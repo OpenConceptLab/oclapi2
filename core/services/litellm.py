@@ -54,6 +54,7 @@ class LiteLLMService:
     CRITICAL Constraints:
     - Primary and alternative candidates MUST come from the provided candidate list only
     - Out-of-scope suggestions (use sparingly) capture concepts NOT in the candidate list that may be relevant, but MUST be in the same target repository
+    - Prioritize primary_mapped_fields as the primary basis for evaluating match candidates. Use additional_metadata fields as secondary signals, but they should not override strong mismatches in primary fields. Can ignore fields like id, pk, serial number, etc.
     - Assess alignment and suitability; avoid unverifiable claims about "clinical value" or "safety"
     - Note data gaps explicitly rather than making unsupported determinations
     - Be transparent about uncertainty and missing information
@@ -280,11 +281,73 @@ class LiteLLMService:
         }
     }
 
+    mock_response_2 = {
+        "id": "chatcmpl-c90e8265-8de9-4b5c-82a1-708f429df24f",
+        "created": 1759831049,
+        "model": "claude-sonnet-4-20250514",
+        "object": "chat.completion",
+        "system_fingerprint": None,
+        "choices": [
+            {
+                "finish_reason": "stop",
+                "index": 0,
+                "message": {
+                    "content": {
+                        "recommendation": "CONDITIONAL",
+                        "primary_candidate": {
+                            "concept_id": "14635-7",
+                            "confidence_level": "MEDIUM",
+                            "match_strength": "75%"
+                        },
+                        "alternative_candidates": [
+                            {
+                                "concept_id": "1989-3",
+                                "rank": 2,
+                                "rationale": "Alternative mapping from CIEL bridge; may have different method or specificity requirements"
+                            },
+                            {
+                                "concept_id": "55814-8",
+                                "rank": 3,
+                                "rationale": "Third option from CIEL bridge mapping; verify if this variant better matches your local implementation"
+                            }
+                        ],
+                        "out_of_scope_suggestions": [
+                            {
+                                "suggested_concept": "Search LOINC for '25-hydroxyvitamin D' with System='Serum' Property='MCnc'",
+                                "rationale": "Current candidates derived through CIEL bridge may not be optimal direct matches; search for exact 25-hydroxyvitamin D tests",
+                                "source": "algorithm_gap"
+                            }
+                        ],
+                        "rationale": "The primary candidate 14635-7 comes from CIEL concept 168183 ('25-hydroxyvitamin D3 measurement') which has strong semantic alignment with your input term '25 Hydroxy Vitamin D' and synonyms '25OHVITD'. However, all candidates are derived through CIEL bridge mappings rather than direct LOINC matches, and the ocl-semantic results show general vitamin D concepts but not specific 25-hydroxyvitamin D tests. Key verification needed: (1) Confirm the LOINC codes 14635-7, 1989-3, and 55814-8 have correct specimen type (serum) and measure 25-hydroxyvitamin D specifically, (2) Check if method specifications matter for your use case. Consider refining search with exact term '25-hydroxyvitamin D serum' to find direct LOINC matches rather than relying solely on CIEL bridge mappings."
+                    },
+                    "role": "assistant",
+                    "tool_calls": None,
+                    "function_call": None
+                }
+            }
+        ],
+        "usage": {
+            "completion_tokens": 505,
+            "prompt_tokens": 18184,
+            "total_tokens": 18689,
+            "completion_tokens_details": None,
+            "prompt_tokens_details": {
+                "audio_tokens": None,
+                "cached_tokens": 0,
+                "text_tokens": None,
+                "image_tokens": None
+            },
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+        }
+    }
+
     def __init__(self):
         self.anthropic_api_key = settings.ANTHROPIC_API_KEY
 
-    def recommend(self, map_project, row, candidates, bridge_candidates=None, include_default_filter=False):  # pragma: no cover  # pylint: disable=too-many-arguments
-        prompt = self.get_prompt(map_project, row, candidates, bridge_candidates, include_default_filter)
+    def recommend(self, map_project, row, metadata, candidates, bridge_candidates=None, scispacy_candidates=None, include_default_filter=False):  # pragma: no cover  # pylint: disable=too-many-arguments,line-too-long
+        prompt = self.get_prompt(
+            map_project, row, metadata, candidates, bridge_candidates, scispacy_candidates, include_default_filter)
         response = self.__call_anthropic(prompt)
         print("****ANT RESPONSE****")
         return response
@@ -303,7 +366,6 @@ class LiteLLMService:
 
     @staticmethod
     def clean_candidate(candidate, locales=None):  # pragma: no cover
-        candidate.pop('search_meta', None)
         candidate.pop('checksums', None)
         candidate.pop('uuid', None)
         candidate.pop('created_at', None)
@@ -340,7 +402,7 @@ class LiteLLMService:
 
         return candidate
 
-    def get_prompt(self, map_project, row, candidates, bridge_candidates=None, include_default_filter=False):  # pragma: no cover  # pylint: disable=too-many-arguments
+    def get_prompt(self, map_project, row, metadata, candidates, bridge_candidates=None, scispacy_candidates=None, include_default_filter=False):  # pragma: no cover  # pylint: disable=too-many-arguments,line-too-long,too-many-locals
         project_context = self.get_project_context(
             map_project, include_default_filter=include_default_filter)
         if not project_context:
@@ -350,11 +412,19 @@ class LiteLLMService:
         locales = get(map_project, 'filters.locale') or None
         all_candidates = {
             'ocl-semantic': [self.clean_candidate(candidate, locales) for candidate in (candidates or [])],
-            'ciel-bridge': [self.clean_candidate(candidate, locales) for candidate in (bridge_candidates or [])]
         }
+        if bridge_candidates:
+            all_candidates['ciel-bridge'] = [
+                self.clean_candidate(candidate, locales) for candidate in bridge_candidates]
+        if scispacy_candidates:
+            all_candidates['scispacy-loinc'] = [
+                self.clean_candidate(candidate, locales) for candidate in scispacy_candidates]
+        full_row = {'primary_mapped_fields': row}
+        if metadata:
+            full_row['additional_metadata'] = metadata
         input_prompt = self.RECOMMEND_CANDIDATE_INPUT_PROMPT.strip().format(
             project=json.dumps(project_context, indent=2),
-            row=json.dumps(row, indent=2),
+            row=json.dumps(full_row, indent=2),
             candidates=json.dumps(all_candidates, indent=2)
         )
         task_prompt = self.RECOMMEND_CANDIDATE_TASK_PROMPT_V2.strip()
@@ -383,8 +453,9 @@ class LiteLLMService:
               },
               "matching_config": {
                 "algorithms": {
-                    "ocl-semantic": "Cosine similarity search on names combined with string matching on properties. Default embedding uses miniLM for cross-lingual support, but multiple models are supported.",
-                    "ciel-bridge": "Lexical and semantic search on the names for the Columbia International eHealth Laboratory (CIEL) interface terminology. Applicable when CIEL has maps to the project’s target repository. This can significantly expand lexical variance, making it more likely to match the source term. Candidates returned by this algorithm are CIEL concepts with 1 or more maps to the target terminology. However, the top-candidate recommended by this prompt must be only one of the maps to the target terminology, and the rationale MUST indicate that it was derived through a CIEL concept.",
+                    "ocl-semantic": "Cosine similarity search on names combined with string matching on properties. Default embedding uses miniLM for cross-lingual support, but multiple models are supported. Normalized score is percentile where the best match is always 100%. Raw score is BM25 returned directly by Elastic Search hybrid search query.",
+                    "ciel-bridge": "Lexical and semantic search on the names for the Columbia International eHealth Laboratory (CIEL) interface terminology. Applicable when CIEL has maps to the project\u2019s target repository. This can significantly expand lexical variance, making it more likely to match the source term. Candidates returned by this algorithm are CIEL concepts with 1 or more maps to the target terminology. However, the top-candidate recommended by this prompt must be only one of the maps to the target terminology, and the rationale MUST indicate that it was derived through a CIEL concept. Normalized score is percentile where the best match is always 100%. Raw score is BM25 returned directly by Elastic Search hybrid search query.",
+                    "scispacy-loinc": "UMLS entity matching to LOINC parts with novel reassembly of LOINC Parts into LOINC candidates. Only matches the name. Score is 0..1 to simulate a cosine similarity score.",
                 },
                 "fields_mapped": map_project.fields_mapped,
                 "thresholds": map_project.score_configuration or {}
@@ -399,5 +470,4 @@ class LiteLLMService:
 
 
     def __call_anthropic(self, message):  # pragma: no cover
-        return completion(
-            model=self.ANTHROPIC_MODEL, messages=[{'content': message, 'role': 'user'}], temperature=0.2)
+        return completion(model=self.ANTHROPIC_MODEL, messages=[{'content': message, 'role': 'user'}], temperature=0.2)

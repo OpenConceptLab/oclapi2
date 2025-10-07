@@ -70,12 +70,14 @@ class MapProjectRecommendView(MapProjectBaseView):  # pragma: no cover
     permission_classes = (IsInAuthGroup,)
     swagger_schema = None
 
-    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument,too-many-locals
         params = self.request.query_params
         map_project = self.get_object()
         candidates = request.data.get('candidates') or []
         bridge_candidates = request.data.get('bridgeCandidates') or []
+        scispacy_candidates = request.data.get('scispacyCandidates') or []
         row = request.data.get('row') or {}
+        metadata = request.data.get('metadata') or {}
         target_repo_url = request.data.get('target_repo_url') or map_project.target_repo_url
 
         if not candidates or not isinstance(candidates, list) or not row or not isinstance(row, dict):
@@ -89,14 +91,15 @@ class MapProjectRecommendView(MapProjectBaseView):  # pragma: no cover
             )
 
         from core.services.litellm import LiteLLMService
+
         if not settings.ENV or settings.ENV in ['ci', 'development', 'test']:
-            return Response(LiteLLMService.mock_response)
+            return Response(LiteLLMService.mock_response_2)
 
         try:
             litellm = LiteLLMService()
             map_project.target_repo_url = target_repo_url
             response = litellm.recommend(
-                map_project, row, candidates, bridge_candidates,
+                map_project, row, metadata, candidates, bridge_candidates, scispacy_candidates,
                 params.get('conceptFilterDefault') in get_truthy_values()
             )
             return Response(litellm.to_dict(response), status=status.HTTP_200_OK)
