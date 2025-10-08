@@ -390,7 +390,8 @@ class LiteLLMService:
         names = []
         for name in candidate.get('names', []):
             if not locales or name.get('locale', None) in locales_:
-                name_ = {k: v for k, v in name.items() if k in ['name', 'locale', 'external_id', 'name_type', 'locale_preferred'] and v}
+                name_ = {k: v for k, v in name.items() if
+                         k in ['name', 'locale', 'external_id', 'name_type', 'locale_preferred'] and v}
                 names.append(name_)
         candidate['names'] = names
 
@@ -402,6 +403,13 @@ class LiteLLMService:
                 if not next((prop for prop in properties if prop.get('code') == k), None):
                     extras[k] = v
             candidate['extras'] = extras
+        mappings = []
+        for mapping in (get(candidate, 'mappings', []) or []):
+            mapping_ = {k: v for k, v in mapping.items() if
+                        k not in ['checksums', 'id', 'sort_weight', 'version_url', 'extras', 'to_concept_code',
+                                  'to_concept_url'] and v}
+            mappings.append(mapping_)
+        candidate['mappings'] = mappings
 
         return candidate
 
