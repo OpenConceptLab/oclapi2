@@ -82,11 +82,19 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         from core.users.models import UserProfile
 
         username = claims.get('preferred_username')
+        groups = claims.get('groups', [])
 
         if not username:
             return UserProfile.objects.none()
 
-        return UserProfile.objects.filter(username=username)
+        queryset = UserProfile.objects.filter(username=username)
+        user = queryset.first()
+        if user:
+            user.extras = user.extras or {}
+            if get(user.extras, '__oidc_groups', []) != groups and len(groups) > 0:
+                user.extras['__oidc_groups'] = groups
+                user.save(update_fields=['extras'])
+        return queryset
 
 
 class OCLAuthenticationBackend(ModelBackend):
