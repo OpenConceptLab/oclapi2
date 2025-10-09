@@ -883,4 +883,9 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         return repo_params
 
     def post(self, request, **kwargs):  # pylint: disable=unused-argument
+        if self.request.user.is_mapper_waitlisted:
+            return Response(
+                {'detail': 'You are currently in waitlist for $match operation.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
         return Response(self.filter_queryset())

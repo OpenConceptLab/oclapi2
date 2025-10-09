@@ -331,3 +331,7 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
             object_url=self.url,
             referenced_object_url=following.url,
         )
+
+    @property
+    def is_mapper_waitlisted(self):
+        return 'mapper-waitlist' in get(self.extras, '__oidc_groups', [])
