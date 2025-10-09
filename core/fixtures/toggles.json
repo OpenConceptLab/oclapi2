@@ -52,5 +52,17 @@
       "staging": true,
       "production": true
     }
+  },
+  {
+    "pk": 7,
+    "model": "toggles.toggle",
+    "fields": {
+      "is_active": true,
+      "name": "MAPPER_WAITLIST_TOGGLE",
+      "dev": true,
+      "qa": false,
+      "staging": true,
+      "production": true
+    }
   }
 ]
