@@ -60,6 +60,62 @@ class LiteLLMService:
     - Be transparent about uncertainty and missing information
     - If a candidate’s rank within the target repo (not within the match results) is available, preference for higher ranking candidates, though alignment and accuracy is much more important
     
+    LOINC Mapping Rules
+
+    **Version 1.0 | Target: LOINC 2.81+**
+    
+    ## LOINC Structure
+    
+    **Purpose:** LOINC codes represent questions/observations in name-value pairs (e.g., HL7 OBX-3, FHIR Observation.code). The code identifies *what* is measured; the value contains the *result*.
+    
+    **Six-Axis Model:** Every LOINC code is defined by six parts:
+    
+    1. **Component** – What is measured (analyte/entity)
+    2. **Property** – Characteristic measured (mass concentration, presence)
+    3. **Timing** – Time interval (Pt = point in time, 24H = 24-hour)
+    4. **System** – Specimen/location (Ser = serum, Ur = urine, Knee)
+    5. **Scale** – Data type (Qn = quantitative, Ord = ordinal, Nom = nominal)
+    6. **Method** – Measurement technique (optional)
+    
+    **Naming Conventions:**
+    - **Fully Specified Name (FSN):** Colon-delimited string with all axes (e.g., `Sodium:SCnc:Pt:Ser:Qn`)
+    - **Long Common Name:** Human-readable unique name
+    - **Short Name:** Concise display name
+    
+    ## Core Mapping Rules
+    
+    ### Semantic Alignment
+    - **MUST** align on all five mandatory axes (Component, Property, Timing, System, Scale)
+    - **MUST** align on Method only if clinically critical (affects sensitivity, specificity, or interpretation)
+    - **MUST NOT** create a mapping if no semantically equivalent LOINC code exists
+    
+    ### What NOT to Include in Mappings
+    Information with separate data fields in standards **MUST NOT** be part of the LOINC code:
+    - Result status (final, preliminary)
+    - Units of measure (mg/dL, mEq/L)
+    - Order priority (STAT, routine)
+    - Provenance (performing lab, ordering clinician)
+    - Patient context (post-stroke, diabetic)
+    
+    **Example:** Map "Sodium measurement" → `2951-2` (Sodium:SCnc:Pt:Ser:Qn). Send result `140` and unit `mEq/L` in separate fields.
+    
+    ### Safety-Critical Constraints
+    - **System mismatch:** Never confuse specimens (serum ≠ urine)
+    - **Component mismatch:** Never confuse analytes (sodium ≠ potassium)
+    - **Scale distinction:** Match data types correctly (quantitative ≠ ordinal)
+    - **Method specificity:** Use specific method when clinically significant (free calcium vs. total calcium)
+    
+    ### Code Selection Priorities
+    - **Method:** Prefer codes *without* method unless source explicitly requires it
+    - **Answers vs. Questions:** Map the test, not the result (map "HLA-B27 type" not "HLA-B27 Detected")
+    - **Timing:** Use Pt for random collections, 24H for 24-hour collections
+    - **Granularity:** Map to individual components unless source is explicitly a panel
+    
+    ### Cardinality
+    - **Preferred:** One-to-one mapping (one source code → one LOINC code)
+    - **Panels:** One source panel → one LOINC panel (or document as one-to-many)
+    - **Broad codes:** Do not map overly general source codes to specific LOINC codes
+
     Before finalizing response:
     1. Verify primary_candidate.concept_id is from input list or null
     2. Verify all alternative_candidates concept_ids are from input list  
