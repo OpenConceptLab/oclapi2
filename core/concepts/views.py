@@ -786,6 +786,9 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
     permission_classes = (IsAuthenticatedOrReadOnly,)
     es_fields = Concept.es_fields
 
+    def get_throttles(self):
+        return ThrottleUtil.get_match_throttles_by_user_plan(self.request.user)
+
     def get_serializer_class(self):
         if self.is_brief():
             return ConceptMinimalSerializer

@@ -19,6 +19,14 @@ class StandardDayThrottle(UserRateThrottle):
     scope = 'standard_day'
 
 
+class MatchStandardMinuteThrottle(UserRateThrottle):
+    scope = 'match_standard_minute'
+
+
+class MatchStandardDayThrottle(UserRateThrottle):
+    scope = 'match_standard_day'
+
+
 class ThrottleUtil:
     @staticmethod
     def get_limit_remaining(throttle, request, view):
@@ -43,3 +51,12 @@ class ThrottleUtil:
         if get(user, 'api_rate_limit.is_guest') or not get(user, 'is_authenticated'):
             return [GuestMinuteThrottle(), GuestDayThrottle()]
         return [StandardMinuteThrottle(), StandardDayThrottle()]
+
+    @staticmethod
+    def get_match_throttles_by_user_plan(user):
+        if not settings.ENABLE_THROTTLING:
+            return []
+        # order is important, first one has to be minute throttle
+        if get(user, 'api_rate_limit.is_guest') or not get(user, 'is_authenticated'):
+            return [GuestMinuteThrottle(), GuestDayThrottle()]
+        return [MatchStandardMinuteThrottle(), MatchStandardDayThrottle()]

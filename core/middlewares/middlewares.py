@@ -140,12 +140,21 @@ class FhirMiddleware(BaseMiddleware):
 
 
 class ThrottleHeadersMiddleware(MiddlewareMixin):
+    match_throttled_paths = ['recommend-beta', '$match']
+    def is_match_throttled_path(self, path):
+        for match_path in self.match_throttled_paths:
+            if match_path in path:
+                return True
+        return False
+
     def process_response(self, request, response):
         if request.path.rstrip("/") not in ['', '/swagger', '/redoc', '/version']:
             view = APIView()
-            throttles = ThrottleUtil.get_throttles_by_user_plan(request.user)
-            minute_limit = ThrottleUtil.get_limit_remaining(throttles[0], request, view)
-            if minute_limit is not None:
+            throttles = ThrottleUtil.get_match_throttles_by_user_plan(request.user) if self.is_match_throttled_path(
+                request.path
+            ) else ThrottleUtil.get_throttles_by_user_plan(request.user)
+
+            if minute_limit := ThrottleUtil.get_limit_remaining(throttles[0], request, view):
                 response['X-LimitRemaining-Minute'] = minute_limit
                 response['X-LimitRemaining-Day'] = ThrottleUtil.get_limit_remaining(throttles[1], request, view)
 
