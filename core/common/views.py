@@ -521,7 +521,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             return 'is_latest_version'
         return None
 
-    def get_facets(self):
+    def get_facets(self):  # pylint: disable=too-many-branches
         facets = {}
         parent_repo = None
 
@@ -532,9 +532,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             params = {
                 'query': self.get_search_string(lower=False),
                 '_search': self.__get_search_results(
-                    ignore_retired_filter=True, sort=False, highlight=False,
-                    force=True, apply_default_filters=False
-                )
+                    ignore_retired_filter=True, sort=False, highlight=False, force=True)
             }
             if 'source' in self.kwargs and self.is_concept_document():
                 parent_repo = params['parent'] = get(self, 'parent_resource')
@@ -691,7 +689,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         return (not collection or collection.startswith('!')) and (not version or version.startswith('!'))
 
-    def __apply_common_search_filters(self, ignore_retired_filter=False, force=False, apply_default_filters=True):
+    def __apply_common_search_filters(self, ignore_retired_filter=False, force=False):
         results = None
         if not force and not self.should_perform_es_search():
             return results
@@ -801,8 +799,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         criteria &= Q('match', owner_type=source_version.parent.resource_type)
         return criteria
 
-    def __get_search_results(self, ignore_retired_filter=False, sort=True, highlight=True, force=False, apply_default_filters=True):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements,line-too-long,too-many-arguments
-        results = self.__apply_common_search_filters(ignore_retired_filter, force, apply_default_filters)
+    def __get_search_results(self, ignore_retired_filter=False, sort=True, highlight=True, force=False):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements,line-too-long
+        results = self.__apply_common_search_filters(ignore_retired_filter, force)
         if results is None:
             return results
         exclude_fuzzy = self.request.query_params.get(EXCLUDE_FUZZY_SEARCH_PARAM) in TRUTHY

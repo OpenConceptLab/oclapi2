@@ -1,4 +1,3 @@
-import json
 import logging
 from math import ceil
 from urllib import parse
@@ -29,7 +28,7 @@ from .checksums import ChecksumModel
 from .exceptions import Http403
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
     to_owner_uri, parse_updated_since_param, get_export_service, to_int, get_truthy_values, generate_temp_version, \
-    canonical_url_to_url_and_version, decode_string, get_falsy_values
+    canonical_url_to_url_and_version, decode_string
 from ..concepts.constants import PERSIST_CLONE_ERROR
 from ..toggles.models import Toggle
 
@@ -177,7 +176,7 @@ class ListWithHeadersMixin(ListModelMixin):
         return (self.should_perform_es_search() and self.is_repo_version_children_request_without_any_search() and
                 get(self, 'parent_resource.is_latest_version', False))
 
-    def list(self, request, *args, **kwargs):  # pylint:disable=too-many-locals,too-many-branches
+    def list(self, request, *args, **kwargs):  # pylint:disable=too-many-locals,too-many-branches,too-many-statements
         cache_key_body = None
         cache_key_headers = None
         data = None
