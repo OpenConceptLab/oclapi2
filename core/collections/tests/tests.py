@@ -90,15 +90,24 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection.active_concepts, 1)
         self.assertEqual(concept.references.count(), 1)
 
-        added, errors = collection.add_expressions({'concepts': [concept.uri]}, collection.created_by)
-        self.assertEqual(errors, {})
-        self.assertIsNotNone(added[0].uri)
-        self.assertEqual(added[0].concepts.first().uri, concept.uri)
+        _, errors = collection.add_expressions({'concepts': [concept.uri]}, collection.created_by)
+        self.assertEqual(
+            errors, {
+                concept.uri: {
+                    concept.uri: {
+                        'errors': [{
+                            'description': 'Concept or Mapping reference name must be unique in a collection.',
+                            'conflicting_references': [collection.references.first().uri]
+                        }]
+                    }
+                }
+            }
+        )
         collection.refresh_from_db()
         self.assertEqual(collection.expansion.concepts.count(), 1)
-        self.assertEqual(collection.references.count(), 2)
+        self.assertEqual(collection.references.count(), 1)
         self.assertEqual(collection.active_concepts, 1)
-        self.assertEqual(concept.references.count(), 2)
+        self.assertEqual(concept.references.count(), 1)
 
     def test_add_expressions_openmrs_schema(self):
         collection = OrganizationCollectionFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
@@ -183,6 +192,33 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection2.references.count(), 1)
         self.assertEqual(collection1.references.first().expression, collection2.references.first().expression)
         self.assertNotEqual(collection1.references.first().id, collection2.references.first().id)
+
+    def test_validate_reference_already_exists(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        ch_locale = ConceptNameFactory.build(locale_preferred=True, locale='ch')
+        en_locale = ConceptNameFactory.build(locale_preferred=True, locale='en')
+        concept = ConceptFactory(names=[ch_locale, en_locale])
+        reference = CollectionReference(expression=concept.uri, collection=collection)
+        reference.save()
+
+        self.assertEqual(collection.references.count(), 1)
+
+        errors = collection.validate(reference)
+
+        self.assertEqual(
+            errors,
+            {
+                concept.uri: {
+                    'errors': [{
+                        'description': 'Concept or Mapping reference name must be unique in a collection.',
+                        'conflicting_references': [reference.uri]
+                    }]
+                }
+            }
+        )
 
     def test_validate_openmrs_schema_duplicate_locale_type(self):
         ch_locale = ConceptNameFactory.build(locale_preferred=True, locale='ch')

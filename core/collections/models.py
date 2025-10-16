@@ -12,7 +12,7 @@ from django.utils.functional import cached_property
 from pydash import get, compact
 
 from core.collections.constants import (
-    COLLECTION_TYPE, CONCEPT_FULLY_SPECIFIED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE,
+    COLLECTION_TYPE, REFERENCE_ALREADY_EXISTS, CONCEPT_FULLY_SPECIFIED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE,
     CONCEPT_PREFERRED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE, COLLECTION_VERSION_TYPE,
     REFERENCE_TYPE_CHOICES, CONCEPT_REFERENCE_TYPE, MAPPING_REFERENCE_TYPE, SOURCE_MAPPINGS, SOURCE_TO_CONCEPTS,
     TRANSFORM_TO_RESOURCE_VERSIONS, COLLECTION_REFERENCE_TYPE, TRANSFORM_TO_EXTENSIONAL)
@@ -175,6 +175,19 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
         else:
             reference.last_resolved_at = None
         errors = {}
+
+        if reference.expression:
+            same_refs = self.references.filter(expression=reference.expression, include=reference.include)
+            if same_refs.exists():
+                errors = {
+                    reference.expression: {
+                        'errors': [{
+                            'description': REFERENCE_ALREADY_EXISTS,
+                            'conflicting_references': [ref.uri for ref in same_refs]
+                        }]
+                    }
+                }
+                return errors
 
         if self.is_openmrs_schema and self.expansion_uri:
             if reference._concepts is None or reference._concepts.count() == 0:  # pylint: disable=protected-access

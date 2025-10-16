@@ -729,10 +729,16 @@ class CollectionReferencesViewTest(OCLAPITestCase):
             response.data,
             [
                 {
-                    'added': True,
+                    'added': False,
                     'expression': self.concept.uri,
-                    'message': f'The concept {self.concept.mnemonic} is successfully added to '
-                               f'collection {self.collection.name}'
+                    'message': {
+                        self.concept.uri: {
+                            'errors': [{
+                                'description': 'Concept or Mapping reference name must be unique in a collection.',
+                                'conflicting_references': [self.reference.uri]
+                            }]
+                        }
+                    }
                 }
             ]
         )
@@ -751,7 +757,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.collection.refresh_from_db()
-        self.assertEqual(self.collection.references.count(), 3)
+        self.assertEqual(self.collection.references.count(), 2)
         self.assertEqual(self.collection.expansion.concepts.count(), 2)
         self.assertEqual(self.collection.active_concepts, 2)
         self.assertEqual(self.collection.active_mappings, 0)
@@ -783,7 +789,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.collection.refresh_from_db()
-        self.assertEqual(self.collection.references.count(), 4)
+        self.assertEqual(self.collection.references.count(), 3)
         self.assertEqual(self.collection.expansion.concepts.count(), 2)
         self.assertEqual(self.collection.expansion.mappings.count(), 1)
         self.assertEqual(self.collection.active_concepts, 2)
@@ -817,7 +823,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.collection.refresh_from_db()
-        self.assertEqual(self.collection.references.count(), 5)
+        self.assertEqual(self.collection.references.count(), 4)
         self.assertEqual(self.collection.expansion.concepts.count(), 3)
         self.assertEqual(self.collection.expansion.mappings.count(), 2)
         self.assertEqual(self.collection.active_concepts, 3)
@@ -849,7 +855,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.collection.refresh_from_db()
-        self.assertEqual(self.collection.references.count(), 6)
+        self.assertEqual(self.collection.references.count(), 5)
         self.assertEqual(self.collection.expansion.concepts.count(), 4)
         self.assertEqual(self.collection.expansion.mappings.count(), 3)
         self.assertEqual(self.collection.active_concepts, 4)
@@ -872,7 +878,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.collection.refresh_from_db()
-        self.assertEqual(self.collection.references.count(), 7)
+        self.assertEqual(self.collection.references.count(), 6)
         self.assertEqual(self.collection.expansion.concepts.count(), 3)
         self.assertEqual(self.collection.expansion.mappings.count(), 2)
         self.assertEqual(self.collection.active_concepts, 3)
