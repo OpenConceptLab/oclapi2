@@ -563,6 +563,10 @@ class CollectionReference(models.Model):
     def can_compute_against_other_system_version(self):
         return (not self.system or not self.version) and not self.resource_version
 
+    @property
+    def is_versionless_expression(self):
+        return not self.version and not self.resource_version
+
     def can_compute_against_system_version(self, system_version):
         result = False
         if self.can_compute_against_other_system_version and system_version:
@@ -649,7 +653,7 @@ class CollectionReference(models.Model):
             self._mappings = self.get_mappings()
             self._fetched = True
 
-    def get_concepts(self, system_version=None):
+    def get_concepts(self, system_version=None):  # pylint: disable=too-many-branches
         system_version = system_version or self.resolve_system_version
         queryset = self.get_resource_queryset_from_system_and_valueset('concepts', system_version)
         valueset_versions = self.resolve_valueset_versions
@@ -661,6 +665,8 @@ class CollectionReference(models.Model):
             queryset = queryset.filter(mnemonic=decode_string(self.code))
             if self.resource_version:
                 queryset = queryset.filter(version=self.resource_version)
+            elif queryset.count() > 1:
+                queryset = Concept.objects.filter(id=queryset.order_by('-id').first().id)
 
         if self.should_apply_filter():
             queryset = self.apply_filters(queryset, Concept)
@@ -927,17 +933,24 @@ class CollectionReference(models.Model):
 
     @cached_property
     def resolve_valueset_versions_with_unresolved(self):
-        versions = []
+        explicit = []
+        evaluated = []
         unresolved = []
         if isinstance(self.valueset, list):
             for valueset in self.valueset:  # pylint: disable=not-an-iterable
                 if valueset:
+                    if is_canonical_uri(valueset):
+                        is_explicit = bool(get(valueset.split('|'), '1')) if '|' in valueset else False
+                    else:
+                        is_explicit = valueset != drop_version(valueset)
+                    is_evaluated = not is_explicit
+                    to_add = evaluated if is_evaluated else explicit
                     version, _ = Collection.resolve_reference_expression(valueset, self.namespace)
                     if version.id:
-                        versions.append(version)
+                        to_add.append(version)
                     else:
                         unresolved.append({'url': valueset, 'namespace': self.namespace, 'type': 'reference.valueset'})
-        return versions, unresolved
+        return explicit, evaluated, unresolved
 
     def clean(self):
         if not self.is_valid_filter():
@@ -1078,10 +1091,14 @@ class Expansion(BaseResourceModel):
     collection_version = models.ForeignKey(
         'collections.Collection', related_name='expansions', on_delete=models.CASCADE)
     is_processing = models.BooleanField(default=False)
-    resolved_collection_versions = models.ManyToManyField(
-        'collections.Collection', related_name='expansions_resolved_collection_versions_set')
-    resolved_source_versions = models.ManyToManyField(
-        'sources.Source', related_name='expansions_resolved_source_versions_set')
+    explicit_collection_versions = models.ManyToManyField(
+        'collections.Collection', related_name='expansions_explicit_collection_versions_set')
+    evaluated_collection_versions = models.ManyToManyField(
+        'collections.Collection', related_name='expansions_evaluated_collection_versions_set')
+    explicit_source_versions = models.ManyToManyField(
+        'sources.Source', related_name='expansions_explicit_source_versions_set')
+    evaluated_source_versions = models.ManyToManyField(
+        'sources.Source', related_name='expansions_evaluated_source_versions_set')
     unresolved_repo_versions = ArrayField(models.JSONField(), default=list, null=True, blank=True)
 
     @property
@@ -1237,8 +1254,10 @@ class Expansion(BaseResourceModel):
 
     def add_references(self, references, index=True, is_adding_all=False, attempt_reevaluate=True):  # pylint: disable=too-many-locals,too-many-statements,too-many-branches
         include_refs, exclude_refs = self.to_ref_list_separated(references)
-        resolved_valueset_versions = []
-        resolved_system_versions = []
+        explicit_valueset_versions = []
+        explicit_system_versions = []
+        evaluated_valueset_versions = []
+        evaluated_system_versions = []
         unresolved_repo_versions = []
         _system_version_cache = {}
 
@@ -1276,12 +1295,16 @@ class Expansion(BaseResourceModel):
                 return _system_version_cache[__cache_key]
             return None
 
-        def get_ref_results(ref):
-            nonlocal resolved_valueset_versions
-            nonlocal resolved_system_versions
+        def get_ref_results(ref):   # pylint: disable=too-many-branches,too-many-locals
+            nonlocal explicit_valueset_versions
+            nonlocal explicit_system_versions
+            nonlocal evaluated_system_versions
+            nonlocal evaluated_valueset_versions
             nonlocal unresolved_repo_versions
-            _resolved_valueset_versions, _unresolved_valueset_versions = ref.resolve_valueset_versions_with_unresolved
-            resolved_valueset_versions += _resolved_valueset_versions
+            _explicit_valueset_versions, _evaluated_valueset_versions, _unresolved_valueset_versions = (
+                ref.resolve_valueset_versions_with_unresolved)
+            explicit_valueset_versions += _explicit_valueset_versions
+            evaluated_valueset_versions += _evaluated_valueset_versions
             unresolved_repo_versions += _unresolved_valueset_versions
             ref_system_versions = []
             should_use_ref_system_version = True
@@ -1292,6 +1315,20 @@ class Expansion(BaseResourceModel):
 
             if should_use_ref_system_version:
                 _system_version = get_ref_system_version(ref)
+                if ref.is_versionless_expression and _system_version:
+                    existing_evaluated_system_version = next(
+                        (
+                            _version for _version in evaluated_system_versions if drop_version(
+                                _version.uri) == drop_version(_system_version.uri)
+                         ),
+                        None
+                    )
+                    if not existing_evaluated_system_version:
+                        existing_evaluated_system_version = self.evaluated_source_versions.filter(
+                            uri__startswith=drop_version(_system_version.uri)
+                        ).order_by('-id').first()
+                    if existing_evaluated_system_version:
+                        _system_version = existing_evaluated_system_version
                 if _system_version:
                     ref_system_versions.append(_system_version)
                 elif ref.system:
@@ -1323,7 +1360,11 @@ class Expansion(BaseResourceModel):
             else:
                 _concepts = ref.concepts.filter()
                 _mappings = ref.mappings.filter()
-            resolved_system_versions += ref_system_versions
+
+            if ref.is_versionless_expression:
+                evaluated_system_versions += ref_system_versions
+            else:
+                explicit_system_versions += ref_system_versions
             return _concepts, _mappings
 
         for reference in include_refs:
@@ -1340,8 +1381,10 @@ class Expansion(BaseResourceModel):
             index_concepts = self.__exclude_resources(reference, self.concepts, concepts, Concept)
             index_mappings = self.__exclude_resources(reference, self.mappings, mappings, Mapping)
 
-        self.resolved_collection_versions.add(*compact(resolved_valueset_versions))
-        self.resolved_source_versions.add(*compact(resolved_system_versions))
+        self.explicit_collection_versions.add(*compact(explicit_valueset_versions))
+        self.explicit_source_versions.add(*compact(explicit_system_versions))
+        self.evaluated_collection_versions.add(*compact(evaluated_valueset_versions))
+        self.evaluated_source_versions.add(*compact(evaluated_system_versions))
         if unresolved_repo_versions:
             self.unresolved_repo_versions = unresolved_repo_versions
             self.save()
@@ -1354,10 +1397,10 @@ class Expansion(BaseResourceModel):
         self.__dedupe_mappings()
 
     def __dedupe_concepts(self):
-        self.concepts.set(self.concepts.distinct('versioned_object_id'))
+        self.concepts.set(self.concepts.order_by('versioned_object_id', '-id').distinct('versioned_object_id'))
 
     def __dedupe_mappings(self):
-        self.mappings.set(self.mappings.distinct('versioned_object_id'))
+        self.mappings.set(self.mappings.order_by('versioned_object_id', '-id').distinct('versioned_object_id'))
 
     def __include_resources(self, rel, resources, is_concept_queryset):
         should_index = resources.exists()
@@ -1449,7 +1492,7 @@ class Expansion(BaseResourceModel):
     @staticmethod
     def get_should_link_repo_versions_criteria():
         return models.Q(
-            resolved_source_versions__isnull=True, resolved_collection_versions__isnull=True,
+            explicit_source_versions__isnull=True, explicit_collection_versions__isnull=True,
         ) & models.Q(models.Q(concepts__isnull=False) | models.Q(mappings__isnull=False))
 
     def link_repo_versions(self):
@@ -1460,7 +1503,7 @@ class Expansion(BaseResourceModel):
         for source in sources:
             version = source.get_latest_released_version() or source.get_latest_version() or source
             if version:
-                self.resolved_source_versions.add(version)
+                self.explicit_source_versions.add(version)
 
 
 class ExpansionParameters:

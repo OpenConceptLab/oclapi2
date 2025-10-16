@@ -583,14 +583,18 @@ class ExpansionDetailSerializer(ModelSerializer):
     parameters = JSONField()
     created_on = DateTimeField(source='created_at', read_only=True)
     created_by = DateTimeField(source='created_by.username', read_only=True)
-    resolved_collection_versions = CollectionVersionListSerializer(many=True, read_only=True)
-    resolved_source_versions = SourceVersionListSerializer(many=True, read_only=True)
+    explicit_collection_versions = CollectionVersionListSerializer(many=True, read_only=True)
+    explicit_source_versions = SourceVersionListSerializer(many=True, read_only=True)
+    evaluated_collection_versions = CollectionVersionListSerializer(many=True, read_only=True)
+    evaluated_source_versions = SourceVersionListSerializer(many=True, read_only=True)
 
     class Meta:
         model = Expansion
         fields = (
             'mnemonic', 'id', 'parameters', 'canonical_url', 'url', 'summary', 'created_on', 'created_by',
-            'is_processing', 'resolved_collection_versions', 'resolved_source_versions', 'unresolved_repo_versions'
+            'is_processing', 'unresolved_repo_versions',
+            'explicit_collection_versions', 'explicit_source_versions',
+            'evaluated_collection_versions', 'evaluated_source_versions',
         )
 
     def __init__(self, *args, **kwargs):

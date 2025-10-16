@@ -1068,10 +1068,10 @@ class TasksTest(OCLTestCase):
             sorted([mapping1.url, mapping2.get_latest_version().url])
         )
         self.assertEqual(expansion.unresolved_repo_versions, [])
-        self.assertEqual(expansion.resolved_collection_versions.count(), 0)
-        self.assertEqual(expansion.resolved_source_versions.count(), 3)
+        self.assertEqual(expansion.explicit_collection_versions.count(), 0)
+        self.assertEqual(expansion.explicit_source_versions.count(), 3)
         self.assertEqual(
-            sorted(list(expansion.resolved_source_versions.values_list('uri', flat=True))),
+            sorted(list(expansion.explicit_source_versions.values_list('uri', flat=True))),
             sorted([concept1.parent.uri, concept2.parent.uri, mapping2.parent.uri])
         )
 
@@ -1119,10 +1119,10 @@ class TasksTest(OCLTestCase):
                 {'url': 'http://foo-system2.com|v1', 'type': 'reference.system', 'version': None, 'namespace': None}
             ]
         )
-        self.assertEqual(expansion.resolved_collection_versions.count(), 0)
-        self.assertEqual(expansion.resolved_source_versions.count(), 3)
+        self.assertEqual(expansion.explicit_collection_versions.count(), 0)
+        self.assertEqual(expansion.explicit_source_versions.count(), 3)
         self.assertEqual(
-            sorted(list(expansion.resolved_source_versions.values_list('uri', flat=True))),
+            sorted(list(expansion.explicit_source_versions.values_list('uri', flat=True))),
             sorted([concept1.parent.uri, concept2.parent.uri, mapping2.parent.uri])
         )
 
@@ -1399,7 +1399,7 @@ class ExpansionTest(OCLTestCase):
         self.assertEqual(expansions.count(), 1)
         self.assertTrue(expansions.first(), expansion)
 
-        expansion.resolved_source_versions.add(mapping.parent)
+        expansion.explicit_source_versions.add(mapping.parent)
 
         expansions = Expansion.objects.filter(criteria)
         self.assertFalse(expansions.exists())
@@ -1412,12 +1412,12 @@ class ExpansionTest(OCLTestCase):
         expansion.concepts.add(concept)
         expansion.mappings.add(mapping)
 
-        self.assertFalse(expansion.resolved_source_versions.exists())
+        self.assertFalse(expansion.explicit_source_versions.exists())
 
         expansion.link_repo_versions()
 
-        self.assertTrue(expansion.resolved_source_versions.exists())
-        self.assertEqual(expansion.resolved_source_versions.first(), concept.parent)
+        self.assertTrue(expansion.explicit_source_versions.exists())
+        self.assertEqual(expansion.explicit_source_versions.first(), concept.parent)
 
 
 class ExpansionParametersTest(OCLTestCase):

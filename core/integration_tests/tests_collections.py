@@ -12,6 +12,7 @@ from core.collections.tests.factories import OrganizationCollectionFactory, User
 from core.common.tasks import export_collection
 from core.common.tests import OCLAPITestCase
 from core.common.utils import get_latest_dir_in_path, drop_version
+from core.concepts.models import Concept
 from core.concepts.serializers import ConceptVersionExportSerializer, ConceptListSerializer
 from core.concepts.tests.factories import ConceptFactory
 from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer
@@ -1487,6 +1488,221 @@ class CollectionReferencesViewTest(OCLAPITestCase):
             format='json'
         )
         self.assertEqual(response.status_code, 400)
+
+    def test_put_with_updated_resolve_reference_rules(self):  # pylint: disable=too-many-statements
+        collection = UserCollectionFactory(mnemonic='coll1', user=self.user)
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+
+        source1 = OrganizationSourceFactory(mnemonic='source1')
+        source1_v1 = OrganizationSourceFactory(
+            mnemonic='source1', organization=source1.organization, version='v1', released=True)
+        source1_v2 = OrganizationSourceFactory(
+            mnemonic='source1', organization=source1.organization, version='v2', released=True)
+
+        concept1 = ConceptFactory(
+            parent=source1, mnemonic='concept1', datatype='N/A', names=1, names__name="concept_1_name")
+        user = concept1.created_by
+        concept1_v1 = concept1.get_latest_version()
+        concept1_v1.is_latest_version = True
+        concept1_v1.version = 'v1'
+        concept1_v1.save()
+        Concept.create_new_version_for(
+            concept1.clone(),
+            {
+                'datatype': 'N/A',
+                'comment': 'Changed datatype to Numeric',
+                'version': 'v2',
+                'names': [{
+                    'locale': 'en',
+                    'name': 'English',
+                    'locale_preferred': True
+                }]
+            },
+            user
+        )
+        concept1_v2 = concept1.get_latest_version()
+        concept1_v2.is_latest_version = True
+        concept1_v2.version = 'v2'
+        concept1_v2.save()
+        Concept.create_new_version_for(
+            concept1.clone(),
+            {
+                'datatype': 'String',
+                'comment': 'Changed datatype to String',
+                'version': 'v3',
+                'names': [{
+                    'locale': 'en',
+                    'name': 'English',
+                    'locale_preferred': True
+                }]
+            },
+            user
+        )
+        concept1_v3 = concept1.get_latest_version()
+        concept1_v3.is_latest_version = True
+        concept1_v3.version = 'v3'
+        concept1_v3.save()
+        Concept.create_new_version_for(
+            concept1.clone(),
+            {
+                'datatype': 'JSON',
+                'comment': 'Changed datatype to JSON',
+                'version': 'v4',
+                'names': [{
+                    'locale': 'en',
+                    'name': 'English',
+                    'locale_preferred': True
+                }]
+            },
+            user
+        )
+        concept1_v4 = concept1.get_latest_version()
+        concept1_v4.is_latest_version = True
+        concept1_v4.version = 'v4'
+        concept1_v4.save()
+
+        self.assertEqual(Concept.objects.filter(mnemonic='concept1').count(), 5)
+
+        source1.concepts.add(concept1_v2)
+        source1_v1.concepts.add(concept1_v2)
+        source1_v1.concepts.add(concept1_v3)
+        source1_v2.concepts.add(concept1_v3)
+        source1_v2.concepts.add(concept1_v4)
+
+        response = self.client.put(
+            collection.uri + 'references/',
+            {
+                'data': {'concepts': [source1_v1.uri + 'concepts/' + concept1_v2.mnemonic + '/']}
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [
+                {
+                    'added': True,
+                    'expression': source1_v1.uri + 'concepts/' + concept1_v2.mnemonic + '/',
+                    'message': 'The reference is successfully added to collection '
+                }
+            ]
+        )
+        self.assertEqual(expansion.concepts.count(), 1)
+        self.assertEqual(expansion.concepts.first().uri, concept1_v3.uri)
+        self.assertEqual(len(expansion.unresolved_repo_versions), 0)
+        self.assertEqual(expansion.evaluated_source_versions.count(), 0)
+        self.assertEqual(expansion.explicit_source_versions.count(), 1)
+        self.assertEqual(expansion.explicit_source_versions.first().uri, source1_v1.uri)
+
+        response = self.client.put(
+            collection.uri + 'references/',
+            {
+                'data': {'concepts': [source1_v2.uri + 'concepts/' + concept1_v2.mnemonic + '/']}
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [
+                {
+                    'added': True,
+                    'expression': source1_v2.uri + 'concepts/' + concept1_v2.mnemonic + '/',
+                    'message': 'The reference is successfully added to collection '
+                }
+            ]
+        )
+        self.assertEqual(expansion.concepts.count(), 1)
+        self.assertEqual(
+            sorted(expansion.concepts.values_list('uri', flat=True)), sorted([concept1_v4.uri]))
+        self.assertEqual(len(expansion.unresolved_repo_versions), 0)
+        self.assertEqual(expansion.evaluated_source_versions.count(), 0)
+        self.assertEqual(expansion.explicit_source_versions.count(), 2)
+        self.assertEqual(
+            sorted(expansion.explicit_source_versions.values_list('uri', flat=True)),
+            sorted([source1_v2.uri, source1_v1.uri])
+        )
+
+        expansion.concepts.clear()
+        expansion.explicit_source_versions.clear()
+        CollectionReference.objects.filter(collection=collection).delete()
+
+        response = self.client.put(
+            collection.uri + 'references/',
+            {
+                'data': {
+                    'concepts': [concept1_v3.uri]
+                }
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [
+                {
+                    'added': True,
+                    'expression': concept1_v3.uri,
+                    'message': 'Added the concept version to the collection.'
+                               ' Future updates will not be added automatically.'
+                }
+            ]
+        )
+        self.assertEqual(expansion.concepts.count(), 1)
+        self.assertEqual(
+            sorted(expansion.concepts.values_list('uri', flat=True)), sorted([concept1_v3.uri]))
+        self.assertEqual(len(expansion.unresolved_repo_versions), 0)
+        self.assertEqual(expansion.evaluated_source_versions.count(), 0)
+        self.assertEqual(expansion.explicit_source_versions.count(), 1)
+        self.assertEqual(
+            sorted(expansion.explicit_source_versions.values_list('uri', flat=True)),
+            sorted([source1_v2.uri])
+        )
+
+        expansion.concepts.clear()
+        expansion.explicit_source_versions.clear()
+        CollectionReference.objects.filter(collection=collection).delete()
+
+        response = self.client.put(
+            collection.uri + 'references/',
+            {
+                'data': {
+                    'concepts': [concept1.uri]
+                }
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [
+                {
+                    'added': True,
+                    'expression': concept1.uri,
+                    'message': f'The concept concept1 is successfully added to collection {collection.name}'
+                }
+            ]
+        )
+        self.assertEqual(expansion.concepts.count(), 1)
+        self.assertEqual(
+            sorted(expansion.concepts.values_list('uri', flat=True)), sorted([concept1_v4.uri]))
+        self.assertEqual(len(expansion.unresolved_repo_versions), 0)
+        self.assertEqual(expansion.evaluated_source_versions.count(), 1)
+        self.assertEqual(expansion.explicit_source_versions.count(), 0)
+        self.assertEqual(
+            sorted(expansion.evaluated_source_versions.values_list('uri', flat=True)),
+            sorted([source1_v2.uri])
+        )
 
 
 class CollectionReferencesPreviewTest(OCLAPITestCase):
