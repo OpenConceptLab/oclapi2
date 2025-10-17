@@ -30,6 +30,7 @@ jobs:
   tests:
     name: Tests
     runs-on: ubuntu-latest
+    container: python:3.11
     services:
         db:
             image: postgres:14.7
