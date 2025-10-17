@@ -1729,7 +1729,6 @@ class ConceptListViewTest(OCLAPITestCase):
         self.token = self.user.get_token()
         self.random_user = UserProfileFactory()
 
-    @unittest.skipIf(settings.ENV == 'ci', "Skipping due to ES tests failing on CI")
     def test_search(self):  # pylint: disable=too-many-statements
         if settings.ENV == 'ci':
             rebuild_indexes(['concepts'])
@@ -1834,7 +1833,6 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 2)
 
-    @unittest.skipIf(settings.ENV == 'ci', "Skipping due to ES tests failing on CI")
     def test_search_with_latest_released_repo_search(self):  # pylint: disable=too-many-statements
         if settings.ENV == 'ci':
             rebuild_indexes(['concepts'])
@@ -1963,7 +1961,6 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
 
-    @unittest.skipIf(settings.ENV == 'ci', "Skipping due to ES tests failing on CI")
     def test_facets(self):
         if settings.ENV == 'ci':
             rebuild_indexes(['concepts'])
@@ -1985,7 +1982,6 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertTrue(class_b_facet[1] >= 1)
         self.assertFalse(class_b_facet[2])
 
-    @unittest.skipIf(settings.ENV == 'ci', "Skipping due to ES tests failing on CI")
     def test_facets_with_latest_released_repo_search(self):
         if settings.ENV == 'ci':
             rebuild_indexes(['concepts'])

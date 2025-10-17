@@ -1382,7 +1382,6 @@ class SourceSummaryViewTest(OCLAPITestCase):
         self.assertEqual(response.data['active_concepts'], 2)
         self.assertEqual(response.data['active_mappings'], 1)
 
-    @unittest.skipIf(settings.ENV == 'ci', "Skipping due to ES tests failing on CI")
     def test_get_200_verbose(self):  # pylint: disable=too-many-statements
         self.source.active_concepts = 2
         self.source.active_mappings = 1
