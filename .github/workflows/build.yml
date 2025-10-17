@@ -78,6 +78,7 @@ jobs:
       - name: Run Tests
         env:
           DB_HOST: db
+          ENVIRONMENT: ci
         run: |
           . venv/bin/activate
           COVERAGE_FILE=/tmp/.coverage coverage run --parallel-mode --source='core' manage.py test --parallel=1 -v 3 --keepdb
