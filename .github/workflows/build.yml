@@ -30,7 +30,8 @@ jobs:
   tests:
     name: Tests
     runs-on: ubuntu-latest
-    container: python:3.11
+    container:
+      image: python:3.11
     services:
         db:
             image: postgres:14.7
@@ -75,6 +76,8 @@ jobs:
 #          python manage.py migrate
 #          python manage.py loaddata core/fixtures/*
       - name: Run Tests
+        env:
+          DB_HOST: db
         run: |
           source venv/bin/activate
           COVERAGE_FILE=/tmp/.coverage coverage run --parallel-mode --source='core' manage.py test --parallel=1 -v 3 --keepdb
