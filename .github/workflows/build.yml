@@ -31,7 +31,7 @@ jobs:
     name: Tests
     runs-on: ubuntu-latest
     services:
-        postgres:
+        db:
             image: postgres:14.7
             env:
               POSTGRES_USER: postgres
@@ -44,7 +44,7 @@ jobs:
               --health-interval 10s
               --health-timeout 5s
               --health-retries 5
-        elasticsearch:
+        es:
           image: docker.elastic.co/elasticsearch/elasticsearch:8.15.2
           ports:
             - 9200:9200
@@ -76,7 +76,7 @@ jobs:
       - name: Run Tests
         run: |
           source venv/bin/activate
-          DB_HOST=127.0.0.1 COVERAGE_FILE=/tmp/.coverage coverage run --parallel-mode --source='core' manage.py test --parallel=1 -v 3 --keepdb
+          COVERAGE_FILE=/tmp/.coverage coverage run --parallel-mode --source='core' manage.py test --parallel=1 -v 3 --keepdb
           COVERAGE_FILE=/tmp/.coverage coverage combine
           COVERAGE_FILE=/tmp/.coverage coverage report -m --include=core/* --fail-under=88 --sort=cover
 
