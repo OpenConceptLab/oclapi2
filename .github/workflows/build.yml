@@ -52,6 +52,9 @@ jobs:
             - 9200:9200
           env:
             discovery.type: single-node
+            xpack.security.enabled: "false"
+            xpack.security.http.ssl.enabled: "false"
+            xpack.security.transport.ssl.enabled: "false"
             ES_JAVA_OPTS: "-Xmx512m -Xms512m"
     steps:
       - uses: actions/checkout@v3
