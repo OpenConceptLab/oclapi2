@@ -69,7 +69,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m venv venv
-          source venv/bin/activate
+          . venv/bin/activate
           pip install --cache-dir ~/.cache/pip -r requirements.txt
 #      - name: DB Setup
 #        run: |
@@ -79,7 +79,7 @@ jobs:
         env:
           DB_HOST: db
         run: |
-          source venv/bin/activate
+          . venv/bin/activate
           COVERAGE_FILE=/tmp/.coverage coverage run --parallel-mode --source='core' manage.py test --parallel=1 -v 3 --keepdb
           COVERAGE_FILE=/tmp/.coverage coverage combine
           COVERAGE_FILE=/tmp/.coverage coverage report -m --include=core/* --fail-under=88 --sort=cover
