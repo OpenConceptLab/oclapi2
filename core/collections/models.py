@@ -59,6 +59,7 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
         'canonical_url': {'sortable': False, 'filterable': True, 'exact': True},
         'experimental': {'sortable': False, 'filterable': False, 'facet': False},
         'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
+        'retired': {'sortable': False, 'filterable': True, 'facet': True},
     }
 
     class Meta:

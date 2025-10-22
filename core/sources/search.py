@@ -28,4 +28,5 @@ class SourceFacetedSearch(CustomESFacetedSearch):
         'hierarchyMeaning': TermsFacet(field='hierarchy_meaning', size=FACET_SIZE),
         'updatedBy': TermsFacet(field='updated_by', size=FACET_SIZE),
         'matchAlgorithm': TermsFacet(field='match_algorithm', size=FACET_SIZE),
+        'retired': TermsFacet(field='retired'),
     }

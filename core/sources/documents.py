@@ -40,13 +40,13 @@ class SourceDocument(Document):
     filter_codes = fields.ListField(fields.KeywordField())
     match_algorithm = fields.ListField(fields.KeywordField())
     repo_type = fields.KeywordField()
+    retired = fields.KeywordField(attr='retired')
 
     class Django:
         model = Source
         fields = [
             'full_name',
             'revision_date',
-            'retired',
             'experimental',
             'case_sensitive',
             'compositional',

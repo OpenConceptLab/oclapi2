@@ -35,13 +35,13 @@ class CollectionDocument(Document):
     custom_validation_schema = fields.KeywordField(attr='custom_validation_schema', normalizer='lowercase')
     created_by = fields.KeywordField()
     repo_type = fields.KeywordField()
+    retired = fields.KeywordField(attr='retired')
 
     class Django:
         model = Collection
         fields = [
             'full_name',
             'revision_date',
-            'retired',
             'experimental',
             'locked_date',
             'external_id',

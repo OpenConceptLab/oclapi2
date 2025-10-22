@@ -49,6 +49,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         'hierarchy_meaning': {'sortable': False, 'filterable': True, 'facet': True},
         'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
         'match_algorithm': {'sortable': False, 'filterable': True, 'facet': True, 'exact': False},
+        'retired': {'sortable': False, 'filterable': True, 'facet': True},
     }
 
     class Meta:

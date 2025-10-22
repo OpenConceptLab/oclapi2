@@ -101,6 +101,11 @@ es_fields = {
         'facet': False,
         'exact': True
     },
+    'retired': {
+        'sortable': False,
+        'filterable': True,
+        'facet': True
+    },
 }
 
 
