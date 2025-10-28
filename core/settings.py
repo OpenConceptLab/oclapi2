@@ -189,6 +189,8 @@ if ENABLE_THROTTLING:
         'guest_day': '10000/day',
         'standard_minute': '500/minute',
         'standard_day': '20000/day',
+        'match_standard_minute': '120/minute',
+        'match_standard_day': '2000/day',
     }
     MIDDLEWARE = [*MIDDLEWARE, 'core.middlewares.middlewares.ThrottleHeadersMiddleware']
 
