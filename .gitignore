@@ -306,3 +306,5 @@ celery-worker-*.tmp
 
 # local dev scripts
 local*.sh
+local*.py
+setup/
