@@ -247,7 +247,9 @@ class UserDetailSerializer(AbstractResourceSerializer):
         instance.location = validated_data.get('location', instance.location)
         instance.bio = validated_data.get('bio', instance.bio)
         instance.preferred_locale = validated_data.get('preferred_locale', instance.preferred_locale)
-        instance.extras = validated_data.get('extras', instance.extras)
+        original_extras = instance.extras
+        instance.extras = validated_data.get('extras', original_extras)
+        instance.extras['__oidc_groups'] = get(original_extras, '__oidc_groups') or []
         instance.updated_by = request_user
         auth_groups = validated_data.get('auth_groups', None)
         if isinstance(auth_groups, list):
