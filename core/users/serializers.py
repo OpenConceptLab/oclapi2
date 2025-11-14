@@ -6,7 +6,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from pydash import get
 from rest_framework import serializers
-from rest_framework.fields import IntegerField, BooleanField
+from rest_framework.fields import IntegerField
 from rest_framework.serializers import ModelSerializer
 from rest_framework.validators import UniqueValidator
 
