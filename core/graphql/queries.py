@@ -16,7 +16,7 @@ from core.concepts.models import Concept
 from core.mappings.models import Mapping
 from core.sources.models import Source
 
-from .types import ConceptType, MappingType
+from .types import ConceptType, MappingType, ToSourceType
 
 logger = logging.getLogger(__name__)
 ES_MAX_WINDOW = 10_000
@@ -99,7 +99,10 @@ def serialize_mappings(concept: Concept) -> List[MappingType]:
         result.append(
             MappingType(
                 map_type=str(mapping.map_type),
-                to_source=mapping.to_source_name,
+                to_source=ToSourceType(
+                    url=mapping.to_source_url,
+                    name=mapping.to_source_name
+                ) if mapping.to_source_url or mapping.to_source_name else None,
                 to_code=mapping.get_to_concept_code(),
                 comment=mapping.comment,
             )

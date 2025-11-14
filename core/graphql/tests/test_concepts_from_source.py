@@ -67,11 +67,11 @@ class ConceptsFromSourceQueryTests(TestCase):
             limit
             totalCount
             hasNextPage
-            results {
-              conceptId
-              display
-              mappings { mapType toSource toCode comment }
-            }
+             results {
+               conceptId
+               display
+               mappings { mapType toSource { url name } toCode comment }
+             }
           }
         }
         """

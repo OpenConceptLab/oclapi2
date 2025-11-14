@@ -213,7 +213,22 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
     @property
     def to_source_name(self):
-        return get(self.get_to_source(), 'mnemonic')
+        """
+        Return the name of the source that this mapping is associated with.
+
+        If the mapping has an associated source, then the mnemonic of that source is returned.
+        If the mapping has a to_source_url, but no associated source, then the parent uri of that url is returned.
+        If the mapping has no associated source or to_source_url, then None is returned.
+        """
+        source = self.get_to_source()
+        if source:
+            return source.mnemonic
+        if self.to_source_url:
+            from core.common.utils import to_parent_uri
+            parent_uri = to_parent_uri(self.to_source_url)
+            if parent_uri:
+                return parent_uri.rstrip('/').split('/')[-1]
+        return None
 
     @property
     def to_source_owner(self):

@@ -6,9 +6,15 @@ import strawberry
 
 
 @strawberry.type
+class ToSourceType:
+    url: Optional[str]
+    name: Optional[str]
+
+
+@strawberry.type
 class MappingType:
     map_type: str = strawberry.field(name="mapType")
-    to_source: Optional[str] = strawberry.field(name="toSource")
+    to_source: Optional[ToSourceType] = strawberry.field(name="toSource")
     to_code: Optional[str] = strawberry.field(name="toCode")
     comment: Optional[str]
 
