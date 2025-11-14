@@ -244,6 +244,11 @@ class Query:
         page: Optional[int] = None,
         limit: Optional[int] = None,
     ) -> ConceptSearchResult:
+        if info.context.auth_status == 'none':
+            raise GraphQLError('Authentication required')
+        elif info.context.auth_status == 'invalid':
+            raise GraphQLError('Authentication failure')
+
         concept_ids_param = conceptIds or []
         text_query = (query or '').strip()
 
