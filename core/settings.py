@@ -77,6 +77,9 @@ CORS_EXPOSE_HEADERS = (
     'X-OCL-API-DEPRECATED',
     'X-OCL-API-STANDARD-CHECKSUM',
     'X-OCL-API-SMART-CHECKSUM',
+    'X-LimitRemaining-Minute',
+    'X-LimitRemaining-Day',
+    'Retry-After',
 )
 
 CORS_ORIGIN_ALLOW_ALL = True
