@@ -47,3 +47,5 @@ minio==7.2.9
 sentence-transformers==3.3.1
 elastic-transport==8.17
 litellm==1.77.0
+strawberry-graphql==0.285.0
+strawberry-graphql-django==0.67.0
