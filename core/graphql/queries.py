@@ -24,8 +24,8 @@ ES_MAX_WINDOW = 10_000
 
 @strawberry.type
 class ConceptSearchResult:
-    org: str
-    source: str
+    org: Optional[str]
+    source: Optional[str]
     version_resolved: str = strawberry.field(name="versionResolved")
     page: Optional[int]
     limit: Optional[int]
@@ -58,6 +58,21 @@ def build_mapping_prefetch(source_version: Source) -> Prefetch:
     mapping_qs = (
         Mapping.objects.filter(
             sources__id=source_version.id,
+            from_concept_id__isnull=False,
+            is_active=True,
+            retired=False,
+        )
+        .select_related('to_source', 'to_concept', 'to_concept__parent')
+        .order_by('map_type', 'to_concept_code', 'to_concept__mnemonic')
+        .distinct()
+    )
+
+    return Prefetch('mappings_from', queryset=mapping_qs, to_attr='graphql_mappings')
+
+
+def build_global_mapping_prefetch() -> Prefetch:
+    mapping_qs = (
+        Mapping.objects.filter(
             from_concept_id__isnull=False,
             is_active=True,
             retired=False,
@@ -125,7 +140,7 @@ def serialize_concepts(concepts: Iterable[Concept]) -> List[ConceptType]:
 
 def concept_ids_from_es(
         query: str,
-        source_version: Source,
+        source_version: Optional[Source],
         pagination: Optional[dict],
 ) -> Optional[tuple[list[int], int]]:
     trimmed = query.strip()
@@ -134,8 +149,9 @@ def concept_ids_from_es(
 
     try:
         search = ConceptDocument.search()
-        search = search.filter('term', source=source_version.mnemonic.lower())
-        search = search.filter('term', source_version=source_version.version)
+        if source_version:
+            search = search.filter('term', source=source_version.mnemonic.lower())
+            search = search.filter('term', source_version=source_version.version)
         search = search.filter('term', retired=False)
 
         should_queries = [
@@ -232,12 +248,12 @@ async def concepts_for_query(
 
 @strawberry.type
 class Query:
-    @strawberry.field(name="conceptsFromSource")
-    async def concepts_from_source(
+    @strawberry.field(name="concepts")
+    async def concepts(
         self,
         info,  # pylint: disable=unused-argument
-        org: str,
-        source: str,
+        org: Optional[str] = None,
+        source: Optional[str] = None,
         version: Optional[str] = None,
         conceptIds: Optional[List[str]] = None,
         query: Optional[str] = None,
@@ -256,9 +272,16 @@ class Query:
             raise GraphQLError('Either conceptIds or query must be provided.')
 
         pagination = normalize_pagination(page, limit)
-        source_version = await resolve_source_version(org, source, version)
-        base_qs = build_base_queryset(source_version)
-        mapping_prefetch = build_mapping_prefetch(source_version)
+
+        if org and source:
+            source_version = await resolve_source_version(org, source, version)
+            base_qs = build_base_queryset(source_version)
+            mapping_prefetch = build_mapping_prefetch(source_version)
+        else:
+            # Global search across all repositories
+            source_version = None
+            base_qs = Concept.objects.filter(is_active=True, retired=False)
+            mapping_prefetch = build_global_mapping_prefetch()
 
         if concept_ids_param:
             concepts, total = await concepts_for_ids(base_qs, concept_ids_param, pagination, mapping_prefetch)
@@ -268,7 +291,7 @@ class Query:
         return ConceptSearchResult(
             org=org,
             source=source,
-            version_resolved=source_version.version,
+            version_resolved=source_version.version if source_version else '',
             page=pagination['page'] if pagination else None,
             limit=pagination['limit'] if pagination else None,
             total_count=total,

@@ -58,8 +58,8 @@ class ConceptsFromSourceQueryTests(TestCase):
 
     def test_fetch_concepts_by_ids_with_pagination(self):
         query = """
-        query ConceptsByIds($org: String!, $source: String!, $conceptIds: [String!], $page: Int, $limit: Int) {
-          conceptsFromSource(org: $org, source: $source, conceptIds: $conceptIds, page: $page, limit: $limit) {
+        query ConceptsByIds($org: String, $source: String, $conceptIds: [String!], $page: Int, $limit: Int) {
+          concepts(org: $org, source: $source, conceptIds: $conceptIds, page: $page, limit: $limit) {
             org
             source
             versionResolved
@@ -84,7 +84,7 @@ class ConceptsFromSourceQueryTests(TestCase):
         })
 
         self.assertEqual(status, 200)
-        payload = data['conceptsFromSource']
+        payload = data['concepts']
         self.assertEqual(payload['org'], self.organization.mnemonic)
         self.assertEqual(payload['source'], self.source.mnemonic)
         self.assertEqual(payload['versionResolved'], HEAD)
@@ -100,8 +100,8 @@ class ConceptsFromSourceQueryTests(TestCase):
     def test_fetch_concepts_by_query_uses_es_ordering(self, mock_es):
         mock_es.return_value = ([self.concept2.id, self.concept1.id], 2)
         query = """
-        query ConceptsByQuery($org: String!, $source: String!, $text: String!) {
-          conceptsFromSource(org: $org, source: $source, query: $text) {
+        query ConceptsByQuery($org: String, $source: String, $text: String!) {
+          concepts(org: $org, source: $source, query: $text) {
             versionResolved
             page
             limit
@@ -118,7 +118,7 @@ class ConceptsFromSourceQueryTests(TestCase):
         })
 
         self.assertEqual(status, 200)
-        payload = data['conceptsFromSource']
+        payload = data['concepts']
         self.assertEqual(payload['versionResolved'], HEAD)
         self.assertIsNone(payload['page'])
         self.assertIsNone(payload['limit'])
@@ -130,8 +130,8 @@ class ConceptsFromSourceQueryTests(TestCase):
     @mock.patch('core.graphql.queries.concept_ids_from_es', return_value=None)
     def test_fetch_concepts_by_query_falls_back_to_db(self, _mock_es):
         query = """
-        query ConceptsByQuery($org: String!, $source: String!, $text: String!) {
-          conceptsFromSource(org: $org, source: $source, query: $text) {
+        query ConceptsByQuery($org: String, $source: String, $text: String!) {
+          concepts(org: $org, source: $source, query: $text) {
             totalCount
             results { conceptId }
           }
@@ -144,7 +144,7 @@ class ConceptsFromSourceQueryTests(TestCase):
         })
 
         self.assertEqual(status, 200)
-        payload = data['conceptsFromSource']
+        payload = data['concepts']
         self.assertEqual(payload['totalCount'], 1)
         self.assertEqual(payload['results'][0]['conceptId'], self.concept1.mnemonic)
 
@@ -152,8 +152,8 @@ class ConceptsFromSourceQueryTests(TestCase):
     def test_fetch_concepts_by_query_recovers_when_es_returns_zero_hits(self, mock_es):
         mock_es.return_value = ([], 0)
         query = """
-        query ConceptsByQuery($org: String!, $source: String!, $text: String!) {
-          conceptsFromSource(org: $org, source: $source, query: $text) {
+        query ConceptsByQuery($org: String, $source: String, $text: String!) {
+          concepts(org: $org, source: $source, query: $text) {
             totalCount
             results { conceptId }
           }
@@ -166,14 +166,14 @@ class ConceptsFromSourceQueryTests(TestCase):
         })
 
         self.assertEqual(status, 200)
-        payload = data['conceptsFromSource']
+        payload = data['concepts']
         self.assertEqual(payload['totalCount'], 1)
         self.assertEqual(payload['results'][0]['conceptId'], self.concept2.mnemonic)
 
     def test_fetch_concepts_for_specific_version(self):
         query = """
-        query ConceptsByIds($org: String!, $source: String!, $conceptIds: [String!], $version: String) {
-          conceptsFromSource(org: $org, source: $source, conceptIds: $conceptIds, version: $version) {
+        query ConceptsByIds($org: String, $source: String, $conceptIds: [String!], $version: String) {
+          concepts(org: $org, source: $source, conceptIds: $conceptIds, version: $version) {
             versionResolved
             results { conceptId }
           }
@@ -187,6 +187,28 @@ class ConceptsFromSourceQueryTests(TestCase):
         })
 
         self.assertEqual(status, 200)
-        payload = data['conceptsFromSource']
+        payload = data['concepts']
         self.assertEqual(payload['versionResolved'], self.release_version.version)
+        self.assertEqual(payload['results'][0]['conceptId'], self.concept1.mnemonic)
+
+    def test_fetch_concepts_global_search(self):
+        query = """
+        query GlobalConcepts($query: String!) {
+          concepts(query: $query) {
+            org
+            source
+            versionResolved
+            totalCount
+            results { conceptId }
+          }
+        }
+        """
+        status, data = self._execute(query, {'query': 'hyper'})
+
+        self.assertEqual(status, 200)
+        payload = data['concepts']
+        self.assertIsNone(payload['org'])
+        self.assertIsNone(payload['source'])
+        self.assertEqual(payload['versionResolved'], '')
+        self.assertEqual(payload['totalCount'], 1)
         self.assertEqual(payload['results'][0]['conceptId'], self.concept1.mnemonic)
