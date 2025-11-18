@@ -24,14 +24,33 @@ ES_MAX_WINDOW = 10_000
 
 @strawberry.type
 class ConceptSearchResult:
-    org: Optional[str]
-    source: Optional[str]
-    version_resolved: str = strawberry.field(name="versionResolved")
-    page: Optional[int]
-    limit: Optional[int]
-    total_count: int = strawberry.field(name="totalCount")
-    has_next_page: bool = strawberry.field(name="hasNextPage")
-    results: List[ConceptType]
+    org: Optional[str] = strawberry.field(
+        description="Organization mnemonic that owns the searched source."
+    )
+    source: Optional[str] = strawberry.field(
+        description="Source mnemonic against which the search was executed."
+    )
+    version_resolved: str = strawberry.field(
+        name="versionResolved",
+        description="Exact source version used (HEAD resolves to its concrete version).",
+    )
+    page: Optional[int] = strawberry.field(
+        description="Requested page (1-indexed) if pagination parameters were supplied."
+    )
+    limit: Optional[int] = strawberry.field(
+        description="Maximum number of records per page when pagination is applied."
+    )
+    total_count: int = strawberry.field(
+        name="totalCount",
+        description="Total number of matching concepts across all pages.",
+    )
+    has_next_page: bool = strawberry.field(
+        name="hasNextPage",
+        description="Indicates whether another page of results exists.",
+    )
+    results: List[ConceptType] = strawberry.field(
+        description="Concepts returned for the current page."
+    )
 
 
 async def resolve_source_version(org: str, source: str, version: Optional[str]) -> Source:
@@ -142,6 +161,8 @@ def serialize_concepts(concepts: Iterable[Concept]) -> List[ConceptType]:
     for concept in concepts:
         output.append(
             ConceptType(
+                id=str(concept.id),
+                external_id=concept.external_id,
                 concept_id=concept.mnemonic,
                 display=concept.display_name,
                 names=serialize_names(concept),
