@@ -6,6 +6,14 @@ import strawberry
 
 
 @strawberry.type
+class ConceptNameType:
+    name: str
+    locale: str
+    type: Optional[str]
+    preferred: bool
+
+
+@strawberry.type
 class ToSourceType:
     url: Optional[str]
     name: Optional[str]
@@ -23,4 +31,5 @@ class MappingType:
 class ConceptType:
     concept_id: str = strawberry.field(name="conceptId")
     display: Optional[str]
+    names: List[ConceptNameType]
     mappings: List[MappingType]
