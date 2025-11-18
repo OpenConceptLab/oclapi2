@@ -59,3 +59,21 @@ class ConceptType:
     mappings: List[MappingType] = strawberry.field(
         description="Mappings originating from this concept."
     )
+    description: Optional[str] = strawberry.field(
+        description="Primary description for the concept, resolved from available locales."
+    )
+    concept_class: Optional[str] = strawberry.field(
+        name="conceptClass",
+        description="Concept class label recorded on the concept.",
+    )
+    datatype: Optional[str] = strawberry.field(
+        description="Datatype associated with the concept (e.g., Text, Numeric)."
+    )
+    is_set: Optional[bool] = strawberry.field(
+        name="isSet",
+        description="True when the concept represents a set."
+    )
+    is_retired: Optional[bool] = strawberry.field(
+        name="isRetired",
+        description="Retirement status of the concept."
+    )

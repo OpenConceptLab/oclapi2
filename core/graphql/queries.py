@@ -156,6 +156,49 @@ def serialize_names(concept: Concept) -> List[ConceptNameType]:
     ]
 
 
+def resolve_description(concept: Concept) -> Optional[str]:
+    descriptions = list(concept.descriptions.all())
+    if not descriptions:
+        return None
+
+    def pick(predicate):
+        for desc in descriptions:
+            if predicate(desc):
+                return desc.description
+        return None
+
+    default_locale = getattr(concept.parent, 'default_locale', None)
+    if default_locale:
+        match = pick(lambda desc: desc.locale == default_locale and desc.locale_preferred)
+        if match:
+            return match
+        match = pick(lambda desc: desc.locale == default_locale)
+        if match:
+            return match
+
+    match = pick(lambda desc: desc.locale_preferred)
+    if match:
+        return match
+    return descriptions[0].description
+
+
+def resolve_is_set_flag(concept: Concept) -> Optional[bool]:
+    value = getattr(concept, 'is_set', None)
+    if value is None:
+        extras = concept.extras or {}
+        if 'is_set' not in extras:
+            return None
+        value = extras['is_set']
+
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {'true', '1', 'yes'}:
+            return True
+        if lowered in {'false', '0', 'no'}:
+            return False
+    return bool(value)
+
+
 def serialize_concepts(concepts: Iterable[Concept]) -> List[ConceptType]:
     output: List[ConceptType] = []
     for concept in concepts:
@@ -167,6 +210,11 @@ def serialize_concepts(concepts: Iterable[Concept]) -> List[ConceptType]:
                 display=concept.display_name,
                 names=serialize_names(concept),
                 mappings=serialize_mappings(concept),
+                description=resolve_description(concept),
+                concept_class=concept.concept_class,
+                datatype=concept.datatype,
+                is_set=resolve_is_set_flag(concept),
+                is_retired=concept.retired,
             )
         )
     return output
@@ -240,7 +288,7 @@ async def concepts_for_ids(
     )
     qs = qs.order_by(ordering, 'mnemonic')
     qs = apply_slice(qs, pagination)
-    qs = qs.prefetch_related('names', mapping_prefetch)
+    qs = qs.prefetch_related('names', 'descriptions', mapping_prefetch)
     return await sync_to_async(list)(qs), total
 
 
@@ -270,13 +318,13 @@ async def concepts_for_query(
                 output_field=IntegerField()
             )
             qs = base_qs.filter(id__in=concept_ids).order_by(ordering)
-            qs = qs.prefetch_related('names', mapping_prefetch)
+            qs = qs.prefetch_related('names', 'descriptions', mapping_prefetch)
             return await sync_to_async(list)(qs), total
 
     qs = fallback_db_search(base_qs, query).order_by('mnemonic')
     total = await sync_to_async(qs.count)()
     qs = apply_slice(qs, pagination)
-    qs = qs.prefetch_related('names', mapping_prefetch)
+    qs = qs.prefetch_related('names', 'descriptions', mapping_prefetch)
     return await sync_to_async(list)(qs), total
 
 

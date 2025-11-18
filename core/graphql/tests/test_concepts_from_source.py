@@ -4,10 +4,15 @@ from unittest import mock
 from django.test import TestCase
 
 from core.common.constants import HEAD
-from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
+from core.concepts.tests.factories import (
+    ConceptDescriptionFactory,
+    ConceptFactory,
+    ConceptNameFactory,
+)
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import OrganizationSourceFactory
+from core.graphql.queries import serialize_concepts
 
 
 class ConceptsFromSourceQueryTests(TestCase):
@@ -23,6 +28,8 @@ class ConceptsFromSourceQueryTests(TestCase):
         )
         self.concept1 = ConceptFactory(parent=self.source, mnemonic='12345')
         ConceptNameFactory(concept=self.concept1, name='Hypertension', locale='en', locale_preferred=True)
+        ConceptDescriptionFactory(concept=self.concept1, name='Hypertension description', locale='en',
+                                  locale_preferred=True)
         self.concept2 = ConceptFactory(parent=self.source, mnemonic='67890')
         ConceptNameFactory(concept=self.concept2, name='Diabetes', locale='en', locale_preferred=True)
         self.mapping = MappingFactory(
@@ -44,6 +51,8 @@ class ConceptsFromSourceQueryTests(TestCase):
         self.concept1.sources.add(self.release_version)
         self.concept2.sources.add(self.release_version)
         self.mapping.sources.add(self.release_version)
+        self.concept1.extras = {**(self.concept1.extras or {}), 'is_set': False}
+        self.concept1.save(update_fields=['extras'])
 
     def _execute(self, query: str, variables: dict):
         response = self.client.post(
@@ -95,6 +104,35 @@ class ConceptsFromSourceQueryTests(TestCase):
         self.assertEqual(len(payload['results']), 1)
         self.assertEqual(payload['results'][0]['conceptId'], self.concept1.mnemonic)
         self.assertEqual(payload['results'][0]['mappings'][0]['toCode'], self.concept2.mnemonic)
+
+    def test_concepts_include_metadata_fields(self):
+        query = """
+        query ConceptsByIds($org: String, $source: String, $conceptIds: [String!]) {
+          concepts(org: $org, source: $source, conceptIds: $conceptIds) {
+            results {
+              conceptId
+              description
+              conceptClass
+              datatype
+              isSet
+              isRetired
+            }
+          }
+        }
+        """
+        status, data = self._execute(query, {
+            'org': self.organization.mnemonic,
+            'source': self.source.mnemonic,
+            'conceptIds': [self.concept1.mnemonic],
+        })
+
+        self.assertEqual(status, 200)
+        concept_payload = data['concepts']['results'][0]
+        self.assertEqual(concept_payload['description'], 'Hypertension description')
+        self.assertEqual(concept_payload['conceptClass'], self.concept1.concept_class)
+        self.assertEqual(concept_payload['datatype'], self.concept1.datatype)
+        self.assertFalse(concept_payload['isSet'])
+        self.assertFalse(concept_payload['isRetired'])
 
     @mock.patch('core.graphql.queries.concept_ids_from_es')
     def test_fetch_concepts_by_query_uses_es_ordering(self, mock_es):
@@ -271,3 +309,23 @@ class ConceptsFromSourceQueryTests(TestCase):
             'type': 'SYNONYM',
             'preferred': False,
         }, names)
+
+    def test_serialize_concepts_includes_metadata_for_retired_concepts(self):
+        retired = ConceptFactory(
+            parent=self.source,
+            mnemonic='retired-1',
+            concept_class='Procedure',
+            datatype='Text',
+            retired=True,
+            extras={'is_set': True},
+        )
+        ConceptDescriptionFactory(concept=retired, name='Retired concept description', locale='en',
+                                  locale_preferred=True)
+
+        serialized = serialize_concepts([retired])[0]
+
+        self.assertEqual(serialized.description, 'Retired concept description')
+        self.assertEqual(serialized.concept_class, 'Procedure')
+        self.assertEqual(serialized.datatype, 'Text')
+        self.assertTrue(serialized.is_set)
+        self.assertTrue(serialized.is_retired)
