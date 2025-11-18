@@ -16,7 +16,7 @@ from core.concepts.models import Concept
 from core.mappings.models import Mapping
 from core.sources.models import Source
 
-from .types import ConceptType, MappingType, ToSourceType
+from .types import ConceptNameType, ConceptType, MappingType, ToSourceType
 
 logger = logging.getLogger(__name__)
 ES_MAX_WINDOW = 10_000
@@ -125,6 +125,18 @@ def serialize_mappings(concept: Concept) -> List[MappingType]:
     return result
 
 
+def serialize_names(concept: Concept) -> List[ConceptNameType]:
+    return [
+        ConceptNameType(
+            name=name.name,
+            locale=name.locale,
+            type=name.type,
+            preferred=name.locale_preferred,
+        )
+        for name in concept.names.all()
+    ]
+
+
 def serialize_concepts(concepts: Iterable[Concept]) -> List[ConceptType]:
     output: List[ConceptType] = []
     for concept in concepts:
@@ -132,6 +144,7 @@ def serialize_concepts(concepts: Iterable[Concept]) -> List[ConceptType]:
             ConceptType(
                 concept_id=concept.mnemonic,
                 display=concept.display_name,
+                names=serialize_names(concept),
                 mappings=serialize_mappings(concept),
             )
         )

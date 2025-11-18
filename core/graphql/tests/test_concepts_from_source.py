@@ -212,3 +212,62 @@ class ConceptsFromSourceQueryTests(TestCase):
         self.assertEqual(payload['versionResolved'], '')
         self.assertEqual(payload['totalCount'], 1)
         self.assertEqual(payload['results'][0]['conceptId'], self.concept1.mnemonic)
+
+    def test_concept_names_include_preferred_locale(self):
+        query = """
+        query ConceptsByIds($org: String, $source: String, $conceptIds: [String!]) {
+          concepts(org: $org, source: $source, conceptIds: $conceptIds) {
+            results {
+              conceptId
+              names { name locale type preferred }
+            }
+          }
+        }
+        """
+        status, data = self._execute(query, {
+            'org': self.organization.mnemonic,
+            'source': self.source.mnemonic,
+            'conceptIds': [self.concept1.mnemonic],
+        })
+
+        self.assertEqual(status, 200)
+        names = data['concepts']['results'][0]['names']
+        self.assertIn({
+            'name': 'Hypertension',
+            'locale': 'en',
+            'type': 'FULLY_SPECIFIED',
+            'preferred': True,
+        }, names)
+
+    def test_concept_names_include_non_preferred_locale(self):
+        ConceptNameFactory(
+            concept=self.concept1,
+            name='Hypertension French',
+            locale='fr',
+            type='SYNONYM',
+            locale_preferred=False,
+        )
+        query = """
+        query ConceptsByIds($org: String, $source: String, $conceptIds: [String!]) {
+          concepts(org: $org, source: $source, conceptIds: $conceptIds) {
+            results {
+              conceptId
+              names { name locale type preferred }
+            }
+          }
+        }
+        """
+        status, data = self._execute(query, {
+            'org': self.organization.mnemonic,
+            'source': self.source.mnemonic,
+            'conceptIds': [self.concept1.mnemonic],
+        })
+
+        self.assertEqual(status, 200)
+        names = data['concepts']['results'][0]['names']
+        self.assertIn({
+            'name': 'Hypertension French',
+            'locale': 'fr',
+            'type': 'SYNONYM',
+            'preferred': False,
+        }, names)
