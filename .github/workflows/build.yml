@@ -221,6 +221,13 @@ jobs:
           task-definition: "task-definition-celery.json"
           container-name: "qa-celery"
           image: ${{ steps.push-image.outputs.image }}
+      - name: "[celery-concurrent] Fill in the new image ID in the Amazon ECS task definition"
+        id: task-def-celery-concurrent
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: "task-definition-celery-concurrent.json"
+          container-name: "qa-celery-concurrent"
+          image: ${{ steps.push-image.outputs.image }}
       - name: "[celery-bulk-import-root] Fill in the new image ID in the Amazon ECS task definition"
         id: task-def-celery-bulk-import-root
         uses: aws-actions/amazon-ecs-render-task-definition@v1
@@ -378,6 +385,13 @@ jobs:
           task-definition: "task-definition-celery.json"
           container-name: "staging-celery"
           image: ${{ steps.push-image.outputs.image }}
+      - name: "[celery-concurrent] Fill in the new image ID in the Amazon ECS task definition"
+        id: task-def-celery-concurrent
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: "task-definition-celery-concurrent.json"
+          container-name: "staging-celery-concurrent"
+          image: ${{ steps.push-image.outputs.image }}
       - name: "[celery-bulk-import-root] Fill in the new image ID in the Amazon ECS task definition"
         id: task-def-celery-bulk-import-root
         uses: aws-actions/amazon-ecs-render-task-definition@v1
@@ -534,6 +548,13 @@ jobs:
         with:
           task-definition: "task-definition-celery.json"
           container-name: "production-celery"
+          image: ${{ steps.push-image.outputs.image }}
+      - name: "[celery-concurrent] Fill in the new image ID in the Amazon ECS task definition"
+        id: task-def-celery-concurrent
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: "task-definition-celery-concurrent.json"
+          container-name: "production-celery-concurrent"
           image: ${{ steps.push-image.outputs.image }}
       - name: "[celery-bulk-import-root] Fill in the new image ID in the Amazon ECS task definition"
         id: task-def-celery-bulk-import-root
