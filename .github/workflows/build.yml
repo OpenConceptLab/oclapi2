@@ -282,6 +282,12 @@ jobs:
           task-definition: ${{ steps.task-def-celery.outputs.task-definition }}
           service: "qa-celery"
           cluster: ${{ env.ECS_CLUSTER_QA }}
+      - name: "[celery-concurrent] Deploy Amazon ECS task definition"
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-def-celery-concurrent.outputs.task-definition }}
+          service: "qa-celery-concurrent"
+          cluster: ${{ env.ECS_CLUSTER_QA }}
       - name: "[celery-bulk-import-root] Deploy Amazon ECS task definition"
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
@@ -446,6 +452,12 @@ jobs:
           task-definition: ${{ steps.task-def-celery.outputs.task-definition }}
           service: "staging-celery"
           cluster: ${{ env.ECS_CLUSTER_STAGING_PRODUCTION }}
+      - name: "[celery-concurrent] Deploy Amazon ECS task definition"
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-def-celery-concurrent.outputs.task-definition }}
+          service: "staging-celery-concurrent"
+          cluster: ${{ env.ECS_CLUSTER_STAGING_PRODUCTION }}
       - name: "[celery-bulk-import-root] Deploy Amazon ECS task definition"
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
@@ -609,6 +621,12 @@ jobs:
         with:
           task-definition: ${{ steps.task-def-celery.outputs.task-definition }}
           service: "production-celery"
+          cluster: ${{ env.ECS_CLUSTER_STAGING_PRODUCTION }}
+      - name: "[celery-concurrent] Deploy Amazon ECS task definition"
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-def-celery-concurrent.outputs.task-definition }}
+          service: "production-celery-concurrent"
           cluster: ${{ env.ECS_CLUSTER_STAGING_PRODUCTION }}
       - name: "[celery-bulk-import-root] Deploy Amazon ECS task definition"
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
