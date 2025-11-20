@@ -6,6 +6,7 @@ from typing import Iterable, List, Optional, Sequence
 import strawberry
 from asgiref.sync import sync_to_async
 from django.db.models import Case, IntegerField, Prefetch, Q, When
+from django.utils import timezone
 from elasticsearch import ConnectionError as ESConnectionError, TransportError
 from elasticsearch_dsl import Q as ES_Q
 from strawberry.exceptions import GraphQLError
@@ -16,7 +17,18 @@ from core.concepts.models import Concept
 from core.mappings.models import Mapping
 from core.sources.models import Source
 
-from .types import ConceptNameType, ConceptType, MappingType, ToSourceType
+from .types import (
+    CodedDatatypeDetails,
+    ConceptNameType,
+    ConceptType,
+    DatatypeDetails,
+    DatatypeType,
+    MappingType,
+    MetadataType,
+    NumericDatatypeDetails,
+    TextDatatypeDetails,
+    ToSourceType,
+)
 
 logger = logging.getLogger(__name__)
 ES_MAX_WINDOW = 10_000
@@ -126,6 +138,10 @@ def apply_slice(qs, pagination: Optional[dict]):
     return qs[pagination['start']:pagination['end']]
 
 
+def with_concept_related(qs, mapping_prefetch: Prefetch):
+    return qs.select_related('created_by', 'updated_by').prefetch_related('names', 'descriptions', mapping_prefetch)
+
+
 def serialize_mappings(concept: Concept) -> List[MappingType]:
     mappings = getattr(concept, 'graphql_mappings', []) or []
     result: List[MappingType] = []
@@ -199,6 +215,115 @@ def resolve_is_set_flag(concept: Concept) -> Optional[bool]:
     return bool(value)
 
 
+def _to_float(value) -> Optional[float]:
+    if value in (None, ''):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _to_bool(value) -> Optional[bool]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {'true', '1', 'yes'}:
+            return True
+        if lowered in {'false', '0', 'no'}:
+            return False
+    return None
+
+
+def resolve_numeric_datatype_details(concept: Concept) -> Optional[NumericDatatypeDetails]:
+    extras = concept.extras or {}
+    numeric_values = {
+        'low_absolute': _to_float(extras.get('low_absolute')),
+        'high_absolute': _to_float(extras.get('hi_absolute')),
+        'low_normal': _to_float(extras.get('low_normal')),
+        'high_normal': _to_float(extras.get('hi_normal')),
+        'low_critical': _to_float(extras.get('low_critical')),
+        'high_critical': _to_float(extras.get('hi_critical')),
+    }
+    units = extras.get('units')
+    if not units and not any(value is not None for value in numeric_values.values()):
+        return None
+    return NumericDatatypeDetails(
+        units=units,
+        low_absolute=numeric_values['low_absolute'],
+        high_absolute=numeric_values['high_absolute'],
+        low_normal=numeric_values['low_normal'],
+        high_normal=numeric_values['high_normal'],
+        low_critical=numeric_values['low_critical'],
+        high_critical=numeric_values['high_critical'],
+    )
+
+
+def resolve_coded_datatype_details(concept: Concept) -> Optional[CodedDatatypeDetails]:
+    extras = concept.extras or {}
+    allow_multiple = extras.get('allow_multiple')
+    if allow_multiple is None:
+        allow_multiple = extras.get('allow_multiple_answers')
+    if allow_multiple is None:
+        allow_multiple = extras.get('allowMultipleAnswers')
+    allow_multiple = _to_bool(allow_multiple)
+    if allow_multiple is None:
+        return None
+    return CodedDatatypeDetails(allow_multiple=allow_multiple)
+
+
+def resolve_text_datatype_details(concept: Concept) -> Optional[TextDatatypeDetails]:
+    extras = concept.extras or {}
+    text_format = extras.get('text_format') or extras.get('textFormat')
+    if not text_format:
+        return None
+    return TextDatatypeDetails(text_format=text_format)
+
+
+def resolve_datatype_details(concept: Concept) -> Optional[DatatypeDetails]:
+    datatype = (concept.datatype or '').strip().lower()
+    if datatype == 'numeric':
+        return resolve_numeric_datatype_details(concept)
+    if datatype == 'coded':
+        return resolve_coded_datatype_details(concept)
+    if datatype == 'text':
+        return resolve_text_datatype_details(concept)
+    return None
+
+
+def format_datetime_for_api(value) -> Optional[str]:
+    if not value:
+        return None
+    if timezone.is_naive(value):
+        value = timezone.make_aware(value, timezone.utc)
+    return value.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')
+
+
+def build_datatype(concept: Concept) -> Optional[DatatypeType]:
+    if not concept.datatype:
+        return None
+    return DatatypeType(
+        name=concept.datatype,
+        details=resolve_datatype_details(concept),
+    )
+
+
+def build_metadata(concept: Concept) -> MetadataType:
+    return MetadataType(
+        is_set=resolve_is_set_flag(concept),
+        is_retired=concept.retired,
+        created_by=getattr(concept.created_by, 'username', None),
+        created_at=format_datetime_for_api(concept.created_at),
+        updated_by=getattr(concept.updated_by, 'username', None),
+        updated_at=format_datetime_for_api(concept.updated_at),
+    )
+
+
 def serialize_concepts(concepts: Iterable[Concept]) -> List[ConceptType]:
     output: List[ConceptType] = []
     for concept in concepts:
@@ -212,9 +337,8 @@ def serialize_concepts(concepts: Iterable[Concept]) -> List[ConceptType]:
                 mappings=serialize_mappings(concept),
                 description=resolve_description(concept),
                 concept_class=concept.concept_class,
-                datatype=concept.datatype,
-                is_set=resolve_is_set_flag(concept),
-                is_retired=concept.retired,
+                datatype=build_datatype(concept),
+                metadata=build_metadata(concept),
             )
         )
     return output
@@ -288,7 +412,7 @@ async def concepts_for_ids(
     )
     qs = qs.order_by(ordering, 'mnemonic')
     qs = apply_slice(qs, pagination)
-    qs = qs.prefetch_related('names', 'descriptions', mapping_prefetch)
+    qs = with_concept_related(qs, mapping_prefetch)
     return await sync_to_async(list)(qs), total
 
 
@@ -318,13 +442,13 @@ async def concepts_for_query(
                 output_field=IntegerField()
             )
             qs = base_qs.filter(id__in=concept_ids).order_by(ordering)
-            qs = qs.prefetch_related('names', 'descriptions', mapping_prefetch)
+            qs = with_concept_related(qs, mapping_prefetch)
             return await sync_to_async(list)(qs), total
 
     qs = fallback_db_search(base_qs, query).order_by('mnemonic')
     total = await sync_to_async(qs.count)()
     qs = apply_slice(qs, pagination)
-    qs = qs.prefetch_related('names', 'descriptions', mapping_prefetch)
+    qs = with_concept_related(qs, mapping_prefetch)
     return await sync_to_async(list)(qs), total
 
 

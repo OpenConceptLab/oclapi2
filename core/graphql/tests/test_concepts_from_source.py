@@ -9,10 +9,11 @@ from core.concepts.tests.factories import (
     ConceptFactory,
     ConceptNameFactory,
 )
+from core.graphql.queries import format_datetime_for_api, serialize_concepts
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import OrganizationSourceFactory
-from core.graphql.queries import serialize_concepts
+from core.users.tests.factories import UserProfileFactory
 
 
 class ConceptsFromSourceQueryTests(TestCase):
@@ -53,6 +54,12 @@ class ConceptsFromSourceQueryTests(TestCase):
         self.mapping.sources.add(self.release_version)
         self.concept1.extras = {**(self.concept1.extras or {}), 'is_set': False}
         self.concept1.save(update_fields=['extras'])
+
+        self.audit_user = UserProfileFactory(username='graphql-audit')
+        self.concept1.created_by = self.audit_user
+        self.concept1.updated_by = self.audit_user
+        self.concept1.save(update_fields=['created_by', 'updated_by'])
+        self.concept1.refresh_from_db()
 
     def _execute(self, query: str, variables: dict):
         response = self.client.post(
@@ -113,9 +120,15 @@ class ConceptsFromSourceQueryTests(TestCase):
               conceptId
               description
               conceptClass
-              datatype
-              isSet
-              isRetired
+              datatype { name }
+              metadata {
+                isSet
+                isRetired
+                createdBy
+                createdAt
+                updatedBy
+                updatedAt
+              }
             }
           }
         }
@@ -130,9 +143,149 @@ class ConceptsFromSourceQueryTests(TestCase):
         concept_payload = data['concepts']['results'][0]
         self.assertEqual(concept_payload['description'], 'Hypertension description')
         self.assertEqual(concept_payload['conceptClass'], self.concept1.concept_class)
-        self.assertEqual(concept_payload['datatype'], self.concept1.datatype)
-        self.assertFalse(concept_payload['isSet'])
-        self.assertFalse(concept_payload['isRetired'])
+        self.assertEqual(concept_payload['datatype']['name'], self.concept1.datatype)
+        metadata = concept_payload['metadata']
+        self.assertFalse(metadata['isSet'])
+        self.assertFalse(metadata['isRetired'])
+        self.assertEqual(metadata['createdBy'], self.audit_user.username)
+        self.assertEqual(metadata['updatedBy'], self.audit_user.username)
+        self.assertEqual(metadata['createdAt'], format_datetime_for_api(self.concept1.created_at))
+        self.assertEqual(metadata['updatedAt'], format_datetime_for_api(self.concept1.updated_at))
+
+    def test_numeric_datatype_details_from_graphql(self):
+        numeric_concept = ConceptFactory(
+            parent=self.source,
+            mnemonic='num-001',
+            datatype='Numeric',
+            extras={
+                'units': 'mg/dL',
+                'low_absolute': 0,
+                'hi_absolute': 10,
+                'low_normal': 3,
+                'hi_normal': 7,
+                'low_critical': 1.5,
+                'hi_critical': 8.5,
+            },
+        )
+        query = """
+        query ($org: String!, $source: String!, $conceptIds: [String!]) {
+          concepts(org: $org, source: $source, conceptIds: $conceptIds) {
+            results {
+              conceptId
+              datatype {
+                name
+                details {
+                  __typename
+                  ... on NumericDatatypeDetails {
+                    units
+                    lowAbsolute
+                    highAbsolute
+                    lowNormal
+                    highNormal
+                    lowCritical
+                    highCritical
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+        status, data = self._execute(query, {
+            'org': self.organization.mnemonic,
+            'source': self.source.mnemonic,
+            'conceptIds': [numeric_concept.mnemonic],
+        })
+
+        self.assertEqual(status, 200)
+        result = data['concepts']['results'][0]
+        self.assertEqual(result['datatype']['name'], 'Numeric')
+        details = result['datatype']['details']
+        self.assertIsNotNone(details)
+        self.assertEqual(details['__typename'], 'NumericDatatypeDetails')
+        self.assertEqual(details['units'], 'mg/dL')
+        self.assertEqual(details['lowAbsolute'], 0)
+        self.assertEqual(details['highAbsolute'], 10)
+        self.assertEqual(details['lowNormal'], 3)
+        self.assertEqual(details['highNormal'], 7)
+        self.assertEqual(details['lowCritical'], 1.5)
+        self.assertEqual(details['highCritical'], 8.5)
+
+    def test_coded_datatype_details_from_graphql(self):
+        coded_concept = ConceptFactory(
+            parent=self.source,
+            mnemonic='coded-1',
+            datatype='Coded',
+            extras={'allow_multiple': True},
+        )
+        query = """
+        query ($org: String!, $source: String!, $conceptIds: [String!]) {
+          concepts(org: $org, source: $source, conceptIds: $conceptIds) {
+            results {
+              conceptId
+              datatype {
+                name
+                details {
+                  __typename
+                  ... on CodedDatatypeDetails {
+                    allowMultiple
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+        status, data = self._execute(query, {
+            'org': self.organization.mnemonic,
+            'source': self.source.mnemonic,
+            'conceptIds': [coded_concept.mnemonic],
+        })
+
+        self.assertEqual(status, 200)
+        result = data['concepts']['results'][0]
+        self.assertEqual(result['datatype']['name'], 'Coded')
+        details = result['datatype']['details']
+        self.assertEqual(details['__typename'], 'CodedDatatypeDetails')
+        self.assertTrue(details['allowMultiple'])
+
+    def test_text_datatype_details_from_graphql(self):
+        text_concept = ConceptFactory(
+            parent=self.source,
+            mnemonic='text-1',
+            datatype='Text',
+            extras={'text_format': 'paragraph'},
+        )
+        query = """
+        query ($org: String!, $source: String!, $conceptIds: [String!]) {
+          concepts(org: $org, source: $source, conceptIds: $conceptIds) {
+            results {
+              conceptId
+              datatype {
+                name
+                details {
+                  __typename
+                  ... on TextDatatypeDetails {
+                    textFormat
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+        status, data = self._execute(query, {
+            'org': self.organization.mnemonic,
+            'source': self.source.mnemonic,
+            'conceptIds': [text_concept.mnemonic],
+        })
+
+        self.assertEqual(status, 200)
+        result = data['concepts']['results'][0]
+        self.assertEqual(result['datatype']['name'], 'Text')
+        details = result['datatype']['details']
+        self.assertEqual(details['__typename'], 'TextDatatypeDetails')
+        self.assertEqual(details['textFormat'], 'paragraph')
 
     @mock.patch('core.graphql.queries.concept_ids_from_es')
     def test_fetch_concepts_by_query_uses_es_ordering(self, mock_es):
@@ -317,8 +470,13 @@ class ConceptsFromSourceQueryTests(TestCase):
             concept_class='Procedure',
             datatype='Text',
             retired=True,
-            extras={'is_set': True},
+            extras={'is_set': True, 'text_format': 'markdown'},
         )
+        retired_user = UserProfileFactory(username='retired-moderator')
+        retired.created_by = retired_user
+        retired.updated_by = retired_user
+        retired.save(update_fields=['created_by', 'updated_by'])
+        retired.refresh_from_db()
         ConceptDescriptionFactory(concept=retired, name='Retired concept description', locale='en',
                                   locale_preferred=True)
 
@@ -326,6 +484,12 @@ class ConceptsFromSourceQueryTests(TestCase):
 
         self.assertEqual(serialized.description, 'Retired concept description')
         self.assertEqual(serialized.concept_class, 'Procedure')
-        self.assertEqual(serialized.datatype, 'Text')
-        self.assertTrue(serialized.is_set)
-        self.assertTrue(serialized.is_retired)
+        self.assertEqual(serialized.datatype.name, 'Text')
+        self.assertTrue(serialized.metadata.is_set)
+        self.assertTrue(serialized.metadata.is_retired)
+        self.assertIsNotNone(serialized.datatype.details)
+        self.assertEqual(serialized.datatype.details.text_format, 'markdown')
+        self.assertEqual(serialized.metadata.created_by, retired_user.username)
+        self.assertEqual(serialized.metadata.updated_by, retired_user.username)
+        self.assertEqual(serialized.metadata.created_at, format_datetime_for_api(retired.created_at))
+        self.assertEqual(serialized.metadata.updated_at, format_datetime_for_api(retired.updated_at))
