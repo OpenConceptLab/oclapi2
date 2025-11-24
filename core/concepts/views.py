@@ -858,7 +858,8 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
                 else:
                     concept._match_type = 'very_high' # pylint:disable=protected-access
                 if not best_match or concept._match_type in ['medium', 'high', 'very_high']:  # pylint:disable=protected-access
-                    concept._requested_locale = locale_filter
+                    if apply_for_name_locale:
+                        concept._requested_locale = locale_filter  # pylint:disable=protected-access
                     serializer = ConceptDetailSerializer if self.is_verbose() else ConceptMinimalSerializer
                     data = serializer(concept, context={'request': self.request}).data
                     data['search_meta']['search_normalized_score'] = normalized_score * 100
