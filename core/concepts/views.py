@@ -822,7 +822,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         repo_params = self.get_repo_params(is_semantic, target_repo_params, target_repo_url)
         locale_filter = filters.pop('locale', None) if is_semantic else get(filters, 'locale', None)
         faceted_criterion = self.get_faceted_criterion(False, filters, minimum_should_match=1) if filters else None
-
+        apply_for_name_locale = locale_filter and isinstance(locale_filter, str) and len(locale_filter.split(',')) == 1
         results = []
         import time
         for row in rows:
@@ -858,6 +858,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
                 else:
                     concept._match_type = 'very_high' # pylint:disable=protected-access
                 if not best_match or concept._match_type in ['medium', 'high', 'very_high']:  # pylint:disable=protected-access
+                    concept._requested_locale = locale_filter
                     serializer = ConceptDetailSerializer if self.is_verbose() else ConceptMinimalSerializer
                     data = serializer(concept, context={'request': self.request}).data
                     data['search_meta']['search_normalized_score'] = normalized_score * 100
