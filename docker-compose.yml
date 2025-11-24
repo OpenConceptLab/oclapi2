@@ -10,11 +10,11 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
   redis:
-    image: bitnami/redis
+    image: bitnami/redis:7.0.12
     restart: "always"
     environment:
       - ALLOW_EMPTY_PASSWORD=yes
-    command: /opt/bitnami/scripts/redis/run.sh --maxmemory 4096mb
+    command: /opt/bitnami/scripts/redis/run.sh --maxmemory 2048mb
     healthcheck:
       test: "redis-cli ping"
     volumes:
@@ -159,7 +159,7 @@ services:
       - upload-data:/code/uploads
   celery_bulk_import_0_1:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
-    command: ["bash", "-c", "CELERY_WORKER_NAME=bulk_import_0_1 ./start_celery_worker.sh -Q bulk_import_0,bulk_import_1 -c 7"]
+    command: ["bash", "-c", "CELERY_WORKER_NAME=bulk_import_0_1 ./start_celery_worker.sh -Q bulk_import_0,bulk_import_1 -c 1"]
     restart: "always"
     healthcheck:
       test:  ["CMD-SHELL", "-c", "CELERY_WORKER_NAME=bulk_import_0_1 ./ping_celery_worker.sh"]
