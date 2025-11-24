@@ -2,11 +2,7 @@
 Authenticated GraphQL View
 
 This view integrates header-based authentication for GraphQL endpoints,
-similar to how REST endpoints handle authorization tokens.
-
-Supports:
-- Django Token authentication (Authorization: Token <token>)
-- OIDC Bearer tokens (Authorization: Bearer <token>) - basic support, may need extension for full JWT validation
+using the same DRF authentication stack as REST (Django tokens or OIDC).
 
 The authenticated user is passed in the GraphQL context as 'user'.
 """
@@ -14,11 +10,14 @@ The authenticated user is passed in the GraphQL context as 'user'.
 from asgiref.sync import sync_to_async
 from strawberry.django.views import AsyncGraphQLView
 from rest_framework.authentication import get_authorization_header
-from rest_framework.authtoken.models import Token
+from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.request import Request
 from django.contrib.auth.models import AnonymousUser
 from django.middleware.csrf import CsrfViewMiddleware
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
+
+from core.common.authentication import OCLAuthentication
 
 
 # https://strawberry.rocks/docs/breaking-changes/0.243.0 GraphQL Strawberry needs manually handling CSRF
@@ -28,7 +27,8 @@ class AuthenticatedGraphQLView(AsyncGraphQLView):
         """Enforce CSRF unless request supplies an auth token."""
         auth_header = get_authorization_header(request).split()
         if not (auth_header and auth_header[0].lower() in (b'token', b'bearer') and len(auth_header) >= 2):
-            response = CsrfViewMiddleware().process_view(request, None, (), {})
+            # CsrfViewMiddleware expects a get_response callable
+            response = CsrfViewMiddleware(lambda req: None).process_view(request, None, (), {})
             if response is not None:
                 return response
 
@@ -44,50 +44,31 @@ class AuthenticatedGraphQLView(AsyncGraphQLView):
             return context
 
         # Otherwise, check authorization header
-        auth = get_authorization_header(request).split()
-
-        if not auth or auth[0].lower() not in [b'token', b'bearer']:
+        auth_header = get_authorization_header(request)
+        if not auth_header:
             context.user = AnonymousUser()
             context.auth_status = 'none'
             return context
 
-        if len(auth) == 1:
-            context.user = AnonymousUser()
-            context.auth_status = 'invalid'
-            return context
-        elif len(auth) > 2:
-            context.user = AnonymousUser()
-            context.auth_status = 'invalid'
-            return context
+        # Reuse DRF's combined Django/OIDC auth stack for GraphQL requests
+        authenticator = OCLAuthentication()
+        drf_request = Request(request)
 
         try:
-            token = auth[1].decode()
-        except UnicodeError:
+            auth_result = await sync_to_async(authenticator.authenticate)(drf_request)
+        except AuthenticationFailed:
             context.user = AnonymousUser()
             context.auth_status = 'invalid'
             return context
 
-        # Handle Django Token authentication
-        if auth[0].lower() == b'token':
-            try:
-                token_obj = await sync_to_async(Token.objects.select_related('user').get)(key=token)
-                context.user = token_obj.user
-                context.auth_status = 'valid'
-            except Token.DoesNotExist:
-                context.user = AnonymousUser()
-                context.auth_status = 'invalid'
-        # Handle OIDC Bearer tokens
-        elif auth[0].lower() == b'bearer':
-            # For OIDC, basic check - in production, implement full JWT validation
-            # using mozilla_django_oidc or similar
-            from core.services.auth.core import AuthService
-            if await sync_to_async(AuthService.is_sso_enabled)():
-                # Placeholder: Assume token is valid if present (extend with proper validation)
-                # TODO: Implement JWT decoding and validation for OIDC
-                context.user = AnonymousUser()  # For now, treat as anonymous
-                context.auth_status = 'invalid'  # Since not implemented
-            else:
-                context.user = AnonymousUser()
-                context.auth_status = 'invalid'
+        if not auth_result:
+            context.user = AnonymousUser()
+            context.auth_status = 'invalid'
+            return context
+
+        user, auth = auth_result
+        context.user = user
+        context.auth = auth
+        context.auth_status = 'valid' if getattr(user, 'is_authenticated', False) else 'invalid'
 
         return context
