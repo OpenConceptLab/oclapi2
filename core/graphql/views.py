@@ -23,7 +23,7 @@ from core.common.authentication import OCLAuthentication
 # https://strawberry.rocks/docs/breaking-changes/0.243.0 GraphQL Strawberry needs manually handling CSRF
 @method_decorator(csrf_exempt, name='dispatch')
 class AuthenticatedGraphQLView(AsyncGraphQLView):
-    async def dispatch(self, request, *args, **kwargs):
+    def dispatch(self, request, *args, **kwargs):  # pylint: disable=invalid-overridden-method
         """Enforce CSRF unless request supplies an auth token."""
         auth_header = get_authorization_header(request).split()
         if not (auth_header and auth_header[0].lower() in (b'token', b'bearer') and len(auth_header) >= 2):

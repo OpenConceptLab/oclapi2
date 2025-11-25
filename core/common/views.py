@@ -1223,7 +1223,8 @@ class RootView(BaseAPIView):  # pragma: no cover
                     name = 'current_user'
             if name == 'core.toggles':
                 name = 'toggles'
-
+            if not name:
+                continue
             host_url = main_host_url.replace('://api.', '://fhir.') if 'fhir' in name else main_host_url
             data['routes'][name] = host_url + '/' + route
 
