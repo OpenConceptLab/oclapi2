@@ -102,6 +102,7 @@ INSTALLED_APPS = [
     'ordered_model',
     'cid.apps.CidAppConfig',
     'django_celery_beat',
+    'strawberry.django',
     'health_check',  # required
     'health_check.db',  # stock Django health checkers
     # 'health_check.contrib.celery_ping',  # requires celery
@@ -120,7 +121,8 @@ INSTALLED_APPS = [
     'core.repos',
     'core.url_registry',
     'core.events',
-    'core.map_projects'
+    'core.map_projects',
+    'core.graphql.apps.GraphqlConfig'
 ]
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (

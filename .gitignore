@@ -303,3 +303,8 @@ src/
 
 # Celery Worker Tmp files
 celery-worker-*.tmp
+
+# local dev scripts
+local*.sh
+local*.py
+setup/
