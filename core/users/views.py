@@ -15,7 +15,7 @@ from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.generics import RetrieveAPIView, UpdateAPIView, DestroyAPIView, RetrieveUpdateDestroyAPIView, \
     ListAPIView
-from rest_framework.permissions import IsAdminUser, IsAuthenticated, AllowAny
+from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -36,7 +36,7 @@ from core.users.documents import UserProfileDocument
 from core.users.search import UserProfileFacetedSearch
 from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer, \
     UserSummarySerializer, FollowingSerializer
-from .models import UserProfile, Follow, UserRateLimit
+from .models import UserProfile, Follow
 from ..common import ERRBIT_LOGGER
 from ..common.throttling import ThrottleUtil
 
@@ -464,25 +464,6 @@ class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.Updat
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class UserRateLimitView(UserBaseView, UpdateAPIView):
-    permission_classes = (IsAdminUser, )
-    queryset = UserProfile.objects.filter()
-
-    def get_queryset(self):
-        return self.queryset
-
-    def update(self, request, *args, **kwargs):
-        rate_plan = self.request.data.get('rate_plan', None)
-
-        if not rate_plan:
-            raise Http400('"rate_plan" needs to be one of "guest" or "standard"')
-        try:
-            UserRateLimit.upsert(self.get_object(), rate_plan, request.user)
-        except ValidationError as ex:
-            return Response(ex.message_dict, status=status.HTTP_400_BAD_REQUEST)
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-
 class UserReactivateView(UserBaseView, UpdateAPIView):
     permission_classes = (IsAdminUser, )
     queryset = UserProfile.objects.filter(is_active=False)
@@ -501,6 +482,9 @@ class UserStaffToggleView(UserBaseView, UpdateAPIView):
     swagger_schema = None
 
     def update(self, request, *args, **kwargs):
+        if AuthService.is_sso_enabled():
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
         user = self.get_object()
         if user.username == self.request.user.username:
             raise Http400()

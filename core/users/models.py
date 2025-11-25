@@ -1,20 +1,19 @@
 import uuid
 from datetime import datetime
 
-from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.models import AbstractUser, Group
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import models
-from pydash import get
 from rest_framework.authtoken.models import Token
 
 from core.common.mixins import SourceContainerMixin
 from core.common.models import BaseModel, CommonLogoModel
 from core.common.tasks import send_user_verification_email, send_user_reset_password_email
 from core.common.utils import web_url
-from core.users.constants import AUTH_GROUPS
+from core.users.constants import AUTH_GROUPS, MAPPER_WAITLIST_GROUP, STAFF_GROUP, SUPERADMIN_GROUP, GUEST_GROUP
 from .constants import USER_OBJECT_TYPE
 from ..common.checksums import ChecksumModel
 
@@ -41,56 +40,6 @@ class Follow(models.Model):
     @property
     def uri(self):
         return f"/users/{self.follower.username}/following/{self.id}/"
-
-
-class UserRateLimit(BaseModel):
-    STANDARD_PLAN = 'standard'
-    GUEST_PLAN = 'guest'
-
-    class Meta:
-        db_table = 'user_api_rate_limits'
-
-    RATE_PLANS = (
-        (STANDARD_PLAN, STANDARD_PLAN),
-        (GUEST_PLAN, GUEST_PLAN),
-    )
-
-    user = models.OneToOneField('users.UserProfile', on_delete=models.CASCADE, related_name='api_rate_limit')
-    rate_plan = models.CharField(choices=RATE_PLANS, max_length=100, default=STANDARD_PLAN)
-    public_access = None
-    uri = None
-    extras = None
-
-    @property
-    def is_standard(self):
-        return self.rate_plan == self.STANDARD_PLAN
-
-    @property
-    def is_guest(self):
-        return self.rate_plan == self.GUEST_PLAN
-
-    def clean(self):
-        if not self.rate_plan:
-            self.rate_plan = self.STANDARD_PLAN
-        super().clean()
-
-    @classmethod
-    def upsert(cls, user, rate_plan, updated_by):
-        self = get(user, 'api_rate_limit')
-        update = False
-        if not self:
-            self = cls(user=user, rate_plan=rate_plan, updated_by=updated_by, created_by=updated_by)
-            update = True
-        if rate_plan and self.rate_plan != rate_plan:
-            self.rate_plan = rate_plan
-            self.updated_by = updated_by
-            update = True
-        if update:
-            self.full_clean()
-            self.save()
-
-    def __repr__(self):
-        return f"{self.__class__}:{self.rate_plan}"
 
 
 class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin, ChecksumModel):
@@ -274,6 +223,22 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         return self.groups.filter(name=group_name).exists()
 
     @property
+    def is_mapper_waitlisted(self):
+        return self.has_auth_group(MAPPER_WAITLIST_GROUP)
+
+    @property
+    def is_guest_group(self):
+        return self.has_auth_group(GUEST_GROUP)
+
+    @property
+    def is_staff_group(self):
+        return self.has_auth_group(STAFF_GROUP)
+
+    @property
+    def is_superadmin_group(self):
+        return self.has_auth_group(SUPERADMIN_GROUP)
+
+    @property
     def auth_headers(self):
         return {'Authorization': f'Token {self.get_token()}'}
 
@@ -332,6 +297,9 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
             referenced_object_url=following.url,
         )
 
-    @property
-    def is_mapper_waitlisted(self):
-        return 'mapper-waitlist' in get(self.extras, '__oidc_groups', [])
+    def set_groups(self, groups, verify=True):
+        if not verify or sorted(self.groups.values_list('name', flat=True)) != sorted(groups):
+            self.groups.set(Group.objects.filter(name__in=groups))
+            self.is_staff = self.has_auth_group(STAFF_GROUP)
+            self.is_superuser = self.has_auth_group(SUPERADMIN_GROUP)
+            self.save()

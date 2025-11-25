@@ -243,6 +243,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     # $cascade as hierarchy attributes
     cascaded_entries = None
     terminal = None
+    _requested_locale = None
 
     es_fields = {
         'id': {'sortable': False, 'filterable': True, 'exact': True},
@@ -331,7 +332,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         )
 
     def __get_parent_default_locale_name(self):
-        parent_default_locale = self.parent.default_locale
+        parent_default_locale = self._requested_locale or self.parent.default_locale
         return get(
             self.__names_qs({'locale': parent_default_locale, 'locale_preferred': True}, 'created_at', 'desc'), '0'
         ) or get(

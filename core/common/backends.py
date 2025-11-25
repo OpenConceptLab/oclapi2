@@ -66,6 +66,7 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         if user.id:
             user.set_checksums()
         user.record_joined_ocl_event()
+        user.set_groups(claims.get('groups', []), False)
         return user
 
     def update_user(self, user, claims):
@@ -76,25 +77,18 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         user.location = claims.get('location', None) or user.location
         user.save()
         user.set_checksums()
+        user.set_groups(claims.get('groups', []))
         return user
 
     def filter_users_by_claims(self, claims):
         from core.users.models import UserProfile
 
         username = claims.get('preferred_username')
-        groups = claims.get('groups', [])
 
         if not username:
             return UserProfile.objects.none()
 
-        queryset = UserProfile.objects.filter(username=username)
-        user = queryset.first()
-        if user:
-            user.extras = user.extras or {}
-            if get(user.extras, '__oidc_groups', []) != groups and len(groups) > 0:
-                user.extras['__oidc_groups'] = groups
-                user.save(update_fields=['extras'])
-        return queryset
+        return UserProfile.objects.filter(username=username)
 
 
 class OCLAuthenticationBackend(ModelBackend):

@@ -97,7 +97,7 @@ class CanViewConceptDictionaryVersion(HasAccessToVersionedObject):
             return True
         return super().has_object_permission(request, view, obj)
 
-class IsInAuthGroup(BasePermission):
+class IsInMapperAIAssistantAuthGroup(BasePermission):
     """
     The user belongs to one of the authorized groups
     """
