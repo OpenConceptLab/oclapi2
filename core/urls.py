@@ -68,7 +68,7 @@ urlpatterns = [
     path('sources/', include('core.sources.urls'), name='sources_url'),
     path('repos/', include('core.repos.urls'), name='repos_url'),
     path('url-registry/', include('core.url_registry.urls'), name='url_registry_url'),
-    
+
     # GraphQL path
     path('', include('core.graphql.urls')),
 

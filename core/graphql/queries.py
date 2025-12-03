@@ -183,7 +183,10 @@ def resolve_description(concept: Concept) -> Optional[str]:
                 return desc.description
         return None
 
-    default_locale = getattr(concept.parent, 'default_locale', None)
+    try:
+        default_locale = getattr(concept.parent, 'default_locale', None)
+    except Source.DoesNotExist:
+        default_locale = None
     if default_locale:
         match = pick(lambda desc: desc.locale == default_locale and desc.locale_preferred)
         if match:
@@ -455,7 +458,7 @@ async def concepts_for_query(
 @strawberry.type
 class Query:
     @strawberry.field(name="concepts")
-    async def concepts(
+    async def concepts(  # pylint: disable=too-many-arguments,too-many-locals
         self,
         info,  # pylint: disable=unused-argument
         org: Optional[str] = None,
@@ -468,7 +471,8 @@ class Query:
     ) -> ConceptSearchResult:
         if info.context.auth_status == 'none':
             raise GraphQLError('Authentication required')
-        elif info.context.auth_status == 'invalid':
+
+        if info.context.auth_status == 'invalid':
             raise GraphQLError('Authentication failure')
 
         concept_ids_param = conceptIds or []
@@ -492,7 +496,13 @@ class Query:
         if concept_ids_param:
             concepts, total = await concepts_for_ids(base_qs, concept_ids_param, pagination, mapping_prefetch)
         else:
-            concepts, total = await concepts_for_query(base_qs, text_query, source_version, pagination, mapping_prefetch)
+            concepts, total = await concepts_for_query(
+                base_qs,
+                text_query,
+                source_version,
+                pagination,
+                mapping_prefetch,
+            )
 
         return ConceptSearchResult(
             org=org,
