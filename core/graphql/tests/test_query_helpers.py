@@ -27,7 +27,6 @@ from core.graphql.queries import (
     build_datatype,
     build_global_mapping_prefetch,
     build_mapping_prefetch,
-    build_metadata,
     concept_ids_from_es,
     concepts_for_ids,
     concepts_for_query,
@@ -54,7 +53,6 @@ from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.sources.models import Source
-from core.users.tests.factories import UserProfileFactory
 
 
 class AuthenticatedGraphQLViewTests(TestCase):
@@ -377,10 +375,10 @@ class QueryHelperTests(TestCase):
                 self._items = items
                 self._total = len(items) if total is None else total
 
-            def filter(self, *args, **kwargs):
+            def filter(self, *_args, **_kwargs):
                 return self
 
-            def query(self, *args, **kwargs):
+            def query(self, *_args, **_kwargs):
                 return self
 
             def __getitem__(self, key):
@@ -388,7 +386,7 @@ class QueryHelperTests(TestCase):
                     return FakeSearch(self._items[key], total=self._total)
                 return self
 
-            def params(self, **kwargs):
+            def params(self, **_kwargs):
                 return self
 
             def execute(self):
