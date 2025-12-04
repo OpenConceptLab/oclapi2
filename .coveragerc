@@ -19,6 +19,8 @@ omit =
     */feeds.py
     *test*
     core/middlewares/*
+    core/graphql/queries.py
+    core/graphql/views.py
     *.css
     *.html
     generate_checksum.py

@@ -162,7 +162,8 @@ class MapProject(BaseModel):
     @classmethod
     def format_request_data(cls, data, parent_resource=None):
         new_data = {
-            key: val[0] if isinstance(val, list) and len(val) == 1 else val for key, val in data.items()
+            key: val[0] if isinstance(val, list) and len(val) == 1 and key not in [
+                'candidates'] else val for key, val in data.items()
         }
         cls.format_json(new_data, 'matches')
         cls.format_json(new_data, 'columns')

@@ -184,7 +184,6 @@ class UserDetailSerializer(AbstractResourceSerializer):
     pins = serializers.SerializerMethodField()
     followers = FollowerSerializer(many=True, read_only=True)
     following = FollowingSerializer(many=True, read_only=True)
-    rate_plan = serializers.CharField(source='api_rate_limit.rate_plan', read_only=True)
 
     class Meta:
         model = UserProfile
@@ -194,7 +193,7 @@ class UserDetailSerializer(AbstractResourceSerializer):
             'url', 'organizations_url', 'extras', 'sources_url', 'collections_url', 'website', 'last_login',
             'logo_url', 'subscribed_orgs', 'is_superuser', 'is_staff', 'first_name', 'last_name', 'verified',
             'verification_token', 'date_joined', 'auth_groups', 'status', 'deactivated_at',
-            'sources', 'collections', 'owned_orgs', 'bookmarks', 'pins', 'bio', 'followers', 'following', 'rate_plan'
+            'sources', 'collections', 'owned_orgs', 'bookmarks', 'pins', 'bio', 'followers', 'following'
         )
 
     def __init__(self, *args, **kwargs):
@@ -249,16 +248,19 @@ class UserDetailSerializer(AbstractResourceSerializer):
         instance.preferred_locale = validated_data.get('preferred_locale', instance.preferred_locale)
         instance.extras = validated_data.get('extras', instance.extras)
         instance.updated_by = request_user
-        auth_groups = validated_data.get('auth_groups', None)
-        if isinstance(auth_groups, list):
-            if len(auth_groups) == 0:
-                instance.groups.set([])
-            else:
-                if instance.is_valid_auth_group(*auth_groups):
-                    instance.groups.set(Group.objects.filter(name__in=auth_groups))
+
+        from core.services.auth.core import AuthService
+        if not AuthService.is_sso_enabled():
+            auth_groups = validated_data.get('auth_groups', None)
+            if isinstance(auth_groups, list):
+                if len(auth_groups) == 0:
+                    instance.groups.set([])
                 else:
-                    self._errors.update({'auth_groups': [INVALID_AUTH_GROUP_NAME]})
-                    return instance
+                    if instance.is_valid_auth_group(*auth_groups):
+                        instance.groups.set(Group.objects.filter(name__in=auth_groups))
+                    else:
+                        self._errors.update({'auth_groups': [INVALID_AUTH_GROUP_NAME]})
+                        return instance
 
         instance.save()
         if instance.id:

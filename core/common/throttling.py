@@ -48,7 +48,7 @@ class ThrottleUtil:
         if not settings.ENABLE_THROTTLING:
             return []
         # order is important, first one has to be minute throttle
-        if get(user, 'api_rate_limit.is_guest') or not get(user, 'is_authenticated'):
+        if not get(user, 'is_authenticated') or get(user, 'is_guest_group'):
             return [GuestMinuteThrottle(), GuestDayThrottle()]
         return [StandardMinuteThrottle(), StandardDayThrottle()]
 
@@ -57,6 +57,6 @@ class ThrottleUtil:
         if not settings.ENABLE_THROTTLING:
             return []
         # order is important, first one has to be minute throttle
-        if get(user, 'api_rate_limit.is_guest') or not get(user, 'is_authenticated'):
+        if not get(user, 'is_authenticated') or get(user, 'is_guest_group'):
             return [GuestMinuteThrottle(), GuestDayThrottle()]
         return [MatchStandardMinuteThrottle(), MatchStandardDayThrottle()]
