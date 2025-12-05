@@ -6,7 +6,7 @@ from elasticsearch_dsl import FacetedSearch, Q
 from pydash import compact, get
 
 from core.common.constants import ES_REQUEST_TIMEOUT
-from core.common.utils import is_url_encoded_string
+from core.common.utils import is_url_encoded_string, get_cross_encoder
 
 
 class CustomESFacetedSearch(FacetedSearch):
@@ -203,28 +203,28 @@ class CustomESSearch:
     def apply_aggregation_score_stats(self):
         self._dsl_search.aggs.bucket("score", "stats", script="_score")
 
-    def to_queryset(self, keep_order=True, normalized_score=False, exact_count=True):  # pylint:disable=too-many-locals
+    def to_queryset(self, keep_order=True, normalized_score=False, exact_count=True, txt=None, encoder_model=None):  # pylint:disable=too-many-locals,too-many-arguments
         """
         This method return a django queryset from the an elasticsearch result.
         It cost a query to the sql db.
         """
-        import time
-        start_time = time.time()
-        s, hits, total = self.__get_response(exact_count)
-        print("ES query execute", time.time() - start_time)
+        encoder = bool(txt)
+        s, hits, total = self.__get_response(exact_count, encoder)
         max_score = hits.max_score or 1
 
-        start_time = time.time()
-        for result in hits.hits:
+        hits = get_cross_encoder(txt, hits.hits, encoder_model) if encoder else hits.hits
+        for result in hits:
             _id = get(result, '_id')
+            rerank_score = get(result, '_rerank_score')
+            raw_score = get(result, '_score') or 0
             self.scores[int(_id)] = {
-                'raw': get(result, '_score'),
-                'normalized': (get(result, '_score') or 0) / max_score
-            } if normalized_score else get(result, '_score')
+                'raw': raw_score,
+                'rerank': rerank_score,
+                'normalized': rerank_score if encoder else (raw_score / max_score)
+            } if normalized_score else raw_score
             highlight = get(result, 'highlight')
             if highlight:
                 self.highlights[int(_id)] = highlight.to_dict()
-        print("Highlights/Score", time.time() - start_time)
         if self.document and self.document.__name__ == 'RepoDocument':
             from core.sources.models import Source
             from core.collections.models import Collection
@@ -308,12 +308,14 @@ class CustomESSearch:
 
         return [build_confidence(high), build_confidence(medium), build_confidence(low)]
 
-    def __get_response(self, exact_count=True):
+    def __get_response(self, exact_count=True, load_fields=False):
         # Do not query again if the es result is already cached
         total = None
         if not hasattr(self._dsl_search, '_response'):
             # We only need the meta fields with the models ids
-            s = self._dsl_search.source(False)
+            s = self._dsl_search.source(
+                excludes=['_embeddings', '_synonyms_embeddings']
+            ) if load_fields else self._dsl_search.source(False)
             s = s.params(request_timeout=ES_REQUEST_TIMEOUT)
             if exact_count:
                 total = s.count()

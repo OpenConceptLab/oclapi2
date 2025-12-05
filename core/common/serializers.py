@@ -173,6 +173,7 @@ class IdentifierSerializer(ReadSerializerMixin, Serializer):
 class SearchResultSerializer(Serializer):  # pylint: disable=abstract-method
     match_type = CharField(source='_match_type', allow_null=True, allow_blank=True)
     search_score = FloatField(source='_score', allow_null=True)
+    search_rerank_score = FloatField(source='_rerank_score', allow_null=True)
     search_confidence = CharField(source='_confidence', allow_null=True, allow_blank=True)
     search_highlight = SerializerMethodField()
 
