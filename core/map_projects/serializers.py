@@ -73,6 +73,21 @@ class MapProjectSummarySerializer(serializers.ModelSerializer):
         model = MapProject
         fields = ['id', 'summary', 'url']
 
+
+class MapProjectListSerializer(serializers.ModelSerializer):
+    created_by = CharField(source='created_by.username', read_only=True)
+    updated_by = CharField(source='updated_by.username', read_only=True)
+    created_at = DateTimeField(read_only=True)
+    updated_at = DateTimeField(read_only=True)
+    id = IntegerField(read_only=True)
+
+    class Meta:
+        model = MapProject
+        fields = [
+            'id', 'name', 'input_file_name', 'created_by', 'updated_by', 'created_at', 'updated_at',
+            'url', 'is_active', 'file_url'
+        ]
+
 class MapProjectSerializer(serializers.ModelSerializer):
     created_by = CharField(source='created_by.username', read_only=True)
     updated_by = CharField(source='updated_by.username', read_only=True)
