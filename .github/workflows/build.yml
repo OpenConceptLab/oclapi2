@@ -48,6 +48,9 @@ jobs:
               --health-retries 5
         es:
           image: docker.elastic.co/elasticsearch/elasticsearch:8.15.2
+          options: >-
+            --ulimit memlock=-1:-1
+            --ulimit nofile=65536:65536
           ports:
             - 9200:9200
           env:
@@ -74,10 +77,16 @@ jobs:
           python -m venv venv
           . venv/bin/activate
           pip install --cache-dir ~/.cache/pip -r requirements.txt
-#      - name: DB Setup
-#        run: |
-#          python manage.py migrate
-#          python manage.py loaddata core/fixtures/*
+      - name: Wait for Elasticsearch HTTP
+        run: |
+          echo "Waiting for Elasticsearch..."
+          for i in {1..30}; do
+            curl -s http://es:9200 >/dev/null && echo "ES is ready!" && exit 0
+            echo "ES not ready yet..."
+            sleep 2
+          done
+          echo "Elasticsearch failed to start" >&2
+          exit 1
       - name: Run Tests
         env:
           DB_HOST: db
