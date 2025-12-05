@@ -224,6 +224,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         if source:
             return source.mnemonic
         if self.to_source_url:
+            from core.common.utils import to_parent_uri
             parent_uri = to_parent_uri(self.to_source_url)
             if parent_uri:
                 return parent_uri.rstrip('/').split('/')[-1]

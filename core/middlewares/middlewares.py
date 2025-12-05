@@ -53,7 +53,10 @@ class ResponseHeadersMiddleware(BaseMiddleware):
         response = self.get_response(request)
         from django.conf import settings
         response[VERSION_HEADER] = settings.VERSION
-        response[REQUEST_USER_HEADER] = str(getattr(request, 'user', None))
+        try:
+            response[REQUEST_USER_HEADER] = str(getattr(request, 'user', None))
+        except Exception:  # noqa: BLE001 - skip user header when session unavailable (e.g., async context)
+            response[REQUEST_USER_HEADER] = ''
         response[RESPONSE_TIME_HEADER] = time.time() - start_time
         response[REQUEST_URL_HEADER] = request.get_full_path() or request.path
         response[REQUEST_METHOD_HEADER] = request.method

@@ -71,6 +71,9 @@ urlpatterns = [
     # GraphQL path
     path('', include('core.graphql.urls')),
 
+    # GraphQL path
+    path('', include('core.graphql.urls')),
+
     # TODO: require FHIR subdomain
     path('fhir/', include('core.fhir.urls'), name='fhir_urls'),
     path('fhir/CodeSystem/', include('core.code_systems.urls'), name='code_systems_urls'),
