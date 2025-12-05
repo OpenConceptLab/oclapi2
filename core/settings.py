@@ -17,7 +17,7 @@ from kombu import Queue, Exchange
 from redis.backoff import ExponentialBackoff
 from redis.exceptions import ConnectionError  # pylint: disable=redefined-builtin
 from redis.retry import Retry
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, CrossEncoder
 
 from core import __version__
 
@@ -616,3 +616,4 @@ MINIO_SECURE = os.environ.get('MINIO_SECURE') == 'TRUE'
 if ENV not in ['ci', 'demo']:
     LM_MODEL_NAME = 'all-MiniLM-L6-v2'
     LM = SentenceTransformer(LM_MODEL_NAME)
+    ENCODER = CrossEncoder("BAAI/bge-reranker-v2-m3", device="cpu")

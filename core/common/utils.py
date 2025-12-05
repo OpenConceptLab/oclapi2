@@ -960,17 +960,15 @@ ENCODERS = [
     "cross-encoder/ms-marco-MiniLM-L-6-v2",
 ]
 
-ENCODER = CrossEncoder(ENCODERS[0], device="cpu")
-
 def get_encoder(model):
     if model in ENCODERS:
         return CrossEncoder(model, device="cpu")
-    return ENCODER
+    return settings.ENCODER
 
 
 def get_cross_encoder(txt, hits, model=None):
     docs = [get(dict(hit["_source"]), 'name') for hit in hits]
-    encoder = get_encoder(model) if model else ENCODER
+    encoder = get_encoder(model) if model else settings.ENCODER
     scores = encoder.predict([(txt, d) for d in docs])
 
     for hit, score in zip(hits, scores):
