@@ -48,17 +48,11 @@ jobs:
               --health-retries 5
         es:
           image: docker.elastic.co/elasticsearch/elasticsearch:8.15.2
-          healthcheck:
-            test: curl -s http://es:9200 >/dev/null || exit 1
-            interval: 10s
-            timeout: 5s
-            retries: 10
+          options: >-
+            --ulimit memlock=-1:-1
+            --ulimit nofile=65536:65536
           ports:
             - 9200:9200
-          ulimits:
-            memlock:
-              soft: -1
-              hard: -1
           env:
             discovery.type: single-node
             xpack.security.enabled: "false"
