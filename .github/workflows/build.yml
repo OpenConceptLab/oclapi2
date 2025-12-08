@@ -65,10 +65,8 @@ jobs:
           android: true
           dotnet: true
           haskell: true
-          docker-images: true
           large-packages: true
           swap-storage: true
-
       - uses: actions/checkout@v3
       - name: Set up Python
         uses: actions/setup-python@v4
