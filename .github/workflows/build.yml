@@ -61,7 +61,7 @@ jobs:
             ES_JAVA_OPTS: "-Xmx1024m -Xms1024m"
     steps:
       - name: Free Disk Space
-        uses: ShubhamTatvamasi/free-disk-space-action@v1
+        uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: true          # remove old tool cache
           android: true             # removes large Android SDK
