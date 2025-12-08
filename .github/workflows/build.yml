@@ -48,11 +48,17 @@ jobs:
               --health-retries 5
         es:
           image: docker.elastic.co/elasticsearch/elasticsearch:8.15.2
-          options: >-
-            --ulimit memlock=-1:-1
-            --ulimit nofile=65536:65536
+          healthcheck:
+            test: curl -s http://es:9200 >/dev/null || exit 1
+            interval: 10s
+            timeout: 5s
+            retries: 10
           ports:
             - 9200:9200
+          ulimits:
+            memlock:
+              soft: -1
+              hard: -1
           env:
             discovery.type: single-node
             xpack.security.enabled: "false"
@@ -60,6 +66,17 @@ jobs:
             xpack.security.transport.ssl.enabled: "false"
             ES_JAVA_OPTS: "-Xmx1024m -Xms1024m"
     steps:
+      - name: Free Disk Space
+        uses: ShubhamTatvamasi/free-disk-space-action@v1
+        with:
+          tool-cache: true          # remove old tool cache
+          android: true             # removes large Android SDK
+          dotnet: true              # remove .NET
+          haskell: true             # remove Haskell
+          docker-images: true       # remove unused docker images
+          large-packages: true      # removes ghc, cabal, etc.
+          swap-storage: true        # remove swap
+          apt: true                 # remove apt cache
       - uses: actions/checkout@v3
       - name: Set up Python
         uses: actions/setup-python@v4
