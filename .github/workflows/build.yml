@@ -115,6 +115,7 @@ jobs:
       - name: Run Tests
         env:
           DB_HOST: 0.0.0.0
+          ES_HOST: 0.0.0.0
           ENVIRONMENT: ci
         run: |
           . venv/bin/activate
