@@ -13,7 +13,8 @@ from core.common.mixins import SourceContainerMixin
 from core.common.models import BaseModel, CommonLogoModel
 from core.common.tasks import send_user_verification_email, send_user_reset_password_email
 from core.common.utils import web_url
-from core.users.constants import AUTH_GROUPS, MAPPER_WAITLIST_GROUP, STAFF_GROUP, SUPERADMIN_GROUP, GUEST_GROUP
+from core.users.constants import AUTH_GROUPS, MAPPER_WAITLIST_GROUP, STAFF_GROUP, SUPERADMIN_GROUP, GUEST_GROUP, \
+    MAPPER_APPROVED_GROUP, MAPPER_CROSS_ENCODER_GROUP
 from .constants import USER_OBJECT_TYPE
 from ..common.checksums import ChecksumModel
 
@@ -225,6 +226,14 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     @property
     def is_mapper_waitlisted(self):
         return self.has_auth_group(MAPPER_WAITLIST_GROUP)
+
+    @property
+    def is_mapper_approved(self):
+        return self.has_auth_group(MAPPER_APPROVED_GROUP)
+
+    @property
+    def is_mapper_cross_encoder_group(self):
+        return self.has_auth_group(MAPPER_CROSS_ENCODER_GROUP)
 
     @property
     def is_guest_group(self):

@@ -36,6 +36,7 @@ class MapProject(BaseModel):
     score_configuration = models.JSONField(default=default_score_configuration, null=True, blank=True)
     filters = models.JSONField(default=dict, null=True, blank=True)
     candidates = models.JSONField(default=dict, null=True, blank=True)
+    reranker = models.BooleanField(default=False)
 
     # Custom API
     match_api_url = models.TextField(null=True, blank=True)

@@ -30,24 +30,25 @@ jobs:
   tests:
     name: Tests
     runs-on: ubuntu-latest
-    container:
-      image: python:3.11
     services:
         db:
-            image: postgres:14.7
-            env:
-              POSTGRES_USER: postgres
-              POSTGRES_PASSWORD: Postgres123
-              POSTGRES_DB: postgres
-            ports:
+          image: postgres:14.7
+          ports:
             - 5432:5432
-            options: >-
-              --health-cmd "pg_isready -U postgres"
-              --health-interval 10s
-              --health-timeout 5s
-              --health-retries 5
+          env:
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: Postgres123
+            POSTGRES_DB: postgres
+          options: >-
+            --health-cmd "pg_isready -U postgres"
+            --health-interval 10s
+            --health-timeout 5s
+            --health-retries 5
         es:
           image: docker.elastic.co/elasticsearch/elasticsearch:8.15.2
+          options: >-
+            --ulimit memlock=-1:-1
+            --ulimit nofile=65536:65536
           ports:
             - 9200:9200
           env:
@@ -55,7 +56,7 @@ jobs:
             xpack.security.enabled: "false"
             xpack.security.http.ssl.enabled: "false"
             xpack.security.transport.ssl.enabled: "false"
-            ES_JAVA_OPTS: "-Xmx512m -Xms512m"
+            ES_JAVA_OPTS: "-Xmx1024m -Xms1024m"
     steps:
       - uses: actions/checkout@v3
       - name: Set up Python
@@ -74,13 +75,47 @@ jobs:
           python -m venv venv
           . venv/bin/activate
           pip install --cache-dir ~/.cache/pip -r requirements.txt
-#      - name: DB Setup
-#        run: |
-#          python manage.py migrate
-#          python manage.py loaddata core/fixtures/*
+      - name: debug containers
+        run: |
+          docker ps
+          echo "checking postgres on 0.0.0.0"
+          pg_isready -h 0.0.0.0 -p 5432 -U postgres
+          echo "checking postgres on localhost"
+          pg_isready -h localhost -p 5432 -U postgres
+      - name: Wait for Postgres
+        run: |
+          echo "Waiting for Postgres..."
+          for i in {1..30}; do
+            pg_isready -h 0.0.0.0 -p 5432 -U postgres && echo "Postgres ready!" && exit 0
+            echo "Still waiting..."
+            sleep 2
+          done
+          echo "Postgres did not start!" && exit 1
+      - name: Wait for Elasticsearch HTTP
+        run: |
+          echo "Waiting for Elasticsearch..."
+          for i in {1..60}; do
+            curl -s http://es:9200/_cluster/health?wait_for_status=yellow&timeout=1s >/dev/null && \
+              echo "Elasticsearch is ready!" && exit 0
+            echo "Still not ready..."
+            sleep 2
+          done
+          echo "Elasticsearch failed to start"
+          exit 1
+      - name: Free Disk Space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          android: true
+          dotnet: true
+          haskell: true
+          tool-cache: false
+          docker-images: false
+          large-packages: false
+          swap-storage: false
       - name: Run Tests
         env:
-          DB_HOST: db
+          DB_HOST: 0.0.0.0
+          ES_HOST: 0.0.0.0
           ENVIRONMENT: ci
         run: |
           . venv/bin/activate
@@ -98,6 +133,16 @@ jobs:
     #  contents: read
 
     steps:
+    - name: Free Disk Space
+      uses: jlumbroso/free-disk-space@main
+      with:
+        android: true
+        dotnet: true
+        haskell: true
+        tool-cache: false
+        docker-images: false
+        large-packages: false
+        swap-storage: false
     - name: Checkout repo
       uses: actions/checkout@v3
     - name: Add GITHUB_SHA_SHORT env property with commit short sha
@@ -131,6 +176,16 @@ jobs:
     name: Release draft
     environment: rc
     steps:
+      - name: Free Disk Space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          android: true
+          dotnet: true
+          haskell: true
+          tool-cache: false
+          docker-images: false
+          large-packages: false
+          swap-storage: false
       - name: Checkout repo
         uses: actions/checkout@v3
       - name: Add GITHUB_SHA_SHORT env property with commit short sha

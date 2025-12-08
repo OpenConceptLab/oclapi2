@@ -797,7 +797,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
 
         return ConceptListSerializer
 
-    def filter_queryset(self, _=None):  # pylint:disable=too-many-locals,too-many-statements
+    def filter_queryset(self, _=None):  # pylint: disable=too-many-locals
         rows = self.request.data.get('rows')
         target_repo_url = self.request.data.get('target_repo_url')
         target_repo_params = self.request.data.get('target_repo')
@@ -808,8 +808,8 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         map_config = self.request.data.get('map_config', [])
         filters = self.request.data.get('filter', {})
         include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM) in get_truthy_values()
-        num_candidates = min(to_int(self.request.query_params.get('numCandidates', 0), 2000), 2000)
-        k_nearest = min(to_int(self.request.query_params.get('kNearest', 0), 50), 50)
+        num_candidates = min(to_int(self.request.query_params.get('numCandidates', 0), 3000), 3000)
+        k_nearest = min(to_int(self.request.query_params.get('kNearest', 0), 100), 100)
         offset = max(to_int(self.request.GET.get('offset'), 0), 0)
         limit = max(to_int(self.request.GET.get('limit'), 0), 0) or self.default_limit
         page = max(to_int(self.request.GET.get('page'), 1), 1)
@@ -823,40 +823,26 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         locale_filter = filters.pop('locale', None) if is_semantic else get(filters, 'locale', None)
         faceted_criterion = self.get_faceted_criterion(False, filters, minimum_should_match=1) if filters else None
         apply_for_name_locale = locale_filter and isinstance(locale_filter, str) and len(locale_filter.split(',')) == 1
+        encoder_model = self.request.GET.get('encoder_model', None)
+        reranker = self.request.GET.get('reranker', None) in get_truthy_values()  # enables reranker
+        reranker = reranker and self.request.user.is_mapper_cross_encoder_group
+        score_to_sort = 'search_rerank_score' if reranker else 'search_normalized_score'
         results = []
-        import time
         for row in rows:
-            start_time = time.time()
             search = ConceptFuzzySearch.search(
                 row, target_repo_url, repo_params, include_retired,
                 is_semantic, num_candidates, k_nearest, map_config, faceted_criterion, locale_filter
             )
-            print("Search Query", time.time() - start_time)
-            start_time = time.time()
             search = search.params(track_total_hits=False, request_cache=True)
             es_search = CustomESSearch(search[start:end], ConceptDocument)
-            es_search.to_queryset(False, True, False)
-            print("Search to Queryset", time.time() - start_time)
+            name = row.get('name') or row.get('Name') if reranker else None
+            es_search.to_queryset(False, True, False, name, encoder_model)
             result = {'row': row, 'results': [], 'map_config': map_config, 'filter': filters}
-            start_time = time.time()
             for concept in es_search.queryset:
                 concept._highlight = es_search.highlights.get(concept.id, {})  # pylint:disable=protected-access
                 score_info = es_search.scores.get(concept.id, {})
-                score = get(score_info, 'raw') or None
-                normalized_score = get(score_info, 'normalized') or None
-                concept._score = score  # pylint:disable=protected-access
-                concept._normalized_score = normalized_score  # pylint:disable=protected-access
-                if limit > 1:
-                    concept._match_type = 'low'  # pylint:disable=protected-access
-                    score_to_check = normalized_score if normalized_score is not None else score
-                    if concept._highlight.get('name', None) or (is_semantic and score_to_check >= score_threshold):  # pylint:disable=protected-access
-                        concept._match_type = 'very_high'  # pylint:disable=protected-access
-                    elif concept._highlight.get('synonyms', None):   # pylint:disable=protected-access
-                        concept._match_type = 'high'  # pylint:disable=protected-access
-                    elif concept._highlight:   # pylint:disable=protected-access
-                        concept._match_type = 'medium'  # pylint:disable=protected-access
-                else:
-                    concept._match_type = 'very_high' # pylint:disable=protected-access
+                normalized_score = get(score_info, 'normalized') or 0
+                self.apply_score(concept, is_semantic, score_info, score_threshold, reranker, limit)
                 if not best_match or concept._match_type in ['medium', 'high', 'very_high']:  # pylint:disable=protected-access
                     if apply_for_name_locale:
                         concept._requested_locale = locale_filter  # pylint:disable=protected-access
@@ -864,15 +850,54 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
                     data = serializer(concept, context={'request': self.request}).data
                     data['search_meta']['search_normalized_score'] = normalized_score * 100
                     result['results'].append(data)
-            print("Queryset to Serializer", time.time() - start_time)
-            start_time = time.time()
             if 'results' in result:
                 result['results'] = sorted(
-                    result['results'], key=lambda res: get(res, 'search_meta.search_normalized_score'), reverse=True)
+                    result['results'], key=lambda res: get(res, f'search_meta.{score_to_sort}'), reverse=True)
             results.append(result)
-            print("Sorting", time.time() - start_time)
 
         return results
+
+    @staticmethod
+    def apply_score(concept, is_semantic, scores, score_threshold, reranker, limit):  # pylint: disable=too-many-arguments,too-many-branches
+        score = get(scores, 'raw') or 0
+        normalized_score = get(scores, 'normalized') or 0
+        rerank_score = get(scores, 'rerank') or 0
+
+        concept._score = score  # pylint:disable=protected-access
+        concept._normalized_score = normalized_score  # pylint:disable=protected-access
+        if reranker:
+            concept._rerank_score = rerank_score  # pylint:disable=protected-access
+        highlight = concept._highlight  # pylint:disable=protected-access
+
+        match_type = 'low'
+        if limit > 1:
+            if is_semantic:
+                if reranker:
+                    if normalized_score >= 0.9:
+                        match_type = 'very_high'
+                    elif normalized_score >= 0.65:
+                        match_type = 'high'
+                    elif normalized_score >= 0.5:
+                        match_type = 'medium'
+                else:
+                    score_to_check = normalized_score if normalized_score is not None else score
+                    if highlight.get('name', None) or score_to_check >= score_threshold:
+                        match_type = 'very_high'
+                    elif highlight.get('synonyms', None):
+                        match_type = 'high'
+                    elif highlight:
+                        match_type = 'medium'
+            else:
+                if highlight.get('name', None):
+                    match_type = 'very_high'
+                elif highlight.get('synonyms', None):
+                    match_type = 'high'
+                elif highlight:
+                    match_type = 'medium'
+        else:
+            match_type = 'very_high'
+
+        concept._match_type = match_type  # pylint:disable=protected-access
 
     @staticmethod
     def get_repo_params(is_semantic, target_repo_params, target_repo_url):

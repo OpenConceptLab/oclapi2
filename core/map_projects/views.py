@@ -6,15 +6,15 @@ from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixi
 from core.common.permissions import HasOwnership, CanEditConceptDictionary
 from core.common.views import BaseAPIView
 from core.map_projects.models import MapProject
-from core.map_projects.serializers import MapProjectSerializer, MapProjectCreateUpdateSerializer, \
-    MapProjectDetailSerializer, MapProjectSummarySerializer, MapProjectLogsSerializer
+from core.map_projects.serializers import MapProjectCreateUpdateSerializer, \
+    MapProjectDetailSerializer, MapProjectSummarySerializer, MapProjectLogsSerializer, MapProjectListSerializer
 
 
 class MapProjectBaseView(BaseAPIView):
     is_searchable = False
     queryset = MapProject.objects.filter(is_active=True)
     permission_classes = (CanEditConceptDictionary,)
-    serializer_class = MapProjectSerializer
+    serializer_class = MapProjectListSerializer
 
 
 class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListWithHeadersMixin):

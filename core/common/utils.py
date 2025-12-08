@@ -27,6 +27,7 @@ from pydash import flatten, compact, get
 from requests import ConnectTimeout
 from requests.auth import HTTPBasicAuth
 from rest_framework.utils import encoders
+from sentence_transformers import CrossEncoder
 
 from core.common.constants import UPDATED_SINCE_PARAM, BULK_IMPORT_QUEUES_COUNT, CURRENT_USER, REQUEST_URL, \
     TEMP_PREFIX
@@ -927,3 +928,49 @@ def get_embeddings(txt):
         from sentence_transformers import SentenceTransformer
         model = SentenceTransformer(settings.LM_MODEL_NAME)
     return model.encode(str(txt))
+
+
+ENCODERS = [
+    # Best and Fastest overall lightweight medical reranker
+    # Size: ~110M
+    # Speed: similar to MiniLM CrossEncoder
+    # Training: includes clinical, medical, question-answering datasets
+    # Output: positive similarity scores (not raw logits!)
+    # 0.6B params
+    # https://huggingface.co/BAAI/bge-reranker-v2-m3
+    "BAAI/bge-reranker-v2-m3",
+
+    # Model: jinhybr/OA-MedBERT-cross-encoder or similar
+    # Size: ~110M
+    # Domain: PubMed abstracts, biomedical QA
+    # Type: binary classifier (logits)
+    # Not huggin face model -- ???
+    # "jinhybr/OA-MedBERT-cross-encoder",
+
+    # Model: microsoft/BioLinkBERT-base
+    # Type: CrossEncoder
+    # Size: ~120M
+    # Domain: UMLS, PubMed, MeSH, SNOMED (closest to OCL)
+    # Not huggin face model -- doesn't work with sentence_transformers
+    # "microsoft/BioLinkBERT-base",
+
+    # 22.7M params
+    # https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2
+    # doesn't work with logits, so not between 0-1
+    "cross-encoder/ms-marco-MiniLM-L-6-v2",
+]
+
+def get_encoder(model):
+    if model in ENCODERS:
+        return CrossEncoder(model, device="cpu")
+    return settings.ENCODER
+
+
+def get_cross_encoder(txt, hits, model=None):
+    docs = [get(dict(hit["_source"]), 'name') for hit in hits]
+    encoder = get_encoder(model) if model else settings.ENCODER
+    scores = encoder.predict([(txt, d) for d in docs])
+
+    for hit, score in zip(hits, scores):
+        hit["_rerank_score"] = float(score)
+    return hits

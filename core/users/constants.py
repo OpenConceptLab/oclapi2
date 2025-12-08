@@ -12,6 +12,7 @@ OPERATIONS_PANEL_GROUP = 'operations_panel'
 MAPPER_AI_ASSISTANT_GROUP = 'mapper_ai_assistant'
 MAPPER_WAITLIST_GROUP = 'mapper-waitlist'
 MAPPER_APPROVED_GROUP = 'mapper-approved'
+MAPPER_CROSS_ENCODER_GROUP = 'mapper_cross_encoder'
 EARLY_ACCESS_NGO_GROUP = 'early_access_ngo'
 GUEST_GROUP = 'guest_user'
 STANDARD_GROUP = 'standard_user'
@@ -33,5 +34,6 @@ AUTH_GROUPS = [
     PREMIUM_GROUP,
     STAFF_GROUP,
     SUPERADMIN_GROUP,
+    MAPPER_CROSS_ENCODER_GROUP
 ]
 INVALID_AUTH_GROUP_NAME = 'Invalid auth group.'

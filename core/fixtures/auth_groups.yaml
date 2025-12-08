@@ -46,3 +46,7 @@
   pk: 12
   fields:
     name: superadmin_user
+- model: "auth.group"
+  pk: 13
+  fields:
+    name: mapper_cross_encoder
