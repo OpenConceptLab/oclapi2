@@ -27,28 +27,9 @@ jobs:
     - run: pip install -r requirements.txt
     - run: pylint -j0 core/
 
-  cleanup:
-    name: Free Disk Space (Host Runner)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Free Disk Space
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: true
-          android: true
-          dotnet: true
-          haskell: true
-          docker-images: true
-          large-packages: true
-          swap-storage: true
-          apt: true
-
   tests:
     name: Tests
-    needs: cleanup
     runs-on: ubuntu-latest
-    container:
-      image: python:3.11
     services:
         db:
             image: postgres:14.7
@@ -77,6 +58,18 @@ jobs:
             xpack.security.transport.ssl.enabled: "false"
             ES_JAVA_OPTS: "-Xmx1024m -Xms1024m"
     steps:
+      - name: Free Disk Space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          docker-images: true
+          large-packages: true
+          swap-storage: true
+          apt: true
+
       - uses: actions/checkout@v3
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -97,12 +90,13 @@ jobs:
       - name: Wait for Elasticsearch HTTP
         run: |
           echo "Waiting for Elasticsearch..."
-          for i in {1..30}; do
-            curl -s http://es:9200 >/dev/null && echo "ES is ready!" && exit 0
-            echo "ES not ready yet..."
+          for i in {1..60}; do
+            curl -s http://es:9200/_cluster/health?wait_for_status=yellow&timeout=1s >/dev/null && \
+              echo "Elasticsearch is ready!" && exit 0
+            echo "Still not ready..."
             sleep 2
           done
-          echo "Elasticsearch failed to start" >&2
+          echo "Elasticsearch failed to start"
           exit 1
       - name: Run Tests
         env:
