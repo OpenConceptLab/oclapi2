@@ -56,16 +56,6 @@ jobs:
             xpack.security.transport.ssl.enabled: "false"
             ES_JAVA_OPTS: "-Xmx1024m -Xms1024m"
     steps:
-      - name: Free Disk Space
-        uses: jlumbroso/free-disk-space@main
-        with:
-          android: true
-          dotnet: true
-          haskell: true
-          tool-cache: false
-          docker-images: false
-          large-packages: false
-          swap-storage: false
       - uses: actions/checkout@v3
       - name: Set up Python
         uses: actions/setup-python@v4
