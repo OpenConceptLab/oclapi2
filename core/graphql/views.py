@@ -13,7 +13,7 @@ from rest_framework.authentication import get_authorization_header
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.request import Request
 from django.contrib.auth.models import AnonymousUser
-from django.middleware.csrf import CsrfViewMiddleware
+from django.middleware.csrf import CsrfViewMiddleware, get_token
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 
@@ -24,18 +24,38 @@ from core.common.authentication import OCLAuthentication
 @method_decorator(csrf_exempt, name='dispatch')
 class AuthenticatedGraphQLView(AsyncGraphQLView):
     async def dispatch(self, request, *args, **kwargs):
-        """Enforce CSRF unless request supplies an auth token."""
+        """Enforce CSRF unless request supplies an auth token; ensure GraphiQL GET sets a CSRF cookie."""
         auth_header = get_authorization_header(request).split()
-        if not (auth_header and auth_header[0].lower() in (b'token', b'bearer') and len(auth_header) >= 2):
+        csrf_middleware = CsrfViewMiddleware(lambda req: None)
+        require_csrf = not (auth_header and auth_header[0].lower() in (b'token', b'bearer') and len(auth_header) >= 2)
+
+        # For anonymous GraphiQL usage, make sure a CSRF cookie is issued on GET.
+        if request.method == 'GET':
+            get_token(request)
+
+        if require_csrf:
             # CsrfViewMiddleware expects a get_response callable
             response = await sync_to_async(
-                CsrfViewMiddleware(lambda req: None).process_view,
+                csrf_middleware.process_view,
                 thread_sensitive=True
             )(request, None, (), {})
             if response is not None:
+                # Still set the cookie if we primed it above.
+                response = await sync_to_async(
+                    csrf_middleware.process_response,
+                    thread_sensitive=True
+                )(request, response)
                 return response
 
-        return await super().dispatch(request, *args, **kwargs)
+        response = await super().dispatch(request, *args, **kwargs)
+
+        if require_csrf or request.method == 'GET':
+            response = await sync_to_async(
+                csrf_middleware.process_response,
+                thread_sensitive=True
+            )(request, response)
+
+        return response
 
     async def get_context(self, request, response=None):
         context = await super().get_context(request, response)
