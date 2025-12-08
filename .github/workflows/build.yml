@@ -73,6 +73,19 @@ jobs:
           python -m venv venv
           . venv/bin/activate
           pip install --cache-dir ~/.cache/pip -r requirements.txt
+      - name: debug containers
+        run: |
+          docker ps
+          pg_isready -h 0.0.0.0 -p 5432 -U postgres
+      - name: Wait for Postgres
+        run: |
+          echo "Waiting for Postgres..."
+          for i in {1..30}; do
+            pg_isready -h db -p 5432 -U postgres && echo "Postgres ready!" && exit 0
+            echo "Still waiting..."
+            sleep 2
+          done
+          echo "Postgres did not start!" && exit 1
       - name: Wait for Elasticsearch HTTP
         run: |
           echo "Waiting for Elasticsearch..."
@@ -84,15 +97,16 @@ jobs:
           done
           echo "Elasticsearch failed to start"
           exit 1
-      - name: Wait for Postgres
-        run: |
-          echo "Waiting for Postgres..."
-          for i in {1..30}; do
-            pg_isready -h db -p 5432 -U postgres && echo "Postgres ready!" && exit 0
-            echo "Still waiting..."
-            sleep 2
-          done
-          echo "Postgres did not start!" && exit 1
+      - name: Free Disk Space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          android: true
+          dotnet: true
+          haskell: true
+          tool-cache: false
+          docker-images: false
+          large-packages: false
+          swap-storage: false
       - name: Run Tests
         env:
           DB_HOST: db
