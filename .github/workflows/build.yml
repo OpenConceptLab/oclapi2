@@ -82,13 +82,11 @@ jobs:
           pg_isready -h 0.0.0.0 -p 5432 -U postgres
           echo "checking postgres on localhost"
           pg_isready -h localhost -p 5432 -U postgres
-          echo "checking postgres on db"
-          pg_isready -h db -p 5432 -U postgres
       - name: Wait for Postgres
         run: |
           echo "Waiting for Postgres..."
           for i in {1..30}; do
-            pg_isready -h db -p 5432 -U postgres && echo "Postgres ready!" && exit 0
+            pg_isready -h 0.0.0.0 -p 5432 -U postgres && echo "Postgres ready!" && exit 0
             echo "Still waiting..."
             sleep 2
           done
@@ -116,7 +114,7 @@ jobs:
           swap-storage: false
       - name: Run Tests
         env:
-          DB_HOST: db
+          DB_HOST: 0.0.0.0
           ENVIRONMENT: ci
         run: |
           . venv/bin/activate
