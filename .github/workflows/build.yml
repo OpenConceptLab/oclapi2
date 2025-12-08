@@ -27,8 +27,25 @@ jobs:
     - run: pip install -r requirements.txt
     - run: pylint -j0 core/
 
+  cleanup:
+    name: Free Disk Space (Host Runner)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free Disk Space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          docker-images: true
+          large-packages: true
+          swap-storage: true
+          apt: true
+
   tests:
     name: Tests
+    needs: cleanup
     runs-on: ubuntu-latest
     container:
       image: python:3.11
@@ -60,17 +77,6 @@ jobs:
             xpack.security.transport.ssl.enabled: "false"
             ES_JAVA_OPTS: "-Xmx1024m -Xms1024m"
     steps:
-      - name: Free Disk Space
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: true          # remove old tool cache
-          android: true             # removes large Android SDK
-          dotnet: true              # remove .NET
-          haskell: true             # remove Haskell
-          docker-images: true       # remove unused docker images
-          large-packages: true      # removes ghc, cabal, etc.
-          swap-storage: true        # remove swap
-          apt: true                 # remove apt cache
       - uses: actions/checkout@v3
       - name: Set up Python
         uses: actions/setup-python@v4
