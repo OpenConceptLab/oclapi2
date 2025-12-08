@@ -32,16 +32,18 @@ jobs:
     runs-on: ubuntu-latest
     services:
         db:
-            image: postgres:14.7
-            env:
-              POSTGRES_USER: postgres
-              POSTGRES_PASSWORD: Postgres123
-              POSTGRES_DB: postgres
-            options: >-
-              --health-cmd "pg_isready -U postgres"
-              --health-interval 10s
-              --health-timeout 5s
-              --health-retries 5
+          image: postgres:14.7
+          ports:
+            - 5432:5432
+          env:
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: Postgres123
+            POSTGRES_DB: postgres
+          options: >-
+            --health-cmd "pg_isready -U postgres"
+            --health-interval 10s
+            --health-timeout 5s
+            --health-retries 5
         es:
           image: docker.elastic.co/elasticsearch/elasticsearch:8.15.2
           options: >-
@@ -76,7 +78,12 @@ jobs:
       - name: debug containers
         run: |
           docker ps
+          echo "checking postgres on 0.0.0.0"
           pg_isready -h 0.0.0.0 -p 5432 -U postgres
+          echo "checking postgres on localhost"
+          pg_isready -h localhost -p 5432 -U postgres
+          echo "checking postgres on db"
+          pg_isready -h db -p 5432 -U postgres
       - name: Wait for Postgres
         run: |
           echo "Waiting for Postgres..."
