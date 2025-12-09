@@ -616,4 +616,5 @@ MINIO_SECURE = os.environ.get('MINIO_SECURE') == 'TRUE'
 if ENV not in ['ci', 'demo']:
     LM_MODEL_NAME = 'all-MiniLM-L6-v2'
     LM = SentenceTransformer(LM_MODEL_NAME)
-    ENCODER = CrossEncoder("BAAI/bge-reranker-v2-m3", device="cpu")
+    if ENV not in ['qa']:
+        ENCODER = CrossEncoder("BAAI/bge-reranker-v2-m3", device="cpu")
