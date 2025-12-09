@@ -9,6 +9,7 @@ from django.db.models import Case, IntegerField, Prefetch, Q, When
 from django.utils import timezone
 from elasticsearch import ConnectionError as ESConnectionError, TransportError
 from elasticsearch_dsl import Q as ES_Q
+from pydash import get
 from strawberry.exceptions import GraphQLError
 
 from core.common.constants import HEAD
@@ -434,8 +435,8 @@ async def concepts_for_query(
                 logger.info(
                     'ES returned zero hits for query="%s" in source "%s" version "%s". Falling back to DB search.',
                     query,
-                    source_version.mnemonic,
-                    source_version.version,
+                    get(source_version, 'mnemonic'),
+                    get(source_version, 'version'),
                 )
             else:
                 return [], total
