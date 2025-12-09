@@ -75,13 +75,6 @@ jobs:
           python -m venv venv
           . venv/bin/activate
           pip install --cache-dir ~/.cache/pip -r requirements.txt
-      - name: debug containers
-        run: |
-          docker ps
-          echo "checking postgres on 0.0.0.0"
-          pg_isready -h 0.0.0.0 -p 5432 -U postgres
-          echo "checking postgres on localhost"
-          pg_isready -h localhost -p 5432 -U postgres
       - name: Wait for Postgres
         run: |
           echo "Waiting for Postgres..."
