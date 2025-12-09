@@ -1,11 +1,9 @@
 import datetime
 import os
-import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from asgiref.sync import async_to_sync
-from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 from django.http import HttpResponse
 from django.test import RequestFactory, TestCase
@@ -85,6 +83,14 @@ class AuthenticatedGraphQLViewTests(TestCase):
             response = async_to_sync(view.dispatch)(request)
         self.assertEqual(response.status_code, 200)
         mock.assert_called_once()
+
+    def test_get_sets_csrf_cookie_for_anonymous(self):
+        view = AuthenticatedGraphQLView(schema=schema)
+        request = self.factory.get('/graphql/')
+        with patch.object(AsyncGraphQLView, 'dispatch', new=AsyncMock(return_value=HttpResponse(status=200))):
+            response = async_to_sync(view.dispatch)(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('csrftoken', response.cookies)
 
     def test_get_context_handles_session_and_token_states(self):
         view = AuthenticatedGraphQLView(schema=schema)
@@ -443,7 +449,6 @@ class QueryHelperTests(TestCase):
         self.assertEqual(total, 2)
         self.assertEqual(concepts, [])
 
-    @unittest.skipIf(settings.ENV == 'ci', "Skipping due to ES tests failing on CI")
     def test_query_concepts_auth_and_results(self):
         info_none = SimpleNamespace(context=SimpleNamespace(auth_status='none'))
         with self.assertRaises(GraphQLError):
