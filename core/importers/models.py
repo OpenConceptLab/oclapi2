@@ -646,7 +646,7 @@ class MappingImporter(BaseResourceImporter):
 
 class ReferenceImporter(BaseResourceImporter):
     mandatory_fields = {"data"}
-    allowed_fields = ["data", "collection", "owner", "owner_type", "__cascade", "collection_url"]
+    allowed_fields = ["data", "collection", "owner", "owner_type", "__cascade", "collection_url", "__transform"]
 
     @staticmethod
     def get_resource_type():
@@ -674,7 +674,8 @@ class ReferenceImporter(BaseResourceImporter):
         if collection:
             if collection.has_edit_access(self.user):
                 added_references, errors = collection.add_expressions(
-                    self.get('data'), self.user, self.get('__cascade', False)
+                    self.get('data'), self.user, self.get('__cascade', False),
+                    self.get('__transform', False)
                 )
                 if self.index_resources and not get(settings, 'TEST_MODE', False):  # pragma: no cover
                     concept_ids = []
