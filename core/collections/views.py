@@ -25,7 +25,7 @@ from core.collections.constants import (
     SOURCE_MAPPINGS,
     UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT)
 from core.collections.documents import CollectionDocument
-from core.collections.models import Collection, CollectionReference
+from core.collections.models import Collection, CollectionReference, Expansion
 from core.collections.search import CollectionFacetedSearch
 from core.collections.serializers import (
     CollectionDetailSerializer, CollectionListSerializer,
@@ -805,6 +805,21 @@ class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, 
         headers = self.get_success_headers(serializer.validated_data)
         return Response(self.get_response_serializer_class()(expansion).data, status=status.HTTP_201_CREATED,
                         headers=headers)
+
+
+class CollectionExpansionsView(CollectionBaseView, ListWithHeadersMixin):
+    def get_serializer_class(self):
+        if self.is_verbose():
+            return ExpansionDetailSerializer
+        return ExpansionSerializer
+
+    def get_queryset(self):
+        instance = get_object_or_404(super().get_queryset())
+        self.check_object_permissions(self.request, instance)
+        return Expansion.objects.filter(collection_version_id__in=instance.versions.values_list('id', flat=True))
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
 
 
 class CollectionVersionExpansionBaseView(CollectionBaseView):

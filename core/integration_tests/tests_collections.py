@@ -3857,3 +3857,36 @@ class CollectionVersionExpansionsViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['mnemonic'], 'e1')
         self.assertEqual(response.data[0]['parameters'], expansion.parameters)
         self.assertEqual(response.data[0]['summary'], {'active_concepts': 0, 'active_mappings': 0})
+
+
+class CollectionExpansionsViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.collection = OrganizationCollectionFactory()
+        self.token = self.collection.created_by.get_token()
+
+    def test_get(self):
+        collection_v1 = OrganizationCollectionFactory(
+            mnemonic=self.collection.mnemonic, organization=self.collection.organization, version='v1'
+        )
+
+        response = self.client.get(
+            self.collection.url + 'expansions/',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, [])
+
+        ExpansionFactory(mnemonic='e1-head', collection_version=self.collection)
+        ExpansionFactory(mnemonic='e1-v1', collection_version=collection_v1)
+        ExpansionFactory(mnemonic='e2-head', collection_version=self.collection)
+
+        response = self.client.get(
+            self.collection.url + 'expansions/',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 3)
+        self.assertEqual([expansion['mnemonic'] for expansion in response.data], ['e2-head', 'e1-v1', 'e1-head'])
