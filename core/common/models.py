@@ -1106,11 +1106,6 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     @property
     def concepts_distribution(self):
         facets = self.get_concept_facets()
-        print("Concept facets Raw", facets)
-        try:
-            print("Concept facets", facets.to_dict())
-        except: # pylint: disable=bare-except
-            pass
         return {
             'active': self.active_concepts,
             'retired': self.retired_concepts_count,

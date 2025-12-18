@@ -112,7 +112,6 @@ class ValueSetsTest(OCLAPITestCase):
         #               'value_sets/value_sets_who_core_contraceptive.json',
         #               'value_sets/value_sets_who_core_hiv.json',
         #               'value_sets/value_sets_who_core_education.json']
-        print()
 
         for test_file in test_files:
             print('Testing ' + test_file)

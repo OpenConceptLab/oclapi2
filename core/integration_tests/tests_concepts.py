@@ -1974,7 +1974,6 @@ class ConceptListViewTest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(list(response.data.keys()), ['facets'])
-        print(response.data)
         class_a_facet = [x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classA'][0]
         self.assertEqual(class_a_facet[0], 'classA')
         self.assertTrue(class_a_facet[1] >= 1)
@@ -1996,7 +1995,6 @@ class ConceptListViewTest(OCLAPITestCase):
             HTTP_INCLUDESEARCHLATEST=True,
         )
         self.assertEqual(response.status_code, 200)
-        print(response.data)
         self.assertEqual(list(response.data.keys()), ['facets'])
 
         class_b_facet = [x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classB'][0]
