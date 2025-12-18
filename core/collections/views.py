@@ -386,27 +386,30 @@ class CollectionReferencesMixin:
     def apply_filters(self, queryset):
         criterion = []
         for key, value in self.request.query_params.dict().items():
-            if key == 'resource_versioned':
-                criterion.append(Q(resource_versioned__isnull=not (value.lower() == 'true')))
+            is_boolean = value.lower() in ['true', 'false']
+            is_false = value.lower() == 'false'
+            is_true = value.lower() == 'true'
+            if key == 'resource_versioned' and is_boolean:
+                criterion.append(Q(resource_version__isnull=is_false))
             elif key == 'repo_versioned':
-                if value.lower() in ['true', 'false']:
-                    criterion.append(Q(version__isnull=not (value.lower() == 'true')))
-                elif isinstance(value, str):
+                if is_boolean:
+                    criterion.append(Q(version__isnull=is_false))
+                else:
                     criterion.append(Q(version__iexact=value))
             elif key == 'cascade':
-                if value.lower() in ['true', 'false']:
-                    criterion.append(Q(cascade__isnull=not (value.lower() == 'true')))
-                elif isinstance(value, str):
-                    criterion.append(Q(cascade__iexact=value) | Q(cascade__method__iexact=value))
+                if is_boolean:
+                    criterion.append(Q(cascade__isnull=is_false))
                 else:
-                    criterion.append(Q(cascade=value))
-            elif key == 'extensional':
+                    criterion.append(Q(cascade__iexact=value) | Q(cascade__method__iexact=value))
+            elif key == 'intensional' and is_true:
                 criterion.append(Q(transform=TRANSFORM_TO_RESOURCE_VERSIONS))
-            elif key == 'intensional':
+            elif key == TRANSFORM_TO_EXTENSIONAL and is_true:
                 criterion.append(Q(transform=TRANSFORM_TO_EXTENSIONAL))
+
         if criterion:
             for criteria in criterion:
                 queryset = queryset.filter(criteria)
+
         return queryset
 
 
