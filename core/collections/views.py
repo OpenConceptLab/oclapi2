@@ -23,7 +23,7 @@ from core.collections.constants import (
     MAPPING_VERSION_ADDED_TO_COLLECTION, CONCEPT_ADDED_TO_COLLECTION_FMT, MAPPING_ADDED_TO_COLLECTION_FMT,
     DELETE_FAILURE, DELETE_SUCCESS, NO_MATCH, VERSION_ALREADY_EXISTS,
     SOURCE_MAPPINGS,
-    UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT)
+    UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT, TRANSFORM_TO_RESOURCE_VERSIONS, TRANSFORM_TO_EXTENSIONAL)
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection, CollectionReference, Expansion
 from core.collections.search import CollectionFacetedSearch
@@ -382,9 +382,37 @@ class CollectionReferenceMappingsView(CollectionReferenceAbstractResourcesView):
         return super().get_queryset().mappings
 
 
+class CollectionReferencesMixin:
+    def apply_filters(self, queryset):
+        criterion = []
+        for key, value in self.request.query_params.dict().items():
+            if key == 'resource_versioned':
+                criterion.append(Q(resource_versioned__isnull=not (value.lower() == 'true')))
+            elif key == 'repo_versioned':
+                if value.lower() in ['true', 'false']:
+                    criterion.append(Q(version__isnull=not (value.lower() == 'true')))
+                elif isinstance(value, str):
+                    criterion.append(Q(version__iexact=value))
+            elif key == 'cascade':
+                if value.lower() in ['true', 'false']:
+                    criterion.append(Q(cascade__isnull=not (value.lower() == 'true')))
+                elif isinstance(value, str):
+                    criterion.append(Q(cascade__iexact=value) | Q(cascade__method__iexact=value))
+                else:
+                    criterion.append(Q(cascade=value))
+            elif key == 'extensional':
+                criterion.append(Q(transform=TRANSFORM_TO_RESOURCE_VERSIONS))
+            elif key == 'intensional':
+                criterion.append(Q(transform=TRANSFORM_TO_EXTENSIONAL))
+        if criterion:
+            for criteria in criterion:
+                queryset = queryset.filter(criteria)
+        return queryset
+
+
 class CollectionReferencesView(
     CollectionBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, DestroyAPIView, ListWithHeadersMixin,
-    TaskMixin
+    TaskMixin, CollectionReferencesMixin
 ):
     def get_serializer_class(self):
         if self.is_verbose():
@@ -410,10 +438,7 @@ class CollectionReferencesView(
     def get_queryset(self):
         search_query = self.request.query_params.get('q', '')
         sort = self.request.query_params.get('search_sort', 'ASC')
-        if sort == 'ASC':
-            sort = ''
-        else:
-            sort = '-'
+        sort = '' if sort == 'ASC' else '-'
 
         instance = self.get_object()
         queryset = instance.references
@@ -423,7 +448,7 @@ class CollectionReferencesView(
         else:
             queryset = queryset.order_by('-id')
 
-        return queryset
+        return self.apply_filters(queryset)
 
     def retrieve(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
@@ -611,7 +636,7 @@ class CollectionReferencesPreview(CollectionBaseView):
         return self.get_preview()
 
 
-class CollectionVersionReferencesView(CollectionVersionBaseView, ListWithHeadersMixin):
+class CollectionVersionReferencesView(CollectionVersionBaseView, ListWithHeadersMixin, CollectionReferencesMixin):
     def get_serializer_class(self):
         if self.is_verbose():
             return CollectionReferenceDetailSerializer
@@ -625,6 +650,7 @@ class CollectionVersionReferencesView(CollectionVersionBaseView, ListWithHeaders
         if not object_version:
             raise Http404()
         references = object_version.references.filter(expression__icontains=search_query)
+        references = self.apply_filters(references)
         self.object_list = references if sort == 'ASC' else list(reversed(references))
         return self.list(request, *args, **kwargs)
 

@@ -23,7 +23,7 @@ NO_MATCH = 'No Collection matches the given query.'
 VERSION_ALREADY_EXISTS = "Collection version '{}' already exist."
 SOURCE_MAPPINGS = 'sourcemappings'
 SOURCE_TO_CONCEPTS = 'sourcetoconcepts'
-TRANSFORM_TO_RESOURCE_VERSIONS = 'resourceversions'
+TRANSFORM_TO_RESOURCE_VERSIONS = 'resourceversions'  # intentional
 TRANSFORM_TO_EXTENSIONAL = 'extensional'
 
 CONCEPT_REFERENCE_TYPE = 'concepts'
