@@ -383,7 +383,7 @@ class CollectionReferenceMappingsView(CollectionReferenceAbstractResourcesView):
 
 
 class CollectionReferencesMixin:
-    def apply_filters(self, queryset):
+    def apply_filters(self, queryset):  # pylint: disable=too-many-branches
         criterion = []
         for key, value in self.request.query_params.dict().items():
             is_boolean = value.lower() in ['true', 'false']
@@ -405,6 +405,10 @@ class CollectionReferencesMixin:
                 criterion.append(Q(transform=TRANSFORM_TO_RESOURCE_VERSIONS))
             elif key == TRANSFORM_TO_EXTENSIONAL and is_true:
                 criterion.append(Q(transform=TRANSFORM_TO_EXTENSIONAL))
+            elif key == 'include' and is_boolean:
+                criterion.append(Q(include=is_true))
+            elif key == 'exclude' and is_boolean:
+                criterion.append(Q(include=not is_true))
 
         if criterion:
             for criteria in criterion:
