@@ -210,12 +210,15 @@ class OpenMRSConceptValidator(BaseConceptValidator):
         if not names or not descriptions:
             return
 
+        # Changed to use source supported_locales instead of global OCL reference locales
+        # to allow sources like CIEL to accept locales like "pt_BR" that are supported by the source
+        # but not in global references.
         for name in names:
-            if name.locale not in self.reference_values['Locales']:
+            if name.locale not in self.repo.supported_locales:
                 raise ValidationError({'names': [OPENMRS_NAME_LOCALE]})
 
         for description in descriptions:
-            if description.locale not in self.reference_values['Locales']:
+            if description.locale not in self.repo.supported_locales:
                 raise ValidationError({'descriptions': [OPENMRS_DESCRIPTION_LOCALE]})
 
     def local_external_id_should_be_valid(self, concept):
