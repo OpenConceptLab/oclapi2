@@ -92,11 +92,9 @@ class AnalyticsEventEmitter:  # pragma: no cover
         }
 
     def _send(self, payload):
-        print("**Payload**", payload)
         try:
             requests.post(self.ANALYTICS_ENDPOINT, json=payload, timeout=self.TIMEOUT_SECONDS)
         except Exception as exc:
-            print("Exception", exc)
             logger.debug("Analytics emit failed: %s", exc)
 
     def _user_id(self):
