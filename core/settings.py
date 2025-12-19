@@ -618,3 +618,8 @@ if ENV not in ['ci', 'demo']:
     LM = SentenceTransformer(LM_MODEL_NAME)
     if ENV not in ['qa']:
         ENCODER = CrossEncoder("BAAI/bge-reranker-v2-m3", device="cpu")
+
+ANALYTICS_API = os.environ.get('ANALYTICS_API', 'http://host.docker.internal:8002')
+if ANALYTICS_API:
+    MIDDLEWARE = [*MIDDLEWARE, 'core.middlewares.middlewares.AnalyticsMiddleware']
+SERVICE_NAME = os.environ.get('SERVICE_NAME', 'oclapi2')

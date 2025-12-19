@@ -11,6 +11,7 @@ from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER, RESPONSE_
     REQUEST_METHOD_HEADER
 from core.common.throttling import ThrottleUtil
 from core.common.utils import set_current_user, set_request_url
+from core.services.analytics_event_emitter import AnalyticsEventEmitter
 from core.services.auth.core import AuthService
 
 request_logger = logging.getLogger('request_logger')
@@ -161,4 +162,14 @@ class ThrottleHeadersMiddleware(MiddlewareMixin):
                 response['X-LimitRemaining-Minute'] = minute_limit
                 response['X-LimitRemaining-Day'] = ThrottleUtil.get_limit_remaining(throttles[1], request, view)
 
+        return response
+
+
+class AnalyticsMiddleware(BaseMiddleware):
+    def __call__(self, request):
+        start = time.monotonic()
+        response = self.get_response(request)
+        if request.path.rstrip("/") not in ['', '/swagger', '/redoc', '/version', '/toggles']:
+            duration_ms = int((time.monotonic() - start) * 1000)
+            AnalyticsEventEmitter(request, response, duration_ms).emit()
         return response
