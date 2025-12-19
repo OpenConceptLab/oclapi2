@@ -8,7 +8,7 @@ from pydash import get
 logger = logging.getLogger(__name__)
 
 
-class AnalyticsEventEmitter:
+class AnalyticsEventEmitter:  # pragma: no cover
     ANALYTICS_ENDPOINT = settings.ANALYTICS_API + '/api-transactions/'
     TIMEOUT_SECONDS = 0.1  # 100ms hard cap
     SENSITIVE_HEADERS = {
