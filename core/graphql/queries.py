@@ -508,6 +508,7 @@ class Query:
                 mapping_prefetch,
             )
 
+        serialized = await sync_to_async(serialize_concepts)(concepts)
         return ConceptSearchResult(
             org=org,
             source=source,
@@ -516,5 +517,5 @@ class Query:
             limit=pagination['limit'] if pagination else None,
             total_count=total,
             has_next_page=has_next(total, pagination),
-            results=serialize_concepts(concepts),
+            results=serialized,
         )
