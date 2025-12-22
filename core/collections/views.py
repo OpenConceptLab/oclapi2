@@ -54,7 +54,7 @@ from core.common.swagger_parameters import q_param, compress_header, page_param,
     include_facets_header, sort_asc_param, sort_desc_param, updated_since_param, include_retired_param, limit_param, \
     canonical_url_param
 from core.common.tasks import add_references, export_collection, delete_collection, index_expansion_concepts, \
-    index_expansion_mappings
+    index_expansion_mappings, seed_children_to_expansion
 from core.common.throttling import ThrottleUtil
 from core.common.utils import compact_dict_by_values, parse_boolean_query_param
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
@@ -892,6 +892,27 @@ class CollectionVersionExpansionView(CollectionVersionExpansionBaseView, Retriev
         if obj.is_default:
             return Response({'errors': ['Cannot delete default expansion']}, status=status.HTTP_400_BAD_REQUEST)
         obj.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class CollectionVersionExpansionReEvaluateView(CollectionVersionExpansionBaseView, TaskMixin):
+    serializer_class = TaskSerializer
+    permission_classes = (CanViewConceptDictionary, )
+
+    def post(self, request, **kwargs):  # pylint: disable=unused-argument
+        obj = self.get_object()
+
+        if obj.is_processing:
+            return Response({'detail': 'Expansion is already being processed'}, status=status.HTTP_409_CONFLICT)
+
+        obj.is_processing = True
+        obj.save(update_fields=['is_processing', 'updated_at'])
+
+        result = self.perform_task(seed_children_to_expansion, (obj.id, True, True), queue='indexing')
+
+        if isinstance(result, Response):
+            return result
+
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

@@ -147,6 +147,11 @@ urlpatterns = [
         name='collection-version-expansion-detail'
     ),
     path(
+        '<str:collection>/<str:version>/expansions/<str:expansion>/re-evaluate/',
+        views.CollectionVersionExpansionReEvaluateView.as_view(),
+        name='collection-version-expansion-re-evaluate'
+    ),
+    path(
         "<str:collection>/<str:version>/expansions/<str:expansion>/concepts/<str:concept>/mappings/",
         views.CollectionVersionConceptMappingsView.as_view(),
         name='concept-mappings'

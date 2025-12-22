@@ -1303,7 +1303,8 @@ class Expansion(BaseResourceModel):
             batch_index_resources.apply_async(('concept', concepts_filters), queue='indexing', permanent=False)
             batch_index_resources.apply_async(('mapping', mappings_filters), queue='indexing', permanent=False)
 
-    def add_references(self, references, index=True, is_adding_all=False, attempt_reevaluate=True):  # pylint: disable=too-many-locals,too-many-statements,too-many-branches
+    def add_references(  # pylint: disable=too-many-locals,too-many-statements,too-many-branches,too-many-arguments
+            self, references, index=True, is_adding_all=False, attempt_reevaluate=True, force_reevaluate=False):
         include_refs, exclude_refs = self.to_ref_list_separated(references)
         explicit_valueset_versions = []
         explicit_system_versions = []
@@ -1323,7 +1324,7 @@ class Expansion(BaseResourceModel):
         index_concepts = index_mappings = False
 
         # attempt_reevaluate is False for delete reference(s)
-        should_reevaluate = attempt_reevaluate and not self.is_auto_generated
+        should_reevaluate = force_reevaluate or (attempt_reevaluate and not self.is_auto_generated)
 
         include_system_versions = []
         system_versions = self.parameters.get(ExpansionParameters.INCLUDE_SYSTEM)
@@ -1479,8 +1480,10 @@ class Expansion(BaseResourceModel):
         if mappings:
             self.index_mappings()
 
-    def seed_children(self, index=True):
-        return self.add_references(self.collection_version.references, index, True)
+    def seed_children(self, index=True, force_reevaluate=False):
+        return self.add_references(
+            references=self.collection_version.references, index=index,
+            is_adding_all=True, force_reevaluate=force_reevaluate)
 
     def wait_until_processed(self):  # pragma: no cover
         processing = self.is_processing
