@@ -714,7 +714,9 @@ class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestr
             resource_instance = self.get_resource_object()
             new_version = resource_instance.clone()
             subject_label_attr = f"cloned_{self.parent_list_attribute}"
-            labels = [name.clone() for name in getattr(resource_instance, self.parent_list_attribute).exclude(id=instance.id)]
+            labels = [
+                name.clone() for name in getattr(resource_instance, self.parent_list_attribute).exclude(id=instance.id)
+            ]
             setattr(new_version, subject_label_attr, labels)
             new_version.comment = f'Deleted {instance.name} in {self.parent_list_attribute}.'
             errors = new_version.save_as_new_version(request.user)
