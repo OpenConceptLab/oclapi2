@@ -361,7 +361,10 @@ def concept_ids_from_es(
         search = ConceptDocument.search()
         if source_version:
             search = search.filter('term', source=source_version.mnemonic.lower())
-            search = search.filter('term', source_version=source_version.version)
+            if source_version.is_head:
+                search = search.filter('term', is_latest_version=True)
+            else:
+                search = search.filter('term', source_version=source_version.version)
         search = search.filter('term', retired=False)
 
         should_queries = [
