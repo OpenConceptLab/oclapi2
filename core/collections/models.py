@@ -667,57 +667,68 @@ class CollectionReference(models.Model):
             self._mappings = self.get_mappings()
             self._fetched = True
 
-    def get_concepts(self, system_version=None):  # pylint: disable=too-many-branches
+    def get_concepts(self, system_version=None):
         system_version = system_version or self.resolve_system_version
-        queryset = self.get_resource_queryset_from_system_and_valueset('concepts', system_version)
+        concept_queryset = self.get_resource_queryset_from_system_and_valueset('concepts', system_version)
         valueset_versions = self.resolve_valueset_versions
         mapping_queryset = Mapping.objects.none()
-        if queryset is None:
+
+        if concept_queryset is None:
             return Concept.objects.none(), mapping_queryset
 
         if self.code:
-            queryset = queryset.filter(mnemonic=decode_string(self.code))
+            concept_queryset = concept_queryset.filter(mnemonic=decode_string(self.code))
             if self.resource_version:
-                queryset = queryset.filter(version=self.resource_version)
-            elif queryset.count() > 1:
-                queryset = Concept.objects.filter(id=queryset.order_by('-id').first().id)
+                concept_queryset = concept_queryset.filter(version=self.resource_version)
+            elif concept_queryset.count() > 1:
+                concept_queryset = Concept.objects.filter(id=concept_queryset.order_by('-id').first().id)
 
         if self.should_apply_filter():
-            queryset = self.apply_filters(queryset, Concept)
-
+            concept_queryset = self._apply_filters(concept_queryset, Concept)
         if self.cascade:
-            cascade_params = self.get_concept_cascade_params(system_version or valueset_versions[0])
-            concept_ids = set()
-            mapping_ids = set()
-            traversed = []
-            for concept in queryset:
-                concept_uri = drop_version(concept.uri)
-                if concept_uri in traversed:
-                    continue
-                traversed.append(concept_uri)
-                result = concept.cascade(**cascade_params)
-                concept_ids.update(set(result['concepts'].values_list('id', flat=True)))
-                mapping_ids.update(set(result['mappings'].values_list('id', flat=True)))
-            concept_ids.update(set(queryset.values_list('id', flat=True)))
-            mapping_ids.update(set(mapping_queryset.values_list('id', flat=True)))
-            queryset = Concept.objects.filter(id__in=concept_ids)
-            mapping_queryset = Mapping.objects.filter(id__in=mapping_ids)
+            concept_queryset, mapping_queryset = self._apply_cascade(
+                concept_queryset, mapping_queryset, system_version, valueset_versions)
+        if self.transform:
+            concept_queryset, mapping_queryset = self._apply_transform(
+                concept_queryset, mapping_queryset, system_version)
 
+        if concept_queryset is None:
+            concept_queryset = Concept.objects.none()
+
+        return concept_queryset, mapping_queryset
+
+    def _apply_transform(self, concept_queryset, mapping_queryset, system_version):
         if self.should_transform_to_latest_version():
-            queryset = self.transform_to_latest_version(queryset, Concept)
-            if self.code:
-                concept = queryset.first()
-                if concept:
-                    self.resource_version = concept.version
-                    self.expression = concept.uri
+            concept_queryset = self._update_by_transform_to_latest_version(concept_queryset, Concept)
             mapping_queryset = self.transform_to_latest_version(mapping_queryset, Mapping)
         if self.should_transform_to_versioned() and not system_version.is_head:  # For HEAD it will be versioned
-            queryset = Concept.objects.filter(id__in=queryset.values_list('versioned_object_id', flat=True))
+            self.version = HEAD
+            concept_queryset = Concept.objects.filter(
+                id__in=concept_queryset.values_list('versioned_object_id', flat=True))
             mapping_queryset = Mapping.objects.filter(
                 id__in=mapping_queryset.values_list('versioned_object_id', flat=True))
-        if queryset is None:
-            queryset = Concept.objects.none()
-        return queryset, mapping_queryset
+
+        return concept_queryset, mapping_queryset
+
+    def _apply_cascade(self, concept_queryset, mapping_queryset, system_version, valueset_versions):
+        cascade_params = self.get_concept_cascade_params(system_version or valueset_versions[0])
+        concept_ids = set()
+        mapping_ids = set()
+        traversed = []
+
+        for concept in concept_queryset:
+            concept_uri = drop_version(concept.uri)
+            if concept_uri in traversed:
+                continue
+            traversed.append(concept_uri)
+            result = concept.cascade(**cascade_params)
+            concept_ids.update(set(result['concepts'].values_list('id', flat=True)))
+            mapping_ids.update(set(result['mappings'].values_list('id', flat=True)))
+
+        concept_ids.update(set(concept_queryset.values_list('id', flat=True)))
+        mapping_ids.update(set(mapping_queryset.values_list('id', flat=True)))
+
+        return Concept.objects.filter(id__in=concept_ids), Mapping.objects.filter(id__in=mapping_ids)
 
     def get_mappings(self, system_version=None):
         queryset = self.get_resource_queryset_from_system_and_valueset('mappings', system_version)
@@ -730,48 +741,74 @@ class CollectionReference(models.Model):
                 queryset = queryset.filter(version=self.resource_version)
 
         if self.should_apply_filter():
-            queryset = self.apply_filters(queryset, Mapping)
+            queryset = self._apply_filters(queryset, Mapping)
 
         if self.should_transform_to_latest_version():
-            queryset = self.transform_to_latest_version(queryset, Mapping)
-            if self.code:
-                mapping = queryset.first()
-                self.resource_version = mapping.version
-                self.expression = mapping.uri
+            queryset = self._update_by_transform_to_latest_version(queryset, Mapping)
         if queryset is None:
             queryset = Mapping.objects.none()
+        return queryset
+
+    def _update_by_transform_to_latest_version(self, queryset, klass):
+        queryset = self.transform_to_latest_version(queryset, klass)
+        if self.code:
+            resource = queryset.first()
+            if resource:
+                self.version = get(resource.latest_source_version, 'version')
+                self.resource_version = None
+                if not self.version:
+                    self.version = HEAD
+                    self.resource_version = resource.version
+                # self.resource_version = resource.version  # old
+                self.expression = resource.uri
         return queryset
 
     @staticmethod
     def dedupe_by_expression(references):
         return list({reference.expression: reference for reference in references}.values())
 
+    def __get_repo_and_resource_version(self, resource, is_intensional, is_extensional):
+        repo_version = self.version
+        resource_version = None
+        if not self.version and self.transform:
+            repo_version = get(resource.latest_source_version, 'version') or HEAD
+            is_head = repo_version == HEAD
+            if is_intensional and is_head:
+                resource_version = resource.version
+            elif is_extensional:
+                resource_version = None
+        if is_intensional and repo_version == HEAD and not resource_version:
+            resource_version = resource.version
+        return repo_version, resource_version
+
+    def __generate_references_for_type(self, queryset, resource_type):
+        references = []
+        is_extensional = self.is_extensional_transform
+        is_intensional = self.is_static_transform
+
+        for resource in queryset:
+            repo_version, resource_version = self.__get_repo_and_resource_version(
+                resource, is_intensional, is_extensional)
+
+            references.append(CollectionReference(
+                expression=resource.uri,
+                reference_type=resource_type,
+                code=encode_string(resource.mnemonic) if resource_type == 'concepts' else resource.mnemonic,
+                collection_id=self.collection_id,
+                created_by=self.created_by,
+                resource_version=resource_version,
+                system=self.system,
+                version=repo_version
+            ))
+        return references
+
     def generate_references(self):
         references = []
+
         if self.should_generate_multiple_references():
             concepts, mappings = self.get_concepts()
-            for concept in concepts:
-                references.append(CollectionReference(
-                    expression=concept.uri,
-                    reference_type='concepts',
-                    code=encode_string(concept.mnemonic),
-                    collection_id=self.collection_id,
-                    created_by=self.created_by,
-                    resource_version=concept.version if self.transform == TRANSFORM_TO_RESOURCE_VERSIONS else None,
-                    system=self.system,
-                    version=self.version
-                ))
-            for mapping in mappings:
-                references.append(CollectionReference(
-                    expression=mapping.uri,
-                    reference_type='mappings',
-                    code=mapping.mnemonic,
-                    collection_id=self.collection_id,
-                    created_by=self.created_by,
-                    resource_version=mapping.version if self.transform == TRANSFORM_TO_RESOURCE_VERSIONS else None,
-                    system=self.system,
-                    version=self.version
-                ))
+            references += self.__generate_references_for_type(concepts, 'concepts')
+            references += self.__generate_references_for_type(mappings, 'mappings')
         else:
             references.append(self)
         return references
@@ -854,7 +891,7 @@ class CollectionReference(models.Model):
                 )
         return search
 
-    def apply_filters(self, queryset, resource_klass):
+    def _apply_filters(self, queryset, resource_klass):
         if self.filter:
             pks = []
             document = resource_klass.get_search_document()

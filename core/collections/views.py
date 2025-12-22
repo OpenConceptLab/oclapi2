@@ -39,7 +39,7 @@ from core.collections.serializers import (
 from core.collections.utils import is_version_specified
 from core.common.constants import (
     HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE,
-    ACCESS_TYPE_NONE, INCLUDE_RETIRED_PARAM, INCLUDE_INVERSE_MAPPINGS_PARAM, ALL, LATEST)
+    ACCESS_TYPE_NONE, INCLUDE_RETIRED_PARAM, INCLUDE_INVERSE_MAPPINGS_PARAM, ALL, LATEST, DEPRECATED_API_HEADER)
 from core.common.exceptions import Http409, Http405, Http400
 from core.common.mixins import (
     ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin,
@@ -517,6 +517,7 @@ class CollectionReferencesView(
 
         added_expressions = set()
         added_original_expressions = set()
+        is_deprecated = False
         for reference in added_references:
             added_expressions.add(reference.expression)
             if reference.cascade and reference.transform:
@@ -524,18 +525,23 @@ class CollectionReferencesView(
             else:
                 added_expression = reference.original_expression or reference.expression
             added_original_expressions.add(added_expression)
+            if not is_deprecated and reference.resource_version:
+                is_deprecated = True
         if errors:
             for expression in errors:
                 added_original_expressions.add(expression)
 
-        response = []
+        results = []
 
         for expression in added_original_expressions:
             response_item = self.create_response_item(added_expressions, errors, expression)
             if response_item:
-                response.append(response_item)
+                results.append(response_item)
 
-        return Response(response, status=status.HTTP_200_OK)
+        response = Response(results, status=status.HTTP_200_OK)
+        if is_deprecated:
+            response[DEPRECATED_API_HEADER] = True
+        return response
 
     def should_cascade_mappings(self):
         return self.request.query_params.get('cascade', '').lower() == SOURCE_MAPPINGS
