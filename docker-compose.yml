@@ -61,6 +61,7 @@ services:
       - MINIO_SECURE
       - ENABLE_THROTTLING
       - SERVICE_NAME=${SERVICE_NAME-oclapi2}
+      - NO_LM=${NO_LM-FALSE}
     healthcheck:
       test: "curl --silent --fail http://localhost:8000/version/ || exit 1"
     volumes:
