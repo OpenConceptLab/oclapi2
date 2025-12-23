@@ -361,7 +361,10 @@ def concept_ids_from_es(
         search = ConceptDocument.search()
         if source_version:
             search = search.filter('term', source=source_version.mnemonic.lower())
-            search = search.filter('term', source_version=source_version.version)
+            if source_version.is_head:
+                search = search.filter('term', is_latest_version=True)
+            else:
+                search = search.filter('term', source_version=source_version.version)
         search = search.filter('term', retired=False)
 
         should_queries = [
@@ -505,6 +508,7 @@ class Query:
                 mapping_prefetch,
             )
 
+        serialized = await sync_to_async(serialize_concepts)(concepts)
         return ConceptSearchResult(
             org=org,
             source=source,
@@ -513,5 +517,5 @@ class Query:
             limit=pagination['limit'] if pagination else None,
             total_count=total,
             has_next_page=has_next(total, pagination),
-            results=serialize_concepts(concepts),
+            results=serialized,
         )
