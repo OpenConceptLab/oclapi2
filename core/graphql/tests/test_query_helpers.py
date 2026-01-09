@@ -27,7 +27,7 @@ from core.graphql.queries import (
     build_datatype,
     build_global_mapping_prefetch,
     build_mapping_prefetch,
-    concept_ids_from_es,
+    search_concepts_in_es,
     concepts_for_ids,
     concepts_for_query,
     format_datetime_for_api,
@@ -219,7 +219,7 @@ class QueryHelperTests(TestCase):
         )
         with patch('core.graphql.queries.Source.get_version', return_value=self.source):
             success = async_to_sync(resolve_source_version)(
-                self.organization.mnemonic, self.source.mnemonic, None
+                self.organization.mnemonic, None, self.source.mnemonic, None
             )
         self.assertEqual(success, self.source)
 
@@ -227,12 +227,12 @@ class QueryHelperTests(TestCase):
             'core.graphql.queries.Source.find_latest_released_version_by', return_value=fallback_only
         ):
             resolved = async_to_sync(resolve_source_version)(
-                self.organization.mnemonic, fallback_only.mnemonic, None
+                self.organization.mnemonic, None, fallback_only.mnemonic, None
             )
         self.assertEqual(resolved, fallback_only)
         with self.assertRaises(GraphQLError):
             async_to_sync(resolve_source_version)(
-                self.organization.mnemonic, 'missing-source', 'v-does-not-exist'
+                self.organization.mnemonic, None, 'missing-source', 'v-does-not-exist'
             )
 
         base_qs = build_base_queryset(self.source)
@@ -256,7 +256,7 @@ class QueryHelperTests(TestCase):
             'core.graphql.queries.Source.find_latest_released_version_by', return_value=None
         ):
             with self.assertRaises(GraphQLError):
-                async_to_sync(resolve_source_version)('ORG', 'SRC', None)
+                async_to_sync(resolve_source_version)('ORG', None, 'SRC', None)
 
         self.assertIsNone(normalize_pagination(None, None))
         self.assertFalse(has_next(10, None))
@@ -363,9 +363,9 @@ class QueryHelperTests(TestCase):
         self.assertIsNone(resolve_text_datatype_details(SimpleNamespace(extras={})))
         self.assertIsNone(format_datetime_for_api(None))
 
-    def test_concept_ids_from_es_paths(self):
-        ids, total = concept_ids_from_es('   ', self.source, None)
-        self.assertEqual(ids, [])
+    def test_search_concepts_in_es_paths(self):
+        hits, total = search_concepts_in_es('   ', self.source, None)
+        self.assertEqual(hits, [])
         self.assertEqual(total, 0)
 
         class FakeResponse:
@@ -375,7 +375,10 @@ class QueryHelperTests(TestCase):
 
             def __iter__(self):
                 for item in self._items:
-                    yield SimpleNamespace(meta=SimpleNamespace(id=item))
+                    yield SimpleNamespace(meta=SimpleNamespace(id=item), to_dict=lambda: {})
+
+            def __len__(self):
+                return len(self._items)
 
         class FakeSearch:
             def __init__(self, items, total=None):
@@ -403,12 +406,13 @@ class QueryHelperTests(TestCase):
             'core.graphql.queries.ConceptDocument.search',
             return_value=FakeSearch([self.concept1.id, self.concept2.id]),
         ):
-            ids, total = concept_ids_from_es('search text', self.source, {'start': 0, 'end': 1})
-        self.assertEqual(ids, [self.concept1.id])
+            hits, total = search_concepts_in_es('search text', self.source, {'start': 0, 'end': 1})
+        self.assertEqual([int(h.meta.id) for h in hits], [self.concept1.id])
         self.assertEqual(total, 2)
 
         with patch('core.graphql.queries.ConceptDocument.search', side_effect=Exception('boom')):
-            self.assertIsNone(concept_ids_from_es('text', self.source, None))
+            hits, total = search_concepts_in_es('text', self.source, None)
+            self.assertIsNone(hits)
 
     def test_concepts_queries_behavior(self):
         base_qs = build_base_queryset(self.source)
@@ -425,21 +429,27 @@ class QueryHelperTests(TestCase):
         self.assertEqual(total, 2)
         self.assertEqual([c.mnemonic for c in concepts], ['UTIL-2', 'UTIL-1'])
 
-        with patch('core.graphql.queries.concept_ids_from_es', return_value=([self.concept2.id], 1)):
+        class FakeHit:
+            def __init__(self, id):
+                self.meta = SimpleNamespace(id=id)
+            def to_dict(self):
+                return {'id': 'UTIL-2', 'datatype': 'Numeric', 'extras': {}}
+
+        with patch('core.graphql.queries.search_concepts_in_es', return_value=([FakeHit(self.concept2.id)], 1)):
             concepts, total = async_to_sync(concepts_for_query)(
                 base_qs, 'anything', self.source, None, mapping_prefetch
             )
         self.assertEqual(total, 1)
         self.assertEqual(concepts[0].id, self.concept2.id)
 
-        with patch('core.graphql.queries.concept_ids_from_es', return_value=None):
+        with patch('core.graphql.queries.search_concepts_in_es', return_value=(None, 0)):
             concepts, total = async_to_sync(concepts_for_query)(
                 base_qs, 'UTIL', self.source, normalize_pagination(1, 1), mapping_prefetch
             )
-        self.assertEqual(total, 0)
-        self.assertEqual(concepts, [])
+        self.assertEqual(total, 2)
+        self.assertEqual(len(concepts), 1)
 
-        with patch('core.graphql.queries.concept_ids_from_es', return_value=([], 2)):
+        with patch('core.graphql.queries.search_concepts_in_es', return_value=([], 2)):
             concepts, total = async_to_sync(concepts_for_query)(
                 base_qs, 'UTIL', self.source, None, mapping_prefetch
             )
@@ -455,7 +465,10 @@ class QueryHelperTests(TestCase):
         with self.assertRaises(GraphQLError):
             async_to_sync(Query().concepts)(info_invalid, query='test')
 
-        info_valid = SimpleNamespace(context=SimpleNamespace(auth_status='valid'))
+        info_valid = SimpleNamespace(
+            context=SimpleNamespace(auth_status='valid'),
+            selected_fields=[SimpleNamespace(name='results', selections=[SimpleNamespace(name='conceptId', selections=[])])]
+        )
         with self.assertRaises(GraphQLError):
             async_to_sync(Query().concepts)(info_valid)
 
@@ -473,17 +486,17 @@ class QueryHelperTests(TestCase):
         self.assertEqual(result_ids.page, 1)
         self.assertEqual(result_ids.limit, 1)
 
-        with patch('core.graphql.queries.concept_ids_from_es', return_value=None):
+        with patch('core.graphql.queries.search_concepts_in_es', return_value=(None, 0)):
             result_query = async_to_sync(Query().concepts)(
                 info_valid,
                 query='UTIL',
             )
-        self.assertEqual(result_query.total_count, 0)
-        self.assertEqual(result_query.results, [])
+        self.assertEqual(result_query.total_count, 2)
+        self.assertEqual([item.concept_id for item in result_query.results], ['UTIL-1', 'UTIL-2'])
 
-        with patch('core.graphql.queries.concept_ids_from_es', return_value=([], 2)), patch(
-            'core.graphql.queries.resolve_source_version', return_value=self.source
-        ):
+        with self.settings(TEST_MODE=False), patch(
+            'core.graphql.queries.search_concepts_in_es', return_value=([], 2)
+        ), patch('core.graphql.queries.resolve_source_version', return_value=self.source):
             result_es_empty = async_to_sync(Query().concepts)(info_valid, query='UTIL')
         self.assertEqual(result_es_empty.total_count, 2)
         self.assertEqual(result_es_empty.results, [])

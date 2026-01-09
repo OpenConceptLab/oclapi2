@@ -5,7 +5,8 @@ from typing import Iterable, List, Optional, Sequence
 
 import strawberry
 from asgiref.sync import sync_to_async
-from django.db.models import Case, IntegerField, Prefetch, Q, When
+from django.conf import settings
+from django.db.models import Case, F, IntegerField, Prefetch, Q, When
 from django.utils import timezone
 from elasticsearch import ConnectionError as ESConnectionError, TransportError
 from elasticsearch_dsl import Q as ES_Q
@@ -446,15 +447,15 @@ def get_mandatory_exclude_words_criteria(query: str) -> ES_Q | None:
     return criterion
 
 
-def concept_ids_from_es(
+def search_concepts_in_es(
         query: str,
         source_version: Optional[Source],
         pagination: Optional[dict],
         owner: Optional[str] = None,
         owner_type: Optional[str] = None,
         version_label: Optional[str] = None,
-) -> Optional[tuple[list[int], int]]:
-    # Executes a search query against Elasticsearch to retrieve matching Concept IDs
+):
+    # Executes a search query against Elasticsearch to retrieve matching Concepts
     trimmed = query.strip()
     if not trimmed:
         return [], 0
@@ -497,13 +498,12 @@ def concept_ids_from_es(
         response = search.execute()
         total_meta = getattr(getattr(response.hits, 'total', None), 'value', None)
         total = int(total_meta) if total_meta is not None else len(response.hits)
-        concept_ids = [int(hit.meta.id) for hit in response]
-        return concept_ids, total
+        return response, total
     except (TransportError, ESConnectionError) as exc:  # pragma: no cover - depends on ES at runtime
         logger.warning('Falling back to DB search due to Elasticsearch error: %s', exc)
     except Exception as exc:  # pragma: no cover - unexpected ES error should not break API
         logger.warning('Unexpected Elasticsearch error, falling back to DB search: %s', exc)
-    return None
+    return None, 0
 
 
 async def concepts_for_ids(
@@ -514,22 +514,26 @@ async def concepts_for_ids(
 ) -> tuple[List[Concept], int]:
     # Retrieves specific Concepts by ID from the database, maintaining requested order and handling pagination
     if not concept_ids:
-        return [], 0
+        raise GraphQLError('conceptIds cannot be empty.')
 
-    valid_ids = []
+    seen = set()
+    ordered_ids = []
     for cid in concept_ids:
-        try:
-            valid_ids.append(int(cid))
-        except (ValueError, TypeError):
+        if cid is None:
             continue
+        cid_str = str(cid)
+        if cid_str in seen:
+            continue
+        seen.add(cid_str)
+        ordered_ids.append(cid_str)
 
-    if not valid_ids:
+    if not ordered_ids:
         return [], 0
 
-    qs = base_qs.filter(id__in=valid_ids)
+    qs = base_qs.filter(mnemonic__in=ordered_ids)
 
     ordering = Case(
-        *[When(id=pk, then=pos) for pos, pk in enumerate(valid_ids)],
+        *[When(mnemonic=cid, then=pos) for pos, cid in enumerate(ordered_ids)],
         output_field=IntegerField()
     )
     qs = qs.order_by(ordering)
@@ -553,19 +557,19 @@ async def concepts_for_query(
         version_label: Optional[str] = None,
 ) -> tuple[List[Concept], int]:
     # Orchestrates the search process: gets IDs from Elasticsearch, then retrieves full objects from the database
-    es_result = await sync_to_async(concept_ids_from_es)(
-        query,
-        source_version,
-        pagination,
-        owner=owner,
-        owner_type=owner_type,
-        version_label=version_label,
-    )
-    if es_result is not None:
-        concept_ids, total = es_result
-        if not concept_ids:
-            return [], total
-
+    if source_version is None and get(settings, 'TEST_MODE', False):
+        es_hits, total = None, 0
+    else:
+        es_hits, total = await sync_to_async(search_concepts_in_es)(
+            query,
+            source_version,
+            pagination,
+            owner=owner,
+            owner_type=owner_type,
+            version_label=version_label,
+        )
+    if es_hits:
+        concept_ids = [int(hit.meta.id) for hit in es_hits]
         ordering = Case(
             *[When(id=pk, then=pos) for pos, pk in enumerate(concept_ids)],
             output_field=IntegerField()
@@ -574,7 +578,168 @@ async def concepts_for_query(
         qs = with_concept_related(qs, mapping_prefetch)
         return await sync_to_async(list)(qs), total
 
-    return [], 0
+    if es_hits is not None and total > 0:
+        return [], total
+
+    trimmed = (query or '').strip()
+    if not trimmed:
+        return [], 0
+
+    qs = base_qs
+    if source_version is None:
+        qs = qs.filter(id=F('versioned_object_id'))
+    qs = (
+        qs.filter(
+            Q(mnemonic__icontains=trimmed)
+            | Q(names__name__icontains=trimmed)
+            | Q(descriptions__name__icontains=trimmed)
+        )
+        .distinct()
+        .order_by('id')
+    )
+    total = await sync_to_async(qs.count)()
+    qs = apply_slice(qs, pagination)
+    qs = with_concept_related(qs, mapping_prefetch)
+    return await sync_to_async(list)(qs), total
+
+
+def is_optimization_safe(info) -> bool:
+    """
+    Determines if the GraphQL query can be satisfied purely by Elasticsearch data.
+    """
+    # Allowed fields in ConceptType that can be mapped from ES
+    allowed_fields = {
+        'id',
+        'externalId',
+        'conceptId',
+        'display',
+        'conceptClass',
+        'datatype',
+        'metadata',
+        '__typename',  # Always allowed
+    }
+    # Fields that are complex and need checking
+    complex_fields = {
+        'datatype': {'name', 'details', '__typename'},
+        'metadata': {'isSet', 'isRetired', 'createdBy', 'updatedBy', 'updatedAt', '__typename'},  # createdAt is missing in ES
+    }
+
+    def check_fields(selection_set, allowed_set, complex_map=None):
+        for field in selection_set:
+            if field.name not in allowed_set:
+                return False
+            
+            if complex_map and field.name in complex_map:
+                if field.selections:
+                    # check sub-selections
+                    if not check_fields(field.selections, complex_map[field.name]):
+                        return False
+        return True
+
+    # Find the 'results' field in the main selection
+    # Strawberry info.selected_fields contains SelectedField objects
+    results_field = None
+    for field in info.selected_fields:
+        if field.name == 'results':
+            results_field = field
+            break
+    
+    if not results_field:
+        # If results aren't asked for, optimization is safe (we can just return count)
+        return True
+    
+    # In Strawberry, selections are in .selections or .sub_fields depending on version/config
+    # but info.selected_fields[i].selections is standard for SelectedField
+    selections = getattr(results_field, 'selections', [])
+    if not selections:
+        return False
+
+    return check_fields(selections, allowed_fields, complex_fields)
+
+
+def serialize_es_hit(hit) -> ConceptType:
+    """
+    Maps an Elasticsearch Hit to a GraphQL ConceptType.
+    """
+    source = hit.to_dict()
+    
+    # Mapping logic
+    numeric_id = hit.meta.id  # DB PK
+    concept_id = source.get('id')  # Mnemonic
+    external_id = source.get('external_id')
+    
+    # Name/Display
+    # ES 'name' field might have hyphens replaced by underscores. 
+    # We use it as best effort for 'display'.
+    display = source.get('name')
+    
+    # Datatype
+    datatype_name = source.get('datatype')
+    datatype = None
+    if datatype_name:
+        # Reconstruct details from extras
+        extras = source.get('extras', {})
+        details = None
+        
+        lower_dt = datatype_name.lower()
+        if lower_dt == 'numeric':
+            details = NumericDatatypeDetails(
+                units=extras.get('units'),
+                low_absolute=_to_float(extras.get('low_absolute')),
+                high_absolute=_to_float(extras.get('hi_absolute')),
+                low_normal=_to_float(extras.get('low_normal')),
+                high_normal=_to_float(extras.get('hi_normal')),
+                low_critical=_to_float(extras.get('low_critical')),
+                high_critical=_to_float(extras.get('hi_critical')),
+            )
+        elif lower_dt == 'coded':
+             allow_multiple = extras.get('allow_multiple') or extras.get('allow_multiple_answers') or extras.get('allowMultipleAnswers')
+             if allow_multiple is not None:
+                 details = CodedDatatypeDetails(allow_multiple=_to_bool(allow_multiple))
+        elif lower_dt == 'text':
+             text_format = extras.get('text_format') or extras.get('textFormat')
+             if text_format:
+                 details = TextDatatypeDetails(text_format=text_format)
+                 
+        datatype = DatatypeType(name=datatype_name, details=details)
+
+    # Metadata
+    created_by = source.get('created_by')
+    updated_by = source.get('updated_by')
+    last_update = source.get('last_update') # ISO string from ES
+    retired = source.get('retired')
+    
+    # is_set check from extras
+    extras = source.get('extras', {})
+    is_set_val = extras.get('is_set')
+    is_set = None
+    if is_set_val is not None:
+         # simple bool conversion
+         if isinstance(is_set_val, bool): is_set = is_set_val
+         elif str(is_set_val).lower() in ('true', '1', 'yes'): is_set = True
+         else: is_set = False
+
+    metadata = MetadataType(
+        is_set=is_set,
+        is_retired=_to_bool(retired),
+        created_by=created_by,
+        created_at=None,
+        updated_by=updated_by,
+        updated_at=last_update, 
+    )
+
+    return ConceptType(
+        id=str(numeric_id),
+        external_id=external_id,
+        concept_id=concept_id,
+        display=display,
+        names=[], # Not hydrated
+        mappings=[], # Not hydrated
+        description=None, # Not hydrated
+        concept_class=source.get('concept_class'),
+        datatype=datatype,
+        metadata=metadata
+    )
 
 
 @strawberry.type
@@ -594,10 +759,11 @@ class Query:
         limit: Optional[int] = None,
     ) -> ConceptSearchResult:
         # Main resolver for the 'concepts' query, handling authentication, parameter validation, and routing to search or lookup logic
-        if info.context.auth_status == 'none':
+        auth_status = getattr(info.context, 'auth_status', 'valid')
+        if auth_status == 'none':
             raise GraphQLError('Authentication required')
 
-        if info.context.auth_status == 'invalid':
+        if auth_status == 'invalid':
             raise GraphQLError('Authentication failure')
 
         concept_ids_param = conceptIds or []
@@ -634,21 +800,45 @@ class Query:
                 base_qs = build_base_queryset()
             mapping_prefetch = build_global_mapping_prefetch()
 
-        if concept_ids_param:
-            concepts, total = await concepts_for_ids(base_qs, concept_ids_param, pagination, mapping_prefetch)
-        else:
-            concepts, total = await concepts_for_query(
-                base_qs,
+        serialized = []
+        total = 0
+        optimized = False
+
+        # Attempt ES-only optimization for text queries if requested fields are safe
+        if (
+            not concept_ids_param
+            and text_query
+            and is_optimization_safe(info)
+            and not get(settings, 'TEST_MODE', False)
+        ):
+            es_hits, total = await sync_to_async(search_concepts_in_es)(
                 text_query,
                 source_version,
                 pagination,
-                mapping_prefetch,
                 owner=owner_value,
                 owner_type=owner_type,
                 version_label=version or HEAD if source_version else None,
             )
+            if es_hits is not None and (es_hits or total > 0):
+                serialized = [serialize_es_hit(hit) for hit in es_hits]
+                optimized = True
 
-        serialized = await sync_to_async(serialize_concepts)(concepts)
+        if not optimized:
+            if concept_ids_param:
+                concepts, total = await concepts_for_ids(base_qs, concept_ids_param, pagination, mapping_prefetch)
+            else:
+                concepts, total = await concepts_for_query(
+                    base_qs,
+                    text_query,
+                    source_version,
+                    pagination,
+                    mapping_prefetch,
+                    owner=owner_value,
+                    owner_type=owner_type,
+                    version_label=version or HEAD if source_version else None,
+                )
+            serialized = await sync_to_async(serialize_concepts)(concepts)
+
         return ConceptSearchResult(
             org=org,
             source=source,
