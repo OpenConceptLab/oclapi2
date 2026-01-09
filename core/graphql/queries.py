@@ -34,12 +34,16 @@ from .types import (
     ToSourceType,
 )
 
+# Logger instance for this module
 logger = logging.getLogger(__name__)
+
+# Maximum number of results retrievable from Elasticsearch in a single window
 ES_MAX_WINDOW = 10_000
 
 
 @strawberry.type
 class ConceptSearchResult:
+    # GraphQL output type structure for concept search/list results
     org: Optional[str] = strawberry.field(
         description="Organization mnemonic that owns the searched source."
     )
@@ -75,6 +79,7 @@ async def resolve_source_version(
     source: str,
     version: Optional[str],
 ) -> Source:
+    # Resolves the specific version of a Source based on organization/owner and version identifier
     if org:
         filters = {'organization__mnemonic': org}
     elif owner:
@@ -98,12 +103,14 @@ async def resolve_source_version(
 
 
 def build_base_queryset(source_version: Source = None):
+    # Constructs the initial Django QuerySet for Concepts, filtering for active and non-retired records
     if source_version:
         return source_version.get_concepts_queryset().filter(is_active=True, retired=False)
     return Concept.objects.filter(is_active=True, retired=False, id=F('versioned_object_id'))
 
 
 def build_mapping_prefetch(source_version: Source) -> Prefetch:
+    # Optimizes database queries by pre-fetching related Mappings for a specific Source version
     mapping_qs = (
         Mapping.objects.filter(
             sources__id=source_version.id,
@@ -120,6 +127,7 @@ def build_mapping_prefetch(source_version: Source) -> Prefetch:
 
 
 def build_global_mapping_prefetch() -> Prefetch:
+    # Optimizes database queries by pre-fetching related Mappings globally across all sources
     mapping_qs = (
         Mapping.objects.filter(
             from_concept_id__isnull=False,
@@ -135,6 +143,7 @@ def build_global_mapping_prefetch() -> Prefetch:
 
 
 def normalize_pagination(page: Optional[int], limit: Optional[int]) -> Optional[dict]:
+    # Validates and calculates pagination parameters (start/end indices) from page and limit
     if page is None or limit is None:
         return None
     if page < 1 or limit < 1:
@@ -145,22 +154,26 @@ def normalize_pagination(page: Optional[int], limit: Optional[int]) -> Optional[
 
 
 def has_next(total: int, pagination: Optional[dict]) -> bool:
+    # Determines if there are more pages of results available based on total count and current pagination
     if not pagination:
         return False
     return total > pagination['end']
 
 
 def apply_slice(qs, pagination: Optional[dict]):
+    # Applies array slicing to a QuerySet or list based on pagination parameters
     if not pagination:
         return qs
     return qs[pagination['start']:pagination['end']]
 
 
 def with_concept_related(qs, mapping_prefetch: Prefetch):
+    # Eagerly loads related entities (created_by, updated_by, names, descriptions) to prevent N+1 queries
     return qs.select_related('created_by', 'updated_by').prefetch_related('names', 'descriptions', mapping_prefetch)
 
 
 def serialize_mappings(concept: Concept) -> List[MappingType]:
+    # Converts internal Mapping model instances into the GraphQL MappingType format
     mappings = getattr(concept, 'graphql_mappings', []) or []
     result: List[MappingType] = []
     for mapping in mappings:
@@ -179,6 +192,7 @@ def serialize_mappings(concept: Concept) -> List[MappingType]:
 
 
 def serialize_names(concept: Concept) -> List[ConceptNameType]:
+    # Converts internal ConceptName model instances into the GraphQL ConceptNameType format
     return [
         ConceptNameType(
             name=name.name,
@@ -191,6 +205,7 @@ def serialize_names(concept: Concept) -> List[ConceptNameType]:
 
 
 def resolve_description(concept: Concept) -> Optional[str]:
+    # Selects the most appropriate description for a concept based on locale preferences and hierarchy
     descriptions = list(concept.descriptions.all())
     if not descriptions:
         return None
@@ -220,6 +235,7 @@ def resolve_description(concept: Concept) -> Optional[str]:
 
 
 def resolve_is_set_flag(concept: Concept) -> Optional[bool]:
+    # Determines if a concept is a 'set' (collection) by inspecting its properties and extras
     value = getattr(concept, 'is_set', None)
     if value is None:
         extras = concept.extras or {}
@@ -237,6 +253,7 @@ def resolve_is_set_flag(concept: Concept) -> Optional[bool]:
 
 
 def _to_float(value) -> Optional[float]:
+    # Helper to safely convert values to float, handling None and empty strings
     if value in (None, ''):
         return None
     try:
@@ -246,6 +263,7 @@ def _to_float(value) -> Optional[float]:
 
 
 def _to_bool(value) -> Optional[bool]:
+    # Helper to safely convert values to boolean, handling string representations (e.g., 'true', 'yes')
     if value is None:
         return None
     if isinstance(value, bool):
@@ -262,6 +280,7 @@ def _to_bool(value) -> Optional[bool]:
 
 
 def resolve_numeric_datatype_details(concept: Concept) -> Optional[NumericDatatypeDetails]:
+    # Extracts and structures metadata specific to Numeric datatypes from concept extras
     extras = concept.extras or {}
     numeric_values = {
         'low_absolute': _to_float(extras.get('low_absolute')),
@@ -286,6 +305,7 @@ def resolve_numeric_datatype_details(concept: Concept) -> Optional[NumericDataty
 
 
 def resolve_coded_datatype_details(concept: Concept) -> Optional[CodedDatatypeDetails]:
+    # Extracts and structures metadata specific to Coded datatypes from concept extras
     extras = concept.extras or {}
     allow_multiple = extras.get('allow_multiple')
     if allow_multiple is None:
@@ -299,6 +319,7 @@ def resolve_coded_datatype_details(concept: Concept) -> Optional[CodedDatatypeDe
 
 
 def resolve_text_datatype_details(concept: Concept) -> Optional[TextDatatypeDetails]:
+    # Extracts and structures metadata specific to Text datatypes from concept extras
     extras = concept.extras or {}
     text_format = extras.get('text_format') or extras.get('textFormat')
     if not text_format:
@@ -307,6 +328,7 @@ def resolve_text_datatype_details(concept: Concept) -> Optional[TextDatatypeDeta
 
 
 def resolve_datatype_details(concept: Concept) -> Optional[DatatypeDetails]:
+    # Delegates extraction of datatype details based on the concept's datatype (Numeric, Coded, Text)
     datatype = (concept.datatype or '').strip().lower()
     if datatype == 'numeric':
         return resolve_numeric_datatype_details(concept)
@@ -318,6 +340,7 @@ def resolve_datatype_details(concept: Concept) -> Optional[DatatypeDetails]:
 
 
 def format_datetime_for_api(value) -> Optional[str]:
+    # Formats datetime objects to ISO 8601 string with UTC timezone for API responses
     if not value:
         return None
     if timezone.is_naive(value):
@@ -326,6 +349,7 @@ def format_datetime_for_api(value) -> Optional[str]:
 
 
 def build_datatype(concept: Concept) -> Optional[DatatypeType]:
+    # Constructs the GraphQL DatatypeType object for a concept
     if not concept.datatype:
         return None
     return DatatypeType(
@@ -335,6 +359,7 @@ def build_datatype(concept: Concept) -> Optional[DatatypeType]:
 
 
 def build_metadata(concept: Concept) -> MetadataType:
+    # Constructs the GraphQL MetadataType object containing audit and status information
     return MetadataType(
         is_set=resolve_is_set_flag(concept),
         is_retired=concept.retired,
@@ -346,6 +371,7 @@ def build_metadata(concept: Concept) -> MetadataType:
 
 
 def serialize_concepts(concepts: Iterable[Concept]) -> List[ConceptType]:
+    # Iterates over a list of Concept models and converts them into GraphQL ConceptType objects
     output: List[ConceptType] = []
     for concept in concepts:
         output.append(
@@ -366,6 +392,7 @@ def serialize_concepts(concepts: Iterable[Concept]) -> List[ConceptType]:
 
 
 def get_exact_search_criterion(query: str) -> tuple[ES_Q, list[str]]:
+    # Builds Elasticsearch criteria for exact matches on specific fields
     match_phrase_field_list = ConceptDocument.get_match_phrase_attrs()
     match_word_fields_map = ConceptDocument.get_exact_match_attrs()
     fields = match_phrase_field_list + list(match_word_fields_map.keys())
@@ -380,6 +407,7 @@ def get_exact_search_criterion(query: str) -> tuple[ES_Q, list[str]]:
 
 
 def get_wildcard_search_criterion(query: str) -> tuple[ES_Q, list[str]]:
+    # Builds Elasticsearch criteria for wildcard/partial matches on specific fields
     fields = ConceptDocument.get_wildcard_search_attrs()
     return (
         CustomESSearch.get_wildcard_match_criterion(
@@ -391,6 +419,7 @@ def get_wildcard_search_criterion(query: str) -> tuple[ES_Q, list[str]]:
 
 
 def get_fuzzy_search_criterion(query: str) -> ES_Q:
+    # Builds Elasticsearch criteria for fuzzy matches to handle typos or variations
     return CustomESSearch.get_fuzzy_match_criterion(
         search_str=CustomESSearch.get_search_string(query, decode=False),
         fields=ConceptDocument.get_fuzzy_search_attrs(),
@@ -400,6 +429,7 @@ def get_fuzzy_search_criterion(query: str) -> ES_Q:
 
 
 def get_mandatory_words_criteria(query: str) -> ES_Q | None:
+    # Constructs criteria ensuring specific words must appear in the search results
     criterion = None
     for must_have in CustomESSearch.get_must_haves(query):
         criteria, _ = get_wildcard_search_criterion(f"{must_have}*")
@@ -408,6 +438,7 @@ def get_mandatory_words_criteria(query: str) -> ES_Q | None:
 
 
 def get_mandatory_exclude_words_criteria(query: str) -> ES_Q | None:
+    # Constructs criteria ensuring specific words must NOT appear in the search results
     criterion = None
     for must_not_have in CustomESSearch.get_must_not_haves(query):
         criteria, _ = get_wildcard_search_criterion(f"{must_not_have}*")
@@ -423,6 +454,7 @@ def concept_ids_from_es(
         owner_type: Optional[str] = None,
         version_label: Optional[str] = None,
 ) -> Optional[tuple[list[int], int]]:
+    # Executes a search query against Elasticsearch to retrieve matching Concept IDs
     trimmed = query.strip()
     if not trimmed:
         return [], 0
@@ -474,6 +506,42 @@ def concept_ids_from_es(
     return None
 
 
+async def concepts_for_ids(
+    base_qs,
+    concept_ids: List[str],
+    pagination: Optional[dict],
+    mapping_prefetch: Prefetch,
+) -> tuple[List[Concept], int]:
+    # Retrieves specific Concepts by ID from the database, maintaining requested order and handling pagination
+    if not concept_ids:
+        return [], 0
+
+    valid_ids = []
+    for cid in concept_ids:
+        try:
+            valid_ids.append(int(cid))
+        except (ValueError, TypeError):
+            continue
+
+    if not valid_ids:
+        return [], 0
+
+    qs = base_qs.filter(id__in=valid_ids)
+
+    ordering = Case(
+        *[When(id=pk, then=pos) for pos, pk in enumerate(valid_ids)],
+        output_field=IntegerField()
+    )
+    qs = qs.order_by(ordering)
+
+    total = await sync_to_async(qs.count)()
+
+    qs = apply_slice(qs, pagination)
+    qs = with_concept_related(qs, mapping_prefetch)
+
+    return await sync_to_async(list)(qs), total
+
+
 async def concepts_for_query(
         base_qs,
         query: str,
@@ -484,6 +552,7 @@ async def concepts_for_query(
         owner_type: Optional[str] = None,
         version_label: Optional[str] = None,
 ) -> tuple[List[Concept], int]:
+    # Orchestrates the search process: gets IDs from Elasticsearch, then retrieves full objects from the database
     es_result = await sync_to_async(concept_ids_from_es)(
         query,
         source_version,
@@ -510,6 +579,7 @@ async def concepts_for_query(
 
 @strawberry.type
 class Query:
+    # Root GraphQL query class defining available entry points
     @strawberry.field(name="concepts")
     async def concepts(  # pylint: disable=too-many-arguments,too-many-locals
         self,
@@ -523,6 +593,7 @@ class Query:
         page: Optional[int] = None,
         limit: Optional[int] = None,
     ) -> ConceptSearchResult:
+        # Main resolver for the 'concepts' query, handling authentication, parameter validation, and routing to search or lookup logic
         if info.context.auth_status == 'none':
             raise GraphQLError('Authentication required')
 
