@@ -30,7 +30,6 @@ from core.graphql.queries import (
     concept_ids_from_es,
     concepts_for_ids,
     concepts_for_query,
-    fallback_db_search,
     format_datetime_for_api,
     has_next,
     normalize_pagination,
@@ -411,11 +410,8 @@ class QueryHelperTests(TestCase):
         with patch('core.graphql.queries.ConceptDocument.search', side_effect=Exception('boom')):
             self.assertIsNone(concept_ids_from_es('text', self.source, None))
 
-    def test_fallback_and_concepts_queries(self):
+    def test_concepts_queries_behavior(self):
         base_qs = build_base_queryset(self.source)
-        self.assertEqual(fallback_db_search(base_qs, '   ').count(), 0)
-        self.assertIn(self.concept1.id, list(fallback_db_search(base_qs, 'UTIL').values_list('id', flat=True)))
-
         mapping_prefetch = build_mapping_prefetch(self.source)
         with self.assertRaises(GraphQLError):
             async_to_sync(concepts_for_ids)(base_qs, [], normalize_pagination(1, 1), mapping_prefetch)
@@ -440,7 +436,8 @@ class QueryHelperTests(TestCase):
             concepts, total = async_to_sync(concepts_for_query)(
                 base_qs, 'UTIL', self.source, normalize_pagination(1, 1), mapping_prefetch
             )
-        self.assertGreaterEqual(total, 1)
+        self.assertEqual(total, 0)
+        self.assertEqual(concepts, [])
 
         with patch('core.graphql.queries.concept_ids_from_es', return_value=([], 2)):
             concepts, total = async_to_sync(concepts_for_query)(
@@ -481,8 +478,8 @@ class QueryHelperTests(TestCase):
                 info_valid,
                 query='UTIL',
             )
-        self.assertGreaterEqual(result_query.total_count, 1)
-        self.assertFalse(result_query.has_next_page)
+        self.assertEqual(result_query.total_count, 0)
+        self.assertEqual(result_query.results, [])
 
         with patch('core.graphql.queries.concept_ids_from_es', return_value=([], 2)), patch(
             'core.graphql.queries.resolve_source_version', return_value=self.source

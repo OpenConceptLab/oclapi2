@@ -13,10 +13,13 @@ from pydash import get
 from strawberry.exceptions import GraphQLError
 
 from core.common.constants import HEAD
+from core.common.search import CustomESSearch
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
+from core.orgs.constants import ORG_OBJECT_TYPE
 from core.sources.models import Source
+from core.users.constants import USER_OBJECT_TYPE
 
 from .types import (
     CodedDatatypeDetails,
@@ -66,8 +69,18 @@ class ConceptSearchResult:
     )
 
 
-async def resolve_source_version(org: str, source: str, version: Optional[str]) -> Source:
-    filters = {'organization__mnemonic': org}
+async def resolve_source_version(
+    org: Optional[str],
+    owner: Optional[str],
+    source: str,
+    version: Optional[str],
+) -> Source:
+    if org:
+        filters = {'organization__mnemonic': org}
+    elif owner:
+        filters = {'user__username': owner}
+    else:
+        raise GraphQLError("Either org or owner must be provided to resolve a source version.")
     target_version = version or HEAD
     instance = await sync_to_async(Source.get_version)(source, target_version, filters)
 
@@ -75,15 +88,19 @@ async def resolve_source_version(org: str, source: str, version: Optional[str]) 
         instance = await sync_to_async(Source.find_latest_released_version_by)({**filters, 'mnemonic': source})
 
     if not instance:
+        owner_label = org or owner
+        owner_kind = "org" if org else "owner"
         raise GraphQLError(
-            f"Source '{source}' with version '{version or 'HEAD'}' was not found for org '{org}'."
+            f"Source '{source}' with version '{version or 'HEAD'}' was not found for {owner_kind} '{owner_label}'."
         )
 
     return instance
 
 
-def build_base_queryset(source_version: Source):
-    return source_version.get_concepts_queryset().filter(is_active=True, retired=False)
+def build_base_queryset(source_version: Source = None):
+    if source_version:
+        return source_version.get_concepts_queryset().filter(is_active=True, retired=False)
+    return Concept.objects.filter(is_active=True, retired=False, id=F('versioned_object_id'))
 
 
 def build_mapping_prefetch(source_version: Source) -> Prefetch:
@@ -348,10 +365,63 @@ def serialize_concepts(concepts: Iterable[Concept]) -> List[ConceptType]:
     return output
 
 
+def get_exact_search_criterion(query: str) -> tuple[ES_Q, list[str]]:
+    match_phrase_field_list = ConceptDocument.get_match_phrase_attrs()
+    match_word_fields_map = ConceptDocument.get_exact_match_attrs()
+    fields = match_phrase_field_list + list(match_word_fields_map.keys())
+    return (
+        CustomESSearch.get_exact_match_criterion(
+            CustomESSearch.get_search_string(query, lower=False, decode=False),
+            match_phrase_field_list,
+            match_word_fields_map,
+        ),
+        fields,
+    )
+
+
+def get_wildcard_search_criterion(query: str) -> tuple[ES_Q, list[str]]:
+    fields = ConceptDocument.get_wildcard_search_attrs()
+    return (
+        CustomESSearch.get_wildcard_match_criterion(
+            CustomESSearch.get_search_string(query, lower=True, decode=True),
+            fields,
+        ),
+        list(fields.keys()),
+    )
+
+
+def get_fuzzy_search_criterion(query: str) -> ES_Q:
+    return CustomESSearch.get_fuzzy_match_criterion(
+        search_str=CustomESSearch.get_search_string(query, decode=False),
+        fields=ConceptDocument.get_fuzzy_search_attrs(),
+        boost_divide_by=10000,
+        expansions=2,
+    )
+
+
+def get_mandatory_words_criteria(query: str) -> ES_Q | None:
+    criterion = None
+    for must_have in CustomESSearch.get_must_haves(query):
+        criteria, _ = get_wildcard_search_criterion(f"{must_have}*")
+        criterion = criteria if criterion is None else criterion & criteria
+    return criterion
+
+
+def get_mandatory_exclude_words_criteria(query: str) -> ES_Q | None:
+    criterion = None
+    for must_not_have in CustomESSearch.get_must_not_haves(query):
+        criteria, _ = get_wildcard_search_criterion(f"{must_not_have}*")
+        criterion = criteria if criterion is None else criterion | criteria
+    return criterion
+
+
 def concept_ids_from_es(
         query: str,
         source_version: Optional[Source],
         pagination: Optional[dict],
+        owner: Optional[str] = None,
+        owner_type: Optional[str] = None,
+        version_label: Optional[str] = None,
 ) -> Optional[tuple[list[int], int]]:
     trimmed = query.strip()
     if not trimmed:
@@ -359,20 +429,32 @@ def concept_ids_from_es(
 
     try:
         search = ConceptDocument.search()
+        search = search.filter('term', retired=False)
         if source_version:
-            search = search.filter('term', source=source_version.mnemonic.lower())
-            if source_version.is_head:
+            search = search.filter('term', source=source_version.mnemonic)
+            if owner and owner_type:
+                search = search.filter('term', owner=owner).filter('term', owner_type=owner_type)
+
+            effective_version = version_label or HEAD
+            if effective_version == HEAD:
+                search = search.filter('term', source_version=HEAD)
                 search = search.filter('term', is_latest_version=True)
             else:
-                search = search.filter('term', source_version=source_version.version)
-        search = search.filter('term', retired=False)
+                search = search.filter('term', source_version=effective_version)
+        else:
+            search = search.filter('term', is_latest_version=True)
 
-        should_queries = [
-            ES_Q('match', id={'query': trimmed, 'boost': 6, 'operator': 'AND'}),
-            ES_Q('match_phrase_prefix', name={'query': trimmed, 'boost': 4}),
-            ES_Q('match', synonyms={'query': trimmed, 'boost': 2, 'operator': 'AND'}),
-        ]
-        search = search.query(ES_Q('bool', should=should_queries, minimum_should_match=1))
+        exact_criterion, _ = get_exact_search_criterion(trimmed)
+        wildcard_criterion, _ = get_wildcard_search_criterion(trimmed)
+        fuzzy_criterion = get_fuzzy_search_criterion(trimmed)
+        search = search.query(exact_criterion | wildcard_criterion | fuzzy_criterion)
+
+        must_have_criterion = get_mandatory_words_criteria(trimmed)
+        if must_have_criterion is not None:
+            search = search.filter(must_have_criterion)
+        must_not_criterion = get_mandatory_exclude_words_criteria(trimmed)
+        if must_not_criterion is not None:
+            search = search.filter(~must_not_criterion)
 
         if pagination:
             search = search[pagination['start']:pagination['end']]
@@ -392,71 +474,38 @@ def concept_ids_from_es(
     return None
 
 
-def fallback_db_search(base_qs, query: str):
-    trimmed = query.strip()
-    if not trimmed:
-        return base_qs.none()
-    return base_qs.filter(
-        Q(mnemonic__icontains=trimmed) | Q(names__name__icontains=trimmed)
-    ).distinct()
-
-
-async def concepts_for_ids(
-        base_qs,
-        concept_ids: Sequence[str],
-        pagination: Optional[dict],
-        mapping_prefetch: Prefetch,
-) -> tuple[List[Concept], int]:
-    unique_ids = list(dict.fromkeys([cid for cid in concept_ids if cid]))
-    if not unique_ids:
-        raise GraphQLError('conceptIds must include at least one value when provided.')
-
-    qs = base_qs.filter(mnemonic__in=unique_ids)
-    total = await sync_to_async(qs.count)()
-    ordering = Case(
-        *[When(mnemonic=value, then=pos) for pos, value in enumerate(unique_ids)],
-        output_field=IntegerField()
-    )
-    qs = qs.order_by(ordering, 'mnemonic')
-    qs = apply_slice(qs, pagination)
-    qs = with_concept_related(qs, mapping_prefetch)
-    return await sync_to_async(list)(qs), total
-
-
 async def concepts_for_query(
         base_qs,
         query: str,
         source_version: Source,
         pagination: Optional[dict],
         mapping_prefetch: Prefetch,
+        owner: Optional[str] = None,
+        owner_type: Optional[str] = None,
+        version_label: Optional[str] = None,
 ) -> tuple[List[Concept], int]:
-    es_result = await sync_to_async(concept_ids_from_es)(query, source_version, pagination)
+    es_result = await sync_to_async(concept_ids_from_es)(
+        query,
+        source_version,
+        pagination,
+        owner=owner,
+        owner_type=owner_type,
+        version_label=version_label,
+    )
     if es_result is not None:
         concept_ids, total = es_result
         if not concept_ids:
-            if total == 0:
-                logger.info(
-                    'ES returned zero hits for query="%s" in source "%s" version "%s". Falling back to DB search.',
-                    query,
-                    get(source_version, 'mnemonic'),
-                    get(source_version, 'version'),
-                )
-            else:
-                return [], total
-        else:
-            ordering = Case(
-                *[When(id=pk, then=pos) for pos, pk in enumerate(concept_ids)],
-                output_field=IntegerField()
-            )
-            qs = base_qs.filter(id__in=concept_ids).order_by(ordering)
-            qs = with_concept_related(qs, mapping_prefetch)
-            return await sync_to_async(list)(qs), total
+            return [], total
 
-    qs = fallback_db_search(base_qs, query).order_by('mnemonic')
-    total = await sync_to_async(qs.count)()
-    qs = apply_slice(qs, pagination)
-    qs = with_concept_related(qs, mapping_prefetch)
-    return await sync_to_async(list)(qs), total
+        ordering = Case(
+            *[When(id=pk, then=pos) for pos, pk in enumerate(concept_ids)],
+            output_field=IntegerField()
+        )
+        qs = base_qs.filter(id__in=concept_ids).order_by(ordering)
+        qs = with_concept_related(qs, mapping_prefetch)
+        return await sync_to_async(list)(qs), total
+
+    return [], 0
 
 
 @strawberry.type
@@ -466,6 +515,7 @@ class Query:
         self,
         info,  # pylint: disable=unused-argument
         org: Optional[str] = None,
+        owner: Optional[str] = None,
         source: Optional[str] = None,
         version: Optional[str] = None,
         conceptIds: Optional[List[str]] = None,
@@ -487,14 +537,30 @@ class Query:
 
         pagination = normalize_pagination(page, limit)
 
-        if org and source:
-            source_version = await resolve_source_version(org, source, version)
-            base_qs = build_base_queryset(source_version)
+        if org and owner:
+            raise GraphQLError('Provide either org or owner, not both.')
+
+        if source and not org and not owner:
+            raise GraphQLError('Either org or owner must be provided when source is specified.')
+
+        owner_value = org or owner
+        owner_type = ORG_OBJECT_TYPE if org else (USER_OBJECT_TYPE if owner else None)
+
+        if (org or owner) and source:
+            source_version = await resolve_source_version(org, owner, source, version)
+            # For search, we use a permissive queryset. For list, we use the strict HEAD-only queryset.
+            if text_query:
+                base_qs = Concept.objects.filter(is_active=True, retired=False, parent_id=source_version.id)
+            else:
+                base_qs = build_base_queryset(source_version)
             mapping_prefetch = build_mapping_prefetch(source_version)
         else:
             # Global search across all repositories
             source_version = None
-            base_qs = Concept.objects.filter(is_active=True, retired=False)
+            if text_query:
+                base_qs = Concept.objects.filter(is_active=True, retired=False)
+            else:
+                base_qs = build_base_queryset()
             mapping_prefetch = build_global_mapping_prefetch()
 
         if concept_ids_param:
@@ -506,6 +572,9 @@ class Query:
                 source_version,
                 pagination,
                 mapping_prefetch,
+                owner=owner_value,
+                owner_type=owner_type,
+                version_label=version or HEAD if source_version else None,
             )
 
         serialized = await sync_to_async(serialize_concepts)(concepts)
