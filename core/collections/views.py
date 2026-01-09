@@ -386,29 +386,34 @@ class CollectionReferencesMixin:
     def apply_filters(self, queryset):  # pylint: disable=too-many-branches
         criterion = []
         for key, value in self.request.query_params.dict().items():
-            is_boolean = value.lower() in ['true', 'false']
-            is_false = value.lower() == 'false'
-            is_true = value.lower() == 'true'
-            if key == 'resource_versioned' and is_boolean:
-                criterion.append(Q(resource_version__isnull=is_false))
-            elif key == 'repo_versioned':
-                if is_boolean:
-                    criterion.append(Q(version__isnull=is_false))
-                else:
-                    criterion.append(Q(version__iexact=value))
+            if not value:
+                continue
+            if key == 'versioning':
+                if value == 'unversioned':
+                    criterion.append(Q(resource_version__isnull=True, version__isnull=True))
+                elif value == 'repository':
+                    criterion.append(Q(version__isnull=False))
+                elif value == 'resource':
+                    criterion.append(Q(resource_version__isnull=False))
+            elif key == 'repo_version':
+                criterion.append(Q(version__iexact=value))
             elif key == 'cascade':
-                if is_boolean:
-                    criterion.append(Q(cascade__isnull=is_false))
+                if value in ['any', 'true']:
+                    criterion.append(Q(cascade__isnull=False))
+                elif value in ['false', 'none']:
+                    criterion.append(Q(cascade__isnull=True))
                 else:
                     criterion.append(Q(cascade__iexact=value) | Q(cascade__method__iexact=value))
-            elif key == 'intensional' and is_true:
-                criterion.append(Q(transform=TRANSFORM_TO_RESOURCE_VERSIONS))
-            elif key == TRANSFORM_TO_EXTENSIONAL and is_true:
-                criterion.append(Q(transform=TRANSFORM_TO_EXTENSIONAL))
-            elif key == 'include' and is_boolean:
-                criterion.append(Q(include=is_true))
-            elif key == 'exclude' and is_boolean:
-                criterion.append(Q(include=not is_true))
+            elif key == 'definition_type':
+                if value == 'intensional':
+                    criterion.append(Q(transform=TRANSFORM_TO_RESOURCE_VERSIONS))
+                elif value == TRANSFORM_TO_EXTENSIONAL:
+                    criterion.append(Q(transform=TRANSFORM_TO_EXTENSIONAL))
+            elif key == 'inclusion_type':
+                if value == 'include':
+                    criterion.append(Q(include=True))
+                elif value == 'exclude':
+                    criterion.append(Q(include=False))
 
         if criterion:
             for criteria in criterion:
