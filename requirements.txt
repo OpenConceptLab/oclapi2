@@ -49,3 +49,5 @@ elastic-transport==8.17
 litellm==1.77.0
 strawberry-graphql==0.285.0
 strawberry-graphql-django==0.67.0
+azure-core>=1.38.0 # not directly required, pinned by Snyk to avoid a vulnerability
+werkzeug>=3.1.5 # not directly required, pinned by Snyk to avoid a vulnerability
