@@ -1,3 +1,5 @@
+import time
+
 from django.conf import settings
 from django.db.models import F
 from django.http import Http404
@@ -799,7 +801,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
 
         return ConceptListSerializer
 
-    def filter_queryset(self, _=None):  # pylint: disable=too-many-locals
+    def filter_queryset(self, _=None):  # pylint: disable=too-many-locals,too-many-statements
         rows = self.request.data.get('rows')
         target_repo_url = self.request.data.get('target_repo_url')
         target_repo_params = self.request.data.get('target_repo')
@@ -831,14 +833,19 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         score_to_sort = 'search_rerank_score' if reranker else 'search_normalized_score'
         results = []
         for row in rows:
+            start_time = time.time()
             search = ConceptFuzzySearch.search(
                 row, target_repo_url, repo_params, include_retired,
                 is_semantic, num_candidates, k_nearest, map_config, faceted_criterion, locale_filter
             )
+            print(f"ES Search built in {time.time() - start_time} seconds")
+            start_time = time.time()
             search = search.params(track_total_hits=False, request_cache=True)
             es_search = CustomESSearch(search[start:end], ConceptDocument)
             name = row.get('name') or row.get('Name') if reranker else None
             es_search.to_queryset(False, True, False, name, encoder_model)
+            print(f"ES Search (including reranker) executed in {time.time() - start_time} seconds")
+            start_time = time.time()
             result = {'row': row, 'results': [], 'map_config': map_config, 'filter': filters}
             for concept in es_search.queryset:
                 concept._highlight = es_search.highlights.get(concept.id, {})  # pylint:disable=protected-access
@@ -852,9 +859,12 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
                     data = serializer(concept, context={'request': self.request}).data
                     data['search_meta']['search_normalized_score'] = normalized_score * 100
                     result['results'].append(data)
+            print(f"Concepts serialized in {time.time() - start_time} seconds")
+            start_time = time.time()
             if 'results' in result:
                 result['results'] = sorted(
                     result['results'], key=lambda res: get(res, f'search_meta.{score_to_sort}'), reverse=True)
+            print(f"Concepts sorted in {time.time() - start_time} seconds")
             results.append(result)
 
         return results

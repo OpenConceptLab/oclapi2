@@ -1,4 +1,5 @@
 import re
+import time
 import urllib
 
 from django.db.models import Case, When, IntegerField
@@ -211,8 +212,9 @@ class CustomESSearch:
         encoder = bool(txt)
         s, hits, total = self.__get_response(exact_count, encoder)
         max_score = hits.max_score or 1
-
+        start_time = time.time()
         hits = get_cross_encoder(txt, hits.hits, encoder_model) if encoder else hits.hits
+        print(f"Cross encoder time: {time.time() - start_time}s")
         for result in hits:
             _id = get(result, '_id')
             rerank_score = get(result, '_rerank_score')
