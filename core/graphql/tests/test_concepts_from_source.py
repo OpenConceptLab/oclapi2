@@ -342,9 +342,16 @@ class ConceptsFromSourceQueryTests(TestCase):
         self.assertEqual(details['__typename'], 'TextDatatypeDetails')
         self.assertEqual(details['textFormat'], 'paragraph')
 
-    @mock.patch('core.graphql.queries.concept_ids_from_es')
+    @mock.patch('core.graphql.queries.search_concepts_in_es')
     def test_fetch_concepts_by_query_uses_es_ordering(self, mock_es):
-        mock_es.return_value = ([self.concept2.id, self.concept1.id], 2)
+        class FakeHit:
+            def __init__(self, id, mnemonic):
+                self.meta = mock.Mock(id=id)
+                self.mnemonic = mnemonic
+            def to_dict(self):
+                return {'id': self.mnemonic, 'name': 'Mock Name'}
+
+        mock_es.return_value = ([FakeHit(self.concept2.id, '67890'), FakeHit(self.concept1.id, '12345')], 2)
         query = """
         query ConceptsByQuery($org: String, $source: String, $text: String!) {
           concepts(org: $org, source: $source, query: $text) {
@@ -373,7 +380,7 @@ class ConceptsFromSourceQueryTests(TestCase):
         self.assertEqual([item['conceptId'] for item in payload['results']],
                          [self.concept2.mnemonic, self.concept1.mnemonic])
 
-    @mock.patch('core.graphql.queries.concept_ids_from_es', return_value=None)
+    @mock.patch('core.graphql.queries.search_concepts_in_es', return_value=(None, 0))
     def test_fetch_concepts_by_query_falls_back_to_db(self, _mock_es):
         query = """
         query ConceptsByQuery($org: String, $source: String, $text: String!) {
@@ -394,7 +401,7 @@ class ConceptsFromSourceQueryTests(TestCase):
         self.assertEqual(payload['totalCount'], 1)
         self.assertEqual(payload['results'][0]['conceptId'], self.concept1.mnemonic)
 
-    @mock.patch('core.graphql.queries.concept_ids_from_es')
+    @mock.patch('core.graphql.queries.search_concepts_in_es')
     def test_fetch_concepts_by_query_recovers_when_es_returns_zero_hits(self, mock_es):
         mock_es.return_value = ([], 0)
         query = """
