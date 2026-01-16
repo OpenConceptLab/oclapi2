@@ -619,7 +619,7 @@ if ENV not in ['ci', 'demo'] and not NO_LM:
     LM_MODEL_NAME = 'all-MiniLM-L6-v2'
     LM = SentenceTransformer(LM_MODEL_NAME)
     if ENV not in ['qa']:
-        ENCODER = CrossEncoder("BAAI/bge-reranker-v2-m3", device="cpu")
+        ENCODER = CrossEncoder("BAAI/bge-reranker-v2-m3", device="cpu", max_length=128)
 
 ANALYTICS_API = os.environ.get('ANALYTICS_API', 'http://host.docker.internal:8002')
 if ANALYTICS_API:

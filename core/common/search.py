@@ -2,6 +2,7 @@ import re
 import time
 import urllib
 
+from cid.locals import get_cid
 from django.db.models import Case, When, IntegerField
 from elasticsearch_dsl import FacetedSearch, Q
 from pydash import compact, get
@@ -212,9 +213,10 @@ class CustomESSearch:
         encoder = bool(txt)
         s, hits, total = self.__get_response(exact_count, encoder)
         max_score = hits.max_score or 1
+        cid = get_cid()
         start_time = time.time()
         hits = get_cross_encoder(txt, hits.hits, encoder_model) if encoder else hits.hits
-        print(f"Cross encoder time: {time.time() - start_time}s")
+        print(f"[{cid}] Cross encoder time: {time.time() - start_time} seconds")
         for result in hits:
             _id = get(result, '_id')
             rerank_score = get(result, '_rerank_score')

@@ -962,7 +962,7 @@ ENCODERS = [
 
 def get_encoder(model):
     if model in ENCODERS:
-        return CrossEncoder(model, device="cpu")
+        return CrossEncoder(model, device="cpu", max_length=128)
     return settings.ENCODER
 
 

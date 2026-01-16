@@ -1,5 +1,6 @@
 import time
 
+from cid.locals import get_cid
 from django.conf import settings
 from django.db.models import F
 from django.http import Http404
@@ -831,6 +832,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         reranker = self.request.GET.get('reranker', None) in get_truthy_values()  # enables reranker
         reranker = reranker and self.request.user.is_mapper_cross_encoder_group
         score_to_sort = 'search_rerank_score' if reranker else 'search_normalized_score'
+        cid = get_cid()
         results = []
         for row in rows:
             start_time = time.time()
@@ -838,13 +840,13 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
                 row, target_repo_url, repo_params, include_retired,
                 is_semantic, num_candidates, k_nearest, map_config, faceted_criterion, locale_filter
             )
-            print(f"ES Search built in {time.time() - start_time} seconds")
+            print(f"[{cid}] ES Search built in {time.time() - start_time} seconds")
             start_time = time.time()
             search = search.params(track_total_hits=False, request_cache=True)
             es_search = CustomESSearch(search[start:end], ConceptDocument)
             name = row.get('name') or row.get('Name') if reranker else None
             es_search.to_queryset(False, True, False, name, encoder_model)
-            print(f"ES Search (including reranker) executed in {time.time() - start_time} seconds")
+            print(f"[{cid}] ES Search (including reranker) executed in {time.time() - start_time} seconds")
             start_time = time.time()
             result = {'row': row, 'results': [], 'map_config': map_config, 'filter': filters}
             for concept in es_search.queryset:
@@ -859,12 +861,12 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
                     data = serializer(concept, context={'request': self.request}).data
                     data['search_meta']['search_normalized_score'] = normalized_score * 100
                     result['results'].append(data)
-            print(f"Concepts serialized in {time.time() - start_time} seconds")
+            print(f"[{cid}] Concepts serialized in {time.time() - start_time} seconds")
             start_time = time.time()
             if 'results' in result:
                 result['results'] = sorted(
                     result['results'], key=lambda res: get(res, f'search_meta.{score_to_sort}'), reverse=True)
-            print(f"Concepts sorted in {time.time() - start_time} seconds")
+            print(f"[{cid}] Concepts sorted in {time.time() - start_time} seconds")
             results.append(result)
 
         return results
