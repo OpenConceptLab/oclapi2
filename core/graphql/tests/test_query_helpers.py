@@ -6,12 +6,12 @@ from unittest.mock import AsyncMock, patch
 from asgiref.sync import async_to_sync
 from django.contrib.auth.models import AnonymousUser
 from django.http import HttpResponse
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory, TestCase, TransactionTestCase
 from rest_framework.exceptions import AuthenticationFailed
 from strawberry.exceptions import GraphQLError
 from strawberry.django.views import AsyncGraphQLView
 
-from core.common.constants import HEAD
+from core.common.constants import ACCESS_TYPE_NONE, HEAD
 from core.concepts.tests.factories import (
     ConceptDescriptionFactory,
     ConceptFactory,
@@ -50,7 +50,7 @@ from core.graphql.tests.conftest import bootstrap_super_user, create_user_with_t
 from core.graphql.views import AuthenticatedGraphQLView
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
-from core.sources.tests.factories import OrganizationSourceFactory
+from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.sources.models import Source
 
 
@@ -236,8 +236,8 @@ class QueryHelperTests(TestCase):
             )
 
         base_qs = build_base_queryset(self.source)
-        mapping_prefetch = build_mapping_prefetch(self.source)
-        global_prefetch = build_global_mapping_prefetch()
+        mapping_prefetch = build_mapping_prefetch(self.source, self.audit_user)
+        global_prefetch = build_global_mapping_prefetch(self.audit_user)
         self.assertIsNotNone(mapping_prefetch)
         self.assertIsNotNone(global_prefetch)
 
@@ -364,7 +364,7 @@ class QueryHelperTests(TestCase):
         self.assertIsNone(format_datetime_for_api(None))
 
     def test_search_concepts_in_es_paths(self):
-        hits, total = search_concepts_in_es('   ', self.source, None)
+        hits, total = search_concepts_in_es('   ', self.source, None, user=self.audit_user)
         self.assertEqual(hits, [])
         self.assertEqual(total, 0)
 
@@ -406,17 +406,22 @@ class QueryHelperTests(TestCase):
             'core.graphql.queries.ConceptDocument.search',
             return_value=FakeSearch([self.concept1.id, self.concept2.id]),
         ):
-            hits, total = search_concepts_in_es('search text', self.source, {'start': 0, 'end': 1})
+            hits, total = search_concepts_in_es(
+                'search text',
+                self.source,
+                {'start': 0, 'end': 1},
+                user=self.audit_user,
+            )
         self.assertEqual([int(h.meta.id) for h in hits], [self.concept1.id])
         self.assertEqual(total, 2)
 
         with patch('core.graphql.queries.ConceptDocument.search', side_effect=Exception('boom')):
-            hits, total = search_concepts_in_es('text', self.source, None)
+            hits, total = search_concepts_in_es('text', self.source, None, user=self.audit_user)
             self.assertIsNone(hits)
 
     def test_concepts_queries_behavior(self):
         base_qs = build_base_queryset(self.source)
-        mapping_prefetch = build_mapping_prefetch(self.source)
+        mapping_prefetch = build_mapping_prefetch(self.source, self.audit_user)
         with self.assertRaises(GraphQLError):
             async_to_sync(concepts_for_ids)(base_qs, [], normalize_pagination(1, 1), mapping_prefetch)
 
@@ -466,7 +471,7 @@ class QueryHelperTests(TestCase):
             async_to_sync(Query().concepts)(info_invalid, query='test')
 
         info_valid = SimpleNamespace(
-            context=SimpleNamespace(auth_status='valid'),
+            context=SimpleNamespace(auth_status='valid', user=self.audit_user),
             selected_fields=[SimpleNamespace(name='results', selections=[SimpleNamespace(name='conceptId', selections=[])])]
         )
         with self.assertRaises(GraphQLError):
@@ -505,3 +510,164 @@ class QueryHelperTests(TestCase):
             result_global = async_to_sync(Query().concepts)(info_valid, query='UTIL')
         self.assertIsNone(result_global.org)
         self.assertIsNone(result_global.source)
+
+
+class GraphQLAccessControlTests(TransactionTestCase):
+    maxDiff = None
+
+    def setUp(self):
+        self._old_async_flag = os.environ.get('DJANGO_ALLOW_ASYNC_UNSAFE')
+        os.environ['DJANGO_ALLOW_ASYNC_UNSAFE'] = 'true'
+        self.super_user = bootstrap_super_user()
+        self.member_user, _ = create_user_with_token('graphql-member', super_user=self.super_user)
+        self.outsider_user, _ = create_user_with_token('graphql-outsider', super_user=self.super_user)
+        self.owner_user, _ = create_user_with_token('graphql-owner', super_user=self.super_user)
+
+        self.private_org = OrganizationFactory(
+            mnemonic='PRIVATE',
+            created_by=self.super_user,
+            updated_by=self.super_user,
+            public_access=ACCESS_TYPE_NONE,
+        )
+        self.private_org.members.add(self.member_user)
+
+        self.private_source = OrganizationSourceFactory(
+            organization=self.private_org,
+            mnemonic='PRIVSRC',
+            name='Private Source',
+            public_access=ACCESS_TYPE_NONE,
+            created_by=self.super_user,
+            updated_by=self.super_user,
+        )
+        self.private_source.organization = self.private_org
+        self.private_source.user = None
+        self.private_source.save(update_fields=['organization', 'user'])
+        self.private_concept = ConceptFactory(
+            parent=self.private_source,
+            mnemonic='SECRET-1',
+            created_by=self.super_user,
+            updated_by=self.super_user,
+        )
+        self.private_concept.public_access = ACCESS_TYPE_NONE
+        self.private_concept.save(update_fields=['public_access'])
+        ConceptNameFactory(concept=self.private_concept, name='Secret Concept', locale='en', locale_preferred=True)
+
+        self.public_org = OrganizationFactory(
+            mnemonic='PUBLIC',
+            created_by=self.super_user,
+            updated_by=self.super_user,
+        )
+        self.public_source = OrganizationSourceFactory(
+            organization=self.public_org,
+            mnemonic='PUBSRC',
+            name='Public Source',
+            created_by=self.super_user,
+            updated_by=self.super_user,
+        )
+        self.public_source.organization = self.public_org
+        self.public_source.user = None
+        self.public_source.save(update_fields=['organization', 'user'])
+        self.public_concept = ConceptFactory(
+            parent=self.public_source,
+            mnemonic='SECRET-2',
+            created_by=self.super_user,
+            updated_by=self.super_user,
+        )
+        ConceptNameFactory(concept=self.public_concept, name='Secret Public', locale='en', locale_preferred=True)
+
+        self.user_private_source = UserSourceFactory(
+            user=self.owner_user,
+            mnemonic='USERPRIV',
+            name='User Private',
+            public_access=ACCESS_TYPE_NONE,
+            created_by=self.super_user,
+            updated_by=self.super_user,
+        )
+        self.user_private_source.user = self.owner_user
+        self.user_private_source.organization = None
+        self.user_private_source.save(update_fields=['organization', 'user'])
+        self.user_private_concept = ConceptFactory(
+            parent=self.user_private_source,
+            mnemonic='USER-SECRET',
+            created_by=self.owner_user,
+            updated_by=self.owner_user,
+        )
+        self.user_private_concept.public_access = ACCESS_TYPE_NONE
+        self.user_private_concept.save(update_fields=['public_access'])
+
+    def tearDown(self):
+        if self._old_async_flag is None:
+            os.environ.pop('DJANGO_ALLOW_ASYNC_UNSAFE', None)
+        else:
+            os.environ['DJANGO_ALLOW_ASYNC_UNSAFE'] = self._old_async_flag
+
+    def _info_for(self, user, selections):
+        return SimpleNamespace(
+            context=SimpleNamespace(auth_status='valid', user=user),
+            selected_fields=[SimpleNamespace(name='results', selections=selections)],
+        )
+
+    def test_private_repo_requires_membership(self):
+        info = self._info_for(self.outsider_user, [SimpleNamespace(name='conceptId', selections=[])])
+        with self.assertRaises(GraphQLError):
+            async_to_sync(Query().concepts)(
+                info,
+                org=self.private_org.mnemonic,
+                source=self.private_source.mnemonic,
+                conceptIds=[self.private_concept.mnemonic],
+            )
+
+    def test_private_repo_allows_member(self):
+        info = self._info_for(self.member_user, [SimpleNamespace(name='conceptId', selections=[])])
+        result = async_to_sync(Query().concepts)(
+            info,
+            org=self.private_org.mnemonic,
+            source=self.private_source.mnemonic,
+            conceptIds=[self.private_concept.mnemonic],
+        )
+        self.assertEqual(result.results[0].concept_id, self.private_concept.mnemonic)
+
+    def test_private_repo_allows_owner(self):
+        info = self._info_for(self.owner_user, [SimpleNamespace(name='conceptId', selections=[])])
+        result = async_to_sync(Query().concepts)(
+            info,
+            owner=self.owner_user.username,
+            source=self.user_private_source.mnemonic,
+            conceptIds=[self.user_private_concept.mnemonic],
+        )
+        self.assertEqual(result.results[0].concept_id, self.user_private_concept.mnemonic)
+
+    def test_global_search_filters_private_for_outsider(self):
+        info = self._info_for(self.outsider_user, [SimpleNamespace(name='description', selections=[])])
+        result = async_to_sync(Query().concepts)(info, query='Secret')
+        self.assertEqual(
+            {item.concept_id for item in result.results},
+            {self.public_concept.mnemonic},
+        )
+
+    def test_global_search_includes_private_for_member(self):
+        info = self._info_for(self.member_user, [SimpleNamespace(name='description', selections=[])])
+        result = async_to_sync(Query().concepts)(info, query='Secret')
+        self.assertEqual(
+            {item.concept_id for item in result.results},
+            {self.public_concept.mnemonic, self.private_concept.mnemonic},
+        )
+
+    def test_es_optimization_runs_for_authenticated(self):
+        info = self._info_for(self.member_user, [SimpleNamespace(name='conceptId', selections=[])])
+
+        class FakeHit:
+            def __init__(self, id):
+                self.meta = SimpleNamespace(id=id)
+            def to_dict(self):
+                return {'id': 'SECRET-2', 'datatype': 'Text', 'extras': {}}
+
+        with patch(
+            'core.graphql.queries.search_concepts_in_es',
+            return_value=([FakeHit(self.public_concept.id)], 1),
+        ) as mock:
+            with self.settings(TEST_MODE=False):
+                result = async_to_sync(Query().concepts)(info, query='Secret')
+        mock.assert_called_once()
+        self.assertEqual(result.total_count, 1)
+        self.assertEqual(result.results[0].concept_id, 'SECRET-2')

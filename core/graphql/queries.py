@@ -13,7 +13,7 @@ from elasticsearch_dsl import Q as ES_Q
 from pydash import get
 from strawberry.exceptions import GraphQLError
 
-from core.common.constants import HEAD
+from core.common.constants import ACCESS_TYPE_NONE, HEAD
 from core.common.search import CustomESSearch
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
@@ -110,7 +110,7 @@ def build_base_queryset(source_version: Source = None):
     return Concept.objects.filter(is_active=True, retired=False, id=F('versioned_object_id'))
 
 
-def build_mapping_prefetch(source_version: Source) -> Prefetch:
+def build_mapping_prefetch(source_version: Source, user) -> Prefetch:
     # Optimizes database queries by pre-fetching related Mappings for a specific Source version
     mapping_qs = (
         Mapping.objects.filter(
@@ -124,10 +124,11 @@ def build_mapping_prefetch(source_version: Source) -> Prefetch:
         .distinct()
     )
 
+    mapping_qs = apply_public_access_filters(mapping_qs, user)
     return Prefetch('mappings_from', queryset=mapping_qs, to_attr='graphql_mappings')
 
 
-def build_global_mapping_prefetch() -> Prefetch:
+def build_global_mapping_prefetch(user) -> Prefetch:
     # Optimizes database queries by pre-fetching related Mappings globally across all sources
     mapping_qs = (
         Mapping.objects.filter(
@@ -140,7 +141,53 @@ def build_global_mapping_prefetch() -> Prefetch:
         .distinct()
     )
 
+    mapping_qs = apply_public_access_filters(mapping_qs, user)
     return Prefetch('mappings_from', queryset=mapping_qs, to_attr='graphql_mappings')
+
+
+def apply_public_access_filters(qs, user):
+    if get(user, 'is_anonymous'):
+        return qs.exclude(public_access=ACCESS_TYPE_NONE)
+    if get(user, 'is_staff'):
+        return qs
+    model = getattr(qs, 'model', None)
+    if model and hasattr(model, 'apply_user_criteria'):
+        return model.apply_user_criteria(qs, user)
+    private_qs = qs.filter(public_access=ACCESS_TYPE_NONE).filter(
+        Q(user_id=user.id) | Q(organization__members__id=user.id)
+    )
+    return qs.exclude(public_access=ACCESS_TYPE_NONE).union(private_qs)
+
+
+def ensure_repo_access(repo, user):
+    if not repo:
+        return
+    if repo.can_view_all_content(user):
+        return
+    raise GraphQLError('You do not have permission to access this repository.')
+
+
+def get_user_access_criteria(user):
+    if get(user, 'is_staff'):
+        return None
+    if get(user, 'is_anonymous'):
+        return ES_Q('term', public_can_view=True)
+    username = (get(user, 'username') or '').lower()
+    orgs = [org.lower() for org in user.organizations.values_list('mnemonic', flat=True)]
+    criteria = ES_Q('term', public_can_view=True)
+    if username:
+        criteria |= (
+            ES_Q('term', public_can_view=False)
+            & ES_Q('term', owner_type=USER_OBJECT_TYPE)
+            & ES_Q('term', owner=username)
+        )
+    if orgs:
+        criteria |= (
+            ES_Q('term', public_can_view=False)
+            & ES_Q('term', owner_type=ORG_OBJECT_TYPE)
+            & ES_Q('terms', owner=orgs)
+        )
+    return criteria
 
 
 def normalize_pagination(page: Optional[int], limit: Optional[int]) -> Optional[dict]:
@@ -454,6 +501,7 @@ def search_concepts_in_es(
         owner: Optional[str] = None,
         owner_type: Optional[str] = None,
         version_label: Optional[str] = None,
+        user=None,
 ):
     # Executes a search query against Elasticsearch to retrieve matching Concepts
     trimmed = query.strip()
@@ -476,6 +524,9 @@ def search_concepts_in_es(
                 search = search.filter('term', source_version=effective_version)
         else:
             search = search.filter('term', is_latest_version=True)
+            criteria = get_user_access_criteria(user)
+            if criteria is not None:
+                search = search.filter(criteria)
 
         exact_criterion, _ = get_exact_search_criterion(trimmed)
         wildcard_criterion, _ = get_wildcard_search_criterion(trimmed)
@@ -766,6 +817,8 @@ class Query:
         if auth_status == 'invalid':
             raise GraphQLError('Authentication failure')
 
+        user = get(info, 'context.user')
+
         concept_ids_param = conceptIds or []
         text_query = (query or '').strip()
 
@@ -785,12 +838,14 @@ class Query:
 
         if (org or owner) and source:
             source_version = await resolve_source_version(org, owner, source, version)
+            ensure_repo_access(source_version, user)
             # For search, we use a permissive queryset. For list, we use the strict HEAD-only queryset.
             if text_query:
                 base_qs = Concept.objects.filter(is_active=True, retired=False, parent_id=source_version.id)
             else:
                 base_qs = build_base_queryset(source_version)
-            mapping_prefetch = build_mapping_prefetch(source_version)
+            base_qs = apply_public_access_filters(base_qs, user)
+            mapping_prefetch = build_mapping_prefetch(source_version, user)
         else:
             # Global search across all repositories
             source_version = None
@@ -798,7 +853,8 @@ class Query:
                 base_qs = Concept.objects.filter(is_active=True, retired=False)
             else:
                 base_qs = build_base_queryset()
-            mapping_prefetch = build_global_mapping_prefetch()
+            base_qs = apply_public_access_filters(base_qs, user)
+            mapping_prefetch = build_global_mapping_prefetch(user)
 
         serialized = []
         total = 0
@@ -818,6 +874,7 @@ class Query:
                 owner=owner_value,
                 owner_type=owner_type,
                 version_label=version or HEAD if source_version else None,
+                user=user,
             )
             if es_hits is not None and (es_hits or total > 0):
                 serialized = [serialize_es_hit(hit) for hit in es_hits]
