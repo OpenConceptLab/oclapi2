@@ -399,7 +399,7 @@ class Reranker:
 
     @staticmethod
     def _order(hits, key_to_order):
-        return sorted(hits, key=key_to_order, reverse=True)
+        return sorted(hits, key=lambda hit: get(hit, key_to_order), reverse=True)
 
     def _get_encoder(self, model_name):
         if model_name and model_name != self.default_model:
