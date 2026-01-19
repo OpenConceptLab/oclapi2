@@ -615,8 +615,11 @@ MINIO_BUCKET_NAME = os.environ.get('MINIO_BUCKET_NAME', '')
 MINIO_SECURE = os.environ.get('MINIO_SECURE') == 'TRUE'
 
 NO_LM = os.environ.get('NO_LM') == 'TRUE'
-if ENV not in ['ci', 'demo'] and not NO_LM:
-    LM_MODEL_NAME = 'all-MiniLM-L6-v2'
+LM_MODEL_NAME = 'all-MiniLM-L6-v2'
+LM = None
+ENCODER = None
+
+if ENV and ENV not in ['ci', 'demo'] and not NO_LM:
     LM = SentenceTransformer(LM_MODEL_NAME)
     if ENV not in ['qa']:
         ENCODER = CrossEncoder("BAAI/bge-reranker-v2-m3", device="cpu", max_length=128)

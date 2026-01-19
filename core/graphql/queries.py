@@ -5,18 +5,22 @@ from typing import Iterable, List, Optional, Sequence
 
 import strawberry
 from asgiref.sync import sync_to_async
-from django.db.models import Case, IntegerField, Prefetch, Q, When
+from django.conf import settings
+from django.db.models import Case, F, IntegerField, Prefetch, Q, When
 from django.utils import timezone
 from elasticsearch import ConnectionError as ESConnectionError, TransportError
 from elasticsearch_dsl import Q as ES_Q
 from pydash import get
 from strawberry.exceptions import GraphQLError
 
-from core.common.constants import HEAD
+from core.common.constants import ACCESS_TYPE_NONE, HEAD
+from core.common.search import CustomESSearch
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
+from core.orgs.constants import ORG_OBJECT_TYPE
 from core.sources.models import Source
+from core.users.constants import USER_OBJECT_TYPE
 
 from .types import (
     CodedDatatypeDetails,
@@ -31,12 +35,16 @@ from .types import (
     ToSourceType,
 )
 
+# Logger instance for this module
 logger = logging.getLogger(__name__)
+
+# Maximum number of results retrievable from Elasticsearch in a single window
 ES_MAX_WINDOW = 10_000
 
 
 @strawberry.type
 class ConceptSearchResult:
+    # GraphQL output type structure for concept search/list results
     org: Optional[str] = strawberry.field(
         description="Organization mnemonic that owns the searched source."
     )
@@ -66,8 +74,19 @@ class ConceptSearchResult:
     )
 
 
-async def resolve_source_version(org: str, source: str, version: Optional[str]) -> Source:
-    filters = {'organization__mnemonic': org}
+async def resolve_source_version(
+    org: Optional[str],
+    owner: Optional[str],
+    source: str,
+    version: Optional[str],
+) -> Source:
+    # Resolves the specific version of a Source based on organization/owner and version identifier
+    if org:
+        filters = {'organization__mnemonic': org}
+    elif owner:
+        filters = {'user__username': owner}
+    else:
+        raise GraphQLError("Either org or owner must be provided to resolve a source version.")
     target_version = version or HEAD
     instance = await sync_to_async(Source.get_version)(source, target_version, filters)
 
@@ -75,18 +94,24 @@ async def resolve_source_version(org: str, source: str, version: Optional[str]) 
         instance = await sync_to_async(Source.find_latest_released_version_by)({**filters, 'mnemonic': source})
 
     if not instance:
+        owner_label = org or owner
+        owner_kind = "org" if org else "owner"
         raise GraphQLError(
-            f"Source '{source}' with version '{version or 'HEAD'}' was not found for org '{org}'."
+            f"Source '{source}' with version '{version or 'HEAD'}' was not found for {owner_kind} '{owner_label}'."
         )
 
     return instance
 
 
-def build_base_queryset(source_version: Source):
-    return source_version.get_concepts_queryset().filter(is_active=True, retired=False)
+def build_base_queryset(source_version: Source = None):
+    # Constructs the initial Django QuerySet for Concepts, filtering for active and non-retired records
+    if source_version:
+        return source_version.get_concepts_queryset().filter(is_active=True, retired=False)
+    return Concept.objects.filter(is_active=True, retired=False, id=F('versioned_object_id'))
 
 
-def build_mapping_prefetch(source_version: Source) -> Prefetch:
+def build_mapping_prefetch(source_version: Source, user) -> Prefetch:
+    # Optimizes database queries by pre-fetching related Mappings for a specific Source version
     mapping_qs = (
         Mapping.objects.filter(
             sources__id=source_version.id,
@@ -99,10 +124,12 @@ def build_mapping_prefetch(source_version: Source) -> Prefetch:
         .distinct()
     )
 
+    mapping_qs = apply_public_access_filters(mapping_qs, user)
     return Prefetch('mappings_from', queryset=mapping_qs, to_attr='graphql_mappings')
 
 
-def build_global_mapping_prefetch() -> Prefetch:
+def build_global_mapping_prefetch(user) -> Prefetch:
+    # Optimizes database queries by pre-fetching related Mappings globally across all sources
     mapping_qs = (
         Mapping.objects.filter(
             from_concept_id__isnull=False,
@@ -114,10 +141,57 @@ def build_global_mapping_prefetch() -> Prefetch:
         .distinct()
     )
 
+    mapping_qs = apply_public_access_filters(mapping_qs, user)
     return Prefetch('mappings_from', queryset=mapping_qs, to_attr='graphql_mappings')
 
 
+def apply_public_access_filters(qs, user):
+    if get(user, 'is_anonymous'):
+        return qs.exclude(public_access=ACCESS_TYPE_NONE)
+    if get(user, 'is_staff'):
+        return qs
+    model = getattr(qs, 'model', None)
+    if model and hasattr(model, 'apply_user_criteria'):
+        return model.apply_user_criteria(qs, user)
+    private_qs = qs.filter(public_access=ACCESS_TYPE_NONE).filter(
+        Q(user_id=user.id) | Q(organization__members__id=user.id)
+    )
+    return qs.exclude(public_access=ACCESS_TYPE_NONE).union(private_qs)
+
+
+def ensure_repo_access(repo, user):
+    if not repo:
+        return
+    if repo.can_view_all_content(user):
+        return
+    raise GraphQLError('You do not have permission to access this repository.')
+
+
+def get_user_access_criteria(user):
+    if get(user, 'is_staff'):
+        return None
+    if get(user, 'is_anonymous'):
+        return ES_Q('term', public_can_view=True)
+    username = (get(user, 'username') or '').lower()
+    orgs = [org.lower() for org in user.organizations.values_list('mnemonic', flat=True)]
+    criteria = ES_Q('term', public_can_view=True)
+    if username:
+        criteria |= (
+            ES_Q('term', public_can_view=False)
+            & ES_Q('term', owner_type=USER_OBJECT_TYPE)
+            & ES_Q('term', owner=username)
+        )
+    if orgs:
+        criteria |= (
+            ES_Q('term', public_can_view=False)
+            & ES_Q('term', owner_type=ORG_OBJECT_TYPE)
+            & ES_Q('terms', owner=orgs)
+        )
+    return criteria
+
+
 def normalize_pagination(page: Optional[int], limit: Optional[int]) -> Optional[dict]:
+    # Validates and calculates pagination parameters (start/end indices) from page and limit
     if page is None or limit is None:
         return None
     if page < 1 or limit < 1:
@@ -128,22 +202,26 @@ def normalize_pagination(page: Optional[int], limit: Optional[int]) -> Optional[
 
 
 def has_next(total: int, pagination: Optional[dict]) -> bool:
+    # Determines if there are more pages of results available based on total count and current pagination
     if not pagination:
         return False
     return total > pagination['end']
 
 
 def apply_slice(qs, pagination: Optional[dict]):
+    # Applies array slicing to a QuerySet or list based on pagination parameters
     if not pagination:
         return qs
     return qs[pagination['start']:pagination['end']]
 
 
 def with_concept_related(qs, mapping_prefetch: Prefetch):
+    # Eagerly loads related entities (created_by, updated_by, names, descriptions) to prevent N+1 queries
     return qs.select_related('created_by', 'updated_by').prefetch_related('names', 'descriptions', mapping_prefetch)
 
 
 def serialize_mappings(concept: Concept) -> List[MappingType]:
+    # Converts internal Mapping model instances into the GraphQL MappingType format
     mappings = getattr(concept, 'graphql_mappings', []) or []
     result: List[MappingType] = []
     for mapping in mappings:
@@ -162,6 +240,7 @@ def serialize_mappings(concept: Concept) -> List[MappingType]:
 
 
 def serialize_names(concept: Concept) -> List[ConceptNameType]:
+    # Converts internal ConceptName model instances into the GraphQL ConceptNameType format
     return [
         ConceptNameType(
             name=name.name,
@@ -174,6 +253,7 @@ def serialize_names(concept: Concept) -> List[ConceptNameType]:
 
 
 def resolve_description(concept: Concept) -> Optional[str]:
+    # Selects the most appropriate description for a concept based on locale preferences and hierarchy
     descriptions = list(concept.descriptions.all())
     if not descriptions:
         return None
@@ -203,6 +283,7 @@ def resolve_description(concept: Concept) -> Optional[str]:
 
 
 def resolve_is_set_flag(concept: Concept) -> Optional[bool]:
+    # Determines if a concept is a 'set' (collection) by inspecting its properties and extras
     value = getattr(concept, 'is_set', None)
     if value is None:
         extras = concept.extras or {}
@@ -220,6 +301,7 @@ def resolve_is_set_flag(concept: Concept) -> Optional[bool]:
 
 
 def _to_float(value) -> Optional[float]:
+    # Helper to safely convert values to float, handling None and empty strings
     if value in (None, ''):
         return None
     try:
@@ -229,6 +311,7 @@ def _to_float(value) -> Optional[float]:
 
 
 def _to_bool(value) -> Optional[bool]:
+    # Helper to safely convert values to boolean, handling string representations (e.g., 'true', 'yes')
     if value is None:
         return None
     if isinstance(value, bool):
@@ -245,6 +328,7 @@ def _to_bool(value) -> Optional[bool]:
 
 
 def resolve_numeric_datatype_details(concept: Concept) -> Optional[NumericDatatypeDetails]:
+    # Extracts and structures metadata specific to Numeric datatypes from concept extras
     extras = concept.extras or {}
     numeric_values = {
         'low_absolute': _to_float(extras.get('low_absolute')),
@@ -269,6 +353,7 @@ def resolve_numeric_datatype_details(concept: Concept) -> Optional[NumericDataty
 
 
 def resolve_coded_datatype_details(concept: Concept) -> Optional[CodedDatatypeDetails]:
+    # Extracts and structures metadata specific to Coded datatypes from concept extras
     extras = concept.extras or {}
     allow_multiple = extras.get('allow_multiple')
     if allow_multiple is None:
@@ -282,6 +367,7 @@ def resolve_coded_datatype_details(concept: Concept) -> Optional[CodedDatatypeDe
 
 
 def resolve_text_datatype_details(concept: Concept) -> Optional[TextDatatypeDetails]:
+    # Extracts and structures metadata specific to Text datatypes from concept extras
     extras = concept.extras or {}
     text_format = extras.get('text_format') or extras.get('textFormat')
     if not text_format:
@@ -290,6 +376,7 @@ def resolve_text_datatype_details(concept: Concept) -> Optional[TextDatatypeDeta
 
 
 def resolve_datatype_details(concept: Concept) -> Optional[DatatypeDetails]:
+    # Delegates extraction of datatype details based on the concept's datatype (Numeric, Coded, Text)
     datatype = (concept.datatype or '').strip().lower()
     if datatype == 'numeric':
         return resolve_numeric_datatype_details(concept)
@@ -301,6 +388,7 @@ def resolve_datatype_details(concept: Concept) -> Optional[DatatypeDetails]:
 
 
 def format_datetime_for_api(value) -> Optional[str]:
+    # Formats datetime objects to ISO 8601 string with UTC timezone for API responses
     if not value:
         return None
     if timezone.is_naive(value):
@@ -309,6 +397,7 @@ def format_datetime_for_api(value) -> Optional[str]:
 
 
 def build_datatype(concept: Concept) -> Optional[DatatypeType]:
+    # Constructs the GraphQL DatatypeType object for a concept
     if not concept.datatype:
         return None
     return DatatypeType(
@@ -318,6 +407,7 @@ def build_datatype(concept: Concept) -> Optional[DatatypeType]:
 
 
 def build_metadata(concept: Concept) -> MetadataType:
+    # Constructs the GraphQL MetadataType object containing audit and status information
     return MetadataType(
         is_set=resolve_is_set_flag(concept),
         is_retired=concept.retired,
@@ -329,6 +419,7 @@ def build_metadata(concept: Concept) -> MetadataType:
 
 
 def serialize_concepts(concepts: Iterable[Concept]) -> List[ConceptType]:
+    # Iterates over a list of Concept models and converts them into GraphQL ConceptType objects
     output: List[ConceptType] = []
     for concept in concepts:
         output.append(
@@ -348,31 +439,106 @@ def serialize_concepts(concepts: Iterable[Concept]) -> List[ConceptType]:
     return output
 
 
-def concept_ids_from_es(
+def get_exact_search_criterion(query: str) -> tuple[ES_Q, list[str]]:
+    # Builds Elasticsearch criteria for exact matches on specific fields
+    match_phrase_field_list = ConceptDocument.get_match_phrase_attrs()
+    match_word_fields_map = ConceptDocument.get_exact_match_attrs()
+    fields = match_phrase_field_list + list(match_word_fields_map.keys())
+    return (
+        CustomESSearch.get_exact_match_criterion(
+            CustomESSearch.get_search_string(query, lower=False, decode=False),
+            match_phrase_field_list,
+            match_word_fields_map,
+        ),
+        fields,
+    )
+
+
+def get_wildcard_search_criterion(query: str) -> tuple[ES_Q, list[str]]:
+    # Builds Elasticsearch criteria for wildcard/partial matches on specific fields
+    fields = ConceptDocument.get_wildcard_search_attrs()
+    return (
+        CustomESSearch.get_wildcard_match_criterion(
+            CustomESSearch.get_search_string(query, lower=True, decode=True),
+            fields,
+        ),
+        list(fields.keys()),
+    )
+
+
+def get_fuzzy_search_criterion(query: str) -> ES_Q:
+    # Builds Elasticsearch criteria for fuzzy matches to handle typos or variations
+    return CustomESSearch.get_fuzzy_match_criterion(
+        search_str=CustomESSearch.get_search_string(query, decode=False),
+        fields=ConceptDocument.get_fuzzy_search_attrs(),
+        boost_divide_by=10000,
+        expansions=2,
+    )
+
+
+def get_mandatory_words_criteria(query: str) -> ES_Q | None:
+    # Constructs criteria ensuring specific words must appear in the search results
+    criterion = None
+    for must_have in CustomESSearch.get_must_haves(query):
+        criteria, _ = get_wildcard_search_criterion(f"{must_have}*")
+        criterion = criteria if criterion is None else criterion & criteria
+    return criterion
+
+
+def get_mandatory_exclude_words_criteria(query: str) -> ES_Q | None:
+    # Constructs criteria ensuring specific words must NOT appear in the search results
+    criterion = None
+    for must_not_have in CustomESSearch.get_must_not_haves(query):
+        criteria, _ = get_wildcard_search_criterion(f"{must_not_have}*")
+        criterion = criteria if criterion is None else criterion | criteria
+    return criterion
+
+
+def search_concepts_in_es(
         query: str,
         source_version: Optional[Source],
         pagination: Optional[dict],
-) -> Optional[tuple[list[int], int]]:
+        owner: Optional[str] = None,
+        owner_type: Optional[str] = None,
+        version_label: Optional[str] = None,
+        user=None,
+):
+    # Executes a search query against Elasticsearch to retrieve matching Concepts
     trimmed = query.strip()
     if not trimmed:
         return [], 0
 
     try:
         search = ConceptDocument.search()
+        search = search.filter('term', retired=False)
         if source_version:
-            search = search.filter('term', source=source_version.mnemonic.lower())
-            if source_version.is_head:
+            search = search.filter('term', source=source_version.mnemonic)
+            if owner and owner_type:
+                search = search.filter('term', owner=owner).filter('term', owner_type=owner_type)
+
+            effective_version = version_label or HEAD
+            if effective_version == HEAD:
+                search = search.filter('term', source_version=HEAD)
                 search = search.filter('term', is_latest_version=True)
             else:
-                search = search.filter('term', source_version=source_version.version)
-        search = search.filter('term', retired=False)
+                search = search.filter('term', source_version=effective_version)
+        else:
+            search = search.filter('term', is_latest_version=True)
+            criteria = get_user_access_criteria(user)
+            if criteria is not None:
+                search = search.filter(criteria)
 
-        should_queries = [
-            ES_Q('match', id={'query': trimmed, 'boost': 6, 'operator': 'AND'}),
-            ES_Q('match_phrase_prefix', name={'query': trimmed, 'boost': 4}),
-            ES_Q('match', synonyms={'query': trimmed, 'boost': 2, 'operator': 'AND'}),
-        ]
-        search = search.query(ES_Q('bool', should=should_queries, minimum_should_match=1))
+        exact_criterion, _ = get_exact_search_criterion(trimmed)
+        wildcard_criterion, _ = get_wildcard_search_criterion(trimmed)
+        fuzzy_criterion = get_fuzzy_search_criterion(trimmed)
+        search = search.query(exact_criterion | wildcard_criterion | fuzzy_criterion)
+
+        must_have_criterion = get_mandatory_words_criteria(trimmed)
+        if must_have_criterion is not None:
+            search = search.filter(must_have_criterion)
+        must_not_criterion = get_mandatory_exclude_words_criteria(trimmed)
+        if must_not_criterion is not None:
+            search = search.filter(~must_not_criterion)
 
         if pagination:
             search = search[pagination['start']:pagination['end']]
@@ -383,43 +549,51 @@ def concept_ids_from_es(
         response = search.execute()
         total_meta = getattr(getattr(response.hits, 'total', None), 'value', None)
         total = int(total_meta) if total_meta is not None else len(response.hits)
-        concept_ids = [int(hit.meta.id) for hit in response]
-        return concept_ids, total
+        return response, total
     except (TransportError, ESConnectionError) as exc:  # pragma: no cover - depends on ES at runtime
         logger.warning('Falling back to DB search due to Elasticsearch error: %s', exc)
     except Exception as exc:  # pragma: no cover - unexpected ES error should not break API
         logger.warning('Unexpected Elasticsearch error, falling back to DB search: %s', exc)
-    return None
-
-
-def fallback_db_search(base_qs, query: str):
-    trimmed = query.strip()
-    if not trimmed:
-        return base_qs.none()
-    return base_qs.filter(
-        Q(mnemonic__icontains=trimmed) | Q(names__name__icontains=trimmed)
-    ).distinct()
+    return None, 0
 
 
 async def concepts_for_ids(
-        base_qs,
-        concept_ids: Sequence[str],
-        pagination: Optional[dict],
-        mapping_prefetch: Prefetch,
+    base_qs,
+    concept_ids: List[str],
+    pagination: Optional[dict],
+    mapping_prefetch: Prefetch,
 ) -> tuple[List[Concept], int]:
-    unique_ids = list(dict.fromkeys([cid for cid in concept_ids if cid]))
-    if not unique_ids:
-        raise GraphQLError('conceptIds must include at least one value when provided.')
+    # Retrieves specific Concepts by ID from the database, maintaining requested order and handling pagination
+    if not concept_ids:
+        raise GraphQLError('conceptIds cannot be empty.')
 
-    qs = base_qs.filter(mnemonic__in=unique_ids)
-    total = await sync_to_async(qs.count)()
+    seen = set()
+    ordered_ids = []
+    for cid in concept_ids:
+        if cid is None:
+            continue
+        cid_str = str(cid)
+        if cid_str in seen:
+            continue
+        seen.add(cid_str)
+        ordered_ids.append(cid_str)
+
+    if not ordered_ids:
+        return [], 0
+
+    qs = base_qs.filter(mnemonic__in=ordered_ids)
+
     ordering = Case(
-        *[When(mnemonic=value, then=pos) for pos, value in enumerate(unique_ids)],
+        *[When(mnemonic=cid, then=pos) for pos, cid in enumerate(ordered_ids)],
         output_field=IntegerField()
     )
-    qs = qs.order_by(ordering, 'mnemonic')
+    qs = qs.order_by(ordering)
+
+    total = await sync_to_async(qs.count)()
+
     qs = apply_slice(qs, pagination)
     qs = with_concept_related(qs, mapping_prefetch)
+
     return await sync_to_async(list)(qs), total
 
 
@@ -429,43 +603,205 @@ async def concepts_for_query(
         source_version: Source,
         pagination: Optional[dict],
         mapping_prefetch: Prefetch,
+        owner: Optional[str] = None,
+        owner_type: Optional[str] = None,
+        version_label: Optional[str] = None,
 ) -> tuple[List[Concept], int]:
-    es_result = await sync_to_async(concept_ids_from_es)(query, source_version, pagination)
-    if es_result is not None:
-        concept_ids, total = es_result
-        if not concept_ids:
-            if total == 0:
-                logger.info(
-                    'ES returned zero hits for query="%s" in source "%s" version "%s". Falling back to DB search.',
-                    query,
-                    get(source_version, 'mnemonic'),
-                    get(source_version, 'version'),
-                )
-            else:
-                return [], total
-        else:
-            ordering = Case(
-                *[When(id=pk, then=pos) for pos, pk in enumerate(concept_ids)],
-                output_field=IntegerField()
-            )
-            qs = base_qs.filter(id__in=concept_ids).order_by(ordering)
-            qs = with_concept_related(qs, mapping_prefetch)
-            return await sync_to_async(list)(qs), total
+    # Orchestrates the search process: gets IDs from Elasticsearch, then retrieves full objects from the database
+    if source_version is None and get(settings, 'TEST_MODE', False):
+        es_hits, total = None, 0
+    else:
+        es_hits, total = await sync_to_async(search_concepts_in_es)(
+            query,
+            source_version,
+            pagination,
+            owner=owner,
+            owner_type=owner_type,
+            version_label=version_label,
+        )
+    if es_hits:
+        concept_ids = [int(hit.meta.id) for hit in es_hits]
+        ordering = Case(
+            *[When(id=pk, then=pos) for pos, pk in enumerate(concept_ids)],
+            output_field=IntegerField()
+        )
+        qs = base_qs.filter(id__in=concept_ids).order_by(ordering)
+        qs = with_concept_related(qs, mapping_prefetch)
+        return await sync_to_async(list)(qs), total
 
-    qs = fallback_db_search(base_qs, query).order_by('mnemonic')
+    if es_hits is not None and total > 0:
+        return [], total
+
+    trimmed = (query or '').strip()
+    if not trimmed:
+        return [], 0
+
+    qs = base_qs
+    if source_version is None:
+        qs = qs.filter(id=F('versioned_object_id'))
+    qs = (
+        qs.filter(
+            Q(mnemonic__icontains=trimmed)
+            | Q(names__name__icontains=trimmed)
+            | Q(descriptions__name__icontains=trimmed)
+        )
+        .distinct()
+        .order_by('id')
+    )
     total = await sync_to_async(qs.count)()
     qs = apply_slice(qs, pagination)
     qs = with_concept_related(qs, mapping_prefetch)
     return await sync_to_async(list)(qs), total
 
 
+def is_optimization_safe(info) -> bool:
+    """
+    Determines if the GraphQL query can be satisfied purely by Elasticsearch data.
+    """
+    # Allowed fields in ConceptType that can be mapped from ES
+    allowed_fields = {
+        'id',
+        'externalId',
+        'conceptId',
+        'display',
+        'conceptClass',
+        'datatype',
+        'metadata',
+        '__typename',  # Always allowed
+    }
+    # Fields that are complex and need checking
+    complex_fields = {
+        'datatype': {'name', 'details', '__typename'},
+        'metadata': {'isSet', 'isRetired', 'createdBy', 'updatedBy', 'updatedAt', '__typename'},  # createdAt is missing in ES
+    }
+
+    def check_fields(selection_set, allowed_set, complex_map=None):
+        for field in selection_set:
+            if field.name not in allowed_set:
+                return False
+            
+            if complex_map and field.name in complex_map:
+                if field.selections:
+                    # check sub-selections
+                    if not check_fields(field.selections, complex_map[field.name]):
+                        return False
+        return True
+
+    # Find the 'results' field in the main selection
+    # Strawberry info.selected_fields contains SelectedField objects
+    results_field = None
+    for field in info.selected_fields:
+        if field.name == 'results':
+            results_field = field
+            break
+    
+    if not results_field:
+        # If results aren't asked for, optimization is safe (we can just return count)
+        return True
+    
+    # In Strawberry, selections are in .selections or .sub_fields depending on version/config
+    # but info.selected_fields[i].selections is standard for SelectedField
+    selections = getattr(results_field, 'selections', [])
+    if not selections:
+        return False
+
+    return check_fields(selections, allowed_fields, complex_fields)
+
+
+def serialize_es_hit(hit) -> ConceptType:
+    """
+    Maps an Elasticsearch Hit to a GraphQL ConceptType.
+    """
+    source = hit.to_dict()
+    
+    # Mapping logic
+    numeric_id = hit.meta.id  # DB PK
+    concept_id = source.get('id')  # Mnemonic
+    external_id = source.get('external_id')
+    
+    # Name/Display
+    # ES 'name' field might have hyphens replaced by underscores. 
+    # We use it as best effort for 'display'.
+    display = source.get('name')
+    
+    # Datatype
+    datatype_name = source.get('datatype')
+    datatype = None
+    if datatype_name:
+        # Reconstruct details from extras
+        extras = source.get('extras', {})
+        details = None
+        
+        lower_dt = datatype_name.lower()
+        if lower_dt == 'numeric':
+            details = NumericDatatypeDetails(
+                units=extras.get('units'),
+                low_absolute=_to_float(extras.get('low_absolute')),
+                high_absolute=_to_float(extras.get('hi_absolute')),
+                low_normal=_to_float(extras.get('low_normal')),
+                high_normal=_to_float(extras.get('hi_normal')),
+                low_critical=_to_float(extras.get('low_critical')),
+                high_critical=_to_float(extras.get('hi_critical')),
+            )
+        elif lower_dt == 'coded':
+             allow_multiple = extras.get('allow_multiple') or extras.get('allow_multiple_answers') or extras.get('allowMultipleAnswers')
+             if allow_multiple is not None:
+                 details = CodedDatatypeDetails(allow_multiple=_to_bool(allow_multiple))
+        elif lower_dt == 'text':
+             text_format = extras.get('text_format') or extras.get('textFormat')
+             if text_format:
+                 details = TextDatatypeDetails(text_format=text_format)
+                 
+        datatype = DatatypeType(name=datatype_name, details=details)
+
+    # Metadata
+    created_by = source.get('created_by')
+    updated_by = source.get('updated_by')
+    last_update = source.get('last_update') # ISO string from ES
+    retired = source.get('retired')
+    
+    # is_set check from extras
+    extras = source.get('extras', {})
+    is_set_val = extras.get('is_set')
+    is_set = None
+    if is_set_val is not None:
+         # simple bool conversion
+         if isinstance(is_set_val, bool): is_set = is_set_val
+         elif str(is_set_val).lower() in ('true', '1', 'yes'): is_set = True
+         else: is_set = False
+
+    metadata = MetadataType(
+        is_set=is_set,
+        is_retired=_to_bool(retired),
+        created_by=created_by,
+        created_at=None,
+        updated_by=updated_by,
+        updated_at=last_update, 
+    )
+
+    return ConceptType(
+        id=str(numeric_id),
+        external_id=external_id,
+        concept_id=concept_id,
+        display=display,
+        names=[], # Not hydrated
+        mappings=[], # Not hydrated
+        description=None, # Not hydrated
+        concept_class=source.get('concept_class'),
+        datatype=datatype,
+        metadata=metadata
+    )
+
+
 @strawberry.type
 class Query:
+    # Root GraphQL query class defining available entry points
     @strawberry.field(name="concepts")
     async def concepts(  # pylint: disable=too-many-arguments,too-many-locals
         self,
         info,  # pylint: disable=unused-argument
         org: Optional[str] = None,
+        owner: Optional[str] = None,
         source: Optional[str] = None,
         version: Optional[str] = None,
         conceptIds: Optional[List[str]] = None,
@@ -473,11 +809,15 @@ class Query:
         page: Optional[int] = None,
         limit: Optional[int] = None,
     ) -> ConceptSearchResult:
-        if info.context.auth_status == 'none':
+        # Main resolver for the 'concepts' query, handling authentication, parameter validation, and routing to search or lookup logic
+        auth_status = getattr(info.context, 'auth_status', 'valid')
+        if auth_status == 'none':
             raise GraphQLError('Authentication required')
 
-        if info.context.auth_status == 'invalid':
+        if auth_status == 'invalid':
             raise GraphQLError('Authentication failure')
+
+        user = get(info, 'context.user')
 
         concept_ids_param = conceptIds or []
         text_query = (query or '').strip()
@@ -487,28 +827,75 @@ class Query:
 
         pagination = normalize_pagination(page, limit)
 
-        if org and source:
-            source_version = await resolve_source_version(org, source, version)
-            base_qs = build_base_queryset(source_version)
-            mapping_prefetch = build_mapping_prefetch(source_version)
+        if org and owner:
+            raise GraphQLError('Provide either org or owner, not both.')
+
+        if source and not org and not owner:
+            raise GraphQLError('Either org or owner must be provided when source is specified.')
+
+        owner_value = org or owner
+        owner_type = ORG_OBJECT_TYPE if org else (USER_OBJECT_TYPE if owner else None)
+
+        if (org or owner) and source:
+            source_version = await resolve_source_version(org, owner, source, version)
+            ensure_repo_access(source_version, user)
+            # For search, we use a permissive queryset. For list, we use the strict HEAD-only queryset.
+            if text_query:
+                base_qs = Concept.objects.filter(is_active=True, retired=False, parent_id=source_version.id)
+            else:
+                base_qs = build_base_queryset(source_version)
+            base_qs = apply_public_access_filters(base_qs, user)
+            mapping_prefetch = build_mapping_prefetch(source_version, user)
         else:
             # Global search across all repositories
             source_version = None
-            base_qs = Concept.objects.filter(is_active=True, retired=False)
-            mapping_prefetch = build_global_mapping_prefetch()
+            if text_query:
+                base_qs = Concept.objects.filter(is_active=True, retired=False)
+            else:
+                base_qs = build_base_queryset()
+            base_qs = apply_public_access_filters(base_qs, user)
+            mapping_prefetch = build_global_mapping_prefetch(user)
 
-        if concept_ids_param:
-            concepts, total = await concepts_for_ids(base_qs, concept_ids_param, pagination, mapping_prefetch)
-        else:
-            concepts, total = await concepts_for_query(
-                base_qs,
+        serialized = []
+        total = 0
+        optimized = False
+
+        # Attempt ES-only optimization for text queries if requested fields are safe
+        if (
+            not concept_ids_param
+            and text_query
+            and is_optimization_safe(info)
+            and not get(settings, 'TEST_MODE', False)
+        ):
+            es_hits, total = await sync_to_async(search_concepts_in_es)(
                 text_query,
                 source_version,
                 pagination,
-                mapping_prefetch,
+                owner=owner_value,
+                owner_type=owner_type,
+                version_label=version or HEAD if source_version else None,
+                user=user,
             )
+            if es_hits is not None and (es_hits or total > 0):
+                serialized = [serialize_es_hit(hit) for hit in es_hits]
+                optimized = True
 
-        serialized = await sync_to_async(serialize_concepts)(concepts)
+        if not optimized:
+            if concept_ids_param:
+                concepts, total = await concepts_for_ids(base_qs, concept_ids_param, pagination, mapping_prefetch)
+            else:
+                concepts, total = await concepts_for_query(
+                    base_qs,
+                    text_query,
+                    source_version,
+                    pagination,
+                    mapping_prefetch,
+                    owner=owner_value,
+                    owner_type=owner_type,
+                    version_label=version or HEAD if source_version else None,
+                )
+            serialized = await sync_to_async(serialize_concepts)(concepts)
+
         return ConceptSearchResult(
             org=org,
             source=source,

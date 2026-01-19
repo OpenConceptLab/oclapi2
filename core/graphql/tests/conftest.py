@@ -1,24 +1,38 @@
 # Shared helpers for GraphQL tests (usable with Django's TestCase or pytest).
 from django.contrib.auth import get_user_model
+from django.core.management.color import no_style
+from django.db import connection
 from rest_framework.authtoken.models import Token
 
 from core.common.constants import SUPER_ADMIN_USER_ID
 from core.users.tests.factories import UserProfileFactory
 
 
+def _reset_model_sequence(model):
+    sql_list = connection.ops.sequence_reset_sql(no_style(), [model])
+    if not sql_list:
+        return
+    with connection.cursor() as cursor:
+        for sql in sql_list:
+            cursor.execute(sql)
+
+
 def bootstrap_super_user():
     """Ensure the SUPER_ADMIN user exists and return it."""
     user_model = get_user_model()
-    super_user, _ = user_model.objects.get_or_create(
-        id=SUPER_ADMIN_USER_ID,
-        defaults={
-            'username': 'superadmin',
-            'email': 'superadmin@example.com',
-            'password': 'unused',
-            'created_by_id': SUPER_ADMIN_USER_ID,
-            'updated_by_id': SUPER_ADMIN_USER_ID,
-        },
-    )
+    super_user = user_model.objects.filter(id=SUPER_ADMIN_USER_ID).first()
+    if not super_user:
+        super_user, _ = user_model.objects.get_or_create(
+            username='superadmin',
+            defaults={
+                'id': SUPER_ADMIN_USER_ID,
+                'email': 'superadmin@example.com',
+                'password': 'unused',
+                'created_by_id': SUPER_ADMIN_USER_ID,
+                'updated_by_id': SUPER_ADMIN_USER_ID,
+            },
+        )
+        _reset_model_sequence(user_model)
     return super_user
 
 
