@@ -85,6 +85,7 @@ urlpatterns = [
 
     path('collections/', include('core.collections.urls'), name='collections_urls'),
     path('concepts/$match/', concept_views.MetadataToConceptsListView.as_view(), name='$match-concepts'),
+    path('concepts/$rerank/', concept_views.RerankConceptsListView.as_view(), name='$rerank-concepts'),
     path('concepts/', concept_views.ConceptListView.as_view(), name='all_concepts_urls'),
     path('mappings/', mapping_views.MappingListView.as_view(), name='all_mappings_urls'),
     path('importers/', include('core.importers.urls'), name='importer_urls'),

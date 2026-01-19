@@ -3,12 +3,14 @@ import time
 import urllib
 
 from cid.locals import get_cid
+from django.conf import settings
 from django.db.models import Case, When, IntegerField
 from elasticsearch_dsl import FacetedSearch, Q
-from pydash import compact, get
+from pydash import compact, get, has, set_
+from sentence_transformers import CrossEncoder
 
 from core.common.constants import ES_REQUEST_TIMEOUT
-from core.common.utils import is_url_encoded_string, get_cross_encoder
+from core.common.utils import is_url_encoded_string
 
 
 class CustomESFacetedSearch(FacetedSearch):
@@ -215,7 +217,10 @@ class CustomESSearch:
         max_score = hits.max_score or 1
         cid = get_cid()
         start_time = time.time()
-        hits = get_cross_encoder(txt, hits.hits, encoder_model) if encoder else hits.hits
+        hits = Reranker(encoder_model).rerank(
+            txt=txt, hits=hits.hits, name_key='name', source_attr='_source', should_convert_source_to_dict=True,
+            order_results=False
+        ) if encoder else hits.hits
         print(f"[{cid}] Cross encoder time: {time.time() - start_time} seconds")
         for result in hits:
             _id = get(result, '_id')
@@ -329,3 +334,89 @@ class CustomESSearch:
             self.max_score = hits.max_score
             return s, hits, total
         return self._dsl_search, None, total
+
+
+class Reranker:
+    ENCODERS = [
+        # Best and Fastest overall lightweight medical reranker
+        # Size: ~110M
+        # Speed: similar to MiniLM CrossEncoder
+        # Training: includes clinical, medical, question-answering datasets
+        # Output: positive similarity scores (not raw logits!)
+        # 0.6B params
+        # https://huggingface.co/BAAI/bge-reranker-v2-m3
+        "BAAI/bge-reranker-v2-m3",
+
+        # Model: jinhybr/OA-MedBERT-cross-encoder or similar
+        # Size: ~110M
+        # Domain: PubMed abstracts, biomedical QA
+        # Type: binary classifier (logits)
+        # Not huggin face model -- ???
+        # "jinhybr/OA-MedBERT-cross-encoder",
+
+        # Model: microsoft/BioLinkBERT-base
+        # Type: CrossEncoder
+        # Size: ~120M
+        # Domain: UMLS, PubMed, MeSH, SNOMED (closest to OCL)
+        # Not huggin face model -- doesn't work with sentence_transformers
+        # "microsoft/BioLinkBERT-base",
+
+        # 22.7M params
+        # https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2
+        # doesn't work with logits, so not between 0-1
+        "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    ]
+    SCORE_KEY = '_rerank_score'
+
+    def __init__(self, model_name=None):
+        self.model_name = model_name
+        self.encoder = self._get_encoder(self.model_name)
+
+    def rerank(  # pylint: disable=too-many-arguments
+            self, hits, txt, name_key='name', source_attr=None, should_convert_source_to_dict=True,
+            score_key=None, order_results=True):
+        scores = self._predict_scores(hits, txt, name_key, source_attr, should_convert_source_to_dict)
+        return self._assign_score(hits, scores, score_key, order_results)
+
+    @property
+    def default_model(self):
+        return settings.ENCODER_MODEL_NAME
+
+    # private
+    def _predict_scores(self, hits, txt, name_key, source_attr, should_convert_source_to_dict):  # pylint: disable=too-many-arguments
+        docs = [get(self._get_source(hit, source_attr, should_convert_source_to_dict), name_key) for hit in hits]
+        return self.encoder.predict([(txt, d) for d in docs])
+
+    def _assign_score(self, hits, scores, score_key, order_results):
+        score_key = score_key or self.SCORE_KEY
+        key_to_set = score_key
+
+        for hit, score in zip(hits, scores):
+            key_to_set = f'search_meta.{score_key}' if has(hit, 'search_meta') else score_key
+            set_(hit, key_to_set, float(score))
+
+        return self._order(hits, key_to_set) if order_results and key_to_set else hits
+
+    @staticmethod
+    def _order(hits, key_to_order):
+        return sorted(hits, key=key_to_order, reverse=True)
+
+    def _get_encoder(self, model_name):
+        if model_name and model_name != self.default_model:
+            return self._load_encoder(model_name)
+        return self._load_default_encoder()
+
+    @staticmethod
+    def _load_encoder(model_name):
+        return CrossEncoder(model_name, device="cpu", max_length=128)
+
+    @staticmethod
+    def _load_default_encoder():
+        return settings.ENCODER
+
+    @staticmethod
+    def _get_source(data, source_attr, should_convert_source_to_dict):
+        source = get(data, source_attr) if source_attr else data
+        if should_convert_source_to_dict and source:
+            source = dict(source)
+        return source

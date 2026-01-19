@@ -21,7 +21,6 @@ from sentence_transformers import SentenceTransformer, CrossEncoder
 
 from core import __version__
 
-
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -615,11 +614,13 @@ MINIO_BUCKET_NAME = os.environ.get('MINIO_BUCKET_NAME', '')
 MINIO_SECURE = os.environ.get('MINIO_SECURE') == 'TRUE'
 
 NO_LM = os.environ.get('NO_LM') == 'TRUE'
+ENCODER_MODEL_NAME = None
 if ENV not in ['ci', 'demo'] and not NO_LM:
     LM_MODEL_NAME = 'all-MiniLM-L6-v2'
     LM = SentenceTransformer(LM_MODEL_NAME)
     if ENV not in ['qa']:
-        ENCODER = CrossEncoder("BAAI/bge-reranker-v2-m3", device="cpu", max_length=128)
+        ENCODER_MODEL_NAME = "BAAI/bge-reranker-v2-m3"
+        ENCODER = CrossEncoder(ENCODER_MODEL_NAME, device="cpu", max_length=128)
 
 ANALYTICS_API = os.environ.get('ANALYTICS_API', 'http://host.docker.internal:8002')
 if ANALYTICS_API:

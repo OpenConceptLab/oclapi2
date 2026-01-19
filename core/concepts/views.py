@@ -10,7 +10,7 @@ from rest_framework import status
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, ListCreateAPIView, RetrieveUpdateDestroyAPIView, \
     UpdateAPIView, ListAPIView
 from rest_framework.mixins import CreateModelMixin
-from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAdminUser, AllowAny
+from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAdminUser, AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -21,7 +21,7 @@ from core.common.constants import (
     HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE, LIMIT_PARAM, LIST_DEFAULT_LIMIT)
 from core.common.exceptions import Http400, Http403, Http409
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
-from core.common.search import CustomESSearch
+from core.common.search import CustomESSearch, Reranker
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, sort_asc_param, verbose_param,
     include_facets_header, updated_since_param, include_inverse_mappings_param, include_retired_param,
@@ -788,7 +788,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
     score_threshold = 0.9
     score_threshold_semantic_very_high = 0.9
     serializer_class = ConceptListSerializer
-    permission_classes = (IsAuthenticatedOrReadOnly,)
+    permission_classes = (IsAuthenticated,)
     es_fields = Concept.es_fields
 
     def get_throttles(self):
@@ -927,9 +927,44 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         return repo_params
 
     def post(self, request, **kwargs):  # pylint: disable=unused-argument
-        if self.request.user.is_mapper_waitlisted:
+        user = self.request.user
+        if user.is_mapper_waitlisted or not user.is_mapper_approved:
             return Response(
                 {'detail': 'You are currently in waitlist for $match operation.'},
                 status=status.HTTP_403_FORBIDDEN
             )
         return Response(self.filter_queryset())
+
+
+class RerankConceptsListView(BaseAPIView):
+    is_searchable = False
+    serializer_class = ConceptListSerializer
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, **kwargs):  # pylint: disable=unused-argument
+        user = self.request.user
+        if user.is_mapper_waitlisted or not user.is_mapper_approved:
+            return Response(
+                {'detail': 'You are currently in waitlist for this operation.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        rows = self.request.data.get('rows', [])
+        name_key = self.request.data.get('name_key', None) or 'display_name'
+        text = self.request.data.get('q', None)
+        score_key = self.request.data.get('score_key', None)
+
+        if not isinstance(rows, list) or not rows:
+            return Response(
+                {'detail': 'Invalid or missing "rows" in request body.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if not text:
+            return Response(
+                {'detail': 'Missing "q" in request body.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        return Response(
+            Reranker().rerank(hits=rows, name_key=name_key, txt=text, score_key=score_key, order_results=True)
+        )
