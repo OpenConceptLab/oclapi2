@@ -2,9 +2,10 @@ import json
 import os
 from unittest import mock
 
-from django.test import TestCase, override_settings
+from django.test import override_settings
 
 from core.common.constants import HEAD
+from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import (
     ConceptDescriptionFactory,
     ConceptFactory,
@@ -34,7 +35,7 @@ from core.users.tests.factories import UserProfileFactory
         and 'TokenAuthMiddleWare' not in mw  # type: ignore
     ],
 )
-class ConceptsFromSourceQueryTests(TestCase):
+class ConceptsFromSourceQueryTests(OCLTestCase):
     maxDiff = None
 
     def setUp(self):

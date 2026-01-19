@@ -2,12 +2,13 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from django.test import TestCase, override_settings
-from django.urls import reverse
 from django.contrib.auth.backends import ModelBackend
+from django.test import override_settings
+from django.urls import reverse
 from rest_framework.authentication import BaseAuthentication, get_authorization_header
 from rest_framework.exceptions import AuthenticationFailed
 
+from core.common.tests import OCLTestCase
 from core.graphql.tests.conftest import bootstrap_super_user, create_user_with_token
 
 
@@ -23,7 +24,7 @@ from core.graphql.tests.conftest import bootstrap_super_user, create_user_with_t
         and 'TokenAuthMiddleWare' not in mw  # type: ignore
     ],
 )
-class TestGraphQLCsrfBehavior(TestCase):
+class TestGraphQLCsrfBehavior(OCLTestCase):
     def setUp(self):
         self.url = reverse('graphql')
         self.super_user = bootstrap_super_user()

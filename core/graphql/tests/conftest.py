@@ -1,5 +1,6 @@
 # Shared helpers for GraphQL tests (usable with Django's TestCase or pytest).
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from rest_framework.authtoken.models import Token
 
 from core.common.constants import SUPER_ADMIN_USER_ID
@@ -19,6 +20,7 @@ def bootstrap_super_user():
             'updated_by_id': SUPER_ADMIN_USER_ID,
         },
     )
+    super_user.groups.add(Group.objects.get(name='graphql_api'))
     return super_user
 
 
@@ -31,6 +33,7 @@ def create_user_with_token(username: str, super_user=None, password='testpass'):
         created_by=super_user,
         updated_by=super_user,
     )
+    user.groups.add(Group.objects.get(name='graphql_api'))
     token, _ = Token.objects.get_or_create(user=user)
     return user, token
 
