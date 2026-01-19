@@ -50,3 +50,7 @@
   pk: 13
   fields:
     name: mapper_cross_encoder
+- model: "auth.group"
+  pk: 14
+  fields:
+    name: graphql_api
