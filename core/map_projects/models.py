@@ -38,6 +38,7 @@ class MapProject(BaseModel):
     candidates = models.JSONField(default=dict, null=True, blank=True)
     reranker = models.BooleanField(default=False)
     bridge_enabled = models.BooleanField(default=False)
+    scispacy_enabled = models.BooleanField(default=False)
 
     # Custom API
     match_api_url = models.TextField(null=True, blank=True)
