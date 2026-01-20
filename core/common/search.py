@@ -384,8 +384,24 @@ class Reranker:
 
     # private
     def _predict_scores(self, hits, txt, name_key, source_attr, should_convert_source_to_dict):  # pylint: disable=too-many-arguments
+        if not hits or not txt:
+            return []
+        scores_full = [float("-inf")] * len(hits)  # or 0.0
+        if not isinstance(txt, str) or not txt.strip():
+            return scores_full  # or 0.0
+
         docs = [get(self._get_source(hit, source_attr, should_convert_source_to_dict), name_key) for hit in hits]
-        return self.encoder.predict([(txt, d) for d in docs])
+        valid = []
+        for i, d in enumerate(docs):
+            if isinstance(d, str) and d.strip():
+                valid.append((i, d.strip()))
+        if not valid:
+            return scores_full
+        scores = self.encoder.predict([(txt, d) for _, d in valid])
+        for (i, _), s in zip(valid, scores):
+            scores_full[i] = float(s)
+
+        return scores_full
 
     def _assign_score(self, hits, scores, score_key, order_results):
         score_key = score_key or self.SCORE_KEY
