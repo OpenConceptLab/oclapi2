@@ -1164,7 +1164,7 @@ class CollectionVersionProcessingView(CollectionBaseView, ConceptContainerProces
 
 class CollectionVersionExportView(ConceptContainerExportMixin, CollectionVersionBaseView):
     entity = 'Collection'
-    permission_classes = (CanViewConceptDictionary,)
+    permission_classes = (CanViewConceptDictionary, IsAuthenticated)
     serializer_class = CollectionVersionExportSerializer
 
     def handle_export_version(self):

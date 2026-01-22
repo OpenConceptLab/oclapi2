@@ -16,6 +16,7 @@ from ocldev.checksum import Checksum
 from pydash import compact, get
 from rest_framework import status
 from rest_framework.mixins import ListModelMixin, CreateModelMixin
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
@@ -954,7 +955,7 @@ class SourceChildMixin(ChecksumModel):
 
 
 class ConceptContainerExportMixin:
-    permission_classes = (CanViewConceptDictionaryVersion, )
+    permission_classes = (CanViewConceptDictionaryVersion, IsAuthenticated)
 
     def get_object(self):
         queryset = self.get_queryset()
@@ -1033,7 +1034,7 @@ class ConceptContainerExportMixin:
 class ConceptContainerProcessingMixin:
     def get_permissions(self):
         if self.request.method == 'POST':
-            return [HasOwnership(), ]
+            return [HasOwnership(), IsAuthenticated()]
 
         return [CanViewConceptDictionary(), ]
 
