@@ -169,7 +169,15 @@ class AnalyticsMiddleware(BaseMiddleware):
     def __call__(self, request):
         start = time.monotonic()
         response = self.get_response(request)
-        if request.path.rstrip("/") not in ['', '/swagger', '/redoc', '/version', '/toggles']:
+        path = request.path
+
+        ignore_any_under_paths = ['/users/login/', '/users/logout/', '/users/signup/']
+        ignore_paths = [
+            '', '/swagger', '/redoc', '/version', '/toggles', '/users/oidc/code-exchange', '/favicon.ico',
+            '/users/api-token', '/users/password/reset', '/user',
+            *[p.rstrip('/') for p in ignore_any_under_paths]
+        ]
+        if path.rstrip("/") not in ignore_paths and not any(path.startswith(p) for p in ignore_any_under_paths):
             duration_ms = int((time.monotonic() - start) * 1000)
             AnalyticsEventEmitter(request, response, duration_ms).emit()
         return response
