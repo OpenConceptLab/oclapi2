@@ -82,13 +82,17 @@ class MapProjectListSerializer(serializers.ModelSerializer):
     created_at = DateTimeField(read_only=True)
     updated_at = DateTimeField(read_only=True)
     id = IntegerField(read_only=True)
+    owner = CharField(source='parent.mnemonic', read_only=True)
+    owner_type = CharField(source='parent.resource_type', read_only=True)
+    owner_url = CharField(source='parent.uri', read_only=True)
 
     class Meta:
         model = MapProject
         fields = [
             'id', 'name', 'input_file_name', 'created_by', 'updated_by', 'created_at', 'updated_at',
-            'url', 'is_active', 'file_url'
+            'url', 'is_active', 'file_url', 'owner_type', 'owner', 'owner_url'
         ]
+
 
 class MapProjectSerializer(serializers.ModelSerializer):
     created_by = CharField(source='created_by.username', read_only=True)
