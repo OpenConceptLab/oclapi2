@@ -89,8 +89,8 @@ class MapProjectListSerializer(serializers.ModelSerializer):
     class Meta:
         model = MapProject
         fields = [
-            'id', 'name', 'input_file_name', 'created_by', 'updated_by', 'created_at', 'updated_at',
-            'url', 'is_active', 'file_url', 'owner_type', 'owner', 'owner_url'
+            'id', 'name', 'created_by', 'updated_by', 'created_at', 'updated_at',
+            'url', 'is_active', 'owner_type', 'owner', 'owner_url'
         ]
 
 
