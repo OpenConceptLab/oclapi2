@@ -31,7 +31,7 @@ from core.common.swagger_parameters import (
     omit_if_exists_in_param, equivalency_map_types_param, search_from_latest_repo_header)
 from core.common.tasks import delete_concept, make_hierarchy
 from core.common.throttling import ThrottleUtil
-from core.common.utils import to_parent_uri_from_kwargs, generate_temp_version, get_truthy_values, to_int
+from core.common.utils import to_parent_uri_from_kwargs, generate_temp_version, get_truthy_values, to_int, drop_version
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
 from core.concepts.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT
@@ -833,6 +833,10 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         reranker = reranker and self.request.user.is_mapper_cross_encoder_group
         score_to_sort = 'search_rerank_score' if reranker else 'search_normalized_score'
         cid = get_cid()
+        is_bridge = (repo_params.get('owner', None) == 'CIEL' and repo_params.get('source', None) == 'CIEL' and
+                     filters.get('target_repo', None) and
+                     drop_version(filters.get('target_repo', None)) != '/orgs/CIEL/sources/CIEL/')
+        algorithm = ('ocl-ciel-bridge' if is_bridge else 'ocl-semantic') if is_semantic else 'ocl-search'
         results = []
         for row in rows:
             start_time = time.time()
@@ -860,6 +864,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
                     serializer = ConceptDetailSerializer if self.is_verbose() else ConceptMinimalSerializer
                     data = serializer(concept, context={'request': self.request}).data
                     data['search_meta']['search_normalized_score'] = normalized_score * 100
+                    data['search_meta']['algorithm'] = algorithm
                     result['results'].append(data)
             print(f"[{cid}] Concepts serialized in {time.time() - start_time} seconds")
             start_time = time.time()
