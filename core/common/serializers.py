@@ -178,13 +178,15 @@ class SearchResultSerializer(Serializer):  # pylint: disable=abstract-method
     search_highlight = SerializerMethodField()
 
     class Meta:
-        fields = ('search_score', 'search_confidence', 'search_highlight', 'match_type')
+        fields = ('search_score', 'search_confidence', 'search_highlight', 'match_type', 'algorithm')
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
 
         if not rep.get('match_type', None):
             rep.pop('match_type', None)
+        if not rep.get('algorithm', None):
+            rep.pop('algorithm', None)
 
         return rep
 
