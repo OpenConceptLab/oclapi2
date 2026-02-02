@@ -22,7 +22,7 @@ class MapProjectCreateUpdateSerializer(serializers.ModelSerializer):
             'created_by', 'updated_by', 'created_at', 'updated_at', 'url', 'is_active',
             'public_access', 'file', 'user_id', 'organization_id', 'description',
             'target_repo_url', 'matching_algorithm', 'include_retired', 'score_configuration',
-            'match_api_url', 'match_api_token', 'batch_size', 'filters', 'candidates', 'reranker',
+            'match_api_url', 'match_api_token', 'batch_size', 'filters', 'candidates',
             'bridge_enabled', 'scispacy_enabled'
         ]
 
@@ -36,7 +36,7 @@ class MapProjectCreateUpdateSerializer(serializers.ModelSerializer):
         if columns is not False:
             instance.columns = columns
         for attr in [
-            'name', 'description', 'extras', 'target_repo_url', 'matching_algorithm', 'include_retired', 'reranker',
+            'name', 'description', 'extras', 'target_repo_url', 'matching_algorithm', 'include_retired',
             'score_configuration', 'match_api_url', 'match_api_token', 'batch_size', 'filters', 'candidates',
             'bridge_enabled', 'scispacy_enabled'
         ]:
@@ -112,7 +112,7 @@ class MapProjectSerializer(serializers.ModelSerializer):
             'owner', 'owner_type', 'owner_url', 'public_access',
             'target_repo_url', 'matching_algorithm', 'summary', 'logs', 'include_retired',
             'score_configuration', 'match_api_url', 'match_api_token', 'batch_size', 'filters', 'candidates',
-            'reranker', 'bridge_enabled', 'scispacy_enabled'
+            'bridge_enabled', 'scispacy_enabled'
         ]
 
     def __init__(self, *args, **kwargs):
