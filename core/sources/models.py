@@ -1,6 +1,7 @@
 import uuid
 from collections import OrderedDict
 
+from celery_once import AlreadyQueued
 from dirtyfields import DirtyFieldsMixin
 from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
@@ -484,13 +485,19 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         user = user or self.updated_by
 
         task = Task.new(queue='indexing', user=user, name=index_source_mappings.__name__)
-        index_source_mappings.apply_async((self.id,), queue='indexing', persist_args=True, task_id=task.id)
+        try:
+            index_source_mappings.apply_async((self.id,), queue='indexing', persist_args=True, task_id=task.id)
+        except AlreadyQueued:
+            pass
 
     def index_concepts_async(self, user):
         user = user or self.updated_by
 
         task = Task.new(queue='indexing', user=user, name=index_source_concepts.__name__)
-        index_source_concepts.apply_async((self.id,), queue='indexing', persist_args=True, task_id=task.id)
+        try:
+            index_source_concepts.apply_async((self.id,), queue='indexing', persist_args=True, task_id=task.id)
+        except AlreadyQueued:
+            pass
 
     def get_export_task(self):
         return Task.find(name__iendswith='export_source', args__contains=[self.id])

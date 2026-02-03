@@ -6,6 +6,7 @@ import threading
 import traceback
 from xml.sax.saxutils import escape
 
+from cid.locals import get_cid
 from django.conf import settings
 from pydash import get
 
@@ -32,7 +33,7 @@ ERRBIT_XML = (
     '<request>'
     '<component>{component}</component>'
     '<url>{url}</url>'
-    '<cgi-data></cgi-data>'
+    '<cgi-data><var key="cid">{cid}</var></cgi-data>'
     '<params>'
     '<var key="foobar">verify</var>'
     '<var key="controller">application</var>'
@@ -159,7 +160,7 @@ class ErrbitClient:
         return ERRBIT_XML.format(
             api_key=self.api_key, version=settings.VERSION, class_name=etype.__class__.__name__, value=message_value,
             trace=_trace_str, component=self.component_name, environment=self.environment, user=str(get_current_user()),
-            url=escape(str(get_request_url()))
+            url=escape(str(get_request_url())), cid=get_cid()
         )
 
 

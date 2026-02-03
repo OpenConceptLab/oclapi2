@@ -1131,6 +1131,20 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         export_source_mock.apply_async.assert_called_once_with((self.source_v1.id,), queue='default', task_id=ANY)
 
     @patch('core.sources.views.export_source')
+    @patch('core.services.storages.cloud.aws.S3.has_path')
+    def test_post_401_version_anonymous(self, s3_has_path_mock, export_source_mock):
+        export_source_mock.__name__ = 'export_source'
+        s3_has_path_mock.return_value = False
+        response = self.client.post(
+            self.source_v1.uri + 'export/',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 401)
+        s3_has_path_mock.assert_not_called()
+        export_source_mock.apply_async.assert_not_called()
+
+    @patch('core.sources.views.export_source')
     @patch('core.services.storages.cloud.aws.S3.exists')
     def test_post_409_head(self, s3_exists_mock, export_source_mock):
         export_source_mock.__name__ = 'export_source'
@@ -1207,6 +1221,20 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 204)
         s3_remove_mock.assert_called_once_with('v1/export/path')
+
+    @patch('core.sources.models.Source.version_export_path', new_callable=PropertyMock)
+    @patch('core.sources.models.Source.has_export')
+    @patch('core.services.storages.cloud.aws.S3.remove')
+    def test_delete_401_anonymous(self, s3_remove_mock, has_export_mock, export_path_mock):
+        has_export_mock.return_value = True
+        export_path_mock.return_value = 'v1/export/path'
+        response = self.client.delete(
+            self.source_v1.uri + 'export/',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 401)
+        s3_remove_mock.assert_not_called()
 
 
 class ExportSourceTaskTest(OCLAPITestCase):

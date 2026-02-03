@@ -530,7 +530,7 @@ class SourceVersionProcessingView(SourceBaseView, ConceptContainerProcessingMixi
 
 class SourceVersionExportView(ConceptContainerExportMixin, SourceVersionBaseView):
     entity = 'Source'
-    permission_classes = (CanViewConceptDictionary,)
+    permission_classes = (CanViewConceptDictionary, IsAuthenticated)
     serializer_class = SourceVersionExportSerializer
 
     def handle_export_version(self):

@@ -6,18 +6,19 @@ from unittest.mock import AsyncMock, patch
 from asgiref.sync import async_to_sync
 from django.contrib.auth.models import AnonymousUser
 from django.http import HttpResponse
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory
 from rest_framework.exceptions import AuthenticationFailed
-from strawberry.exceptions import GraphQLError
 from strawberry.django.views import AsyncGraphQLView
+from strawberry.exceptions import GraphQLError
 
 from core.common.constants import HEAD
+from core.common.tests import OCLTestCase
+from core.concepts.models import Concept
 from core.concepts.tests.factories import (
     ConceptDescriptionFactory,
     ConceptFactory,
     ConceptNameFactory,
 )
-from core.concepts.models import Concept
 from core.graphql.queries import (
     Query,
     _to_bool,
@@ -50,11 +51,11 @@ from core.graphql.tests.conftest import bootstrap_super_user, create_user_with_t
 from core.graphql.views import AuthenticatedGraphQLView
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
-from core.sources.tests.factories import OrganizationSourceFactory
 from core.sources.models import Source
+from core.sources.tests.factories import OrganizationSourceFactory
 
 
-class AuthenticatedGraphQLViewTests(TestCase):
+class AuthenticatedGraphQLViewTests(OCLTestCase):
     def setUp(self):
         self.factory = RequestFactory()
         self.super_user = bootstrap_super_user()
@@ -127,7 +128,7 @@ class AuthenticatedGraphQLViewTests(TestCase):
             self.assertEqual(context.auth_status, 'valid')
 
 
-class QueryHelperTests(TestCase):
+class QueryHelperTests(OCLTestCase):
     maxDiff = None
 
     def setUp(self):

@@ -1134,7 +1134,7 @@ class Expansion(BaseResourceModel):
                       models.Index(name="expansion_mnemonic_like", fields=["mnemonic"], opclasses=["text_pattern_ops"])
                   ] + BaseResourceModel.Meta.indexes
 
-    parameters = models.JSONField(default=default_expansion_parameters)
+    parameters = models.JSONField(default=dict, null=True, blank=True)
     canonical_url = models.URLField(null=True, blank=True)
     text = models.TextField(null=True, blank=True)
     concepts = models.ManyToManyField('concepts.Concept', blank=True, related_name='expansion_set')
@@ -1506,8 +1506,8 @@ class Expansion(BaseResourceModel):
         return self.collection_version.uri + f'expansions/{self.mnemonic}/'
 
     def clean(self):
-        if not self.parameters:
-            self.parameters = default_expansion_parameters()
+        if not self.parameters or self.parameters == default_expansion_parameters():
+            self.parameters = {}
         if not self.unresolved_repo_versions:
             self.unresolved_repo_versions = []
 
@@ -1568,7 +1568,7 @@ class ExpansionParameters:
     DATE = 'date'
 
     def __init__(self, parameters, is_concept_queryset=True):
-        self.parameters = parameters
+        self.parameters = parameters or {}
         self.parameter_classes = {}
         self.before_filters = {}
         self.is_concept_queryset = is_concept_queryset

@@ -8,16 +8,17 @@ The authenticated user is passed in the GraphQL context as 'user'.
 """
 
 from asgiref.sync import sync_to_async
-from strawberry.django.views import AsyncGraphQLView
-from rest_framework.authentication import get_authorization_header
-from rest_framework.exceptions import AuthenticationFailed
-from rest_framework.request import Request
 from django.contrib.auth.models import AnonymousUser
 from django.middleware.csrf import CsrfViewMiddleware, get_token
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
+from rest_framework.authentication import get_authorization_header
+from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.request import Request
+from strawberry.django.views import AsyncGraphQLView
 
 from core.common.authentication import OCLAuthentication
+from core.users.constants import GRAPHQL_API_GROUP
 
 
 # https://strawberry.rocks/docs/breaking-changes/0.243.0 GraphQL Strawberry needs manually handling CSRF
@@ -60,17 +61,23 @@ class AuthenticatedGraphQLView(AsyncGraphQLView):
     async def get_context(self, request, response=None):
         context = await super().get_context(request, response)
 
+        def make_invalid(auth_status='invalid'):
+            context.user = AnonymousUser()
+            context.auth_status = auth_status
+
         # First, check if user is authenticated via session (e.g., browser login)
         if hasattr(request, 'user') and request.user.is_authenticated:
-            context.user = request.user
-            context.auth_status = 'valid'
+            if await sync_to_async(request.user.has_auth_group, thread_sensitive=True)(GRAPHQL_API_GROUP):
+                context.user = request.user
+                context.auth_status = 'valid'
+            else:
+                make_invalid()
             return context
 
         # Otherwise, check authorization header
         auth_header = get_authorization_header(request)
         if not auth_header:
-            context.user = AnonymousUser()
-            context.auth_status = 'none'
+            make_invalid('none')
             return context
 
         # Reuse DRF's combined Django/OIDC auth stack for GraphQL requests
@@ -80,16 +87,18 @@ class AuthenticatedGraphQLView(AsyncGraphQLView):
         try:
             auth_result = await sync_to_async(authenticator.authenticate)(drf_request)
         except AuthenticationFailed:
-            context.user = AnonymousUser()
-            context.auth_status = 'invalid'
+            make_invalid()
             return context
 
         if not auth_result:
-            context.user = AnonymousUser()
-            context.auth_status = 'invalid'
+            make_invalid()
             return context
 
         user, auth = auth_result
+        if not await sync_to_async(user.has_auth_group, thread_sensitive=True)(GRAPHQL_API_GROUP):
+            make_invalid()
+            return context
+
         context.user = user
         context.auth = auth
         context.auth_status = 'valid' if getattr(user, 'is_authenticated', False) else 'invalid'

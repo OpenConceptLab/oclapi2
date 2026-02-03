@@ -1,3 +1,6 @@
+import time
+
+from cid.locals import get_cid
 from django.conf import settings
 from django.db.models import F
 from django.http import Http404
@@ -7,7 +10,7 @@ from rest_framework import status
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, ListCreateAPIView, RetrieveUpdateDestroyAPIView, \
     UpdateAPIView, ListAPIView
 from rest_framework.mixins import CreateModelMixin
-from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAdminUser, AllowAny
+from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAdminUser, AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -18,7 +21,7 @@ from core.common.constants import (
     HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE, LIMIT_PARAM, LIST_DEFAULT_LIMIT)
 from core.common.exceptions import Http400, Http403, Http409
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
-from core.common.search import CustomESSearch
+from core.common.search import CustomESSearch, Reranker
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, sort_asc_param, verbose_param,
     include_facets_header, updated_since_param, include_inverse_mappings_param, include_retired_param,
@@ -28,7 +31,7 @@ from core.common.swagger_parameters import (
     omit_if_exists_in_param, equivalency_map_types_param, search_from_latest_repo_header)
 from core.common.tasks import delete_concept, make_hierarchy
 from core.common.throttling import ThrottleUtil
-from core.common.utils import to_parent_uri_from_kwargs, generate_temp_version, get_truthy_values, to_int
+from core.common.utils import to_parent_uri_from_kwargs, generate_temp_version, get_truthy_values, to_int, drop_version
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
 from core.concepts.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT
@@ -782,10 +785,8 @@ class ConceptsHierarchyAmendAdminView(APIView):  # pragma: no cover
 
 class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
     default_limit = 1
-    score_threshold = 0.9
-    score_threshold_semantic_very_high = 0.9
     serializer_class = ConceptListSerializer
-    permission_classes = (IsAuthenticatedOrReadOnly,)
+    permission_classes = (IsAuthenticated,)
     es_fields = Concept.es_fields
 
     def get_throttles(self):
@@ -799,7 +800,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
 
         return ConceptListSerializer
 
-    def filter_queryset(self, _=None):  # pylint: disable=too-many-locals
+    def filter_queryset(self, _=None):  # pylint: disable=too-many-locals,too-many-statements
         rows = self.request.data.get('rows')
         target_repo_url = self.request.data.get('target_repo_url')
         target_repo_params = self.request.data.get('target_repo')
@@ -820,75 +821,76 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         is_semantic = self.request.query_params.get('semantic', None) in get_truthy_values() and Toggle.get(
             'SEMANTIC_SEARCH_TOGGLE')
         best_match = self.request.query_params.get('bestMatch', None) in get_truthy_values()
-        score_threshold = self.score_threshold_semantic_very_high if is_semantic else self.score_threshold
         repo_params = self.get_repo_params(is_semantic, target_repo_params, target_repo_url)
         locale_filter = filters.pop('locale', None) if is_semantic else get(filters, 'locale', None)
         faceted_criterion = self.get_faceted_criterion(False, filters, minimum_should_match=1) if filters else None
         apply_for_name_locale = locale_filter and isinstance(locale_filter, str) and len(locale_filter.split(',')) == 1
         encoder_model = self.request.GET.get('encoder_model', None)
-        reranker = self.request.GET.get('reranker', None) in get_truthy_values()  # enables reranker
-        reranker = reranker and self.request.user.is_mapper_cross_encoder_group
-        score_to_sort = 'search_rerank_score' if reranker else 'search_normalized_score'
+        score_to_sort = 'search_rerank_score'
+        cid = get_cid()
+        is_bridge = (repo_params.get('owner', None) == 'CIEL' and repo_params.get('source', None) == 'CIEL' and
+                     filters.get('target_repo', None) and
+                     drop_version(filters.get('target_repo', None)) != '/orgs/CIEL/sources/CIEL/')
+        algorithm = ('ocl-ciel-bridge' if is_bridge else 'ocl-semantic') if is_semantic else 'ocl-search'
         results = []
         for row in rows:
+            start_time = time.time()
             search = ConceptFuzzySearch.search(
                 row, target_repo_url, repo_params, include_retired,
                 is_semantic, num_candidates, k_nearest, map_config, faceted_criterion, locale_filter
             )
+            print(f"[{cid}] ES Search built in {time.time() - start_time} seconds")
+            start_time = time.time()
             search = search.params(track_total_hits=False, request_cache=True)
             es_search = CustomESSearch(search[start:end], ConceptDocument)
-            name = row.get('name') or row.get('Name') if reranker else None
+            name = row.get('name') or row.get('Name')
             es_search.to_queryset(False, True, False, name, encoder_model)
+            print(f"[{cid}] ES Search (with reranker) executed in {time.time() - start_time} seconds")
+            start_time = time.time()
             result = {'row': row, 'results': [], 'map_config': map_config, 'filter': filters}
             for concept in es_search.queryset:
                 concept._highlight = es_search.highlights.get(concept.id, {})  # pylint:disable=protected-access
                 score_info = es_search.scores.get(concept.id, {})
                 normalized_score = get(score_info, 'normalized') or 0
-                self.apply_score(concept, is_semantic, score_info, score_threshold, reranker, limit)
+                self.apply_score(concept, is_semantic, score_info, limit)
                 if not best_match or concept._match_type in ['medium', 'high', 'very_high']:  # pylint:disable=protected-access
                     if apply_for_name_locale:
                         concept._requested_locale = locale_filter  # pylint:disable=protected-access
                     serializer = ConceptDetailSerializer if self.is_verbose() else ConceptMinimalSerializer
                     data = serializer(concept, context={'request': self.request}).data
                     data['search_meta']['search_normalized_score'] = normalized_score * 100
+                    data['search_meta']['algorithm'] = algorithm
                     result['results'].append(data)
+            print(f"[{cid}] Concepts serialized in {time.time() - start_time} seconds")
+            start_time = time.time()
             if 'results' in result:
                 result['results'] = sorted(
                     result['results'], key=lambda res: get(res, f'search_meta.{score_to_sort}'), reverse=True)
+            print(f"[{cid}] Concepts sorted in {time.time() - start_time} seconds")
             results.append(result)
 
         return results
 
     @staticmethod
-    def apply_score(concept, is_semantic, scores, score_threshold, reranker, limit):  # pylint: disable=too-many-arguments,too-many-branches
+    def apply_score(concept, is_semantic, scores, limit):
         score = get(scores, 'raw') or 0
         normalized_score = get(scores, 'normalized') or 0
         rerank_score = get(scores, 'rerank') or 0
 
         concept._score = score  # pylint:disable=protected-access
         concept._normalized_score = normalized_score  # pylint:disable=protected-access
-        if reranker:
-            concept._rerank_score = rerank_score  # pylint:disable=protected-access
+        concept._rerank_score = rerank_score  # pylint:disable=protected-access
         highlight = concept._highlight  # pylint:disable=protected-access
 
         match_type = 'low'
         if limit > 1:
             if is_semantic:
-                if reranker:
-                    if normalized_score >= 0.9:
-                        match_type = 'very_high'
-                    elif normalized_score >= 0.65:
-                        match_type = 'high'
-                    elif normalized_score >= 0.5:
-                        match_type = 'medium'
-                else:
-                    score_to_check = normalized_score if normalized_score is not None else score
-                    if highlight.get('name', None) or score_to_check >= score_threshold:
-                        match_type = 'very_high'
-                    elif highlight.get('synonyms', None):
-                        match_type = 'high'
-                    elif highlight:
-                        match_type = 'medium'
+                if normalized_score >= 0.9:
+                    match_type = 'very_high'
+                elif normalized_score >= 0.65:
+                    match_type = 'high'
+                elif normalized_score >= 0.5:
+                    match_type = 'medium'
             else:
                 if highlight.get('name', None):
                     match_type = 'very_high'
@@ -915,9 +917,44 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         return repo_params
 
     def post(self, request, **kwargs):  # pylint: disable=unused-argument
-        if self.request.user.is_mapper_waitlisted:
+        user = self.request.user
+        if user.is_mapper_waitlisted or not user.is_mapper_approved:
             return Response(
                 {'detail': 'You are currently in waitlist for $match operation.'},
                 status=status.HTTP_403_FORBIDDEN
             )
         return Response(self.filter_queryset())
+
+
+class RerankConceptsListView(BaseAPIView):
+    is_searchable = False
+    serializer_class = ConceptListSerializer
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, **kwargs):  # pylint: disable=unused-argument
+        user = self.request.user
+        if user.is_mapper_waitlisted or not user.is_mapper_approved:
+            return Response(
+                {'detail': 'You are currently in waitlist for this operation.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        rows = self.request.data.get('rows', [])
+        name_key = self.request.data.get('name_key', None) or 'display_name'
+        text = self.request.data.get('q', None)
+        score_key = self.request.data.get('score_key', None)
+
+        if not isinstance(rows, list) or not rows:
+            return Response(
+                {'detail': 'Invalid or missing "rows" in request body.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if not text:
+            return Response(
+                {'detail': 'Missing "q" in request body.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        return Response(
+            Reranker().rerank(hits=rows, name_key=name_key, txt=text, score_key=score_key, order_results=True)
+        )
