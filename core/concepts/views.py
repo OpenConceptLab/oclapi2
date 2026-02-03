@@ -31,7 +31,8 @@ from core.common.swagger_parameters import (
     omit_if_exists_in_param, equivalency_map_types_param, search_from_latest_repo_header)
 from core.common.tasks import delete_concept, make_hierarchy
 from core.common.throttling import ThrottleUtil
-from core.common.utils import to_parent_uri_from_kwargs, generate_temp_version, get_truthy_values, to_int, drop_version
+from core.common.utils import to_parent_uri_from_kwargs, generate_temp_version, get_truthy_values, to_int, drop_version, \
+    get_falsy_values
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
 from core.concepts.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT
@@ -829,8 +830,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         faceted_criterion = self.get_faceted_criterion(False, filters, minimum_should_match=1) if filters else None
         apply_for_name_locale = locale_filter and isinstance(locale_filter, str) and len(locale_filter.split(',')) == 1
         encoder_model = self.request.GET.get('encoder_model', None)
-        reranker = self.request.GET.get('reranker', None) in get_truthy_values()  # enables reranker
-        reranker = reranker and self.request.user.is_mapper_cross_encoder_group
+        reranker = self.request.GET.get('reranker', True) not in get_falsy_values()
         score_to_sort = 'search_rerank_score' if reranker else 'search_normalized_score'
         cid = get_cid()
         is_bridge = (repo_params.get('owner', None) == 'CIEL' and repo_params.get('source', None) == 'CIEL' and
