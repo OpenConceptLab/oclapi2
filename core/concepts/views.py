@@ -31,7 +31,8 @@ from core.common.swagger_parameters import (
     omit_if_exists_in_param, equivalency_map_types_param, search_from_latest_repo_header)
 from core.common.tasks import delete_concept, make_hierarchy
 from core.common.throttling import ThrottleUtil
-from core.common.utils import to_parent_uri_from_kwargs, generate_temp_version, get_truthy_values, to_int, drop_version
+from core.common.utils import to_parent_uri_from_kwargs, generate_temp_version, get_truthy_values, to_int, drop_version, \
+    get_falsy_values
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
 from core.concepts.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT
@@ -785,6 +786,8 @@ class ConceptsHierarchyAmendAdminView(APIView):  # pragma: no cover
 
 class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
     default_limit = 1
+    score_threshold = 0.9
+    score_threshold_semantic_very_high = 0.9
     serializer_class = ConceptListSerializer
     permission_classes = (IsAuthenticated,)
     es_fields = Concept.es_fields
@@ -821,12 +824,14 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         is_semantic = self.request.query_params.get('semantic', None) in get_truthy_values() and Toggle.get(
             'SEMANTIC_SEARCH_TOGGLE')
         best_match = self.request.query_params.get('bestMatch', None) in get_truthy_values()
+        score_threshold = self.score_threshold_semantic_very_high if is_semantic else self.score_threshold
         repo_params = self.get_repo_params(is_semantic, target_repo_params, target_repo_url)
         locale_filter = filters.pop('locale', None) if is_semantic else get(filters, 'locale', None)
         faceted_criterion = self.get_faceted_criterion(False, filters, minimum_should_match=1) if filters else None
         apply_for_name_locale = locale_filter and isinstance(locale_filter, str) and len(locale_filter.split(',')) == 1
         encoder_model = self.request.GET.get('encoder_model', None)
-        score_to_sort = 'search_rerank_score'
+        reranker = self.request.GET.get('reranker', True) not in get_falsy_values()
+        score_to_sort = 'search_rerank_score' if reranker else 'search_normalized_score'
         cid = get_cid()
         is_bridge = (repo_params.get('owner', None) == 'CIEL' and repo_params.get('source', None) == 'CIEL' and
                      filters.get('target_repo', None) and
@@ -843,16 +848,16 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
             start_time = time.time()
             search = search.params(track_total_hits=False, request_cache=True)
             es_search = CustomESSearch(search[start:end], ConceptDocument)
-            name = row.get('name') or row.get('Name')
+            name = row.get('name') or row.get('Name') if reranker else None
             es_search.to_queryset(False, True, False, name, encoder_model)
-            print(f"[{cid}] ES Search (with reranker) executed in {time.time() - start_time} seconds")
+            print(f"[{cid}] ES Search (with reranker={bool(reranker)}) executed in {time.time() - start_time} seconds")
             start_time = time.time()
             result = {'row': row, 'results': [], 'map_config': map_config, 'filter': filters}
             for concept in es_search.queryset:
                 concept._highlight = es_search.highlights.get(concept.id, {})  # pylint:disable=protected-access
                 score_info = es_search.scores.get(concept.id, {})
                 normalized_score = get(score_info, 'normalized') or 0
-                self.apply_score(concept, is_semantic, score_info, limit)
+                self.apply_score(concept, is_semantic, score_info, score_threshold, reranker, limit)
                 if not best_match or concept._match_type in ['medium', 'high', 'very_high']:  # pylint:disable=protected-access
                     if apply_for_name_locale:
                         concept._requested_locale = locale_filter  # pylint:disable=protected-access
@@ -872,25 +877,35 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         return results
 
     @staticmethod
-    def apply_score(concept, is_semantic, scores, limit):
+    def apply_score(concept, is_semantic, scores, score_threshold, reranker, limit):  # pylint: disable=too-many-arguments,too-many-branches
         score = get(scores, 'raw') or 0
         normalized_score = get(scores, 'normalized') or 0
         rerank_score = get(scores, 'rerank') or 0
 
         concept._score = score  # pylint:disable=protected-access
         concept._normalized_score = normalized_score  # pylint:disable=protected-access
-        concept._rerank_score = rerank_score  # pylint:disable=protected-access
+        if reranker:
+            concept._rerank_score = rerank_score  # pylint:disable=protected-access
         highlight = concept._highlight  # pylint:disable=protected-access
 
         match_type = 'low'
         if limit > 1:
             if is_semantic:
-                if normalized_score >= 0.9:
-                    match_type = 'very_high'
-                elif normalized_score >= 0.65:
-                    match_type = 'high'
-                elif normalized_score >= 0.5:
-                    match_type = 'medium'
+                if reranker:
+                    if normalized_score >= 0.9:
+                        match_type = 'very_high'
+                    elif normalized_score >= 0.65:
+                        match_type = 'high'
+                    elif normalized_score >= 0.5:
+                        match_type = 'medium'
+                else:
+                    score_to_check = normalized_score if normalized_score is not None else score
+                    if highlight.get('name', None) or score_to_check >= score_threshold:
+                        match_type = 'very_high'
+                    elif highlight.get('synonyms', None):
+                        match_type = 'high'
+                    elif highlight:
+                        match_type = 'medium'
             else:
                 if highlight.get('name', None):
                     match_type = 'very_high'
