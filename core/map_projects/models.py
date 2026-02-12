@@ -36,6 +36,7 @@ class MapProject(BaseModel):
     score_configuration = models.JSONField(default=default_score_configuration, null=True, blank=True)
     filters = models.JSONField(default=dict, null=True, blank=True)
     candidates = models.JSONField(default=dict, null=True, blank=True)
+    lookup_config = models.JSONField(default=dict, null=True, blank=True)
 
     class Meta:
         db_table = 'map_projects'
@@ -166,6 +167,7 @@ class MapProject(BaseModel):
         cls.format_json(new_data, 'filters')
         cls.format_json(new_data, 'candidates')
         cls.format_json(new_data, 'algorithms')
+        cls.format_json(new_data, 'lookup_config')
 
         if parent_resource:
             new_data[parent_resource.resource_type.lower() + '_id'] = parent_resource.id
