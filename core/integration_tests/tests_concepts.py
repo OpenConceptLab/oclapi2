@@ -12,6 +12,7 @@ from core.common.tests import OCLAPITestCase
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory, ConceptDescriptionFactory
+from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
@@ -142,6 +143,190 @@ class ConceptRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, {'__all__': ['Concept ID must be unique within a source.']})
+
+    def test_post_201_with_mappings(self):
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/"
+        random_concept = ConceptFactory()
+
+        mappings = [
+            # 1 to target concept that doesnt exists with __parent_concept as substitution
+            {
+                'from_concept': '__parent_concept',
+                'to_concept_url': '/orgs/random-org/sources/random-source/concepts/target-concept/',
+                'map_type': 'Same As'
+            },
+            # 2 to target concept that doesnt exists with parent concept as direct url
+            {
+                'from_concept_url': concepts_url + 'c1/',
+                'to_concept_url': '/orgs/random-org/sources/random-source/concepts/target-concept/',
+                'map_type': 'BROADER-THAN'
+            },
+            # 3 to target concept that exists
+            {
+                'from_concept_url': concepts_url + 'c1/',
+                'to_concept_url': random_concept.url,
+                'map_type': 'NARROWER-THAN'
+            },
+        ]
+
+        response = self.client.post(
+            concepts_url,
+            {**self.concept_payload, 'mappings': mappings},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertListEqual(
+            sorted(list(response.data.keys())),
+            sorted([
+                'uuid',
+                'id',
+                'external_id',
+                'concept_class',
+                'datatype',
+                'url',
+                'retired',
+                'source',
+                'owner',
+                'owner_type',
+                'owner_url',
+                'display_name',
+                'display_locale',
+                'names',
+                'descriptions',
+                'created_on',
+                'updated_on',
+                'versions_url',
+                'version',
+                'extras',
+                'type',
+                'update_comment',
+                'version_url',
+                'updated_by',
+                'created_by',
+                'public_can_view',
+                'checksums',
+                'property',
+                'versioned_object_id',
+                'latest_source_version'
+            ])
+        )
+
+        concept = Concept.objects.filter(mnemonic='c1').first().versioned_object
+        latest_version = concept.get_latest_version()
+
+        self.assertFalse(latest_version.is_versioned_object)
+        self.assertTrue(latest_version.is_latest_version)
+
+        self.assertTrue(concept.is_versioned_object)
+        self.assertFalse(concept.is_latest_version)
+
+        self.assertEqual(concept.versions.count(), 1)
+        self.assertEqual(response.data['uuid'], str(concept.id))
+        self.assertEqual(response.data['datatype'], 'Coded')
+        self.assertEqual(response.data['concept_class'], 'Procedure')
+        self.assertEqual(response.data['url'], concept.uri)
+        self.assertFalse(response.data['retired'])
+        self.assertEqual(response.data['source'], self.source.mnemonic)
+        self.assertEqual(response.data['owner'], self.organization.mnemonic)
+        self.assertEqual(response.data['owner_type'], "Organization")
+        self.assertEqual(response.data['owner_url'], self.organization.uri)
+        self.assertEqual(response.data['display_name'], 'c1 name')
+        self.assertEqual(response.data['display_locale'], 'en')
+        self.assertEqual(response.data['versions_url'], concept.uri + 'versions/')
+        self.assertEqual(response.data['version'], str(concept.id))
+        self.assertEqual(response.data['extras'], {'foo': 'bar'})
+        self.assertEqual(response.data['type'], 'Concept')
+        self.assertEqual(response.data['version_url'], latest_version.uri)
+        self.assertEqual(latest_version.get_bidirectional_mappings().count(), 3)
+        self.assertEqual(concept.get_bidirectional_mappings().count(), 3)
+        self.assertEqual(concept.parent.get_mappings_queryset().count(), 3)
+        self.assertEqual(self.source.get_mappings_queryset().count(), 3)
+
+    def test_post_400_with_mappings_everything_or_nothing(self):
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/"
+        random_concept = ConceptFactory()
+
+        mappings = [
+            # 1 to target concept that doesnt exists with __parent_concept as substitution
+            {
+                'from_concept': '__parent_concept',
+                'to_concept_url': '/orgs/random-org/sources/random-source/concepts/target-concept/',
+                'map_type': 'Same As'
+            },
+            # 2 to target concept that doesnt exists with parent concept as direct url -- must fail for duplicate
+            {
+                'from_concept_url': concepts_url + 'c1/',
+                'to_concept_url': '/orgs/random-org/sources/random-source/concepts/target-concept/',
+                'map_type': 'Same As'
+            },
+            # 3 to target concept that exists
+            {
+                'from_concept_url': concepts_url + 'c1/',
+                'to_concept_url': random_concept.url,
+                'map_type': 'NARROWER-THAN'
+            },
+            # 4 parent concept not involved - must fail for no involvement with parent concept
+            {
+                'from_concept_url': concepts_url + 'c2/',
+                'to_concept_url': random_concept.url,
+                'map_type': 'Same-As'
+            },
+            # 5 parent concept not involved - must fail for parent concept not from concept
+            {
+                'from_concept_url': random_concept.url,
+                'to_concept_url': concepts_url + 'c1/',
+                'map_type': 'Same-As'
+            },
+            # 6 parent concept not involved - must fail for no involvement with parent concept
+            {
+                'from_concept': 'c1',
+                'to_concept_url': random_concept.url,
+                'map_type': 'Same-As'
+            },
+        ]
+
+        response = self.client.post(
+            concepts_url,
+            {**self.concept_payload, 'mappings': mappings},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data,
+            {
+                'mappings': [
+                    {
+                        **mappings[1],
+                        'errors': {
+                            '__all__': ['Parent, map_type, from_concept, to_source, to_concept_code must be unique.']
+                        }
+                    }, {
+                        **mappings[3],
+                        'errors': {
+                            'from_concept_url': ['from_concept_url must be parent concept url']
+                        }
+                    }, {
+                        **mappings[4],
+                        'errors': {
+                            'from_concept_url': ['from_concept_url must be parent concept url']
+                        }
+                    }, {
+                        **mappings[5],
+                        'errors': {
+                            '__all__': ['Cannot assign "\'c1\'": "Mapping.from_concept" must be a "Concept" instance.']
+                        }
+                    }
+                ]
+            }
+        )
+        self.assertFalse(Concept.objects.filter(mnemonic='c1').exists())
+        self.assertFalse(self.source.get_concepts_queryset().exists())
+        self.assertFalse(self.source.get_mappings_queryset().exists())
+        self.assertEqual(Mapping.objects.count(), 0)
 
     def test_post_400(self):
         concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/"
@@ -318,7 +503,6 @@ class ConceptRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['owner_url'], self.organization.uri)
         self.assertEqual(response.data['display_name'], prev_version.display_name)
         self.assertEqual(concept.datatype, "N/A")
-
 
     def test_put_200_openmrs_schema(self):  # pylint: disable=too-many-statements
         self.create_lookup_concept_classes()

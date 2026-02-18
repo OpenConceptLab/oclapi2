@@ -616,6 +616,76 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                         child = Concept.objects.filter(uri=uri).first().get_latest_version()
                         child.parent_concepts.add(new_latest_version)
 
+    def create_mappings(self, mappings):
+        from core.mappings.serializers import MappingDetailSerializer
+        results = []
+        any_with_errors = False
+        if mappings and self.id:
+            user = self.created_by
+            for mapping_data in mappings:
+                errors = {}
+                try:
+                    created = self._create_mapping_from_self(mapping_data.copy(), user)
+                except Exception as ex:
+                    error_dict = get(ex, 'message_dict') or get(ex, 'error_dict')
+                    if error_dict:
+                        errors = error_dict
+                    else:
+                        errors['__all__'] = [str(ex)]
+                    any_with_errors = True
+                    created = False
+                serializer = None
+                if created:
+                    serializer = MappingDetailSerializer(created)
+                    errors = created.errors
+                    if not errors and not created.id:
+                        errors['__all__'] = ['Something bad happened while creating the mapping.']
+                    if errors:
+                        serializer._errors = errors  # pylint: disable=protected-access
+                        any_with_errors = True
+
+                results.append({
+                    'mapping': mapping_data,
+                    'instance': created,
+                    'serializer': serializer,
+                    'errors': errors
+                })
+
+        return results, any_with_errors
+
+    def _create_mapping_from_self(self, mapping_data, user):
+        from core.mappings.models import Mapping
+        if mapping_data.get('from_concept') == '__parent_concept':
+            mapping_data['from_concept_url'] = self.uri
+            mapping_data.pop('from_concept')
+        if mapping_data.get('to_concept') == '__parent_concept':
+            mapping_data['to_concept_url'] = self.uri
+            mapping_data.pop('to_concept')
+
+        if mapping_data.get('from_concept_url', None) and drop_version(
+                mapping_data['from_concept_url']) != drop_version(self.uri):
+            raise ValidationError({'from_concept_url': 'from_concept_url must be parent concept url'})
+
+        return Mapping.persist_new({**mapping_data, 'parent_id': self.parent_id}, user)
+
+    @staticmethod
+    def _remove_mappings_just_created(mappings_results):
+        for mapping in mappings_results:
+            if get(mapping, 'instance.id', None):
+                try:
+                    mapping['instance'].delete()
+                except IntegrityError:
+                    pass
+
+    @staticmethod
+    def _get_errors_from_mappings(mappings_result):
+        return [
+            {
+                **mapping['mapping'],
+                'errors': get(mapping, 'serializer.errors') or mapping.get('errors')
+            } for mapping in mappings_result if mapping.get('errors')
+        ]
+
     def set_locales(self, locales, locale_klass):
         if not self.id:
             return  # pragma: no cover
@@ -783,6 +853,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         names = data.pop('names', []) or []
         descriptions = data.pop('descriptions', []) or []
         parent_concept_uris = data.pop('parent_concept_urls', None)
+        mappings_payload = data.pop('mappings_payload', None) or data.pop('mappings', None) or []
+        mappings_result = []
+        has_mapping_errors = False
+        initial_version = None
         concept = Concept(**data)
         temp_version = generate_temp_version()
         concept.version = temp_version
@@ -832,6 +906,12 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                     initial_version.sources.set([parent])
 
             concept.sources.set([parent])
+
+            if mappings_payload:
+                mappings_result, has_mapping_errors = concept.create_mappings(mappings_payload)
+                if has_mapping_errors:
+                    raise ValidationError('Error(s) occurred while creating mappings.')
+
             if get(settings, 'TEST_MODE', False):
                 update_mappings_concept(concept.id)
             else:
@@ -850,13 +930,25 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 parent.update_concepts_count()
             concept.set_checksums(sync=sync_checksum)
         except ValidationError as ex:
+            if mappings_result:
+                concept._remove_mappings_just_created(mappings_result)
+            if get(initial_version, 'id'):
+                initial_version.delete()
             if concept.id:
                 concept.delete()
             concept.errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
+            if has_mapping_errors:
+                concept.errors['mappings'] = concept._get_errors_from_mappings(mappings_result)
         except (IntegrityError, ValueError) as ex:
+            if mappings_result:
+                concept._remove_mappings_just_created(mappings_result)
+            if get(initial_version, 'id'):
+                initial_version.delete()
             if concept.id:
                 concept.delete()
             concept.errors.update({'__all__': ex.args})
+            if has_mapping_errors:
+                concept.errors['mappings'] = concept._get_errors_from_mappings(mappings_result)
 
         return concept
 
