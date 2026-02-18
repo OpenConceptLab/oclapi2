@@ -112,6 +112,7 @@ class ConceptDescriptionSerializer(ConceptLabelSerializer):
 class ConceptAbstractSerializer(AbstractResourceSerializer):
     uuid = CharField(source='id', read_only=True)
     mappings = SerializerMethodField()
+    mappings_payload = ListField(child=JSONField(), write_only=True, required=False, allow_empty=True)
     parent_concepts = SerializerMethodField()
     child_concepts = SerializerMethodField()
     hierarchy_path = SerializerMethodField()
@@ -126,7 +127,7 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
         abstract = True
         fields = AbstractResourceSerializer.Meta.fields + (
             'uuid', 'parent_concept_urls', 'child_concept_urls', 'parent_concepts', 'child_concepts', 'hierarchy_path',
-            'mappings', 'extras', 'summary', 'references', 'has_children', 'checksums'
+            'mappings', 'extras', 'summary', 'references', 'has_children', 'checksums', 'mappings_payload'
         )
 
     def __init__(self, *args, **kwargs):  # pylint: disable=too-many-branches

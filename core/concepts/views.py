@@ -244,9 +244,9 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         if not self.parent_resource or isinstance(request.data, list):
             raise Http404()
         concept_id = get(request.data, 'id') or generate_temp_version()
-        serializer = self.get_serializer(
-            data={**request.data, 'parent_id': self.parent_resource.id, 'id': concept_id, 'name': concept_id}
-        )
+        data = {**request.data, 'parent_id': self.parent_resource.id, 'id': concept_id, 'name': concept_id}
+        data['mappings_payload'] = data.pop('mappings', [])
+        serializer = self.get_serializer(data=data)
         if serializer.is_valid():
             serializer.save()
             if serializer.is_valid():
