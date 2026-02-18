@@ -224,7 +224,7 @@ class CustomESSearch:
         print(f"[{cid}] Cross encoder time: {time.time() - start_time} seconds")
         for result in hits:
             _id = get(result, '_id')
-            rerank_score = get(result, '_rerank_score')
+            rerank_score = get(result, 'search_rerank_score')
             raw_score = get(result, '_score') or 0
             self.scores[int(_id)] = {
                 'raw': raw_score,
@@ -366,7 +366,7 @@ class Reranker:
         # doesn't work with logits, so not between 0-1
         "cross-encoder/ms-marco-MiniLM-L-6-v2",
     ]
-    SCORE_KEY = '_rerank_score'
+    SCORE_KEY = 'search_rerank_score'
 
     def __init__(self, model_name=None):
         self.model_name = model_name
@@ -410,6 +410,7 @@ class Reranker:
         for hit, score in zip(hits, scores):
             key_to_set = f'search_meta.{score_key}' if has(hit, 'search_meta') else score_key
             set_(hit, key_to_set, float(score))
+            set_(hit, 'search_meta.search_normalized_score', float(score) * 100)
 
         return self._order(hits, key_to_set) if order_results and key_to_set else hits
 
