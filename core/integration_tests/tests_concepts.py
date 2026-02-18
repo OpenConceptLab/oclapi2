@@ -167,6 +167,11 @@ class ConceptRetrieveUpdateDestroyViewTest(OCLAPITestCase):
                 'to_concept_url': random_concept.url,
                 'map_type': 'NARROWER-THAN'
             },
+            # 4 self mapping without from_concept
+            {
+                'to_concept_url': concepts_url + 'c1/',
+                'map_type': 'Same As'
+            },
         ]
 
         response = self.client.post(
@@ -239,10 +244,10 @@ class ConceptRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['extras'], {'foo': 'bar'})
         self.assertEqual(response.data['type'], 'Concept')
         self.assertEqual(response.data['version_url'], latest_version.uri)
-        self.assertEqual(latest_version.get_bidirectional_mappings().count(), 3)
-        self.assertEqual(concept.get_bidirectional_mappings().count(), 3)
-        self.assertEqual(concept.parent.get_mappings_queryset().count(), 3)
-        self.assertEqual(self.source.get_mappings_queryset().count(), 3)
+        self.assertEqual(latest_version.get_bidirectional_mappings().count(), 4)
+        self.assertEqual(concept.get_bidirectional_mappings().count(), 4)
+        self.assertEqual(concept.parent.get_mappings_queryset().count(), 4)
+        self.assertEqual(self.source.get_mappings_queryset().count(), 4)
 
     def test_post_400_with_mappings_everything_or_nothing(self):
         concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/"
@@ -251,7 +256,6 @@ class ConceptRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         mappings = [
             # 1 to target concept that doesnt exists with __parent_concept as substitution
             {
-                'from_concept': '__parent_concept',
                 'to_concept_url': '/orgs/random-org/sources/random-source/concepts/target-concept/',
                 'map_type': 'Same As'
             },
@@ -267,7 +271,7 @@ class ConceptRetrieveUpdateDestroyViewTest(OCLAPITestCase):
                 'to_concept_url': random_concept.url,
                 'map_type': 'NARROWER-THAN'
             },
-            # 4 parent concept not involved - must fail for no involvement with parent concept
+            # 4 parent concept not involved - must pass and from_concept_url is ignored and set to parent concept url
             {
                 'from_concept_url': concepts_url + 'c2/',
                 'to_concept_url': random_concept.url,
@@ -277,12 +281,6 @@ class ConceptRetrieveUpdateDestroyViewTest(OCLAPITestCase):
             {
                 'from_concept_url': random_concept.url,
                 'to_concept_url': concepts_url + 'c1/',
-                'map_type': 'Same-As'
-            },
-            # 6 parent concept not involved - must fail for no involvement with parent concept
-            {
-                'from_concept': 'c1',
-                'to_concept_url': random_concept.url,
                 'map_type': 'Same-As'
             },
         ]
@@ -303,21 +301,6 @@ class ConceptRetrieveUpdateDestroyViewTest(OCLAPITestCase):
                         **mappings[1],
                         'errors': {
                             '__all__': ['Parent, map_type, from_concept, to_source, to_concept_code must be unique.']
-                        }
-                    }, {
-                        **mappings[3],
-                        'errors': {
-                            'from_concept_url': ['from_concept_url must be parent concept url']
-                        }
-                    }, {
-                        **mappings[4],
-                        'errors': {
-                            'from_concept_url': ['from_concept_url must be parent concept url']
-                        }
-                    }, {
-                        **mappings[5],
-                        'errors': {
-                            '__all__': ['Cannot assign "\'c1\'": "Mapping.from_concept" must be a "Concept" instance.']
                         }
                     }
                 ]

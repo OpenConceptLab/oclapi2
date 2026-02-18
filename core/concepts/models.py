@@ -655,18 +655,13 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     def _create_mapping_from_self(self, mapping_data, user):
         from core.mappings.models import Mapping
-        if mapping_data.get('from_concept') == '__parent_concept':
-            mapping_data['from_concept_url'] = self.uri
-            mapping_data.pop('from_concept')
-        if mapping_data.get('to_concept') == '__parent_concept':
-            mapping_data['to_concept_url'] = self.uri
-            mapping_data.pop('to_concept')
+        data = {key: value for key, value in mapping_data.items() if not key.startswith('from_')}
+        data['from_concept_url'] = drop_version(self.uri)
+        if data.get('to_concept') == '__parent_concept':
+            data['to_concept_url'] = self.uri
+            data.pop('to_concept')
 
-        if mapping_data.get('from_concept_url', None) and drop_version(
-                mapping_data['from_concept_url']) != drop_version(self.uri):
-            raise ValidationError({'from_concept_url': 'from_concept_url must be parent concept url'})
-
-        return Mapping.persist_new({**mapping_data, 'parent_id': self.parent_id}, user)
+        return Mapping.persist_new({**data, 'parent_id': self.parent_id}, user)
 
     @staticmethod
     def _remove_mappings_just_created(mappings_results):

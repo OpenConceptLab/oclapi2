@@ -112,7 +112,7 @@ class ConceptDescriptionSerializer(ConceptLabelSerializer):
 class ConceptAbstractSerializer(AbstractResourceSerializer):
     uuid = CharField(source='id', read_only=True)
     mappings = SerializerMethodField()
-    mappings_payload = JSONField(write_only=True, required=False)
+    mappings_payload = ListField(child=JSONField(), write_only=True, required=False, allow_empty=True)
     parent_concepts = SerializerMethodField()
     child_concepts = SerializerMethodField()
     hierarchy_path = SerializerMethodField()
