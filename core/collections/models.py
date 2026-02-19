@@ -1200,10 +1200,11 @@ class Expansion(BaseResourceModel):
         parameters = ExpansionParameters(self.parameters, is_concept_queryset)
         return parameters.apply(queryset)
 
-    def index_concepts(self):
-        if self.concepts.exists():
+    def index_concepts(self, concept_versioned_ids=None):
+        should_run = len(concept_versioned_ids) > 0 if concept_versioned_ids is not None else self.concepts.exists()
+        if should_run:
             if get(settings, 'TEST_MODE', False):
-                index_expansion_concepts(self.id, self.concepts.count())
+                index_expansion_concepts(self.id, self.concepts.count(), concept_versioned_ids)
             else:
                 task = None
                 try:
@@ -1212,15 +1213,17 @@ class Expansion(BaseResourceModel):
                         name=index_expansion_concepts.__name__
                     )
                     index_expansion_concepts.apply_async(
-                        (self.id, self.concepts.count(), ), task_id=task.id, queue=task.queue, persist_args=True)
+                        (self.id, self.concepts.count(), concept_versioned_ids),
+                        task_id=task.id, queue=task.queue, persist_args=True)
                 except AlreadyQueued:
                     if task:
                         task.delete()
 
-    def index_mappings(self):
-        if self.mappings.exists():
+    def index_mappings(self, mapping_versioned_ids=None):
+        should_run = len(mapping_versioned_ids) > 0 if mapping_versioned_ids is not None else self.mappings.exists()
+        if should_run:
             if get(settings, 'TEST_MODE', False):
-                index_expansion_mappings(self.id, self.mappings.count())
+                index_expansion_mappings(self.id, self.mappings.count(), mapping_versioned_ids)
             else:
                 task = None
                 try:
@@ -1229,7 +1232,8 @@ class Expansion(BaseResourceModel):
                         name=index_expansion_mappings.__name__
                     )
                     index_expansion_mappings.apply_async(
-                        (self.id, self.mappings.count()), task_id=task.id, queue=task.queue, persist_args=True)
+                        (self.id, self.mappings.count(), mapping_versioned_ids),
+                        task_id=task.id, queue=task.queue, persist_args=True)
                 except AlreadyQueued:
                     if task:
                         task.delete()
@@ -1252,29 +1256,28 @@ class Expansion(BaseResourceModel):
     def delete_references(self, references):
         refs, _ = self.to_ref_list_separated(references)
 
-        index_concepts = False
-        index_mappings = False
+        index_concepts = []
+        index_mappings = []
         any_ref_with_resources = False
         for reference in refs:
             concepts = reference.concepts
             if concepts.exists():
                 any_ref_with_resources = True
-                index_concepts = True
-                filters = {'versioned_object_id__in': list(concepts.values_list('versioned_object_id', flat=True))}
+                resources_updated = list(concepts.values_list('versioned_object_id', flat=True))
+                filters = {'versioned_object_id__in': resources_updated}
+                index_concepts = [*index_concepts, *resources_updated]
                 self.concepts.set(self.concepts.exclude(**filters))
                 batch_index_resources.apply_async(('concept', filters), queue='indexing', permanent=False)
             mappings = reference.mappings
             if mappings.exists():
                 any_ref_with_resources = True
-                index_mappings = True
-                filters = {'versioned_object_id__in': list(mappings.values_list('versioned_object_id', flat=True))}
+                resources_updated = list(mappings.values_list('versioned_object_id', flat=True))
+                filters = {'versioned_object_id__in': resources_updated}
+                index_mappings = [*index_mappings, *resources_updated]
                 self.mappings.set(self.mappings.exclude(**filters))
                 batch_index_resources.apply_async(('mapping', filters), queue='indexing', permanent=False)
 
-        if index_concepts:
-            self.index_concepts()
-        if index_mappings:
-            self.index_mappings()
+        self.index_resources(index_concepts, index_mappings)
 
         if any_ref_with_resources:
             removed_reference_ids = [ref.id for ref in self.to_ref_list(references)]
@@ -1321,7 +1324,7 @@ class Expansion(BaseResourceModel):
             else:
                 exclude_refs += [*existing_exclude_refs.all()]
 
-        index_concepts = index_mappings = False
+        index_concepts = index_mappings = []
 
         # attempt_reevaluate is False for delete reference(s)
         should_reevaluate = force_reevaluate or (attempt_reevaluate and not self.is_auto_generated)
@@ -1421,17 +1424,21 @@ class Expansion(BaseResourceModel):
 
         for reference in include_refs:
             concepts, mappings = get_ref_results(reference)
-            concepts_results = self.__include_resources(self.concepts, concepts, True)
-            if not index_concepts:
-                index_concepts = concepts_results
-            mappings_results = self.__include_resources(self.mappings, mappings, False)
-            if not index_mappings:
-                index_mappings = mappings_results
+            concepts_updated = self.__include_resources(self.concepts, concepts, True)
+            if index and concepts_updated is not False:
+                index_concepts = [*index_concepts, *concepts_updated.values_list('versioned_object_id', flat=True)]
+            mappings_updated = self.__include_resources(self.mappings, mappings, False)
+            if index and mappings_updated is not False:
+                index_mappings = [*index_mappings, *mappings_updated.values_list('versioned_object_id', flat=True)]
 
         for reference in exclude_refs:
             concepts, mappings = get_ref_results(reference)
-            index_concepts = self.__exclude_resources(reference, self.concepts, concepts, Concept)
-            index_mappings = self.__exclude_resources(reference, self.mappings, mappings, Mapping)
+            concepts_updated = self.__exclude_resources(reference, self.concepts, concepts, Concept)
+            mappings_updated = self.__exclude_resources(reference, self.mappings, mappings, Mapping)
+            if index and concepts_updated is not False:
+                index_concepts = [*index_concepts, *concepts_updated.values_list('versioned_object_id', flat=True)]
+            if index and mappings_updated is not False:
+                index_mappings = [*index_mappings, *mappings_updated.values_list('versioned_object_id', flat=True)]
 
         self.explicit_collection_versions.add(*compact(explicit_valueset_versions))
         self.explicit_source_versions.add(*compact(explicit_system_versions))
@@ -1455,30 +1462,30 @@ class Expansion(BaseResourceModel):
         self.mappings.set(self.mappings.order_by('versioned_object_id', '-id').distinct('versioned_object_id'))
 
     def __include_resources(self, rel, resources, is_concept_queryset):
-        should_index = resources.exists()
-        if should_index:
-            rel.add(*self.apply_parameters(resources, is_concept_queryset))
-        return should_index
+        resources_updated = False
+        if resources.exists():
+            resources_updated = self.apply_parameters(resources, is_concept_queryset)
+            rel.add(*resources_updated)
+        return resources_updated
 
     @staticmethod
     def __exclude_resources(ref, rel, resources, klass):
-        should_index = resources.exists()
-        if should_index:
+        resources_updated = False
+        if resources.exists():
             if ref.resource_version:
+                resources_updated = resources
                 rel.remove(*resources)
             else:
-                rel.remove(
-                    *klass.objects.filter(
-                        versioned_object_id__in=resources.values_list('versioned_object_id', flat=True)
-                    )
-                )
-        return should_index
+                resources_updated = klass.objects.filter(
+                    versioned_object_id__in=resources.values_list('versioned_object_id', flat=True))
+                rel.remove(*resources_updated)
+        return resources_updated
 
     def index_resources(self, concepts, mappings):
         if concepts:
-            self.index_concepts()
+            self.index_concepts(concepts)
         if mappings:
-            self.index_mappings()
+            self.index_mappings(mappings)
 
     def seed_children(self, index=True, force_reevaluate=False):
         return self.add_references(
