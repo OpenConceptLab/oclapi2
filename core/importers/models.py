@@ -442,6 +442,8 @@ class ConceptImporter(BaseResourceImporter):
         self.data['mnemonic'] = str(self.data.pop('id', ''))
         if not is_url_encoded_string(self.data['mnemonic']):
             self.data['mnemonic'] = encode_string(self.data['mnemonic'])
+        for locale in [*(self.data.get('names', []) or []), *(self.data.get('descriptions', []) or [])]:
+            locale.pop('checksum', None)
 
     def clean(self):
         if not self.is_valid():
