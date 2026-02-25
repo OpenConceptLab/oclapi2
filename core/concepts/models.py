@@ -529,7 +529,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def create_new_version_for(
             cls, instance, data, user, create_parent_version=True, add_prev_version_children=True,
             _hierarchy_processing=False, is_patch=False
-    ):  # pylint: disable=too-many-arguments
+    ):  # pylint: disable=too-many-arguments,too-many-locals
         mappings_payload = data.pop('mappings_payload', None)
         prev_latest = Concept.objects.filter(
             mnemonic=instance.mnemonic, parent_id=instance.parent_id, is_latest_version=True
@@ -576,7 +576,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         )
         if has_mapping_errors:
             instance.rollback_latest_version_to(prev_latest)
-            errors['mappings'] = instance._get_errors_from_mappings(mappings_result)
+            errors['mappings'] = instance._get_errors_from_mappings(mappings_result)  # pylint: disable=protected-access
 
         return errors
 
@@ -732,7 +732,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def find_direct_mapping(self, mapping_id):
         return self.get_unidirectional_mappings().filter(mnemonic=str(mapping_id)).first() if mapping_id else None
 
-    def upsert_or_delete_mappings(self, mappings_payload, user):
+    def upsert_or_delete_mappings(self, mappings_payload, user):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         from core.mappings.models import Mapping
         results = []
         any_with_errors = False
