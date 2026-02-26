@@ -487,6 +487,199 @@ class ConceptRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['display_name'], prev_version.display_name)
         self.assertEqual(concept.datatype, "N/A")
 
+    def test_put_200_with_mappings(self):  # pylint: disable=too-many-statements
+        concept = ConceptFactory(parent=self.source, datatype="N/A")
+        self.assertEqual(concept.versions.count(), 1)
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
+        random_concept = ConceptFactory()
+
+        mappings = [
+            {
+                'from_concept': '__parent_concept',
+                'to_concept_url': '/orgs/random-org/sources/random-source/concepts/target-concept/',
+                'map_type': 'Same As'
+            },
+            {
+                'from_concept_url': concepts_url,
+                'to_concept_url': '/orgs/random-org/sources/random-source/concepts/target-concept/',
+                'map_type': 'BROADER-THAN'
+            },
+            {
+                'from_concept_url': concepts_url,
+                'to_concept_url': random_concept.url,
+                'map_type': 'NARROWER-THAN'
+            },
+            {
+                'to_concept_url': concepts_url,
+                'map_type': 'Same As'
+            },
+        ]
+
+        response = self.client.put(
+            concepts_url,
+            {
+                **self.concept_payload,
+                'datatype': 'None', 'update_comment': 'Updated datatype', 'mappings': mappings
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertListEqual(
+            sorted(list(response.data.keys())),
+            sorted(['uuid',
+                    'id',
+                    'external_id',
+                    'concept_class',
+                    'datatype',
+                    'url',
+                    'retired',
+                    'source',
+                    'owner',
+                    'owner_type',
+                    'owner_url',
+                    'display_name',
+                    'display_locale',
+                    'names',
+                    'descriptions',
+                    'created_on',
+                    'updated_on',
+                    'versions_url',
+                    'version',
+                    'extras',
+                    'type',
+                    'update_comment',
+                    'version_url',
+                    'updated_by',
+                    'created_by',
+                    'public_can_view',
+                    'checksums',
+                    'property',
+                    'latest_source_version',
+                    'versioned_object_id'])
+        )
+        concept.refresh_from_db()
+        latest_version = concept.get_latest_version()
+        self.assertEqual(concept.datatype, 'None')
+        self.assertEqual(latest_version.datatype, 'None')
+        self.assertEqual(latest_version.prev_version.datatype, 'N/A')
+        self.assertEqual(latest_version.get_bidirectional_mappings().count(), 4)
+        self.assertEqual(concept.get_bidirectional_mappings().count(), 4)
+        self.assertEqual(concept.parent.get_mappings_queryset().count(), 4)
+        self.assertEqual(self.source.get_mappings_queryset().count(), 4)
+
+    def test_put_200_with_mappings_upsert_and_delete(self):
+        concept = ConceptFactory(parent=self.source)
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
+        update_target = ConceptFactory(parent=self.source)
+        update_target_new = ConceptFactory(parent=self.source)
+        delete_target = ConceptFactory(parent=self.source)
+        new_target = ConceptFactory(parent=self.source)
+
+        mapping_to_update = MappingFactory(
+            parent=self.source, from_concept=concept, to_concept=update_target, map_type='Same As'
+        ).versioned_object
+        mapping_to_delete = MappingFactory(
+            parent=self.source, from_concept=concept, to_concept=delete_target, map_type='BROADER-THAN'
+        ).versioned_object
+
+        response = self.client.put(
+            concepts_url,
+            {
+                **self.concept_payload,
+                'datatype': 'None',
+                'update_comment': 'Updated concept with mapping operations',
+                'mappings': [
+                    {
+                        'id': mapping_to_update.mnemonic,
+                        'map_type': 'NARROWER-THAN',
+                        'update_comment': 'updated map type',
+                        'to_concept_url': update_target_new.url
+                    },
+                    {
+                        'to_concept_url': new_target.url,
+                        'map_type': 'Same As'
+                    },
+                    {
+                        'id': mapping_to_delete.mnemonic,
+                        'action': '__delete',
+                        'update_comment': 'Deleted from concept update'
+                    }
+                ]
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mapping_to_update.refresh_from_db()
+        mapping_to_delete.refresh_from_db()
+        concept.refresh_from_db()
+        self.assertEqual(mapping_to_update.map_type, 'NARROWER-THAN')
+        self.assertEqual(mapping_to_update.to_concept_id, update_target_new.id)
+        self.assertEqual(mapping_to_update.versions.count(), 2)
+        self.assertTrue(mapping_to_delete.retired)
+        self.assertTrue(mapping_to_delete.get_latest_version().retired)
+        self.assertFalse(mapping_to_delete.get_latest_version().prev_version.retired)
+        self.assertEqual(mapping_to_delete.versions.count(), 2)
+        self.assertTrue(
+            concept.get_unidirectional_mappings().filter(
+                to_concept_id=new_target.id,
+                map_type='Same As',
+                retired=False
+            ).exists()
+        )
+        self.assertEqual(concept.get_unidirectional_mappings().filter(retired=False).count(), 2)
+
+    def test_put_400_with_mappings_everything_or_nothing(self):
+        concept = ConceptFactory(parent=self.source)
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
+        existing_target = ConceptFactory(parent=self.source)
+        new_target = ConceptFactory(parent=self.source)
+        existing_mapping = MappingFactory(
+            parent=self.source, from_concept=concept, to_concept=existing_target, map_type='Same As'
+        ).versioned_object
+
+        initial_versions_count = concept.versions.count()
+        initial_datatype = concept.datatype
+        initial_active_mappings_count = concept.get_bidirectional_mappings().filter(retired=False).count()
+
+        response = self.client.put(
+            concepts_url,
+            {
+                **self.concept_payload,
+                'datatype': 'None',
+                'update_comment': 'Should fail and rollback all',
+                'mappings': [
+                    {
+                        'id': existing_mapping.mnemonic,
+                        'to_concept_url': new_target.url,
+                        'map_type': 'NARROWER-THAN'
+                    },
+                    {
+                        'action': '__delete'
+                    }
+                ]
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('mappings', response.data)
+
+        concept.refresh_from_db()
+        existing_mapping.refresh_from_db()
+        self.assertEqual(concept.versions.count(), initial_versions_count)
+        self.assertEqual(concept.datatype, initial_datatype)
+        self.assertEqual(existing_mapping.to_concept_id, existing_target.id)
+        self.assertEqual(existing_mapping.map_type, 'Same As')
+        self.assertFalse(existing_mapping.retired)
+        self.assertEqual(
+            concept.get_bidirectional_mappings().filter(retired=False).count(),
+            initial_active_mappings_count
+        )
+
     def test_put_200_openmrs_schema(self):  # pylint: disable=too-many-statements
         self.create_lookup_concept_classes()
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)

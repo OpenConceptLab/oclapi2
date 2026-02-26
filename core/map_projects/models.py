@@ -37,6 +37,7 @@ class MapProject(BaseModel):
     filters = models.JSONField(default=dict, null=True, blank=True)
     candidates = models.JSONField(default=dict, null=True, blank=True)
     lookup_config = models.JSONField(default=dict, null=True, blank=True)
+    analysis = models.JSONField(default=dict, null=True, blank=True)
 
     class Meta:
         db_table = 'map_projects'
@@ -159,13 +160,14 @@ class MapProject(BaseModel):
     def format_request_data(cls, data, parent_resource=None):
         new_data = {
             key: val[0] if isinstance(val, list) and len(val) == 1 and key not in [
-                'candidates'] else val for key, val in data.items()
+                'candidates', 'analysis'] else val for key, val in data.items()
         }
         cls.format_json(new_data, 'matches')
         cls.format_json(new_data, 'columns')
         cls.format_json(new_data, 'score_configuration')
         cls.format_json(new_data, 'filters')
         cls.format_json(new_data, 'candidates')
+        cls.format_json(new_data, 'analysis')
         cls.format_json(new_data, 'algorithms')
         cls.format_json(new_data, 'lookup_config')
 

@@ -529,7 +529,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def create_new_version_for(
             cls, instance, data, user, create_parent_version=True, add_prev_version_children=True,
             _hierarchy_processing=False, is_patch=False
-    ):  # pylint: disable=too-many-arguments
+    ):  # pylint: disable=too-many-arguments,too-many-locals
+        mappings_payload = data.pop('mappings_payload', None)
+        prev_latest = Concept.objects.filter(
+            mnemonic=instance.mnemonic, parent_id=instance.parent_id, is_latest_version=True
+        ).first()
         instance.id = None  # Clear id so it is persisted as a new object
         instance.version = data.get('version', None)
         instance.concept_class = data.get('concept_class', instance.concept_class)
@@ -557,13 +561,24 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         if not parent_concept_uris and has_parent_concept_uris_attr:
             parent_concept_uris = []
 
-        return instance.save_as_new_version(
+        errors = instance.save_as_new_version(
             user=user,
             create_parent_version=create_parent_version,
             parent_concept_uris=parent_concept_uris,
             add_prev_version_children=add_prev_version_children,
             _hierarchy_processing=_hierarchy_processing
         )
+
+        if errors or mappings_payload is None:
+            return errors
+        mappings_result, has_mapping_errors = instance.upsert_or_delete_mappings(
+            mappings_payload, user
+        )
+        if has_mapping_errors:
+            instance.rollback_latest_version_to(prev_latest)
+            errors['mappings'] = instance._get_errors_from_mappings(mappings_result)  # pylint: disable=protected-access
+
+        return errors
 
     def set_parent_concepts_from_uris(self, create_parent_version=True):
         parent_concepts = get(self, '_parent_concepts', [])
@@ -655,13 +670,139 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     def _create_mapping_from_self(self, mapping_data, user):
         from core.mappings.models import Mapping
-        data = {key: value for key, value in mapping_data.items() if not key.startswith('from_')}
+        data = {
+            key: value for key, value in mapping_data.items()
+            if not key.startswith('from_') and key not in ['id', 'uuid', 'action']
+        }
         data['from_concept_url'] = drop_version(self.uri)
         if data.get('to_concept') == '__parent_concept':
             data['to_concept_url'] = self.uri
             data.pop('to_concept')
 
         return Mapping.persist_new({**data, 'parent_id': self.parent_id}, user)
+
+    def _validate_mapping_create_from_self(self, mapping_data, user):
+        from core.mappings.models import Mapping
+        data = {
+            key: value for key, value in mapping_data.items()
+            if not key.startswith('from_') and key not in ['id', 'uuid', 'action']
+        }
+        data['from_concept_url'] = drop_version(self.uri)
+        if data.get('to_concept') == '__parent_concept':
+            data['to_concept_url'] = self.uri
+            data.pop('to_concept')
+        data['parent_id'] = self.parent_id
+
+        related_fields = ['from_concept_url', 'to_concept_url', 'to_source_url', 'from_source_url']
+        field_data = {k: v for k, v in data.items() if k not in related_fields}
+        url_params = {k: v for k, v in data.items() if k in related_fields}
+        candidate = Mapping(**field_data, created_by=user, updated_by=user)
+        candidate.populate_fields_from_relations(url_params)
+        candidate.full_clean()
+
+    @staticmethod
+    def _rollback_mapping_operations(applied_operations):
+        from core.mappings.models import Mapping
+        for operation in reversed(applied_operations):
+            op_type = operation.get('__action')
+            mapping_id = operation['versioned_object_id']
+            if not mapping_id or not op_type:
+                continue
+            if op_type == 'create' and mapping_id:
+                Mapping.objects.filter(versioned_object_id=mapping_id).delete()
+                continue
+            latest_version = Mapping.objects.filter(versioned_object_id=mapping_id, is_latest_version=True).first()
+            prev_latest = latest_version.prev_version
+            prev_latest.mark_latest_version(True, latest_version.parent)
+            prev_latest.update_versioned_object()
+            latest_version.delete()
+
+    def rollback_latest_version_to(self, prev_latest):
+        if not prev_latest:
+            return
+        latest = Concept.objects.filter(
+            mnemonic=self.mnemonic, parent_id=self.parent_id, is_latest_version=True
+        ).first()
+        if latest and latest.id != prev_latest.id:
+            latest.remove_locales()
+            latest.delete()
+            prev_latest.mark_latest_version(True, self.parent)
+            prev_latest.update_versioned_object()
+
+    def find_direct_mapping(self, mapping_id):
+        return self.get_unidirectional_mappings().filter(mnemonic=str(mapping_id)).first() if mapping_id else None
+
+    def upsert_or_delete_mappings(self, mappings_payload, user):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+        from core.mappings.models import Mapping
+        results = []
+        any_with_errors = False
+        applied_operations = []
+
+        for mapping_data in mappings_payload or []:
+            mapping_data = mapping_data.copy()
+            mapping_id = mapping_data.get('id')
+            action = mapping_data.get('action')
+            errors = {}
+            serializer = None
+            created = None
+
+            try:
+                if action == '__delete' and not mapping_id:
+                    raise ValidationError({'id': ['Mapping id is required when action is __delete.']})
+
+                if mapping_id:
+                    mapping = self.find_direct_mapping(mapping_id)
+                    if not mapping:
+                        raise ValidationError({'id': [f"Mapping '{mapping_id}' not found for this concept."]})
+
+                    if action == '__delete':
+                        errors = mapping.retire(
+                            user, mapping_data.get('update_comment') or mapping_data.get('comment')
+                        )
+                        if not errors:
+                            applied_operations.append({
+                                'action': '__delete', 'versioned_object_id': mapping.versioned_object_id})
+                        created = mapping
+                    else:
+                        updates = {
+                            k: v for k, v in mapping_data.items() if k not in ['id', 'uuid', 'action', 'checksums']}
+                        if updates.get('to_concept') == '__parent_concept':
+                            updates['to_concept_url'] = self.uri
+                            updates.pop('to_concept')
+                        errors = Mapping.create_new_version_for(mapping.clone(user=user), updates, user)
+                        if not errors:
+                            applied_operations.append({
+                                '__action': 'update', 'versioned_object_id': mapping.versioned_object_id})
+                        created = mapping
+                else:
+                    created = self._create_mapping_from_self(mapping_data, user)
+                    errors = created.errors
+                    if not errors and not created.id:
+                        errors['__all__'] = ['Something bad happened while creating the mapping.']
+                    if not errors and created.id:
+                        applied_operations.append({'__action': 'create', 'id': created.versioned_object_id})
+            except Exception as ex:  # pylint: disable=broad-except
+                error_dict = get(ex, 'message_dict') or get(ex, 'error_dict')
+                if error_dict:
+                    errors = error_dict
+                else:
+                    errors['__all__'] = [str(ex)]
+                any_with_errors = True
+
+            if errors:
+                any_with_errors = True
+
+            results.append({
+                'mapping': mapping_data,
+                'instance': created,
+                'serializer': serializer,
+                'errors': errors
+            })
+
+        if any_with_errors and applied_operations:
+            self._rollback_mapping_operations(applied_operations)
+
+        return results, any_with_errors
 
     @staticmethod
     def _remove_mappings_just_created(mappings_results):

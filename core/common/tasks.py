@@ -559,24 +559,34 @@ def batch_index_resources(resource, filters, update_indexed=False):
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
     acks_late=True, reject_on_worker_lost=True, base=QueueOnceCustomTask
 )
-def index_expansion_concepts(expansion_id, count=None):  # pylint: disable=unused-argument
+def index_expansion_concepts(expansion_id, count=None, concept_versioned_ids=None):  # pylint: disable=unused-argument
     from core.collections.models import Expansion
     expansion = Expansion.objects.filter(id=expansion_id).first()
     if expansion:
         from core.concepts.documents import ConceptDocument
-        expansion.batch_index(expansion.concepts, ConceptDocument)
+        from core.concepts.models import Concept
+        if concept_versioned_ids:
+            queryset = Concept.objects.filter(versioned_object_id__in=concept_versioned_ids)
+        else:
+            queryset = expansion.concepts
+        expansion.batch_index(queryset, ConceptDocument)
 
 
 @app.task(
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
     acks_late=True, reject_on_worker_lost=True, base=QueueOnceCustomTask
 )
-def index_expansion_mappings(expansion_id, count=None):  # pylint: disable=unused-argument
+def index_expansion_mappings(expansion_id, count=None, mapping_versioned_ids=None):  # pylint: disable=unused-argument
     from core.collections.models import Expansion
     expansion = Expansion.objects.filter(id=expansion_id).first()
     if expansion:
         from core.mappings.documents import MappingDocument
-        expansion.batch_index(expansion.mappings, MappingDocument)
+        from core.mappings.models import Mapping
+        if mapping_versioned_ids:
+            queryset = Mapping.objects.filter(versioned_object_id__in=mapping_versioned_ids)
+        else:
+            queryset = expansion.mappings
+        expansion.batch_index(queryset, MappingDocument)
 
 
 @app.task

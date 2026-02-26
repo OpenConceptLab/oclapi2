@@ -22,7 +22,7 @@ class MapProjectCreateUpdateSerializer(serializers.ModelSerializer):
             'created_by', 'updated_by', 'created_at', 'updated_at', 'url', 'is_active',
             'public_access', 'file', 'user_id', 'organization_id', 'description',
             'target_repo_url', 'include_retired', 'score_configuration',
-            'filters', 'candidates', 'algorithms', 'lookup_config'
+            'filters', 'candidates', 'algorithms', 'lookup_config', 'analysis'
         ]
 
     def prepare_object(self, validated_data, instance=None, file=None):
@@ -36,7 +36,7 @@ class MapProjectCreateUpdateSerializer(serializers.ModelSerializer):
             instance.columns = columns
         for attr in [
             'name', 'description', 'extras', 'target_repo_url', 'include_retired',
-            'score_configuration', 'filters', 'candidates', 'algorithms', 'lookup_config'
+            'score_configuration', 'filters', 'candidates', 'algorithms', 'lookup_config', 'analysis'
         ]:
             setattr(instance, attr, validated_data.get(attr, get(instance, attr)))
         if not instance.id:
@@ -109,7 +109,7 @@ class MapProjectSerializer(serializers.ModelSerializer):
             'created_by', 'updated_by', 'created_at', 'updated_at', 'url', 'is_active',
             'owner', 'owner_type', 'owner_url', 'public_access',
             'target_repo_url', 'summary', 'logs', 'include_retired',
-            'score_configuration', 'filters', 'candidates', 'algorithms', 'lookup_config'
+            'score_configuration', 'filters', 'candidates', 'algorithms', 'lookup_config', 'analysis'
         ]
 
     def __init__(self, *args, **kwargs):
