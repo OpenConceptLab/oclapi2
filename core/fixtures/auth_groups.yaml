@@ -54,3 +54,7 @@
   pk: 14
   fields:
     name: graphql_api
+- model: "auth.group"
+  pk: 15
+  fields:
+    name: core_user
