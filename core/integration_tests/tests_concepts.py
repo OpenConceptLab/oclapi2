@@ -631,6 +631,70 @@ class ConceptRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         )
         self.assertEqual(concept.get_unidirectional_mappings().filter(retired=False).count(), 2)
 
+    def test_patch_200_with_mappings_only_upsert_and_delete(self):
+        concept = ConceptFactory(
+            parent=self.source,
+            names=[ConceptNameFactory.build(locale='en', locale_preferred=True)]
+        )
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
+        update_target = ConceptFactory(parent=self.source)
+        update_target_new = ConceptFactory(parent=self.source)
+        delete_target = ConceptFactory(parent=self.source)
+        new_target = ConceptFactory(parent=self.source)
+
+        mapping_to_update = MappingFactory(
+            parent=self.source, from_concept=concept, to_concept=update_target, map_type='Same As'
+        ).versioned_object
+        mapping_to_delete = MappingFactory(
+            parent=self.source, from_concept=concept, to_concept=delete_target, map_type='BROADER-THAN'
+        ).versioned_object
+
+        initial_versions_count = concept.versions.count()
+
+        response = self.client.patch(
+            concepts_url,
+            {
+                'mappings': [
+                    {
+                        'id': mapping_to_update.mnemonic,
+                        'map_type': 'NARROWER-THAN',
+                        'update_comment': 'updated map type',
+                        'to_concept_url': update_target_new.url
+                    },
+                    {
+                        'to_concept_url': new_target.url,
+                        'map_type': 'Same As'
+                    },
+                    {
+                        'id': mapping_to_delete.mnemonic,
+                        'action': '__delete',
+                        'update_comment': 'Deleted from concept patch'
+                    }
+                ]
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        mapping_to_update.refresh_from_db()
+        mapping_to_delete.refresh_from_db()
+        concept.refresh_from_db()
+
+        self.assertEqual(mapping_to_update.map_type, 'NARROWER-THAN')
+        self.assertEqual(mapping_to_update.to_concept_id, update_target_new.id)
+        self.assertEqual(mapping_to_update.versions.count(), 2)
+        self.assertTrue(mapping_to_delete.retired)
+        self.assertEqual(concept.versions.count(), initial_versions_count + 1)
+        self.assertTrue(
+            concept.get_unidirectional_mappings().filter(
+                to_concept_id=new_target.id,
+                map_type='Same As',
+                retired=False
+            ).exists()
+        )
+        self.assertEqual(concept.get_unidirectional_mappings().filter(retired=False).count(), 2)
+
     def test_put_400_with_mappings_everything_or_nothing(self):
         concept = ConceptFactory(parent=self.source)
         concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"

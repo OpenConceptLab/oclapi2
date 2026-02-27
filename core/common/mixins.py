@@ -893,6 +893,7 @@ class SourceChildMixin(ChecksumModel):
         parent_concept_uris = kwargs.pop('parent_concept_uris', None)
         add_prev_version_children = kwargs.pop('add_prev_version_children', True)
         _hierarchy_processing = kwargs.pop('_hierarchy_processing', False)
+        skip_duplicate_version_check = kwargs.pop('skip_duplicate_version_check', False)
         errors = {}
         self.created_by = self.updated_by = user
         self.version = self.version or generate_temp_version()
@@ -919,7 +920,7 @@ class SourceChildMixin(ChecksumModel):
                             self.set_checksums()
                         if Toggle.get(
                                 'PREVENT_DUPLICATE_VERSION_TOGGLE'
-                        ) and not _hierarchy_processing:
+                        ) and not _hierarchy_processing and not skip_duplicate_version_check:
                             standard_checksum = prev_latest.checksums.get('standard')
                             if not standard_checksum:
                                 standard_checksum = prev_latest.get_checksums(recalculate=True).get('standard')

@@ -566,7 +566,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             create_parent_version=create_parent_version,
             parent_concept_uris=parent_concept_uris,
             add_prev_version_children=add_prev_version_children,
-            _hierarchy_processing=_hierarchy_processing
+            _hierarchy_processing=_hierarchy_processing,
+            skip_duplicate_version_check=bool(mappings_payload)
         )
 
         if errors or mappings_payload is None:
