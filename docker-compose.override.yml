@@ -23,6 +23,7 @@ services:
     environment:
       - ENVIRONMENT=development
       - DEBUG=${DEBUG-TRUE}
+    command: bash entrypoint_fix_crlf.sh
   celery:
     build: .
     volumes:
