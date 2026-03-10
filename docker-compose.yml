@@ -10,7 +10,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
   redis:
-    image: bitnami/redis:7.0.12
+    image: bitnami/redis:latest
     restart: "always"
     environment:
       - ALLOW_EMPTY_PASSWORD=yes
@@ -75,10 +75,10 @@ services:
       test: "curl --silent --fail http://localhost:3500/ || exit 1"
   celery:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
-    command: ["bash", "-c", "CELERY_WORKER_NAME=default ./start_celery_worker.sh -P prefork -Q default -c 2"]
+    command: ["bash", "-c", "CELERY_WORKER_NAME=default bash start_celery_worker.sh -P prefork -Q default -c 2"]
     restart: "always"
     healthcheck:
-      test: ["CMD-SHELL", "-c", "CELERY_WORKER_NAME=default ./ping_celery_worker.sh"]
+      test: ["CMD-SHELL", "-c", "CELERY_WORKER_NAME=default bash ping_celery_worker.sh"]
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
@@ -98,7 +98,7 @@ services:
       - upload-data:/code/uploads
   celery_beat:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
-    command: ["bash", "-c", "./start_celery_beat.sh"]
+    command: ["bash", "start_celery_beat.sh"]
     restart: "always"
     healthcheck:
       test: ["CMD", "python", "manage.py", "celery_beat_healthcheck"]
@@ -116,10 +116,10 @@ services:
       - AWS_REGION_NAME
   celery_indexing:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
-    command: ["bash", "-c", "CELERY_WORKER_NAME=indexing ./start_celery_worker.sh -P prefork -Q indexing -c 2"]
+    command: ["bash", "-c", "CELERY_WORKER_NAME=indexing bash start_celery_worker.sh -P prefork -Q indexing -c 2"]
     restart: "always"
     healthcheck:
-      test: ["CMD-SHELL", "-c", "CELERY_WORKER_NAME=indexing ./ping_celery_worker.sh"]
+      test: ["CMD-SHELL", "-c", "CELERY_WORKER_NAME=indexing bash ping_celery_worker.sh"]
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
@@ -137,10 +137,10 @@ services:
       - AWS_REGION_NAME
   celery_concurrent:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
-    command: ["bash", "-c", "CELERY_WORKER_NAME=concurrent ./start_celery_worker.sh -P prefork -Q concurrent -c 2"]
+    command: ["bash", "-c", "CELERY_WORKER_NAME=concurrent bash start_celery_worker.sh -P prefork -Q concurrent -c 2"]
     restart: "always"
     healthcheck:
-      test:  ["CMD-SHELL", "-c", "CELERY_WORKER_NAME=concurrent ./ping_celery_worker.sh"]
+      test:  ["CMD-SHELL", "-c", "CELERY_WORKER_NAME=concurrent bash ping_celery_worker.sh"]
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
@@ -160,10 +160,10 @@ services:
       - upload-data:/code/uploads
   celery_bulk_import_0_1:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
-    command: ["bash", "-c", "CELERY_WORKER_NAME=bulk_import_0_1 ./start_celery_worker.sh -Q bulk_import_0,bulk_import_1 -c 1"]
+    command: ["bash", "-c", "CELERY_WORKER_NAME=bulk_import_0_1 bash start_celery_worker.sh -Q bulk_import_0,bulk_import_1 -c 1"]
     restart: "always"
     healthcheck:
-      test:  ["CMD-SHELL", "-c", "CELERY_WORKER_NAME=bulk_import_0_1 ./ping_celery_worker.sh"]
+      test:  ["CMD-SHELL", "-c", "CELERY_WORKER_NAME=bulk_import_0_1 bash ping_celery_worker.sh"]
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
@@ -183,10 +183,10 @@ services:
       - upload-data:/code/uploads
   celery_bulk_import_2_3:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
-    command: ["bash", "-c", "CELERY_WORKER_NAME=bulk_import_2_3 ./start_celery_worker.sh -Q bulk_import_2,bulk_import_3 -c 1"]
+    command: ["bash", "-c", "CELERY_WORKER_NAME=bulk_import_2_3 bash start_celery_worker.sh -Q bulk_import_2,bulk_import_3 -c 1"]
     restart: "always"
     healthcheck:
-      test:  ["CMD-SHELL", "-c", "CELERY_WORKER_NAME=bulk_import_2_3 ./ping_celery_worker.sh"]
+      test:  ["CMD-SHELL", "-c", "CELERY_WORKER_NAME=bulk_import_2_3 bash ping_celery_worker.sh"]
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
@@ -206,10 +206,10 @@ services:
       - upload-data:/code/uploads
   celery_bulk_import_root:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
-    command: ["bash", "-c", "CELERY_WORKER_NAME=bulk_import_root ./start_celery_worker.sh -Q bulk_import_root -c 1"]
+    command: ["bash", "-c", "CELERY_WORKER_NAME=bulk_import_root bash start_celery_worker.sh -Q bulk_import_root -c 1"]
     restart: "always"
     healthcheck:
-      test:  ["CMD-SHELL", "-c", "CELERY_WORKER_NAME=bulk_import_root ./ping_celery_worker.sh"]
+      test:  ["CMD-SHELL", "-c", "CELERY_WORKER_NAME=bulk_import_root bash ping_celery_worker.sh"]
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
@@ -229,7 +229,7 @@ services:
       - upload-data:/code/uploads
   flower:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
-    command: ["bash", "-c", "./start_flower.sh"]
+    command: ["bash", "start_flower.sh"]
     ports:
       - 5555:5555
     depends_on:
@@ -249,7 +249,7 @@ services:
       - bootstrap.memory_lock=true
       - xpack.security.enabled=false
       - m=2GB
-      - "ES_JAVA_OPTS=-Xms1500m -Xmx1500m"
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
     ulimits:
       memlock:
         soft: -1

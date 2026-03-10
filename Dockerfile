@@ -55,4 +55,4 @@ RUN ["bash", "-c", "./set_build_version.sh"]
 
 EXPOSE 8000
 
-CMD ["bash", "-c", "./startup.sh"]
+CMD ["bash", "startup.sh"]

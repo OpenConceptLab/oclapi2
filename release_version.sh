@@ -15,7 +15,7 @@ PROJECT_VERSION=$(cat $VERSION_FILE \
 
 TAG="$PROJECT_VERSION-$SOURCE_COMMIT"
 
-./set_build_version.sh
+bash set_build_version.sh
 
 git checkout -b release
 git add $VERSION_FILE
