@@ -47,15 +47,12 @@ RUN python manage.py collectstatic --noinput
 
 USER ocl
 
-# Normalize Windows CRLF -> LF for shell scripts checked out on Windows
-RUN sed -i 's/\x0D$//' set_build_version.sh startup.sh wait_for_it.sh pre_startup.sh start_celery_worker.sh ping_celery_worker.sh start_flower.sh start_celery_beat.sh
-
-RUN chmod +x set_build_version.sh wait_for_it.sh startup.sh start_celery_worker.sh ping_celery_worker.sh start_flower.sh start_celery_beat.sh
+RUN chmod +x set_build_version.sh wait_for_it.sh startup.sh start_celery_worker.sh ping_celery_worker.sh start_flower.sh
 
 ARG SOURCE_COMMIT
 
-RUN ["bash", "set_build_version.sh"]
+RUN ["bash", "-c", "./set_build_version.sh"]
 
 EXPOSE 8000
 
-CMD ["bash", "startup.sh"]
+CMD ["bash", "-c", "./startup.sh"]

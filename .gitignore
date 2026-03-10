@@ -308,4 +308,3 @@ celery-worker-*.tmp
 local*.sh
 local*.py
 setup/
-/.claude
