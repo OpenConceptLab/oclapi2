@@ -21,6 +21,10 @@ services:
     environment:
       - ENVIRONMENT=development
       - DEBUG=${DEBUG-TRUE}
+      - SKIP_MIGRATE_DB=true
+      - HF_HUB_OFFLINE=1
+      - TRANSFORMERS_OFFLINE=1
+      - NO_LM=TRUE
   celery:
     build: .
     volumes:
