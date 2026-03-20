@@ -64,6 +64,10 @@ updated_since_param = openapi.Parameter(
 canonical_url_param = openapi.Parameter(
     CANONICAL_URL_REQUEST_PARAM, openapi.IN_QUERY, type=openapi.TYPE_STRING,
 )
+all_versions_param = openapi.Parameter(
+    'allVersions', openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=False,
+    description='Include all repo versions (default only shows HEAD versions)'
+)
 
 released_param = openapi.Parameter(
     RELEASED_PARAM, openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=False,
