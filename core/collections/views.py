@@ -52,7 +52,7 @@ from core.common.permissions import (
 from core.common.serializers import TaskSerializer
 from core.common.swagger_parameters import q_param, compress_header, page_param, verbose_param, \
     include_facets_header, sort_asc_param, sort_desc_param, updated_since_param, include_retired_param, limit_param, \
-    canonical_url_param, all_versions_param
+    canonical_url_param, all_versions_param, include_summary_param
 from core.common.tasks import add_references, export_collection, delete_collection, index_expansion_concepts, \
     index_expansion_mappings, seed_children_to_expansion
 from core.common.throttling import ThrottleUtil
@@ -834,6 +834,9 @@ class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, 
         self.check_object_permissions(self.request, instance)
         return instance
 
+    @swagger_auto_schema(
+        manual_parameters=[verbose_param, include_summary_param, page_param, limit_param]
+    )
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
 
@@ -853,6 +856,8 @@ class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, 
 
 
 class CollectionExpansionsView(CollectionBaseView, ListWithHeadersMixin):
+    """List all expansions across all versions of a collection."""
+
     def get_serializer_class(self):
         if self.is_verbose():
             return ExpansionDetailSerializer
@@ -863,6 +868,9 @@ class CollectionExpansionsView(CollectionBaseView, ListWithHeadersMixin):
         self.check_object_permissions(self.request, instance)
         return Expansion.objects.filter(collection_version_id__in=instance.versions.values_list('id', flat=True))
 
+    @swagger_auto_schema(
+        manual_parameters=[verbose_param, include_summary_param, page_param, limit_param]
+    )
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
 
