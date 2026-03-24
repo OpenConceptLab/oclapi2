@@ -388,7 +388,8 @@ class ConceptMinimalSerializerRecursive(ConceptAbstractSerializer):
     class Meta:
         model = Concept
         fields = ConceptAbstractSerializer.Meta.fields + (
-            'id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired')
+            'id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired',
+            'concept_class', 'datatype')
 
     def __init__(self, *args, **kwargs):
         if 'mappings' in self.fields:

@@ -1768,7 +1768,8 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         entry = response.data['entry']
         self.assertCountEqual(
             list(entry.keys()),
-            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired', 'checksums']
+            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired', 'checksums',
+             'concept_class', 'datatype']
         )
         self.assertEqual(entry['id'], concept1.mnemonic)
         self.assertEqual(entry['type'], 'Concept')
@@ -1826,7 +1827,8 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         entry = response.data['entry']
         self.assertCountEqual(
             list(entry.keys()),
-            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired', 'checksums']
+            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired', 'checksums',
+             'concept_class', 'datatype']
         )
         self.assertEqual(entry['id'], concept2.mnemonic)
         self.assertEqual(entry['type'], 'Concept')
@@ -1868,7 +1870,8 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         entry = response.data['entry']
         self.assertCountEqual(
             list(entry.keys()),
-            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired', 'checksums']
+            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired', 'checksums',
+             'concept_class', 'datatype']
         )
         self.assertEqual(entry['id'], concept1.mnemonic)
         self.assertEqual(entry['type'], 'Concept')
@@ -1883,7 +1886,8 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         entry = response.data['entry']
         self.assertCountEqual(
             list(entry.keys()),
-            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired', 'checksums']
+            ['id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired', 'checksums',
+             'concept_class', 'datatype']
         )
         self.assertEqual(entry['id'], concept2.mnemonic)
         self.assertEqual(entry['type'], 'Concept')
