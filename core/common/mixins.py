@@ -51,8 +51,7 @@ class CustomPaginator:
         if not is_sliced:
             bottom = (self.page_number - 1) * self.page_size
             top = bottom + self.page_size
-            if top >= self.total:
-                top = self.total
+            top = min(top, self.total)
             self.queryset = self.queryset[bottom:top]
         if isinstance(self.queryset, QuerySet):
             self.queryset.count = None

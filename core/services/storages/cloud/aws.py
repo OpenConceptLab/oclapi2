@@ -117,8 +117,7 @@ class S3(CloudStorageServiceInterface):
 
     @staticmethod
     def file_iterator(response):
-        for chunk in response['Body'].iter_chunks():
-            yield chunk
+        yield from response['Body'].iter_chunks()
 
     def get_streaming_response(self, key):
         s3_response = self.get_object(key)
