@@ -146,7 +146,7 @@ class TokenAuthenticationView(APIView):
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
     @swagger_auto_schema(request_body=AuthTokenSerializer)
-    def post(self, request, *args, **kwargs):
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         if AuthService.is_sso_enabled():
             raise Http400(
                 {'error': ["Single Sign On is enabled in this environment. Cannot login via API directly."]})
