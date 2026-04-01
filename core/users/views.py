@@ -11,7 +11,6 @@ from mozilla_django_oidc.views import OIDCAuthenticationCallbackView
 from pydash import get
 from rest_framework import mixins, status
 from rest_framework.authtoken.serializers import AuthTokenSerializer
-from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.generics import RetrieveAPIView, UpdateAPIView, DestroyAPIView, RetrieveUpdateDestroyAPIView, \
     ListAPIView
@@ -126,8 +125,9 @@ class OIDCLogoutView(APIView):
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
-class TokenAuthenticationView(ObtainAuthToken):
-    """Implementation of ObtainAuthToken with last_login update"""
+class TokenAuthenticationView(APIView):
+    """Authenticate a user and return their token without DRF's deprecated schema dependency."""
+    permission_classes = (AllowAny,)
 
     def get_throttles(self):
         return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
@@ -151,6 +151,12 @@ class TokenAuthenticationView(ObtainAuthToken):
             raise Http400(
                 {'error': ["Single Sign On is enabled in this environment. Cannot login via API directly."]})
 
+        serializer = AuthTokenSerializer(
+            data=request.data,
+            context={'request': request},
+        )
+        serializer.is_valid(raise_exception=True)
+
         user = UserProfile.objects.filter(username=request.data.get('username')).first()
 
         if not user or not user.check_password(request.data.get('password')):
@@ -173,7 +179,7 @@ class TokenAuthenticationView(ObtainAuthToken):
                 }, status=status.HTTP_401_UNAUTHORIZED
             )
 
-        result = super().post(request, *args, **kwargs)
+        result = Response({'token': user.get_token()})
 
         try:
             update_last_login(None, user)
