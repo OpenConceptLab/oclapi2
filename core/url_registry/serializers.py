@@ -1,5 +1,5 @@
 from pydash import get
-from rest_framework.fields import CharField, BooleanField, DateTimeField
+from rest_framework.fields import CharField, BooleanField, DateTimeField, URLField
 
 from core.common.serializers import AbstractResourceSerializer
 from core.repos.serializers import RepoListSerializer
@@ -21,6 +21,7 @@ class URLRegistryBaseSerializer(AbstractResourceSerializer):
 
 
 class URLRegistryDetailSerializer(URLRegistryBaseSerializer):
+    url = URLField(validators=[])
     created_by = CharField(source='created_by.username', read_only=True)
     updated_by = CharField(source='updated_by.username', read_only=True)
     is_active = BooleanField(read_only=True)
@@ -30,6 +31,7 @@ class URLRegistryDetailSerializer(URLRegistryBaseSerializer):
 
     class Meta:
         model = URLRegistry
+        validators = []
         fields = URLRegistryBaseSerializer.Meta.fields + (
             'created_by', 'updated_by', 'created_at', 'updated_at', 'is_active', 'extras', 'repo'
         )
