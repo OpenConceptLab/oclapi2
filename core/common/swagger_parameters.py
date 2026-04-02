@@ -229,7 +229,7 @@ match_encoder_model_param = openapi.Parameter(
     description='Custom encoder model name for semantic vector search'
 )
 match_reranker_param = openapi.Parameter(
-    'reranker', openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=False,
+    'reranker', openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=True,
     description='Enable cross-encoder reranking of results (semantic only)'
 )
 match_offset_param = openapi.Parameter(
