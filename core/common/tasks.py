@@ -4,10 +4,12 @@ from datetime import datetime
 from json import JSONDecodeError
 
 from billiard.exceptions import WorkerLostError
+from celery import chord
 from celery.utils.log import get_task_logger
 from dateutil.relativedelta import relativedelta
 from django.apps import apps
 from django.conf import settings
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage
 from django.core.management import call_command
@@ -287,6 +289,12 @@ def bulk_import_subtask(path, username, owner_type, owner, resource_type, files)
     return ImporterSubtask(path, username, owner_type, owner, resource_type, files).run()
 
 
+@app.task(retry_kwargs={'max_retries': 0}, compression='gzip')
+def bulk_import_queue(task_queue):
+    tasks = task_queue.pop(0)
+    return chord(tasks, bulk_import_queue.si(task_queue)).apply_async(queue='concurrent')
+
+
 @app.task(retry_kwargs={'max_retries': 0})
 def bulk_import_subtask_empty():
     """Used if group has only one task to prevent celery from converting the group to a single task"""
@@ -407,11 +415,11 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
 
 
 @app.task
-def seed_children_to_expansion(expansion_id, index=True):
+def seed_children_to_expansion(expansion_id, index=True, force_reevaluate=False):
     from core.collections.models import Expansion
     expansion = Expansion.objects.filter(id=expansion_id).first()
     if expansion:
-        expansion.seed_children(index=index)
+        expansion.seed_children(index=index, force_reevaluate=force_reevaluate)
         if expansion.is_processing:
             expansion.is_processing = False
             expansion.save()
@@ -551,24 +559,34 @@ def batch_index_resources(resource, filters, update_indexed=False):
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
     acks_late=True, reject_on_worker_lost=True, base=QueueOnceCustomTask
 )
-def index_expansion_concepts(expansion_id):
+def index_expansion_concepts(expansion_id, count=None, concept_versioned_ids=None):  # pylint: disable=unused-argument
     from core.collections.models import Expansion
     expansion = Expansion.objects.filter(id=expansion_id).first()
     if expansion:
         from core.concepts.documents import ConceptDocument
-        expansion.batch_index(expansion.concepts, ConceptDocument)
+        from core.concepts.models import Concept
+        if concept_versioned_ids:
+            queryset = Concept.objects.filter(versioned_object_id__in=concept_versioned_ids)
+        else:
+            queryset = expansion.concepts
+        expansion.batch_index(queryset, ConceptDocument)
 
 
 @app.task(
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
     acks_late=True, reject_on_worker_lost=True, base=QueueOnceCustomTask
 )
-def index_expansion_mappings(expansion_id):
+def index_expansion_mappings(expansion_id, count=None, mapping_versioned_ids=None):  # pylint: disable=unused-argument
     from core.collections.models import Expansion
     expansion = Expansion.objects.filter(id=expansion_id).first()
     if expansion:
         from core.mappings.documents import MappingDocument
-        expansion.batch_index(expansion.mappings, MappingDocument)
+        from core.mappings.models import Mapping
+        if mapping_versioned_ids:
+            queryset = Mapping.objects.filter(versioned_object_id__in=mapping_versioned_ids)
+        else:
+            queryset = expansion.mappings
+        expansion.batch_index(queryset, MappingDocument)
 
 
 @app.task
@@ -816,10 +834,26 @@ def expire_old_celery_tasks():
     Task.objects.filter(updated_at__lt=timezone.now() - timezone.timedelta(days=7)).delete()
 
 
-@app.task
-def source_version_compare(version1_uri, version2_uri, is_changelog, verbosity):
+def generate_key(*args, **kwargs):
+    key_parts = [repr(arg) for arg in args]
+    key_parts += [f"{k}={repr(v)}" for k, v in sorted(kwargs.items())]
+    return "|".join(key_parts)
+
+@app.task(base=QueueOnceCustomTask)
+def source_version_compare(version1_uri, version2_uri, is_changelog, verbosity, ignore_cache=False):
+    ignore_cache = ignore_cache or get(settings, 'TEST_MODE', False)
+    if not ignore_cache:
+        cache_key = generate_key(
+            'source_version_compare', version1_uri, version2_uri, is_changelog, verbosity)
+        result = cache.get(cache_key)
+        if result:
+            return result
+
     from core.sources.models import Source
     version1 = Source.objects.get(uri=version1_uri)
     version2 = Source.objects.get(uri=version2_uri)
     fn = Source.changelog if is_changelog else Source.compare
-    return fn(version1, version2, verbosity)
+    result = fn(version1, version2, verbosity)
+    if not ignore_cache:
+        cache.set(cache_key, result, timeout=60*60*24*4)
+    return result

@@ -22,4 +22,5 @@ class CollectionFacetedSearch(CustomESFacetedSearch):
         'version': TermsFacet(field='version', size=FACET_SIZE),
         'customValidationSchema': TermsFacet(field='custom_validation_schema'),
         'updatedBy': TermsFacet(field='updated_by', size=FACET_SIZE),
+        'retired': TermsFacet(field='retired'),
     }

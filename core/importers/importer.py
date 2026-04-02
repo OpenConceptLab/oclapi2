@@ -10,20 +10,22 @@ import tempfile
 import zipfile
 from zipfile import ZipFile
 from celery.result import AsyncResult, result_from_tuple
-from celery import group, chain
+from celery import group
 
 import ijson
 import requests
 from ijson import JSONError
+from kombu import uuid
 from packaging.version import Version
 from pydantic import BaseModel, computed_field, PrivateAttr
 
 from django.utils import timezone
+from pydash import get
 from rest_framework.exceptions import ValidationError
 
 from core import settings
 from core.common.serializers import IdentifierSerializer
-from core.common.tasks import bulk_import_subtask, bulk_import_subtask_empty
+from core.common.tasks import bulk_import_subtask, bulk_import_subtask_empty, bulk_import_queue
 from core.common.tasks import import_finisher
 from core.code_systems.converter import CodeSystemConverter
 from core.common.utils import get_export_service
@@ -83,6 +85,7 @@ class ImportTask(BaseModel):
     time_started: datetime = timezone.now()
     _time_finished: datetime = PrivateAttr(default=None)
     dependencies: list = []
+    subtask_ids: list = []
     initial_summary: ImportTaskSummary = ImportTaskSummary()
     final_summary: ImportTaskSummary = None
 
@@ -94,7 +97,7 @@ class ImportTask(BaseModel):
 
     @staticmethod
     def import_task_from_json(result_json):
-        if result_json.get('import_task', None):
+        if get(result_json, 'import_task', None):
             return ImportTask(**result_json)
         return None
 
@@ -109,10 +112,11 @@ class ImportTask(BaseModel):
         return None
 
     def revoke(self):
-        import_group = self.import_async_result
-        while import_group is not None:
-            import_group.revoke()  # Revokes all tasks in a group
-            import_group = import_group.parent
+        import_final_task = self.import_async_result
+        import_final_task.revoke()
+        for task_id in self.subtask_ids:
+            child = AsyncResult(task_id)
+            child.revoke()
 
     @import_async_result.setter
     def import_async_result(self, import_async_result):
@@ -144,36 +148,30 @@ class ImportTask(BaseModel):
         if not self.import_async_result:
             return summary
 
-        import_group = self.import_async_result
-        import_groups = []
-        while import_group.parent is not None:
-            import_group = import_group.parent
-            import_groups = [import_group] + import_groups
+        for task_id in self.subtask_ids:
+            child = AsyncResult(task_id)
+            if child.ready():
+                results = child.result
+                if not isinstance(results, list):
+                    results = [child.result]
 
-        for import_group in import_groups:
-            for child in import_group.children:
-                if child.ready():
-                    results = child.result
-                    if not isinstance(results, list):
-                        results = [child.result]
-
-                    for result in results:
-                        summary.processed += 1
-                        if result == CREATED:
-                            summary.created += 1
-                        elif result == UPDATED:
-                            summary.updated += 1
-                        elif result == DELETED:
-                            summary.deleted += 1
-                        elif result == PERMISSION_DENIED:
-                            summary.permission_denied += 1
-                        elif result == UNCHANGED:
-                            summary.unchanged += 1
-                        else:
-                            summary.failed += 1
-                            summary.failures.append(result)
-            if not import_group.ready():
-                break  # inspect next group only if the current one is ready
+                for result in results:
+                    summary.processed += 1
+                    if result == CREATED:
+                        summary.created += 1
+                    elif result == UPDATED:
+                        summary.updated += 1
+                    elif result == DELETED:
+                        summary.deleted += 1
+                    elif result == PERMISSION_DENIED:
+                        summary.permission_denied += 1
+                    elif result == UNCHANGED:
+                        summary.unchanged += 1
+                    else:
+                        summary.failed += 1
+                        summary.failures.append(result)
+            else:
+                break  # inspect further only if the current one is ready
         return summary
 
     @computed_field
@@ -235,7 +233,6 @@ class Importer:
         time_started = timezone.now()
         resource_types = ['CodeSystem', 'ValueSet', 'ConceptMap']
         resource_types.extend(ResourceImporter.get_resource_types())
-
         if not self.path.startswith('/'):  # not local path
             key = self.path
             protocol_index = key.find('://')
@@ -254,12 +251,12 @@ class Importer:
                         shutil.copyfileobj(import_file.raw, temp)
                 self.path = file_url
             else:
-                if not key.startswith(self.IMPORT_CACHE):
-                    key = self.IMPORT_CACHE + key
                 upload_service = get_export_service()
-                if upload_service.exists(key):  # already uploaded by the view
-                    self.path = key
-                else:
+                if not (self.path.startswith(self.IMPORT_CACHE) and upload_service.exists(self.path)):
+                    # if not already uploaded by the view
+                    if not key.startswith(self.IMPORT_CACHE):
+                        key = self.IMPORT_CACHE + key
+
                     with requests.get(self.path, stream=True) as import_file:
                         if not import_file.ok:
                             raise ImportError(f"Failed to GET {self.path}, responded with {import_file.status_code}")
@@ -275,13 +272,14 @@ class Importer:
         tasks = self.prepare_tasks(resource_types, dependencies, resources)
         if tasks:
             # In the future we will let the user approve the import before scheduling tasks.
-            task = self.schedule_tasks(tasks)
+            task, subtask_ids = self.schedule_tasks(tasks)
 
             # Return the task id of the chain to track the end of execution.
             # We do not wait for the end of execution of tasks here to free up worker and memory.
             # It is also to be able to pick up running tasks in the event of restart and not having to handle restarting
             # the main task.
-            result = ImportTask(import_task=task.as_tuple(), time_started=time_started, dependencies=dependencies)
+            result = ImportTask(import_task=task.as_tuple(), subtask_ids=subtask_ids, time_started=time_started,
+                                dependencies=dependencies)
 
             for _, files in resources.items():
                 for _, count in files.items():
@@ -369,21 +367,19 @@ class Importer:
                 if dependency_path in visited_dependencies:
                     # Found circular dependency... Ignore and continue.
                     continue
+
+                if dependency_path == 'https://packages.simplifier.net/hl7.fhir.r4.core/4.0.1/':
+                    # Do not import the core package if it's on the list of dependencies
+                    visited_dependencies.append(dependency_path)
+                    dependencies.append(dependency_path)
+                    continue
                 self.prepare_resources(dependency_path, resource_types, dependencies, visited_dependencies, resources)
 
         dependencies.append(path)
 
     def prepare_tasks(self, resource_types, packages, resources):
         tasks = []
-        # Count all items to determine batch size
-        all_count = 0
-        for resource, item in resources.items():
-            for filepath, count in item.items():
-                all_count += count
-        if all_count > 50000:
-            task_batch_size = (all_count / 1000)
-        else:
-            task_batch_size = self.MIN_BATCH_SIZE
+        task_batch_size = self.calculate_batch_size(resources)
 
         # Import in groups in order. Resources within groups are imported in parallel.
         for package in packages:
@@ -427,24 +423,46 @@ class Importer:
                     tasks.append(groups)
         return tasks
 
+    def calculate_batch_size(self, resources):
+        # Count all items to determine batch size
+        all_count = 0
+        for _, item in resources.items():
+            for _, count in item.items():
+                all_count += count
+        if all_count > 50000:
+            task_batch_size = round(all_count / 1000)
+        else:
+            task_batch_size = self.MIN_BATCH_SIZE
+        return task_batch_size
+
     def schedule_tasks(self, tasks):
-        chained_tasks = chain()
+        subtask_ids = []
+        group_queue = []
         for task in tasks:
             group_tasks = []
             for group_task in task:
                 # TODO: create 2 queues for new bulk import subtasks: bulk_import_subtask and bulk_import_subtask_root
+                subtask_id = uuid()
+                subtask_ids.append(subtask_id)
                 group_tasks.append(bulk_import_subtask.si(group_task['path'], group_task['username'],
                                                           group_task['owner_type'], group_task['owner'],
                                                           group_task['resource_type'], group_task['files'])
-                                   .set(queue='concurrent'))
+                                   .set(task_id=subtask_id))
             if len(group_tasks) == 1:  # Prevent celery from converting group to a single task
-                group_tasks.append(bulk_import_subtask_empty.si().set(queue='concurrent'))
+                group_tasks.append(bulk_import_subtask_empty.si())
 
-            chained_tasks |= group(group_tasks)
-        chained_tasks |= import_finisher.si(self.task_id).set(queue='concurrent')
+            group_queue.append(group(group_tasks))
 
-        final_task = chained_tasks.apply_async(queue='concurrent')
-        return final_task
+        final_task_id = uuid()
+        group_queue.append(import_finisher.si(self.task_id).set(task_id=final_task_id))
+
+        # Celery cannot handle chain of groups that have hundreds of tasks thus we use a task that schedules
+        # a group of tasks once the previous group is done.
+        bulk_import_queue.si(group_queue).apply_async(queue='concurrent')
+
+        # We pass the final task id to be able to track the end of execution and track progress.
+        final_task = AsyncResult(final_task_id)
+        return final_task, subtask_ids
 
     def is_importable_file(self, file_name):
         return file_name.endswith('.json') and ((self.is_npm_import() and file_name.startswith('package/')

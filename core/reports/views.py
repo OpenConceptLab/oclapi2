@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.common.tasks import resources_report
+from core.common.throttling import ThrottleUtil
 from core.common.views import BaseAPIView
 from core.tasks.models import Task
 from core.tasks.serializers import TaskBriefSerializer
@@ -17,6 +18,9 @@ from core.users.reports import UserReport
 
 class ResourcesReportJobView(APIView):  # pragma: no cover
     permission_classes = (IsAdminUser, )
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     @staticmethod
     @swagger_auto_schema(

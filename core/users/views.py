@@ -11,11 +11,10 @@ from mozilla_django_oidc.views import OIDCAuthenticationCallbackView
 from pydash import get
 from rest_framework import mixins, status
 from rest_framework.authtoken.serializers import AuthTokenSerializer
-from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.generics import RetrieveAPIView, UpdateAPIView, DestroyAPIView, RetrieveUpdateDestroyAPIView, \
     ListAPIView
-from rest_framework.permissions import IsAdminUser, IsAuthenticated, AllowAny
+from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -38,17 +37,22 @@ from core.users.serializers import UserDetailSerializer, UserCreateSerializer, U
     UserSummarySerializer, FollowingSerializer
 from .models import UserProfile, Follow
 from ..common import ERRBIT_LOGGER
+from ..common.throttling import ThrottleUtil
 
 TRUTHY = get_truthy_values()
 
 
 class OCLOIDCAuthenticationCallbackView(OIDCAuthenticationCallbackView):
-    pass
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
 
 class OIDCodeExchangeView(APIView):
     """API to exchange OIDP one-time authorization_code with token"""
     permission_classes = (AllowAny, )
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     @staticmethod
     def post(request):
@@ -68,6 +72,9 @@ class OIDCodeExchangeView(APIView):
 # This API is only to migrate users from Django to OID, requires OID admin credentials in payload
 class SSOMigrateView(APIView):  # pragma: no cover
     permission_classes = (AllowAny, )
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     def get_object(self):
         username = self.kwargs.get('user')
@@ -92,6 +99,9 @@ class SSOMigrateView(APIView):  # pragma: no cover
 class TokenExchangeView(APIView):
     permission_classes = (IsAuthenticated, )
 
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
+
     @staticmethod
     def get(request):
         return Response({'token': request.user.get_token()})
@@ -99,6 +109,9 @@ class TokenExchangeView(APIView):
 
 class OIDCLogoutView(APIView):
     permission_classes = (AllowAny,)
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     @staticmethod
     def get(request):
@@ -112,8 +125,12 @@ class OIDCLogoutView(APIView):
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
-class TokenAuthenticationView(ObtainAuthToken):
-    """Implementation of ObtainAuthToken with last_login update"""
+class TokenAuthenticationView(APIView):
+    """Authenticate a user and return their token without DRF's deprecated schema dependency."""
+    permission_classes = (AllowAny,)
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     @staticmethod
     def get(request):
@@ -129,14 +146,19 @@ class TokenAuthenticationView(ObtainAuthToken):
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
     @swagger_auto_schema(request_body=AuthTokenSerializer)
-    def post(self, request, *args, **kwargs):
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         if AuthService.is_sso_enabled():
             raise Http400(
                 {'error': ["Single Sign On is enabled in this environment. Cannot login via API directly."]})
 
-        user = UserProfile.objects.filter(username=request.data.get('username')).first()
+        username = request.data.get('username')
+        password = request.data.get('password')
+        if not username or not password:
+            return Response(status=status.HTTP_400_BAD_REQUEST)
 
-        if not user or not user.check_password(request.data.get('password')):
+        user = UserProfile.objects.filter(username=username).first()
+
+        if not user or not user.check_password(password):
             raise Http400({'non_field_errors': ["Unable to log in with provided credentials."]})
 
         if not user.is_active:
@@ -156,7 +178,7 @@ class TokenAuthenticationView(ObtainAuthToken):
                 }, status=status.HTTP_401_UNAUTHORIZED
             )
 
-        result = super().post(request, *args, **kwargs)
+        result = Response({'token': user.get_token()})
 
         try:
             update_last_login(None, user)
@@ -465,6 +487,9 @@ class UserStaffToggleView(UserBaseView, UpdateAPIView):
     swagger_schema = None
 
     def update(self, request, *args, **kwargs):
+        if AuthService.is_sso_enabled():
+            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
         user = self.get_object()
         if user.username == self.request.user.username:
             raise Http400()
@@ -478,6 +503,9 @@ class UserStaffToggleView(UserBaseView, UpdateAPIView):
 
 class UserExtrasBaseView(APIView):
     serializer_class = UserDetailSerializer
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     def get_object(self):
         instance = self.request.user if self.kwargs.get('user_is_self') else UserProfile.objects.filter(
@@ -585,6 +613,9 @@ class UserFollowingView(DestroyAPIView):
     lookup_url_kwarg = 'id'
     lookup_field = 'id'
     queryset = Follow.objects.filter()
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     def perform_destroy(self, instance):
         follower = instance.follower

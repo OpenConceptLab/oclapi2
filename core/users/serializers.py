@@ -248,16 +248,19 @@ class UserDetailSerializer(AbstractResourceSerializer):
         instance.preferred_locale = validated_data.get('preferred_locale', instance.preferred_locale)
         instance.extras = validated_data.get('extras', instance.extras)
         instance.updated_by = request_user
-        auth_groups = validated_data.get('auth_groups', None)
-        if isinstance(auth_groups, list):
-            if len(auth_groups) == 0:
-                instance.groups.set([])
-            else:
-                if instance.is_valid_auth_group(*auth_groups):
-                    instance.groups.set(Group.objects.filter(name__in=auth_groups))
+
+        from core.services.auth.core import AuthService
+        if not AuthService.is_sso_enabled():
+            auth_groups = validated_data.get('auth_groups', None)
+            if isinstance(auth_groups, list):
+                if len(auth_groups) == 0:
+                    instance.groups.set([])
                 else:
-                    self._errors.update({'auth_groups': [INVALID_AUTH_GROUP_NAME]})
-                    return instance
+                    if instance.is_valid_auth_group(*auth_groups):
+                        instance.groups.set(Group.objects.filter(name__in=auth_groups))
+                    else:
+                        self._errors.update({'auth_groups': [INVALID_AUTH_GROUP_NAME]})
+                        return instance
 
         instance.save()
         if instance.id:

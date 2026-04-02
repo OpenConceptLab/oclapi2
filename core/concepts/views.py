@@ -1,13 +1,17 @@
+import time
+
+from cid.locals import get_cid
 from django.conf import settings
 from django.db.models import F
 from django.http import Http404
+from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get, compact
 from rest_framework import status
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, ListCreateAPIView, RetrieveUpdateDestroyAPIView, \
     UpdateAPIView, ListAPIView
 from rest_framework.mixins import CreateModelMixin
-from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAdminUser, AllowAny
+from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAdminUser, AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -15,19 +19,23 @@ from core.bundles.models import Bundle
 from core.bundles.serializers import BundleSerializer
 from core.collections.documents import CollectionDocument
 from core.common.constants import (
-    HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE)
+    HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE, LIMIT_PARAM, LIST_DEFAULT_LIMIT)
 from core.common.exceptions import Http400, Http403, Http409
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
-from core.common.search import CustomESSearch
+from core.common.search import CustomESSearch, Reranker
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, sort_asc_param, verbose_param,
     include_facets_header, updated_since_param, include_inverse_mappings_param, include_retired_param,
     compress_header, include_source_versions_param, include_collection_versions_param, cascade_method_param,
     cascade_map_types_param, cascade_exclude_map_types_param, cascade_hierarchy_param, cascade_mappings_param,
     cascade_levels_param, cascade_direction_param, cascade_view_hierarchy, return_map_types_param,
-    omit_if_exists_in_param, equivalency_map_types_param, search_from_latest_repo_header)
+    omit_if_exists_in_param, equivalency_map_types_param, search_from_latest_repo_header,
+    match_semantic_param, match_best_match_param, match_num_candidates_param, match_k_nearest_param,
+    match_brief_param, match_encoder_model_param, match_reranker_param, match_offset_param)
 from core.common.tasks import delete_concept, make_hierarchy
-from core.common.utils import to_parent_uri_from_kwargs, generate_temp_version, get_truthy_values, to_int
+from core.common.throttling import ThrottleUtil
+from core.common.utils import (to_parent_uri_from_kwargs, generate_temp_version, get_truthy_values, to_int,
+                               drop_version)
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
 from core.concepts.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT
@@ -151,21 +159,48 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
 
         return ConceptListSerializer
 
+    def is_sliced(self):
+        result = super().is_sliced()
+        if result:
+            return result
+        parent = get(self, 'parent_resource')
+
+        return 'source' in self.kwargs and parent and not parent.is_head
+
     def get_queryset(self):
         is_latest_version = 'collection' not in self.kwargs and (
                 'version' not in self.kwargs or get(self.kwargs, 'version') == HEAD
         )
         parent = get(self, 'parent_resource')
+        is_source_nested = 'source' in self.kwargs
+        only_hierarchy_root = self.request.query_params.get('onlyHierarchyRoot', False) in TRUTHY and is_source_nested
         if parent:
-            queryset = parent.concepts_set if parent.is_head else parent.concepts
-            queryset = Concept.apply_attribute_based_filters(queryset, self.params).filter(is_active=True)
+            if only_hierarchy_root:
+                queryset = Concept.objects.filter(id=parent.hierarchy_root_id).filter()
+            elif parent.is_head:
+                queryset = Concept.apply_attribute_based_filters(
+                    parent.concepts_set, self.params).filter(is_active=True)
+            else:
+                limit = to_int(self.params.get(LIMIT_PARAM), LIST_DEFAULT_LIMIT)
+                page = to_int(self.params.get('page'), 1)
+                offset = (page - 1) * limit
+                through_qs = Concept.sources.through.objects.filter(source_id=parent.id)
+                filters = Concept.get_filters_for_criterion(
+                    {k: v for k, v in self.params.items() if k not in ['is_latest']}, 'concept')
+                exclude_retired = 'concept__retired' in filters  # filters will have it false to exclude
+                self.total_count = through_qs.filter(
+                    concept__retired=False, concept__is_active=True).count() if exclude_retired else through_qs.count()
+                queryset = Concept.objects.filter(
+                    id__in=through_qs.filter(
+                        **filters, concept__is_active=True
+                    ).values_list('concept_id', flat=True).order_by('-concept_id')[offset:offset+limit]
+                )
         else:
             queryset = super().get_queryset()
 
         if is_latest_version:
             queryset = queryset.filter(id=F('versioned_object_id'))
-
-        if 'source' in self.kwargs and self.request.query_params.get('onlyParentLess', False) in TRUTHY:
+        if is_source_nested and self.request.query_params.get('onlyParentLess', False) in TRUTHY:
             queryset = queryset.filter(parent_concepts__isnull=True)
 
         if not self.is_brief():
@@ -209,14 +244,12 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
 
     def post(self, request, **_):
         self.set_parent_resource()
-        if not self.parent_resource:
+        if not self.parent_resource or isinstance(request.data, list):
             raise Http404()
-        concept_id = request.data.get('id') or generate_temp_version()
-        if isinstance(request.data, list):
-            raise Http400()
-        serializer = self.get_serializer(
-            data={**request.data, 'parent_id': self.parent_resource.id, 'id': concept_id, 'name': concept_id}
-        )
+        concept_id = get(request.data, 'id') or generate_temp_version()
+        data = {**request.data, 'parent_id': self.parent_resource.id, 'id': concept_id, 'name': concept_id}
+        data['mappings_payload'] = data.pop('mappings', [])
+        serializer = self.get_serializer(data=data)
         if serializer.is_valid():
             serializer.save()
             if serializer.is_valid():
@@ -316,6 +349,7 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
         self.object = self.get_object()
+        real_partial = kwargs.get('partial', False)
         partial = kwargs.pop('partial', True)
         self.parent_resource = self.object.parent
 
@@ -325,7 +359,10 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
                 status=status.HTTP_400_BAD_REQUEST
             )
         self.object = self.object.clone()
-        serializer = self.get_serializer(self.object, data=request.data, partial=partial)
+        data = request.data.copy()
+        data['mappings_payload'] = data.pop('mappings', [])
+        serializer = self.get_serializer(
+            self.object, data=data, partial=partial, is_patch=real_partial)
         success_status_code = status.HTTP_200_OK
 
         if serializer.is_valid():
@@ -686,7 +723,9 @@ class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestr
             resource_instance = self.get_resource_object()
             new_version = resource_instance.clone()
             subject_label_attr = f"cloned_{self.parent_list_attribute}"
-            labels = [name.clone() for name in resource_instance.names.exclude(id=instance.id)]
+            labels = [
+                name.clone() for name in getattr(resource_instance, self.parent_list_attribute).exclude(id=instance.id)
+            ]
             setattr(new_version, subject_label_attr, labels)
             new_version.comment = f'Deleted {instance.name} in {self.parent_list_attribute}.'
             errors = new_version.save_as_new_version(request.user)
@@ -728,6 +767,9 @@ class ConceptsHierarchyAmendAdminView(APIView):  # pragma: no cover
     swagger_schema = None
     permission_classes = (IsAdminUser, )
 
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
+
     @staticmethod
     def post(request):
         concept_map = request.data
@@ -749,10 +791,14 @@ class ConceptsHierarchyAmendAdminView(APIView):  # pragma: no cover
 
 class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
     default_limit = 1
-    score_threshold = 6
-    score_threshold_semantic_very_high = 9
+    score_threshold = 0.9
+    score_threshold_semantic_very_high = 0.9
     serializer_class = ConceptListSerializer
-    permission_classes = (IsAuthenticatedOrReadOnly,)
+    permission_classes = (IsAuthenticated,)
+    es_fields = Concept.es_fields
+
+    def get_throttles(self):
+        return ThrottleUtil.get_match_throttles_by_user_plan(self.request.user)
 
     def get_serializer_class(self):
         if self.is_brief():
@@ -762,46 +808,216 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
 
         return ConceptListSerializer
 
-    def filter_queryset(self, _=None):  # pylint:disable=too-many-locals
+    def filter_queryset(self, _=None):  # pylint: disable=too-many-locals,too-many-statements
         rows = self.request.data.get('rows')
         target_repo_url = self.request.data.get('target_repo_url')
         target_repo_params = self.request.data.get('target_repo')
-        include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM) in get_truthy_values()
+
         if not rows or (not target_repo_url and not target_repo_params):
             raise Http400()
+
+        map_config = self.request.data.get('map_config', [])
+        filters = self.request.data.get('filter', {})
+        include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM) in get_truthy_values()
+        num_candidates = min(to_int(self.request.query_params.get('numCandidates', 0), 3000), 3000)
+        k_nearest = min(to_int(self.request.query_params.get('kNearest', 0), 100), 100)
         offset = max(to_int(self.request.GET.get('offset'), 0), 0)
         limit = max(to_int(self.request.GET.get('limit'), 0), 0) or self.default_limit
         page = max(to_int(self.request.GET.get('page'), 1), 1)
         start = offset or (page - 1) * limit
         end = start + limit
-        results = []
-        is_semantic = self.request.query_params.get('semantic', None) == 'true' and Toggle.get('SEMANTIC_SEARCH_TOGGLE')
-        best_match = self.request.query_params.get('bestMatch', None) == 'true'
+        is_semantic = self.request.query_params.get('semantic', None) in get_truthy_values() and Toggle.get(
+            'SEMANTIC_SEARCH_TOGGLE')
+        best_match = self.request.query_params.get('bestMatch', None) in get_truthy_values()
         score_threshold = self.score_threshold_semantic_very_high if is_semantic else self.score_threshold
-
+        repo_params = self.get_repo_params(is_semantic, target_repo_params, target_repo_url)
+        locale_filter = filters.pop('locale', None) if is_semantic else get(filters, 'locale', None)
+        faceted_criterion = self.get_faceted_criterion(False, filters, minimum_should_match=1) if filters else None
+        apply_for_name_locale = locale_filter and isinstance(locale_filter, str) and len(locale_filter.split(',')) == 1
+        encoder_model = self.request.GET.get('encoder_model', None)
+        reranker = self.request.GET.get('reranker', None) in get_truthy_values()
+        score_to_sort = 'search_rerank_score' if reranker else 'search_normalized_score'
+        cid = get_cid()
+        is_bridge = (repo_params.get('owner', None) == 'CIEL' and repo_params.get('source', None) == 'CIEL' and
+                     filters.get('target_repo', None) and
+                     drop_version(filters.get('target_repo', None)) != '/orgs/CIEL/sources/CIEL/')
+        algorithm = ('ocl-ciel-bridge' if is_bridge else 'ocl-semantic') if is_semantic else 'ocl-search'
+        results = []
         for row in rows:
-            search = ConceptFuzzySearch.search(row, target_repo_url, target_repo_params, include_retired)
-            search = search.params(min_score=score_threshold if best_match else 0)
+            start_time = time.time()
+            search = ConceptFuzzySearch.search(
+                row, target_repo_url, repo_params, include_retired,
+                is_semantic, num_candidates, k_nearest, map_config, faceted_criterion, locale_filter
+            )
+            print(f"[{cid}] ES Search built in {time.time() - start_time} seconds")
+            start_time = time.time()
+            search = search.params(track_total_hits=False, request_cache=True)
             es_search = CustomESSearch(search[start:end], ConceptDocument)
-            es_search.to_queryset(False)
-            result = {'row': row, 'results': []}
+            name = row.get('name') or row.get('Name') if reranker else None
+            es_search.to_queryset(False, True, False, name, encoder_model)
+            print(f"[{cid}] ES Search (including reranker={reranker}) executed in {time.time() - start_time} seconds")
+            start_time = time.time()
+            result = {'row': row, 'results': [], 'map_config': map_config, 'filter': filters}
             for concept in es_search.queryset:
                 concept._highlight = es_search.highlights.get(concept.id, {})  # pylint:disable=protected-access
-                concept._score = es_search.scores.get(concept.id, {})  # pylint:disable=protected-access
-                concept._match_type = 'low'  # pylint:disable=protected-access
-                if concept._score > self.score_threshold:  # pylint:disable=protected-access
-                    concept._match_type = 'high'  # pylint:disable=protected-access
-                    if concept._highlight.get('name', None):  # pylint:disable=protected-access
-                        concept._match_type = 'very_high'  # pylint:disable=protected-access
-                    if is_semantic and concept._score > self.score_threshold_semantic_very_high:  # pylint:disable=protected-access,line-too-long
-                        concept._match_type = 'very_high'  # pylint:disable=protected-access
-                if not best_match or concept._match_type == 'very_high':  # pylint:disable=protected-access
+                score_info = es_search.scores.get(concept.id, {})
+                normalized_score = get(score_info, 'normalized') or 0
+                self.apply_score(concept, is_semantic, score_info, score_threshold, reranker, limit)
+                if not best_match or concept._match_type in ['medium', 'high', 'very_high']:  # pylint:disable=protected-access
+                    if apply_for_name_locale:
+                        concept._requested_locale = locale_filter  # pylint:disable=protected-access
                     serializer = ConceptDetailSerializer if self.is_verbose() else ConceptMinimalSerializer
-                    result['results'].append(
-                        serializer(concept, context={'request': self.request}).data)
+                    data = serializer(concept, context={'request': self.request}).data
+                    data['search_meta']['search_normalized_score'] = normalized_score * 100
+                    data['search_meta']['algorithm'] = algorithm
+                    result['results'].append(data)
+            print(f"[{cid}] Concepts serialized in {time.time() - start_time} seconds")
+            start_time = time.time()
+            if 'results' in result:
+                result['results'] = sorted(
+                    result['results'], key=lambda res: get(res, f'search_meta.{score_to_sort}'), reverse=True)
+            print(f"[{cid}] Concepts sorted in {time.time() - start_time} seconds")
             results.append(result)
 
         return results
 
+    @staticmethod
+    def apply_score(concept, is_semantic, scores, score_threshold, reranker, limit):  # pylint: disable=too-many-arguments,too-many-branches
+        score = get(scores, 'raw') or 0
+        normalized_score = get(scores, 'normalized') or 0
+        rerank_score = get(scores, 'rerank') or 0
+
+        concept._score = score  # pylint:disable=protected-access
+        concept._normalized_score = normalized_score  # pylint:disable=protected-access
+        if reranker:
+            concept._rerank_score = rerank_score  # pylint:disable=protected-access
+        highlight = concept._highlight  # pylint:disable=protected-access
+
+        match_type = 'low'
+        if limit > 1:
+            if is_semantic:
+                if reranker:
+                    if normalized_score >= 0.9:
+                        match_type = 'very_high'
+                    elif normalized_score >= 0.65:
+                        match_type = 'high'
+                    elif normalized_score >= 0.5:
+                        match_type = 'medium'
+                else:
+                    score_to_check = normalized_score if normalized_score is not None else score
+                    if highlight.get('name', None) or score_to_check >= score_threshold:
+                        match_type = 'very_high'
+                    elif highlight.get('synonyms', None):
+                        match_type = 'high'
+                    elif highlight:
+                        match_type = 'medium'
+            else:
+                if highlight.get('name', None):
+                    match_type = 'very_high'
+                elif highlight.get('synonyms', None):
+                    match_type = 'high'
+                elif highlight:
+                    match_type = 'medium'
+        else:
+            match_type = 'very_high'
+
+        concept._match_type = match_type  # pylint:disable=protected-access
+
+    @staticmethod
+    def get_repo_params(is_semantic, target_repo_params, target_repo_url):
+        repo = ConceptFuzzySearch.get_target_repo(target_repo_url)
+        if not repo:
+            raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')
+        if is_semantic:
+            if repo and not repo.has_semantic_match_algorithm:
+                raise Http400('This repo version does not support semantic search')
+        repo_params = target_repo_params or ConceptFuzzySearch.get_repo_params(repo)
+        if not repo_params:
+            raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')
+        return repo_params
+
+    @swagger_auto_schema(
+        operation_description='Find matching concepts across repositories using structured input data.',
+        operation_summary='$match - Find matching concepts',
+        manual_parameters=[
+            verbose_param, include_retired_param, limit_param, page_param, match_offset_param,
+            match_semantic_param, match_best_match_param, match_num_candidates_param,
+            match_k_nearest_param, match_brief_param, match_encoder_model_param, match_reranker_param,
+        ],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['rows'],
+            properties={
+                'target_repo_url': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='Repository URL to match against. Either target_repo_url or target_repo is required.'
+                ),
+                'target_repo': openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    description='Alternative to target_repo_url. Object with owner, source, source_version, '
+                                'owner_type fields.'
+                ),
+                'rows': openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(type=openapi.TYPE_OBJECT),
+                    description='List of concept-like key-value pairs to match.'
+                ),
+                'map_config': openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(type=openapi.TYPE_OBJECT),
+                    description='Optional list configuring mapping logic per row.'
+                ),
+                'filter': openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    description='Filtering criteria including locale and faceted filters.'
+                ),
+            }
+        ),
+        responses={
+            200: 'List of matched results per input row',
+            400: 'Missing required parameters (rows, target_repo_url/target_repo)',
+            403: 'User not approved for $match or on waitlist',
+        }
+    )
     def post(self, request, **kwargs):  # pylint: disable=unused-argument
+        user = self.request.user
+        if user.is_mapper_waitlisted or not user.is_mapper_approved:
+            return Response(
+                {'detail': 'You are currently in waitlist for $match operation.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
         return Response(self.filter_queryset())
+
+
+class RerankConceptsListView(BaseAPIView):
+    is_searchable = False
+    serializer_class = ConceptListSerializer
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, **kwargs):  # pylint: disable=unused-argument
+        user = self.request.user
+        if user.is_mapper_waitlisted or not user.is_mapper_approved:
+            return Response(
+                {'detail': 'You are currently in waitlist for this operation.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        rows = self.request.data.get('rows', [])
+        name_key = self.request.data.get('name_key', None) or 'display_name'
+        text = self.request.data.get('q', None)
+        score_key = self.request.data.get('score_key', None)
+
+        if not isinstance(rows, list) or not rows:
+            return Response(
+                {'detail': 'Invalid or missing "rows" in request body.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if not text:
+            return Response(
+                {'detail': 'Missing "q" in request body.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        return Response(
+            Reranker().rerank(hits=rows, name_key=name_key, txt=text, score_key=score_key, order_results=True)
+        )

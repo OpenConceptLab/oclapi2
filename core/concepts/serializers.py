@@ -112,6 +112,7 @@ class ConceptDescriptionSerializer(ConceptLabelSerializer):
 class ConceptAbstractSerializer(AbstractResourceSerializer):
     uuid = CharField(source='id', read_only=True)
     mappings = SerializerMethodField()
+    mappings_payload = ListField(child=JSONField(), write_only=True, required=False, allow_empty=True)
     parent_concepts = SerializerMethodField()
     child_concepts = SerializerMethodField()
     hierarchy_path = SerializerMethodField()
@@ -126,13 +127,14 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
         abstract = True
         fields = AbstractResourceSerializer.Meta.fields + (
             'uuid', 'parent_concept_urls', 'child_concept_urls', 'parent_concepts', 'child_concepts', 'hierarchy_path',
-            'mappings', 'extras', 'summary', 'references', 'has_children', 'checksums'
+            'mappings', 'extras', 'summary', 'references', 'has_children', 'checksums', 'mappings_payload'
         )
 
     def __init__(self, *args, **kwargs):  # pylint: disable=too-many-branches
         request = get(kwargs, 'context.request')
         params = get(request, 'query_params')
         self.view_kwargs = get(kwargs, 'context.view.kwargs', {})
+        self.is_patch = kwargs.pop('is_patch', None)
 
         self.query_params = params.dict() if params else {}
         self.include_indirect_mappings = self.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM) in TRUTHY
@@ -171,7 +173,7 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
                 self.fields.pop('summary', None)
             if not get(request, 'instance'):
                 self.fields.pop('references', None)
-            if get(params, 'onlyParentLess') not in TRUTHY:
+            if get(params, 'onlyParentLess') not in TRUTHY and get(params, 'onlyHierarchyRoot') not in TRUTHY:
                 self.fields.pop('has_children', None)
         except:  # pylint: disable=bare-except
             pass
@@ -197,6 +199,7 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
         request = get(context, 'request')
         is_mapping_brief = request.query_params.get('mappingBrief', None) in TRUTHY
         map_types = compact((request.query_params.get('mapTypes', '') or '').split(','))
+        target_repo_urls = compact((request.query_params.get('targetRepoUrls', '') or '').split(','))
         serializer_class = MappingMinimalSerializer if is_mapping_brief else MappingDetailSerializer
         is_collection = 'collection' in self.view_kwargs
         collection_version = self.view_kwargs.get('version', HEAD) if is_collection else None
@@ -211,6 +214,8 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
                 parent_uri, collection_version) if is_collection else obj.get_unidirectional_mappings()
             if map_types:
                 mappings = mappings.filter(map_type__in=map_types)
+            if target_repo_urls:
+                mappings = mappings.filter(to_source_url__in=target_repo_urls)
             return serializer_class(mappings, many=True).data
 
         return []
@@ -275,6 +280,7 @@ class ConceptListSerializer(ConceptAbstractSerializer):
     version_updated_by = DateTimeField(source='updated_by.username', read_only=True)
     latest_source_version = CharField(
         source='latest_source_version.version', allow_null=True, allow_blank=True, read_only=True, required=False)
+    property = JSONField(source='summary_properties', read_only=True)
 
     class Meta:
         model = Concept
@@ -283,7 +289,7 @@ class ConceptListSerializer(ConceptAbstractSerializer):
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
             'locale', 'version_created_by', 'version_created_on', 'mappings', 'is_latest_version', 'versions_url',
             'version_url', 'extras', 'type', 'versioned_object_id', 'version_updated_on', 'version_updated_by',
-            'latest_source_version'
+            'latest_source_version', 'property'
         )
 
 
@@ -354,7 +360,7 @@ class ConceptMinimalSerializer(ConceptAbstractSerializer):
 
     class Meta:
         model = Concept
-        fields = ConceptAbstractSerializer.Meta.fields + ('id', 'type', 'url', 'version_url', 'retired')
+        fields = ConceptAbstractSerializer.Meta.fields + ('id', 'type', 'url', 'version_url', 'retired', 'display_name')
 
 
 class ConceptChecksumSerializer(AbstractResourceSerializer):
@@ -382,7 +388,8 @@ class ConceptMinimalSerializerRecursive(ConceptAbstractSerializer):
     class Meta:
         model = Concept
         fields = ConceptAbstractSerializer.Meta.fields + (
-            'id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired')
+            'id', 'type', 'url', 'version_url', 'terminal', 'entries', 'display_name', 'retired',
+            'concept_class', 'datatype')
 
     def __init__(self, *args, **kwargs):
         if 'mappings' in self.fields:
@@ -432,6 +439,7 @@ class ConceptDetailSerializer(ConceptAbstractSerializer):
     created_by = DateTimeField(source='created_by.username', read_only=True)
     latest_source_version = CharField(
         source='latest_source_version.version', allow_null=True, allow_blank=True, read_only=True, required=False)
+    property = JSONField(source='properties', read_only=True)
 
     class Meta:
         model = Concept
@@ -440,7 +448,7 @@ class ConceptDetailSerializer(ConceptAbstractSerializer):
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
             'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'parent_id', 'type',
             'update_comment', 'version_url', 'updated_by', 'created_by',
-            'public_can_view', 'versioned_object_id', 'latest_source_version'
+            'public_can_view', 'versioned_object_id', 'latest_source_version', 'property'
         )
 
     def create(self, validated_data):
@@ -455,7 +463,7 @@ class ConceptDetailSerializer(ConceptAbstractSerializer):
     def update(self, instance, validated_data):
         errors = Concept.create_new_version_for(
             instance=instance, data=validated_data, user=self.context.get('request').user,
-            create_parent_version=self.create_parent_version
+            create_parent_version=self.create_parent_version, is_patch=self.is_patch
         )
         if errors:
             self._errors.update(errors)

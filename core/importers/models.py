@@ -113,10 +113,11 @@ class BaseResourceImporter:
         self.data = data
         self.update_if_exists = update_if_exists
         self.queryset = None
+        self.index_resources = False
 
     @classmethod
     def can_handle(cls, obj):
-        return isinstance(obj, dict) and obj.get('type', '').lower() == cls.get_resource_type()
+        return isinstance(obj, dict) and obj.get('type', '').lower() == cls.get_resource_type().lower()
 
     @staticmethod
     def get_resource_type():
@@ -136,7 +137,7 @@ class BaseResourceImporter:
         return self.mandatory_fields.issubset(self.data.keys())
 
     def get_owner_type(self):
-        return self.get('owner_type', '').lower()
+        return (self.get('owner_type', '') or '').lower()
 
     def is_user_owner(self):
         return self.get_owner_type() == 'user'
@@ -187,7 +188,7 @@ class OrganizationImporter(BaseResourceImporter):
 
     @staticmethod
     def get_resource_type():
-        return 'organization'
+        return 'Organization'
 
     def exists(self):
         return self.get_queryset().exists()
@@ -227,12 +228,12 @@ class SourceImporter(BaseResourceImporter):
         "public_access", "default_locale", "supported_locales", "website", "extras", "external_id",
         'canonical_url', 'identifier', 'contact', 'jurisdiction', 'publisher', 'purpose', 'copyright',
         'revision_date', 'text', 'content_type', 'experimental', 'case_sensitive', 'collection_reference',
-        'hierarchy_meaning', 'compositional', 'version_needed', 'meta',
+        'hierarchy_meaning', 'compositional', 'version_needed', 'meta', 'properties', 'filters'
     ]
 
     @staticmethod
     def get_resource_type():
-        return 'source'
+        return 'Source'
 
     def exists(self):
         return self.get_queryset().exists()
@@ -285,7 +286,7 @@ class SourceVersionImporter(BaseResourceImporter):
 
     @staticmethod
     def get_resource_type():
-        return 'source version'
+        return 'Source Version'
 
     def exists(self):
         return Source.objects.filter(
@@ -323,7 +324,7 @@ class CollectionImporter(BaseResourceImporter):
 
     @staticmethod
     def get_resource_type():
-        return 'collection'
+        return 'Collection'
 
     def exists(self):
         return self.get_queryset().exists()
@@ -376,7 +377,7 @@ class CollectionVersionImporter(BaseResourceImporter):
 
     @staticmethod
     def get_resource_type():
-        return 'collection version'
+        return 'Collection Version'
 
     def exists(self):
         return Collection.objects.filter(
@@ -412,7 +413,7 @@ class ConceptImporter(BaseResourceImporter):
 
     @staticmethod
     def get_resource_type():
-        return 'concept'
+        return 'Concept'
 
     def __init__(self, data, user, update_if_exists):
         super().__init__(data, user, update_if_exists)
@@ -441,6 +442,8 @@ class ConceptImporter(BaseResourceImporter):
         self.data['mnemonic'] = str(self.data.pop('id', ''))
         if not is_url_encoded_string(self.data['mnemonic']):
             self.data['mnemonic'] = encode_string(self.data['mnemonic'])
+        for locale in [*(self.data.get('names', []) or []), *(self.data.get('descriptions', []) or [])]:
+            locale.pop('checksum', None)
 
     def clean(self):
         if not self.is_valid():
@@ -453,8 +456,10 @@ class ConceptImporter(BaseResourceImporter):
 
     def process(self):
         parent = self.data.get('parent')
+        errors = {}
         if not parent:
-            return FAILED
+            errors['source'] = 'Not Found'
+            return errors
         if parent.has_edit_access(self.user):
             if self.version:
                 self.instance = self.get_queryset().first().clone()
@@ -475,7 +480,7 @@ class ConceptImporter(BaseResourceImporter):
                 data={**self.data, '_counted': None, '_index': False}, user=self.user, create_parent_version=False)
             if self.instance.id:
                 return CREATED
-            return self.instance.errors or FAILED
+            return self.instance.errors or errors or FAILED
 
         return PERMISSION_DENIED
 
@@ -506,7 +511,7 @@ class MappingImporter(BaseResourceImporter):
 
     @staticmethod
     def get_resource_type():
-        return 'mapping'
+        return 'Mapping'
 
     def __init__(self, data, user, update_if_exists):
         super().__init__(data, user, update_if_exists)
@@ -597,8 +602,10 @@ class MappingImporter(BaseResourceImporter):
 
     def process(self):
         parent = self.data.get('parent')
+        errors = {}
         if not parent:
-            return FAILED
+            errors['source'] = 'Not Found'
+            return errors
         if parent.has_edit_access(self.user):
             if self.version:
                 queryset = self.get_queryset()
@@ -617,7 +624,7 @@ class MappingImporter(BaseResourceImporter):
             self.instance = Mapping.persist_new({**self.data, '_counted': None, '_index': False}, self.user)
             if self.instance.id:
                 return CREATED
-            return self.instance.errors or FAILED
+            return self.instance.errors or errors or FAILED
 
         return PERMISSION_DENIED
 
@@ -641,11 +648,11 @@ class MappingImporter(BaseResourceImporter):
 
 class ReferenceImporter(BaseResourceImporter):
     mandatory_fields = {"data"}
-    allowed_fields = ["data", "collection", "owner", "owner_type", "__cascade", "collection_url"]
+    allowed_fields = ["data", "collection", "owner", "owner_type", "__cascade", "collection_url", "__transform"]
 
     @staticmethod
     def get_resource_type():
-        return 'reference'
+        return 'Reference'
 
     def exists(self):
         return False
@@ -668,10 +675,11 @@ class ReferenceImporter(BaseResourceImporter):
 
         if collection:
             if collection.has_edit_access(self.user):
-                (added_references, _) = collection.add_expressions(
-                    self.get('data'), self.user, self.get('__cascade', False)
+                added_references, errors = collection.add_expressions(
+                    self.get('data'), self.user, self.get('__cascade', False),
+                    self.get('__transform', False)
                 )
-                if not get(settings, 'TEST_MODE', False):  # pragma: no cover
+                if self.index_resources and not get(settings, 'TEST_MODE', False):  # pragma: no cover
                     concept_ids = []
                     mapping_ids = []
                     for ref in added_references:
@@ -684,7 +692,12 @@ class ReferenceImporter(BaseResourceImporter):
                     if mapping_ids:
                         batch_index_resources.apply_async(
                             ('mapping', {'id__in': mapping_ids}), queue='indexing', permanent=False)
-
+                if errors:
+                    return {
+                        'errors': errors,
+                        'added_references_expressions': [ref.expression for ref in
+                                                         added_references] if added_references else []
+                    }
                 return CREATED
             return PERMISSION_DENIED
         return NOT_FOUND
@@ -743,6 +756,7 @@ class BulkImportInline(BaseImporter):
         self.total = len(self.input_list)
         self.start_time = time.time()
         self.elapsed_seconds = 0
+        self.index_resources = False
 
     def set_task(self):
         self.task = Task.objects.filter(id=self.self_task_id).first()
@@ -846,7 +860,7 @@ class BulkImportInline(BaseImporter):
             if item_type == 'concept':
                 concept_importer = ConceptImporter(item, self.user, self.update_if_exists)
                 _result = concept_importer.delete() if action == 'delete' else concept_importer.run()
-                if get(concept_importer.instance, 'id'):
+                if self.index_resources and get(concept_importer.instance, 'id'):
                     new_concept_ids.update(set(compact(
                         [
                             concept_importer.instance.versioned_object_id,
@@ -860,7 +874,7 @@ class BulkImportInline(BaseImporter):
             if item_type == 'mapping':
                 mapping_importer = MappingImporter(item, self.user, self.update_if_exists)
                 _result = mapping_importer.delete() if action == 'delete' else mapping_importer.run()
-                if get(mapping_importer.instance, 'id'):
+                if self.index_resources and get(mapping_importer.instance, 'id'):
                     new_mapping_ids.update(set(compact(
                         [
                             mapping_importer.instance.versioned_object_id,
@@ -886,8 +900,7 @@ class BulkImportInline(BaseImporter):
             for chunk in chunks(list(set(new_mapping_ids)), 5000):
                 batch_index_resources.apply_async(
                     ('mapping', {'id__in': chunk}, True), queue='indexing', permanent=False)
-
-        self.elapsed_seconds = time.time() - self.start_time
+        self.elapsed_seconds = round(time.time() - self.start_time, 4)
 
         self.make_result()
 
@@ -1112,7 +1125,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                     if is_child:
                         if part_type not in self.resource_wise_time:
                             self.resource_wise_time[part_type] = 0
-                        self.resource_wise_time[part_type] += (time.time() - start_time)
+                        self.resource_wise_time[part_type] += round(time.time() - start_time, 4)
 
         post_import_update_resource_counts.apply_async(queue='default', permanent=False)
 
@@ -1123,17 +1136,27 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         return self.result
 
     def update_elapsed_seconds(self):
-        self.elapsed_seconds = time.time() - self.start_time
+        self.elapsed_seconds = round(time.time() - self.start_time, 4)
 
     @property
     def detailed_summary(self):
         result = self.json_result
-        return f"Started: {self.start_time_formatted} | Processed: {result.get('processed')}/{result.get('total')} | " \
-            f"Created: {len(result.get('created'))} | Updated: {len(result.get('updated'))} | " \
-            f"Deleted: {len(result.get('deleted'))} | Existing: {len(result.get('exists'))} | " \
-            f"Permission Denied: {len(result.get('permission_denied'))} | " \
-            f"Unchanged: {len(result.get('unchanged'))} | " \
-            f"Time: {self.elapsed_seconds}secs"
+        message = f"Started: {self.start_time_formatted} | Processed: {result.get('processed')}/{result.get('total')}"
+        if len(result.get('created')):
+            message += f" | Created: {len(result.get('created'))}"
+        if len(result.get('updated')):
+            message += f" | Updated: {len(result.get('updated'))}"
+        if len(result.get('deleted')):
+            message += f" | Deleted: {len(result.get('deleted'))}"
+        if len(result.get('exists')):
+            message += f" | Existing: {len(result.get('exists'))}"
+        if len(result.get('permission_denied')):
+            message += f" | Permission Denied: {len(result.get('permission_denied'))}"
+        if len(result.get('unchanged')):
+            message += f" | Unchanged: {len(result.get('unchanged'))}"
+        message += f" | Time: {self.elapsed_seconds}secs"
+
+        return message
 
     @property
     def start_time_formatted(self):

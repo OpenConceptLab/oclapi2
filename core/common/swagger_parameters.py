@@ -6,7 +6,7 @@ from core.common.constants import RELEASED_PARAM, VERBOSE_PARAM, INCLUDE_RETIRED
     LAST_LOGIN_BEFORE_PARAM, LAST_LOGIN_SINCE_PARAM, DATE_JOINED_SINCE_PARAM, DATE_JOINED_BEFORE_PARAM, \
     CASCADE_HIERARCHY_PARAM, CASCADE_METHOD_PARAM, MAP_TYPES_PARAM, EXCLUDE_MAP_TYPES_PARAM, CASCADE_MAPPINGS_PARAM, \
     INCLUDE_MAPPINGS_PARAM, CASCADE_LEVELS_PARAM, CASCADE_DIRECTION_PARAM, ALL, RETURN_MAP_TYPES, OMIT_IF_EXISTS_IN, \
-    EQUIVALENCY_MAP_TYPES, CANONICAL_URL_REQUEST_PARAM
+    EQUIVALENCY_MAP_TYPES, CANONICAL_URL_REQUEST_PARAM, INCLUDE_SUMMARY
 # HEADERS
 from core.orgs.constants import NO_MEMBERS
 
@@ -63,6 +63,10 @@ updated_since_param = openapi.Parameter(
 )
 canonical_url_param = openapi.Parameter(
     CANONICAL_URL_REQUEST_PARAM, openapi.IN_QUERY, type=openapi.TYPE_STRING,
+)
+all_versions_param = openapi.Parameter(
+    'allVersions', openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=False,
+    description='Include all repo versions (default only shows HEAD versions)'
 )
 
 released_param = openapi.Parameter(
@@ -183,6 +187,11 @@ cascade_view_hierarchy = openapi.Parameter(
     enum=['', 'hierarchy'],
     description='Hierarchy (nested) or Flat Response'
 )
+include_summary_param = openapi.Parameter(
+    INCLUDE_SUMMARY, openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=False,
+    description='Include summary counts of active concepts and mappings'
+)
+
 task_state_param = openapi.Parameter(
     'state',
     openapi.IN_QUERY,
@@ -192,4 +201,38 @@ task_state_param = openapi.Parameter(
 task_start_date_param = openapi.Parameter(
     'start_date', openapi.IN_QUERY, type=openapi.TYPE_STRING, format='YYYY-MM-DD', required=False,
     description='filter by start date of tasks'
+)
+
+# $match params
+match_semantic_param = openapi.Parameter(
+    'semantic', openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=False,
+    description='Use semantic (LM-based) matching algorithm'
+)
+match_best_match_param = openapi.Parameter(
+    'bestMatch', openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=False,
+    description='Apply minimum score threshold, filtering out low-quality matches'
+)
+match_num_candidates_param = openapi.Parameter(
+    'numCandidates', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, default=3000,
+    description='Number of approximate nearest neighbor candidates (semantic only). Max: 3000'
+)
+match_k_nearest_param = openapi.Parameter(
+    'kNearest', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, default=100,
+    description='Number of nearest neighbors to return from vector search (semantic only). Max: 100'
+)
+match_brief_param = openapi.Parameter(
+    'brief', openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=False,
+    description='Return minimal concept fields in results'
+)
+match_encoder_model_param = openapi.Parameter(
+    'encoder_model', openapi.IN_QUERY, type=openapi.TYPE_STRING,
+    description='Custom encoder model name for semantic vector search (e.g. BAAI/bge-reranker-v2-m3)'
+)
+match_reranker_param = openapi.Parameter(
+    'reranker', openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=True,
+    description='Enable cross-encoder reranking of results (semantic only)'
+)
+match_offset_param = openapi.Parameter(
+    'offset', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, default=0,
+    description='Number of results to skip per row'
 )

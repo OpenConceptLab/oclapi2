@@ -26,8 +26,9 @@ class Organization(BaseResourceModel, SourceContainerMixin, ChecksumModel):
         '_mnemonic': {'sortable': True, 'filterable': False, 'exact': False},
         'last_update': {'sortable': True, 'default': 'desc', 'filterable': False},
         'updated_by': {'sortable': False, 'filterable': False, 'facet': True},
-        'company': {'sortable': False, 'filterable': True, 'exact': True},
-        'location': {'sortable': False, 'filterable': True, 'exact': True},
+        'company': {'sortable': True, 'filterable': True, 'exact': True},
+        'location': {'sortable': True, 'filterable': True, 'exact': True},
+        'created_on': {'sortable': True, 'filterable': False, 'exact': False},
     }
 
     name = models.TextField()

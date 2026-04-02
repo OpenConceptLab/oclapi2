@@ -30,4 +30,5 @@ urlpatterns = [
     path('<str:org>/collections/', include('core.collections.urls')),
     path('<str:org>/pins/', include('core.pins.urls')),
     path('<str:org>/events/', include('core.events.urls')),
+    path('<str:org>/map-projects/', include('core.map_projects.urls')),
 ]

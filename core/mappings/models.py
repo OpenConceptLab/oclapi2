@@ -213,7 +213,21 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
     @property
     def to_source_name(self):
-        return get(self.get_to_source(), 'mnemonic')
+        """
+        Return the name of the source that this mapping is associated with.
+
+        If the mapping has an associated source, then the mnemonic of that source is returned.
+        If the mapping has a to_source_url, but no associated source, then the parent uri of that url is returned.
+        If the mapping has no associated source or to_source_url, then None is returned.
+        """
+        source = self.get_to_source()
+        if source:
+            return source.mnemonic
+        if self.to_source_url:
+            parent_uri = to_parent_uri(self.to_source_url)
+            if parent_uri:
+                return parent_uri.rstrip('/').split('/')[-1]
+        return None
 
     @property
     def to_source_owner(self):
@@ -321,6 +335,8 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         to_source_url = data.get('to_source_url', None) or to_parent_uri(to_concept_url)
 
         def get_concept(expr):
+            if expr and not expr.endswith('/'):
+                expr = expr + '/'
             concept = Concept.objects.filter(
                 uri=expr).first() or Concept.objects.filter(uri=encode_string(expr, safe='/')).first()
 
@@ -377,6 +393,10 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     def is_existing_in_parent(self):
         return self.parent.mappings_set.filter(mnemonic__exact=self.mnemonic).exists()
 
+    @property
+    def latest_source_version(self):
+        return self.sources.exclude(version=HEAD).order_by('-created_at').first()
+
     @classmethod
     def create_new_version_for(cls, instance, data, user):
         instance.populate_fields_from_relations(data)
@@ -421,9 +441,11 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                 if self.from_concept_id:
                     self.index_from_concept()
         except ValidationError as ex:
-            self.errors.update(ex.message_dict)
+            self.errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
         except IntegrityError as ex:
             self.errors.update({'__all__': ex.args})
+        except Exception as ex:  # pylint: disable=broad-except
+            self.errors.update({'__all__': str(ex)})
 
     def index_from_concept(self):
         if self.from_concept_id:
@@ -497,7 +519,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         except ValidationError as ex:
             if mapping.id:
                 mapping.delete()
-            mapping.errors.update(ex.message_dict)
+            mapping.errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
         except (IntegrityError, ValueError) as ex:
             if mapping.id:
                 mapping.delete()

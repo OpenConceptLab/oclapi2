@@ -168,6 +168,34 @@ class MappingListViewTest(OCLAPITestCase):
         self.assertEqual(response.data['to_source_version'], None)
         self.assertEqual(response.data['to_concept_code'], 'A73')
         self.assertEqual(response.data['to_concept_name'], None)
+        mapping = source.mappings.first()
+        self.assertIsNone(mapping.to_concept_id)
+
+    def test_post_to_concept_exists_and_bad_to_concept_url(self):
+        source = UserSourceFactory(user=self.user)
+        concept = ConceptFactory(parent=source)
+        to_concept = ConceptFactory(mnemonic='to-concept')
+
+        response = self.client.post(
+            source.mappings_url,
+            {
+                "map_type": "Same As",
+                "from_concept_url": concept.get_latest_version().uri,
+                "to_concept_url": to_concept.url.rstrip('/')  # removes last '/'
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['from_source_url'], source.uri)
+        self.assertEqual(response.data['from_source_version'], None)
+        self.assertEqual(response.data['from_concept_code'], concept.mnemonic)
+        self.assertEqual(response.data['from_concept_name'], None)
+        self.assertEqual(response.data['to_source_url'], to_concept.parent.url)
+        self.assertEqual(response.data['to_source_version'], None)
+        self.assertEqual(response.data['to_concept_code'], 'to-concept')
+        self.assertEqual(response.data['to_concept_name'], None)
+        mapping = source.mappings.first()
+        self.assertEqual(mapping.to_concept_id, to_concept.id)
 
     def test_post_everything_exists_201(self):
         source1 = UserSourceFactory(user=self.user)

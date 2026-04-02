@@ -17,12 +17,17 @@ class EventsView(BaseAPIView, ListWithHeadersMixin):
     permission_classes = (AllowAny,)
     default_qs_sort_attr = '-created_at'
     serializer_class = EventSerializer
+    owner = None
 
     def get_owner(self):
-        owner = self.get_owner_from_kwargs()
-        if not owner:
+        if self.owner:
+            return self.owner
+
+        self.owner = self.get_owner_from_kwargs()
+        if not self.owner:
             raise Http404()
-        return owner
+
+        return self.owner
 
     def get_queryset(self):
         owner = self.get_owner()

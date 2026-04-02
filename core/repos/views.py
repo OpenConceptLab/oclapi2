@@ -4,13 +4,19 @@ from core.common.constants import HEAD
 from core.common.mixins import ListWithHeadersMixin
 from core.common.permissions import CanViewConceptDictionary
 from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, page_param, \
-    include_retired_param, updated_since_param, compress_header, canonical_url_param
+    include_retired_param, updated_since_param, compress_header, canonical_url_param, all_versions_param
 from core.common.views import BaseAPIView
 from core.repos.documents import RepoDocument
 from core.repos.search import RepoFacetedSearch
 from core.repos.serializers import RepoListSerializer
 
 es_fields = {
+    'repo_type': {
+        'sortable': True,
+        'filterable': True,
+        'facet': True,
+        'exact': True
+    },
     'source_type': {
         'sortable': True,
         'filterable': True,
@@ -95,6 +101,11 @@ es_fields = {
         'facet': False,
         'exact': True
     },
+    'retired': {
+        'sortable': False,
+        'filterable': True,
+        'facet': True
+    },
 }
 
 
@@ -111,7 +122,7 @@ class ReposListView(BaseAPIView, ListWithHeadersMixin):
     @swagger_auto_schema(
         manual_parameters=[
             q_param, limit_param, sort_desc_param, sort_asc_param, page_param,
-            include_retired_param, updated_since_param, canonical_url_param, compress_header
+            include_retired_param, updated_since_param, canonical_url_param, all_versions_param, compress_header
         ]
     )
     def get(self, request, *args, **kwargs):

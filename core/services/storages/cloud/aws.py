@@ -2,7 +2,7 @@ import base64
 
 import boto3
 from botocore.config import Config
-from botocore.exceptions import ClientError, NoCredentialsError
+from botocore.exceptions import ClientError, NoCredentialsError, WaiterError
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.http import StreamingHttpResponse
@@ -76,8 +76,8 @@ class S3(CloudStorageServiceInterface):
 
     def exists(self, key):
         try:
-            self.__resource().meta.client.head_object(Key=key, Bucket=settings.AWS_STORAGE_BUCKET_NAME)
-        except (ClientError, NoCredentialsError):
+            self.__resource().Object(settings.AWS_STORAGE_BUCKET_NAME, key).wait_until_exists()
+        except (WaiterError, ClientError, NoCredentialsError):
             return False
 
         return True
@@ -117,8 +117,7 @@ class S3(CloudStorageServiceInterface):
 
     @staticmethod
     def file_iterator(response):
-        for chunk in response['Body'].iter_chunks():
-            yield chunk
+        yield from response['Body'].iter_chunks()
 
     def get_streaming_response(self, key):
         s3_response = self.get_object(key)

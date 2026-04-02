@@ -24,6 +24,7 @@ import core.mappings.views as mapping_views
 import core.reports.views as report_views
 from core import VERSION
 from core.collections.views import ReferenceExpressionResolveView
+from core.common.swagger import OCLSwaggerSchemaGenerator
 from core.common.utils import get_api_base_url
 from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogView, StandardChecksumView, \
     SmartChecksumView
@@ -41,6 +42,7 @@ api_info = openapi.Info(
 SchemaView = get_schema_view(
     api_info,
     public=True,
+    generator_class=OCLSwaggerSchemaGenerator,
     permission_classes=(permissions.AllowAny,),
     url=get_api_base_url()
 )
@@ -68,6 +70,11 @@ urlpatterns = [
     path('sources/', include('core.sources.urls'), name='sources_url'),
     path('repos/', include('core.repos.urls'), name='repos_url'),
     path('url-registry/', include('core.url_registry.urls'), name='url_registry_url'),
+    # GraphQL path
+    path('', include('core.graphql.urls')),
+
+    # GraphQL path
+    path('', include('core.graphql.urls')),
 
     # TODO: require FHIR subdomain
     path('fhir/', include('core.fhir.urls'), name='fhir_urls'),
@@ -80,6 +87,7 @@ urlpatterns = [
 
     path('collections/', include('core.collections.urls'), name='collections_urls'),
     path('concepts/$match/', concept_views.MetadataToConceptsListView.as_view(), name='$match-concepts'),
+    path('concepts/$rerank/', concept_views.RerankConceptsListView.as_view(), name='$rerank-concepts'),
     path('concepts/', concept_views.ConceptListView.as_view(), name='all_concepts_urls'),
     path('mappings/', mapping_views.MappingListView.as_view(), name='all_mappings_urls'),
     path('importers/', include('core.importers.urls'), name='importer_urls'),

@@ -14,3 +14,47 @@
   pk: 4
   fields:
     name: operations_panel
+- model: "auth.group"
+  pk: 5
+  fields:
+    name: mapper_ai_assistant
+- model: "auth.group"
+  pk: 6
+  fields:
+    name: mapper-waitlist
+- model: "auth.group"
+  pk: 7
+  fields:
+    name: mapper-approved
+- model: "auth.group"
+  pk: 8
+  fields:
+    name: guest_user
+- model: "auth.group"
+  pk: 9
+  fields:
+    name: standard_user
+- model: "auth.group"
+  pk: 10
+  fields:
+    name: premium_user
+- model: "auth.group"
+  pk: 11
+  fields:
+    name: staff_user
+- model: "auth.group"
+  pk: 12
+  fields:
+    name: superadmin_user
+- model: "auth.group"
+  pk: 13
+  fields:
+    name: mapper_cross_encoder
+- model: "auth.group"
+  pk: 14
+  fields:
+    name: graphql_api
+- model: "auth.group"
+  pk: 15
+  fields:
+    name: core_user

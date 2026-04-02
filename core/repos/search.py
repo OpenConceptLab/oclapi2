@@ -25,5 +25,7 @@ class RepoFacetedSearch(CustomESFacetedSearch):
         'customValidationSchema': TermsFacet(field='custom_validation_schema'),
         'locale': TermsFacet(field='locale', size=FACET_SIZE),
         'owner': TermsFacet(field='owner', size=FACET_SIZE),
-        'ownerType': TermsFacet(field='owner_type')
+        'ownerType': TermsFacet(field='owner_type'),
+        'repoType': TermsFacet(field='repo_type'),
+        'retired': TermsFacet(field='retired')
     }

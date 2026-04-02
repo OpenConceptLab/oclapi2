@@ -103,7 +103,7 @@ class SourceVersionListSerializer(ModelSerializer):
         fields = (
             'type', 'short_code', 'name', 'url', 'canonical_url', 'owner', 'owner_type', 'owner_url', 'version',
             'created_at', 'id', 'source_type', 'updated_at', 'released', 'retired', 'version_url',
-            'previous_version_url', 'checksums'
+            'previous_version_url', 'checksums', 'match_algorithms'
         )
 
     @staticmethod
@@ -146,7 +146,8 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
                 'autoid_mapping_mnemonic', 'autoid_mapping_external_id',
                 'autoid_concept_mnemonic_start_from', 'autoid_concept_external_id_start_from',
                 'autoid_mapping_mnemonic_start_from', 'autoid_mapping_external_id_start_from',
-                'autoid_concept_name_external_id', 'autoid_concept_description_external_id'
+                'autoid_concept_name_external_id', 'autoid_concept_description_external_id', 'properties', 'filters',
+                'match_algorithms'
         ]:
             setattr(source, attr, validated_data.get(attr, get(source, attr)))
         for attr in ['jurisdiction', 'identifier', 'contact', 'meta']:
@@ -357,11 +358,12 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourc
     updated_on = DateTimeField(source='updated_at')
     supported_locales = ListField(required=False, allow_empty=True)
     created_by = CharField(source='created_by.username', read_only=True)
-    updated_by = DateTimeField(source='updated_by.username', read_only=True)
+    updated_by = CharField(source='updated_by.username', read_only=True)
     summary = SerializerMethodField()
     client_configs = SerializerMethodField()
     hierarchy_root = SerializerMethodField()
     hierarchy_root_url = CharField(source='hierarchy_root.url', required=False, allow_blank=True, allow_null=True)
+    filters = ListField(required=False, allow_null=True)
 
     class Meta:
         model = Source
@@ -379,7 +381,8 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourc
             'autoid_concept_name_external_id', 'autoid_concept_description_external_id',
             'autoid_mapping_mnemonic', 'autoid_mapping_external_id',
             'autoid_concept_mnemonic_start_from', 'autoid_concept_external_id_start_from',
-            'autoid_mapping_mnemonic_start_from', 'autoid_mapping_external_id_start_from', 'checksums'
+            'autoid_mapping_mnemonic_start_from', 'autoid_mapping_external_id_start_from', 'checksums',
+            'properties', 'filters', 'match_algorithms'
         ) + AbstractRepoResourcesSerializer.Meta.fields
 
     def __init__(self, *args, **kwargs):
@@ -427,6 +430,7 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourc
     def to_representation(self, instance):  # used to be to_native
         ret = super().to_representation(instance)
         ret.update({"supported_locales": instance.get_supported_locales()})
+        ret.update({"filters": instance.filters_ordered})
         return ret
 
 
@@ -452,6 +456,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
     states = SerializerMethodField()
     tasks = SerializerMethodField()
     hierarchy_root_url = CharField(source='hierarchy_root.url', required=False, allow_blank=True, allow_null=True)
+    filters = ListField(required=False, allow_null=True)
 
     class Meta:
         model = Source
@@ -465,7 +470,8 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
             'content_type', 'revision_date', 'summary', 'text', 'meta',
             'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
-            'version_needed', 'hierarchy_root_url', 'checksums', 'states', 'tasks'
+            'version_needed', 'hierarchy_root_url', 'checksums', 'states', 'tasks', 'properties', 'filters',
+            'match_algorithms'
         ) + AbstractRepoResourcesSerializer.Meta.fields
 
     def __init__(self, *args, **kwargs):
@@ -514,6 +520,12 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
             tasks = obj.get_tasks_info()
 
         return tasks
+
+    def to_representation(self, instance):  # used to be to_native
+        ret = super().to_representation(instance)
+        ret.update({"supported_locales": instance.get_supported_locales()})
+        ret.update({"filters": instance.filters_ordered})
+        return ret
 
 
 class SourceVersionExportSerializer(SourceVersionDetailSerializer):

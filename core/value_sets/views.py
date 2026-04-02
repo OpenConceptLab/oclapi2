@@ -6,7 +6,7 @@ from rest_framework.response import Response
 
 from core.bundles.serializers import FHIRBundleSerializer
 from core.code_systems.views import CodeSystemValidateCodeView
-from core.collections.models import Collection, default_expansion_parameters
+from core.collections.models import Collection
 from core.collections.views import CollectionListView, CollectionRetrieveUpdateDestroyView, \
     CollectionVersionExpansionsView
 from core.common.constants import HEAD
@@ -138,10 +138,7 @@ class ValueSetExpandView(CollectionVersionExpansionsView):
 
             params = parameters.validated_data
             params = params.get('parameters', {})
-            if not params:
-                qs = qs.filter(parameters=default_expansion_parameters()).order_by('-id')
-            else:
-                qs = qs.filter(parameters=params).order_by('-id')
+            qs = qs.filter(parameters=params if params else {}).order_by('-id')
 
         return qs
 

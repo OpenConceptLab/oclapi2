@@ -1,7 +1,9 @@
 from drf_yasg.utils import swagger_auto_schema
 from pydash import compact
+from rest_framework import status
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, get_object_or_404
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from rest_framework.response import Response
 
 from core.common.exceptions import Http400
 from core.common.mixins import ListWithHeadersMixin
@@ -59,6 +61,10 @@ class TaskView(AbstractTaskView, DestroyAPIView):
         obj = get_object_or_404(queryset, **{self.lookup_field: self.kwargs[self.lookup_url_kwarg]})
         self.check_object_permissions(self.request, obj)
         return obj
+
+    def destroy(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        self.perform_destroy(self.get_object())
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     def perform_destroy(self, instance):
         if not instance.has_access(self.request.user):

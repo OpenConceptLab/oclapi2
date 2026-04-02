@@ -3,6 +3,7 @@ from celery_once import AlreadyQueued
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericRelation
 from django.contrib.postgres.fields import ArrayField
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.core.validators import RegexValidator
@@ -23,6 +24,7 @@ from core.common.utils import reverse_resource, reverse_resource_version, parse_
     canonical_url_to_url_and_version, get_current_authorized_user, encode_string, decode_string
 from core.common.utils import to_owner_uri
 from core.settings import DEFAULT_LOCALE
+from . import ERRBIT_LOGGER
 from .checksums import ChecksumModel
 from .constants import (
     ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX,
@@ -545,13 +547,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     @property
     def parent(self):
-        parent = None
-        if self.organization_id:
-            parent = self.organization
-        if self.user_id:
-            parent = self.user
-
-        return parent
+        return self.organization if self.organization_id else self.user
 
     @property
     def parent_id(self):
@@ -597,8 +593,29 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             delete_s3_objects.apply_async((export_path,), queue='default', permanent=False)
         self.post_delete_actions()
 
+    def get_concepts_cache_keys(self):
+        return self.__get_resources_cache_keys('concepts')
+
+    def get_mappings_cache_keys(self):
+        return self.__get_resources_cache_keys('mappings')
+
+    def __get_resources_cache_keys(self, resources):
+        return f'repo_cache:body:{self.uri}{resources}/', f'repo_cache:headers:{self.uri}{resources}/'
+
     def post_delete_actions(self):
-        pass
+        return self.__clear_cache()
+
+    def __clear_cache(self):
+        try:
+            concepts_body_key, concepts_headers_key = self.get_concepts_cache_keys()
+            mappings_body_key, mappings_headers_key = self.get_mappings_cache_keys()
+            return cache.client.get_client().delete(*[
+                cache.make_key(key) for key in [
+                    concepts_body_key, mappings_body_key, concepts_headers_key, mappings_headers_key
+                ]
+            ])
+        except:  # pylint: disable=bare-except
+            return False
 
     def delete_pins(self):
         if self.is_head:
@@ -683,7 +700,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         try:
             obj.full_clean()
         except ValidationError as ex:
-            errors.update(ex.message_dict)
+            errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
         if errors:
             return errors
 
@@ -746,23 +763,28 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         pass
 
     @classmethod
-    def persist_changes(cls, obj, updated_by, original_schema, **kwargs):
+    def persist_changes(cls, obj, updated_by, original_schema, **kwargs):  # pylint: disable=too-many-locals
         errors = {}
         parent_resource = kwargs.pop('parent_resource', obj.parent)
         if not parent_resource:
             errors['parent'] = SOURCE_PARENT_CANNOT_BE_NONE
 
         queue_schema_update_task = obj.is_validation_necessary()
+        original_repo = cls.objects.filter(id=obj.id).first()
+
         is_source = cls.__name__ == 'Source'
-        original_source = cls.objects.filter(id=obj.id).first()
-        should_reindex_resources = is_source and obj.released != original_source.released
-        obj._should_update_public_access = is_source and obj.public_access != original_source.public_access  # pylint: disable=protected-access
-        obj._should_update_is_active = is_source and obj.is_active != original_source.is_active  # pylint: disable=protected-access
+        should_reindex_resources = is_source and obj.released != original_repo.released
+        should_reindex_concepts_only = (
+            is_source and obj.has_semantic_match_algorithm != original_repo.has_semantic_match_algorithm
+        )
+
+        obj._should_update_public_access = is_source and obj.public_access != original_repo.public_access  # pylint: disable=protected-access
+        obj._should_update_is_active = is_source and obj.is_active != original_repo.is_active  # pylint: disable=protected-access
 
         try:
             obj.full_clean()
         except ValidationError as ex:
-            errors.update(ex.message_dict)
+            errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
 
         if errors:
             return errors
@@ -786,9 +808,13 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                     obj.index_resources_for_self_as_latest_released()
                 else:
                     obj.index_resources_for_self_as_unreleased()
+            elif should_reindex_concepts_only:
+                obj.index_concepts_async(obj.updated_by)
 
         except IntegrityError as ex:
             errors.update({'__all__': ex.args})
+        except AlreadyQueued as ex:
+            errors.update({'__all__': 'Already Queued'})
 
         return errors
 
@@ -812,7 +838,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 concept_validation_error = {
                     'mnemonic': concept.mnemonic,
                     'url': concept.url,
-                    'errors': validation_error.message_dict
+                    'errors': get(validation_error, 'message_dict') or get(validation_error, 'error_dict'),
                 }
                 failed_concept_validations.append(concept_validation_error)
 
@@ -1016,7 +1042,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             if namespace:
                 criteria &= models.Q(models.Q(user__uri=namespace) | models.Q(organization__uri=namespace))
         else:
-            criteria &= models.Q(uri=resolution_url)
+            criteria &= models.Q(uri=(resolution_url if resolution_url.endswith('/') else resolution_url + '/'))
 
         from core.repos.models import Repository
         return cls.resolve_repo(Repository.get(criteria), version, is_canonical, resolution_url), registry_entry
@@ -1130,6 +1156,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     def get_name_locale_distribution(self):
         return self._get_distribution(self.get_name_locales_queryset(), 'locale')
 
+    def get_name_locale_list_distribution(self):
+        return self.get_concepts_queryset().distinct('names__locale').values_list('names__locale', flat=True)
+
     def get_name_type_distribution(self):
         return self._get_distribution(self.get_name_locales_queryset(), 'type')
 
@@ -1148,18 +1177,19 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     def get_concept_facets(self, filters=None):
         from core.concepts.search import ConceptFacetedSearch
-        return self._get_resource_facets(ConceptFacetedSearch, filters)
+        return self._get_resource_facets(ConceptFacetedSearch, filters, parent=self)
 
     def get_mapping_facets(self, filters=None):
         from core.mappings.search import MappingFacetedSearch
         return self._get_resource_facets(MappingFacetedSearch, filters)
 
-    def _get_resource_facets(self, facet_class, filters=None):
-        search = facet_class('', filters=self._get_resource_facet_filters(filters))
+    def _get_resource_facets(self, facet_class, filters=None, **kwargs):
+        search = facet_class(query='', filters=self._get_resource_facet_filters(filters), **kwargs)
         search.params(request_timeout=ES_REQUEST_TIMEOUT)
         try:
             facets = search.execute().facets
         except TransportError as ex:  # pragma: no cover
+            ERRBIT_LOGGER.log(ex)
             raise Http400(detail=get(ex, 'info') or get(ex, 'error') or str(ex)) from ex
 
         return facets

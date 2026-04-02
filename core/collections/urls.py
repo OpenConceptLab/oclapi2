@@ -97,17 +97,22 @@ urlpatterns = [
         name='collection-references'
     ),
     path(
-        '<str:collection>/references/<str:reference>/',
+        '<str:collection>/references/preview/',
+        views.CollectionReferencesPreview.as_view(),
+        name='collection-references-preview'
+    ),
+    path(
+        '<str:collection>/references/<int:reference>/',
         views.CollectionReferenceView.as_view(),
         name='collection-reference'
     ),
     path(
-        '<str:collection>/references/<str:reference>/concepts/',
+        '<str:collection>/references/<int:reference>/concepts/',
         views.CollectionReferenceConceptsView.as_view(),
         name='collection-reference-concepts-list'
     ),
     path(
-        '<str:collection>/references/<str:reference>/mappings/',
+        '<str:collection>/references/<int:reference>/mappings/',
         views.CollectionReferenceMappingsView.as_view(),
         name='collection-reference-mappings-list'
     ),
@@ -115,6 +120,11 @@ urlpatterns = [
         "<str:collection>/extras/",
         views.CollectionExtrasView.as_view(),
         name='collection-extras'
+    ),
+    path(
+        '<str:collection>/expansions/',
+        views.CollectionExpansionsView.as_view(),
+        name='expansion-list-collection'
     ),
     path(
         '<str:collection>/<str:version>/',
@@ -135,6 +145,11 @@ urlpatterns = [
         '<str:collection>/<str:version>/expansions/<str:expansion>/',
         views.CollectionVersionExpansionView.as_view(),
         name='collection-version-expansion-detail'
+    ),
+    path(
+        '<str:collection>/<str:version>/expansions/<str:expansion>/re-evaluate/',
+        views.CollectionVersionExpansionReEvaluateView.as_view(),
+        name='collection-version-expansion-re-evaluate'
     ),
     path(
         "<str:collection>/<str:version>/expansions/<str:expansion>/concepts/<str:concept>/mappings/",

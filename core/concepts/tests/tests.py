@@ -1376,6 +1376,287 @@ class ConceptTest(OCLTestCase):
         self.assertTrue(checksums['standard'] == concept.checksums['standard'] == concept.checksum)
         self.assertTrue(checksums['smart'] == concept.checksums['smart'])
 
+    def test_properties_and_filters(self):  # pylint: disable=too-many-statements
+        source = OrganizationSourceFactory(properties=[], filters=[])
+        concept1 = ConceptFactory(parent=source, concept_class='Diagnosis', datatype='N/A')
+
+        concept1.refresh_from_db()
+
+        for concept in [concept1, concept1.get_latest_version()]:
+            self.assertEqual(concept.extras, {})
+            self.assertEqual(concept.properties, [])
+            self.assertEqual(concept.datatype, 'N/A')
+            self.assertEqual(concept.concept_class, 'Diagnosis')
+
+        source.properties = [
+            {
+                "code": "concept_class",
+                "description": "Type of concept",
+                "type": "code",   # e.g. from /orgs/OCL/collections/Classes/
+            },
+            {
+                "code": "datatype",
+                "description": "Type of data captured for this concept",
+                "type": "code",   # e.g. from /orgs/OCL/collections/Datatypes/
+            },
+            {
+                "code": "units",
+                "description": "Units of measurement",
+                "type": "string"
+            }
+        ]
+        source.filters = [
+            {'code': 'concept_class', 'operator': ['='], 'value': 'blah'},
+            {'code': 'datatype', 'operator': ['='], 'value': 'blah'},
+        ]
+
+        source.meta = {
+            'display': {
+                'concept_summary_properties': ['datatype', 'concept_class'],
+                'concept_filter_order': ['concept_class', 'datatype'],
+            }
+        }
+        source.save()
+
+        self.assertEqual(
+            source.filters_ordered,
+            [
+                {'code': 'concept_class', 'operator': ['='], 'value': 'blah'},
+                {'code': 'datatype', 'operator': ['='], 'value': 'blah'},
+            ]
+        )
+
+        concept2 = ConceptFactory(parent=source, concept_class='Diagnosis', datatype='N/A')
+        concept3 = ConceptFactory(
+            parent=source, concept_class='Diagnosis', datatype='N/A', extras={'foo': 'bar', 'units': 'parts/microliter'}
+        )
+
+        concept2_latest_version = concept2.get_latest_version()
+        concept3_latest_version = concept3.get_latest_version()
+
+        concept2s = [concept2, concept2_latest_version]
+        concept3s = [concept3, concept3_latest_version]
+
+        for concept in concept2s:
+            concept.refresh_from_db()
+            self.assertEqual(concept.extras, {})
+            self.assertEqual(
+                concept.properties,
+                [
+                    {'code': 'datatype', 'valueCode': 'N/A'},
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis'}
+                ]
+            )
+            self.assertEqual(
+                concept.summary_properties,
+                [
+                    {'code': 'datatype', 'valueCode': 'N/A'},
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
+                ]
+            )
+            self.assertEqual(
+                concept.filters_ordered,
+                [
+                    {'code': 'concept_class', 'operator': ['='], 'value': 'blah'},
+                    {'code': 'datatype', 'operator': ['='], 'value': 'blah'},
+                ]
+            )
+        for concept in concept3s:
+            concept.refresh_from_db()
+            self.assertEqual(
+                concept.extras,
+                {'foo': 'bar', 'units': 'parts/microliter'})
+            self.assertEqual(
+                concept.properties,
+                [
+                    {'code': 'datatype', 'valueCode': 'N/A'},
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
+                    {'code': 'units', 'valueString': 'parts/microliter'}
+                ]
+            )
+            self.assertEqual(
+                concept.summary_properties,
+                [
+                    {'code': 'datatype', 'valueCode': 'N/A'},
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
+                ]
+            )
+            self.assertEqual(
+                concept.filters_ordered,
+                [
+                    {'code': 'concept_class', 'operator': ['='], 'value': 'blah'},
+                    {'code': 'datatype', 'operator': ['='], 'value': 'blah'},
+                ]
+            )
+
+        source.meta = {
+            'display': {
+                'concept_summary_properties': ['concept_class', 'datatype'],
+                'concept_filter_order': ['datatype', 'concept_class'],
+            }
+        }
+        source.save()
+
+        self.assertEqual(
+            source.filters_ordered,
+            [
+                {'code': 'datatype', 'operator': ['='], 'value': 'blah'},
+                {'code': 'concept_class', 'operator': ['='], 'value': 'blah'},
+            ]
+        )
+
+        for concept in concept2s:
+            concept.refresh_from_db()
+            self.assertEqual(concept.extras, {})
+            self.assertEqual(
+                concept.properties,
+                [
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
+                    {'code': 'datatype', 'valueCode': 'N/A'},
+                ]
+            )
+            self.assertEqual(
+                concept.summary_properties,
+                [
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
+                    {'code': 'datatype', 'valueCode': 'N/A'},
+                ]
+            )
+        self.assertEqual(
+            concept.filters_ordered,
+            [
+                {'code': 'datatype', 'operator': ['='], 'value': 'blah'},
+                {'code': 'concept_class', 'operator': ['='], 'value': 'blah'},
+            ]
+        )
+        for concept in concept3s:
+            concept.refresh_from_db()
+            self.assertEqual(
+                concept.extras,
+                {'foo': 'bar', 'units': 'parts/microliter'})
+            self.assertEqual(
+                concept.properties,
+                [
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
+                    {'code': 'datatype', 'valueCode': 'N/A'},
+                    {'code': 'units', 'valueString': 'parts/microliter'}
+                ]
+            )
+            self.assertEqual(
+                concept.summary_properties,
+                [
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
+                    {'code': 'datatype', 'valueCode': 'N/A'},
+                ]
+            )
+            self.assertEqual(
+                concept.filters_ordered,
+                [
+                    {'code': 'datatype', 'operator': ['='], 'value': 'blah'},
+                    {'code': 'concept_class', 'operator': ['='], 'value': 'blah'},
+                ]
+            )
+
+        source.meta = {
+            'display': {
+                'concept_summary_properties': ['concept_class', 'datatype', 'foobar'],
+                'concept_filter_order': ['datatype', 'concept_class', 'foobar', 'barbar', 'bar1'],
+            },
+        }
+        source.filters = [
+            {'code': 'concept_class', 'operator': ['='], 'value': 'blah'},
+            {'code': 'datatype', 'operator': ['='], 'value': 'blah'},
+            {'code': 'bar2', 'operator': ['='], 'value': 'blah'},
+            {'code': 'bar0', 'operator': ['='], 'value': 'blah'},
+            {'code': 'bar1', 'operator': ['='], 'value': 'blah'},
+            {'code': 'barbar', 'operator': ['='], 'value': 'blah'},
+        ]
+        source.save()
+        self.assertEqual(
+            source.filters_ordered,
+            [
+                {'code': 'datatype', 'operator': ['='], 'value': 'blah'},
+                {'code': 'concept_class', 'operator': ['='], 'value': 'blah'},
+                {'code': 'barbar', 'operator': ['='], 'value': 'blah'},
+                {'code': 'bar1', 'operator': ['='], 'value': 'blah'},
+                {'code': 'bar0', 'operator': ['='], 'value': 'blah'},
+                {'code': 'bar2', 'operator': ['='], 'value': 'blah'},
+            ]
+        )
+
+        for concept in concept2s:
+            concept.refresh_from_db()
+            self.assertEqual(concept.extras, {})
+            self.assertEqual(
+                concept.properties,
+                [
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
+                    {'code': 'datatype', 'valueCode': 'N/A'}
+                ]
+            )
+            self.assertEqual(
+                concept.summary_properties,
+                [
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
+                    {'code': 'datatype', 'valueCode': 'N/A'},
+                ]
+            )
+        for concept in concept3s:
+            concept.refresh_from_db()
+            self.assertEqual(
+                concept.extras,
+                {'foo': 'bar', 'units': 'parts/microliter'})
+            self.assertEqual(
+                concept.properties,
+                [
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
+                    {'code': 'datatype', 'valueCode': 'N/A'},
+                    {'code': 'units', 'valueString': 'parts/microliter'}
+                ]
+            )
+            self.assertEqual(
+                concept.summary_properties,
+                [
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
+                    {'code': 'datatype', 'valueCode': 'N/A'},
+                ]
+            )
+
+        source.meta = {'display': {'concept_summary_properties': []}}
+        source.save()
+
+        for concept in concept2s:
+            concept.refresh_from_db()
+            self.assertEqual(concept.extras, {})
+            self.assertEqual(
+                concept.properties,
+                [
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
+                    {'code': 'datatype', 'valueCode': 'N/A'}
+                ]
+            )
+            self.assertEqual(
+                concept.summary_properties,
+                []
+            )
+        for concept in concept3s:
+            concept.refresh_from_db()
+            self.assertEqual(
+                concept.extras,
+                {'foo': 'bar', 'units': 'parts/microliter'})
+            self.assertEqual(
+                concept.properties,
+                [
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
+                    {'code': 'datatype', 'valueCode': 'N/A'},
+                    {'code': 'units', 'valueString': 'parts/microliter'}
+                ]
+            )
+            self.assertEqual(
+                concept.summary_properties,
+                []
+            )
+
 
 class OpenMRSConceptValidatorTest(OCLTestCase):
     def setUp(self):

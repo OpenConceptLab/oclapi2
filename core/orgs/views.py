@@ -4,7 +4,7 @@ from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import mixins, status, generics
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, RetrieveUpdateDestroyAPIView, UpdateAPIView
-from rest_framework.permissions import IsAuthenticatedOrReadOnly, AllowAny
+from rest_framework.permissions import IsAuthenticatedOrReadOnly, AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -15,18 +15,19 @@ from core.common.mixins import ListWithHeadersMixin
 from core.common.permissions import HasPrivateAccess, CanViewConceptDictionary
 from core.common.swagger_parameters import org_no_members_param
 from core.common.tasks import delete_organization
+from core.common.throttling import ThrottleUtil
 from core.common.utils import parse_updated_since_param, get_truthy_values
 from core.common.views import BaseAPIView, BaseLogoView
-from core.tasks.mixins import TaskMixin
+from core.map_projects.views import MapProjectListView
 from core.orgs.constants import NO_MEMBERS
 from core.orgs.documents import OrganizationDocument
 from core.orgs.models import Organization
 from core.orgs.serializers import OrganizationDetailSerializer, OrganizationListSerializer, \
     OrganizationCreateSerializer, OrganizationOverviewSerializer
 from core.sources.views import SourceListView
+from core.tasks.mixins import TaskMixin
 from core.users.models import UserProfile
 from core.users.serializers import UserDetailSerializer
-
 
 TRUTHY = get_truthy_values()
 
@@ -184,6 +185,9 @@ class OrganizationMemberView(generics.GenericAPIView):
     user_in_org = False
     serializer_class = UserDetailSerializer
 
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
+
     def initial(self, request, *args, **kwargs):
         org_id = kwargs.pop('org')
         self.organization = Organization.objects.filter(mnemonic=org_id).first()
@@ -240,6 +244,9 @@ class OrganizationMemberView(generics.GenericAPIView):
 
 
 class OrganizationResourceAbstractListView:
+    version = None
+    permission_classes = (IsAuthenticated,)
+
     def get_queryset(self):
         username = self.kwargs.get('user', None)
         if not username and self.user_is_self:
@@ -248,19 +255,28 @@ class OrganizationResourceAbstractListView:
         user = UserProfile.objects.filter(username=username).first()
         if not user:
             raise Http404()
-
-        return self.queryset.filter(organization__in=user.organizations.all(), version=HEAD)
+        queryset = self.queryset.filter(organization__in=user.organizations.all())
+        if self.version:
+            queryset = queryset.filter(version=self.version)
+        return queryset
 
 
 class OrganizationSourceListView(OrganizationResourceAbstractListView, SourceListView):
-    pass
+    version = HEAD
 
 
 class OrganizationCollectionListView(OrganizationResourceAbstractListView, CollectionListView):
+    version = HEAD
+
+
+class OrganizationMapProjectListView(OrganizationResourceAbstractListView, MapProjectListView):
     pass
 
 
 class OrganizationExtrasBaseView(APIView):
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
+
     def get_object(self):
         instance = Organization.objects.filter(is_active=True, mnemonic=self.kwargs['org']).first()
 

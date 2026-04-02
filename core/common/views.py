@@ -5,6 +5,7 @@ import markdown
 import requests
 from django.conf import settings
 from django.core.mail import EmailMessage
+from django.db import models
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404
 from drf_yasg import openapi
@@ -24,12 +25,13 @@ from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST, \
     BRIEF_PARAM, ES_REQUEST_TIMEOUT, INCLUDE_INACTIVE, FHIR_LIMIT_PARAM, RAW_PARAM, SEARCH_MAP_CODES_PARAM, \
     INCLUDE_SEARCH_META_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM, EXCLUDE_WILDCARD_SEARCH_PARAM, UPDATED_BY_USERNAME_PARAM, \
-    CANONICAL_URL_REQUEST_PARAM, CHECKSUMS_PARAM
+    CANONICAL_URL_REQUEST_PARAM, CHECKSUMS_PARAM, ACCESS_TYPE_NONE
 from core.common.exceptions import Http400
 from core.common.mixins import PathWalkerMixin
 from core.common.search import CustomESSearch
 from core.common.serializers import RootSerializer
 from core.common.swagger_parameters import all_resource_query_param
+from core.common.throttling import ThrottleUtil
 from core.common.utils import compact_dict_by_values, to_snake_case, parse_updated_since_param, \
     to_int, get_falsy_values, get_truthy_values, format_url_for_search
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
@@ -58,6 +60,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     default_qs_sort_attr = '-updated_at'
     facet_class = None
     total_count = 0
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     def has_no_kwargs(self):
         return len(self.kwargs.values()) == 0
@@ -174,6 +179,29 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 _queryset = _queryset.order_by(*self.default_qs_sort_attr)
         return _queryset
 
+    def filter_queryset_by_owner(self, queryset):
+        if 'user' in self.kwargs:
+            return queryset.filter(user__username=self.kwargs['user'])
+        if 'org' in self.kwargs:
+            return queryset.filter(organization__mnemonic=self.kwargs['org'])
+
+        return queryset
+
+    def filter_queryset_by_public_access(self, queryset):
+        user = self.request.user
+
+        if get(user, 'is_anonymous'):
+            return queryset.exclude(public_access=ACCESS_TYPE_NONE)
+        if user.is_staff:
+            return queryset
+
+        public_queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
+        private_queryset = queryset.filter(public_access=ACCESS_TYPE_NONE)
+        private_queryset = private_queryset.filter(
+            models.Q(user_id=user.id) | models.Q(organization__members__id=user.id))
+
+        return public_queryset.union(private_queryset)
+
     def get_sort_and_desc(self):
         query_params = self.request.query_params.dict()
 
@@ -197,6 +225,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if field in self.es_fields:
             attrs = self.es_fields[field]
             return attrs.get('sortable', False)
+        if self.is_concept_document() and field.startswith('properties.'):
+            return True
 
         return False
 
@@ -286,44 +316,122 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             match_word_fields_map,
         ), fields
 
-    def get_faceted_criterion(self):
-        filters = self.get_faceted_filters()
+    def get_faceted_criterion(self, split=False, params=None, **kwargs):
+        filters = self.get_faceted_filters(
+            split=split,
+            params=params,
+            additional_fields=['id', 'id_raw'],
+            repo_default_filters=kwargs.pop('repo_default_filters', None)
+        )
+
+        def get_query_criteria(attr, val):
+            is_property = attr.startswith('properties__')
+            is_target_repo_filter = attr in ['target_repo', 'target_repo_map_type']
+            if is_target_repo_filter:
+                path = 'source'
+                if attr == 'target_repo_map_type':
+                    path = 'map_type'
+                return Q(
+                    "nested",
+                    path="mapped_codes",
+                    query=Q("term", **{f"mapped_codes.{path}": val})
+                )
+            if is_property:
+                property_code = attr.split('properties__', 1)[1]
+
+                if not val:
+                    new_attr = "properties." + property_code
+                    return ~Q("exists", field=new_attr)
+                return Q('term', **{f"properties.{property_code}.keyword": val.strip('\"').strip('\'')})
+
+            return Q('term', **{attr: val.strip('\"').strip('\'')})
 
         def get_query(attr, val):
+            """
+                Constructs a dynamic Elasticsearch DSL query based on value modifiers:
+                - Supports `!` prefix for negation
+                - Supports `*` suffix for prefix/regex matching
+                - Supports multiple comma-separated values
+            """
+            prefix_query = val.endswith('*')
             not_query = val.startswith('!')
             vals = val.replace('!', '', 1).split(',')
-            query = Q('match', **{attr: vals.pop().strip('\"').strip('\'')})
-            criteria = ~query if not_query else query  # pylint: disable=invalid-unary-operand-type
+            if prefix_query:
+                queries = [
+                    Q(
+                        'regexp',
+                        **{attr: {'value': _val.strip('\"').strip('\'')}}
+                    ) for _val in vals
+                ]
+            else:
+                queries = [
+                    get_query_criteria(attr, _val) for _val in vals
+                ]
 
-            for _val in vals:
-                query = Q('match', **{attr: _val.strip('\"').strip('\'')})
-                if not_query:
-                    criteria &= ~query  # pylint: disable=invalid-unary-operand-type
-                else:
-                    criteria |= query
-
-            return criteria
+            return Q('bool', must=[~q for q in queries]) if not_query else Q('bool', should=queries, **kwargs)
 
         if filters:
             first_filter = filters.popitem()
             criterion = get_query(first_filter[0], first_filter[1])
             for field, value in filters.items():
                 criterion &= get_query(field, value)
-
             return criterion
 
-    def get_faceted_filters(self, split=False):
+        return None
+
+    @staticmethod
+    def merge_filters(filter1, filter2):
+        if not filter1 or not filter2:
+            return filter1 or filter2 or {}
+        merged = {}
+        for key in set(filter1) | set(filter2):
+            v1, v2 = filter1.get(key), filter2.get(key)
+            # Case 1: both values exist
+            if v1 is not None and v2 is not None:
+                if isinstance(v1, list) and isinstance(v2, list):
+                    merged[key] = list(dict.fromkeys(v1 + v2))  # dedup preserve order
+                elif isinstance(v1, str) and isinstance(v2, str):
+                    if "," in v1 or "," in v2:
+                        merged[key] = ",".join(dict.fromkeys((v1.split(",") + v2.split(","))))
+                    else:
+                        merged[key] = ",".join(dict.fromkeys([v1, v2]))
+                else:
+                    merged[key] = v1  # prefer value from `a`
+            else:
+                merged[key] = v1 if v1 is not None else v2
+        return merged
+
+    def get_faceted_filters(self, split=False, params=None, additional_fields=None, repo_default_filters=None):
         faceted_filters = {}
-        faceted_fields = self.get_faceted_fields()
-        query_params = {to_snake_case(k): v for k, v in self.request.query_params.dict().items()}
+        faceted_fields = [*self.get_faceted_fields(), *(additional_fields or [])]
+        params = self.request.query_params.dict() if params is None else params
+
+        query_params = {k if k.startswith('properties__') else to_snake_case(k): v for k, v in params.items()}
+        repo_default_filters = {
+            to_snake_case(k): v for k, v in repo_default_filters.items()
+        } if repo_default_filters else {}
+        merged_filters = self.merge_filters(repo_default_filters, query_params)
+
         for field in faceted_fields:
-            if field in query_params:
-                query_value = query_params[field]
+            if field == 'properties':
+                property_facets = {
+                    key: val.split(',') if split and (val and isinstance(val, str)) else val for key, val in
+                    merged_filters.items() if key.startswith('properties__')
+                }
+                faceted_filters = {**faceted_filters, **property_facets}
+            if field in merged_filters or field.replace('_text.keyword', '') in merged_filters:
+                query_value = merged_filters.get(
+                    field, False) or merged_filters.get(field.replace('_text.keyword', ''))
                 faceted_filters[field] = query_value.split(',') if split else query_value
         return faceted_filters
 
     def get_faceted_fields(self):
-        return [field for field, config in get(self, 'es_fields', {}).items() if config.get('facet', False)]
+        es_fields = get(self, 'es_fields', {})
+        return [
+            get(
+                config, 'facet_field'
+            ) or field for field, config in es_fields.items() if config.get('facet', False)
+        ]
 
     def get_facet_filters_from_kwargs(self):
         kwargs = self.kwargs
@@ -413,17 +521,23 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             return 'is_latest_version'
         return None
 
-    def get_facets(self):
+    def get_facets(self):  # pylint: disable=too-many-branches
         facets = {}
+        parent_repo = None
 
         if self.facet_class:
             if self.is_user_document():
                 return facets
 
-            faceted_search = self.facet_class(  # pylint: disable=not-callable
-                self.get_search_string(lower=False),
-                _search=self.__get_search_results(ignore_retired_filter=True, sort=False, highlight=False, force=True),
-            )
+            params = {
+                'query': self.get_search_string(lower=False),
+                '_search': self.__get_search_results(
+                    ignore_retired_filter=True, sort=False, highlight=False, force=True)
+            }
+            if 'source' in self.kwargs and self.is_concept_document():
+                parent_repo = params['parent'] = get(self, 'parent_resource')
+
+            faceted_search = self.facet_class(**params) # pylint: disable=not-callable
             faceted_search.params(request_timeout=ES_REQUEST_TIMEOUT)
             try:
                 s = faceted_search.execute()
@@ -435,13 +549,34 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if self.should_search_latest_repo() and self.is_source_child_document_model() and 'source_version' in facets:
             facets['source_version'] = [facet for facet in facets['source_version'] if facet[0] != 'HEAD']
         is_global_scope = ('org' not in self.kwargs and 'user' not in self.kwargs and not self.user_is_self)
+
+        normalized_facet_concept_class = facets.pop('_conceptClass', None) or []
+        normalized_facet_datatype = facets.pop('_datatype', None) or []
+        if len(facets.get('conceptClass', [])) == 0 and len(normalized_facet_concept_class) > 0:
+            facets['conceptClass'] = normalized_facet_concept_class
+        if len(facets.get('datatype', [])) == 0 and len(normalized_facet_datatype) > 0:
+            facets['datatype'] = normalized_facet_datatype
+
+
+        facets.pop('collection_owner_url', None)
         if is_global_scope:
-            facets.pop('source_version', None)
             facets.pop('collection_version', None)
             facets.pop('expansion', None)
-            facets.pop('collection_owner_url', None)
+        else:
+            facets.pop('owner', None)
+            facets.pop('ownerType', None)
+            if 'source' in self.kwargs:
+                facets.pop('source', None)
+                facets.pop('source_version', None)
+            elif 'collection' in self.kwargs:
+                facets.pop('collection', None)
+                facets.pop('collection_owner_url', None)
         facets.pop('is_in_latest_source_version', None)
         facets.pop('is_latest_version', None)
+
+        if parent_repo and self.is_concept_document():
+            return parent_repo.get_ordered_concept_facets_by_filter_order(facets)
+
         return facets
 
     def get_extras_searchable_fields_from_query_params(self):
@@ -527,16 +662,16 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return False
 
     def get_public_criteria(self):
-        criteria = Q('match', public_can_view=True)
+        criteria = Q('term', public_can_view=True)
         user = self.request.user
 
         if user.is_authenticated:
             username = user.username
             from core.orgs.documents import OrganizationDocument
             if self.document_model in [OrganizationDocument]:
-                criteria |= (Q('match', public_can_view=False) & Q('match', user=username))
+                criteria |= (Q('term', public_can_view=False) & Q('term', user=username))
             if self.is_concept_container_document_model() or self.is_source_child_document_model():
-                criteria |= (Q('match', public_can_view=False) & Q('match', created_by=username))
+                criteria |= (Q('term', public_can_view=False) & Q('term', created_by=username))
 
         return criteria
 
@@ -560,14 +695,17 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         search_kwargs = {'index': self.document_model.indexes} if get(self.document_model, 'indexes') else {}
         results = self.document_model.search(**search_kwargs)
         default_filters = self.default_filters.copy()
+        if ((self.is_concept_container_document_model() or self.is_repo_document_model()) and
+                self.request.query_params.get('allVersions', None) in TRUTHY):
+            default_filters.pop('version', None)
         if self.is_user_document() and self.should_include_inactive():
             default_filters.pop('is_active', None)
 
         updated_by = self.request.query_params.get(UPDATED_BY_USERNAME_PARAM, None)
         if updated_by:
-            results = results.query("terms", updated_by=compact(updated_by.split(',')))
+            results = results.filter("terms", updated_by=compact(updated_by.split(',')))
         if self.is_canonical_specified():
-            results = results.query(
+            results = results.filter(
                 'match_phrase',
                 _canonical_url=format_url_for_search(self.request.query_params.get(CANONICAL_URL_REQUEST_PARAM))
             )
@@ -577,22 +715,21 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 default_filters[latest_attr] = True
 
         for field, value in default_filters.items():
-            results = results.query("match", **{field: value})
+            results = results.filter("term", **{field: value})
 
         updated_since = parse_updated_since_param(self.request.query_params)
         if updated_since:
-            results = results.query('range', last_update={"gte": updated_since})
+            results = results.filter('range', last_update={"gte": updated_since})
 
         if not ignore_retired_filter and self._should_exclude_retired_from_search_results():
-            results = results.query('match', retired=False)
+            results = results.filter('term', retired=False)
 
         include_private = self._should_include_private()
         if not include_private:
-            results = results.query(self.get_public_criteria())
-
+            results = results.filter(self.get_public_criteria())
         faceted_criterion = self.get_faceted_criterion()
         if faceted_criterion:
-            results = results.query(faceted_criterion)
+            results = results.filter(faceted_criterion)
         return results
 
     def is_canonical_specified(self):
@@ -660,11 +797,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         criteria &= Q('match', owner_type=source_version.parent.resource_type)
         return criteria
 
-    def __get_search_results(self, ignore_retired_filter=False, sort=True, highlight=True, force=False):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
+    def __get_search_results(self, ignore_retired_filter=False, sort=True, highlight=True, force=False):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements,line-too-long
         results = self.__apply_common_search_filters(ignore_retired_filter, force)
         if results is None:
             return results
-
         exclude_fuzzy = self.request.query_params.get(EXCLUDE_FUZZY_SEARCH_PARAM) in TRUTHY
         exclude_wildcard = self.request.query_params.get(EXCLUDE_WILDCARD_SEARCH_PARAM) in TRUTHY
 
@@ -739,16 +875,49 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         for key, value in kwargs_filters.items():
             attr = to_snake_case(key)
             if isinstance(value, list):
-                criteria = Q('match', **{attr: get(value, '0')})
+                criteria = Q('term', **{attr: get(value, '0')})
                 for val in value[1:]:
-                    criteria |= Q('match', **{attr: val})
-                results = results.query(criteria)
+                    criteria |= Q('term', **{attr: val})
+                results = results.filter(criteria)
             else:
-                results = results.query('match', **{attr: value})
+                results = results.filter('term', **{attr: value})
 
-        if highlight and self.request.query_params.get(INCLUDE_SEARCH_META_PARAM) in get_truthy_values():
+        sort_attrs = self._get_sort_attribute()
+        if self.is_concept_document() and (not sort_attrs or '_score' in get(sort_attrs, '0', {})):
+            search_str = self.get_search_string(lower=False)
+            results = results.extra(
+                rescore={
+                  "window_size": 400,
+                  "query": {
+                    "score_mode": "total",
+                    "query_weight": 1.0,
+                    "rescore_query_weight": 800.0,
+                    "rescore_query": {
+                      "dis_max": {
+                        "tie_breaker": 0.0,
+                        "queries": [
+                          {
+                            "constant_score": {
+                              "filter": { "term": { "_name": { "value": search_str, "case_insensitive": True } } },
+                              "boost": 10.0
+                            }
+                          },
+                          {
+                            "constant_score": {
+                              "filter": { "term": { "_synonyms": { "value": search_str, "case_insensitive": True } } },
+                              "boost": 8.0
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+            )
+        if fields and highlight and self.request.query_params.get(INCLUDE_SEARCH_META_PARAM) in get_truthy_values():
             results = results.highlight(*self.clean_fields_for_highlight(fields))
-        return results.sort(*self._get_sort_attribute()) if sort else results
+        results = results.source(excludes=['_synonyms_embeddings', '_embeddings'])
+        return results.sort(*sort_attrs) if sort else results
 
     def get_mandatory_words_criteria(self):
         criterion = None
@@ -818,7 +987,29 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             source_versions, other_filters
         ).get_aggregations(self.is_verbose(), self.is_raw())
 
+    def is_repo_version_children_request(self):
+        if self.is_source_child_document_model() and self.kwargs and 'source' in self.kwargs:
+            parent = get(self, 'parent_resource')
+            if parent and not parent.is_head:
+                return True
+        return False
+
+    def is_repo_version_children_request_without_any_search(self):
+        # used for caching repo versions concepts/mappings first page
+        if self.is_repo_version_children_request() and not self.get_search_string() and not self.is_verbose():
+            page = self.request.query_params.dict().get('page', '').strip()
+            sort = self.request.query_params.dict().get('sortDesc', '').strip()
+            limit = self.request.query_params.dict().get('limit', '').strip()
+            if limit:
+                limit = to_int(limit, 25)
+            return bool(
+                (not limit or limit == 25) and (not page or page in [1, '1']) and (not sort or sort == '_score')
+            )
+        return False
+
     def should_perform_es_search(self):
+        if self.is_repo_version_children_request() and self.request.query_params.get('onlyHierarchyRoot') not in TRUTHY:
+            return True
         sort_field, _ = self.get_sort_and_desc()
         return (
                 self.is_only_searchable or
@@ -827,6 +1018,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 bool(self.get_faceted_filters()) or
                 (bool(sort_field) and sort_field != '_score')
         ) or (SEARCH_PARAM in self.request.query_params.dict() and self.should_search_latest_repo())
+
+    def is_sliced(self):
+        return self.should_perform_es_search()
 
     def should_search_latest_repo(self):
         return self.is_source_child_document_model() and (
@@ -906,6 +1100,9 @@ class SourceChildCommonBaseView(BaseAPIView):
 class SourceChildExtrasBaseView:
     default_qs_sort_attr = '-created_at'
 
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
+
     def get_object(self):
         queryset = self.get_queryset()
 
@@ -973,6 +1170,9 @@ class APIVersionView(APIView):  # pragma: no cover
     permission_classes = (AllowAny,)
     swagger_schema = None
 
+    def get_throttles(self):
+        return []
+
     @staticmethod
     def get(_):
         return Response(__version__)
@@ -981,6 +1181,9 @@ class APIVersionView(APIView):  # pragma: no cover
 class ChangeLogView(APIView):  # pragma: no cover
     permission_classes = (AllowAny, )
     swagger_schema = None
+
+    def get_throttles(self):
+        return []
 
     @staticmethod
     def get(_):
@@ -991,6 +1194,9 @@ class ChangeLogView(APIView):  # pragma: no cover
 class RootView(BaseAPIView):  # pragma: no cover
     permission_classes = (AllowAny,)
     serializer_class = RootSerializer
+
+    def get_throttles(self):
+        return []
 
     def get(self, _):
         from core.urls import urlpatterns
@@ -1015,7 +1221,8 @@ class RootView(BaseAPIView):  # pragma: no cover
                     name = 'current_user'
             if name == 'core.toggles':
                 name = 'toggles'
-
+            if not name:
+                continue
             host_url = main_host_url.replace('://api.', '://fhir.') if 'fhir' in name else main_host_url
             data['routes'][name] = host_url + '/' + route
 
@@ -1035,6 +1242,9 @@ class BaseLogoView:
 
 class FeedbackView(APIView):  # pragma: no cover
     permission_classes = (AllowAny, )
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     @staticmethod
     @swagger_auto_schema(request_body=openapi.Schema(
@@ -1133,6 +1343,9 @@ class ConceptContainerExtraRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIVie
 class AbstractChecksumView(APIView):
     permission_classes = (IsAuthenticated,)
     smart = False
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     @swagger_auto_schema(
         manual_parameters=[all_resource_query_param],

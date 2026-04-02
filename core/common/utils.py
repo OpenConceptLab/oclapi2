@@ -221,8 +221,10 @@ def write_export_file(
 
     if is_collection:
         if version.expansion_uri:
-            concepts_qs = Concept.expansion_set.through.objects.filter(expansion_id=version.expansion.id)
-            mappings_qs = Mapping.expansion_set.through.objects.filter(expansion_id=version.expansion.id)
+            expansion = version.expansion
+            if expansion:
+                concepts_qs = Concept.expansion_set.through.objects.filter(expansion_id=version.expansion.id)
+                mappings_qs = Mapping.expansion_set.through.objects.filter(expansion_id=version.expansion.id)
     else:
         concepts_qs = Concept.sources.through.objects.filter(source_id=version.id)
         mappings_qs = Mapping.sources.through.objects.filter(source_id=version.id)
@@ -278,7 +280,7 @@ def write_export_file(
             logger.info(
                 f'{resource_name} has {total_references:d} references. Getting them in batches of {batch_size:d}...'
             )
-            reference_serializer_class = get_class('core.collections.serializers.CollectionReferenceSerializer')
+            reference_serializer_class = get_class('core.collections.serializers.CollectionReferenceDetailSerializer')
             for start in range(0, total_references, batch_size):
                 end = min(start + batch_size, total_references)
                 logger.info(f'Serializing references {start + 1:d} - {end:d}...')
@@ -494,6 +496,8 @@ def is_versioned_uri(expression):
 
 
 def to_parent_uri(expression):
+    if not expression:
+        return expression
     splitter = None
     if '/concepts/' in expression:
         splitter = '/concepts/'
@@ -911,3 +915,15 @@ def format_url_for_search(url):
 
 def clean_term(term):
     return term.lower().replace(' ', '').replace('-', '').replace('_', '')
+
+
+def get_embeddings(txt):
+    from core.toggles.models import Toggle
+    if not Toggle.get('SEMANTIC_SEARCH_TOGGLE') or settings.ENV == 'ci':
+        return None
+
+    model = settings.LM
+    if not model:
+        from sentence_transformers import SentenceTransformer
+        model = SentenceTransformer(settings.LM_MODEL_NAME)
+    return model.encode(str(txt))

@@ -36,13 +36,17 @@ class SourceDocument(Document):
     custom_validation_schema = fields.KeywordField(attr='custom_validation_schema', normalizer='lowercase')
     hierarchy_meaning = fields.KeywordField()
     created_by = fields.KeywordField()
+    property_codes = fields.ListField(fields.KeywordField())
+    filter_codes = fields.ListField(fields.KeywordField())
+    match_algorithm = fields.ListField(fields.KeywordField())
+    repo_type = fields.KeywordField()
+    retired = fields.KeywordField(attr='retired')
 
     class Django:
         model = Source
         fields = [
             'full_name',
             'revision_date',
-            'retired',
             'experimental',
             'case_sensitive',
             'compositional',
@@ -119,6 +123,18 @@ class SourceDocument(Document):
         return get(instance.supported_locales, [])
 
     @staticmethod
+    def prepare_match_algorithm(instance):
+        return instance.match_algorithms or []
+
+    @staticmethod
+    def prepare_property_codes(instance):
+        return [prop.get('code') for prop in get(instance.properties, [])]
+
+    @staticmethod
+    def prepare_filter_codes(instance):
+        return [prop.get('code') for prop in get(instance.filters, [])]
+
+    @staticmethod
     def prepare_extras(instance):
         value = {}
 
@@ -170,3 +186,7 @@ class SourceDocument(Document):
     @staticmethod
     def prepare__canonical_url(instance):
         return format_url_for_search(instance.canonical_url)
+
+    @staticmethod
+    def prepare_repo_type(_):
+        return Source.OBJECT_TYPE

@@ -20,6 +20,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.common.constants import DEPRECATED_API_HEADER
+from core.common.throttling import ThrottleUtil
 from core.common.views import BaseAPIView
 from core.common.tasks import bulk_import_new
 from core.common.swagger_parameters import update_if_exists_param, task_param, result_param, username_param, \
@@ -71,6 +72,9 @@ def import_response(request, import_queue, data, threads=None, inline=False, dep
 
 
 class ImportRetrieveDestroyMixin(BaseAPIView):
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
+
     def get_serializer_class(self):
         if self.request.GET.get('task'):
             return TaskDetailSerializer
@@ -140,6 +144,9 @@ class ImportRetrieveDestroyMixin(BaseAPIView):
 class BulkImportParallelInlineView(APIView):
     permission_classes = (IsAuthenticated, )
     deprecated = True
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     def get_parsers(self):
         if 'application/json' in [self.request.META.get('CONTENT_TYPE')]:
@@ -225,6 +232,9 @@ class BulkImportFileUploadView(APIView):  # pragma: no cover
     parser_classes = (MultiPartParser, )
     deprecated = True
 
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
+
     @swagger_auto_schema(
         manual_parameters=[update_if_exists_param, file_upload_param],
         deprecated=True
@@ -254,6 +264,9 @@ class BulkImportFileURLView(APIView):  # pragma: no cover
     permission_classes = (IsAuthenticated, )
     parser_classes = (MultiPartParser, )
     deprecated = True
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     @swagger_auto_schema(
         manual_parameters=[update_if_exists_param, file_url_param],
@@ -335,6 +348,9 @@ class BulkImportInlineView(APIView):  # pragma: no cover
     permission_classes = (IsAuthenticated, )
     parser_classes = (MultiPartParser, FormParser)
     deprecated = True
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     @swagger_auto_schema(
         manual_parameters=[update_if_exists_param, file_url_param, file_upload_param],

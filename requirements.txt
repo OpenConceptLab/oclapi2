@@ -1,9 +1,9 @@
 Django==5.1.5
-psycopg2==2.9.7
+psycopg2==2.9.11
 gunicorn==22.0.0 #production server
 whitenoise==6.5.0 #serving swagger static files
 djangorestframework==3.14.0
-pylint==2.17.5
+pylint==3.3.8
 pydash==7.0.6
 django-cors-headers==4.2.0
 pyyaml==6.0.1
@@ -20,8 +20,8 @@ git+https://github.com/snyaggarwal/flower # use until https://github.com/mher/fl
 redis==5.2.1
 django-redis==5.4.0 # needed for redis sentinel support
 kombu==5.4.2
-django-elasticsearch-dsl==7.3
-drf-yasg==1.21.5
+django-elasticsearch-dsl==8.0
+drf-yasg==1.21.7
 git+https://github.com/snyaggarwal/django-queryset-csv
 ocldev==0.2.2
 coverage==7.3.0
@@ -44,3 +44,8 @@ ijson==3.2.3
 responses==0.25.0
 pydantic==2.6.4
 minio==7.2.9
+sentence-transformers==3.3.1
+elastic-transport==8.17
+litellm==1.77.0
+strawberry-graphql==0.285.0
+strawberry-graphql-django==0.67.0

@@ -14,6 +14,7 @@ omit =
     */documents.py
     core/common/search.py
     core/common/errbit.py
+    core/common/throttling.py
     */es_normalizers.py
     */feeds.py
     *test*

@@ -10,7 +10,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
   redis:
-    image: bitnami/redis:7.0.12
+    image: bitnami/redis
     restart: "always"
     environment:
       - ALLOW_EMPTY_PASSWORD=yes
@@ -32,6 +32,8 @@ services:
       - REDIS_PORT=${REDIS_PORT-6379}
       - DB_HOST=${DB_HOST-db}
       - DB_PORT=${DB_PORT-5432}
+      - DB=${DB-postgres}
+      - DB_USER=${DB_USER-postgres}
       - DB_PASSWORD=${DB_PASSWORD-Postgres123}
       - ES_HOSTS=${ES_HOSTS-es:9200}
       - ES_SCHEME=${ES_SCHEME-http}
@@ -59,6 +61,9 @@ services:
       - MINIO_ENDPOINT
       - MINIO_SECRET_KEY
       - MINIO_SECURE
+      - ENABLE_THROTTLING
+      - SERVICE_NAME=${SERVICE_NAME-oclapi2}
+      - NO_LM=${NO_LM-FALSE}
     healthcheck:
       test: "curl --silent --fail http://localhost:8000/version/ || exit 1"
     volumes:
@@ -240,11 +245,13 @@ services:
     healthcheck:
       test: "curl --silent --fail -u $${FLOWER_USER:-root}:$${FLOWER_PASSWORD:-Root123} http://localhost:5555/metrics || exit 1"
   es:
-    image: elasticsearch:7.17.10
+    image: elasticsearch:8.15.2
     environment:
       - discovery.type=single-node
       - bootstrap.memory_lock=true
-      - "ES_JAVA_OPTS=-Xms1024m -Xmx1024m"
+      - xpack.security.enabled=false
+      - m=2GB
+      - "ES_JAVA_OPTS=-Xms1500m -Xmx1500m"
     ulimits:
       memlock:
         soft: -1

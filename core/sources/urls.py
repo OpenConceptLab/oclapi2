@@ -23,6 +23,11 @@ urlpatterns = [
         name='source-mapped-sources'
     ),
     path(
+        "<str:source>/<str:version>/mapped-sources/",
+        views.SourceVersionMappedSourcesListView.as_view(),
+        name='source-version-mapped-sources'
+    ),
+    path(
         "<str:source>/summary/",
         views.SourceSummaryView.as_view(),
         name='source-summary'
@@ -69,10 +74,22 @@ urlpatterns = [
         name='source-extras'
     ),
     path(
+        "<str:source>/properties/",
+        views.SourcePropertiesView.as_view(),
+        name='source-properties'
+    ),
+    path(
+        "<str:source>/filters/",
+        views.SourceFiltersView.as_view(),
+        name='source-filters'
+    ),
+    path(
         "<str:source>/<str:version>/",
         views.SourceVersionRetrieveUpdateDestroyView.as_view(),
         name='source-version-detail'
     ),
+    path("<str:source>/<str:version>/concepts/indexes/", views.SourceConceptsIndexView.as_view()),
+    path("<str:source>/<str:version>/mappings/indexes/", views.SourceMappingsIndexView.as_view()),
     path(
         '<str:source>/<str:version>/summary/',
         views.SourceVersionSummaryView.as_view(),
@@ -91,6 +108,16 @@ urlpatterns = [
         "<str:source>/<str:version>/extras/",
         views.SourceVersionExtrasView.as_view(),
         name='sourceversion-extras'
+    ),
+    path(
+        "<str:source>/<str:version>/properties/",
+        views.SourceVersionPropertiesView.as_view(),
+        name='sourceversion-properties'
+    ),
+    path(
+        "<str:source>/<str:version>/filters/",
+        views.SourceVersionFiltersView.as_view(),
+        name='sourceversion-filters'
     ),
     path(
         "<str:source>/<str:version>/concepts/",

@@ -4,7 +4,6 @@ from celery_once import AlreadyQueued
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
-from django.db.models import Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
@@ -17,7 +16,7 @@ from rest_framework.response import Response
 
 from core.bundles.serializers import BundleSerializer
 from core.client_configs.views import ResourceClientConfigsView
-from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM, ACCESS_TYPE_NONE
+from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM
 from core.common.exceptions import Http405, Http400
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin, \
     ConceptContainerExportMixin, ConceptContainerProcessingMixin
@@ -26,10 +25,11 @@ from core.common.permissions import CanViewConceptDictionary, CanEditConceptDict
 from core.common.serializers import TaskSerializer
 from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, \
     page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header, \
-    canonical_url_param
+    canonical_url_param, all_versions_param
 from core.common.tasks import export_source, index_source_concepts, index_source_mappings, delete_source, \
     generate_source_resources_checksums, source_version_compare
-from core.common.utils import parse_boolean_query_param, compact_dict_by_values, to_parent_uri, decode_string
+from core.common.utils import parse_boolean_query_param, compact_dict_by_values, to_parent_uri, decode_string, \
+    get_truthy_values
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
 from core.sources.documents import SourceDocument
@@ -111,18 +111,8 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
         return queryset
 
     def get_queryset(self):
-        queryset = super().get_queryset()
-        queryset = self.apply_filters(queryset)
-        user = self.request.user
-        if get(user, 'is_staff'):
-            return queryset
-        if get(user, 'is_anonymous'):
-            return queryset.exclude(public_access=ACCESS_TYPE_NONE)
-
-        public_queryset = queryset.exclude(public_access=ACCESS_TYPE_NONE)
-        private_queryset = queryset.filter(public_access=ACCESS_TYPE_NONE)
-        private_queryset = private_queryset.filter(Q(user_id=user.id) | Q(organization__members__id=user.id))
-        return public_queryset.union(private_queryset)
+        return self.filter_queryset_by_public_access(
+            self.apply_filters(super().get_queryset()))
 
     def get_serializer_class(self):
         if self.is_brief():
@@ -137,7 +127,8 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
     @swagger_auto_schema(
         manual_parameters=[
             q_param, limit_param, sort_desc_param, sort_asc_param, page_param, verbose_param,
-            include_retired_param, updated_since_param, canonical_url_param, include_facets_header, compress_header
+            include_retired_param, updated_since_param, canonical_url_param, all_versions_param,
+            include_facets_header, compress_header
         ]
     )
     def get(self, request, *args, **kwargs):
@@ -183,7 +174,9 @@ class SourceLogoView(SourceBaseView, BaseLogoView):
         return [CanEditConceptDictionary()]
 
 
-class SourceRetrieveUpdateDestroyView(SourceBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, TaskMixin):
+class SourceRetrieveUpdateDestroyView(
+    SourceBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, UpdateAPIView, TaskMixin
+):
     serializer_class = SourceDetailSerializer
 
     def get_object(self, queryset=None):
@@ -252,9 +245,15 @@ class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeader
         head_object = self.get_queryset().first()
         version = request.data.pop('id', None)
         payload = {
-            "mnemonic": head_object.mnemonic, "id": head_object.mnemonic, "name": head_object.name, **request.data,
-            "organization_id": head_object.organization_id, "user_id": head_object.user_id,
-            'version': version
+            "mnemonic": head_object.mnemonic,
+            "id": head_object.mnemonic,
+            "name": head_object.name, **request.data,
+            "organization_id": head_object.organization_id,
+            "user_id": head_object.user_id,
+            'version': version,
+            "meta": request.data.get('meta', head_object.meta),
+            "properties": request.data.get('properties', head_object.properties),
+            "filters": request.data.get('filters', head_object.filters)
         }
         serializer = self.get_serializer(data=payload)
         if serializer.is_valid():
@@ -363,6 +362,7 @@ class SourceMappingsIndexView(SourceBaseView):
 
 class SourceConceptsCloneView(SourceBaseView):
     serializer_class = BundleSerializer
+    permission_classes = (CanEditConceptDictionary, )
 
     def post(self, request, **kwargs):  # pylint: disable=unused-argument, too-many-locals
         """
@@ -451,7 +451,10 @@ class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIV
         try:
             instance.delete()
         except ValidationError as ex:
-            return Response(ex.message_dict, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}),
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -468,12 +471,42 @@ class SourceExtrasView(SourceExtrasBaseView, ListAPIView):
         return Response(get(self.get_object(), 'extras', {}))
 
 
+class SourcePropertiesView(SourceExtrasBaseView, ListAPIView):
+    serializer_class = SourceDetailSerializer
+
+    def list(self, request, *args, **kwargs):
+        return Response(get(self.get_object(), 'properties', []))
+
+
+class SourceFiltersView(SourceExtrasBaseView, ListAPIView):
+    serializer_class = SourceDetailSerializer
+
+    def list(self, request, *args, **kwargs):
+        return Response(get(self.get_object(), 'filters', []))
+
+
 class SourceVersionExtrasView(SourceBaseView, ListAPIView):
     serializer_class = SourceDetailSerializer
 
     def list(self, request, *args, **kwargs):
         instance = get_object_or_404(self.get_queryset(), version=decode_string(self.kwargs['version']))
         return Response(get(instance, 'extras', {}))
+
+
+class SourceVersionPropertiesView(SourceBaseView, ListAPIView):
+    serializer_class = SourceDetailSerializer
+
+    def list(self, request, *args, **kwargs):
+        instance = get_object_or_404(self.get_queryset(), version=decode_string(self.kwargs['version']))
+        return Response(get(instance, 'properties', []))
+
+
+class SourceVersionFiltersView(SourceBaseView, ListAPIView):
+    serializer_class = SourceDetailSerializer
+
+    def list(self, request, *args, **kwargs):
+        instance = get_object_or_404(self.get_queryset(), version=decode_string(self.kwargs['version']))
+        return Response(get(instance, 'filters', []))
 
 
 class SourceVersionResourcesChecksumGenerateView(SourceBaseView, TaskMixin):  # pragma: no cover
@@ -498,7 +531,7 @@ class SourceVersionProcessingView(SourceBaseView, ConceptContainerProcessingMixi
 
 class SourceVersionExportView(ConceptContainerExportMixin, SourceVersionBaseView):
     entity = 'Source'
-    permission_classes = (CanViewConceptDictionary,)
+    permission_classes = (CanViewConceptDictionary, IsAuthenticated)
     serializer_class = SourceVersionExportSerializer
 
     def handle_export_version(self):
@@ -588,22 +621,35 @@ class SourceClientConfigsView(SourceBaseView, ResourceClientConfigsView):
     permission_classes = (CanViewConceptDictionary, )
 
 
-class SourceMappedSourcesListView(SourceListView):
+class AbstractSourceMappedSourcesListView(SourceListView):
     is_searchable = False
 
+    def get_object_instance(self):
+        return get_object_or_404(super().get_queryset().order_by('-created_at'))
+
     def get_object(self, queryset=None):
-        instance = super().get_queryset().order_by('-created_at').first()
-        if not instance:
-            raise Http404()
+        instance = self.get_object_instance()
         self.check_object_permissions(self.request, instance)
         return instance
 
-    def get_queryset(self):
-        instance = self.get_object()
-        return instance.get_mapped_sources()
+    def is_exclude_self(self):
+        return self.request.query_params.get('excludeSelf', True) in get_truthy_values()
 
+    def get_queryset(self):
+        return self.get_object().get_mapped_sources(exclude_self=self.is_exclude_self())
+
+    @swagger_auto_schema(auto_schema=None)
     def post(self, request, **kwargs):
         raise Http405()
+
+
+class SourceMappedSourcesListView(AbstractSourceMappedSourcesListView):
+    pass
+
+
+class SourceVersionMappedSourcesListView(AbstractSourceMappedSourcesListView):
+    def get_object_instance(self):
+        return get_object_or_404(Source.get_base_queryset(compact_dict_by_values(self.get_filter_params())))
 
 
 class AbstractSourceVersionsDiffView(BaseAPIView, TaskMixin):
@@ -616,6 +662,8 @@ class AbstractSourceVersionsDiffView(BaseAPIView, TaskMixin):
         version2_uri = self.request.data.get('version2')  # newer version
         version1 = get_object_or_404(Source.objects.filter(uri=version1_uri))
         version2 = get_object_or_404(Source.objects.filter(uri=version2_uri))
+        if version1.created_at > version2.created_at:
+            raise Http400('version1 must be older than version2')
         self.check_object_permissions(self.request, version1)
         self.check_object_permissions(self.request, version2)
         return version1, version2
@@ -628,10 +676,15 @@ class AbstractSourceVersionsDiffView(BaseAPIView, TaskMixin):
 
     def post(self, _):
         version1, version2 = self.get_objects()
+        ignore_cache = bool(version1.is_head or version2.is_head)
         result = self.perform_task(
-            source_version_compare, (version1.uri, version2.uri, self.changelog, self.get_verbosity()))
+            source_version_compare,
+            (version1.uri, version2.uri, self.changelog, self.get_verbosity(), ignore_cache)
+        )
+
         if isinstance(result, Response):
             return result
+
         return Response(result)
 
 

@@ -3,11 +3,15 @@ import time
 
 import requests
 from django.http import HttpResponseNotFound, HttpResponse
+from django.utils.deprecation import MiddlewareMixin
 from request_logging.middleware import LoggingMiddleware
+from rest_framework.views import APIView
 
 from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER, RESPONSE_TIME_HEADER, REQUEST_URL_HEADER, \
     REQUEST_METHOD_HEADER
+from core.common.throttling import ThrottleUtil
 from core.common.utils import set_current_user, set_request_url
+from core.services.analytics_event_emitter import AnalyticsEventEmitter
 from core.services.auth.core import AuthService
 
 request_logger = logging.getLogger('request_logger')
@@ -50,7 +54,10 @@ class ResponseHeadersMiddleware(BaseMiddleware):
         response = self.get_response(request)
         from django.conf import settings
         response[VERSION_HEADER] = settings.VERSION
-        response[REQUEST_USER_HEADER] = str(getattr(request, 'user', None))
+        try:
+            response[REQUEST_USER_HEADER] = str(getattr(request, 'user', None))
+        except Exception:  # noqa: BLE001 - skip user header when session unavailable (e.g., async context)
+            response[REQUEST_USER_HEADER] = ''
         response[RESPONSE_TIME_HEADER] = time.time() - start_time
         response[REQUEST_URL_HEADER] = request.get_full_path() or request.path
         response[REQUEST_METHOD_HEADER] = request.method
@@ -133,4 +140,44 @@ class FhirMiddleware(BaseMiddleware):
         else:
             response = self.get_response(request)
 
+        return response
+
+
+class ThrottleHeadersMiddleware(MiddlewareMixin):
+    match_throttled_paths = ['recommend-beta', '$match']
+    def is_match_throttled_path(self, path):
+        for match_path in self.match_throttled_paths:
+            if match_path in path:
+                return True
+        return False
+
+    def process_response(self, request, response):
+        if request.path.rstrip("/") not in ['', '/swagger', '/redoc', '/version']:
+            view = APIView()
+            throttles = ThrottleUtil.get_match_throttles_by_user_plan(request.user) if self.is_match_throttled_path(
+                request.path
+            ) else ThrottleUtil.get_throttles_by_user_plan(request.user)
+
+            if minute_limit := ThrottleUtil.get_limit_remaining(throttles[0], request, view):
+                response['X-LimitRemaining-Minute'] = minute_limit
+                response['X-LimitRemaining-Day'] = ThrottleUtil.get_limit_remaining(throttles[1], request, view)
+
+        return response
+
+
+class AnalyticsMiddleware(BaseMiddleware):
+    def __call__(self, request):
+        start = time.monotonic()
+        response = self.get_response(request)
+        path = request.path
+
+        ignore_any_under_paths = ['/users/login/', '/users/logout/', '/users/signup/']
+        ignore_paths = [
+            '', '/swagger', '/redoc', '/version', '/toggles', '/users/oidc/code-exchange', '/favicon.ico',
+            '/users/api-token', '/users/password/reset', '/user',
+            *[p.rstrip('/') for p in ignore_any_under_paths]
+        ]
+        if path.rstrip("/") not in ignore_paths and not any(path.startswith(p) for p in ignore_any_under_paths):
+            duration_ms = int((time.monotonic() - start) * 1000)
+            AnalyticsEventEmitter(request, response, duration_ms).emit()
         return response

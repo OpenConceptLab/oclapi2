@@ -47,7 +47,34 @@
     "fields": {
       "is_active": true,
       "name": "SEMANTIC_SEARCH_TOGGLE",
-      "dev": true
+      "dev": true,
+      "qa": true,
+      "staging": true,
+      "production": true
+    }
+  },
+  {
+    "pk": 7,
+    "model": "toggles.toggle",
+    "fields": {
+      "is_active": true,
+      "name": "MAPPER_WAITLIST_TOGGLE",
+      "dev": true,
+      "qa": false,
+      "staging": true,
+      "production": true
+    }
+  },
+  {
+    "pk": 8,
+    "model": "toggles.toggle",
+    "fields": {
+      "is_active": true,
+      "name": "SCISPACY_LOINC_TOGGLE",
+      "dev": true,
+      "qa": false,
+      "staging": false,
+      "production": true
     }
   }
 ]

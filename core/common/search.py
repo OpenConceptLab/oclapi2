@@ -1,17 +1,22 @@
 import re
+import time
 import urllib
 
+from cid.locals import get_cid
+from django.conf import settings
 from django.db.models import Case, When, IntegerField
 from elasticsearch_dsl import FacetedSearch, Q
-from pydash import compact, get
+from pydash import compact, get, has, set_
+from sentence_transformers import CrossEncoder
 
+from core.common.constants import ES_REQUEST_TIMEOUT
 from core.common.utils import is_url_encoded_string
 
 
 class CustomESFacetedSearch(FacetedSearch):
-    def __init__(self, query=None, filters={}, sort=(), _search=None):  # pylint: disable=dangerous-default-value
+    def __init__(self, query=None, filters=None, sort=(), _search=None):  # pylint: disable=dangerous-default-value
         self._search = _search
-        super().__init__(query=query, filters=filters, sort=sort)
+        super().__init__(query=query, filters=filters or {}, sort=sort)
 
     @staticmethod
     def format_search_str(search_str):
@@ -65,9 +70,9 @@ class CustomESSearch:
     @staticmethod
     def get_search_string(search_str, lower=True, decode=True):
         if lower:
-            search_str = search_str.lower()
+            search_str = str(search_str).lower()
         if decode:
-            search_str = search_str.replace('**', '*')
+            search_str = str(search_str).replace('**', '*')
             starts_with_asterisk = search_str.startswith('*')
             ends_with_asterisk = search_str.endswith('*')
             if starts_with_asterisk:
@@ -134,20 +139,20 @@ class CustomESSearch:
 
     @staticmethod
     def get_match_phrase_criteria(field, search_str, boost):
-        criteria = CustomESSearch.get_term_match_criteria(field, search_str, boost)
-        if field == 'external_id':
-            return criteria
-        return criteria | CustomESSearch.get_prefix_criteria(
-            field, search_str, boost
-        ) | Q('match_phrase', **{field: {'query': search_str, 'boost': boost}})
+        if field in ['external_id', '_name', '_synonyms', 'repo_owner'] or field.startswith('_'):
+            return CustomESSearch.get_term_match_criteria(field, search_str, boost)
+
+        return Q(
+            'match_phrase', **{field: {'query': search_str.lower(), 'boost': boost + 75}}
+        ) | CustomESSearch.get_prefix_criteria(field, search_str.lower(), boost + 50)
 
     @staticmethod
     def get_term_match_criteria(field, search_str, boost):
-        return Q('term', **{field: {'value': search_str, 'boost': boost + 100}})
+        return Q('term', **{field: {'value': search_str, 'boost': boost + 100, 'case_insensitive': True}})
 
     @staticmethod
     def get_prefix_criteria(field, search_str, boost):
-        return Q('prefix', **{field: {'value': search_str, 'boost': boost + 95}})
+        return Q('match_phrase_prefix', **{field: {'query': search_str.lower(), 'boost': boost, "max_expansions": 20}})
 
     @staticmethod
     def get_match_criteria(field, search_str, boost):
@@ -202,16 +207,30 @@ class CustomESSearch:
     def apply_aggregation_score_stats(self):
         self._dsl_search.aggs.bucket("score", "stats", script="_score")
 
-    def to_queryset(self, keep_order=True):
+    def to_queryset(self, keep_order=True, normalized_score=False, exact_count=True, txt=None, encoder_model=None):  # pylint:disable=too-many-locals,too-many-arguments
         """
         This method return a django queryset from the an elasticsearch result.
         It cost a query to the sql db.
         """
-        s, hits = self.__get_response()
-
-        for result in hits.hits:
+        encoder = bool(txt)
+        s, hits, total = self.__get_response(exact_count, encoder)
+        max_score = hits.max_score or 1
+        cid = get_cid()
+        start_time = time.time()
+        hits = Reranker(encoder_model).rerank(
+            txt=txt, hits=hits.hits, name_key='name', source_attr='_source', should_convert_source_to_dict=True,
+            order_results=False
+        ) if encoder else hits.hits
+        print(f"[{cid}] Cross encoder time: {time.time() - start_time} seconds")
+        for result in hits:
             _id = get(result, '_id')
-            self.scores[int(_id)] = get(result, '_score')
+            rerank_score = get(result, 'search_rerank_score')
+            raw_score = get(result, '_score') or 0
+            self.scores[int(_id)] = {
+                'raw': raw_score,
+                'rerank': rerank_score,
+                'normalized': rerank_score if encoder else (raw_score / max_score)
+            } if normalized_score else raw_score
             highlight = get(result, 'highlight')
             if highlight:
                 self.highlights[int(_id)] = highlight.to_dict()
@@ -236,15 +255,16 @@ class CustomESSearch:
                 )
                 qs = qs.order_by(preserved_order)
         self.queryset = qs
-        self.total = hits.total.value
+        self.total = total or 0
 
     def get_aggregations(self, verbose=False, raw=False):
-        s, _ = self.__get_response()
+        s, _, total = self.__get_response()
 
         result = s.aggs.to_dict()
         if raw:
             return result
         self.max_score = result['score']['max']
+        self.total = total or 0
         return self._get_score_buckets(
             self.max_score, result['distribution']['buckets'], verbose)
 
@@ -297,13 +317,123 @@ class CustomESSearch:
 
         return [build_confidence(high), build_confidence(medium), build_confidence(low)]
 
-    def __get_response(self):
+    def __get_response(self, exact_count=True, load_fields=False):
         # Do not query again if the es result is already cached
+        total = None
         if not hasattr(self._dsl_search, '_response'):
             # We only need the meta fields with the models ids
-            s = self._dsl_search.source(excludes=['*'])
+            s = self._dsl_search.source(
+                excludes=['_embeddings', '_synonyms_embeddings']
+            ) if load_fields else self._dsl_search.source(False)
+            s = s.params(request_timeout=ES_REQUEST_TIMEOUT)
+            if exact_count:
+                total = s.count()
+            s = s.params(track_total_hits=False, request_cache=True)
             s = s.execute()
             hits = s.hits
             self.max_score = hits.max_score
-            return s, hits
-        return self._dsl_search, None
+            return s, hits, total
+        return self._dsl_search, None, total
+
+
+class Reranker:
+    ENCODERS = [
+        # Best and Fastest overall lightweight medical reranker
+        # Size: ~110M
+        # Speed: similar to MiniLM CrossEncoder
+        # Training: includes clinical, medical, question-answering datasets
+        # Output: positive similarity scores (not raw logits!)
+        # 0.6B params
+        # https://huggingface.co/BAAI/bge-reranker-v2-m3
+        "BAAI/bge-reranker-v2-m3",
+
+        # Model: jinhybr/OA-MedBERT-cross-encoder or similar
+        # Size: ~110M
+        # Domain: PubMed abstracts, biomedical QA
+        # Type: binary classifier (logits)
+        # Not huggin face model -- ???
+        # "jinhybr/OA-MedBERT-cross-encoder",
+
+        # Model: microsoft/BioLinkBERT-base
+        # Type: CrossEncoder
+        # Size: ~120M
+        # Domain: UMLS, PubMed, MeSH, SNOMED (closest to OCL)
+        # Not huggin face model -- doesn't work with sentence_transformers
+        # "microsoft/BioLinkBERT-base",
+
+        # 22.7M params
+        # https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2
+        # doesn't work with logits, so not between 0-1
+        "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    ]
+    SCORE_KEY = 'search_rerank_score'
+
+    def __init__(self, model_name=None):
+        self.model_name = model_name
+        self.encoder = self._get_encoder(self.model_name)
+
+    def rerank(  # pylint: disable=too-many-arguments
+            self, hits, txt, name_key='name', source_attr=None, should_convert_source_to_dict=True,
+            score_key=None, order_results=True):
+        scores = self._predict_scores(hits, txt, name_key, source_attr, should_convert_source_to_dict)
+        return self._assign_score(hits, scores, score_key, order_results)
+
+    @property
+    def default_model(self):
+        return settings.ENCODER_MODEL_NAME
+
+    # private
+    def _predict_scores(self, hits, txt, name_key, source_attr, should_convert_source_to_dict):  # pylint: disable=too-many-arguments
+        if not hits or not txt:
+            return []
+        scores_full = [float("-inf")] * len(hits)  # or 0.0
+        if not isinstance(txt, str) or not txt.strip():
+            return scores_full  # or 0.0
+
+        docs = [get(self._get_source(hit, source_attr, should_convert_source_to_dict), name_key) for hit in hits]
+        valid = []
+        for i, d in enumerate(docs):
+            if isinstance(d, str) and d.strip():
+                valid.append((i, d.strip()))
+        if not valid:
+            return scores_full
+        scores = self.encoder.predict([(txt, d) for _, d in valid])
+        for (i, _), s in zip(valid, scores):
+            scores_full[i] = float(s)
+
+        return scores_full
+
+    def _assign_score(self, hits, scores, score_key, order_results):
+        score_key = score_key or self.SCORE_KEY
+        key_to_set = score_key
+
+        for hit, score in zip(hits, scores):
+            key_to_set = f'search_meta.{score_key}' if has(hit, 'search_meta') else score_key
+            set_(hit, key_to_set, float(score))
+            set_(hit, 'search_meta.search_normalized_score', float(score) * 100)
+
+        return self._order(hits, key_to_set) if order_results and key_to_set else hits
+
+    @staticmethod
+    def _order(hits, key_to_order):
+        return sorted(hits, key=lambda hit: get(hit, key_to_order), reverse=True)
+
+    def _get_encoder(self, model_name):
+        if model_name and model_name != self.default_model:
+            return self._load_encoder(model_name)
+        return self._load_default_encoder()
+
+    @staticmethod
+    def _load_encoder(model_name):
+        return CrossEncoder(model_name, device="cpu", max_length=128)
+
+    @staticmethod
+    def _load_default_encoder():
+        return settings.ENCODER
+
+    @staticmethod
+    def _get_source(data, source_attr, should_convert_source_to_dict):
+        source = get(data, source_attr) if source_attr else data
+        if should_convert_source_to_dict and source:
+            source = dict(source)
+        return source

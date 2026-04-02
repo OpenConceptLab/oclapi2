@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from core.client_configs.serializers import ClientConfigSerializer, ClientConfigTemplateSerializer
 from core.common.views import BaseAPIView
 from .models import ClientConfig
+from ..common.throttling import ThrottleUtil
 
 
 class ClientConfigBaseView(generics.GenericAPIView):
@@ -14,6 +15,9 @@ class ClientConfigBaseView(generics.GenericAPIView):
     pk_field = 'id'
     queryset = ClientConfig.objects.filter(is_active=True)
     serializer_class = ClientConfigSerializer
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
 
 class ClientConfigView(ClientConfigBaseView, RetrieveAPIView, UpdateAPIView, DestroyAPIView):
@@ -49,6 +53,9 @@ class ResourceClientConfigsView(BaseAPIView, RetrieveAPIView):
 
 class ResourceTemplatesView(ListAPIView, CreateAPIView):
     serializer_class = ClientConfigTemplateSerializer
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     def get_queryset(self):
         user = self.request.user

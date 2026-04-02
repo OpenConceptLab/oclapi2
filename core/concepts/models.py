@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError
 from django.db.models import F, Q
-from pydash import get, compact
+from pydash import get, compact, has
 
 from core.common.checksums import ChecksumModel
 from core.common.constants import ISO_639_1, LATEST, HEAD, ALL
@@ -243,6 +243,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     # $cascade as hierarchy attributes
     cascaded_entries = None
     terminal = None
+    _requested_locale = None
 
     es_fields = {
         'id': {'sortable': False, 'filterable': True, 'exact': True},
@@ -254,23 +255,35 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         'updated_by': {'sortable': False, 'filterable': False, 'facet': True},
         'is_latest_version': {'sortable': False, 'filterable': True},
         'is_in_latest_source_version': {'sortable': False, 'filterable': True},
-        'concept_class': {'sortable': True, 'filterable': True, 'facet': True, 'exact': False},
-        'datatype': {'sortable': True, 'filterable': True, 'facet': True, 'exact': False},
+        'concept_class': {
+            'sortable': True, 'filterable': True, 'facet': True, 'exact': False,
+            'facet_field': 'concept_class_text.keyword'
+        },
+        'datatype': {
+            'sortable': True, 'filterable': True, 'facet': True, 'exact': False, 'facet_field': 'datatype_text.keyword'
+        },
         'locale': {'sortable': False, 'filterable': True, 'facet': True, 'exact': False},
         'synonyms': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
         'description': {'sortable': False, 'filterable': True, 'facet': False, 'exact': False},
         'retired': {'sortable': False, 'filterable': True, 'facet': True},
-        'source': {'sortable': True, 'filterable': True, 'facet': True, 'exact': False},
+        'source': {
+            'sortable': True, 'filterable': True, 'facet': True, 'exact': False, 'facet_field': 'source_text.keyword'
+        },
         'collection': {'sortable': False, 'filterable': True, 'facet': True},
         'collection_url': {'sortable': False, 'filterable': True, 'facet': True},
         'collection_owner_url': {'sortable': False, 'filterable': False, 'facet': True},
-        'owner': {'sortable': True, 'filterable': True, 'facet': True, 'exact': False},
+        'owner': {
+            'sortable': True, 'filterable': True, 'facet': True, 'exact': False, 'facet_field': 'owner_text.keyword'
+        },
         'owner_type': {'sortable': False, 'filterable': True, 'facet': True, 'exact': False},
         'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
         'name_types': {'sortable': False, 'filterable': True, 'facet': True},
         'description_types': {'sortable': False, 'filterable': True, 'facet': True},
         'same_as_map_codes': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
         'other_map_codes': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
+        'properties': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
+        'target_repo': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
+        'target_repo_map_type': {'sortable': False, 'filterable': True, 'facet': True, 'exact': True},
     }
 
     @staticmethod
@@ -319,7 +332,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         )
 
     def __get_parent_default_locale_name(self):
-        parent_default_locale = self.parent.default_locale
+        parent_default_locale = self._requested_locale or self.parent.default_locale
         return get(
             self.__names_qs({'locale': parent_default_locale, 'locale_preferred': True}, 'created_at', 'desc'), '0'
         ) or get(
@@ -483,8 +496,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             versioned_object_id=self.versioned_object_id,
             _index=self._index
         )
-        concept_version.cloned_names = self.__clone_name_locales()
-        concept_version.cloned_descriptions = self.__clone_description_locales()
+        concept_version.cloned_names = self.clone_name_locales()
+        concept_version.cloned_descriptions = self.clone_description_locales()
         concept_version._parent_concepts = self.parent_concepts.all()  # pylint: disable=protected-access
 
         return concept_version
@@ -515,8 +528,12 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     @classmethod
     def create_new_version_for(
             cls, instance, data, user, create_parent_version=True, add_prev_version_children=True,
-            _hierarchy_processing=False
-    ):  # pylint: disable=too-many-arguments
+            _hierarchy_processing=False, is_patch=False
+    ):  # pylint: disable=too-many-arguments,too-many-locals
+        mappings_payload = data.pop('mappings_payload', None)
+        prev_latest = Concept.objects.filter(
+            mnemonic=instance.mnemonic, parent_id=instance.parent_id, is_latest_version=True
+        ).first()
         instance.id = None  # Clear id so it is persisted as a new object
         instance.version = data.get('version', None)
         instance.concept_class = data.get('concept_class', instance.concept_class)
@@ -525,9 +542,16 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         instance.external_id = data.get('external_id', instance.external_id)
         instance.comment = data.get('update_comment') or data.get('comment')
         instance.retired = data.get('retired', instance.retired)
+        if is_patch:
+            prev = instance.versions.exclude(id=instance.id).filter(is_latest_version=True).first()
+            new_names = ConceptName.build(data.get('names', [])) if 'names' in data else (
+                prev.clone_name_locales())
+            new_descriptions = ConceptDescription.build(data.get('descriptions', [])) if 'descriptions' in data else (
+                prev.clone_description_locales())
+        else:
+            new_names = ConceptName.build(data.get('names', []))
+            new_descriptions = ConceptDescription.build(data.get('descriptions', []))
 
-        new_names = ConceptName.build(data.get('names', []))
-        new_descriptions = ConceptDescription.build(data.get('descriptions', []))
         has_parent_concept_uris_attr = 'parent_concept_urls' in data
         parent_concept_uris = data.pop('parent_concept_urls', None)
 
@@ -537,13 +561,25 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         if not parent_concept_uris and has_parent_concept_uris_attr:
             parent_concept_uris = []
 
-        return instance.save_as_new_version(
+        errors = instance.save_as_new_version(
             user=user,
             create_parent_version=create_parent_version,
             parent_concept_uris=parent_concept_uris,
             add_prev_version_children=add_prev_version_children,
-            _hierarchy_processing=_hierarchy_processing
+            _hierarchy_processing=_hierarchy_processing,
+            skip_duplicate_version_check=bool(mappings_payload)
         )
+
+        if errors or mappings_payload is None:
+            return errors
+        mappings_result, has_mapping_errors = instance.upsert_or_delete_mappings(
+            mappings_payload, user
+        )
+        if has_mapping_errors:
+            instance.rollback_latest_version_to(prev_latest)
+            errors['mappings'] = instance._get_errors_from_mappings(mappings_result)  # pylint: disable=protected-access
+
+        return errors
 
     def set_parent_concepts_from_uris(self, create_parent_version=True):
         parent_concepts = get(self, '_parent_concepts', [])
@@ -596,6 +632,197 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                         child = Concept.objects.filter(uri=uri).first().get_latest_version()
                         child.parent_concepts.add(new_latest_version)
 
+    def create_mappings(self, mappings):
+        from core.mappings.serializers import MappingDetailSerializer
+        results = []
+        any_with_errors = False
+        if mappings and self.id:
+            user = self.created_by
+            for mapping_data in mappings:
+                errors = {}
+                try:
+                    created = self._create_mapping_from_self(mapping_data.copy(), user)
+                except Exception as ex:
+                    error_dict = get(ex, 'message_dict') or get(ex, 'error_dict')
+                    if error_dict:
+                        errors = error_dict
+                    else:
+                        errors['__all__'] = [str(ex)]
+                    any_with_errors = True
+                    created = False
+                serializer = None
+                if created:
+                    serializer = MappingDetailSerializer(created)
+                    errors = created.errors
+                    if not errors and not created.id:
+                        errors['__all__'] = ['Something bad happened while creating the mapping.']
+                    if errors:
+                        serializer._errors = errors  # pylint: disable=protected-access
+                        any_with_errors = True
+
+                results.append({
+                    'mapping': mapping_data,
+                    'instance': created,
+                    'serializer': serializer,
+                    'errors': errors
+                })
+
+        return results, any_with_errors
+
+    def _create_mapping_from_self(self, mapping_data, user):
+        from core.mappings.models import Mapping
+        data = {
+            key: value for key, value in mapping_data.items()
+            if not key.startswith('from_') and key not in ['id', 'uuid', 'action']
+        }
+        data['from_concept_url'] = drop_version(self.uri)
+        if data.get('to_concept') == '__parent_concept':
+            data['to_concept_url'] = self.uri
+            data.pop('to_concept')
+
+        return Mapping.persist_new({**data, 'parent_id': self.parent_id}, user)
+
+    def _validate_mapping_create_from_self(self, mapping_data, user):
+        from core.mappings.models import Mapping
+        data = {
+            key: value for key, value in mapping_data.items()
+            if not key.startswith('from_') and key not in ['id', 'uuid', 'action']
+        }
+        data['from_concept_url'] = drop_version(self.uri)
+        if data.get('to_concept') == '__parent_concept':
+            data['to_concept_url'] = self.uri
+            data.pop('to_concept')
+        data['parent_id'] = self.parent_id
+
+        related_fields = ['from_concept_url', 'to_concept_url', 'to_source_url', 'from_source_url']
+        field_data = {k: v for k, v in data.items() if k not in related_fields}
+        url_params = {k: v for k, v in data.items() if k in related_fields}
+        candidate = Mapping(**field_data, created_by=user, updated_by=user)
+        candidate.populate_fields_from_relations(url_params)
+        candidate.full_clean()
+
+    @staticmethod
+    def _rollback_mapping_operations(applied_operations):
+        from core.mappings.models import Mapping
+        for operation in reversed(applied_operations):
+            op_type = operation.get('__action')
+            mapping_id = operation['versioned_object_id']
+            if not mapping_id or not op_type:
+                continue
+            if op_type == 'create' and mapping_id:
+                Mapping.objects.filter(versioned_object_id=mapping_id).delete()
+                continue
+            latest_version = Mapping.objects.filter(versioned_object_id=mapping_id, is_latest_version=True).first()
+            prev_latest = latest_version.prev_version
+            prev_latest.mark_latest_version(True, latest_version.parent)
+            prev_latest.update_versioned_object()
+            latest_version.delete()
+
+    def rollback_latest_version_to(self, prev_latest):
+        if not prev_latest:
+            return
+        latest = Concept.objects.filter(
+            mnemonic=self.mnemonic, parent_id=self.parent_id, is_latest_version=True
+        ).first()
+        if latest and latest.id != prev_latest.id:
+            latest.remove_locales()
+            latest.delete()
+            prev_latest.mark_latest_version(True, self.parent)
+            prev_latest.update_versioned_object()
+
+    def find_direct_mapping(self, mapping_id):
+        return self.get_unidirectional_mappings().filter(mnemonic=str(mapping_id)).first() if mapping_id else None
+
+    def upsert_or_delete_mappings(self, mappings_payload, user):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+        from core.mappings.models import Mapping
+        results = []
+        any_with_errors = False
+        applied_operations = []
+
+        for mapping_data in mappings_payload or []:
+            mapping_data = mapping_data.copy()
+            mapping_id = mapping_data.get('id')
+            action = mapping_data.get('action')
+            errors = {}
+            serializer = None
+            created = None
+
+            try:
+                if action == '__delete' and not mapping_id:
+                    raise ValidationError({'id': ['Mapping id is required when action is __delete.']})
+
+                if mapping_id:
+                    mapping = self.find_direct_mapping(mapping_id)
+                    if not mapping:
+                        raise ValidationError({'id': [f"Mapping '{mapping_id}' not found for this concept."]})
+
+                    if action == '__delete':
+                        errors = mapping.retire(
+                            user, mapping_data.get('update_comment') or mapping_data.get('comment')
+                        )
+                        if not errors:
+                            applied_operations.append({
+                                'action': '__delete', 'versioned_object_id': mapping.versioned_object_id})
+                        created = mapping
+                    else:
+                        updates = {
+                            k: v for k, v in mapping_data.items() if k not in ['id', 'uuid', 'action', 'checksums']}
+                        if updates.get('to_concept') == '__parent_concept':
+                            updates['to_concept_url'] = self.uri
+                            updates.pop('to_concept')
+                        errors = Mapping.create_new_version_for(mapping.clone(user=user), updates, user)
+                        if not errors:
+                            applied_operations.append({
+                                '__action': 'update', 'versioned_object_id': mapping.versioned_object_id})
+                        created = mapping
+                else:
+                    created = self._create_mapping_from_self(mapping_data, user)
+                    errors = created.errors
+                    if not errors and not created.id:
+                        errors['__all__'] = ['Something bad happened while creating the mapping.']
+                    if not errors and created.id:
+                        applied_operations.append({'__action': 'create', 'id': created.versioned_object_id})
+            except Exception as ex:  # pylint: disable=broad-except
+                error_dict = get(ex, 'message_dict') or get(ex, 'error_dict')
+                if error_dict:
+                    errors = error_dict
+                else:
+                    errors['__all__'] = [str(ex)]
+                any_with_errors = True
+
+            if errors:
+                any_with_errors = True
+
+            results.append({
+                'mapping': mapping_data,
+                'instance': created,
+                'serializer': serializer,
+                'errors': errors
+            })
+
+        if any_with_errors and applied_operations:
+            self._rollback_mapping_operations(applied_operations)
+
+        return results, any_with_errors
+
+    @staticmethod
+    def _remove_mappings_just_created(mappings_results):
+        for mapping in mappings_results:
+            if get(mapping, 'instance.id', None):
+                try:
+                    mapping['instance'].delete()
+                except IntegrityError:
+                    pass
+
+    @staticmethod
+    def _get_errors_from_mappings(mappings_result):
+        return [
+            {
+                **mapping['mapping'],
+                'errors': get(mapping, 'serializer.errors') or mapping.get('errors')
+            } for mapping in mappings_result if mapping.get('errors')
+        ]
+
     def set_locales(self, locales, locale_klass):
         if not self.id:
             return  # pragma: no cover
@@ -613,10 +840,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         self.names.all().delete()
         self.descriptions.all().delete()
 
-    def __clone_name_locales(self):
+    def clone_name_locales(self):
         return self.__clone_locales(self.names)
 
-    def __clone_description_locales(self):
+    def clone_description_locales(self):
         return self.__clone_locales(self.descriptions)
 
     @staticmethod
@@ -625,6 +852,94 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     def is_existing_in_parent(self):
         return self.parent.concepts_set.filter(mnemonic__exact=self.mnemonic).exists()
+
+    @property
+    def latest_source_version(self):
+        return self.sources.exclude(version=HEAD).order_by('-created_at').first()
+
+    def get_source_version_before_creation(self):
+        return self.sources.exclude(version=HEAD).filter(
+            created_at__lte=self.created_at).order_by('-created_at').first()
+
+    @property
+    def properties(self):
+        parent = self.get_parent_source_version()
+
+        return self.__get_properties_from_extras_and_definitions(
+            get(parent, 'properties') or [],
+            summary=get(parent, 'concept_summary_properties'),
+            return_all=True
+        )
+
+    @property
+    def summary_properties(self):
+        parent = self.get_parent_source_version()
+
+        return self.__get_properties_from_extras_and_definitions(
+            get(parent, 'properties') or [],
+            summary=get(parent, 'concept_summary_properties') or [],
+            return_all=False
+        )
+
+    @property
+    def filters(self):
+        return get(self.get_parent_source_version(), 'filters') or []
+
+    @property
+    def filters_ordered(self):
+        parent = self.get_parent_source_version()
+        definitions = get(parent, 'filters') or []
+        filter_order = get(parent, 'concept_filter_order') or []
+        if filter_order and definitions:
+            filters_ordered = []
+            for code in filter_order:
+                _filter = next((_filter for _filter in definitions if _filter['code'] == code), None)
+                if _filter:
+                    filters_ordered.append(_filter)
+            return filters_ordered
+        return definitions
+
+    def get_parent_source_version(self):
+        if self.is_versioned_object:
+            return self.parent
+
+        return self.latest_source_version or self.get_source_version_before_creation() or self.parent
+
+    def __get_properties_from_extras_and_definitions(self, definitions, summary=False, return_all=True):
+        extras = self.extras or {}
+        result = []
+        summary_codes = summary or []
+        NOT_EXISTING_VALUE = '____FAlse____'
+
+        def resolve_value(prop):
+            code = prop["code"]
+            if code not in extras and code.lower() in {"concept_class", "class", "conceptclass", "datatype"}:
+                return self.datatype if code.lower() == "datatype" else self.concept_class
+            return get(extras, code) if has(extras, code) else NOT_EXISTING_VALUE
+
+        def build_property(prop):
+            if not prop:
+                return False
+            value = resolve_value(prop)
+            if value == NOT_EXISTING_VALUE:
+                return False
+            value_key = f"value{(prop.get('type') or '').title()}"
+            return {"code": prop["code"], value_key: value}
+
+        for prop_code in summary_codes:
+            _prop = next((definition for definition in definitions if definition['code'] == prop_code), None)
+            if built := build_property(_prop):
+                result.append(built)
+
+        if return_all:
+            rest = sorted([
+                _prop['code'] for _prop in definitions if _prop.get('code') and _prop.get('code') not in summary_codes])
+            for prop_code in rest:
+                _prop = next((definition for definition in definitions if definition['code'] == prop_code), None)
+                if built := build_property(_prop):
+                    result.append(built)
+
+        return result
 
     def save_cloned(self):
         try:
@@ -664,7 +979,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         except ValidationError as ex:
             if self.id:
                 self.delete()
-            self.errors.update(ex.message_dict)
+            self.errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
         except IntegrityError as ex:
             if self.id:
                 self.delete()
@@ -675,6 +990,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         names = data.pop('names', []) or []
         descriptions = data.pop('descriptions', []) or []
         parent_concept_uris = data.pop('parent_concept_urls', None)
+        mappings_payload = data.pop('mappings_payload', None) or data.pop('mappings', None) or []
+        mappings_result = []
+        has_mapping_errors = False
+        initial_version = None
         concept = Concept(**data)
         temp_version = generate_temp_version()
         concept.version = temp_version
@@ -724,6 +1043,12 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                     initial_version.sources.set([parent])
 
             concept.sources.set([parent])
+
+            if mappings_payload:
+                mappings_result, has_mapping_errors = concept.create_mappings(mappings_payload)
+                if has_mapping_errors:
+                    raise ValidationError('Error(s) occurred while creating mappings.')
+
             if get(settings, 'TEST_MODE', False):
                 update_mappings_concept(concept.id)
             else:
@@ -742,13 +1067,25 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 parent.update_concepts_count()
             concept.set_checksums(sync=sync_checksum)
         except ValidationError as ex:
+            if mappings_result:
+                concept._remove_mappings_just_created(mappings_result)
+            if get(initial_version, 'id'):
+                initial_version.delete()
             if concept.id:
                 concept.delete()
-            concept.errors.update(ex.message_dict)
+            concept.errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
+            if has_mapping_errors:
+                concept.errors['mappings'] = concept._get_errors_from_mappings(mappings_result)
         except (IntegrityError, ValueError) as ex:
+            if mappings_result:
+                concept._remove_mappings_just_created(mappings_result)
+            if get(initial_version, 'id'):
+                initial_version.delete()
             if concept.id:
                 concept.delete()
             concept.errors.update({'__all__': ex.args})
+            if has_mapping_errors:
+                concept.errors['mappings'] = concept._get_errors_from_mappings(mappings_result)
 
         return concept
 

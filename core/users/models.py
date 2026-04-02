@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.models import AbstractUser, Group
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.contrib.contenttypes.models import ContentType
@@ -13,7 +13,8 @@ from core.common.mixins import SourceContainerMixin
 from core.common.models import BaseModel, CommonLogoModel
 from core.common.tasks import send_user_verification_email, send_user_reset_password_email
 from core.common.utils import web_url
-from core.users.constants import AUTH_GROUPS
+from core.users.constants import AUTH_GROUPS, MAPPER_WAITLIST_GROUP, STAFF_GROUP, SUPERADMIN_GROUP, GUEST_GROUP, \
+    MAPPER_APPROVED_GROUP
 from .constants import USER_OBJECT_TYPE
 from ..common.checksums import ChecksumModel
 
@@ -85,7 +86,6 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     def events(self):
         from core.events.models import Event
         return Event.objects.filter(object_url=self.uri)
-
 
     def calculate_uri(self):
         return f"/users/{self.username}/"
@@ -224,6 +224,26 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         return self.groups.filter(name=group_name).exists()
 
     @property
+    def is_mapper_waitlisted(self):
+        return self.has_auth_group(MAPPER_WAITLIST_GROUP)
+
+    @property
+    def is_mapper_approved(self):
+        return self.has_auth_group(MAPPER_APPROVED_GROUP)
+
+    @property
+    def is_guest_group(self):
+        return self.has_auth_group(GUEST_GROUP)
+
+    @property
+    def is_staff_group(self):
+        return self.has_auth_group(STAFF_GROUP)
+
+    @property
+    def is_superadmin_group(self):
+        return self.has_auth_group(SUPERADMIN_GROUP)
+
+    @property
     def auth_headers(self):
         return {'Authorization': f'Token {self.get_token()}'}
 
@@ -281,3 +301,10 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
             object_url=self.url,
             referenced_object_url=following.url,
         )
+
+    def set_groups(self, groups, verify=True):
+        if not verify or sorted(self.groups.values_list('name', flat=True)) != sorted(groups):
+            self.groups.set(Group.objects.filter(name__in=groups))
+            self.is_staff = self.has_auth_group(STAFF_GROUP)
+            self.is_superuser = self.has_auth_group(SUPERADMIN_GROUP)
+            self.save()

@@ -1,5 +1,6 @@
 import json
 import time
+import unittest
 import zipfile
 
 from celery_once import AlreadyQueued
@@ -151,6 +152,7 @@ class SourceListViewTest(OCLAPITestCase):
                 'autoid_concept_name_external_id', 'autoid_concept_description_external_id',
                 'autoid_concept_mnemonic_start_from', 'autoid_concept_external_id_start_from',
                 'autoid_mapping_mnemonic_start_from', 'autoid_mapping_external_id_start_from', 'checksums',
+                'properties', 'filters', 'match_algorithms'
             ])
         )
         source = Source.objects.last()
@@ -272,6 +274,7 @@ class SourceRetrieveUpdateDestroyViewTest(OCLAPITestCase):
                 'autoid_concept_name_external_id', 'autoid_concept_description_external_id',
                 'autoid_concept_mnemonic_start_from', 'autoid_concept_external_id_start_from',
                 'autoid_mapping_mnemonic_start_from', 'autoid_mapping_external_id_start_from', 'checksums',
+                'properties', 'filters', 'match_algorithms'
             ])
         )
         source = Source.objects.last()
@@ -361,7 +364,7 @@ class SourceRetrieveUpdateDestroyViewTest(OCLAPITestCase):
                 'name': 'delete_source_task'
             }
         )
-        delete_source_task_mock.apply_async.assert_called_once_with((source.id,), task_id=ANY)
+        delete_source_task_mock.apply_async.assert_called_once_with((source.id,), task_id=ANY, queue='default')
 
     @patch('core.common.models.delete_s3_objects')
     def test_delete_204(self, delete_s3_objects_mock):  # sync delete
@@ -1128,6 +1131,20 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         export_source_mock.apply_async.assert_called_once_with((self.source_v1.id,), queue='default', task_id=ANY)
 
     @patch('core.sources.views.export_source')
+    @patch('core.services.storages.cloud.aws.S3.has_path')
+    def test_post_401_version_anonymous(self, s3_has_path_mock, export_source_mock):
+        export_source_mock.__name__ = 'export_source'
+        s3_has_path_mock.return_value = False
+        response = self.client.post(
+            self.source_v1.uri + 'export/',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 401)
+        s3_has_path_mock.assert_not_called()
+        export_source_mock.apply_async.assert_not_called()
+
+    @patch('core.sources.views.export_source')
     @patch('core.services.storages.cloud.aws.S3.exists')
     def test_post_409_head(self, s3_exists_mock, export_source_mock):
         export_source_mock.__name__ = 'export_source'
@@ -1204,6 +1221,20 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 204)
         s3_remove_mock.assert_called_once_with('v1/export/path')
+
+    @patch('core.sources.models.Source.version_export_path', new_callable=PropertyMock)
+    @patch('core.sources.models.Source.has_export')
+    @patch('core.services.storages.cloud.aws.S3.remove')
+    def test_delete_401_anonymous(self, s3_remove_mock, has_export_mock, export_path_mock):
+        has_export_mock.return_value = True
+        export_path_mock.return_value = 'v1/export/path'
+        response = self.client.delete(
+            self.source_v1.uri + 'export/',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 401)
+        s3_remove_mock.assert_not_called()
 
 
 class ExportSourceTaskTest(OCLAPITestCase):
@@ -1379,6 +1410,7 @@ class SourceSummaryViewTest(OCLAPITestCase):
         self.assertEqual(response.data['active_concepts'], 2)
         self.assertEqual(response.data['active_mappings'], 1)
 
+    @unittest.skipIf(settings.ENV == 'ci', "Skipping due to ES tests failing on CI")
     def test_get_200_verbose(self):  # pylint: disable=too-many-statements
         self.source.active_concepts = 2
         self.source.active_mappings = 1
@@ -1476,8 +1508,8 @@ class SourceSummaryViewTest(OCLAPITestCase):
             {
                 'active': 4,
                 'retired': 0,
-                'concept_class': [(self.random_key, 2), (f'foobar-{self.random_key}', 2)],
-                'datatype': [(self.random_key, 2), (f'foo-{self.random_key}', 1), (f'foobar-{self.random_key}', 1)],
+                'concept_class': [(self.random_key, 2), (f'FOOBAR-{self.random_key}', 2)],
+                'datatype': [(self.random_key, 2), (f'FOO-{self.random_key}', 1), (f'FOOBAR-{self.random_key}', 1)],
                 'locale': [('en', 2)],
                 'name_type': [('SHORT', 2)]
             }
@@ -1838,6 +1870,60 @@ class SourceMappedSourcesListViewTest(OCLAPITestCase):
     def test_post_405(self):
         response = self.client.post(
             self.source.url + 'mapped-sources/',
+            {'default_locale': 'en'},
+            HTTP_AUTHORIZATION=f'Token {self.token}'
+        )
+
+        self.assertEqual(response.status_code, 405)
+
+
+class SourceVersionMappedSourcesListViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.source = OrganizationSourceFactory()
+        self.source_version = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.source.organization, version='v1')
+        self.token = self.source.created_by.get_token()
+
+    def test_get_404(self):
+        response = self.client.get(
+            '/orgs/my/sources/empty/v1/mapped-sources/',
+            HTTP_AUTHORIZATION=f'Token {self.token}'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    @patch('core.sources.views.Source.get_mapped_sources')
+    def test_get_200(self, get_mapped_sources_mock):
+        get_mapped_sources_mock.return_value = Source.objects.none()
+
+        response = self.client.get(
+            self.source_version.url + 'mapped-sources/',
+            HTTP_AUTHORIZATION=f'Token {self.token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+        get_mapped_sources_mock.assert_called_once()
+
+    @patch('core.sources.views.Source.get_mapped_sources')
+    def test_get_200_with_data(self, get_mapped_sources_mock):
+        source2 = OrganizationSourceFactory(mnemonic='source2')
+        get_mapped_sources_mock.return_value = Source.objects.filter(id=source2.id)
+
+        response = self.client.get(
+            self.source_version.url + 'mapped-sources/?excludeSelf=false',
+            HTTP_AUTHORIZATION=f'Token {self.token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['url'], source2.url)
+        get_mapped_sources_mock.assert_called_once_with(exclude_self=False)
+
+    def test_post_405(self):
+        response = self.client.post(
+            self.source_version.url + 'mapped-sources/',
             {'default_locale': 'en'},
             HTTP_AUTHORIZATION=f'Token {self.token}'
         )

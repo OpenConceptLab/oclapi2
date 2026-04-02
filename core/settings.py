@@ -13,11 +13,11 @@ https://docs.djangoproject.com/en/3.0/ref/settings/
 import os
 
 from corsheaders.defaults import default_headers
-from elasticsearch import RequestsHttpConnection
 from kombu import Queue, Exchange
 from redis.backoff import ExponentialBackoff
 from redis.exceptions import ConnectionError  # pylint: disable=redefined-builtin
 from redis.retry import Retry
+from sentence_transformers import SentenceTransformer, CrossEncoder
 
 from core import __version__
 
@@ -39,6 +39,15 @@ SECRET_KEY = '=q1%fd62$x!35xzzlc3lix3g!s&!2%-1d@5a=rm!n4lu74&6)p'
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG') == 'TRUE'
+ENV = os.environ.get('ENVIRONMENT', 'development')
+
+ES_SYNC = True
+
+if not ENV or ENV in ['ci', 'dev', 'development']:
+    ENABLE_THROTTLING = False
+    ES_SYNC = False
+else:
+    ENABLE_THROTTLING = os.environ.get('ENABLE_THROTTLING', False) in ['true', 'True', 'TRUE', True]
 
 ALLOWED_HOSTS = ['*']
 
@@ -67,6 +76,9 @@ CORS_EXPOSE_HEADERS = (
     'X-OCL-API-DEPRECATED',
     'X-OCL-API-STANDARD-CHECKSUM',
     'X-OCL-API-SMART-CHECKSUM',
+    'X-LimitRemaining-Minute',
+    'X-LimitRemaining-Day',
+    'Retry-After',
 )
 
 CORS_ORIGIN_ALLOW_ALL = True
@@ -89,6 +101,7 @@ INSTALLED_APPS = [
     'ordered_model',
     'cid.apps.CidAppConfig',
     'django_celery_beat',
+    'strawberry.django',
     'health_check',  # required
     'health_check.db',  # stock Django health checkers
     # 'health_check.contrib.celery_ping',  # requires celery
@@ -107,6 +120,8 @@ INSTALLED_APPS = [
     'core.repos',
     'core.url_registry',
     'core.events',
+    'core.map_projects',
+    'core.graphql.apps.GraphqlConfig'
 ]
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
@@ -172,6 +187,18 @@ MIDDLEWARE = [
     'core.middlewares.middlewares.FhirMiddleware'
 ]
 
+if ENABLE_THROTTLING:
+    REST_FRAMEWORK['DEFAULT_THROTTLE_RATES'] = {
+        'guest_minute': '400/minute',
+        'guest_day': '10000/day',
+        'standard_minute': '500/minute',
+        'standard_day': '20000/day',
+        'match_standard_minute': '120/minute',
+        'match_standard_day': '2000/day',
+    }
+    MIDDLEWARE = [*MIDDLEWARE, 'core.middlewares.middlewares.ThrottleHeadersMiddleware']
+
+
 ROOT_URLCONF = 'core.urls'
 
 TEMPLATES = [
@@ -214,16 +241,17 @@ ES_SCHEME = os.environ.get('ES_SCHEME', 'http')
 ES_VERIFY_CERTS = os.environ.get('ES_VERIFY_CERTS', str(ES_SCHEME == 'https'))
 ES_USER = os.environ.get('ES_USER', None)
 ES_PASSWORD = os.environ.get('ES_PASSWORD', None)
-ES_ENABLE_SNIFFING = os.environ.get('ES_ENABLE_SNIFFING', True) in ['TRUE', True]
+ES_ENABLE_SNIFFING = os.environ.get('ES_ENABLE_SNIFFING', False) in ['TRUE', True]
 http_auth = None
 if ES_USER and ES_PASSWORD:
     http_auth = (ES_USER, ES_PASSWORD)
 
 ELASTICSEARCH_DSL = {
     'default': {
-        'hosts': ES_HOSTS.split(',') if ES_HOSTS else [ES_HOST + ':' + ES_PORT],
+        'hosts': [
+            f"{ES_SCHEME}://{host}" for host in ES_HOSTS.split(',')
+        ] if ES_HOSTS else [f'{ES_SCHEME}://{ES_HOST}:{ES_PORT}'],
         'http_auth': http_auth,
-        'use_ssl': ES_SCHEME == 'https',
         'verify_certs': ES_VERIFY_CERTS.lower() == 'true',
         'sniff_on_connection_fail': ES_ENABLE_SNIFFING,
         'sniff_on_start': ES_ENABLE_SNIFFING,
@@ -231,11 +259,9 @@ ELASTICSEARCH_DSL = {
         'sniff_timeout': 10,
         'max_retries': 3,
         'retry_on_timeout': True,
-        'connection_class': RequestsHttpConnection # Needed for verify_certs=False to work
     },
 }
 
-ENV = os.environ.get('ENVIRONMENT', 'development')
 CID_GENERATE = True
 CID_RESPONSE_HEADER = None
 if ENV and ENV not in ['ci', 'development']:
@@ -497,7 +523,6 @@ ELASTICSEARCH_DSL_PARALLEL = True
 ELASTICSEARCH_DSL_AUTO_REFRESH = True
 ELASTICSEARCH_DSL_AUTOSYNC = True
 ELASTICSEARCH_DSL_SIGNAL_PROCESSOR = 'core.common.models.CelerySignalProcessor'
-ES_SYNC = True
 USE_X_FORWARDED_HOST = True
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 # Only used for flower
@@ -587,3 +612,17 @@ MINIO_ACCESS_KEY = os.environ.get('MINIO_ACCESS_KEY', '')
 MINIO_SECRET_KEY = os.environ.get('MINIO_SECRET_KEY', '')
 MINIO_BUCKET_NAME = os.environ.get('MINIO_BUCKET_NAME', '')
 MINIO_SECURE = os.environ.get('MINIO_SECURE') == 'TRUE'
+
+NO_LM = os.environ.get('NO_LM') == 'TRUE'
+ENCODER_MODEL_NAME = None
+if ENV not in ['ci', 'demo'] and not NO_LM:
+    LM_MODEL_NAME = 'all-MiniLM-L6-v2'
+    LM = SentenceTransformer(LM_MODEL_NAME)
+    if ENV not in ['qa']:
+        ENCODER_MODEL_NAME = "BAAI/bge-reranker-v2-m3"
+        ENCODER = CrossEncoder(ENCODER_MODEL_NAME, device="cpu", max_length=128)
+
+ANALYTICS_API = os.environ.get('ANALYTICS_API', 'http://host.docker.internal:8002')
+if ANALYTICS_API:
+    MIDDLEWARE = [*MIDDLEWARE, 'core.middlewares.middlewares.AnalyticsMiddleware']
+SERVICE_NAME = os.environ.get('SERVICE_NAME', 'oclapi2')

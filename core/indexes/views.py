@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 
 from core.common.swagger_parameters import apps_param, ids_param, resources_body_param, uri_param, filter_param
 from core.common.tasks import rebuild_indexes, populate_indexes, batch_index_resources
+from core.common.throttling import ThrottleUtil
 from core.common.utils import get_resource_class_from_resource_name
 from core.tasks.models import Task
 
@@ -17,6 +18,9 @@ class BaseESIndexView(APIView):  # pragma: no cover
     permission_classes = (IsAdminUser,)
     parser_classes = (MultiPartParser,)
     task = None
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     @swagger_auto_schema(manual_parameters=[apps_param])
     def post(self, request):
@@ -48,6 +52,9 @@ class PopulateESIndexView(BaseESIndexView):  # pragma: no cover
 class ResourceIndexView(APIView):
     permission_classes = (IsAdminUser,)
     parser_classes = (MultiPartParser,)
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     @swagger_auto_schema(manual_parameters=[ids_param, uri_param, filter_param, resources_body_param])
     def post(self, _, resource):

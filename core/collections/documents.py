@@ -34,13 +34,14 @@ class CollectionDocument(Document):
     immutable = fields.KeywordField(attr='immutable')
     custom_validation_schema = fields.KeywordField(attr='custom_validation_schema', normalizer='lowercase')
     created_by = fields.KeywordField()
+    repo_type = fields.KeywordField()
+    retired = fields.KeywordField(attr='retired')
 
     class Django:
         model = Collection
         fields = [
             'full_name',
             'revision_date',
-            'retired',
             'experimental',
             'locked_date',
             'external_id',
@@ -145,3 +146,7 @@ class CollectionDocument(Document):
     @staticmethod
     def prepare__canonical_url(instance):
         return format_url_for_search(instance.canonical_url)
+
+    @staticmethod
+    def prepare_repo_type(_):
+        return Collection.OBJECT_TYPE

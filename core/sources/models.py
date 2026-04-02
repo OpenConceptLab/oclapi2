@@ -1,18 +1,22 @@
 import uuid
+from collections import OrderedDict
 
+from celery_once import AlreadyQueued
 from dirtyfields import DirtyFieldsMixin
 from django.conf import settings
+from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import UniqueConstraint, F, Max, Count
 from django.db.models.functions import Cast
-from pydash import get
+from pydash import get, compact
 
 from core.common.checksums import ChecksumChangelog
 from core.common.constants import HEAD
 from core.common.models import ConceptContainerModel
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings, \
     resolve_url_registry_entries
+from core.common.utils import to_camel_case
 from core.common.validators import validate_non_negative
 from core.concepts.models import ConceptName, Concept
 from core.services.storages.postgres import PostgresQL
@@ -23,6 +27,9 @@ from core.tasks.models import Task
 
 class Source(DirtyFieldsMixin, ConceptContainerModel):
     DEFAULT_AUTO_ID_START_FROM = 1
+    TOKEN_MATCH_ALGORITHM = 'es'
+    SEMANTIC_MATCH_ALGORITHM = 'llm'
+    MATCH_ALGORITHMS = [TOKEN_MATCH_ALGORITHM, SEMANTIC_MATCH_ALGORITHM]
 
     es_fields = {
         'source_type': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
@@ -33,6 +40,8 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         'last_update': {'sortable': True, 'filterable': False, 'default': 'desc'},
         'updated_by': {'sortable': False, 'filterable': False, 'facet': True},
         'locale': {'sortable': False, 'filterable': True, 'facet': True},
+        'property_codes': {'sortable': False, 'filterable': True, 'facet': True},
+        'filter_codes': {'sortable': False, 'filterable': True, 'facet': True},
         'owner': {'sortable': True, 'filterable': True, 'facet': True, 'exact': True},
         'owner_type': {'sortable': False, 'filterable': True, 'facet': True},
         'custom_validation_schema': {'sortable': False, 'filterable': True, 'facet': True},
@@ -40,6 +49,8 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         'experimental': {'sortable': False, 'filterable': False, 'facet': False},
         'hierarchy_meaning': {'sortable': False, 'filterable': True, 'facet': True},
         'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
+        'match_algorithm': {'sortable': False, 'filterable': True, 'facet': True, 'exact': False},
+        'retired': {'sortable': False, 'filterable': True, 'facet': True},
     }
 
     class Meta:
@@ -101,8 +112,17 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     autoid_concept_description_external_id = models.CharField(
         null=True, blank=True, choices=LOCALE_EXTERNAL_AUTO_ID_CHOICES, max_length=10)
 
+    properties = ArrayField(models.JSONField(), default=list, null=True, blank=True)
+    filters = ArrayField(models.JSONField(), default=list, null=True, blank=True)
+    match_algorithms = ArrayField(
+        models.CharField(max_length=50), default=list, null=True, blank=True)
+
     OBJECT_TYPE = SOURCE_TYPE
     OBJECT_VERSION_TYPE = SOURCE_VERSION_TYPE
+
+    @property
+    def has_semantic_match_algorithm(self):
+        return self.match_algorithms and self.SEMANTIC_MATCH_ALGORITHM in self.match_algorithms
 
     @property
     def is_sequential_concept_mnemonic(self):
@@ -201,7 +221,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     def is_validation_necessary(self):
         origin_source = self.get_latest_version()
 
-        if origin_source.custom_validation_schema == self.custom_validation_schema:
+        if origin_source and origin_source.custom_validation_schema == self.custom_validation_schema:
             return False
 
         return self.custom_validation_schema is not None and self.active_concepts
@@ -231,9 +251,127 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     def clean(self):
         self.hierarchy_meaning = self.hierarchy_meaning or None
 
+        self.clean_properties()
+        self.clean_filters()
+        self.clean_match_algorithms()
+
         super().clean()
         if self.hierarchy_root_id and not self.is_hierarchy_root_belonging_to_self():
             raise ValidationError({'hierarchy_root': [HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE]})
+
+    def clean_match_algorithms(self):
+        self.match_algorithms = self.match_algorithms or []
+
+        if not self.match_algorithms:
+            self.match_algorithms = [self.TOKEN_MATCH_ALGORITHM]
+            return
+
+        self.match_algorithms = compact(set(self.match_algorithms))
+
+        if any(algorithm not in self.MATCH_ALGORITHMS for algorithm in self.match_algorithms):
+            raise ValidationError({'match_algorithms': [f'Match algorithms must be among {self.MATCH_ALGORITHMS}']})
+
+    @property
+    def concept_summary_properties(self):
+        return get(self.meta, 'display.concept_summary_properties') or []
+
+    @property
+    def concept_filter_order(self):
+        return get(self.meta, 'display.concept_filter_order') or []
+
+    @property
+    def concept_filter_default(self):
+        return get(self.meta, 'display.default_filter') or None
+
+    @property
+    def filters_ordered(self):
+        if not self.filters:
+            return []
+
+        ordered = []
+        ordered_code = [
+            *(self.concept_filter_order or []),
+            *sorted([
+                f['code'] for f in self.filters if f.get('code', None) and f['code'] not in self.concept_filter_order
+            ], key=str.lower)
+        ]
+        for code in ordered_code:
+            filter_obj = next((f for f in self.filters if f.get('code') == code), None)
+            if filter_obj:
+                ordered.append(filter_obj)
+        return ordered
+
+    def clean_properties(self):
+        if not self.properties:
+            self.properties = []
+            return
+        fields = {'code', 'uri', 'description', 'type'}
+        allowed_types = {'code', 'Coding', 'string', 'integer', 'boolean', 'dateTime', 'decimal'}
+        cleaned_properties = []
+        # code: required string
+        # uri: optional URI
+        # description: optional string
+        # "type": required string code | Coding | string | integer | boolean | dateTime | decimal, defaults string
+
+        for idx, prop in enumerate(self.properties or []):
+            if not isinstance(prop, dict):
+                raise ValidationError({'properties': [f'Property at index {idx} must be a dictionary']})
+            extra_keys = set(prop.keys()) - fields
+            if extra_keys:
+                raise ValidationError({'properties': [f'Invalid keys in property at index {idx}: {extra_keys}']})
+            if not prop.get('code') or not isinstance(prop['code'], str):
+                raise ValidationError({'properties': [f"'code' is required and must be a string at index {idx}"]})
+            if 'uri' in prop and prop['uri'] is not None and not isinstance(prop['uri'], str):
+                raise ValidationError({'properties': [f"'uri' must be a string if provided at index {idx}"]})
+            if 'description' in prop and prop['description'] is not None and not isinstance(prop['description'], str):
+                raise ValidationError({'properties': [f"'description' must be a string if provided at index {idx}"]})
+            prop_type = prop.get('type', 'string')
+            if not isinstance(prop_type, str) or prop_type not in allowed_types:
+                raise ValidationError({'properties': [f"'type' must be one of {allowed_types} at index {idx}"]})
+            prop['type'] = prop_type
+            cleaned_properties.append(prop)
+
+        self.properties = cleaned_properties
+
+    def clean_filters(self):
+        if not self.filters:
+            self.filters = []
+            return
+
+        fields = {'code', 'description', 'operator', 'value'}
+        allowed_operators = {'=', 'is-a', 'descendent-of', 'is-not-a', 'regex', 'in', 'not-in', 'generalizes',
+                             'child-of', 'descendent-leaf', 'exists'}
+        cleaned_filters = []
+
+        # code: required string
+        # description: optional string
+        # value: #required string
+        # operator: required list = | is-a | descendent-of | is-not-a | regex | in | not-in | generalizes
+        #                           | child-of | descendent-leaf | exists
+
+        for idx, _filter in enumerate(self.filters or []):
+            if not isinstance(_filter, dict):
+                raise ValidationError({'filters': [f'Filter at index {idx} must be a dictionary']})
+            extra_keys = set(_filter.keys()) - fields
+            if extra_keys:
+                raise ValidationError({'filters': [f'Invalid keys in filter at index {idx}: {extra_keys}']})
+            if not _filter.get('code') or not isinstance(_filter['code'], str):
+                raise ValidationError({'filters': [f"'code' is required and must be a string at index {idx}"]})
+            if 'description' in _filter and _filter['description'] is not None and not isinstance(
+                    _filter['description'], str):
+                raise ValidationError({'filters': [f"'description' must be a string if provided at index {idx}"]})
+            operators = _filter.get('operator')
+            if not operators or not isinstance(operators, list) or not all(isinstance(op, str) for op in operators):
+                raise ValidationError({'filters': [f"'operator' must be a list of strings at index {idx}"]})
+            invalid_ops = set(operators) - allowed_operators
+            if invalid_ops:
+                raise ValidationError({'filters': [f"Invalid operators at index {idx}: {invalid_ops}"]})
+            if 'value' not in _filter or not isinstance(_filter['value'], str) or not _filter['value']:
+                raise ValidationError(
+                    {'filters': [f"'value' is required and must be a non-empty string at index {idx}"]})
+            cleaned_filters.append(_filter)
+
+        self.filters = cleaned_filters
 
     def get_parentless_concepts(self):
         return self.concepts.filter(parent_concepts__isnull=True, id=F('versioned_object_id'))
@@ -347,13 +485,19 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         user = user or self.updated_by
 
         task = Task.new(queue='indexing', user=user, name=index_source_mappings.__name__)
-        index_source_mappings.apply_async((self.id,), queue='indexing', persist_args=True, task_id=task.id)
+        try:
+            index_source_mappings.apply_async((self.id,), queue='indexing', persist_args=True, task_id=task.id)
+        except AlreadyQueued:
+            pass
 
     def index_concepts_async(self, user):
         user = user or self.updated_by
 
         task = Task.new(queue='indexing', user=user, name=index_source_concepts.__name__)
-        index_source_concepts.apply_async((self.id,), queue='indexing', persist_args=True, task_id=task.id)
+        try:
+            index_source_concepts.apply_async((self.id,), queue='indexing', persist_args=True, task_id=task.id)
+        except AlreadyQueued:
+            pass
 
     def get_export_task(self):
         return Task.find(name__iendswith='export_source', args__contains=[self.id])
@@ -481,6 +625,8 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             PostgresQL.drop_seq(self.mappings_mnemonic_seq_name)
             PostgresQL.drop_seq(self.mappings_external_id_seq_name)
 
+        super().post_delete_actions()
+
     def post_create_actions(self):
         if get(settings, 'TEST_MODE', False):
             update_mappings_source(self.id)
@@ -518,11 +664,15 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     def last_mapping_update(self):
         return self.get_max_mapping_attribute('updated_at')
 
-    def get_mapped_sources(self):
+    def get_mapped_sources(self, exclude_self=True):
         """Returns only direct mapped sources"""
-        mappings = self.mappings.exclude(to_source_id=self.id)
-        mappings = mappings.order_by('to_source_id').distinct('to_source_id')
-        return Source.objects.filter(id__in=mappings.values_list('to_source_id', flat=True))
+        source_ids = self.__get_mapped_source_ids()
+        if exclude_self:
+            source_ids = set(source_ids) - {self.id}
+        return Source.objects.filter(id__in=source_ids)
+
+    def __get_mapped_source_ids(self):
+        return self.mappings.values_list('to_source_id', flat=True)
 
     def clone_resources(self, user, concepts, mappings, **kwargs):
         from core.mappings.models import Mapping
@@ -864,3 +1014,32 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     def get_brief_serializer(self):
         from core.sources.serializers import SourceVersionMinimalSerializer, SourceMinimalSerializer
         return SourceMinimalSerializer if self.is_head else SourceVersionMinimalSerializer
+
+    def get_ordered_concept_facets_by_filter_order(self, facets):
+        sorted_facets = OrderedDict()
+        filter_order = self.concept_filter_order or []
+
+        traversed_keys = set()
+        for key in filter_order:
+            property_key = f'properties__{key}'
+            if property_key in facets:
+                sorted_facets[property_key] = facets[property_key]
+                traversed_keys.update({property_key, key, to_camel_case(key)})
+
+        properties_facets = {}
+        other_facets = {}
+        for k, v in facets.items():
+            if k in traversed_keys:
+                continue
+            if k.startswith("properties__"):
+                properties_facets[k] = v
+            else:
+                other_facets[k] = v
+
+        for k in sorted(properties_facets.keys()):
+            sorted_facets[k] = properties_facets[k]
+
+        for k in sorted(other_facets.keys()):
+            sorted_facets[k] = other_facets[k]
+
+        return sorted_facets

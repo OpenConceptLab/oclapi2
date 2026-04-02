@@ -66,6 +66,7 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         if user.id:
             user.set_checksums()
         user.record_joined_ocl_event()
+        user.set_groups(claims.get('groups', []), False)
         return user
 
     def update_user(self, user, claims):
@@ -76,6 +77,7 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         user.location = claims.get('location', None) or user.location
         user.save()
         user.set_checksums()
+        user.set_groups(claims.get('groups', []))
         return user
 
     def filter_users_by_claims(self, claims):

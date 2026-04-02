@@ -1,7 +1,9 @@
 import logging
 from math import ceil
 from urllib import parse
+from urllib.parse import urlencode
 
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
@@ -14,6 +16,7 @@ from ocldev.checksum import Checksum
 from pydash import compact, get
 from rest_framework import status
 from rest_framework.mixins import ListModelMixin, CreateModelMixin
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
@@ -23,6 +26,7 @@ from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion
 from .checksums import ChecksumModel
+from .exceptions import Http403
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
     to_owner_uri, parse_updated_since_param, get_export_service, to_int, get_truthy_values, generate_temp_version, \
     canonical_url_to_url_and_version, decode_string
@@ -47,8 +51,7 @@ class CustomPaginator:
         if not is_sliced:
             bottom = (self.page_number - 1) * self.page_size
             top = bottom + self.page_size
-            if top >= self.total:
-                top = self.total
+            top = min(top, self.total)
             self.queryset = self.queryset[bottom:top]
         if isinstance(self.queryset, QuerySet):
             self.queryset.count = None
@@ -153,62 +156,107 @@ class ListWithHeadersMixin(ListModelMixin):
         res['num_found'] = get(self, 'total_count') or queryset.count()
         return res
 
-    def list(self, request, *args, **kwargs):  # pylint:disable=too-many-locals,too-many-branches
+    def __get_cached_data_if_any(self, request):
+        base_path = request.get_full_path()
+        params = request.query_params.copy()
+        params.pop('verbose', None)
+        params.pop('brief', None)
+        query_string = urlencode(params, doseq=True)
+        parent = self.parent_resource
+
+        key_body, key_headers = parent.get_concepts_cache_keys() if '/concepts' in base_path else (
+            parent.get_mappings_cache_keys())
+        if query_string:
+            key_body += '?' + query_string
+            key_headers += '?' + query_string
+
+        return key_body, cache.get(key_body) or None, key_headers, cache.get(key_headers) or None
+
+    def __can_cache(self):
+        return (self.should_perform_es_search() and self.is_repo_version_children_request_without_any_search() and
+                get(self, 'parent_resource.is_latest_version', False))
+
+    def list(self, request, *args, **kwargs):  # pylint:disable=too-many-locals,too-many-branches,too-many-statements
+        cache_key_body = None
+        cache_key_headers = None
+        data = None
+        headers = {}
+        sorted_list = []
         query_params = request.query_params.dict()
         is_csv = query_params.get('csv', False)
-        search_string = query_params.get('type', None)
-        search_term = query_params.get('q', None)
-        if is_csv:
-            pattern = search_term
-            if pattern:
-                query_params._mutable = True  # pylint: disable=protected-access
-                query_params['q'] = "*" + search_term + "*"
 
-        if is_csv and not search_string:
-            return self.get_csv(request)
+        if not is_csv and request.method == 'GET' and self.__can_cache():
+            cache_key_body, data, cache_key_headers, headers = self.__get_cached_data_if_any(request)
+            if self.request.query_params.get('_force_cache_clear') in TRUTHY:
+                data = None
 
-        if self.only_facets():
-            return Response({'facets': {'fields': self.get_facets()}})
-        if self.only_search_stats() and search_term:
-            return Response(self.get_search_stats(get(self, '_source_versions', []), get(self, '_extra_filters', None)))
+        if not data:
+            search_string = query_params.get('type', None)
+            search_term = query_params.get('q', None)
+            if is_csv:
+                pattern = search_term
+                if pattern:
+                    query_params._mutable = True  # pylint: disable=protected-access
+                    query_params['q'] = "*" + search_term + "*"
 
-        if self.object_list is None:
-            self.object_list = self.filter_queryset()
+            if is_csv and not search_string:
+                return self.get_csv(request)
 
-        if is_csv and search_string:
-            klass = type(self.object_list[0])
-            queryset = klass.objects.filter(id__in=self.get_object_ids())
-            return self.get_csv(request, queryset)
+            if self.only_facets():
+                data = {'facets': {'fields': self.get_facets()}}
+                if cache_key_body is not None:
+                    timeout = 60 * 60 * 24  # 1 day
+                    cache.set(cache_key_body, data, timeout=timeout)
+                    cache.set(cache_key_headers, headers, timeout=timeout)
+                return Response(data)
+            if self.only_search_stats() and search_term:
+                return Response(
+                    self.get_search_stats(
+                        get(self, '_source_versions', []), get(self, '_extra_filters', None)))
 
-        # Skip pagination if compressed results are requested
-        compress = self.should_compress()
+            if self.object_list is None:
+                self.object_list = self.filter_queryset()
 
-        sorted_list = self.object_list
+            if is_csv and search_string:
+                klass = type(self.object_list[0])
+                queryset = klass.objects.filter(id__in=self.get_object_ids())
+                return self.get_csv(request, queryset)
 
-        headers = {}
-        results = sorted_list
-        paginator = None
+            # Skip pagination if compressed results are requested
+            compress = self.should_compress()
 
-        if not compress:
-            if not self.limit or int(self.limit) == 0 or int(self.limit) > 1000:
-                if self.is_brief() and self.is_checksums() and self.kwargs.get('source') and get(
-                        self, 'model.__name__') in ['Concept', 'Mapping']:
-                    self.limit = 20000  # for checksums
-                else:
-                    self.limit = LIST_DEFAULT_LIMIT
-            paginator = CustomPaginator(
-                request=request, queryset=sorted_list, page_size=self.limit, total_count=self.total_count,
-                is_sliced=self.should_perform_es_search(), max_score=get(self, '_max_score'),
-                search_scores=get(self, '_scores'), highlights=get(self, '_highlights')
-            )
-            headers = paginator.headers
-            results = paginator.current_page_results
-        data = self.serialize_list(results, paginator)
+            sorted_list = self.object_list
+
+            headers = {}
+            results = sorted_list
+            paginator = None
+
+            if not compress:
+                self.limit = to_int(self.limit, LIST_DEFAULT_LIMIT)
+                if not self.limit or int(self.limit) == 0 or int(self.limit) > 1000:
+                    if self.is_brief() and self.is_checksums() and self.kwargs.get('source') and get(
+                            self, 'model.__name__') in ['Concept', 'Mapping']:
+                        self.limit = 20000  # for checksums
+                    else:
+                        self.limit = LIST_DEFAULT_LIMIT
+                paginator = CustomPaginator(
+                    request=request, queryset=sorted_list, page_size=self.limit, total_count=self.total_count,
+                    is_sliced=self.is_sliced(), max_score=get(self, '_max_score'),
+                    search_scores=get(self, '_scores'), highlights=get(self, '_highlights')
+                )
+                headers = paginator.headers
+                results = paginator.current_page_results
+            data = self.serialize_list(results, paginator)
+            if cache_key_body is not None:
+                timeout = 60 * 60 * 24  # 1 day
+                cache.set(cache_key_body, data, timeout=timeout)
+                cache.set(cache_key_headers, headers, timeout=timeout)
 
         response = Response(data)
-        for key, value in headers.items():
-            response[key] = value
-        if not headers:
+        if headers:
+            for key, value in headers.items():
+                response[key] = value
+        if not headers and not self.only_facets():
             response['num_found'] = len(sorted_list)
         return response
 
@@ -358,6 +406,18 @@ class SubResourceMixin(PathWalkerMixin):
 class ConceptDictionaryMixin(SubResourceMixin):
     permission_classes = (HasPrivateAccess,)
 
+    def check_for_match_algorithms(self, instance=None):
+        match_algorithms = self.request.data.get('match_algorithms', [])
+        if match_algorithms and not self.request.user.is_staff:
+            if instance and instance.__class__.__name__ == 'Source' and (
+                sorted(match_algorithms or []) != sorted(instance.match_algorithms or [])
+            ):
+                raise Http403('You do not have permissions update a repo with semantic match algorithm.')
+
+            from core.sources.models import Source
+            if not instance and Source.SEMANTIC_MATCH_ALGORITHM in match_algorithms:
+                raise Http403('You do not have permissions create a repo with semantic match algorithm.')
+
 
 class ConceptDictionaryCreateMixin(ConceptDictionaryMixin):
     """
@@ -388,6 +448,9 @@ class ConceptDictionaryCreateMixin(ConceptDictionaryMixin):
         permission = HasOwnership()
         if not permission.has_object_permission(request, self, self.parent_resource):
             return Response(status=status.HTTP_403_FORBIDDEN)
+
+        self.check_for_match_algorithms()
+
         data = request.data.copy()
         supported_locales = data.pop('supported_locales', '')
         if isinstance(supported_locales, str):
@@ -417,7 +480,6 @@ class ConceptDictionaryCreateMixin(ConceptDictionaryMixin):
 
 
 class ConceptDictionaryUpdateMixin(ConceptDictionaryMixin):
-
     """
     Concrete view for updating a model instance.
     """
@@ -425,11 +487,16 @@ class ConceptDictionaryUpdateMixin(ConceptDictionaryMixin):
         super().initialize(request, request.path_info)
         return self.update(request)
 
-    def update(self, request):
+    def patch(self, request, **kwargs):  # pylint: disable=unused-argument
+        super().initialize(request, request.path_info)
+        return self.update(request)
+
+    def update(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         if not self.parent_resource:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
         self.object = self.get_object()
+        self.check_for_match_algorithms(self.object)
         save_kwargs = {'force_update': True, 'parent_resource': self.parent_resource}
         success_status_code = status.HTTP_200_OK
 
@@ -514,32 +581,21 @@ class SourceContainerMixin:
         return self.uri + 'collections/'
 
     def get_repo_events_criteria(self, private=False):
-        criteria = None
         sources = self.source_set.filter(is_active=True)
         collections = self.collection_set.filter(is_active=True)
 
         if not private:
-            sources = self.source_set.filter(public_access__in=[ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT])
-            collections = self.collection_set.filter(public_access__in=[ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT])
+            sources = sources.filter(public_access__in=[ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT])
+            collections = collections.filter(public_access__in=[ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT])
 
-        for source in sources:
-            if criteria is None:
-                criteria = Q(referenced_object_url=source.uri)
-            else:
-                criteria |= Q(referenced_object_url=source.uri)
-        for collection in collections:
-            if criteria is None:
-                criteria = Q(referenced_object_url=collection.uri)
-            else:
-                criteria |= Q(referenced_object_url=collection.uri)
+        source_uris = sources.values_list('uri', flat=True)
+        collection_uris = collections.values_list('uri', flat=True)
 
-        return criteria
+        return Q(referenced_object_url__in=[*source_uris, *collection_uris])
 
     def get_repo_events(self, private=False):
         from core.events.models import Event
         criteria = self.get_repo_events_criteria(private)
-        if criteria is None:
-            return Event.objects.none()
         queryset = Event.objects.filter(criteria)
         return queryset if private else queryset.filter(public=True)
 
@@ -585,20 +641,29 @@ class SourceChildMixin(ChecksumModel):
 
     @staticmethod
     def apply_attribute_based_filters(queryset, params):
+        filters = SourceChildMixin.get_filters_for_criterion(params)
+        if filters:
+            queryset = queryset.filter(**filters)
+        return queryset
+
+    @staticmethod
+    def get_filters_for_criterion(params, prefix=None):
+        filters = {}
+        prefix = (prefix + '__') if prefix and not prefix.startswith('__') else ''
         is_latest = params.get('is_latest', None) in TRUTHY
         include_retired = params.get(INCLUDE_RETIRED_PARAM, None) in TRUTHY
         updated_since = parse_updated_since_param(params)
         updated_by = params.get(UPDATED_BY_USERNAME_PARAM, None)
         if is_latest:
-            queryset = queryset.filter(is_latest_version=True)
+            filters[prefix + 'is_latest_version'] = True
         if not include_retired and not params.get('concept', None) and not params.get('mapping', None):
-            queryset = queryset.filter(retired=False)
+            filters[prefix + 'retired'] = False
         if updated_since:
-            queryset = queryset.filter(updated_at__gte=updated_since)
+            filters[prefix + 'updated_at__gte'] = updated_since
         if updated_by:
-            queryset = queryset.filter(updated_by__username=updated_by)
+            filters[prefix + 'updated_by__username'] = updated_by
 
-        return queryset
+        return filters
 
     @property
     def source_versions(self):
@@ -827,6 +892,7 @@ class SourceChildMixin(ChecksumModel):
         parent_concept_uris = kwargs.pop('parent_concept_uris', None)
         add_prev_version_children = kwargs.pop('add_prev_version_children', True)
         _hierarchy_processing = kwargs.pop('_hierarchy_processing', False)
+        skip_duplicate_version_check = kwargs.pop('skip_duplicate_version_check', False)
         errors = {}
         self.created_by = self.updated_by = user
         self.version = self.version or generate_temp_version()
@@ -853,7 +919,7 @@ class SourceChildMixin(ChecksumModel):
                             self.set_checksums()
                         if Toggle.get(
                                 'PREVENT_DUPLICATE_VERSION_TOGGLE'
-                        ) and not _hierarchy_processing:
+                        ) and not _hierarchy_processing and not skip_duplicate_version_check:
                             standard_checksum = prev_latest.checksums.get('standard')
                             if not standard_checksum:
                                 standard_checksum = prev_latest.get_checksums(recalculate=True).get('standard')
@@ -873,7 +939,7 @@ class SourceChildMixin(ChecksumModel):
 
                 transaction.on_commit(lambda: self._index_on_new_version_creation(prev_latest))
         except ValidationError as err:
-            errors.update(err.message_dict)
+            errors.update(get(err, 'message_dict') or get(err, 'error_dict') or {})
         finally:
             cls.resume_indexing()
             if not persisted:
@@ -889,7 +955,7 @@ class SourceChildMixin(ChecksumModel):
 
 
 class ConceptContainerExportMixin:
-    permission_classes = (CanViewConceptDictionaryVersion, )
+    permission_classes = (CanViewConceptDictionaryVersion, IsAuthenticated)
 
     def get_object(self):
         queryset = self.get_queryset()
@@ -968,7 +1034,7 @@ class ConceptContainerExportMixin:
 class ConceptContainerProcessingMixin:
     def get_permissions(self):
         if self.request.method == 'POST':
-            return [HasOwnership(), ]
+            return [HasOwnership(), IsAuthenticated()]
 
         return [CanViewConceptDictionary(), ]
 

@@ -30,7 +30,7 @@ from core.common.tasks import seed_children_to_expansion, batch_index_resources,
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
     get_resource_class_from_resource_name, to_snake_case, \
     es_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
-    get_truthy_values, get_falsy_values, get_current_authorized_user
+    get_truthy_values, get_falsy_values, get_current_authorized_user, to_camel_case
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -59,6 +59,7 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
         'canonical_url': {'sortable': False, 'filterable': True, 'exact': True},
         'experimental': {'sortable': False, 'filterable': False, 'facet': False},
         'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
+        'retired': {'sortable': False, 'filterable': True, 'facet': True},
     }
 
     class Meta:
@@ -175,6 +176,7 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
         else:
             reference.last_resolved_at = None
         errors = {}
+
         if reference.expression:
             same_refs = self.references.filter(expression=reference.expression, include=reference.include)
             if same_refs.exists():
@@ -187,6 +189,7 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
                     }
                 }
                 return errors
+
         if self.is_openmrs_schema and self.expansion_uri:
             if reference._concepts is None or reference._concepts.count() == 0:  # pylint: disable=protected-access
                 return None
@@ -219,7 +222,7 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
             matching_names_in_concept[name_key] = True
             other = other_concepts_in_collection.filter(
                 names__name=name.name, names__locale=name.locale, **{f"names__{attribute}": value})
-            if other.exists():
+            if other.exclude(versioned_object_id=concept.versioned_object_id).exists():
                 for other_concept in other:
                     conflicting_concept_name = other_concept.names.filter(
                         name=name.name, locale=name.locale, **{attribute: value}).first()
@@ -241,11 +244,16 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
     @transaction.atomic
     def add_expressions(
             self, data, user, cascade=False, transform=False, _async=False):
+        references = self.parse_expressions(data, user, cascade, transform)
+        return self.add_references(references, user, _async)
+
+    @staticmethod
+    def parse_expressions(data, user, cascade=False, transform=False):
         parser = CollectionReferenceParser(data, transform, cascade, user)
         parser.parse()
         parser.to_reference_structure()
         references = parser.to_objects()
-        return self.add_references(references, user, _async)
+        return references
 
     def add_references(self, references, user=None, _async=False):
         errors = {}
@@ -569,6 +577,10 @@ class CollectionReference(models.Model):
     def can_compute_against_other_system_version(self):
         return (not self.system or not self.version) and not self.resource_version
 
+    @property
+    def is_versionless_expression(self):
+        return not self.version and not self.resource_version
+
     def can_compute_against_system_version(self, system_version):
         result = False
         if self.can_compute_against_other_system_version and system_version:
@@ -657,40 +669,66 @@ class CollectionReference(models.Model):
 
     def get_concepts(self, system_version=None):
         system_version = system_version or self.resolve_system_version
-        queryset = self.get_resource_queryset_from_system_and_valueset('concepts', system_version)
+        concept_queryset = self.get_resource_queryset_from_system_and_valueset('concepts', system_version)
         valueset_versions = self.resolve_valueset_versions
         mapping_queryset = Mapping.objects.none()
-        if queryset is None:
+
+        if concept_queryset is None:
             return Concept.objects.none(), mapping_queryset
 
         if self.code:
-            queryset = queryset.filter(mnemonic=decode_string(self.code))
+            concept_queryset = concept_queryset.filter(mnemonic=decode_string(self.code))
             if self.resource_version:
-                queryset = queryset.filter(version=self.resource_version)
-        if self.cascade:
-            cascade_params = self.get_concept_cascade_params(system_version or valueset_versions[0])
-            for concept in queryset:
-                result = concept.cascade(**cascade_params)
-                queryset = Concept.objects.filter(
-                    id__in=list(queryset.union(result['concepts']).values_list('id', flat=True)))
-                mapping_queryset = Mapping.objects.filter(
-                    id__in=list(mapping_queryset.union(result['mappings']).values_list('id', flat=True)))
+                concept_queryset = concept_queryset.filter(version=self.resource_version)
+            elif concept_queryset.count() > 1:
+                concept_queryset = Concept.objects.filter(id=concept_queryset.order_by('-id').first().id)
 
         if self.should_apply_filter():
-            queryset = self.apply_filters(queryset, Concept)
+            concept_queryset = self._apply_filters(concept_queryset, Concept)
+        if self.cascade:
+            concept_queryset, mapping_queryset = self._apply_cascade(
+                concept_queryset, mapping_queryset, system_version, valueset_versions)
+        if self.transform:
+            concept_queryset, mapping_queryset = self._apply_transform(
+                concept_queryset, mapping_queryset, system_version)
+
+        if concept_queryset is None:
+            concept_queryset = Concept.objects.none()
+
+        return concept_queryset, mapping_queryset
+
+    def _apply_transform(self, concept_queryset, mapping_queryset, system_version):
         if self.should_transform_to_latest_version():
-            queryset = self.transform_to_latest_version(queryset, Concept)
-            if self.code:
-                concept = queryset.first()
-                if concept:
-                    self.resource_version = concept.version
-                    self.expression = concept.uri
+            concept_queryset = self._update_by_transform_to_latest_version(concept_queryset, Concept)
             mapping_queryset = self.transform_to_latest_version(mapping_queryset, Mapping)
         if self.should_transform_to_versioned() and not system_version.is_head:  # For HEAD it will be versioned
-            queryset = Concept.objects.filter(id__in=queryset.values_list('versioned_object_id', flat=True))
+            self.version = HEAD
+            concept_queryset = Concept.objects.filter(
+                id__in=concept_queryset.values_list('versioned_object_id', flat=True))
             mapping_queryset = Mapping.objects.filter(
                 id__in=mapping_queryset.values_list('versioned_object_id', flat=True))
-        return queryset, mapping_queryset
+
+        return concept_queryset, mapping_queryset
+
+    def _apply_cascade(self, concept_queryset, mapping_queryset, system_version, valueset_versions):
+        cascade_params = self.get_concept_cascade_params(system_version or valueset_versions[0])
+        concept_ids = set()
+        mapping_ids = set()
+        traversed = []
+
+        for concept in concept_queryset:
+            concept_uri = drop_version(concept.uri)
+            if concept_uri in traversed:
+                continue
+            traversed.append(concept_uri)
+            result = concept.cascade(**cascade_params)
+            concept_ids.update(set(result['concepts'].values_list('id', flat=True)))
+            mapping_ids.update(set(result['mappings'].values_list('id', flat=True)))
+
+        concept_ids.update(set(concept_queryset.values_list('id', flat=True)))
+        mapping_ids.update(set(mapping_queryset.values_list('id', flat=True)))
+
+        return Concept.objects.filter(id__in=concept_ids), Mapping.objects.filter(id__in=mapping_ids)
 
     def get_mappings(self, system_version=None):
         queryset = self.get_resource_queryset_from_system_and_valueset('mappings', system_version)
@@ -703,46 +741,74 @@ class CollectionReference(models.Model):
                 queryset = queryset.filter(version=self.resource_version)
 
         if self.should_apply_filter():
-            queryset = self.apply_filters(queryset, Mapping)
+            queryset = self._apply_filters(queryset, Mapping)
 
         if self.should_transform_to_latest_version():
-            queryset = self.transform_to_latest_version(queryset, Mapping)
-            if self.code:
-                mapping = queryset.first()
-                self.resource_version = mapping.version
-                self.expression = mapping.uri
+            queryset = self._update_by_transform_to_latest_version(queryset, Mapping)
+        if queryset is None:
+            queryset = Mapping.objects.none()
+        return queryset
+
+    def _update_by_transform_to_latest_version(self, queryset, klass):
+        queryset = self.transform_to_latest_version(queryset, klass)
+        if self.code:
+            resource = queryset.first()
+            if resource:
+                self.version = get(resource.latest_source_version, 'version')
+                self.resource_version = None
+                if not self.version:
+                    self.version = HEAD
+                    self.resource_version = resource.version
+                # self.resource_version = resource.version  # old
+                self.expression = resource.uri
         return queryset
 
     @staticmethod
     def dedupe_by_expression(references):
         return list({reference.expression: reference for reference in references}.values())
 
+    def __get_repo_and_resource_version(self, resource, is_intensional, is_extensional):
+        repo_version = self.version
+        resource_version = None
+        if not self.version and self.transform:
+            repo_version = get(resource.latest_source_version, 'version') or HEAD
+            is_head = repo_version == HEAD
+            if is_intensional and is_head:
+                resource_version = resource.version
+            elif is_extensional:
+                resource_version = None
+        if is_intensional and repo_version == HEAD and not resource_version:
+            resource_version = resource.version
+        return repo_version, resource_version
+
+    def __generate_references_for_type(self, queryset, resource_type):
+        references = []
+        is_extensional = self.is_extensional_transform
+        is_intensional = self.is_static_transform
+
+        for resource in queryset:
+            repo_version, resource_version = self.__get_repo_and_resource_version(
+                resource, is_intensional, is_extensional)
+
+            references.append(CollectionReference(
+                expression=resource.uri,
+                reference_type=resource_type,
+                code=encode_string(resource.mnemonic) if resource_type == 'concepts' else resource.mnemonic,
+                collection_id=self.collection_id,
+                created_by=self.created_by,
+                resource_version=resource_version,
+                system=self.system,
+                version=repo_version
+            ))
+        return references
+
     def generate_references(self):
         references = []
+
         if self.should_generate_multiple_references():
             concepts, mappings = self.get_concepts()
-            for concept in concepts:
-                references.append(CollectionReference(
-                    expression=concept.uri,
-                    reference_type='concepts',
-                    code=encode_string(concept.mnemonic),
-                    collection_id=self.collection_id,
-                    created_by=self.created_by,
-                    resource_version=concept.version if self.transform == TRANSFORM_TO_RESOURCE_VERSIONS else None,
-                    system=self.system,
-                    version=self.version
-                ))
-            for mapping in mappings:
-                references.append(CollectionReference(
-                    expression=mapping.uri,
-                    reference_type='mappings',
-                    code=mapping.mnemonic,
-                    collection_id=self.collection_id,
-                    created_by=self.created_by,
-                    resource_version=mapping.version if self.transform == TRANSFORM_TO_RESOURCE_VERSIONS else None,
-                    system=self.system,
-                    version=self.version
-                ))
+            references += self.__generate_references_for_type(concepts, 'concepts')
+            references += self.__generate_references_for_type(mappings, 'mappings')
         else:
             references.append(self)
         return references
@@ -825,7 +891,7 @@ class CollectionReference(models.Model):
                 )
         return search
 
-    def apply_filters(self, queryset, resource_klass):
+    def _apply_filters(self, queryset, resource_klass):
         if self.filter:
             pks = []
             document = resource_klass.get_search_document()
@@ -840,7 +906,10 @@ class CollectionReference(models.Model):
                             filter_def['property'] not in self.get_allowed_filter_properties()
                         )
                 ):
-                    continue
+                    if filter_def['property'] in self.get_allowed_filter_properties_but_need_case_switch():
+                        filter_def['property'] = to_snake_case(filter_def['property'])
+                    else:
+                        continue
                 val = filter_def['value']
                 if filter_def['property'] == 'q':
                     self._apply_search(search, val, document)
@@ -915,17 +984,24 @@ class CollectionReference(models.Model):
 
     @cached_property
     def resolve_valueset_versions_with_unresolved(self):
-        versions = []
+        explicit = []
+        evaluated = []
         unresolved = []
         if isinstance(self.valueset, list):
             for valueset in self.valueset:  # pylint: disable=not-an-iterable
                 if valueset:
+                    if is_canonical_uri(valueset):
+                        is_explicit = bool(get(valueset.split('|'), '1')) if '|' in valueset else False
+                    else:
+                        is_explicit = valueset != drop_version(valueset)
+                    is_evaluated = not is_explicit
+                    to_add = evaluated if is_evaluated else explicit
                     version, _ = Collection.resolve_reference_expression(valueset, self.namespace)
                     if version.id:
-                        versions.append(version)
+                        to_add.append(version)
                     else:
                         unresolved.append({'url': valueset, 'namespace': self.namespace, 'type': 'reference.valueset'})
-        return versions, unresolved
+        return explicit, evaluated, unresolved
 
     def clean(self):
         if not self.is_valid_filter():
@@ -986,6 +1062,9 @@ class CollectionReference(models.Model):
         elif self.is_mapping:
             common = [*Mapping.es_fields.keys(), *common]
         return common
+
+    def get_allowed_filter_properties_but_need_case_switch(self):
+        return map(to_camel_case, self.get_allowed_filter_properties())
 
     @staticmethod
     def __is_valid_filter_schema(filter_def):
@@ -1055,7 +1134,7 @@ class Expansion(BaseResourceModel):
                       models.Index(name="expansion_mnemonic_like", fields=["mnemonic"], opclasses=["text_pattern_ops"])
                   ] + BaseResourceModel.Meta.indexes
 
-    parameters = models.JSONField(default=default_expansion_parameters)
+    parameters = models.JSONField(default=dict, null=True, blank=True)
     canonical_url = models.URLField(null=True, blank=True)
     text = models.TextField(null=True, blank=True)
     concepts = models.ManyToManyField('concepts.Concept', blank=True, related_name='expansion_set')
@@ -1063,10 +1142,14 @@ class Expansion(BaseResourceModel):
     collection_version = models.ForeignKey(
         'collections.Collection', related_name='expansions', on_delete=models.CASCADE)
     is_processing = models.BooleanField(default=False)
-    resolved_collection_versions = models.ManyToManyField(
-        'collections.Collection', related_name='expansions_resolved_collection_versions_set')
-    resolved_source_versions = models.ManyToManyField(
-        'sources.Source', related_name='expansions_resolved_source_versions_set')
+    explicit_collection_versions = models.ManyToManyField(
+        'collections.Collection', related_name='expansions_explicit_collection_versions_set')
+    evaluated_collection_versions = models.ManyToManyField(
+        'collections.Collection', related_name='expansions_evaluated_collection_versions_set')
+    explicit_source_versions = models.ManyToManyField(
+        'sources.Source', related_name='expansions_explicit_source_versions_set')
+    evaluated_source_versions = models.ManyToManyField(
+        'sources.Source', related_name='expansions_evaluated_source_versions_set')
     unresolved_repo_versions = ArrayField(models.JSONField(), default=list, null=True, blank=True)
 
     @property
@@ -1117,10 +1200,11 @@ class Expansion(BaseResourceModel):
         parameters = ExpansionParameters(self.parameters, is_concept_queryset)
         return parameters.apply(queryset)
 
-    def index_concepts(self):
-        if self.concepts.exists():
+    def index_concepts(self, concept_versioned_ids=None):
+        should_run = len(concept_versioned_ids) > 0 if concept_versioned_ids is not None else self.concepts.exists()
+        if should_run:
             if get(settings, 'TEST_MODE', False):
-                index_expansion_concepts(self.id)
+                index_expansion_concepts(self.id, self.concepts.count(), concept_versioned_ids)
             else:
                 task = None
                 try:
@@ -1129,15 +1213,17 @@ class Expansion(BaseResourceModel):
                         name=index_expansion_concepts.__name__
                     )
                     index_expansion_concepts.apply_async(
-                        (self.id, ), task_id=task.id, queue=task.queue, persist_args=True)
+                        (self.id, self.concepts.count(), concept_versioned_ids),
+                        task_id=task.id, queue=task.queue, persist_args=True)
                 except AlreadyQueued:
                     if task:
                         task.delete()
 
-    def index_mappings(self):
-        if self.mappings.exists():
+    def index_mappings(self, mapping_versioned_ids=None):
+        should_run = len(mapping_versioned_ids) > 0 if mapping_versioned_ids is not None else self.mappings.exists()
+        if should_run:
             if get(settings, 'TEST_MODE', False):
-                index_expansion_mappings(self.id)
+                index_expansion_mappings(self.id, self.mappings.count(), mapping_versioned_ids)
             else:
                 task = None
                 try:
@@ -1146,7 +1232,8 @@ class Expansion(BaseResourceModel):
                         name=index_expansion_mappings.__name__
                     )
                     index_expansion_mappings.apply_async(
-                        (self.id, ), task_id=task.id, queue=task.queue, persist_args=True)
+                        (self.id, self.mappings.count(), mapping_versioned_ids),
+                        task_id=task.id, queue=task.queue, persist_args=True)
                 except AlreadyQueued:
                     if task:
                         task.delete()
@@ -1169,29 +1256,28 @@ class Expansion(BaseResourceModel):
     def delete_references(self, references):
         refs, _ = self.to_ref_list_separated(references)
 
-        index_concepts = False
-        index_mappings = False
+        index_concepts = []
+        index_mappings = []
         any_ref_with_resources = False
         for reference in refs:
             concepts = reference.concepts
             if concepts.exists():
                 any_ref_with_resources = True
-                index_concepts = True
-                filters = {'versioned_object_id__in': list(concepts.values_list('versioned_object_id', flat=True))}
+                resources_updated = list(concepts.values_list('versioned_object_id', flat=True))
+                filters = {'versioned_object_id__in': resources_updated}
+                index_concepts = [*index_concepts, *resources_updated]
                 self.concepts.set(self.concepts.exclude(**filters))
                 batch_index_resources.apply_async(('concept', filters), queue='indexing', permanent=False)
             mappings = reference.mappings
             if mappings.exists():
                 any_ref_with_resources = True
-                index_mappings = True
-                filters = {'versioned_object_id__in': list(mappings.values_list('versioned_object_id', flat=True))}
+                resources_updated = list(mappings.values_list('versioned_object_id', flat=True))
+                filters = {'versioned_object_id__in': resources_updated}
+                index_mappings = [*index_mappings, *resources_updated]
                 self.mappings.set(self.mappings.exclude(**filters))
                 batch_index_resources.apply_async(('mapping', filters), queue='indexing', permanent=False)
 
-        if index_concepts:
-            self.index_concepts()
-        if index_mappings:
-            self.index_mappings()
+        self.index_resources(index_concepts, index_mappings)
 
         if any_ref_with_resources:
             removed_reference_ids = [ref.id for ref in self.to_ref_list(references)]
@@ -1220,10 +1306,13 @@ class Expansion(BaseResourceModel):
             batch_index_resources.apply_async(('concept', concepts_filters), queue='indexing', permanent=False)
             batch_index_resources.apply_async(('mapping', mappings_filters), queue='indexing', permanent=False)
 
-    def add_references(self, references, index=True, is_adding_all=False, attempt_reevaluate=True):  # pylint: disable=too-many-locals,too-many-statements,too-many-branches
+    def add_references(  # pylint: disable=too-many-locals,too-many-statements,too-many-branches,too-many-arguments
+            self, references, index=True, is_adding_all=False, attempt_reevaluate=True, force_reevaluate=False):
         include_refs, exclude_refs = self.to_ref_list_separated(references)
-        resolved_valueset_versions = []
-        resolved_system_versions = []
+        explicit_valueset_versions = []
+        explicit_system_versions = []
+        evaluated_valueset_versions = []
+        evaluated_system_versions = []
         unresolved_repo_versions = []
         _system_version_cache = {}
 
@@ -1235,10 +1324,10 @@ class Expansion(BaseResourceModel):
             else:
                 exclude_refs += [*existing_exclude_refs.all()]
 
-        index_concepts = index_mappings = False
+        index_concepts = index_mappings = []
 
         # attempt_reevaluate is False for delete reference(s)
-        should_reevaluate = attempt_reevaluate and not self.is_auto_generated
+        should_reevaluate = force_reevaluate or (attempt_reevaluate and not self.is_auto_generated)
 
         include_system_versions = []
         system_versions = self.parameters.get(ExpansionParameters.INCLUDE_SYSTEM)
@@ -1261,12 +1350,16 @@ class Expansion(BaseResourceModel):
                 return _system_version_cache[__cache_key]
             return None
 
-        def get_ref_results(ref):
-            nonlocal resolved_valueset_versions
-            nonlocal resolved_system_versions
+        def get_ref_results(ref):   # pylint: disable=too-many-branches,too-many-locals
+            nonlocal explicit_valueset_versions
+            nonlocal explicit_system_versions
+            nonlocal evaluated_system_versions
+            nonlocal evaluated_valueset_versions
             nonlocal unresolved_repo_versions
-            _resolved_valueset_versions, _unresolved_valueset_versions = ref.resolve_valueset_versions_with_unresolved
-            resolved_valueset_versions += _resolved_valueset_versions
+            _explicit_valueset_versions, _evaluated_valueset_versions, _unresolved_valueset_versions = (
+                ref.resolve_valueset_versions_with_unresolved)
+            explicit_valueset_versions += _explicit_valueset_versions
+            evaluated_valueset_versions += _evaluated_valueset_versions
             unresolved_repo_versions += _unresolved_valueset_versions
             ref_system_versions = []
             should_use_ref_system_version = True
@@ -1277,6 +1370,20 @@ class Expansion(BaseResourceModel):
 
             if should_use_ref_system_version:
                 _system_version = get_ref_system_version(ref)
+                if ref.is_versionless_expression and _system_version:
+                    existing_evaluated_system_version = next(
+                        (
+                            _version for _version in evaluated_system_versions if drop_version(
+                                _version.uri) == drop_version(_system_version.uri)
+                         ),
+                        None
+                    )
+                    if not existing_evaluated_system_version:
+                        existing_evaluated_system_version = self.evaluated_source_versions.filter(
+                            uri__startswith=drop_version(_system_version.uri)
+                        ).order_by('-id').first()
+                    if existing_evaluated_system_version:
+                        _system_version = existing_evaluated_system_version
                 if _system_version:
                     ref_system_versions.append(_system_version)
                 elif ref.system:
@@ -1308,25 +1415,35 @@ class Expansion(BaseResourceModel):
             else:
                 _concepts = ref.concepts.filter()
                 _mappings = ref.mappings.filter()
-            resolved_system_versions += ref_system_versions
+
+            if ref.is_versionless_expression:
+                evaluated_system_versions += ref_system_versions
+            else:
+                explicit_system_versions += ref_system_versions
             return _concepts, _mappings
 
         for reference in include_refs:
             concepts, mappings = get_ref_results(reference)
-            concepts_results = self.__include_resources(self.concepts, concepts, True)
-            if not index_concepts:
-                index_concepts = concepts_results
-            mappings_results = self.__include_resources(self.mappings, mappings, False)
-            if not index_mappings:
-                index_mappings = mappings_results
+            concepts_updated = self.__include_resources(self.concepts, concepts, True)
+            if index and concepts_updated is not False:
+                index_concepts = [*index_concepts, *concepts_updated.values_list('versioned_object_id', flat=True)]
+            mappings_updated = self.__include_resources(self.mappings, mappings, False)
+            if index and mappings_updated is not False:
+                index_mappings = [*index_mappings, *mappings_updated.values_list('versioned_object_id', flat=True)]
 
         for reference in exclude_refs:
             concepts, mappings = get_ref_results(reference)
-            index_concepts = self.__exclude_resources(reference, self.concepts, concepts, Concept)
-            index_mappings = self.__exclude_resources(reference, self.mappings, mappings, Mapping)
+            concepts_updated = self.__exclude_resources(reference, self.concepts, concepts, Concept)
+            mappings_updated = self.__exclude_resources(reference, self.mappings, mappings, Mapping)
+            if index and concepts_updated is not False:
+                index_concepts = [*index_concepts, *concepts_updated.values_list('versioned_object_id', flat=True)]
+            if index and mappings_updated is not False:
+                index_mappings = [*index_mappings, *mappings_updated.values_list('versioned_object_id', flat=True)]
 
-        self.resolved_collection_versions.add(*compact(resolved_valueset_versions))
-        self.resolved_source_versions.add(*compact(resolved_system_versions))
+        self.explicit_collection_versions.add(*compact(explicit_valueset_versions))
+        self.explicit_source_versions.add(*compact(explicit_system_versions))
+        self.evaluated_collection_versions.add(*compact(evaluated_valueset_versions))
+        self.evaluated_source_versions.add(*compact(evaluated_system_versions))
         if unresolved_repo_versions:
             self.unresolved_repo_versions = unresolved_repo_versions
             self.save()
@@ -1339,46 +1456,52 @@ class Expansion(BaseResourceModel):
         self.__dedupe_mappings()
 
     def __dedupe_concepts(self):
-        self.concepts.set(self.concepts.distinct('versioned_object_id'))
+        self.concepts.set(self.concepts.order_by('versioned_object_id', '-id').distinct('versioned_object_id'))
 
     def __dedupe_mappings(self):
-        self.mappings.set(self.mappings.distinct('versioned_object_id'))
+        self.mappings.set(self.mappings.order_by('versioned_object_id', '-id').distinct('versioned_object_id'))
 
     def __include_resources(self, rel, resources, is_concept_queryset):
-        should_index = resources.exists()
-        if should_index:
-            rel.add(*self.apply_parameters(resources, is_concept_queryset))
-        return should_index
+        resources_updated = False
+        if resources.exists():
+            resources_updated = self.apply_parameters(resources, is_concept_queryset)
+            rel.add(*resources_updated)
+        return resources_updated
 
     @staticmethod
     def __exclude_resources(ref, rel, resources, klass):
-        should_index = resources.exists()
-        if should_index:
+        resources_updated = False
+        if resources.exists():
             if ref.resource_version:
+                resources_updated = resources
                 rel.remove(*resources)
             else:
-                rel.remove(
-                    *klass.objects.filter(
-                        versioned_object_id__in=resources.values_list('versioned_object_id', flat=True)
-                    )
-                )
-        return should_index
+                resources_updated = klass.objects.filter(
+                    versioned_object_id__in=resources.values_list('versioned_object_id', flat=True))
+                rel.remove(*resources_updated)
+        return resources_updated
 
     def index_resources(self, concepts, mappings):
         if concepts:
-            self.index_concepts()
+            self.index_concepts(concepts)
         if mappings:
-            self.index_mappings()
+            self.index_mappings(mappings)
 
-    def seed_children(self, index=True):
-        return self.add_references(self.collection_version.references, index, True)
+    def seed_children(self, index=True, force_reevaluate=False):
+        return self.add_references(
+            references=self.collection_version.references, index=index,
+            is_adding_all=True, force_reevaluate=force_reevaluate)
 
     def wait_until_processed(self):  # pragma: no cover
         processing = self.is_processing
         while processing:
             print("Expansion is still processing, sleeping for 5 secs...")
             time.sleep(5)
-            self.refresh_from_db()
+            try:
+                self.refresh_from_db()
+            except Expansion.DoesNotExist:
+                print("Expansion no longer exists, exiting wait loop.")
+                return
             processing = self.is_processing
             if not processing:
                 print("Expansion processed, waking up...")
@@ -1390,8 +1513,8 @@ class Expansion(BaseResourceModel):
         return self.collection_version.uri + f'expansions/{self.mnemonic}/'
 
     def clean(self):
-        if not self.parameters:
-            self.parameters = default_expansion_parameters()
+        if not self.parameters or self.parameters == default_expansion_parameters():
+            self.parameters = {}
         if not self.unresolved_repo_versions:
             self.unresolved_repo_versions = []
 
@@ -1430,7 +1553,7 @@ class Expansion(BaseResourceModel):
     @staticmethod
     def get_should_link_repo_versions_criteria():
         return models.Q(
-            resolved_source_versions__isnull=True, resolved_collection_versions__isnull=True,
+            explicit_source_versions__isnull=True, explicit_collection_versions__isnull=True,
         ) & models.Q(models.Q(concepts__isnull=False) | models.Q(mappings__isnull=False))
 
     def link_repo_versions(self):
@@ -1441,7 +1564,7 @@ class Expansion(BaseResourceModel):
         for source in sources:
             version = source.get_latest_released_version() or source.get_latest_version() or source
             if version:
-                self.resolved_source_versions.add(version)
+                self.explicit_source_versions.add(version)
 
 
 class ExpansionParameters:
@@ -1452,7 +1575,7 @@ class ExpansionParameters:
     DATE = 'date'
 
     def __init__(self, parameters, is_concept_queryset=True):
-        self.parameters = parameters
+        self.parameters = parameters or {}
         self.parameter_classes = {}
         self.before_filters = {}
         self.is_concept_queryset = is_concept_queryset
