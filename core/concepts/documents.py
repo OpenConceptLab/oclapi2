@@ -165,11 +165,11 @@ class ConceptDocument(Document):
 
     @staticmethod
     def prepare_locale(instance):
-        return compact(set(instance.names.values_list('locale', flat=True)))
+        return compact(set(n.locale for n in instance.names.all()))
 
     @staticmethod
     def prepare_source_version(instance):
-        return list(instance.sources.values_list('version', flat=True))
+        return [s.version for s in instance.sources.all()]
 
     @staticmethod
     def prepare_collection_version(instance):
@@ -218,15 +218,15 @@ class ConceptDocument(Document):
 
     @staticmethod
     def prepare_name_types(instance):
-        return compact(set(instance.names.values_list('type', flat=True)))
+        return compact(set(n.type for n in instance.names.all()))
 
     @staticmethod
     def prepare_description_types(instance):
-        return compact(set(instance.descriptions.values_list('type', flat=True)))
+        return compact(set(d.type for d in instance.descriptions.all()))
 
     @staticmethod
     def prepare_description(instance):
-        return '. '.join(compact(set(instance.descriptions.values_list('name', flat=True))))
+        return '. '.join(compact(set(d.name for d in instance.descriptions.all())))
 
     def prepare(self, instance):
         data = super().prepare(instance)
@@ -239,8 +239,8 @@ class ConceptDocument(Document):
         name = get(preferred_locale, 'name') or ''
         data['_name'] = name.lower()
         data['name'] = name.replace('-', '_')
-        synonyms = instance.names.exclude(name=name).exclude(name='')
-        data['synonyms'] = compact(set(synonyms.values_list('name', flat=True)))
+        synonyms = [n for n in instance.names.all() if n.name and n.name != name]
+        data['synonyms'] = compact(set(n.name for n in synonyms))
         data['_synonyms'] = data['synonyms']
 
         if instance.parent.has_semantic_match_algorithm:

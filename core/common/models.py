@@ -5,7 +5,6 @@ from django.contrib.contenttypes.fields import GenericRelation
 from django.contrib.postgres.fields import ArrayField
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.core.paginator import Paginator
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError, transaction
 from django.db.models import Value, Q, Count
@@ -200,16 +199,22 @@ class BaseModel(models.Model):
         return criteria
 
     @staticmethod
-    def batch_index(queryset, document, single_batch=False):
+    def batch_index(queryset, document, single_batch=False, prefetch=None):
         if not get(settings, 'TEST_MODE'):
             doc = document()
+            if prefetch:
+                queryset = queryset.prefetch_related(*prefetch)
             if single_batch:
                 doc.update(queryset.all(), parallel=True)
             else:
-                paginator = Paginator(queryset.order_by('-id'), 500)
-                for page_number in paginator.page_range:
-                    page = paginator.page(page_number)
-                    doc.update(page.object_list, parallel=True)
+                batch_size = 500
+                start = 0
+                while True:
+                    batch = list(queryset.order_by('-id')[start:start + batch_size])
+                    if not batch:
+                        break
+                    doc.update(batch, parallel=True)
+                    start += batch_size
 
     @staticmethod
     @transaction.atomic
@@ -720,9 +725,6 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     @classmethod
     def persist_new_version(cls, obj, user=None, **kwargs):
-        from core.collections.serializers import CollectionDetailSerializer
-        from core.sources.serializers import SourceDetailSerializer
-
         errors = {}
 
         obj.is_active = True
@@ -731,17 +733,14 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             obj.created_by = user
             obj.updated_by = user
         repo_resource_name = obj.__class__.__name__
-        serializer = SourceDetailSerializer if repo_resource_name == 'Source' else CollectionDetailSerializer
         head = obj.head
         if not head:
             errors[repo_resource_name.lower()] = 'Version Head not found.'
             return errors
-        obj.snapshot = serializer(head).data
         obj.update_version_data(head)
         obj.save(**kwargs)
 
         if obj.id:
-            obj.get_checksums(recalculate=True)
             obj.sibling_versions.update(is_latest_version=False)
 
         is_test_mode = get(settings, 'TEST_MODE', False)

@@ -449,18 +449,27 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
                 latest_released.index_children_async(user)
 
     def seed_concepts(self, index=True):
+        from core.concepts.models import Concept
         head = self.head
         if head:
-            concepts = head.concepts.filter(is_latest_version=True)
-            self.concepts.set(concepts)
+            through_model = Concept.sources.through
+            through_model.objects.filter(source_id=self.id).delete()
+            concept_ids = list(head.concepts.filter(is_latest_version=True).values_list('id', flat=True))
+            through_objects = [through_model(source_id=self.id, concept_id=cid) for cid in concept_ids]
+            through_model.objects.bulk_create(through_objects, batch_size=5000)
             if index:
                 from core.concepts.documents import ConceptDocument
                 self.batch_index(self.concepts, ConceptDocument)
 
     def seed_mappings(self, index=True):
+        from core.mappings.models import Mapping
         head = self.head
         if head:
-            self.mappings.set(head.mappings.filter(is_latest_version=True))
+            through_model = Mapping.sources.through
+            through_model.objects.filter(source_id=self.id).delete()
+            mapping_ids = list(head.mappings.filter(is_latest_version=True).values_list('id', flat=True))
+            through_objects = [through_model(source_id=self.id, mapping_id=mid) for mid in mapping_ids]
+            through_model.objects.bulk_create(through_objects, batch_size=5000)
             if index:
                 from core.mappings.documents import MappingDocument
                 self.batch_index(self.mappings, MappingDocument)

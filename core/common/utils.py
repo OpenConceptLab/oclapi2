@@ -213,7 +213,7 @@ def write_export_file(
     resource_string = json.dumps(data, cls=encoders.JSONEncoder)
     logger.info('Done serializing attributes.')
 
-    batch_size = 100
+    batch_size = 1000
     is_collection = resource_type == 'collection'
 
     concepts_qs = Concept.objects.none()
@@ -236,97 +236,88 @@ def write_export_file(
         if version.is_head:
             filters['is_latest_version'] = True
 
+    resource_name = resource_type.title()
+
     with open('export.json', 'w') as out:
         out.write(f'{resource_string[:-1]}, "concepts": [')
 
-    resource_name = resource_type.title()
-
-    if concepts_qs.exists():
-        logger.info(f'{resource_name} has concepts. Getting them in batches of {batch_size:d}...')
         concept_serializer_class = get_class('core.concepts.serializers.ConceptVersionExportSerializer')
+        written_concepts = False
         start = 0
-        end = batch_size
-        batch_queryset = concepts_qs.order_by('-concept_id')[start:end]
-
-        while batch_queryset.exists():
-            logger.info(f'Serializing concepts {start + 1:d} - {end:d}...')
+        while True:
+            batch_ids = list(
+                concepts_qs.order_by('-concept_id')[start:start + batch_size].values_list('concept_id', flat=True)
+            )
+            if not batch_ids:
+                break
+            logger.info(f'Serializing concepts {start + 1:d} - {start + len(batch_ids):d}...')
             queryset = Concept.objects.filter(
-                id__in=batch_queryset.values_list('concept_id')).filter(**filters).order_by('-id')
-            if queryset.exists():
-                if start > 0:
-                    with open('export.json', 'a') as out:
-                        out.write(', ')
-                concept_versions = queryset.prefetch_related('names', 'descriptions')
+                id__in=batch_ids).filter(**filters).prefetch_related('names', 'descriptions').order_by('-id')
+            concept_versions = list(queryset)
+            if concept_versions:
+                if written_concepts:
+                    out.write(', ')
                 data = concept_serializer_class(concept_versions, many=True).data
                 concept_string = json.dumps(data, cls=encoders.JSONEncoder)
-                concept_string = concept_string[1:-1]
-
-                with open('export.json', 'a') as out:
-                    out.write(concept_string)
-
+                out.write(concept_string[1:-1])
+                written_concepts = True
             start += batch_size
-            end += batch_size
-            batch_queryset = concepts_qs.order_by('-concept_id')[start:end]
 
-        logger.info('Done serializing concepts.')
+        if written_concepts:
+            logger.info('Done serializing concepts.')
 
-    if is_collection:
-        references_qs = version.references
-        total_references = references_qs.count()
+        if is_collection:
+            references_qs = version.references
+            total_references = references_qs.count()
 
-        with open('export.json', 'a') as out:
             out.write('], "references": [')
-        if total_references:
-            logger.info(
-                f'{resource_name} has {total_references:d} references. Getting them in batches of {batch_size:d}...'
-            )
-            reference_serializer_class = get_class('core.collections.serializers.CollectionReferenceDetailSerializer')
-            for start in range(0, total_references, batch_size):
-                end = min(start + batch_size, total_references)
-                logger.info(f'Serializing references {start + 1:d} - {end:d}...')
-                references = references_qs.order_by('-id').filter()[start:end]
-                reference_serializer = reference_serializer_class(references, many=True)
-                reference_string = json.dumps(reference_serializer.data, cls=encoders.JSONEncoder)
-                reference_string = reference_string[1:-1]
-                with open('export.json', 'a') as out:
-                    out.write(reference_string)
-                    if end != total_references:
+            if total_references:
+                logger.info(
+                    f'{resource_name} has {total_references:d} references. '
+                    f'Getting them in batches of {batch_size:d}...'
+                )
+                reference_serializer_class = get_class(
+                    'core.collections.serializers.CollectionReferenceDetailSerializer')
+                for ref_start in range(0, total_references, batch_size):
+                    ref_end = min(ref_start + batch_size, total_references)
+                    logger.info(f'Serializing references {ref_start + 1:d} - {ref_end:d}...')
+                    references = references_qs.order_by('-id').filter()[ref_start:ref_end]
+                    reference_serializer = reference_serializer_class(references, many=True)
+                    reference_string = json.dumps(reference_serializer.data, cls=encoders.JSONEncoder)
+                    out.write(reference_string[1:-1])
+                    if ref_end != total_references:
                         out.write(', ')
-            logger.info('Done serializing references.')
+                logger.info('Done serializing references.')
 
-    with open('export.json', 'a') as out:
         out.write('], "mappings": [')
 
-    if mappings_qs.exists():
-        logger.info(f'{resource_name} has mappings. Getting them in batches of {batch_size:d}...')
         mapping_serializer_class = get_class('core.mappings.serializers.MappingDetailSerializer')
+        written_mappings = False
         start = 0
-        end = batch_size
-        batch_queryset = mappings_qs.order_by('-mapping_id')[start:end]
-
-        while batch_queryset.exists():
-            logger.info(f'Serializing mappings {start + 1:d} - {start + batch_size:d}...')
+        while True:
+            batch_ids = list(
+                mappings_qs.order_by('-mapping_id')[start:start + batch_size].values_list('mapping_id', flat=True)
+            )
+            if not batch_ids:
+                break
+            logger.info(f'Serializing mappings {start + 1:d} - {start + len(batch_ids):d}...')
             queryset = Mapping.objects.filter(
-                id__in=batch_queryset.values_list('mapping_id')).filter(**filters).order_by('-id')
-            if queryset.exists():
-                if start > 0:
-                    with open('export.json', 'a') as out:
-                        out.write(', ')
-
-                data = mapping_serializer_class(queryset, many=True).data
+                id__in=batch_ids).filter(**filters).prefetch_related(
+                'from_concept', 'to_concept', 'from_source', 'to_source').order_by('-id')
+            mapping_versions = list(queryset)
+            if mapping_versions:
+                if written_mappings:
+                    out.write(', ')
+                data = mapping_serializer_class(mapping_versions, many=True).data
                 mapping_string = json.dumps(data, cls=encoders.JSONEncoder)
-                mapping_string = mapping_string[1:-1]
-                with open('export.json', 'a') as out:
-                    out.write(mapping_string)
-
+                out.write(mapping_string[1:-1])
+                written_mappings = True
             start += batch_size
-            end += batch_size
-            batch_queryset = mappings_qs.order_by('-mapping_id')[start:end]
 
-        logger.info('Done serializing mappings.')
+        if written_mappings:
+            logger.info('Done serializing mappings.')
 
-    end_time = str(round((time.time() - start_time) + 2, 2))
-    with open('export.json', 'a') as out:
+        end_time = str(round((time.time() - start_time) + 2, 2))
         out.write('], "export_time": ' + json.dumps(f"{end_time}secs", cls=encoders.JSONEncoder) + '}')
 
     version.update_extras('__export_time', end_time)
