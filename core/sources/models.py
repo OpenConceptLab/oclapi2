@@ -449,7 +449,6 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
                 latest_released.index_children_async(user)
 
     def seed_concepts(self, index=True):
-        from core.concepts.models import Concept
         head = self.head
         if head:
             through_model = Concept.sources.through
