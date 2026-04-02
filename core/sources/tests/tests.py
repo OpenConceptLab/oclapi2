@@ -1434,14 +1434,18 @@ class TasksTest(OCLTestCase):
     def test_index_source_mappings(self, batch_index_mock, source_mappings_mock):
         source = OrganizationSourceFactory()
         index_source_mappings(source.id)
-        batch_index_mock.assert_called_once_with(source_mappings_mock, MappingDocument)
+        batch_index_mock.assert_called_once_with(
+            source_mappings_mock, MappingDocument,
+            prefetch=['sources', 'expansion_set', 'expansion_set__collection_version'])
 
     @patch('core.sources.models.Source.concepts')
     @patch('core.sources.models.Source.batch_index')
     def test_index_source_concepts(self, batch_index_mock, source_concepts_mock):
         source = OrganizationSourceFactory()
         index_source_concepts(source.id)
-        batch_index_mock.assert_called_once_with(source_concepts_mock, ConceptDocument)
+        batch_index_mock.assert_called_once_with(
+            source_concepts_mock, ConceptDocument,
+            prefetch=['sources', 'names', 'descriptions', 'expansion_set', 'expansion_set__collection_version'])
 
     @patch('core.sources.models.Source.validate_child_concepts')
     def test_update_validation_schema_success(self, validate_child_concepts_mock):
