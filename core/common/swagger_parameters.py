@@ -226,7 +226,7 @@ match_brief_param = openapi.Parameter(
 )
 match_encoder_model_param = openapi.Parameter(
     'encoder_model', openapi.IN_QUERY, type=openapi.TYPE_STRING,
-    description='Custom encoder model name for semantic vector search'
+    description='Custom encoder model name for semantic vector search (e.g. BAAI/bge-reranker-v2-m3)'
 )
 match_reranker_param = openapi.Parameter(
     'reranker', openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=True,
