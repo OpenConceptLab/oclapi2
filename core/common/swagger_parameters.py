@@ -202,3 +202,37 @@ task_start_date_param = openapi.Parameter(
     'start_date', openapi.IN_QUERY, type=openapi.TYPE_STRING, format='YYYY-MM-DD', required=False,
     description='filter by start date of tasks'
 )
+
+# $match params
+match_semantic_param = openapi.Parameter(
+    'semantic', openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=False,
+    description='Use semantic (LM-based) matching algorithm'
+)
+match_best_match_param = openapi.Parameter(
+    'bestMatch', openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=False,
+    description='Apply minimum score threshold, filtering out low-quality matches'
+)
+match_num_candidates_param = openapi.Parameter(
+    'numCandidates', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, default=3000,
+    description='Number of approximate nearest neighbor candidates (semantic only). Max: 3000'
+)
+match_k_nearest_param = openapi.Parameter(
+    'kNearest', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, default=100,
+    description='Number of nearest neighbors to return from vector search (semantic only). Max: 100'
+)
+match_brief_param = openapi.Parameter(
+    'brief', openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=False,
+    description='Return minimal concept fields in results'
+)
+match_encoder_model_param = openapi.Parameter(
+    'encoder_model', openapi.IN_QUERY, type=openapi.TYPE_STRING,
+    description='Custom encoder model name for semantic vector search (e.g. BAAI/bge-reranker-v2-m3)'
+)
+match_reranker_param = openapi.Parameter(
+    'reranker', openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=True,
+    description='Enable cross-encoder reranking of results (semantic only)'
+)
+match_offset_param = openapi.Parameter(
+    'offset', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, default=0,
+    description='Number of results to skip per row'
+)

@@ -24,6 +24,7 @@ import core.mappings.views as mapping_views
 import core.reports.views as report_views
 from core import VERSION
 from core.collections.views import ReferenceExpressionResolveView
+from core.common.swagger import OCLSwaggerSchemaGenerator
 from core.common.utils import get_api_base_url
 from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogView, StandardChecksumView, \
     SmartChecksumView
@@ -41,6 +42,7 @@ api_info = openapi.Info(
 SchemaView = get_schema_view(
     api_info,
     public=True,
+    generator_class=OCLSwaggerSchemaGenerator,
     permission_classes=(permissions.AllowAny,),
     url=get_api_base_url()
 )
