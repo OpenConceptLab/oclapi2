@@ -544,12 +544,13 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         return f"{prefix}_mappings_external_id_seq"
 
     def save(
-        self, force_insert=False, force_update=False, using=None, update_fields=None
+        self, *args, force_insert=False, force_update=False, using=None, update_fields=None
     ):
         is_new = not self.id
         dirty_fields = self.get_dirty_fields()
 
-        super().save(force_insert=force_insert, force_update=force_update, using=using, update_fields=update_fields)
+        super().save(*args, force_insert=force_insert, force_update=force_update, using=using,
+                     update_fields=update_fields)
 
         if self.id and self.is_head:
             if is_new:

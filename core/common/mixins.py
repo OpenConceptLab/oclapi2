@@ -822,8 +822,9 @@ class SourceChildMixin(ChecksumModel):
 
         return criteria
 
-    def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
-        super().save(force_insert, force_update, using, update_fields)
+    def save(self, *args, force_insert=False, force_update=False, using=None, update_fields=None):
+        super().save(*args, force_insert=force_insert, force_update=force_update, using=using,
+                     update_fields=update_fields)
 
         if self.is_latest_version and self._counted is False:
             if self.__class__.__name__ == 'Concept':
