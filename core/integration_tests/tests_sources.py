@@ -711,9 +711,9 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(version.id, self.source_v1.id)
         self.assertTrue(version.is_latest_released)
         index_source_concepts_task_mock.apply_async.assert_called_once_with(
-            (version.id,), queue='indexing', persist_args=True, task_id=ANY)
+            (version.id, {'is_in_latest_source_version': True}), queue='indexing', persist_args=True, task_id=ANY)
         index_source_mappings_task_mock.apply_async.assert_called_once_with(
-            (version.id,), queue='indexing', persist_args=True, task_id=ANY)
+            (version.id, {'is_in_latest_source_version': True}), queue='indexing', persist_args=True, task_id=ANY)
 
     @patch('core.sources.models.index_source_mappings')
     @patch('core.sources.models.index_source_concepts')
@@ -764,9 +764,11 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.source_v1.refresh_from_db()
         self.assertFalse(self.source_v1.released)
         index_source_concepts_task_mock.apply_async.assert_called_once_with(
-            (self.source_v1.id,), queue='indexing', persist_args=True, task_id=ANY)
+            (self.source_v1.id, {'is_in_latest_source_version': False}),
+            queue='indexing', persist_args=True, task_id=ANY)
         index_source_mappings_task_mock.apply_async.assert_called_once_with(
-            (self.source_v1.id,), queue='indexing', persist_args=True, task_id=ANY)
+            (self.source_v1.id, {'is_in_latest_source_version': False}),
+            queue='indexing', persist_args=True, task_id=ANY)
 
     @patch('core.sources.models.index_source_mappings')
     @patch('core.sources.models.index_source_concepts')
@@ -807,15 +809,19 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(
             index_source_concepts_task_mock.apply_async.mock_calls,
             [
-                call((source_v2.id,), queue='indexing', persist_args=True, task_id=ANY),
-                call((self.source_v1.id,), queue='indexing', persist_args=True, task_id=ANY)
+                call((source_v2.id, {'is_in_latest_source_version': False}),
+                     queue='indexing', persist_args=True, task_id=ANY),
+                call((self.source_v1.id, {'is_in_latest_source_version': True}),
+                     queue='indexing', persist_args=True, task_id=ANY)
             ]
         )
         self.assertEqual(
             index_source_mappings_task_mock.apply_async.mock_calls,
             [
-                call((source_v2.id,), queue='indexing', persist_args=True, task_id=ANY),
-                call((self.source_v1.id,), queue='indexing', persist_args=True, task_id=ANY)
+                call((source_v2.id, {'is_in_latest_source_version': False}),
+                     queue='indexing', persist_args=True, task_id=ANY),
+                call((self.source_v1.id, {'is_in_latest_source_version': True}),
+                     queue='indexing', persist_args=True, task_id=ANY)
             ]
         )
 
@@ -858,15 +864,21 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(
             index_source_concepts_task_mock.apply_async.mock_calls,
             [
-                call((self.source_v1.id,), queue='indexing', persist_args=True, task_id=ANY),
-                call((source_v2.id,), queue='indexing', persist_args=True, task_id=ANY)
+                call(
+                    (self.source_v1.id, {'is_in_latest_source_version': False}),
+                    queue='indexing', persist_args=True, task_id=ANY),
+                call(
+                    (source_v2.id, {'is_in_latest_source_version': True}),
+                    queue='indexing', persist_args=True, task_id=ANY)
             ]
         )
         self.assertEqual(
             index_source_mappings_task_mock.apply_async.mock_calls,
             [
-                call((self.source_v1.id,), queue='indexing', persist_args=True, task_id=ANY),
-                call((source_v2.id,), queue='indexing', persist_args=True, task_id=ANY)
+                call((self.source_v1.id, {'is_in_latest_source_version': False}),
+                     queue='indexing', persist_args=True, task_id=ANY),
+                call((source_v2.id, {'is_in_latest_source_version': True}),
+                     queue='indexing', persist_args=True, task_id=ANY)
             ]
         )
 
