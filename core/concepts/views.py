@@ -4,6 +4,7 @@ from cid.locals import get_cid
 from django.conf import settings
 from django.db.models import F
 from django.http import Http404
+from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get, compact
 from rest_framework import status
@@ -28,7 +29,9 @@ from core.common.swagger_parameters import (
     compress_header, include_source_versions_param, include_collection_versions_param, cascade_method_param,
     cascade_map_types_param, cascade_exclude_map_types_param, cascade_hierarchy_param, cascade_mappings_param,
     cascade_levels_param, cascade_direction_param, cascade_view_hierarchy, return_map_types_param,
-    omit_if_exists_in_param, equivalency_map_types_param, search_from_latest_repo_header)
+    omit_if_exists_in_param, equivalency_map_types_param, search_from_latest_repo_header,
+    match_semantic_param, match_best_match_param, match_num_candidates_param, match_k_nearest_param,
+    match_brief_param, match_encoder_model_param, match_reranker_param, match_offset_param)
 from core.common.tasks import delete_concept, make_hierarchy
 from core.common.throttling import ThrottleUtil
 from core.common.utils import (to_parent_uri_from_kwargs, generate_temp_version, get_truthy_values, to_int,
@@ -933,6 +936,49 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
             raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')
         return repo_params
 
+    @swagger_auto_schema(
+        operation_description='Find matching concepts across repositories using structured input data.',
+        operation_summary='$match - Find matching concepts',
+        manual_parameters=[
+            verbose_param, include_retired_param, limit_param, page_param, match_offset_param,
+            match_semantic_param, match_best_match_param, match_num_candidates_param,
+            match_k_nearest_param, match_brief_param, match_encoder_model_param, match_reranker_param,
+        ],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['rows'],
+            properties={
+                'target_repo_url': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='Repository URL to match against. Either target_repo_url or target_repo is required.'
+                ),
+                'target_repo': openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    description='Alternative to target_repo_url. Object with owner, source, source_version, '
+                                'owner_type fields.'
+                ),
+                'rows': openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(type=openapi.TYPE_OBJECT),
+                    description='List of concept-like key-value pairs to match.'
+                ),
+                'map_config': openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(type=openapi.TYPE_OBJECT),
+                    description='Optional list configuring mapping logic per row.'
+                ),
+                'filter': openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    description='Filtering criteria including locale and faceted filters.'
+                ),
+            }
+        ),
+        responses={
+            200: 'List of matched results per input row',
+            400: 'Missing required parameters (rows, target_repo_url/target_repo)',
+            403: 'User not approved for $match or on waitlist',
+        }
+    )
     def post(self, request, **kwargs):  # pylint: disable=unused-argument
         user = self.request.user
         if user.is_mapper_waitlisted or not user.is_mapper_approved:

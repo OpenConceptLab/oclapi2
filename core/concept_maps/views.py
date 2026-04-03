@@ -138,6 +138,7 @@ class ConceptMapTranslateView(MappingListView):
                     if mapping.map_type == SAME_AS:
                         equivalence = "equivalent"
 
+                    to_url = None
                     if mapping.to_source and mapping.to_source.canonical_url:
                         to_url = mapping.to_source.canonical_url
                     elif mapping.to_source_url:

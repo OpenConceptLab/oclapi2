@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timezone as datetime_timezone
 import logging
 from typing import Iterable, List, Optional, Sequence
 
@@ -321,8 +322,8 @@ def format_datetime_for_api(value) -> Optional[str]:
     if not value:
         return None
     if timezone.is_naive(value):
-        value = timezone.make_aware(value, timezone.utc)
-    return value.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')
+        value = timezone.make_aware(value, datetime_timezone.utc)
+    return value.astimezone(datetime_timezone.utc).isoformat().replace('+00:00', 'Z')
 
 
 def build_datatype(concept: Concept) -> Optional[DatatypeType]:

@@ -11,7 +11,6 @@ from mozilla_django_oidc.views import OIDCAuthenticationCallbackView
 from pydash import get
 from rest_framework import mixins, status
 from rest_framework.authtoken.serializers import AuthTokenSerializer
-from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.generics import RetrieveAPIView, UpdateAPIView, DestroyAPIView, RetrieveUpdateDestroyAPIView, \
     ListAPIView
@@ -126,8 +125,9 @@ class OIDCLogoutView(APIView):
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
-class TokenAuthenticationView(ObtainAuthToken):
-    """Implementation of ObtainAuthToken with last_login update"""
+class TokenAuthenticationView(APIView):
+    """Authenticate a user and return their token without DRF's deprecated schema dependency."""
+    permission_classes = (AllowAny,)
 
     def get_throttles(self):
         return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
@@ -146,14 +146,19 @@ class TokenAuthenticationView(ObtainAuthToken):
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
     @swagger_auto_schema(request_body=AuthTokenSerializer)
-    def post(self, request, *args, **kwargs):
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         if AuthService.is_sso_enabled():
             raise Http400(
                 {'error': ["Single Sign On is enabled in this environment. Cannot login via API directly."]})
 
-        user = UserProfile.objects.filter(username=request.data.get('username')).first()
+        username = request.data.get('username')
+        password = request.data.get('password')
+        if not username or not password:
+            return Response(status=status.HTTP_400_BAD_REQUEST)
 
-        if not user or not user.check_password(request.data.get('password')):
+        user = UserProfile.objects.filter(username=username).first()
+
+        if not user or not user.check_password(password):
             raise Http400({'non_field_errors': ["Unable to log in with provided credentials."]})
 
         if not user.is_active:
@@ -173,7 +178,7 @@ class TokenAuthenticationView(ObtainAuthToken):
                 }, status=status.HTTP_401_UNAUTHORIZED
             )
 
-        result = super().post(request, *args, **kwargs)
+        result = Response({'token': user.get_token()})
 
         try:
             update_last_login(None, user)

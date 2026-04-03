@@ -19,6 +19,7 @@ PREMIUM_GROUP = 'premium_user'
 STAFF_GROUP = 'staff_user'
 SUPERADMIN_GROUP = 'superadmin_user'
 GRAPHQL_API_GROUP = 'graphql_api'
+CORE_USER_GROUP = 'core_user'
 AUTH_GROUPS = [
     OCL_SERVERS_GROUP,
     OCL_FHIR_SERVERS_GROUP,
@@ -34,6 +35,7 @@ AUTH_GROUPS = [
     PREMIUM_GROUP,
     STAFF_GROUP,
     SUPERADMIN_GROUP,
-    GRAPHQL_API_GROUP
+    GRAPHQL_API_GROUP,
+    CORE_USER_GROUP,
 ]
 INVALID_AUTH_GROUP_NAME = 'Invalid auth group.'

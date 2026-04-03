@@ -10,7 +10,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
   redis:
-    image: bitnami/redis:7.0.12
+    image: bitnami/redis
     restart: "always"
     environment:
       - ALLOW_EMPTY_PASSWORD=yes
@@ -32,6 +32,8 @@ services:
       - REDIS_PORT=${REDIS_PORT-6379}
       - DB_HOST=${DB_HOST-db}
       - DB_PORT=${DB_PORT-5432}
+      - DB=${DB-postgres}
+      - DB_USER=${DB_USER-postgres}
       - DB_PASSWORD=${DB_PASSWORD-Postgres123}
       - ES_HOSTS=${ES_HOSTS-es:9200}
       - ES_SCHEME=${ES_SCHEME-http}
@@ -94,6 +96,7 @@ services:
       - AWS_SECRET_ACCESS_KEY
       - AWS_STORAGE_BUCKET_NAME
       - AWS_REGION_NAME
+      - NO_LM=${NO_LM-TRUE}
     volumes:
       - upload-data:/code/uploads
   celery_beat:
@@ -114,6 +117,7 @@ services:
       - AWS_SECRET_ACCESS_KEY
       - AWS_STORAGE_BUCKET_NAME
       - AWS_REGION_NAME
+      - NO_LM=${NO_LM-TRUE}
   celery_indexing:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
     command: ["bash", "-c", "CELERY_WORKER_NAME=indexing ./start_celery_worker.sh -P prefork -Q indexing -c 2"]
@@ -156,6 +160,7 @@ services:
       - AWS_SECRET_ACCESS_KEY
       - AWS_STORAGE_BUCKET_NAME
       - AWS_REGION_NAME
+      - NO_LM=${NO_LM-TRUE}
     volumes:
       - upload-data:/code/uploads
   celery_bulk_import_0_1:
@@ -179,6 +184,7 @@ services:
       - AWS_SECRET_ACCESS_KEY
       - AWS_STORAGE_BUCKET_NAME
       - AWS_REGION_NAME
+      - NO_LM=${NO_LM-TRUE}
     volumes:
       - upload-data:/code/uploads
   celery_bulk_import_2_3:
@@ -202,6 +208,7 @@ services:
       - AWS_SECRET_ACCESS_KEY
       - AWS_STORAGE_BUCKET_NAME
       - AWS_REGION_NAME
+      - NO_LM=${NO_LM-TRUE}
     volumes:
       - upload-data:/code/uploads
   celery_bulk_import_root:
@@ -225,6 +232,7 @@ services:
       - AWS_SECRET_ACCESS_KEY
       - AWS_STORAGE_BUCKET_NAME
       - AWS_REGION_NAME
+      - NO_LM=${NO_LM-TRUE}
     volumes:
       - upload-data:/code/uploads
   flower:

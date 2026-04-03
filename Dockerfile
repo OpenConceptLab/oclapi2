@@ -1,4 +1,4 @@
-FROM python:3.10-slim AS builder
+FROM python:3.12-slim AS builder
 ENV PYTHONUNBUFFERED 1
 ENV PYTHONDONTWRITEBYTECODE 1
 
@@ -14,7 +14,7 @@ ADD requirements.txt /code/
 
 RUN pip wheel --no-cache-dir --wheel-dir /code/wheels -r requirements.txt
 
-FROM python:3.10-slim
+FROM python:3.12-slim
 ENV PYTHONUNBUFFERED 1
 ENV PYTHONDONTWRITEBYTECODE 1
 

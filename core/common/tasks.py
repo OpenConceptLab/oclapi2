@@ -393,6 +393,17 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
         task_id = self.request.id
         try:
             instance.add_processing(task_id)
+            # Compute snapshot and checksums async (moved from persist_new_version for faster HTTP response)
+            head = instance.head
+            if head:
+                if is_source:
+                    from core.sources.serializers import SourceDetailSerializer
+                    instance.snapshot = SourceDetailSerializer(head).data
+                elif is_collection:
+                    from core.collections.serializers import CollectionDetailSerializer
+                    instance.snapshot = CollectionDetailSerializer(head).data
+                instance.save(update_fields=['snapshot'])
+            instance.get_checksums(recalculate=True)
             instance.seed_references()
             if is_source:
                 instance.seed_concepts(index=False)
@@ -569,7 +580,11 @@ def index_expansion_concepts(expansion_id, count=None, concept_versioned_ids=Non
             queryset = Concept.objects.filter(versioned_object_id__in=concept_versioned_ids)
         else:
             queryset = expansion.concepts
-        expansion.batch_index(queryset, ConceptDocument)
+        expansion.batch_index(
+            queryset, ConceptDocument,
+            prefetch=['sources', 'names', 'descriptions',
+                      'expansion_set', 'expansion_set__collection_version']
+        )
 
 
 @app.task(
@@ -586,7 +601,10 @@ def index_expansion_mappings(expansion_id, count=None, mapping_versioned_ids=Non
             queryset = Mapping.objects.filter(versioned_object_id__in=mapping_versioned_ids)
         else:
             queryset = expansion.mappings
-        expansion.batch_index(queryset, MappingDocument)
+        expansion.batch_index(
+            queryset, MappingDocument,
+            prefetch=['sources', 'expansion_set', 'expansion_set__collection_version']
+        )
 
 
 @app.task
@@ -621,7 +639,11 @@ def index_source_concepts(source_id):
     source = Source.objects.filter(id=source_id).first()
     if source:
         from core.concepts.documents import ConceptDocument
-        source.batch_index(source.concepts, ConceptDocument)
+        source.batch_index(
+            source.concepts, ConceptDocument,
+            prefetch=['sources', 'names', 'descriptions',
+                      'expansion_set', 'expansion_set__collection_version']
+        )
 
 
 @app.task(
@@ -633,7 +655,10 @@ def index_source_mappings(source_id):
     source = Source.objects.filter(id=source_id).first()
     if source:
         from core.mappings.documents import MappingDocument
-        source.batch_index(source.mappings, MappingDocument)
+        source.batch_index(
+            source.mappings, MappingDocument,
+            prefetch=['sources', 'expansion_set', 'expansion_set__collection_version']
+        )
 
 
 @app.task(base=QueueOnceCustomTask)

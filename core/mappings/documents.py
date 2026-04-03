@@ -106,7 +106,7 @@ class MappingDocument(Document):
 
     @staticmethod
     def prepare_source_version(instance):
-        return list(instance.sources.values_list('version', flat=True))
+        return [s.version for s in instance.sources.all()]
 
     @staticmethod
     def prepare_collection_version(instance):

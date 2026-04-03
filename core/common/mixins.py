@@ -51,8 +51,7 @@ class CustomPaginator:
         if not is_sliced:
             bottom = (self.page_number - 1) * self.page_size
             top = bottom + self.page_size
-            if top >= self.total:
-                top = self.total
+            top = min(top, self.total)
             self.queryset = self.queryset[bottom:top]
         if isinstance(self.queryset, QuerySet):
             self.queryset.count = None
@@ -823,8 +822,9 @@ class SourceChildMixin(ChecksumModel):
 
         return criteria
 
-    def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
-        super().save(force_insert, force_update, using, update_fields)
+    def save(self, *args, force_insert=False, force_update=False, using=None, update_fields=None):
+        super().save(*args, force_insert=force_insert, force_update=force_update, using=using,
+                     update_fields=update_fields)
 
         if self.is_latest_version and self._counted is False:
             if self.__class__.__name__ == 'Concept':
@@ -893,6 +893,7 @@ class SourceChildMixin(ChecksumModel):
         parent_concept_uris = kwargs.pop('parent_concept_uris', None)
         add_prev_version_children = kwargs.pop('add_prev_version_children', True)
         _hierarchy_processing = kwargs.pop('_hierarchy_processing', False)
+        skip_duplicate_version_check = kwargs.pop('skip_duplicate_version_check', False)
         errors = {}
         self.created_by = self.updated_by = user
         self.version = self.version or generate_temp_version()
@@ -919,7 +920,7 @@ class SourceChildMixin(ChecksumModel):
                             self.set_checksums()
                         if Toggle.get(
                                 'PREVENT_DUPLICATE_VERSION_TOGGLE'
-                        ) and not _hierarchy_processing:
+                        ) and not _hierarchy_processing and not skip_duplicate_version_check:
                             standard_checksum = prev_latest.checksums.get('standard')
                             if not standard_checksum:
                                 standard_checksum = prev_latest.get_checksums(recalculate=True).get('standard')

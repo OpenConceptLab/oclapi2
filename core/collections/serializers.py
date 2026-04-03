@@ -127,6 +127,7 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
     class Meta:
         model = Collection
         lookup_field = 'mnemonic'
+        validators = []
         fields = (
             '__all__'
         )

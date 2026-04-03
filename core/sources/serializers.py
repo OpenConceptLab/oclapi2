@@ -117,6 +117,7 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
     class Meta:
         model = Source
         lookup_field = 'mnemonic'
+        validators = []
         fields = (
             '__all__'
         )

@@ -13,7 +13,7 @@ from django.test import TestCase
 from django.utils import timezone
 from minio.deleteobjects import DeleteError
 from mock.mock import call
-from moto import mock_s3
+from moto import mock_aws
 
 from core.services.storages.cloud.aws import S3
 from core.services.storages.cloud.azure import BlobStorage
@@ -21,7 +21,7 @@ from core.services.storages.cloud.minio import MinIO
 
 
 class S3Test(TestCase):
-    @mock_s3
+    @mock_aws
     def test_upload(self):
         _conn = boto3.resource('s3', region_name='us-east-1')
         _conn.create_bucket(Bucket='oclapi2-dev')
@@ -36,7 +36,7 @@ class S3Test(TestCase):
             'content'
         )
 
-    @mock_s3
+    @mock_aws
     def test_exists(self):
         _conn = boto3.resource('s3', region_name='us-east-1')
         _conn.create_bucket(Bucket='oclapi2-dev')
@@ -63,8 +63,8 @@ class S3Test(TestCase):
         )
 
     def test_upload_file(self):
-        with patch("builtins.open", mock_open(read_data="file-content")) as mock_file:
-            s3 = S3()
+        s3 = S3()
+        with patch("core.services.storages.cloud.aws.open", mock_open(read_data="file-content")) as mock_file:
             s3.upload = Mock(return_value=200)  # pylint: disable=protected-access
             file_path = "path/to/file.ext"
             res = s3.upload_file(key=file_path, headers={'header1': 'val1'})
@@ -147,7 +147,7 @@ class S3Test(TestCase):
             isinstance(mock_calls[0][1][1], ContentFile)
         )
 
-    @mock_s3
+    @mock_aws
     def test_remove(self):
         conn = boto3.resource('s3', region_name='us-east-1')
         conn.create_bucket(Bucket='oclapi2-dev')
@@ -168,7 +168,7 @@ class S3Test(TestCase):
         with self.assertRaises(ClientError):
             conn.Object('oclapi2-dev', 'some/path').get()
 
-    @mock_s3
+    @mock_aws
     def test_url_for(self):
         _conn = boto3.resource('s3', region_name='us-east-1')
         _conn.create_bucket(Bucket='oclapi2-dev')

@@ -157,11 +157,12 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
         return self.autoexpand
 
     def save(
-            self, force_insert=False, force_update=False, using=None, update_fields=None
+            self, *args, force_insert=False, force_update=False, using=None, update_fields=None
     ):
         dirty_fields = self.get_dirty_fields()
 
-        super().save(force_insert=force_insert, force_update=force_update, using=using, update_fields=update_fields)
+        super().save(*args, force_insert=force_insert, force_update=force_update, using=using,
+                     update_fields=update_fields)
 
         if self.id and 'canonical_url' in dirty_fields and self.active_url_registry_entries.exists():
             resolve_url_registry_entries.apply_async((self.id, self.resource_type), queue='default', permanent=False)
@@ -1072,9 +1073,10 @@ class CollectionReference(models.Model):
                sorted(filter_def.keys()) == sorted(['property', 'op', 'value']) and \
                {type(val) for val in filter_def.values()} == {str}
 
-    def save(self, force_insert=False, force_update=False, using=None,
+    def save(self, *args, force_insert=False, force_update=False, using=None,
              update_fields=None):
-        super().save(force_insert=force_insert, force_update=force_update, using=using, update_fields=update_fields)
+        super().save(*args, force_insert=force_insert, force_update=force_update, using=using,
+                     update_fields=update_fields)
 
         if self.id and get(self, '_fetched'):
             if self._concepts is not None and self._concepts.exists():

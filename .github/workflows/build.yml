@@ -23,7 +23,7 @@ jobs:
     - name: Run linting rules
       uses: actions/setup-python@v4
       with:
-        python-version: '3.10'
+        python-version: '3.12'
     - run: pip install -r requirements.txt
     - run: pylint -j0 core/
 
@@ -62,7 +62,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - name: Cache pip dependencies
         uses: actions/cache@v3
         with:
