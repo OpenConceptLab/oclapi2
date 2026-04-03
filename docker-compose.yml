@@ -96,6 +96,7 @@ services:
       - AWS_SECRET_ACCESS_KEY
       - AWS_STORAGE_BUCKET_NAME
       - AWS_REGION_NAME
+      - NO_LM=${NO_LM-TRUE}
     volumes:
       - upload-data:/code/uploads
   celery_beat:
@@ -116,6 +117,7 @@ services:
       - AWS_SECRET_ACCESS_KEY
       - AWS_STORAGE_BUCKET_NAME
       - AWS_REGION_NAME
+      - NO_LM=${NO_LM-TRUE}
   celery_indexing:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
     command: ["bash", "-c", "CELERY_WORKER_NAME=indexing ./start_celery_worker.sh -P prefork -Q indexing -c 2"]
@@ -158,6 +160,7 @@ services:
       - AWS_SECRET_ACCESS_KEY
       - AWS_STORAGE_BUCKET_NAME
       - AWS_REGION_NAME
+      - NO_LM=${NO_LM-TRUE}
     volumes:
       - upload-data:/code/uploads
   celery_bulk_import_0_1:
@@ -181,6 +184,7 @@ services:
       - AWS_SECRET_ACCESS_KEY
       - AWS_STORAGE_BUCKET_NAME
       - AWS_REGION_NAME
+      - NO_LM=${NO_LM-TRUE}
     volumes:
       - upload-data:/code/uploads
   celery_bulk_import_2_3:
@@ -204,6 +208,7 @@ services:
       - AWS_SECRET_ACCESS_KEY
       - AWS_STORAGE_BUCKET_NAME
       - AWS_REGION_NAME
+      - NO_LM=${NO_LM-TRUE}
     volumes:
       - upload-data:/code/uploads
   celery_bulk_import_root:
@@ -227,6 +232,7 @@ services:
       - AWS_SECRET_ACCESS_KEY
       - AWS_STORAGE_BUCKET_NAME
       - AWS_REGION_NAME
+      - NO_LM=${NO_LM-TRUE}
     volumes:
       - upload-data:/code/uploads
   flower:
