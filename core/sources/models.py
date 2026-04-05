@@ -419,7 +419,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             queryset = self.mappings_set.filter(id=F('versioned_object_id'))
         self.active_mappings = queryset.filter(retired=False, is_active=True).count()
 
-    def index_resources_for_self_as_latest_released(self):
+    def index_resources_for_self_as_latest_released(self, only_update=False):
         """
         1. Assumes self is the latest released version
         2. indexes prev released version's (if exists) concepts and mappings
@@ -430,9 +430,11 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
 
             prev_released_version = self.get_prev_released_version()
             if prev_released_version:
-                prev_released_version.index_children_async(user)
+                prev_released_version.index_children_async(user, {'is_in_latest_source_version': False})
 
-            self.index_children_async(user)
+            self.index_children_async(
+                user, {'is_in_latest_source_version': True} if only_update else None
+            )
 
     def index_resources_for_self_as_unreleased(self):
         """
@@ -442,11 +444,11 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         """
         if not self.released:
             user = self.updated_by
-            self.index_children_async(user)
+            self.index_children_async(user, {'is_in_latest_source_version': False})
 
             latest_released = self.get_latest_released_version()
             if latest_released:
-                latest_released.index_children_async(user)
+                latest_released.index_children_async(user, {'is_in_latest_source_version': True})
 
     def seed_concepts(self, index=True):
         head = self.head
@@ -483,27 +485,31 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         else:
             self.index_children_async(user)
 
-    def index_children_async(self, user=None):
+    def index_children_async(self, user=None, partial_doc=None):
         user = user or self.updated_by
 
-        self.index_concepts_async(user)
-        self.index_mappings_async(user)
+        self.index_concepts_async(user, partial_doc)
+        self.index_mappings_async(user, partial_doc)
 
-    def index_mappings_async(self, user):
+    def index_mappings_async(self, user, partial_doc=None):
         user = user or self.updated_by
 
         task = Task.new(queue='indexing', user=user, name=index_source_mappings.__name__)
         try:
-            index_source_mappings.apply_async((self.id,), queue='indexing', persist_args=True, task_id=task.id)
+            index_source_mappings.apply_async(
+                (self.id, partial_doc), queue='indexing', persist_args=True, task_id=task.id
+            )
         except AlreadyQueued:
             pass
 
-    def index_concepts_async(self, user):
+    def index_concepts_async(self, user, partial_doc=None):
         user = user or self.updated_by
 
         task = Task.new(queue='indexing', user=user, name=index_source_concepts.__name__)
         try:
-            index_source_concepts.apply_async((self.id,), queue='indexing', persist_args=True, task_id=task.id)
+            index_source_concepts.apply_async(
+                (self.id, partial_doc), queue='indexing', persist_args=True, task_id=task.id
+            )
         except AlreadyQueued:
             pass
 
@@ -518,7 +524,6 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
 
     def get_seed_new_version_task(self):
         return Task.find(name__iendswith='seed_children_to_new_version', args__contains=['source', self.id])
-
 
     def __get_resource_db_sequence_prefix(self):
         return self.uri.replace('/', '_').replace('-', '_').replace('.', '_').replace('@', '_')
