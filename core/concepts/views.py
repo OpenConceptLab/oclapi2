@@ -1006,6 +1006,7 @@ class RerankConceptsListView(BaseAPIView):
         name_key = self.request.data.get('name_key', None) or 'display_name'
         text = self.request.data.get('q', None)
         score_key = self.request.data.get('score_key', None)
+        encoder_model = self.request.data.get('encoder_model', None)
 
         if not isinstance(rows, list) or not rows:
             return Response(
@@ -1017,7 +1018,9 @@ class RerankConceptsListView(BaseAPIView):
                 {'detail': 'Missing "q" in request body.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-
-        return Response(
-            Reranker().rerank(hits=rows, name_key=name_key, txt=text, score_key=score_key, order_results=True)
-        )
+        try:
+            reranker = Reranker(model_name=encoder_model)
+            results = reranker.rerank(hits=rows, name_key=name_key, txt=text, score_key=score_key, order_results=True)
+            return Response(results)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
