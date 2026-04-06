@@ -1448,7 +1448,7 @@ class TasksTest(OCLTestCase):
         source_v2 = OrganizationSourceFactory(
             organization=head.organization, version='v2', mnemonic=head.mnemonic, released=True)
 
-        source_v2.index_resources_for_self_as_latest_released(True)
+        source_v2.index_resources_for_self_as_latest_released(only_update=True)
 
         self.assertEqual(
             index_children_async_mock.mock_calls,
