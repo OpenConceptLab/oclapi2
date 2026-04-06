@@ -1512,6 +1512,34 @@ class TasksTest(OCLTestCase):
             partial_doc={'is_in_latest_source_version': False}
         )
 
+    @patch('core.common.tasks.logger.exception')
+    @patch('core.sources.models.Source.concepts')
+    @patch('core.sources.models.Source.batch_index')
+    def test_index_source_concepts_partial_update_failure_should_fallback_to_full_index(
+            self, batch_index_mock, source_concepts_mock, logger_exception_mock
+    ):
+        source = OrganizationSourceFactory()
+        batch_index_mock.side_effect = [Exception('boom'), None]
+
+        index_source_concepts(source.id, {'is_in_latest_source_version': False})
+
+        self.assertEqual(
+            batch_index_mock.mock_calls,
+            [
+                call(
+                    source_concepts_mock, ConceptDocument,
+                    partial_doc={'is_in_latest_source_version': False}
+                ),
+                call(
+                    source_concepts_mock, ConceptDocument,
+                    prefetch=['sources', 'names', 'descriptions', 'expansion_set', 'expansion_set__collection_version']
+                )
+            ]
+        )
+        logger_exception_mock.assert_called_once_with(
+            'Falling back to full concept reindex for source %s', source.id
+        )
+
     @patch('core.sources.models.Source.mappings')
     @patch('core.sources.models.Source.batch_index')
     def test_index_source_mappings_partial_update(
@@ -1522,6 +1550,34 @@ class TasksTest(OCLTestCase):
         batch_index_mock.assert_called_once_with(
             source_mappings_mock, MappingDocument,
             partial_doc={'is_in_latest_source_version': False}
+        )
+
+    @patch('core.common.tasks.logger.exception')
+    @patch('core.sources.models.Source.mappings')
+    @patch('core.sources.models.Source.batch_index')
+    def test_index_source_mappings_partial_update_failure_should_fallback_to_full_index(
+            self, batch_index_mock, source_mappings_mock, logger_exception_mock
+    ):
+        source = OrganizationSourceFactory()
+        batch_index_mock.side_effect = [Exception('boom'), None]
+
+        index_source_mappings(source.id, {'is_in_latest_source_version': False})
+
+        self.assertEqual(
+            batch_index_mock.mock_calls,
+            [
+                call(
+                    source_mappings_mock, MappingDocument,
+                    partial_doc={'is_in_latest_source_version': False}
+                ),
+                call(
+                    source_mappings_mock, MappingDocument,
+                    prefetch=['sources', 'expansion_set', 'expansion_set__collection_version']
+                )
+            ]
+        )
+        logger_exception_mock.assert_called_once_with(
+            'Falling back to full mapping reindex for source %s', source.id
         )
 
     @patch('core.sources.models.Source.validate_child_concepts')
