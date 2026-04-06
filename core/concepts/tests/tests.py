@@ -1800,6 +1800,51 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             }
         )
 
+    def test_duplicate_fully_specified_name_per_source_should_fail_even_with_unrelated_null_typed_name(self):
+        """Regression for #2406: duplicate FSNs must still be caught when another concept also has NULL-typed names."""
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
+
+        concept1 = Concept.persist_new(
+            {
+                'mnemonic': 'cerebral-malaria-existing',
+                'version': HEAD,
+                'parent': source,
+                'concept_class': 'Diagnosis',
+                'datatype': 'None',
+                'names': [
+                    ConceptNameFactory.build(
+                        name='Cerebral malaria', locale='en', locale_preferred=True, type='Fully Specified'
+                    ),
+                    ConceptNameFactory.build(
+                        name='Unrelated synonym with NULL type', locale='en', locale_preferred=False, type=None
+                    ),
+                ]
+            }
+        )
+        concept2 = Concept.persist_new(
+            {
+                'mnemonic': 'cerebral-malaria-duplicate',
+                'version': HEAD,
+                'parent': source,
+                'concept_class': 'Diagnosis',
+                'datatype': 'None',
+                'names': [
+                    ConceptNameFactory.build(
+                        name='Cerebral malaria', locale='en', locale_preferred=True, type='Fully Specified'
+                    ),
+                ]
+            }
+        )
+
+        self.assertEqual(concept1.errors, {})
+        self.assertEqual(
+            concept2.errors,
+            {
+                'names': [OPENMRS_FULLY_SPECIFIED_NAME_UNIQUE_PER_SOURCE_LOCALE +
+                          ': Cerebral malaria (locale: en, preferred: yes)']
+            }
+        )
+
     def test_at_least_one_fully_specified_name_per_concept_negative(self):
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
 

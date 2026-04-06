@@ -14,6 +14,7 @@ from core.concepts.constants import (
     LOCALES_SEARCH_INDEX_TERM, INDEX_TERM, FULLY_SPECIFIED, SHORT,
     OPENMRS_CONCEPT_EXTERNAL_ID_ERROR, OPENMRS_EXTERNAL_ID_LENGTH, OPENMRS_NAME_EXTERNAL_ID_ERROR,
     OPENMRS_DESCRIPTION_EXTERNAL_ID_ERROR)
+from core.concepts.models import ConceptName
 from core.concepts.validators import BaseConceptValidator, message_with_name_details
 
 
@@ -76,7 +77,7 @@ class OpenMRSConceptValidator(BaseConceptValidator):
             concept=concept,
             attribute='locale_preferred',
             error_message=OPENMRS_PREFERRED_NAME_UNIQUE_PER_SOURCE_LOCALE,
-            filters={'names__locale_preferred': True}
+            filters={'locale_preferred': True}
         )
 
     def fully_specified_name_should_be_unique_for_source_and_locale(self, concept):
@@ -103,14 +104,20 @@ class OpenMRSConceptValidator(BaseConceptValidator):
         if not filters:
             filters = {}
 
-        return not self.repo.concepts_set.exclude(
-            versioned_object_id=versioned_object_id
+        # Query the localized text row directly so all name constraints apply to the same related record.
+        return not ConceptName.objects.exclude(
+            concept__versioned_object_id=versioned_object_id
         ).exclude(
-            names__type__in=(*LOCALES_SHORT, *LOCALES_SEARCH_INDEX_TERM, '', None)
+            type__in=(*LOCALES_SHORT, *LOCALES_SEARCH_INDEX_TERM, '', None)
         ).exclude(
-            names__type__isnull=True
+            type__isnull=True
         ).filter(
-            is_active=True, retired=False, is_latest_version=True, names__locale=name.locale, names__name=name.name,
+            concept__parent=self.repo,
+            concept__is_active=True,
+            concept__retired=False,
+            concept__is_latest_version=True,
+            locale=name.locale,
+            name=name.name,
             **filters
         ).exists()
 
