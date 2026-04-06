@@ -1800,8 +1800,8 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             }
         )
 
-    def test_duplicate_fully_specified_name_per_source_should_fail_even_with_unrelated_null_typed_name(self):
-        """Regression for #2406: duplicate FSNs must still be caught when another concept also has NULL-typed names."""
+    def test_duplicate_fully_specified_name_per_source_should_fail_case_insensitively_even_with_null_typed_name(self):
+        """Regression for #2406: duplicate FSNs must be rejected case-insensitively even with NULL-typed names."""
         source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
 
         concept1 = Concept.persist_new(
@@ -1830,7 +1830,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
                 'datatype': 'None',
                 'names': [
                     ConceptNameFactory.build(
-                        name='Cerebral malaria', locale='en', locale_preferred=True, type='Fully Specified'
+                        name='cerebral malaria', locale='en', locale_preferred=True, type='Fully Specified'
                     ),
                 ]
             }
@@ -1841,7 +1841,7 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             concept2.errors,
             {
                 'names': [OPENMRS_FULLY_SPECIFIED_NAME_UNIQUE_PER_SOURCE_LOCALE +
-                          ': Cerebral malaria (locale: en, preferred: yes)']
+                          ': cerebral malaria (locale: en, preferred: yes)']
             }
         )
 
