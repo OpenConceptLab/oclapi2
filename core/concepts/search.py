@@ -4,7 +4,191 @@ from pydash import flatten, is_number, compact, get
 from core.common.constants import FACET_SIZE, HEAD
 from core.common.search import CustomESFacetedSearch, CustomESSearch
 from core.common.utils import get_embeddings, is_canonical_uri
+from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
+
+CONCEPT_FUZZY_BOOST_DIVIDE_BY = 10000
+CONCEPT_FUZZY_EXPANSIONS = 2
+
+
+def normalize_concept_search_query(query):
+    """Normalize raw concept search text so all callers share the same preprocessing."""
+    return str(query or '').replace('"', '').replace("'", '').strip()
+
+
+def filter_concept_search_fields(fields, include_map_codes=True):
+    """Optionally remove map-code fields to match the REST search toggle semantics."""
+    if include_map_codes:
+        return fields
+
+    if isinstance(fields, dict):
+        return {key: value for key, value in fields.items() if not key.endswith('map_codes')}
+
+    return [field for field in fields if not field.endswith('map_codes')]
+
+
+def get_concept_search_string(query, lower=True, decode=True):
+    """Return the normalized concept query string in the same format used by REST search."""
+    return CustomESSearch.get_search_string(
+        normalize_concept_search_query(query),
+        lower=lower,
+        decode=decode,
+    )
+
+
+def get_concept_exact_search_criterion(query, include_map_codes=True):
+    """Build the exact-match clause used by both REST and GraphQL concept search."""
+    match_phrase_field_list = ConceptDocument.get_match_phrase_attrs()
+    match_word_fields_map = filter_concept_search_fields(
+        ConceptDocument.get_exact_match_attrs(),
+        include_map_codes=include_map_codes,
+    )
+    fields = match_phrase_field_list + list(match_word_fields_map.keys())
+    return CustomESSearch.get_exact_match_criterion(
+        get_concept_search_string(query, lower=False, decode=False),
+        match_phrase_field_list,
+        match_word_fields_map,
+    ), fields
+
+
+def get_concept_wildcard_search_criterion(query, include_map_codes=True):
+    """Build the wildcard clause used by both REST and GraphQL concept search."""
+    fields = filter_concept_search_fields(
+        ConceptDocument.get_wildcard_search_attrs(),
+        include_map_codes=include_map_codes,
+    )
+    return CustomESSearch.get_wildcard_match_criterion(
+        search_str=get_concept_search_string(query),
+        fields=fields,
+    ), list(fields.keys())
+
+
+def get_concept_fuzzy_search_criterion(
+    query,
+    boost_divide_by=CONCEPT_FUZZY_BOOST_DIVIDE_BY,
+    expansions=CONCEPT_FUZZY_EXPANSIONS,
+):
+    """Build the fuzzy clause used by both REST and GraphQL concept search."""
+    return CustomESSearch.get_fuzzy_match_criterion(
+        search_str=get_concept_search_string(query, decode=False),
+        fields=ConceptDocument.get_fuzzy_search_attrs(),
+        boost_divide_by=boost_divide_by,
+        expansions=expansions,
+    )
+
+
+def get_concept_mandatory_words_criteria(query, include_map_codes=True):
+    """Build the required-word wildcard clauses shared by REST and GraphQL."""
+    criterion = None
+    for must_have in CustomESSearch.get_must_haves(normalize_concept_search_query(query)):
+        criteria, _ = get_concept_wildcard_search_criterion(
+            f"{must_have}*",
+            include_map_codes=include_map_codes,
+        )
+        criterion = criteria if criterion is None else criterion & criteria
+    return criterion
+
+
+def get_concept_mandatory_exclude_words_criteria(query, include_map_codes=True):
+    """Build the excluded-word wildcard clauses shared by REST and GraphQL."""
+    criterion = None
+    for must_not_have in CustomESSearch.get_must_not_haves(normalize_concept_search_query(query)):
+        criteria, _ = get_concept_wildcard_search_criterion(
+            f"{must_not_have}*",
+            include_map_codes=include_map_codes,
+        )
+        criterion = criteria if criterion is None else criterion | criteria
+    return criterion
+
+
+def get_concept_search_rescore(query):
+    """Return the concept-specific ES rescore block shared by REST and GraphQL."""
+    search_str = get_concept_search_string(query, lower=False)
+    return {
+        "window_size": 400,
+        "query": {
+            "score_mode": "total",
+            "query_weight": 1.0,
+            "rescore_query_weight": 800.0,
+            "rescore_query": {
+                "dis_max": {
+                    "tie_breaker": 0.0,
+                    "queries": [
+                        {
+                            "constant_score": {
+                                "filter": {
+                                    "term": {
+                                        "_name": {
+                                            "value": search_str,
+                                            "case_insensitive": True,
+                                        }
+                                    }
+                                },
+                                "boost": 10.0,
+                            }
+                        },
+                        {
+                            "constant_score": {
+                                "filter": {
+                                    "term": {
+                                        "_synonyms": {
+                                            "value": search_str,
+                                            "case_insensitive": True,
+                                        }
+                                    }
+                                },
+                                "boost": 8.0,
+                            }
+                        },
+                    ]
+                }
+            },
+        },
+    }
+
+
+def apply_concept_text_search(
+    search,
+    query,
+    include_wildcard=True,
+    include_fuzzy=True,
+    include_map_codes=True,
+    fuzzy_boost_divide_by=CONCEPT_FUZZY_BOOST_DIVIDE_BY,
+    fuzzy_expansions=CONCEPT_FUZZY_EXPANSIONS,
+    include_rescore=False,
+):
+    """Apply the shared concept text-search clauses to an Elasticsearch search object."""
+    criterion, fields = get_concept_exact_search_criterion(query, include_map_codes=include_map_codes)
+
+    if include_wildcard:
+        wildcard_criterion, wildcard_fields = get_concept_wildcard_search_criterion(
+            query,
+            include_map_codes=include_map_codes,
+        )
+        criterion |= wildcard_criterion
+        fields += wildcard_fields
+
+    if include_fuzzy:
+        criterion |= get_concept_fuzzy_search_criterion(
+            query,
+            boost_divide_by=fuzzy_boost_divide_by,
+            expansions=fuzzy_expansions,
+        )
+
+    search = search.query(criterion)
+
+    must_have_criterion = get_concept_mandatory_words_criteria(query, include_map_codes=include_map_codes)
+    if must_have_criterion is not None:
+        search = search.filter(must_have_criterion)
+
+    must_not_criterion = get_concept_mandatory_exclude_words_criteria(query, include_map_codes=include_map_codes)
+    if must_not_criterion is not None:
+        search = search.filter(~must_not_criterion)
+
+    if include_rescore:
+        search = search.extra(rescore=get_concept_search_rescore(query))
+
+    return search, fields
 
 
 class ConceptFacetedSearch(CustomESFacetedSearch):

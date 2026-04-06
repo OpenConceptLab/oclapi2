@@ -11,6 +11,63 @@ from sentence_transformers import CrossEncoder
 
 from core.common.constants import ES_REQUEST_TIMEOUT
 from core.common.utils import is_url_encoded_string
+from core.orgs.constants import ORG_OBJECT_TYPE
+from core.users.constants import USER_OBJECT_TYPE
+
+
+def get_document_public_visibility_criteria(
+    user,
+    include_creator_private_access=False,
+    include_owner_private_access=False,
+    include_organization_memberships=False,
+):
+    """Return a shared Elasticsearch visibility criterion for owner-scoped documents."""
+    criteria = Q('term', public_can_view=True)
+    if not getattr(user, 'is_authenticated', False):
+        return criteria
+
+    private_criteria = None
+    username = getattr(user, 'username', None)
+    if username and include_creator_private_access:
+        private_criteria = Q('term', created_by=username)
+
+    if username and include_owner_private_access:
+        owner_criteria = Q('term', owner_type=USER_OBJECT_TYPE) & Q('term', owner=username.lower())
+        private_criteria = owner_criteria if private_criteria is None else private_criteria | owner_criteria
+
+    if include_organization_memberships:
+        organization_mnemonics = [
+            mnemonic.lower() for mnemonic in user.organizations.values_list('mnemonic', flat=True)
+        ]
+        if organization_mnemonics:
+            org_criteria = Q('term', owner_type=ORG_OBJECT_TYPE) & Q('terms', owner=organization_mnemonics)
+            private_criteria = org_criteria if private_criteria is None else private_criteria | org_criteria
+
+    if private_criteria is None:
+        return criteria
+
+    return criteria | (Q('term', public_can_view=False) & private_criteria)
+
+
+def apply_document_public_visibility_filter(
+    search,
+    user,
+    include_creator_private_access=False,
+    include_owner_private_access=False,
+    include_organization_memberships=False,
+):
+    """Apply a shared Elasticsearch visibility filter without changing staff searches."""
+    if getattr(user, 'is_staff', False):
+        return search
+
+    return search.filter(
+        get_document_public_visibility_criteria(
+            user,
+            include_creator_private_access=include_creator_private_access,
+            include_owner_private_access=include_owner_private_access,
+            include_organization_memberships=include_organization_memberships,
+        )
+    )
 
 
 class CustomESFacetedSearch(FacetedSearch):

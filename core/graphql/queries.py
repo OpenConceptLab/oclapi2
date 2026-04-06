@@ -10,14 +10,13 @@ from django.contrib.auth.models import AnonymousUser
 from django.db.models import Case, F, IntegerField, Prefetch, Q, When
 from django.utils import timezone
 from elasticsearch import ConnectionError as ESConnectionError, TransportError
-from elasticsearch_dsl import Q as ES_Q
 from pydash import get
 from strawberry.exceptions import GraphQLError
 
 from core.common.constants import HEAD
-from core.common.search import CustomESSearch
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
+from core.concepts.search import apply_concept_text_search
 from core.mappings.models import Mapping
 from core.orgs.constants import ORG_OBJECT_TYPE
 from core.sources.models import Source
@@ -368,56 +367,6 @@ def serialize_concepts(concepts: Iterable[Concept]) -> List[ConceptType]:
     return output
 
 
-def get_exact_search_criterion(query: str) -> tuple[ES_Q, list[str]]:
-    match_phrase_field_list = ConceptDocument.get_match_phrase_attrs()
-    match_word_fields_map = ConceptDocument.get_exact_match_attrs()
-    fields = match_phrase_field_list + list(match_word_fields_map.keys())
-    return (
-        CustomESSearch.get_exact_match_criterion(
-            CustomESSearch.get_search_string(query, lower=False, decode=False),
-            match_phrase_field_list,
-            match_word_fields_map,
-        ),
-        fields,
-    )
-
-
-def get_wildcard_search_criterion(query: str) -> tuple[ES_Q, list[str]]:
-    fields = ConceptDocument.get_wildcard_search_attrs()
-    return (
-        CustomESSearch.get_wildcard_match_criterion(
-            CustomESSearch.get_search_string(query, lower=True, decode=True),
-            fields,
-        ),
-        list(fields.keys()),
-    )
-
-
-def get_fuzzy_search_criterion(query: str) -> ES_Q:
-    return CustomESSearch.get_fuzzy_match_criterion(
-        search_str=CustomESSearch.get_search_string(query, decode=False),
-        fields=ConceptDocument.get_fuzzy_search_attrs(),
-        boost_divide_by=10000,
-        expansions=2,
-    )
-
-
-def get_mandatory_words_criteria(query: str) -> ES_Q | None:
-    criterion = None
-    for must_have in CustomESSearch.get_must_haves(query):
-        criteria, _ = get_wildcard_search_criterion(f"{must_have}*")
-        criterion = criteria if criterion is None else criterion & criteria
-    return criterion
-
-
-def get_mandatory_exclude_words_criteria(query: str) -> ES_Q | None:
-    criterion = None
-    for must_not_have in CustomESSearch.get_must_not_haves(query):
-        criteria, _ = get_wildcard_search_criterion(f"{must_not_have}*")
-        criterion = criteria if criterion is None else criterion | criteria
-    return criterion
-
-
 def concept_ids_from_es(
         query: str,
         source_version: Optional[Source],
@@ -449,17 +398,7 @@ def concept_ids_from_es(
             search = search.filter('term', is_latest_version=True)
             search = apply_es_visibility_filter(search, user or AnonymousUser())
 
-        exact_criterion, _ = get_exact_search_criterion(trimmed)
-        wildcard_criterion, _ = get_wildcard_search_criterion(trimmed)
-        fuzzy_criterion = get_fuzzy_search_criterion(trimmed)
-        search = search.query(exact_criterion | wildcard_criterion | fuzzy_criterion)
-
-        must_have_criterion = get_mandatory_words_criteria(trimmed)
-        if must_have_criterion is not None:
-            search = search.filter(must_have_criterion)
-        must_not_criterion = get_mandatory_exclude_words_criteria(trimmed)
-        if must_not_criterion is not None:
-            search = search.filter(~must_not_criterion)
+        search, _ = apply_concept_text_search(search, trimmed, include_rescore=True)
 
         if pagination:
             search = search[pagination['start']:pagination['end']]

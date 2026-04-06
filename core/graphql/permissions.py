@@ -12,9 +12,8 @@ from strawberry.exceptions import GraphQLError
 
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.permissions import CanViewConceptDictionary
+from core.common.search import apply_document_public_visibility_filter
 from core.concepts.models import Concept
-from core.orgs.constants import ORG_OBJECT_TYPE
-from core.users.constants import USER_OBJECT_TYPE
 
 SOURCE_VERSION_CACHE_ATTR = '_graphql_source_version_cache'
 
@@ -55,39 +54,12 @@ def filter_global_queryset(qs, user):
 
 def apply_es_visibility_filter(search, user):
     """Mirror REST visibility rules in Elasticsearch so totals stay aligned with the DB."""
-    if getattr(user, 'is_staff', False):
-        return search
-
-    if getattr(user, 'is_anonymous', True):
-        return search.filter('term', public_can_view=True)
-
-    organization_mnemonics = [
-        mnemonic.lower() for mnemonic in user.organizations.values_list('mnemonic', flat=True)
-    ]
-    visibility_filters = [
-        {'term': {'public_can_view': True}},
-        {
-            'bool': {
-                'must': [
-                    {'term': {'owner_type': USER_OBJECT_TYPE}},
-                    {'term': {'owner': user.username.lower()}},
-                ]
-            }
-        },
-    ]
-    if organization_mnemonics:
-        visibility_filters.append(
-            {
-                'bool': {
-                    'must': [
-                        {'term': {'owner_type': ORG_OBJECT_TYPE}},
-                        {'terms': {'owner': organization_mnemonics}},
-                    ]
-                }
-            }
-        )
-
-    return search.filter('bool', should=visibility_filters, minimum_should_match=1)
+    return apply_document_public_visibility_filter(
+        search,
+        user,
+        include_owner_private_access=True,
+        include_organization_memberships=True,
+    )
 
 
 def check_user_permission(

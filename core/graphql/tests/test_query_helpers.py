@@ -398,6 +398,9 @@ class QueryHelperTests(OCLTestCase):
             def params(self, **_kwargs):
                 return self
 
+            def extra(self, **_kwargs):
+                return self
+
             def execute(self):
                 return FakeResponse(self._items, self._total)
 
@@ -437,13 +440,21 @@ class QueryHelperTests(OCLTestCase):
             def params(self, **_kwargs):
                 return self
 
+            def extra(self, **_kwargs):
+                return self
+
             def execute(self):
                 return RecordingResponse()
 
         anonymous_search = RecordingSearch()
         with patch('core.graphql.queries.ConceptDocument.search', return_value=anonymous_search):
             concept_ids_from_es('shared', None, None, user=AnonymousUser())
-        self.assertIn((('term',), {'public_can_view': True}), anonymous_search.filters)
+        self.assertTrue(
+            any(
+                len(args) == 1 and not kwargs and 'public_can_view' in str(args[0])
+                for args, kwargs in anonymous_search.filters
+            )
+        )
 
     def test_concepts_queries_behavior(self):
         base_qs = build_base_queryset(self.source)
