@@ -1,6 +1,7 @@
 import json
 from collections import Counter
 
+from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models, IntegrityError
@@ -38,6 +39,7 @@ class MapProject(BaseModel):
     candidates = models.JSONField(default=dict, null=True, blank=True)
     lookup_config = models.JSONField(default=dict, null=True, blank=True)
     analysis = models.JSONField(default=dict, null=True, blank=True)
+    encoder_model = models.TextField(null=True, blank=True, default=settings.ENCODER_MODEL_NAME)
 
     class Meta:
         db_table = 'map_projects'
@@ -195,6 +197,8 @@ class MapProject(BaseModel):
         self.clean_filters()
         if not self.include_retired:
             self.include_retired = False
+        if not self.encoder_model:
+            self.encoder_model = settings.ENCODER_MODEL_NAME
         if self.matches:
             try:
                 self.matches = json.loads(self.matches)
