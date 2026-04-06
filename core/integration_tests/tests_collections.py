@@ -2,7 +2,6 @@ import json
 import zipfile
 
 from celery_once import AlreadyQueued
-from django.http import StreamingHttpResponse
 from mock import patch, Mock, ANY
 from rest_framework.exceptions import ErrorDetail
 
@@ -2608,12 +2607,12 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         s3_has_path_mock.assert_called_once_with("users/username/username_coll_v1.")
 
-    @patch('core.services.storages.cloud.aws.S3.get_streaming_response')
+    @patch('core.services.storages.cloud.aws.S3.url_for')
     @patch('core.services.storages.cloud.aws.S3.get_last_key_from_path')
     @patch('core.services.storages.cloud.aws.S3.has_path')
-    def test_get_200_version(self, s3_has_path_mock, s3_get_last_key_from_path_mock, s3_streaming_response):
+    def test_get_302_version(self, s3_has_path_mock, s3_get_last_key_from_path_mock, s3_url_for_mock):
         s3_has_path_mock.return_value = True
-        s3_streaming_response.return_value = StreamingHttpResponse(content_type='application/zip')
+        s3_url_for_mock.return_value = 'https://signed.example/coll-v1.zip'
         s3_get_last_key_from_path_mock.return_value = f'users/username/username_coll_v1.{self.v1_updated_at}.zip'
 
         response = self.client.get(
@@ -2622,15 +2621,17 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
             format='json'
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], 'https://signed.example/coll-v1.zip')
         s3_has_path_mock.assert_called_once_with("users/username/username_coll_v1.")
         s3_get_last_key_from_path_mock.assert_called_once_with("users/username/username_coll_v1.")
+        s3_url_for_mock.assert_called_once_with(f'users/username/username_coll_v1.{self.v1_updated_at}.zip')
 
-    @patch('core.services.storages.cloud.aws.S3.get_streaming_response')
+    @patch('core.services.storages.cloud.aws.S3.url_for')
     @patch('core.services.storages.cloud.aws.S3.exists')
-    def test_get_200_head(self, s3_exists_mock, s3_streaming_response):
+    def test_get_302_head(self, s3_exists_mock, s3_url_for_mock):
         s3_exists_mock.return_value = True
-        s3_streaming_response.return_value = StreamingHttpResponse(content_type='application/zip')
+        s3_url_for_mock.return_value = 'https://signed.example/coll-head.zip'
 
         response = self.client.get(
             self.collection.uri + 'HEAD/export/',
@@ -2638,8 +2639,10 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
             format='json'
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], 'https://signed.example/coll-head.zip')
         s3_exists_mock.assert_called_once_with(f"users/username/username_coll_vHEAD.{self.HEAD_updated_at}.zip")
+        s3_url_for_mock.assert_called_once_with(f"users/username/username_coll_vHEAD.{self.HEAD_updated_at}.zip")
 
     def test_get_405(self):
         response = self.client.get(

@@ -9,7 +9,7 @@ from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Q, F, QuerySet
 from django.http import HttpResponseForbidden, Http404
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, redirect
 from django.urls import resolve, Resolver404
 from django.utils.functional import cached_property
 from ocldev.checksum import Checksum
@@ -984,7 +984,13 @@ class ConceptContainerExportMixin:
             return Response(status=status.HTTP_208_ALREADY_REPORTED)
 
         if version.has_export():
-            return get_export_service().get_streaming_response(version.get_export_path())
+            export_path = version.get_export_path()
+            export_url = get_export_service().url_for(export_path)
+            if export_url:
+                return redirect(export_url)
+            logger.warning('Export exists for %s version %s but no signed URL was generated.',
+                           self.entity.lower(), version.version)
+            return Response(status=status.HTTP_204_NO_CONTENT)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
