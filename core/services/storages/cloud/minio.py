@@ -2,7 +2,6 @@ import base64
 import mimetypes
 from io import BytesIO
 
-from django.http import StreamingHttpResponse
 from minio import Minio, S3Error
 from minio.deleteobjects import DeleteObject
 from pydash import get
@@ -167,21 +166,6 @@ class MinIO(CloudStorageServiceInterface):
         """
         response = self.client.get_object(bucket_name=self.bucket_name, object_name=key)
         return response
-
-    def get_streaming_response(self, key):
-        """
-        Streams the file from MinIO using Django's StreamingHttpResponse.
-        """
-        try:
-            response = self.get_object(key)
-            streaming_http_response = StreamingHttpResponse(
-                self.file_iterator(response),
-                content_type=response.headers['Content-Type']
-            )
-            streaming_http_response['Content-Disposition'] = f'attachment; filename={key.split("/")[-1]}'
-            return streaming_http_response
-        except S3Error as e:
-            raise FileNotFoundError(f"File {key} not found in bucket {self.bucket_name}. Error: {e}") from e
 
     @staticmethod
     def file_iterator(file_obj, chunk_size=8192):
