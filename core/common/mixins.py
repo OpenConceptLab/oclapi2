@@ -988,9 +988,15 @@ class ConceptContainerExportMixin:
             export_url = get_export_service().url_for(export_path)
             if export_url:
                 return redirect(export_url)
-            logger.warning('Export exists for %s version %s but no signed URL was generated.',
-                           self.entity.lower(), version.version)
-            return Response(status=status.HTTP_204_NO_CONTENT)
+            logger.error(
+                'Export exists for %s version %s but no signed URL was generated.',
+                self.entity.lower(),
+                version.version,
+            )
+            return Response(
+                {'detail': 'Export exists but could not generate a download URL.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 

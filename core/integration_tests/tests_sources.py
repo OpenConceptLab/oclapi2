@@ -1028,6 +1028,23 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         s3_get_last_key_from_path_mock.assert_called_once_with("users/username/username_source1_v1.")
         s3_url_for_mock.assert_called_once_with(f'users/username/username_source1_v1.{self.v1_updated_at}.zip')
 
+    @patch('core.services.storages.cloud.aws.S3.url_for')
+    @patch('core.services.storages.cloud.aws.S3.exists')
+    def test_get_500_head_when_signed_url_generation_fails(self, s3_exists_mock, s3_url_for_mock):
+        s3_exists_mock.return_value = True
+        s3_url_for_mock.return_value = None
+
+        response = self.client.get(
+            self.source.uri + 'HEAD/export/',
+            HTTP_AUTHORIZATION='Token ' + self.admin_token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data, {'detail': 'Export exists but could not generate a download URL.'})
+        s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
+        s3_url_for_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
+
     @patch('core.sources.models.Source.is_exporting', new_callable=PropertyMock)
     @patch('core.services.storages.cloud.aws.S3.exists')
     def test_get_208_HEAD(self, s3_exists_mock, is_exporting_mock):
