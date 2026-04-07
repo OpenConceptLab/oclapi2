@@ -1,8 +1,7 @@
 import factory
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from mock import patch, Mock, ANY, PropertyMock
-from mock.mock import call
+from mock import patch, Mock, ANY, PropertyMock, call
 
 from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
@@ -1358,9 +1357,9 @@ class TasksTest(OCLTestCase):
         export_source_task_mock.apply_async.assert_called_once_with(
             (source_v1.id,), queue='default', persist_args=True, task_id=ANY)
         index_source_concepts_task_mock.apply_async.assert_called_once_with(
-            (source_v1.id,), queue='indexing', persist_args=True, task_id=ANY)
+            (source_v1.id, None), queue='indexing', persist_args=True, task_id=ANY)
         index_source_mappings_task_mock.apply_async.assert_called_once_with(
-            (source_v1.id,), queue='indexing', persist_args=True, task_id=ANY)
+            (source_v1.id, None), queue='indexing', persist_args=True, task_id=ANY)
 
     @patch('core.common.tasks.export_source')
     @patch('core.sources.models.index_source_mappings')
@@ -1395,15 +1394,69 @@ class TasksTest(OCLTestCase):
         self.assertEqual(
             index_source_concepts_task_mock.apply_async.mock_calls,
             [
-                call((source_v1.id,), queue='indexing', persist_args=True, task_id=ANY),
-                call((source_v2.id,), queue='indexing', persist_args=True, task_id=ANY)
-            ])
+                call(
+                    (source_v1.id, {'is_in_latest_source_version': False}),
+                    queue='indexing', persist_args=True, task_id=ANY
+                ),
+                call(
+                    (source_v2.id, None),
+                    queue='indexing', persist_args=True, task_id=ANY
+                )
+            ]
+        )
         self.assertEqual(
             index_source_mappings_task_mock.apply_async.mock_calls,
             [
-                call((source_v1.id,), queue='indexing', persist_args=True, task_id=ANY),
-                call((source_v2.id,), queue='indexing', persist_args=True, task_id=ANY)
-            ])
+                call(
+                    (source_v1.id, {'is_in_latest_source_version': False}),
+                    queue='indexing', persist_args=True, task_id=ANY
+                ),
+                call(
+                    (source_v2.id, None),
+                    queue='indexing', persist_args=True, task_id=ANY
+                )
+            ]
+        )
+
+    @patch.object(Source, 'index_children_async', autospec=True)
+    def test_index_resources_for_self_as_latest_released_should_fully_index_new_version_on_create(
+            self, index_children_async_mock
+    ):
+        head = OrganizationSourceFactory()
+        source_v1 = OrganizationSourceFactory(
+            organization=head.organization, version='v1', mnemonic=head.mnemonic, released=True)
+        source_v2 = OrganizationSourceFactory(
+            organization=head.organization, version='v2', mnemonic=head.mnemonic, released=True)
+
+        source_v2.index_resources_for_self_as_latest_released()
+
+        self.assertEqual(
+            index_children_async_mock.mock_calls,
+            [
+                call(source_v1, source_v2.created_by, {'is_in_latest_source_version': False}),
+                call(source_v2, source_v2.created_by, None)
+            ]
+        )
+
+    @patch.object(Source, 'index_children_async', autospec=True)
+    def test_index_resources_for_self_as_latest_released_should_only_partially_update_on_release_state_update(
+            self, index_children_async_mock
+    ):
+        head = OrganizationSourceFactory()
+        source_v1 = OrganizationSourceFactory(
+            organization=head.organization, version='v1', mnemonic=head.mnemonic, released=True)
+        source_v2 = OrganizationSourceFactory(
+            organization=head.organization, version='v2', mnemonic=head.mnemonic, released=True)
+
+        source_v2.index_resources_for_self_as_latest_released(only_update=True)
+
+        self.assertEqual(
+            index_children_async_mock.mock_calls,
+            [
+                call(source_v1, source_v2.created_by, {'is_in_latest_source_version': False}),
+                call(source_v2, source_v2.created_by, {'is_in_latest_source_version': True})
+            ]
+        )
 
     def test_update_source_active_mappings_count(self):
         source = OrganizationSourceFactory()
@@ -1446,6 +1499,86 @@ class TasksTest(OCLTestCase):
         batch_index_mock.assert_called_once_with(
             source_concepts_mock, ConceptDocument,
             prefetch=['sources', 'names', 'descriptions', 'expansion_set', 'expansion_set__collection_version'])
+
+    @patch('core.sources.models.Source.concepts')
+    @patch('core.sources.models.Source.batch_index')
+    def test_index_source_concepts_partial_update(
+            self, batch_index_mock, source_concepts_mock
+    ):
+        source = OrganizationSourceFactory()
+        index_source_concepts(source.id, {'is_in_latest_source_version': False})
+        batch_index_mock.assert_called_once_with(
+            source_concepts_mock, ConceptDocument,
+            partial_doc={'is_in_latest_source_version': False}
+        )
+
+    @patch('core.common.tasks.logger.exception')
+    @patch('core.sources.models.Source.concepts')
+    @patch('core.sources.models.Source.batch_index')
+    def test_index_source_concepts_partial_update_failure_should_fallback_to_full_index(
+            self, batch_index_mock, source_concepts_mock, logger_exception_mock
+    ):
+        source = OrganizationSourceFactory()
+        batch_index_mock.side_effect = [Exception('boom'), None]
+
+        index_source_concepts(source.id, {'is_in_latest_source_version': False})
+
+        self.assertEqual(
+            batch_index_mock.mock_calls,
+            [
+                call(
+                    source_concepts_mock, ConceptDocument,
+                    partial_doc={'is_in_latest_source_version': False}
+                ),
+                call(
+                    source_concepts_mock, ConceptDocument,
+                    prefetch=['sources', 'names', 'descriptions', 'expansion_set', 'expansion_set__collection_version']
+                )
+            ]
+        )
+        logger_exception_mock.assert_called_once_with(
+            'Falling back to full concept reindex for source %s', source.id
+        )
+
+    @patch('core.sources.models.Source.mappings')
+    @patch('core.sources.models.Source.batch_index')
+    def test_index_source_mappings_partial_update(
+            self, batch_index_mock, source_mappings_mock
+    ):
+        source = OrganizationSourceFactory()
+        index_source_mappings(source.id, {'is_in_latest_source_version': False})
+        batch_index_mock.assert_called_once_with(
+            source_mappings_mock, MappingDocument,
+            partial_doc={'is_in_latest_source_version': False}
+        )
+
+    @patch('core.common.tasks.logger.exception')
+    @patch('core.sources.models.Source.mappings')
+    @patch('core.sources.models.Source.batch_index')
+    def test_index_source_mappings_partial_update_failure_should_fallback_to_full_index(
+            self, batch_index_mock, source_mappings_mock, logger_exception_mock
+    ):
+        source = OrganizationSourceFactory()
+        batch_index_mock.side_effect = [Exception('boom'), None]
+
+        index_source_mappings(source.id, {'is_in_latest_source_version': False})
+
+        self.assertEqual(
+            batch_index_mock.mock_calls,
+            [
+                call(
+                    source_mappings_mock, MappingDocument,
+                    partial_doc={'is_in_latest_source_version': False}
+                ),
+                call(
+                    source_mappings_mock, MappingDocument,
+                    prefetch=['sources', 'expansion_set', 'expansion_set__collection_version']
+                )
+            ]
+        )
+        logger_exception_mock.assert_called_once_with(
+            'Falling back to full mapping reindex for source %s', source.id
+        )
 
     @patch('core.sources.models.Source.validate_child_concepts')
     def test_update_validation_schema_success(self, validate_child_concepts_mock):
