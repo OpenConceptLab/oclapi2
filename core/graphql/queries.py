@@ -22,7 +22,13 @@ from core.orgs.constants import ORG_OBJECT_TYPE
 from core.sources.models import Source
 from core.users.constants import USER_OBJECT_TYPE
 
-from .permissions import PermissionsMixin, apply_es_visibility_filter, check_user_permission
+from .constants import SEARCH_UNAVAILABLE, build_expected_graphql_error
+from .permissions import (
+    PermissionsMixin,
+    apply_es_visibility_filter,
+    check_user_permission,
+    filter_global_queryset,
+)
 from .types import (
     CodedDatatypeDetails,
     ConceptNameType,
@@ -121,7 +127,8 @@ def build_mapping_prefetch(source_version: Source) -> Prefetch:
     return Prefetch('mappings_from', queryset=mapping_qs, to_attr='graphql_mappings')
 
 
-def build_global_mapping_prefetch() -> Prefetch:
+def build_global_mapping_prefetch(user=None) -> Prefetch:
+    """Build the global mapping prefetch using the same visibility rules as REST list endpoints."""
     mapping_qs = (
         Mapping.objects.filter(
             from_concept_id__isnull=False,
@@ -133,6 +140,8 @@ def build_global_mapping_prefetch() -> Prefetch:
         .distinct()
     )
 
+    # Mapping visibility must be filtered independently because a public concept can still reference private mappings.
+    mapping_qs = filter_global_queryset(mapping_qs, user or AnonymousUser())
     return Prefetch('mappings_from', queryset=mapping_qs, to_attr='graphql_mappings')
 
 
@@ -486,6 +495,10 @@ async def concepts_for_query(
         elif total > 0:
             return [], total
 
+    if source_version is None:
+        # Global search is ES-backed because the DB fallback is both broader and much more expensive under outage.
+        raise build_expected_graphql_error(SEARCH_UNAVAILABLE)
+
     qs = build_db_search_queryset(base_qs, query).order_by('mnemonic')
     total = await sync_to_async(qs.count)()
     qs = apply_slice(qs, pagination)
@@ -520,10 +533,6 @@ class Query(PermissionsMixin):
         limit: Optional[int] = None,
     ) -> ConceptSearchResult:
         permission_target = self or Query()
-
-        if getattr(info.context, 'auth_status', 'none') == 'invalid':
-            raise GraphQLError('Authentication failure')
-
         concept_ids_param = conceptIds or []
         text_query = (query or '').strip()
         user = getattr(info.context, 'user', AnonymousUser())
@@ -550,7 +559,7 @@ class Query(PermissionsMixin):
             # Global search across all repositories
             source_version = None
             base_qs = permission_target.filter_global_queryset(build_base_queryset(), user)
-            mapping_prefetch = build_global_mapping_prefetch()
+            mapping_prefetch = build_global_mapping_prefetch(user)
 
         if concept_ids_param:
             concepts, total = await concepts_for_ids(base_qs, concept_ids_param, pagination, mapping_prefetch)

@@ -12,6 +12,7 @@ from django.contrib.auth.models import AnonymousUser
 from django.middleware.csrf import CsrfViewMiddleware, get_token
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
+from graphql import ExecutionResult
 from rest_framework.authentication import get_authorization_header
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.request import Request
@@ -19,6 +20,8 @@ from strawberry.django.views import AsyncGraphQLView
 
 from core.common.authentication import OCLAuthentication
 from core.users.constants import GRAPHQL_API_GROUP
+
+from .constants import AUTHENTICATION_FAILED, build_expected_graphql_error
 
 
 # https://strawberry.rocks/docs/breaking-changes/0.243.0 GraphQL Strawberry needs manually handling CSRF
@@ -104,3 +107,13 @@ class AuthenticatedGraphQLView(AsyncGraphQLView):
         context.auth_status = 'valid' if getattr(user, 'is_authenticated', False) else 'invalid'
 
         return context
+
+    async def execute_operation(self, request, context, root_value, sub_response):
+        # Invalid credentials should become a normal GraphQL error payload before resolver execution starts.
+        if getattr(context, 'auth_status', 'none') == 'invalid':
+            return ExecutionResult(
+                data=None,
+                errors=[build_expected_graphql_error(AUTHENTICATION_FAILED)],
+            )
+
+        return await super().execute_operation(request, context, root_value, sub_response)

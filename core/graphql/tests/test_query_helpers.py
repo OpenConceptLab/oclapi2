@@ -46,6 +46,12 @@ from core.graphql.queries import (
     serialize_names,
     with_concept_related,
 )
+from core.graphql.constants import (
+    AUTHENTICATION_FAILED,
+    FORBIDDEN,
+    SEARCH_UNAVAILABLE,
+    build_expected_graphql_error,
+)
 from core.graphql.schema import schema
 from core.graphql.tests.conftest import bootstrap_super_user, create_user_with_token
 from core.graphql.views import AuthenticatedGraphQLView
@@ -127,6 +133,15 @@ class AuthenticatedGraphQLViewTests(OCLTestCase):
                 context = async_to_sync(view.get_context)(valid_request)
             self.assertEqual(context.user, self.user)
             self.assertEqual(context.auth_status, 'valid')
+
+    def test_schema_process_errors_skips_expected_business_errors(self):
+        with patch('strawberry.schema.base.StrawberryLogger.error') as error_logger:
+            schema.process_errors([build_expected_graphql_error(AUTHENTICATION_FAILED)])
+        error_logger.assert_not_called()
+
+        with patch('strawberry.schema.base.StrawberryLogger.error') as error_logger:
+            schema.process_errors([GraphQLError('unexpected boom')])
+        error_logger.assert_called_once()
 
 
 class QueryHelperTests(OCLTestCase):
@@ -252,6 +267,35 @@ class QueryHelperTests(OCLTestCase):
         self.assertEqual(list(sliced.values_list('mnemonic', flat=True)), ['UTIL-2'])
         related_qs = with_concept_related(base_qs, mapping_prefetch)
         self.assertGreaterEqual(related_qs.count(), 2)
+
+    def test_build_global_mapping_prefetch_filters_private_mappings(self):
+        private_mapping = MappingFactory(
+            parent=self.source,
+            from_concept=self.concept1,
+            to_concept=self.concept2,
+            public_access=ACCESS_TYPE_NONE,
+            created_by=self.audit_user,
+            updated_by=self.audit_user,
+        )
+        anonymous_qs = with_concept_related(
+            build_base_queryset(),
+            build_global_mapping_prefetch(AnonymousUser()),
+        ).filter(id=self.concept1.id)
+        anonymous_concept = list(anonymous_qs)[0]
+        self.assertTrue(all(mapping.public_access != ACCESS_TYPE_NONE for mapping in anonymous_concept.graphql_mappings))
+
+        member = UserProfileFactory(
+            username='graphql-mapping-member',
+            created_by=self.super_user,
+            updated_by=self.super_user,
+        )
+        self.organization.members.add(member)
+        member_qs = with_concept_related(
+            build_base_queryset(),
+            build_global_mapping_prefetch(member),
+        ).filter(id=self.concept1.id)
+        member_concept = list(member_qs)[0]
+        self.assertTrue(any(mapping.id == private_mapping.id for mapping in member_concept.graphql_mappings))
 
     def test_resolve_source_version_error_path_and_pagination_defaults(self):
         with patch('core.graphql.queries.Source.get_version', return_value=None), patch(
@@ -485,6 +529,18 @@ class QueryHelperTests(OCLTestCase):
         self.assertEqual(total, 0)
         self.assertEqual(concepts, [])
 
+        with patch('core.graphql.queries.concept_ids_from_es', return_value=None):
+            with self.assertRaises(GraphQLError) as unavailable:
+                async_to_sync(concepts_for_query)(
+                    build_base_queryset(),
+                    'UTIL',
+                    None,
+                    normalize_pagination(1, 1),
+                    build_global_mapping_prefetch(AnonymousUser()),
+                    user=AnonymousUser(),
+                )
+        self.assertEqual(unavailable.exception.extensions['code'], SEARCH_UNAVAILABLE)
+
         with patch('core.graphql.queries.concept_ids_from_es', return_value=([], 2)):
             concepts, total = async_to_sync(concepts_for_query)(
                 base_qs, 'UTIL', self.source, None, mapping_prefetch
@@ -498,8 +554,9 @@ class QueryHelperTests(OCLTestCase):
             async_to_sync(Query().concepts)(info_none)
 
         info_invalid = SimpleNamespace(context=SimpleNamespace(auth_status='invalid', user=AnonymousUser()))
-        with self.assertRaises(GraphQLError):
+        with self.assertRaises(GraphQLError) as invalid:
             async_to_sync(Query().concepts)(info_invalid, query='test')
+        self.assertEqual(invalid.exception.extensions['code'], AUTHENTICATION_FAILED)
 
         info_valid = SimpleNamespace(context=SimpleNamespace(auth_status='valid', user=self.audit_user))
         with self.assertRaises(GraphQLError):
@@ -520,12 +577,12 @@ class QueryHelperTests(OCLTestCase):
         self.assertEqual(result_ids.limit, 1)
 
         with patch('core.graphql.queries.concept_ids_from_es', return_value=None):
-            result_query = async_to_sync(Query().concepts)(
-                info_valid,
-                query='UTIL',
-            )
-        self.assertEqual(result_query.total_count, 0)
-        self.assertEqual(result_query.results, [])
+            with self.assertRaises(GraphQLError) as unavailable:
+                async_to_sync(Query().concepts)(
+                    info_valid,
+                    query='UTIL',
+                )
+        self.assertEqual(unavailable.exception.extensions['code'], SEARCH_UNAVAILABLE)
 
         with patch('core.graphql.queries.concept_ids_from_es', return_value=([], 2)), patch(
             'core.graphql.queries.resolve_source_version', return_value=self.source
@@ -534,8 +591,11 @@ class QueryHelperTests(OCLTestCase):
         self.assertEqual(result_es_empty.total_count, 2)
         self.assertEqual(result_es_empty.results, [])
 
-        with patch('core.graphql.queries.resolve_source_version', return_value=self.source):
-            result_global = async_to_sync(Query().concepts)(info_valid, query='UTIL')
+        with patch('core.graphql.queries.concept_ids_from_es', return_value=([self.concept1.id], 1)):
+            result_global = async_to_sync(Query().concepts)(
+                info_valid,
+                query='UTIL',
+            )
         self.assertIsNone(result_global.org)
         self.assertIsNone(result_global.source)
 
@@ -607,6 +667,7 @@ class QueryHelperTests(OCLTestCase):
         anonymous_info = SimpleNamespace(context=SimpleNamespace(auth_status='none', user=AnonymousUser()))
         outsider_info = SimpleNamespace(context=SimpleNamespace(auth_status='valid', user=outsider))
         member_info = SimpleNamespace(context=SimpleNamespace(auth_status='valid', user=member))
+        invalid_info = SimpleNamespace(context=SimpleNamespace(auth_status='invalid', user=AnonymousUser()))
 
         with self.assertRaises(GraphQLError) as forbidden:
             async_to_sync(Query().concepts)(
@@ -616,6 +677,27 @@ class QueryHelperTests(OCLTestCase):
                 conceptIds=[private_concept.mnemonic],
             )
         self.assertEqual(str(forbidden.exception), 'Forbidden')
+        self.assertEqual(forbidden.exception.extensions['code'], FORBIDDEN)
+
+        with self.assertRaises(GraphQLError) as invalid_private:
+            async_to_sync(Query().concepts)(
+                invalid_info,
+                org=private_org.mnemonic,
+                source=private_source.mnemonic,
+                conceptIds=[private_concept.mnemonic],
+            )
+        self.assertEqual(str(invalid_private.exception), 'Authentication failure')
+        self.assertEqual(invalid_private.exception.extensions['code'], AUTHENTICATION_FAILED)
+
+        with self.assertRaises(GraphQLError) as invalid_public:
+            async_to_sync(Query().concepts)(
+                invalid_info,
+                org=public_org.mnemonic,
+                source=public_source.mnemonic,
+                conceptIds=[public_concept.mnemonic],
+            )
+        self.assertEqual(str(invalid_public.exception), 'Authentication failure')
+        self.assertEqual(invalid_public.exception.extensions['code'], AUTHENTICATION_FAILED)
 
         public_repo_result = async_to_sync(Query().concepts)(
             anonymous_info,
@@ -626,13 +708,21 @@ class QueryHelperTests(OCLTestCase):
         self.assertEqual(public_repo_result.total_count, 1)
         self.assertEqual(public_repo_result.results[0].concept_id, public_concept.mnemonic)
 
-        anonymous_global = async_to_sync(Query().concepts)(anonymous_info, query='Shared Visibility')
+        with patch(
+            'core.graphql.queries.concept_ids_from_es',
+            return_value=([public_concept.id], 1),
+        ):
+            anonymous_global = async_to_sync(Query().concepts)(anonymous_info, query='Shared Visibility')
         self.assertEqual(
             [concept.concept_id for concept in anonymous_global.results],
             [public_concept.mnemonic],
         )
 
-        member_global = async_to_sync(Query().concepts)(member_info, query='Shared Visibility')
+        with patch(
+            'core.graphql.queries.concept_ids_from_es',
+            return_value=([private_concept.id, public_concept.id], 2),
+        ):
+            member_global = async_to_sync(Query().concepts)(member_info, query='Shared Visibility')
         self.assertEqual(
             {concept.concept_id for concept in member_global.results},
             {private_concept.mnemonic, public_concept.mnemonic},

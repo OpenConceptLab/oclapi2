@@ -13,7 +13,8 @@ from strawberry.exceptions import GraphQLError
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.permissions import CanViewConceptDictionary
 from core.common.search import apply_document_public_visibility_filter
-from core.concepts.models import Concept
+
+from .constants import AUTHENTICATION_FAILED, FORBIDDEN, build_expected_graphql_error
 
 SOURCE_VERSION_CACHE_ATTR = '_graphql_source_version_cache'
 
@@ -40,15 +41,17 @@ async def ensure_can_view_repo(user, source_version) -> None:
     )(request, None, source_version)
 
     if not allowed:
-        raise GraphQLError('Forbidden')
+        raise build_expected_graphql_error(FORBIDDEN)
 
 
 def filter_global_queryset(qs, user):
-    """Apply the same global visibility rules used by the REST concepts API."""
+    """Apply the same global visibility rules used by the REST concept and mapping APIs."""
     if getattr(user, 'is_anonymous', True):
         return qs.exclude(public_access=ACCESS_TYPE_NONE)
     if not getattr(user, 'is_staff', False):
-        return Concept.apply_user_criteria(qs, user)
+        apply_user_criteria = getattr(qs.model, 'apply_user_criteria', None)
+        if apply_user_criteria:
+            return apply_user_criteria(qs, user)
     return qs
 
 
@@ -70,6 +73,9 @@ def check_user_permission(
     @wraps(resolver)
     async def wrapper(self, info, *args, **kwargs):
         permission_target = get_permission_target(self, resolver)
+        if getattr(info.context, 'auth_status', 'none') == 'invalid':
+            # Reject invalid credentials before repo resolution so private/public repos look the same.
+            raise build_expected_graphql_error(AUTHENTICATION_FAILED)
         org = kwargs.get('org')
         owner = kwargs.get('owner')
         source = kwargs.get('source')
