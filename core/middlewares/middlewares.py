@@ -172,7 +172,7 @@ class AnalyticsMiddleware(BaseMiddleware):
         response = self.get_response(request)
         path = request.path
 
-        ignore_any_under_paths = ['/users/login/', '/users/logout/', '/users/signup/']
+        ignore_any_under_paths = ['/users/logout/', '/users/signup/']
         ignore_paths = [
             '', '/swagger', '/redoc', '/version', '/toggles', '/users/oidc/code-exchange', '/favicon.ico',
             '/users/api-token', '/users/password/reset', '/user',
