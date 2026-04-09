@@ -49,6 +49,17 @@ if not ENV or ENV in ['ci', 'dev', 'development']:
 else:
     ENABLE_THROTTLING = os.environ.get('ENABLE_THROTTLING', False) in ['true', 'True', 'TRUE', True]
 
+
+def get_list_from_env(name):
+    """Return a trimmed list for comma-separated environment variables."""
+    return [value.strip() for value in os.environ.get(name, '').split(',') if value.strip()]
+
+
+REQUIRE_AUTHENTICATION = os.environ.get('REQUIRE_AUTHENTICATION', 'false').lower() in ['true', '1']
+APPROVED_ANONYMOUS_CLIENTS = get_list_from_env('APPROVED_ANONYMOUS_CLIENTS')
+APPROVED_ANONYMOUS_API_KEYS = get_list_from_env('APPROVED_ANONYMOUS_API_KEYS')
+APPROVED_ANONYMOUS_IPS = get_list_from_env('APPROVED_ANONYMOUS_IPS')
+
 ALLOWED_HOSTS = ['*']
 
 CORS_ALLOW_HEADERS = default_headers + (
@@ -198,6 +209,11 @@ if ENABLE_THROTTLING:
         'match_standard_day': '5000/day',
     }
     MIDDLEWARE = [*MIDDLEWARE, 'core.middlewares.middlewares.ThrottleHeadersMiddleware']
+
+if REQUIRE_AUTHENTICATION:
+    auth_middleware = 'django.contrib.auth.middleware.AuthenticationMiddleware'
+    auth_index = MIDDLEWARE.index(auth_middleware)
+    MIDDLEWARE.insert(auth_index + 1, 'core.middlewares.middlewares.RequireAuthenticationMiddleware')
 
 
 ROOT_URLCONF = 'core.urls'
