@@ -108,7 +108,6 @@ class RequireAuthenticationMiddleware(BaseMiddleware):
         '/admin/',
     )
     exempt_exact_paths = {
-        '',
         '/',
         '/version',
         '/changelog',
@@ -135,13 +134,9 @@ class RequireAuthenticationMiddleware(BaseMiddleware):
             return True
 
         user = getattr(request, 'user', None)
-        return any((
-            getattr(user, 'is_authenticated', False),
-            self.is_exempt_path(request.path),
-            self.has_approved_client_header(request),
-            self.has_approved_api_key(request),
-            self.has_approved_ip(request),
-        ))
+        return getattr(user, 'is_authenticated', False) or self.is_exempt_path(request.path) or \
+            self.has_approved_client_header(request) or \
+            self.has_approved_api_key(request) or self.has_approved_ip(request)
 
     @classmethod
     def is_exempt_path(cls, path):
@@ -177,8 +172,7 @@ class RequireAuthenticationMiddleware(BaseMiddleware):
 
         authorization = request.META.get('HTTP_AUTHORIZATION', '').strip()
         x_api_key = request.META.get('HTTP_X_API_KEY', '').strip()
-        query_api_key = request.GET.get('api_key', '').strip()
-        tokens = [authorization, x_api_key, query_api_key]
+        tokens = [authorization, x_api_key]
         bearer_token = authorization.split(None, 1)[1].strip() if ' ' in authorization else ''
         if bearer_token:
             tokens.append(bearer_token)
@@ -187,18 +181,16 @@ class RequireAuthenticationMiddleware(BaseMiddleware):
 
     @staticmethod
     def has_approved_ip(request):
-        """Match source IPs using forwarded addresses first, then the socket address."""
+        """Match source IPs using the socket address only."""
         approved_ips = settings.APPROVED_ANONYMOUS_IPS
         if not approved_ips:
             return False
 
-        forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR', '')
-        remote_addr = request.META.get('REMOTE_ADDR', '')
-        ip_candidates = [ip.strip() for ip in forwarded_for.split(',') if ip.strip()]
-        if remote_addr:
-            ip_candidates.append(remote_addr.strip())
+        remote_addr = request.META.get('REMOTE_ADDR', '').strip()
+        if not remote_addr:
+            return False
 
-        return any(ip in approved_ips for ip in ip_candidates)
+        return remote_addr in approved_ips
 
 
 class FhirMiddleware(BaseMiddleware):

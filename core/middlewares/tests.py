@@ -1,5 +1,6 @@
 import json
 
+from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 from django.http import HttpResponse
 from django.test import RequestFactory, SimpleTestCase, override_settings
@@ -61,6 +62,12 @@ class RequireAuthenticationMiddlewareTest(SimpleTestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_blocks_anonymous_request_for_whitespace_client_header(self):
+        """Whitespace-only client header values should be rejected after normalization."""
+        response = self.middleware(self.make_request('/orgs/OCL/', HTTP_X_OCL_CLIENT='   '))
+
+        self.assertEqual(response.status_code, 403)
+
     def test_allows_anonymous_request_for_approved_api_key_header(self):
         """Allowlisted anonymous API keys should bypass the gate."""
         response = self.middleware(self.make_request('/orgs/OCL/', HTTP_X_API_KEY='test-api-key'))
@@ -73,11 +80,25 @@ class RequireAuthenticationMiddlewareTest(SimpleTestCase):
 
         self.assertEqual(response.status_code, 200)
 
+    def test_blocks_anonymous_request_for_query_string_api_key(self):
+        """Query string API keys should not bypass the authentication gate."""
+        response = self.middleware(self.make_request('/orgs/OCL/?api_key=test-api-key'))
+
+        self.assertEqual(response.status_code, 403)
+
     def test_allows_anonymous_request_for_approved_ip(self):
         """Allowlisted source IPs should keep anonymous access."""
         response = self.middleware(self.make_request('/orgs/OCL/', REMOTE_ADDR='10.0.0.1'))
 
         self.assertEqual(response.status_code, 200)
+
+    def test_blocks_anonymous_request_for_forwarded_ip_only(self):
+        """Forwarded IP headers alone should not bypass the authentication gate."""
+        response = self.middleware(
+            self.make_request('/orgs/OCL/', HTTP_X_FORWARDED_FOR='10.0.0.1', REMOTE_ADDR='203.0.113.5')
+        )
+
+        self.assertEqual(response.status_code, 403)
 
     def test_allows_options_request(self):
         """CORS preflight requests should not be blocked."""
@@ -135,3 +156,12 @@ class RequireAuthenticationMiddlewareTest(SimpleTestCase):
             with self.subTest(path=path):
                 response = self.middleware(self.make_request(path))
                 self.assertEqual(response.status_code, 200)
+
+
+@override_settings(REQUIRE_AUTHENTICATION=False)
+class RequireAuthenticationSettingsTest(SimpleTestCase):
+    """Verify auth-enforcement middleware configuration toggles cleanly."""
+
+    def test_authentication_middleware_not_inserted_when_disabled(self):
+        """RequireAuthenticationMiddleware should be absent when the feature is disabled."""
+        self.assertNotIn('core.middlewares.middlewares.RequireAuthenticationMiddleware', settings.MIDDLEWARE)
