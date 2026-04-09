@@ -264,3 +264,16 @@ class UserDetailSerializer(AbstractResourceSerializer):
         if instance.id:
             instance.set_checksums()
         return instance
+
+
+class UserContentSummarySerializer(serializers.Serializer):  # pylint: disable=abstract-method
+    username = serializers.CharField(read_only=True)
+    concepts_created = IntegerField(read_only=True)
+    concepts_updated = IntegerField(read_only=True)
+    mappings_created = IntegerField(read_only=True)
+    mappings_updated = IntegerField(read_only=True)
+    sources_owned = IntegerField(read_only=True)
+    collections_owned = IntegerField(read_only=True)
+    references_added = IntegerField(read_only=True)
+    versions_created = IntegerField(read_only=True)
+    expansions_created = IntegerField(read_only=True)
