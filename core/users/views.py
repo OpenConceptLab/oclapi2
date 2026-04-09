@@ -630,7 +630,7 @@ class UserContentSummaryView(APIView):
     permission_classes = (IsAuthenticated,)
     serializer_class = UserContentSummarySerializer
 
-    def get(self, request, user):
+    def get(self, request, user):  # pylint: disable=too-many-locals
         from django.db.models import F
         from core.collections.models import Collection, CollectionReference, Expansion
         from core.concepts.models import Concept
