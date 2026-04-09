@@ -29,6 +29,7 @@ urlpatterns = [
     path('<str:user>/following/<int:id>/', views.UserFollowingView.as_view(), name='userprofile-following'),
     path('<str:user>/orgs/', org_views.OrganizationListView.as_view(), name='userprofile-orgs'),
     path('<str:user>/extras/', views.UserExtrasView.as_view(), name='user-extras'),
+    path('<str:user>/content-summary/', views.UserContentSummaryView.as_view(), name='user-content-summary'),
     path(
         '<str:user>/orgs/sources/',
         org_views.OrganizationSourceListView.as_view(), name='userprofile-organization-source-list'),
