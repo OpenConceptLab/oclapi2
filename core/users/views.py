@@ -19,7 +19,7 @@ from rest_framework.permissions import IsAdminUser, IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from core.common.constants import NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, LAST_LOGIN_SINCE_PARAM, \
+from core.common.constants import NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, HEAD, LAST_LOGIN_SINCE_PARAM, \
     LAST_LOGIN_BEFORE_PARAM, DATE_JOINED_SINCE_PARAM, DATE_JOINED_BEFORE_PARAM, UPDATED_BY_USERNAME_PARAM
 from core.common.exceptions import Http400
 from core.common.mixins import ListWithHeadersMixin
@@ -635,3 +635,50 @@ class UserFollowingView(DestroyAPIView):
         follower.unfollow(instance.following)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class UserContentSummaryView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request, user):
+        from django.db import models as db_models
+        from core.collections.models import CollectionReference, Expansion
+        from core.concepts.models import Concept
+        from core.mappings.models import Mapping
+        from core.sources.models import Source
+        from core.collections.models import Collection
+
+        try:
+            profile = UserProfile.objects.get(username=user)
+        except UserProfile.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        is_self = request.user.username == profile.username
+        if not is_self and not request.user.is_staff:
+            raise PermissionDenied()
+
+        head_concepts = Concept.objects.filter(id=db_models.F('versioned_object_id'))
+        head_mappings = Mapping.objects.filter(id=db_models.F('versioned_object_id'))
+        user_head_sources = Source.objects.filter(user=profile, version=HEAD)
+        user_head_collections = Collection.objects.filter(user=profile, version=HEAD)
+
+        # Non-HEAD versions created by this user (version releases)
+        user_source_versions = Source.objects.filter(
+            created_by=profile).exclude(version=HEAD)
+        user_collection_versions = Collection.objects.filter(
+            created_by=profile).exclude(version=HEAD)
+
+        data = {
+            'username': profile.username,
+            'concepts_created': head_concepts.filter(created_by=profile).count(),
+            'concepts_updated': head_concepts.filter(updated_by=profile).count(),
+            'mappings_created': head_mappings.filter(created_by=profile).count(),
+            'mappings_updated': head_mappings.filter(updated_by=profile).count(),
+            'sources_owned': user_head_sources.count(),
+            'collections_owned': user_head_collections.count(),
+            'references_added': CollectionReference.objects.filter(
+                collection__in=user_head_collections, created_by=profile).count(),
+            'versions_created': user_source_versions.count() + user_collection_versions.count(),
+            'expansions_created': Expansion.objects.filter(created_by=profile).count(),
+        }
+        return Response(data)
