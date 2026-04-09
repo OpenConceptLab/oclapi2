@@ -35,7 +35,7 @@ from core.users.constants import VERIFICATION_TOKEN_MISMATCH, VERIFY_EMAIL_MESSA
 from core.users.documents import UserProfileDocument
 from core.users.search import UserProfileFacetedSearch
 from core.users.serializers import UserDetailSerializer, UserCreateSerializer, UserListSerializer, \
-    UserSummarySerializer, FollowingSerializer
+    UserSummarySerializer, FollowingSerializer, UserContentSummarySerializer
 from .models import UserProfile, Follow, UserRateLimit
 from ..common import ERRBIT_LOGGER
 from ..common.throttling import ThrottleUtil
@@ -639,14 +639,14 @@ class UserFollowingView(DestroyAPIView):
 
 class UserContentSummaryView(APIView):
     permission_classes = (IsAuthenticated,)
+    serializer_class = UserContentSummarySerializer
 
     def get(self, request, user):
-        from django.db import models as db_models
-        from core.collections.models import CollectionReference, Expansion
+        from django.db.models import F
+        from core.collections.models import Collection, CollectionReference, Expansion
         from core.concepts.models import Concept
         from core.mappings.models import Mapping
         from core.sources.models import Source
-        from core.collections.models import Collection
 
         try:
             profile = UserProfile.objects.get(username=user)
@@ -657,8 +657,8 @@ class UserContentSummaryView(APIView):
         if not is_self and not request.user.is_staff:
             raise PermissionDenied()
 
-        head_concepts = Concept.objects.filter(id=db_models.F('versioned_object_id'))
-        head_mappings = Mapping.objects.filter(id=db_models.F('versioned_object_id'))
+        head_concepts = Concept.objects.filter(id=F('versioned_object_id'))
+        head_mappings = Mapping.objects.filter(id=F('versioned_object_id'))
         user_head_sources = Source.objects.filter(user=profile, version=HEAD)
         user_head_collections = Collection.objects.filter(user=profile, version=HEAD)
 
