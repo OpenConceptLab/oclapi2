@@ -681,4 +681,5 @@ class UserContentSummaryView(APIView):
             'versions_created': user_source_versions.count() + user_collection_versions.count(),
             'expansions_created': Expansion.objects.filter(created_by=profile).count(),
         }
-        return Response(data)
+        serializer = self.serializer_class(data)
+        return Response(serializer.data)
