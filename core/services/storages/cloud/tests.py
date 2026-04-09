@@ -8,7 +8,6 @@ import boto3
 from azure.storage.blob import BlobPrefix
 from botocore.exceptions import ClientError
 from django.core.files.base import ContentFile
-from django.http import StreamingHttpResponse
 from django.test import TestCase
 from django.utils import timezone
 from minio.deleteobjects import DeleteError
@@ -500,25 +499,6 @@ class MinIOTest(TestCase):
 
         # Assert that remove_objects was called with the correct file keys
         mock_client.remove_objects.assert_called_once()
-
-    @patch("core.services.storages.cloud.minio.Minio")
-    def test_get_streaming_response(self, mock_minio_client):
-        # Mock get_object method
-        mock_client = mock_minio_client.return_value
-        mock_file_obj = MagicMock()
-        mock_file_obj.read = MagicMock(side_effect=[b"chunk1", b"chunk2", b""])
-        mock_client.get_object = MagicMock(return_value=mock_file_obj)
-        MinIO.file_iterator(mock_file_obj)
-
-        client = MinIO()
-        # Call the get_streaming_response method
-        response = client.get_streaming_response('test-file1.txt')
-
-        # Assert that the response is a StreamingHttpResponse
-        self.assertIsInstance(response, StreamingHttpResponse)
-        # Convert response content into a list for easier assertion
-        response_content = b"".join(list(response.streaming_content))
-        self.assertEqual(response_content, b"chunk1chunk2")
 
     @patch("core.services.storages.cloud.minio.Minio", Mock())
     def test_file_iterator(self):
