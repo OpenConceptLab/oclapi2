@@ -1,12 +1,25 @@
 services:
+  rustfs:
+    image: rustfs/rustfs
+    ports:
+      - 9000:9000
+      - 9001:9001
+    environment:
+      - RUSTFS_ROOT_USER=${MINIO_ACCESS_KEY-rustfsadmin}
+      - RUSTFS_ROOT_PASSWORD=${MINIO_SECRET_KEY-rustfsadmin}
+    volumes:
+      - rustfs-data:/data
+    restart: "no"
   db:
     ports:
       - 5432:5432
     restart: "no"
+    command: postgres -c max_connections=300
   redis:
     ports:
       - 6379:6379
     restart: "no"
+    command: /opt/bitnami/scripts/redis/run.sh --maxmemory 4096mb
   api:
     build: .
     ports:
@@ -20,9 +33,17 @@ services:
       - es
       - celery
       - flower
+      - rustfs
     environment:
       - ENVIRONMENT=development
       - DEBUG=${DEBUG-TRUE}
+      - NO_LM=TRUE
+      - EXPORT_SERVICE=core.services.storages.cloud.minio.MinIO
+      - MINIO_ENDPOINT=rustfs:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY-rustfsadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY-rustfsadmin}
+      - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME-oclapi2-dev}
+      - MINIO_SECURE=${MINIO_SECURE-false}
   celery:
     build: .
     volumes:
@@ -93,3 +114,8 @@ services:
     ports:
       - 9200:9200
     restart: "no"
+    environment:
+      - m=4gb
+
+volumes:
+  rustfs-data:
