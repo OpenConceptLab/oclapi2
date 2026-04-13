@@ -3,7 +3,6 @@ import base64
 from azure.storage.blob import BlobServiceClient, ContentSettings, BlobPrefix
 from django.conf import settings
 from django.core.files.base import ContentFile
-from django.http import StreamingHttpResponse
 from pydash import get
 
 from core.services.storages.cloud.core import CloudStorageServiceInterface
@@ -113,17 +112,6 @@ class BlobStorage(CloudStorageServiceInterface):
         stream = blob_client.download_blob()
         data = stream.readall()
         yield data
-
-    def get_streaming_response(self, key):
-        blob_client = self.get_object(key)
-        blob_properties = blob_client.get_blob_properties()
-        response = StreamingHttpResponse(
-            self.file_iterator(blob_client),
-            content_type=blob_properties.content_settings.content_type
-        )
-        response['Content-Disposition'] = f'attachment; filename={key.split("/")[-1]}'
-
-        return response
 
     # private
     def _upload(self, blob_name, file_content=None, file_path=None, read_directive=None, metadata=None):  # pylint: disable=too-many-arguments

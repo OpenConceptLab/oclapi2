@@ -382,3 +382,80 @@ class TasksTest(OCLTestCase):
         self.assertTrue(user.reset_password_url in mail.body)
         self.assertTrue(f'Hi {user.username},' in mail.body)
         send_mail_mock.assert_called_once()
+
+
+class UserContentSummaryViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = UserProfileFactory(username='summaryuser')
+        self.token = self.user.get_token()
+
+    def test_unauthenticated(self):
+        response = self.client.get('/users/summaryuser/content-summary/')
+        self.assertEqual(response.status_code, 401)
+
+    def test_self_user(self):
+        response = self.client.get(
+            '/users/summaryuser/content-summary/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['username'], 'summaryuser')
+        self.assertEqual(response.data['concepts_created'], 0)
+        self.assertEqual(response.data['concepts_updated'], 0)
+        self.assertEqual(response.data['mappings_created'], 0)
+        self.assertEqual(response.data['mappings_updated'], 0)
+        self.assertEqual(response.data['sources_owned'], 0)
+        self.assertEqual(response.data['collections_owned'], 0)
+        self.assertEqual(response.data['references_added'], 0)
+        self.assertEqual(response.data['versions_created'], 0)
+        self.assertEqual(response.data['expansions_created'], 0)
+
+    def test_other_user_forbidden(self):
+        other_user = UserProfileFactory(username='otheruser')
+        other_token = other_user.get_token()
+
+        response = self.client.get(
+            '/users/summaryuser/content-summary/',
+            HTTP_AUTHORIZATION='Token ' + other_token,
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_staff_can_view_other_user(self):
+        admin = UserProfileFactory(username='adminuser', is_staff=True)
+        admin_token = admin.get_token()
+
+        response = self.client.get(
+            '/users/summaryuser/content-summary/',
+            HTTP_AUTHORIZATION='Token ' + admin_token,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['username'], 'summaryuser')
+
+    def test_nonexistent_user(self):
+        response = self.client.get(
+            '/users/doesnotexist/content-summary/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_with_content(self):
+        from core.sources.tests.factories import UserSourceFactory
+        from core.concepts.tests.factories import ConceptFactory
+        from core.mappings.tests.factories import MappingFactory
+        from core.collections.tests.factories import UserCollectionFactory
+
+        source = UserSourceFactory(user=self.user, created_by=self.user)
+        ConceptFactory(parent=source, created_by=self.user, updated_by=self.user)
+        MappingFactory(parent=source, created_by=self.user, updated_by=self.user)
+        UserCollectionFactory(user=self.user, created_by=self.user)
+
+        response = self.client.get(
+            '/users/summaryuser/content-summary/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['sources_owned'], 1)
+        self.assertEqual(response.data['collections_owned'], 1)
+        self.assertGreaterEqual(response.data['concepts_created'], 1)
+        self.assertGreaterEqual(response.data['mappings_created'], 1)

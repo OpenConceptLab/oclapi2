@@ -144,7 +144,8 @@ class FhirMiddleware(BaseMiddleware):
 
 
 class ThrottleHeadersMiddleware(MiddlewareMixin):
-    match_throttled_paths = ['recommend-beta', '$match']
+    match_throttled_paths = ['$match', '/concepts/$match/']
+
     def is_match_throttled_path(self, path):
         for match_path in self.match_throttled_paths:
             if match_path in path:
@@ -171,7 +172,7 @@ class AnalyticsMiddleware(BaseMiddleware):
         response = self.get_response(request)
         path = request.path
 
-        ignore_any_under_paths = ['/users/login/', '/users/logout/', '/users/signup/']
+        ignore_any_under_paths = ['/users/logout/', '/users/signup/']
         ignore_paths = [
             '', '/swagger', '/redoc', '/version', '/toggles', '/users/oidc/code-exchange', '/favicon.ico',
             '/users/api-token', '/users/password/reset', '/user',

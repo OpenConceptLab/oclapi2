@@ -634,31 +634,46 @@ def make_hierarchy(concept_map):  # pragma: no cover
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
     acks_late=True, reject_on_worker_lost=True, base=QueueOnceCustomTask
 )
-def index_source_concepts(source_id):
+def index_source_concepts(source_id, partial_doc=None):
+    """
+    Index source concepts, or partially update existing ES documents when `partial_doc` is supplied.
+    """
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
     if source:
         from core.concepts.documents import ConceptDocument
-        source.batch_index(
-            source.concepts, ConceptDocument,
-            prefetch=['sources', 'names', 'descriptions',
-                      'expansion_set', 'expansion_set__collection_version']
-        )
+        prefetch = ['sources', 'names', 'descriptions', 'expansion_set', 'expansion_set__collection_version']
+        try:
+            kwargs = {'partial_doc': partial_doc} if partial_doc else {'prefetch': prefetch}
+            source.batch_index(source.concepts, ConceptDocument, **kwargs)
+        except Exception:  # pragma: no cover
+            if not partial_doc:
+                raise
+            logger.exception('Falling back to full concept reindex for source %s', source_id)
+            source.batch_index(source.concepts, ConceptDocument, prefetch=prefetch)
 
 
 @app.task(
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
     acks_late=True, reject_on_worker_lost=True, base=QueueOnceCustomTask
 )
-def index_source_mappings(source_id):
+def index_source_mappings(source_id, partial_doc=None):
+    """
+    Index source mappings, or partially update existing ES documents when `partial_doc` is supplied.
+    """
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
     if source:
         from core.mappings.documents import MappingDocument
-        source.batch_index(
-            source.mappings, MappingDocument,
-            prefetch=['sources', 'expansion_set', 'expansion_set__collection_version']
-        )
+        prefetch = ['sources', 'expansion_set', 'expansion_set__collection_version']
+        try:
+            kwargs = {'partial_doc': partial_doc} if partial_doc else {'prefetch': prefetch}
+            source.batch_index(source.mappings, MappingDocument, **kwargs)
+        except Exception:  # pragma: no cover
+            if not partial_doc:
+                raise
+            logger.exception('Falling back to full mapping reindex for source %s', source_id)
+            source.batch_index(source.mappings, MappingDocument, prefetch=prefetch)
 
 
 @app.task(base=QueueOnceCustomTask)

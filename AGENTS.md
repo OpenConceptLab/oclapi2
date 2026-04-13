@@ -6,10 +6,13 @@
 
 ## Build, Test, and Development Commands
 - `docker compose up -d` boots the API, Postgres, Elasticsearch, Redis, and workers for local hacking.
-- `docker compose run --rm api python manage.py test --keepdb -v3` runs the Django test suite quickly against the dev database.
+- `docker ps --format '{{.Names}}\t{{.Status}}'` should be your first check before running verification so you can reuse the existing service containers.
+- `docker exec oclapi2-api-1 python manage.py test --keepdb -v3` runs the Django test suite in the already-running API container and is the preferred default for routine verification.
 - `docker exec -it oclapi2-api-1 pylint -j2 core` enforces lint rules.
 - `docker compose -f docker-compose.yml -f docker-compose.ci.yml run --rm api bash coverage.sh` reports coverage and fails under the CI thresholds.
 - `docker exec -it oclapi2-api-1 python manage.py search_index --populate -f --parallel` rebuilds Elasticsearch indexes after model or serializer changes.
+
+Always prefer `docker exec` into the existing `oclapi2-api-1` container over `docker compose run` for tests, lint, and management commands unless the user explicitly asks otherwise or the container is unavailable.
 
 ## Coding Style & Naming Conventions
 Use 4-space indentation, `snake_case` for functions/modules, and `PascalCase` for Django models and serializers. Keep imports sorted (stdlib, third-party, local) and lean on `pylint` to catch regressions. Favor explicit settings toggles by extending `core/toggles/` and document feature flags in docstrings above the flag definition. Apply KISS, DRY, and YAGNI: keep views/serializers simple, consolidate helpers per app, and skip speculative features.
@@ -17,9 +20,10 @@ Always comment code, in English only: add concise docstrings for functions, clas
 
 ## Testing Guidelines
 Target ≥93% coverage by pairing unit tests with integration cases. Name files `test_<feature>.py` and co-locate fixtures inside the app’s `tests/fixtures/`. Smoke Elasticsearch-dependent tests live in `core/integration_tests/` and should be guarded with `@skipUnless(settings.ES_ENABLED, ...)`. Use `python manage.py test app.tests --keepdb` for focused runs and include representative payloads in `core/samples/` when asserting serialization.
+For any code change, run targeted tests and pylint by default unless the user explicitly narrows verification. When using containers, prefer `docker exec oclapi2-api-1 ...` equivalents for both.
 
 ## Commit & Pull Request Guidelines
-Structure commit subjects using Conventional Commits (`feat(core): add repoType filter`) or issue references such as `OpenConceptLab/ocl_issues#2252 repo facets`. Keep one logical change per commit so release tooling can tag accurately. Follow GitFlow branches—start work on `feature/<issue-id>-slug` from `develop`, reserve `hotfix/*` for production fixes, and merge back through PRs only. Every PR must describe the motivation, list verification steps (`docker compose run --rm api python manage.py test…`), link the tracked issue, attach evidence when API responses change, and call out migrations, indexing, or env var impacts before requesting review.
+Structure commit subjects using Conventional Commits (`feat(core): add repoType filter`) or issue references such as `OpenConceptLab/ocl_issues#2252 repo facets`. Keep one logical change per commit so release tooling can tag accurately. Follow GitFlow branches—start work on `feature/<issue-id>-slug` from `develop`, reserve `hotfix/*` for production fixes, and merge back through PRs only. Every PR must describe the motivation, list verification steps (`docker exec oclapi2-api-1 python manage.py test…`, `docker exec oclapi2-api-1 pylint …`), link the tracked issue, attach evidence when API responses change, and call out migrations, indexing, or env var impacts before requesting review.
 
 ## Security & Configuration Tips
 Keep `vm.max_map_count=262144` set before starting Elasticsearch. For SSO, export `OIDC_SERVER_URL`, `OIDC_SERVER_INTERNAL_URL`, and `OIDC_REALM`; omitting them falls back to Django auth. Never commit secrets—use `.env` overrides or Docker compose profiles instead.

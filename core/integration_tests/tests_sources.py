@@ -6,7 +6,6 @@ import zipfile
 from celery_once import AlreadyQueued
 from django.conf import settings
 from django.db import transaction
-from django.http import StreamingHttpResponse
 from mock import patch, Mock, ANY, PropertyMock
 from mock.mock import call
 from rest_framework.exceptions import ErrorDetail
@@ -711,9 +710,9 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(version.id, self.source_v1.id)
         self.assertTrue(version.is_latest_released)
         index_source_concepts_task_mock.apply_async.assert_called_once_with(
-            (version.id,), queue='indexing', persist_args=True, task_id=ANY)
+            (version.id, {'is_in_latest_source_version': True}), queue='indexing', persist_args=True, task_id=ANY)
         index_source_mappings_task_mock.apply_async.assert_called_once_with(
-            (version.id,), queue='indexing', persist_args=True, task_id=ANY)
+            (version.id, {'is_in_latest_source_version': True}), queue='indexing', persist_args=True, task_id=ANY)
 
     @patch('core.sources.models.index_source_mappings')
     @patch('core.sources.models.index_source_concepts')
@@ -764,9 +763,11 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.source_v1.refresh_from_db()
         self.assertFalse(self.source_v1.released)
         index_source_concepts_task_mock.apply_async.assert_called_once_with(
-            (self.source_v1.id,), queue='indexing', persist_args=True, task_id=ANY)
+            (self.source_v1.id, {'is_in_latest_source_version': False}),
+            queue='indexing', persist_args=True, task_id=ANY)
         index_source_mappings_task_mock.apply_async.assert_called_once_with(
-            (self.source_v1.id,), queue='indexing', persist_args=True, task_id=ANY)
+            (self.source_v1.id, {'is_in_latest_source_version': False}),
+            queue='indexing', persist_args=True, task_id=ANY)
 
     @patch('core.sources.models.index_source_mappings')
     @patch('core.sources.models.index_source_concepts')
@@ -807,15 +808,19 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(
             index_source_concepts_task_mock.apply_async.mock_calls,
             [
-                call((source_v2.id,), queue='indexing', persist_args=True, task_id=ANY),
-                call((self.source_v1.id,), queue='indexing', persist_args=True, task_id=ANY)
+                call((source_v2.id, {'is_in_latest_source_version': False}),
+                     queue='indexing', persist_args=True, task_id=ANY),
+                call((self.source_v1.id, {'is_in_latest_source_version': True}),
+                     queue='indexing', persist_args=True, task_id=ANY)
             ]
         )
         self.assertEqual(
             index_source_mappings_task_mock.apply_async.mock_calls,
             [
-                call((source_v2.id,), queue='indexing', persist_args=True, task_id=ANY),
-                call((self.source_v1.id,), queue='indexing', persist_args=True, task_id=ANY)
+                call((source_v2.id, {'is_in_latest_source_version': False}),
+                     queue='indexing', persist_args=True, task_id=ANY),
+                call((self.source_v1.id, {'is_in_latest_source_version': True}),
+                     queue='indexing', persist_args=True, task_id=ANY)
             ]
         )
 
@@ -858,15 +863,21 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(
             index_source_concepts_task_mock.apply_async.mock_calls,
             [
-                call((self.source_v1.id,), queue='indexing', persist_args=True, task_id=ANY),
-                call((source_v2.id,), queue='indexing', persist_args=True, task_id=ANY)
+                call(
+                    (self.source_v1.id, {'is_in_latest_source_version': False}),
+                    queue='indexing', persist_args=True, task_id=ANY),
+                call(
+                    (source_v2.id, {'is_in_latest_source_version': True}),
+                    queue='indexing', persist_args=True, task_id=ANY)
             ]
         )
         self.assertEqual(
             index_source_mappings_task_mock.apply_async.mock_calls,
             [
-                call((self.source_v1.id,), queue='indexing', persist_args=True, task_id=ANY),
-                call((source_v2.id,), queue='indexing', persist_args=True, task_id=ANY)
+                call((self.source_v1.id, {'is_in_latest_source_version': False}),
+                     queue='indexing', persist_args=True, task_id=ANY),
+                call((source_v2.id, {'is_in_latest_source_version': True}),
+                     queue='indexing', persist_args=True, task_id=ANY)
             ]
         )
 
@@ -992,11 +1003,10 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         s3_has_path_mock.assert_called_once_with("users/username/username_source1_v1.")
 
-    @patch('core.services.storages.cloud.aws.S3.get_streaming_response')
+    @patch('core.services.storages.cloud.aws.S3.url_for')
     @patch('core.services.storages.cloud.aws.S3.exists')
-    def test_get_200_head(self, s3_exists_mock, s3_streaming_response):
-        response = StreamingHttpResponse()
-        s3_streaming_response.return_value = response
+    def test_get_302_head(self, s3_exists_mock, s3_url_for_mock):
+        s3_url_for_mock.return_value = 'https://signed.example/head.zip'
         s3_exists_mock.return_value = True
 
         response = self.client.get(
@@ -1005,15 +1015,16 @@ class SourceVersionExportViewTest(OCLAPITestCase):
             format='json'
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], 'https://signed.example/head.zip')
         s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
+        s3_url_for_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
 
-    @patch('core.services.storages.cloud.aws.S3.get_streaming_response')
+    @patch('core.services.storages.cloud.aws.S3.url_for')
     @patch('core.services.storages.cloud.aws.S3.get_last_key_from_path')
     @patch('core.services.storages.cloud.aws.S3.has_path')
-    def test_get_200_version(self, s3_has_path_mock, s3_get_last_key_from_path_mock, s3_streaming_response):
-        response = StreamingHttpResponse()
-        s3_streaming_response.return_value = response
+    def test_get_302_version(self, s3_has_path_mock, s3_get_last_key_from_path_mock, s3_url_for_mock):
+        s3_url_for_mock.return_value = 'https://signed.example/v1.zip'
         s3_has_path_mock.return_value = True
         s3_get_last_key_from_path_mock.return_value = f'users/username/username_source1_v1.{self.v1_updated_at}.zip'
 
@@ -1023,10 +1034,28 @@ class SourceVersionExportViewTest(OCLAPITestCase):
             format='json'
         )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response, response)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], 'https://signed.example/v1.zip')
         s3_has_path_mock.assert_called_once_with("users/username/username_source1_v1.")
         s3_get_last_key_from_path_mock.assert_called_once_with("users/username/username_source1_v1.")
+        s3_url_for_mock.assert_called_once_with(f'users/username/username_source1_v1.{self.v1_updated_at}.zip')
+
+    @patch('core.services.storages.cloud.aws.S3.url_for')
+    @patch('core.services.storages.cloud.aws.S3.exists')
+    def test_get_500_head_when_signed_url_generation_fails(self, s3_exists_mock, s3_url_for_mock):
+        s3_exists_mock.return_value = True
+        s3_url_for_mock.return_value = None
+
+        response = self.client.get(
+            self.source.uri + 'HEAD/export/',
+            HTTP_AUTHORIZATION='Token ' + self.admin_token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data, {'detail': 'Export exists but could not generate a download URL.'})
+        s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
+        s3_url_for_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
 
     @patch('core.sources.models.Source.is_exporting', new_callable=PropertyMock)
     @patch('core.services.storages.cloud.aws.S3.exists')
