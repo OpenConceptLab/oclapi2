@@ -838,10 +838,11 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         reranker = self.request.GET.get('reranker', None) in get_truthy_values()
         score_to_sort = 'search_rerank_score' if reranker else 'search_normalized_score'
         cid = get_cid()
-        is_bridge = (repo_params.get('owner', None) == 'CIEL' and repo_params.get('source', None) == 'CIEL' and
-                     filters.get('target_repo', None) and
-                     drop_version(filters.get('target_repo', None)) != '/orgs/CIEL/sources/CIEL/')
-        algorithm = ('ocl-ciel-bridge' if is_bridge else 'ocl-semantic') if is_semantic else 'ocl-search'
+        target_repo_filter = filters.get('target_repo', None)
+        search_repo_url = f"/orgs/{repo_params.get('owner')}/sources/{repo_params.get('source')}/"
+        is_bridge = (is_semantic and target_repo_filter and
+                     drop_version(target_repo_filter) != search_repo_url)
+        algorithm = ('ocl-bridge' if is_bridge else 'ocl-semantic') if is_semantic else 'ocl-search'
         results = []
         for row in rows:
             start_time = time.time()
