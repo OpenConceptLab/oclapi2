@@ -983,11 +983,13 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self.parts = deque([])
         self.result = None
         self._json_result = None
+        self.concept_hierarchy_map = {}  # child_uri -> [parent_uris], built before input_list is cleared
         if self.content:
             self.input_list = self.content if isinstance(self.content, list) else self.content.splitlines()
             self.total = len(self.input_list)
         self.make_resource_distribution()
         self.make_parts()
+        self.collect_concept_hierarchy_map()
         self.content = None  # memory optimization
         self.input_list = []  # memory optimization
 
@@ -1036,6 +1038,21 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                 else:
                     self.parts[-1].append(line)
                 prev_line = line
+
+    def collect_concept_hierarchy_map(self):
+        for data in self.input_list:
+            line = data if isinstance(data, dict) else json.loads(data)
+            if line.get('type', '').lower() != 'concept':
+                continue
+            parent_urls = line.get('parent_concept_urls') or []
+            concept_id = line.get('id')
+            owner = line.get('owner')
+            source = line.get('source')
+            if parent_urls and concept_id and owner and source:
+                owner_type = line.get('owner_type', '').lower()
+                owner_prefix = 'users' if owner_type in ['user', 'users'] else 'orgs'
+                child_uri = f'/{owner_prefix}/{owner}/sources/{source}/concepts/{concept_id}/'
+                self.concept_hierarchy_map[child_uri] = parent_urls
 
     @staticmethod
     def chunker_list(seq, size, is_child):  # pylint: disable=too-many-locals
@@ -1141,6 +1158,15 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                         if part_type not in self.resource_wise_time:
                             self.resource_wise_time[part_type] = 0
                         self.resource_wise_time[part_type] += round(time.time() - start_time, 4)
+
+        if self.concept_hierarchy_map:
+            inverted = {}
+            for child_uri, parent_uris in self.concept_hierarchy_map.items():
+                for parent_uri in parent_uris:
+                    if parent_uri not in inverted:
+                        inverted[parent_uri] = []
+                    inverted[parent_uri].append(child_uri)
+            make_hierarchy(inverted)
 
         post_import_update_resource_counts.apply_async(queue='default', permanent=False)
 
