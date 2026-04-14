@@ -15,7 +15,7 @@ from core.celery import app
 from core.collections.models import Collection
 from core.common.constants import HEAD
 from core.common.tasks import bulk_import_parts_inline, delete_organization, batch_index_resources, \
-    post_import_update_resource_counts
+    post_import_update_resource_counts, make_hierarchy
 from core.common.utils import drop_version, is_url_encoded_string, encode_string, to_parent_uri, chunks
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -820,6 +820,7 @@ class BulkImportInline(BaseImporter):
             print("***************")
         new_concept_ids = set()
         new_mapping_ids = set()
+        concept_hierarchy_map = {}  # child_uri -> [parent_uris]
         for original_item in self.input_list:
             self.processed += 1
             logger.info('Processing %s of %s', str(self.processed), str(self.total))
@@ -869,6 +870,11 @@ class BulkImportInline(BaseImporter):
                             concept_importer.instance.id,
                         ]
                     )))
+                if action != 'delete' and get(concept_importer.instance, 'id'):
+                    parent_urls = original_item.get('parent_concept_urls') or []
+                    if parent_urls:
+                        child_uri = drop_version(concept_importer.instance.uri)
+                        concept_hierarchy_map[child_uri] = parent_urls
                 self.handle_item_import_result(_result, original_item)
                 continue
             if item_type == 'mapping':
@@ -891,6 +897,15 @@ class BulkImportInline(BaseImporter):
                     reference_importer.delete() if action == 'delete' else reference_importer.run(), original_item
                 )
                 continue
+
+        if concept_hierarchy_map:
+            inverted = {}
+            for child_uri, parent_uris in concept_hierarchy_map.items():
+                for parent_uri in parent_uris:
+                    if parent_uri not in inverted:
+                        inverted[parent_uri] = []
+                    inverted[parent_uri].append(child_uri)
+            make_hierarchy(inverted)
 
         if new_concept_ids:
             for chunk in chunks(list(set(new_concept_ids)), 5000):
