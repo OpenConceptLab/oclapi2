@@ -2,7 +2,9 @@ import logging
 import time
 
 import requests
+from django.conf import settings
 from django.http import HttpResponseNotFound, HttpResponse
+from django.http.response import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
 from request_logging.middleware import LoggingMiddleware
 from rest_framework.views import APIView
@@ -52,7 +54,6 @@ class ResponseHeadersMiddleware(BaseMiddleware):
     def __call__(self, request):
         start_time = time.time()
         response = self.get_response(request)
-        from django.conf import settings
         response[VERSION_HEADER] = settings.VERSION
         try:
             response[REQUEST_USER_HEADER] = str(getattr(request, 'user', None))
@@ -89,6 +90,109 @@ class TokenAuthMiddleWare(BaseMiddleware):
         return response
 
 
+class RequireAuthenticationMiddleware(BaseMiddleware):
+    """Block anonymous API access unless the request matches an approved bypass."""
+
+    exempt_path_prefixes = (
+        '/healthcheck/',
+        '/users/api-token/',
+        '/users/login/',
+        '/users/logout/',
+        '/users/signup/',
+        '/users/password/reset/',
+        '/users/oidc/',
+        '/oidc/',
+        '/fhir/',
+        '/swagger',
+        '/redoc/',
+        '/admin/',
+    )
+    exempt_exact_paths = {
+        '/',
+        '/version',
+        '/changelog',
+        '/feedback',
+        '/toggles',
+        '/locales',
+        '/events',
+    }
+    forbidden_response = {
+        'detail': 'Authentication required. Anonymous API access is disabled.',
+        'upgrade_url': 'https://app.openconceptlab.org/pricing',
+    }
+
+    def __call__(self, request):
+        """Allow exempt and approved anonymous traffic, otherwise return 403."""
+        if self.is_request_allowed(request):
+            return self.get_response(request)
+
+        return JsonResponse(self.forbidden_response, status=403)
+
+    def is_request_allowed(self, request):
+        """Return whether the current request can bypass authentication enforcement."""
+        if request.method == 'OPTIONS' or request.META.get('HTTP_USER_AGENT', '').startswith('ELB-HealthChecker'):
+            return True
+
+        user = getattr(request, 'user', None)
+        return getattr(user, 'is_authenticated', False) or self.is_exempt_path(request.path) or \
+            self.has_approved_client_header(request) or \
+            self.has_approved_api_key(request) or self.has_approved_ip(request)
+
+    @classmethod
+    def is_exempt_path(cls, path):
+        """Return whether a request path must remain accessible to anonymous users."""
+        normalized_path = path.rstrip('/') or '/'
+        if normalized_path in cls.exempt_exact_paths:
+            return True
+
+        if any(path.startswith(prefix) for prefix in cls.exempt_path_prefixes):
+            return True
+
+        return (
+            path.startswith('/users/')
+            and (
+                '/verify/' in path
+                or path.endswith('/sso-migrate/')
+                or path.endswith('/following/')
+            )
+        )
+
+    @staticmethod
+    def has_approved_client_header(request):
+        """Match the configured anonymous allowlist against the X-OCL-CLIENT header."""
+        client_name = request.META.get('HTTP_X_OCL_CLIENT', '').strip()
+        return bool(client_name and client_name in settings.APPROVED_ANONYMOUS_CLIENTS)
+
+    @staticmethod
+    def has_approved_api_key(request):
+        """Match allowlisted anonymous API keys from common request locations."""
+        approved_keys = settings.APPROVED_ANONYMOUS_API_KEYS
+        if not approved_keys:
+            return False
+
+        authorization = request.META.get('HTTP_AUTHORIZATION', '').strip()
+        x_api_key = request.META.get('HTTP_X_API_KEY', '').strip()
+        tokens = [authorization, x_api_key]
+        bearer_token = authorization.split(None, 1)[1].strip() if ' ' in authorization else ''
+        if bearer_token:
+            tokens.append(bearer_token)
+
+        return any(token and token in approved_keys for token in tokens)
+
+    @staticmethod
+    def has_approved_ip(request):
+        """Match source IPs using the socket address only."""
+        approved_ips = settings.APPROVED_ANONYMOUS_IPS
+        if not approved_ips:
+            return False
+
+        remote_addr = request.META.get('REMOTE_ADDR', '').strip()
+        if not remote_addr:
+            return False
+
+        return remote_addr in approved_ips
+
+
 class FhirMiddleware(BaseMiddleware):
     """
     It is used to expose FHIR endpoints under FHIR subdomain only and convert content from xml to json.
@@ -98,7 +202,6 @@ class FhirMiddleware(BaseMiddleware):
     def __call__(self, request):
         absolute_uri = request.build_absolute_uri()
 
-        from django.conf import settings
         if settings.FHIR_SUBDOMAIN:
             uri = absolute_uri.split('/')
             domain = uri[2] if len(uri) > 2 else ''
