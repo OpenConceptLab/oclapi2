@@ -609,6 +609,8 @@ if ENV == 'development':
 
 # MINIO storage settings
 MINIO_ENDPOINT = os.environ.get('MINIO_ENDPOINT', '')
+MINIO_EXTERNAL_ENDPOINT = os.environ.get('MINIO_EXTERNAL_ENDPOINT', '')
+MINIO_REGION = os.environ.get('MINIO_REGION', 'us-east-1')
 MINIO_ACCESS_KEY = os.environ.get('MINIO_ACCESS_KEY', '')
 MINIO_SECRET_KEY = os.environ.get('MINIO_SECRET_KEY', '')
 MINIO_BUCKET_NAME = os.environ.get('MINIO_BUCKET_NAME', '')
