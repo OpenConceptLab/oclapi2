@@ -195,15 +195,23 @@ class MapProject(BaseModel):
 
     def clean(self):
         self.clean_filters()
-        if not self.include_retired:
-            self.include_retired = False
-        if not self.encoder_model:
-            self.encoder_model = settings.ENCODER_MODEL_NAME
+        self.clean_include_retired()
+        self.clean_encoder_model()
+        self.clean_matches()
+
+    def clean_matches(self):
         if self.matches:
             try:
                 self.matches = json.loads(self.matches)
             except (json.JSONDecodeError, TypeError):
                 pass
+
+    def clean_include_retired(self):
+        if not self.include_retired:
+            self.include_retired = False
+
+    def clean_encoder_model(self):
+        self.encoder_model = self.encoder_model.strip() if self.encoder_model else settings.ENCODER_MODEL_NAME
 
     def clean_filters(self):
         if not self.filters:
