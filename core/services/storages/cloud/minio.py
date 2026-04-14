@@ -21,10 +21,12 @@ class MinIO(CloudStorageServiceInterface):
         self.secure = settings.MINIO_SECURE
         self.client = Minio(endpoint=self.endpoint, access_key=self.access_key, secret_key=self.secret_key,
                             secure=self.secure)
-        # Separate client for presigned URL generation using the externally accessible endpoint.
+        # Dedicated client for presigned URL generation.
+        # Uses the external endpoint so the signature carries the publicly accessible host.
         # Region is set explicitly to avoid a network round-trip for region discovery
         # (the external endpoint is not reachable from inside the container).
-        self.external_client = Minio(
+        # All other operations use self.client (internal endpoint) since they run server-side.
+        self._presign_client = Minio(
             endpoint=self.external_endpoint, access_key=self.access_key, secret_key=self.secret_key,
             secure=self.secure, region=settings.MINIO_REGION
         ) if self.external_endpoint != self.endpoint else self.client
@@ -90,7 +92,7 @@ class MinIO(CloudStorageServiceInterface):
         Falls back to the internal client when no external endpoint is configured.
         """
         try:
-            return self.external_client.get_presigned_url(
+            return self._presign_client.get_presigned_url(
                 method='GET', bucket_name=self.bucket_name, object_name=file_path
             ) if file_path else None
         except S3Error as e:
