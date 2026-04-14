@@ -199,7 +199,7 @@ if ENABLE_THROTTLING:
         'match_standard_minute': '300/minute',
         'match_standard_day': '5000/day',
         'match_core_minute': '1000/minute',
-        'match_core_day': '2000/day',
+        'match_core_day': '20000/day',
     }
     MIDDLEWARE = [*MIDDLEWARE, 'core.middlewares.middlewares.ThrottleHeadersMiddleware']
 
