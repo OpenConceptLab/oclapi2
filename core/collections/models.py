@@ -1108,6 +1108,18 @@ class CollectionReference(models.Model):
     def translation(self):
         return CollectionReferenceTranslator(self).translate()
 
+    def get_resolved_repo_versions_serialized(self):
+        system_version = self.resolve_system_version
+        valueset_versions = self.resolve_valueset_versions
+        data = []
+        if system_version:
+            from core.sources.serializers import SourceVersionListSerializer
+            data.append(SourceVersionListSerializer(system_version).data)
+        if valueset_versions:
+            from core.collections.serializers import CollectionVersionListSerializer
+            data += CollectionVersionListSerializer(valueset_versions, many=True).data
+        return data
+
 
 def default_expansion_parameters():
     return {
