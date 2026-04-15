@@ -275,11 +275,13 @@ class AnalyticsMiddleware(BaseMiddleware):
         response = self.get_response(request)
         path = request.path
 
-        ignore_any_under_paths = ['/users/logout/', '/users/signup/']
+        # /users/signup/ and /users/logout/ are tracked — they're real
+        # user-intent events (top-of-funnel + session-end signal). Login
+        # tracking was added previously via ocl_online#55.
+        ignore_any_under_paths = []
         ignore_paths = [
             '', '/swagger', '/redoc', '/version', '/toggles', '/users/oidc/code-exchange', '/favicon.ico',
             '/users/api-token', '/users/password/reset', '/user',
-            *[p.rstrip('/') for p in ignore_any_under_paths]
         ]
         if path.rstrip("/") not in ignore_paths and not any(path.startswith(p) for p in ignore_any_under_paths):
             duration_ms = int((time.monotonic() - start) * 1000)
