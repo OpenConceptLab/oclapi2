@@ -987,7 +987,17 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
                 {'detail': 'You are currently in waitlist for $match operation.'},
                 status=status.HTTP_403_FORBIDDEN
             )
-        return Response(self.filter_queryset())
+        results = self.filter_queryset()
+        response = Response(results)
+        # Surface the total matched items as num_returned so the analytics
+        # emitter records it as item_count on the APITransaction row. Plan
+        # item 11 in data-extraction-v2 wants per-request item counts on
+        # $match (sum across all input rows of matches returned).
+        if isinstance(results, list):
+            response['num_returned'] = sum(
+                len(r.get('results', [])) for r in results if isinstance(r, dict)
+            )
+        return response
 
 
 class RerankConceptsListView(BaseAPIView):
