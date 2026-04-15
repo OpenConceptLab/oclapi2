@@ -15,7 +15,7 @@ from core.celery import app
 from core.collections.models import Collection
 from core.common.constants import HEAD
 from core.common.tasks import bulk_import_parts_inline, delete_organization, batch_index_resources, \
-    post_import_update_resource_counts
+    post_import_update_resource_counts, make_hierarchy
 from core.common.utils import drop_version, is_url_encoded_string, encode_string, to_parent_uri, chunks
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -968,11 +968,13 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self.parts = deque([])
         self.result = None
         self._json_result = None
+        self.concept_hierarchy_map = {}  # child_uri -> [parent_uris], built before input_list is cleared
         if self.content:
             self.input_list = self.content if isinstance(self.content, list) else self.content.splitlines()
             self.total = len(self.input_list)
         self.make_resource_distribution()
         self.make_parts()
+        self.collect_concept_hierarchy_map()
         self.content = None  # memory optimization
         self.input_list = []  # memory optimization
 
@@ -1021,6 +1023,25 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                 else:
                     self.parts[-1].append(line)
                 prev_line = line
+
+    def collect_concept_hierarchy_map(self):
+        for data in self.input_list:
+            line = data if isinstance(data, dict) else json.loads(data)
+            if line.get('type', '').lower() != 'concept':
+                continue
+            parent_urls = line.get('parent_concept_urls') or []
+            concept_id = line.get('id')
+            owner = line.get('owner')
+            source = line.get('source')
+            if parent_urls and concept_id and owner and source:
+                owner_type = line.get('owner_type', '').lower()
+                owner_prefix = 'users' if owner_type in ['user', 'users'] else 'orgs'
+                # P2: normalize concept_id the same way ConceptImporter.parse() does,
+                # so the URI matches what was actually persisted in the database.
+                if not is_url_encoded_string(concept_id):
+                    concept_id = encode_string(concept_id)
+                child_uri = f'/{owner_prefix}/{owner}/sources/{source}/concepts/{concept_id}/'
+                self.concept_hierarchy_map[child_uri] = parent_urls
 
     @staticmethod
     def chunker_list(seq, size, is_child):  # pylint: disable=too-many-locals
@@ -1126,6 +1147,30 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                         if part_type not in self.resource_wise_time:
                             self.resource_wise_time[part_type] = 0
                         self.resource_wise_time[part_type] += round(time.time() - start_time, 4)
+
+        if self.concept_hierarchy_map:
+            # P1: restrict reconciliation to concepts the importing user can actually edit,
+            # mirroring the has_edit_access guard in ConceptImporter.process(). This excludes
+            # PERMISSION_DENIED rows and prevents hierarchy changes on sources the user does
+            # not own, even when those concepts already exist in the database.
+            user = UserProfile.objects.filter(username=self.username).first()
+            accessible_uris = set(
+                concept.uri
+                for concept in Concept.objects.filter(
+                    uri__in=self.concept_hierarchy_map.keys(), id=F('versioned_object_id')
+                ).select_related('parent')
+                if concept.parent.has_edit_access(user)
+            )
+            inverted = {}
+            for child_uri, parent_uris in self.concept_hierarchy_map.items():
+                if child_uri not in accessible_uris:
+                    continue
+                for parent_uri in parent_uris:
+                    if parent_uri not in inverted:
+                        inverted[parent_uri] = []
+                    inverted[parent_uri].append(child_uri)
+            if inverted:
+                make_hierarchy(inverted)
 
         post_import_update_resource_counts.apply_async(queue='default', permanent=False)
 
