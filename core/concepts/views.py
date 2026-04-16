@@ -1033,5 +1033,5 @@ class RerankConceptsListView(BaseAPIView):
         except Exception as e:
             ERRBIT_LOGGER.log(e)
             return Response(
-                {'detail': {'detail': 'An error occurred while processing the rerank request.'}},
-                status=status.HTTP_400_BAD_REQUEST)
+                {'detail': 'An error occurred while processing the rerank request.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR)
