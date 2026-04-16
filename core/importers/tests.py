@@ -1332,15 +1332,16 @@ class BulkImportParallelRunnerTest(OCLTestCase):
 
     # ── run() hierarchy reconciliation ───────────────────────────────────────
 
+    @patch('core.importers.models.post_import_update_resource_counts.apply_async', Mock())
+    @patch('core.importers.models.BulkImportParallelRunner.wait_till_tasks_alive', Mock())
+    @patch('core.importers.models.BulkImportParallelRunner.queue_tasks', Mock())
     @patch('core.importers.models.make_hierarchy')
-    @patch('core.importers.models.BulkImportParallelRunner.wait_till_tasks_alive')
-    @patch('core.importers.models.BulkImportParallelRunner.queue_tasks')
-    def test_run_calls_make_hierarchy_with_inverted_map(self, queue_tasks_mock, wait_mock, make_hierarchy_mock):
+    def test_run_calls_make_hierarchy_with_inverted_map(self, make_hierarchy_mock):
         """After all chunks complete, make_hierarchy receives the inverted {parent_uri: [child_uris]} map."""
-        org    = OrganizationFactory(mnemonic='TestOrg')
+        org = OrganizationFactory(mnemonic='TestOrg')
         source = OrganizationSourceFactory(organization=org, mnemonic='TestSource', version='HEAD')
         parent = ConceptFactory(parent=source, mnemonic='ParentConcept')
-        child  = ConceptFactory(parent=source, mnemonic='ChildConcept')
+        child = ConceptFactory(parent=source, mnemonic='ChildConcept')
 
         # File order: child before parent (the exact scenario the fix targets)
         content = '\n'.join([
@@ -1363,10 +1364,11 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         self.assertIn(parent.uri, inverted)
         self.assertIn(child.uri, inverted[parent.uri])
 
+    @patch('core.importers.models.post_import_update_resource_counts.apply_async', Mock())
+    @patch('core.importers.models.BulkImportParallelRunner.wait_till_tasks_alive', Mock())
+    @patch('core.importers.models.BulkImportParallelRunner.queue_tasks', Mock())
     @patch('core.importers.models.make_hierarchy')
-    @patch('core.importers.models.BulkImportParallelRunner.wait_till_tasks_alive')
-    @patch('core.importers.models.BulkImportParallelRunner.queue_tasks')
-    def test_run_skips_make_hierarchy_when_no_hierarchy(self, queue_tasks_mock, wait_mock, make_hierarchy_mock):
+    def test_run_skips_make_hierarchy_when_no_hierarchy(self, make_hierarchy_mock):
         """make_hierarchy is not called when no concept in the import has parent_concept_urls."""
         content = '\n'.join([
             json.dumps({
@@ -1379,9 +1381,10 @@ class BulkImportParallelRunnerTest(OCLTestCase):
 
         make_hierarchy_mock.assert_not_called()
 
-    @patch('core.importers.models.BulkImportParallelRunner.wait_till_tasks_alive')
-    @patch('core.importers.models.BulkImportParallelRunner.queue_tasks')
-    def test_run_hierarchy_child_before_parent(self, queue_tasks_mock, wait_mock):
+    @patch('core.importers.models.post_import_update_resource_counts.apply_async', Mock())
+    @patch('core.importers.models.BulkImportParallelRunner.wait_till_tasks_alive', Mock())
+    @patch('core.importers.models.BulkImportParallelRunner.queue_tasks', Mock())
+    def test_run_hierarchy_child_before_parent(self):
         """
         End-to-end: when child appears before parent in the import file, the reconciliation
         step must correctly establish the parent_concepts M2M link in the database.
@@ -1411,17 +1414,18 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         child.refresh_from_db()
         self.assertIn(parent.get_latest_version(), child.parent_concepts.all())
 
-    @patch('core.importers.models.BulkImportParallelRunner.wait_till_tasks_alive')
-    @patch('core.importers.models.BulkImportParallelRunner.queue_tasks')
-    def test_run_hierarchy_parent_before_child(self, queue_tasks_mock, wait_mock):
+    @patch('core.importers.models.post_import_update_resource_counts.apply_async', Mock())
+    @patch('core.importers.models.BulkImportParallelRunner.wait_till_tasks_alive', Mock())
+    @patch('core.importers.models.BulkImportParallelRunner.queue_tasks', Mock())
+    def test_run_hierarchy_parent_before_child(self):
         """
         End-to-end: when parent appears before child (natural order), the reconciliation
         must also establish the link correctly — confirming the fix is order-agnostic.
         """
-        org    = OrganizationFactory(mnemonic='TestOrg')
+        org = OrganizationFactory(mnemonic='TestOrg')
         source = OrganizationSourceFactory(organization=org, mnemonic='TestSource', version='HEAD')
         parent = ConceptFactory(parent=source, mnemonic='ParentConcept')
-        child  = ConceptFactory(parent=source, mnemonic='ChildConcept')
+        child = ConceptFactory(parent=source, mnemonic='ChildConcept')
 
         # parent listed before child — normal/expected order
         content = '\n'.join([
@@ -1442,26 +1446,28 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         child.refresh_from_db()
         self.assertIn(parent.get_latest_version(), child.parent_concepts.all())
 
+    @patch('core.importers.models.post_import_update_resource_counts.apply_async', Mock())
+    @patch('core.importers.models.BulkImportParallelRunner.wait_till_tasks_alive', Mock())
+    @patch('core.importers.models.BulkImportParallelRunner.queue_tasks', Mock())
     @patch('core.importers.models.make_hierarchy')
-    @patch('core.importers.models.BulkImportParallelRunner.wait_till_tasks_alive')
-    @patch('core.importers.models.BulkImportParallelRunner.queue_tasks')
-    def test_run_excludes_inaccessible_concepts(self, queue_tasks_mock, wait_mock, make_hierarchy_mock):
+    def test_run_excludes_inaccessible_concepts(self, make_hierarchy_mock):
         """
         Concepts from sources the importing user cannot edit must be excluded from make_hierarchy,
         even when they exist in the database. This prevents hierarchy changes on foreign sources
         that were denied during import (P1 security fix).
         """
         # OrgA — importing user is a member → has edit access
-        org_a    = OrganizationFactory(mnemonic='OrgA')
+        org_a = OrganizationFactory(mnemonic='OrgA')
         source_a = OrganizationSourceFactory(organization=org_a, mnemonic='SourceA', version='HEAD')
         parent_a = ConceptFactory(parent=source_a, mnemonic='ParentA')
-        child_a  = ConceptFactory(parent=source_a, mnemonic='ChildA')
+        child_a = ConceptFactory(parent=source_a, mnemonic='ChildA')
 
         # OrgB — importing user is NOT a member and source is not publicly editable → no edit access
-        org_b    = OrganizationFactory(mnemonic='OrgB')
-        source_b = OrganizationSourceFactory(organization=org_b, mnemonic='SourceB', version='HEAD', public_access='None')
+        org_b = OrganizationFactory(mnemonic='OrgB')
+        source_b = OrganizationSourceFactory(
+            organization=org_b, mnemonic='SourceB', version='HEAD', public_access='None')
         parent_b = ConceptFactory(parent=source_b, mnemonic='ParentB')
-        child_b  = ConceptFactory(parent=source_b, mnemonic='ChildB')
+        child_b = ConceptFactory(parent=source_b, mnemonic='ChildB')
 
         importing_user = UserProfileFactory(username='importer-user')
         org_a.members.add(importing_user)
