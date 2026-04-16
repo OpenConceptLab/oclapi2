@@ -14,7 +14,7 @@ from core.common.models import BaseModel, CommonLogoModel
 from core.common.tasks import send_user_verification_email, send_user_reset_password_email
 from core.common.utils import web_url
 from core.users.constants import AUTH_GROUPS, MAPPER_WAITLIST_GROUP, STAFF_GROUP, SUPERADMIN_GROUP, GUEST_GROUP, \
-    MAPPER_APPROVED_GROUP
+    MAPPER_APPROVED_GROUP, CORE_USER_GROUP
 from .constants import USER_OBJECT_TYPE
 from ..common.checksums import ChecksumModel
 
@@ -242,6 +242,10 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
     @property
     def is_superadmin_group(self):
         return self.has_auth_group(SUPERADMIN_GROUP)
+
+    @property
+    def is_core_group(self):
+        return self.has_auth_group(CORE_USER_GROUP)
 
     @property
     def auth_headers(self):

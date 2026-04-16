@@ -18,6 +18,7 @@ from rest_framework.views import APIView
 from core.bundles.models import Bundle
 from core.bundles.serializers import BundleSerializer
 from core.collections.documents import CollectionDocument
+from core.common import ERRBIT_LOGGER
 from core.common.constants import (
     HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE, LIMIT_PARAM, LIST_DEFAULT_LIMIT)
 from core.common.exceptions import Http400, Http403, Http409
@@ -1003,7 +1004,7 @@ class RerankConceptsListView(BaseAPIView):
     serializer_class = ConceptListSerializer
     permission_classes = (IsAuthenticated,)
 
-    def post(self, request, **kwargs):  # pylint: disable=unused-argument
+    def post(self, request, **kwargs):  # pylint: disable=unused-argument,too-many-return-statements
         user = self.request.user
         if user.is_mapper_waitlisted or not user.is_mapper_approved:
             return Response(
@@ -1015,6 +1016,12 @@ class RerankConceptsListView(BaseAPIView):
         name_key = self.request.data.get('name_key', None) or 'display_name'
         text = self.request.data.get('q', None)
         score_key = self.request.data.get('score_key', None)
+        encoder_model = self.request.data.get('encoder_model', None)
+        if encoder_model and encoder_model != settings.ENCODER_MODEL_NAME and not user.is_core_group:
+            return Response(
+                {'detail': 'You do not have permission to request for custom encoder models.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
         if not isinstance(rows, list) or not rows:
             return Response(
@@ -1026,7 +1033,14 @@ class RerankConceptsListView(BaseAPIView):
                 {'detail': 'Missing "q" in request body.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-
-        return Response(
-            Reranker().rerank(hits=rows, name_key=name_key, txt=text, score_key=score_key, order_results=True)
-        )
+        try:
+            reranker = Reranker(model_name=encoder_model)
+            results = reranker.rerank(hits=rows, name_key=name_key, txt=text, score_key=score_key, order_results=True)
+            return Response(results)
+        except (ValueError, RuntimeError, OSError) as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            ERRBIT_LOGGER.log(e)
+            return Response(
+                {'detail': 'An error occurred while processing the rerank request.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR)
