@@ -989,10 +989,8 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
             )
         results = self.filter_queryset()
         response = Response(results)
-        # Surface the total matched items as num_returned so the analytics
-        # emitter records it as item_count on the APITransaction row. Plan
-        # item 11 in data-extraction-v2 wants per-request item counts on
-        # $match (sum across all input rows of matches returned).
+        # num_returned is picked up by the analytics middleware as
+        # APITransaction.item_count (see ocl_online#73).
         if isinstance(results, list):
             response['num_returned'] = sum(
                 len(r.get('results', [])) for r in results if isinstance(r, dict)
