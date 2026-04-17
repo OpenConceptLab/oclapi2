@@ -679,8 +679,12 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         return self.get_max_mapping_attribute('updated_at')
 
     def get_mapped_sources(self, exclude_self=True):
-        """Returns only direct mapped sources"""
-        queryset = Source.objects.filter(mappings_to__sources=self).distinct()
+        mapped_source_ids = (
+            self.get_mappings_queryset()
+            .values_list('to_source_id', flat=True)
+            .distinct()
+        )
+        queryset = Source.objects.filter(id__in=mapped_source_ids)
         if exclude_self:
             queryset = queryset.exclude(id=self.id)
         return queryset
