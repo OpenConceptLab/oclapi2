@@ -330,10 +330,11 @@ class ChecksumDiff:
 
 
 class ChecksumChangelog:
-    def __init__(self, concepts_diff, mappings_diff, identity='mnemonic'):  # pylint: disable=too-many-arguments
+    def __init__(self, concepts_diff, mappings_diff, identity='mnemonic', enrich=False):  # pylint: disable=too-many-arguments
         self.concepts_diff = concepts_diff
         self.mappings_diff = mappings_diff
         self.identity = identity
+        self.enrich = enrich
         self.result = {}
 
     def get_mapping_summary(self, mapping, mapping_id=None):
@@ -346,6 +347,40 @@ class ChecksumChangelog:
             'map_type': mapping.map_type,
         }
 
+    def _build_concepts_cache(self, diff_keys):  # pylint: disable=too-many-branches
+        """Batch-fetch concepts with names/descriptions for enrich mode (avoids N+1 queries)."""
+        from core.concepts.models import Concept
+        all_ids = set()
+        for key in diff_keys:
+            diff = self.concepts_diff.result.get(key, False)
+            if isinstance(diff, dict):
+                for concept_id in diff[self.identity]:
+                    db_id = self.concepts_diff.get_db_id_for(key, concept_id)
+                    if db_id:
+                        all_ids.add(db_id)
+                    if key in ('changed_major', 'changed_minor'):
+                        v1_id = get(self.concepts_diff.resources1_map, f'{concept_id}.id')
+                        if v1_id and v1_id != db_id:
+                            all_ids.add(v1_id)
+        return {
+            c.id: c
+            for c in Concept.objects.filter(id__in=all_ids).prefetch_related('names', 'descriptions')
+        }
+
+    @staticmethod
+    def _names_list(concept):
+        return [
+            {'name': n.name, 'type': n.type, 'locale': n.locale, 'locale_preferred': n.locale_preferred}
+            for n in concept.names.all()
+        ]
+
+    @staticmethod
+    def _descriptions_list(concept):
+        return [
+            {'description': d.name, 'type': d.type, 'locale': d.locale}
+            for d in concept.descriptions.all()
+        ]
+
     def process(self):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         from core.mappings.models import Mapping
         from core.concepts.models import Concept
@@ -354,6 +389,9 @@ class ChecksumChangelog:
         traversed_mappings = set()
         traversed_concepts = set()
         diff_keys = ['new', 'removed', 'changed_retired', 'changed_major', 'changed_minor']
+
+        concepts_cache = self._build_concepts_cache(diff_keys) if self.enrich else {}
+
         for key in diff_keys:  # pylint: disable=too-many-nested-blocks
             diff = self.concepts_diff.result.get(key, False)
             if isinstance(diff, dict):
@@ -363,7 +401,10 @@ class ChecksumChangelog:
                         continue
                     traversed_concepts.add(concept_id)
                     concept_db_id = self.concepts_diff.get_db_id_for(key, concept_id)
-                    concept = Concept.objects.filter(id=concept_db_id).first()
+                    if self.enrich:
+                        concept = concepts_cache.get(concept_db_id)
+                    else:
+                        concept = Concept.objects.filter(id=concept_db_id).first()
                     concept_display_name = get(concept, 'display_name')
                     if concept_display_name:
                         concept_display_name = concept_display_name.replace('"', "'")
@@ -371,6 +412,20 @@ class ChecksumChangelog:
                         'id': concept_id,
                         'display_name': concept_display_name
                     }
+                    if self.enrich and concept:
+                        summary['concept_class'] = getattr(concept, 'concept_class', None)
+                        summary['datatype'] = getattr(concept, 'datatype', None)
+                        summary['names'] = self._names_list(concept)
+                        summary['descriptions'] = self._descriptions_list(concept)
+                        if key in ('changed_major', 'changed_minor'):
+                            v1_id = get(self.concepts_diff.resources1_map, f'{concept_id}.id')
+                            if v1_id and v1_id != concept_db_id:
+                                v1_concept = concepts_cache.get(v1_id)
+                                if v1_concept:
+                                    summary['prev_names'] = self._names_list(v1_concept)
+                                    summary['prev_descriptions'] = self._descriptions_list(v1_concept)
+                                    summary['prev_concept_class'] = getattr(v1_concept, 'concept_class', None)
+                                    summary['prev_datatype'] = getattr(v1_concept, 'datatype', None)
                     mappings_diff_summary = {}
                     for mapping_diff_key in diff_keys:
                         mapping_ids = get(self.mappings_diff.result, f'{mapping_diff_key}.{self.identity}')

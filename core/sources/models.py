@@ -981,7 +981,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         }
 
     @staticmethod
-    def changelog(version1, version2, verbosity=0):
+    def changelog(version1, version2, verbosity=0, enrich=False):
         """
         version1 is the older version
         version2 is the newer version
@@ -999,7 +999,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         )
         concepts_diff.process()
         mappings_diff.process()
-        log = ChecksumChangelog(concepts_diff, mappings_diff)
+        log = ChecksumChangelog(concepts_diff, mappings_diff, enrich=enrich)
         log.process()
         result = {
             'meta': {
