@@ -438,7 +438,9 @@ class ConceptsFromSourceQueryTests(OCLTestCase):
         self.assertEqual(payload['versionResolved'], self.release_version.version)
         self.assertEqual(payload['results'][0]['conceptId'], self.concept1.mnemonic)
 
-    def test_fetch_concepts_global_search(self):
+    @mock.patch('core.graphql.queries.concept_ids_from_es')
+    def test_fetch_concepts_global_search(self, mock_es):
+        mock_es.return_value = ([self.concept1.id], 1)
         query = """
         query GlobalConcepts($query: String!) {
           concepts(query: $query) {

@@ -28,12 +28,20 @@ from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_
     CANONICAL_URL_REQUEST_PARAM, CHECKSUMS_PARAM, ACCESS_TYPE_NONE
 from core.common.exceptions import Http400
 from core.common.mixins import PathWalkerMixin
-from core.common.search import CustomESSearch
+from core.common.search import CustomESSearch, get_document_public_visibility_criteria
 from core.common.serializers import RootSerializer
 from core.common.swagger_parameters import all_resource_query_param
 from core.common.throttling import ThrottleUtil
 from core.common.utils import compact_dict_by_values, to_snake_case, parse_updated_since_param, \
     to_int, get_falsy_values, get_truthy_values, format_url_for_search
+from core.concepts.search import (
+    get_concept_exact_search_criterion,
+    get_concept_fuzzy_search_criterion,
+    get_concept_mandatory_exclude_words_criteria,
+    get_concept_mandatory_words_criteria,
+    get_concept_search_rescore,
+    get_concept_wildcard_search_criterion,
+)
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.orgs.constants import ORG_OBJECT_TYPE
 from core.users.constants import USER_OBJECT_TYPE
@@ -292,6 +300,12 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return result
 
     def get_fuzzy_search_criterion(self, boost_divide_by=10, expansions=5):
+        if self.is_concept_document():
+            return get_concept_fuzzy_search_criterion(
+                self.get_raw_search_string(),
+                boost_divide_by=boost_divide_by,
+                expansions=expansions,
+            )
         return CustomESSearch.get_fuzzy_match_criterion(
             search_str=self.get_search_string(decode=False),
             fields=self.get_fuzzy_search_fields(),
@@ -300,6 +314,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         )
 
     def get_wildcard_search_criterion(self, search_str=None):
+        if self.is_concept_document():
+            return get_concept_wildcard_search_criterion(
+                search_str or self.get_raw_search_string(),
+                include_map_codes=self.request.query_params.get(SEARCH_MAP_CODES_PARAM) not in get_falsy_values(),
+            )
         fields = self.get_wildcard_search_fields()
         return CustomESSearch.get_wildcard_match_criterion(
             search_str=search_str or self.get_search_string(),
@@ -307,6 +326,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         ), fields.keys()
 
     def get_exact_search_criterion(self):
+        if self.is_concept_document():
+            return get_concept_exact_search_criterion(
+                self.get_raw_search_string(),
+                include_map_codes=self.request.query_params.get(SEARCH_MAP_CODES_PARAM) not in get_falsy_values(),
+            )
         match_phrase_field_list = self.document_model.get_match_phrase_attrs()
         match_word_fields_map = self.clean_fields(self.document_model.get_exact_match_attrs())
         fields = match_phrase_field_list + list(match_word_fields_map.keys())
@@ -662,8 +686,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return False
 
     def get_public_criteria(self):
-        criteria = Q('term', public_can_view=True)
         user = self.request.user
+        criteria = Q('term', public_can_view=True)
 
         if user.is_authenticated:
             username = user.username
@@ -671,7 +695,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             if self.document_model in [OrganizationDocument]:
                 criteria |= (Q('term', public_can_view=False) & Q('term', user=username))
             if self.is_concept_container_document_model() or self.is_source_child_document_model():
-                criteria |= (Q('term', public_can_view=False) & Q('term', created_by=username))
+                return get_document_public_visibility_criteria(
+                    user,
+                    include_creator_private_access=True,
+                )
 
         return criteria
 
@@ -884,42 +911,18 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         sort_attrs = self._get_sort_attribute()
         if self.is_concept_document() and (not sort_attrs or '_score' in get(sort_attrs, '0', {})):
-            search_str = self.get_search_string(lower=False)
-            results = results.extra(
-                rescore={
-                  "window_size": 400,
-                  "query": {
-                    "score_mode": "total",
-                    "query_weight": 1.0,
-                    "rescore_query_weight": 800.0,
-                    "rescore_query": {
-                      "dis_max": {
-                        "tie_breaker": 0.0,
-                        "queries": [
-                          {
-                            "constant_score": {
-                              "filter": { "term": { "_name": { "value": search_str, "case_insensitive": True } } },
-                              "boost": 10.0
-                            }
-                          },
-                          {
-                            "constant_score": {
-                              "filter": { "term": { "_synonyms": { "value": search_str, "case_insensitive": True } } },
-                              "boost": 8.0
-                            }
-                          }
-                        ]
-                      }
-                    }
-                  }
-                }
-            )
+            results = results.extra(rescore=get_concept_search_rescore(self.get_raw_search_string()))
         if fields and highlight and self.request.query_params.get(INCLUDE_SEARCH_META_PARAM) in get_truthy_values():
             results = results.highlight(*self.clean_fields_for_highlight(fields))
         results = results.source(excludes=['_synonyms_embeddings', '_embeddings'])
         return results.sort(*sort_attrs) if sort else results
 
     def get_mandatory_words_criteria(self):
+        if self.is_concept_document():
+            return get_concept_mandatory_words_criteria(
+                self.get_raw_search_string(),
+                include_map_codes=self.request.query_params.get(SEARCH_MAP_CODES_PARAM) not in get_falsy_values(),
+            )
         criterion = None
         for must_have in CustomESSearch.get_must_haves(self.get_raw_search_string()):
             criteria, _ = self.get_wildcard_search_criterion(f"{must_have}*")
@@ -927,6 +930,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return criterion
 
     def get_mandatory_exclude_words_criteria(self):
+        if self.is_concept_document():
+            return get_concept_mandatory_exclude_words_criteria(
+                self.get_raw_search_string(),
+                include_map_codes=self.request.query_params.get(SEARCH_MAP_CODES_PARAM) not in get_falsy_values(),
+            )
         criterion = None
         for must_not_have in CustomESSearch.get_must_not_haves(self.get_raw_search_string()):
             criteria, _ = self.get_wildcard_search_criterion(f"{must_not_have}*")

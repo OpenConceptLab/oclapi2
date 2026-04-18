@@ -6,19 +6,29 @@ from typing import Iterable, List, Optional, Sequence
 
 import strawberry
 from asgiref.sync import sync_to_async
-from django.db.models import Case, IntegerField, Prefetch, Q, When
+from django.contrib.auth.models import AnonymousUser
+from django.db.models import Case, F, IntegerField, Prefetch, Q, When
 from django.utils import timezone
 from elasticsearch import ConnectionError as ESConnectionError, TransportError
-from elasticsearch_dsl import Q as ES_Q
 from pydash import get
 from strawberry.exceptions import GraphQLError
 
 from core.common.constants import HEAD
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
+from core.concepts.search import apply_concept_text_search
 from core.mappings.models import Mapping
+from core.orgs.constants import ORG_OBJECT_TYPE
 from core.sources.models import Source
+from core.users.constants import USER_OBJECT_TYPE
 
+from .constants import SEARCH_UNAVAILABLE, build_expected_graphql_error
+from .permissions import (
+    PermissionsMixin,
+    apply_es_visibility_filter,
+    check_user_permission,
+    filter_global_queryset,
+)
 from .types import (
     CodedDatatypeDetails,
     ConceptNameType,
@@ -67,8 +77,18 @@ class ConceptSearchResult:
     )
 
 
-async def resolve_source_version(org: str, source: str, version: Optional[str]) -> Source:
-    filters = {'organization__mnemonic': org}
+async def resolve_source_version(
+    org: Optional[str],
+    owner: Optional[str],
+    source: str,
+    version: Optional[str],
+) -> Source:
+    if org:
+        filters = {'organization__mnemonic': org}
+    elif owner:
+        filters = {'user__username': owner}
+    else:
+        raise GraphQLError("Either org or owner must be provided to resolve a source version.")
     target_version = version or HEAD
     instance = await sync_to_async(Source.get_version)(source, target_version, filters)
 
@@ -76,15 +96,19 @@ async def resolve_source_version(org: str, source: str, version: Optional[str]) 
         instance = await sync_to_async(Source.find_latest_released_version_by)({**filters, 'mnemonic': source})
 
     if not instance:
+        owner_label = org or owner
+        owner_kind = "org" if org else "owner"
         raise GraphQLError(
-            f"Source '{source}' with version '{version or 'HEAD'}' was not found for org '{org}'."
+            f"Source '{source}' with version '{version or 'HEAD'}' was not found for {owner_kind} '{owner_label}'."
         )
 
     return instance
 
 
-def build_base_queryset(source_version: Source):
-    return source_version.get_concepts_queryset().filter(is_active=True, retired=False)
+def build_base_queryset(source_version: Source = None):
+    if source_version:
+        return source_version.get_concepts_queryset().filter(is_active=True, retired=False)
+    return Concept.objects.filter(is_active=True, retired=False, id=F('versioned_object_id'))
 
 
 def build_mapping_prefetch(source_version: Source) -> Prefetch:
@@ -103,7 +127,8 @@ def build_mapping_prefetch(source_version: Source) -> Prefetch:
     return Prefetch('mappings_from', queryset=mapping_qs, to_attr='graphql_mappings')
 
 
-def build_global_mapping_prefetch() -> Prefetch:
+def build_global_mapping_prefetch(user=None) -> Prefetch:
+    """Build the global mapping prefetch using the same visibility rules as REST list endpoints."""
     mapping_qs = (
         Mapping.objects.filter(
             from_concept_id__isnull=False,
@@ -115,6 +140,8 @@ def build_global_mapping_prefetch() -> Prefetch:
         .distinct()
     )
 
+    # Mapping visibility must be filtered independently because a public concept can still reference private mappings.
+    mapping_qs = filter_global_queryset(mapping_qs, user or AnonymousUser())
     return Prefetch('mappings_from', queryset=mapping_qs, to_attr='graphql_mappings')
 
 
@@ -353,6 +380,10 @@ def concept_ids_from_es(
         query: str,
         source_version: Optional[Source],
         pagination: Optional[dict],
+        owner: Optional[str] = None,
+        owner_type: Optional[str] = None,
+        version_label: Optional[str] = None,
+        user=None,
 ) -> Optional[tuple[list[int], int]]:
     trimmed = query.strip()
     if not trimmed:
@@ -360,20 +391,23 @@ def concept_ids_from_es(
 
     try:
         search = ConceptDocument.search()
+        search = search.filter('term', retired=False)
         if source_version:
-            search = search.filter('term', source=source_version.mnemonic.lower())
-            if source_version.is_head:
+            search = search.filter('term', source=source_version.mnemonic)
+            if owner and owner_type:
+                search = search.filter('term', owner=owner).filter('term', owner_type=owner_type)
+
+            effective_version = version_label or HEAD
+            if effective_version == HEAD:
+                search = search.filter('term', source_version=HEAD)
                 search = search.filter('term', is_latest_version=True)
             else:
-                search = search.filter('term', source_version=source_version.version)
-        search = search.filter('term', retired=False)
+                search = search.filter('term', source_version=effective_version)
+        else:
+            search = search.filter('term', is_latest_version=True)
+            search = apply_es_visibility_filter(search, user or AnonymousUser())
 
-        should_queries = [
-            ES_Q('match', id={'query': trimmed, 'boost': 6, 'operator': 'AND'}),
-            ES_Q('match_phrase_prefix', name={'query': trimmed, 'boost': 4}),
-            ES_Q('match', synonyms={'query': trimmed, 'boost': 2, 'operator': 'AND'}),
-        ]
-        search = search.query(ES_Q('bool', should=should_queries, minimum_should_match=1))
+        search, _ = apply_concept_text_search(search, trimmed, include_rescore=True)
 
         if pagination:
             search = search[pagination['start']:pagination['end']]
@@ -393,35 +427,37 @@ def concept_ids_from_es(
     return None
 
 
-def fallback_db_search(base_qs, query: str):
-    trimmed = query.strip()
-    if not trimmed:
-        return base_qs.none()
-    return base_qs.filter(
-        Q(mnemonic__icontains=trimmed) | Q(names__name__icontains=trimmed)
-    ).distinct()
-
-
 async def concepts_for_ids(
         base_qs,
         concept_ids: Sequence[str],
         pagination: Optional[dict],
         mapping_prefetch: Prefetch,
 ) -> tuple[List[Concept], int]:
-    unique_ids = list(dict.fromkeys([cid for cid in concept_ids if cid]))
-    if not unique_ids:
-        raise GraphQLError('conceptIds must include at least one value when provided.')
+    """Fetch concepts by mnemonic while preserving the client-provided ordering."""
+    ordered_ids = list(dict.fromkeys(concept_id for concept_id in concept_ids if concept_id))
+    if not ordered_ids:
+        raise GraphQLError('conceptIds must contain at least one value.')
 
-    qs = base_qs.filter(mnemonic__in=unique_ids)
-    total = await sync_to_async(qs.count)()
     ordering = Case(
-        *[When(mnemonic=value, then=pos) for pos, value in enumerate(unique_ids)],
-        output_field=IntegerField()
+        *[When(mnemonic=concept_id, then=pos) for pos, concept_id in enumerate(ordered_ids)],
+        output_field=IntegerField(),
     )
-    qs = qs.order_by(ordering, 'mnemonic')
+    qs = base_qs.filter(mnemonic__in=ordered_ids).order_by(ordering)
+    total = await sync_to_async(qs.count)()
     qs = apply_slice(qs, pagination)
     qs = with_concept_related(qs, mapping_prefetch)
     return await sync_to_async(list)(qs), total
+
+
+def build_db_search_queryset(base_qs, query: str):
+    """Build the database fallback used when Elasticsearch is unavailable or stale."""
+    trimmed = query.strip()
+    if not trimmed:
+        return base_qs.none()
+
+    return base_qs.filter(
+        Q(names__name__icontains=trimmed) | Q(descriptions__name__icontains=trimmed)
+    ).distinct()
 
 
 async def concepts_for_query(
@@ -430,30 +466,40 @@ async def concepts_for_query(
         source_version: Source,
         pagination: Optional[dict],
         mapping_prefetch: Prefetch,
+        owner: Optional[str] = None,
+        owner_type: Optional[str] = None,
+        version_label: Optional[str] = None,
+        user=None,
 ) -> tuple[List[Concept], int]:
-    es_result = await sync_to_async(concept_ids_from_es)(query, source_version, pagination)
+    es_result = await sync_to_async(concept_ids_from_es)(
+        query,
+        source_version,
+        pagination,
+        owner=owner,
+        owner_type=owner_type,
+        version_label=version_label,
+        user=user,
+    )
     if es_result is not None:
         concept_ids, total = es_result
-        if not concept_ids:
-            if total == 0:
-                logger.info(
-                    'ES returned zero hits for query="%s" in source "%s" version "%s". Falling back to DB search.',
-                    query,
-                    get(source_version, 'mnemonic'),
-                    get(source_version, 'version'),
-                )
-            else:
-                return [], total
-        else:
+        if concept_ids:
             ordering = Case(
                 *[When(id=pk, then=pos) for pos, pk in enumerate(concept_ids)],
                 output_field=IntegerField()
             )
             qs = base_qs.filter(id__in=concept_ids).order_by(ordering)
             qs = with_concept_related(qs, mapping_prefetch)
-            return await sync_to_async(list)(qs), total
+            concepts = await sync_to_async(list)(qs)
+            if len(concepts) == len(concept_ids):
+                return concepts, total
+        elif total > 0:
+            return [], total
 
-    qs = fallback_db_search(base_qs, query).order_by('mnemonic')
+    if source_version is None:
+        # Global search is ES-backed because the DB fallback is both broader and much more expensive under outage.
+        raise build_expected_graphql_error(SEARCH_UNAVAILABLE)
+
+    qs = build_db_search_queryset(base_qs, query).order_by('mnemonic')
     total = await sync_to_async(qs.count)()
     qs = apply_slice(qs, pagination)
     qs = with_concept_related(qs, mapping_prefetch)
@@ -461,12 +507,24 @@ async def concepts_for_query(
 
 
 @strawberry.type
-class Query:
+class Query(PermissionsMixin):
+    async def resolve_source_version_for_permissions(
+        self,
+        org: Optional[str],
+        owner: Optional[str],
+        source: str,
+        version: Optional[str],
+    ) -> Source:
+        """Resolve repository versions through the shared GraphQL helper."""
+        return await resolve_source_version(org, owner, source, version)
+
     @strawberry.field(name="concepts")
+    @check_user_permission
     async def concepts(  # pylint: disable=too-many-arguments,too-many-locals
         self,
         info,  # pylint: disable=unused-argument
         org: Optional[str] = None,
+        owner: Optional[str] = None,
         source: Optional[str] = None,
         version: Optional[str] = None,
         conceptIds: Optional[List[str]] = None,
@@ -474,29 +532,34 @@ class Query:
         page: Optional[int] = None,
         limit: Optional[int] = None,
     ) -> ConceptSearchResult:
-        if info.context.auth_status == 'none':
-            raise GraphQLError('Authentication required')
-
-        if info.context.auth_status == 'invalid':
-            raise GraphQLError('Authentication failure')
-
+        permission_target = self or Query()
         concept_ids_param = conceptIds or []
         text_query = (query or '').strip()
+        user = getattr(info.context, 'user', AnonymousUser())
 
         if not concept_ids_param and not text_query:
             raise GraphQLError('Either conceptIds or query must be provided.')
 
         pagination = normalize_pagination(page, limit)
 
-        if org and source:
-            source_version = await resolve_source_version(org, source, version)
+        if org and owner:
+            raise GraphQLError('Provide either org or owner, not both.')
+
+        if source and not org and not owner:
+            raise GraphQLError('Either org or owner must be provided when source is specified.')
+
+        owner_value = org or owner
+        owner_type = ORG_OBJECT_TYPE if org else (USER_OBJECT_TYPE if owner else None)
+
+        if (org or owner) and source:
+            source_version = await permission_target.get_source_version(info, org, owner, source, version)
             base_qs = build_base_queryset(source_version)
             mapping_prefetch = build_mapping_prefetch(source_version)
         else:
             # Global search across all repositories
             source_version = None
-            base_qs = Concept.objects.filter(is_active=True, retired=False)
-            mapping_prefetch = build_global_mapping_prefetch()
+            base_qs = permission_target.filter_global_queryset(build_base_queryset(), user)
+            mapping_prefetch = build_global_mapping_prefetch(user)
 
         if concept_ids_param:
             concepts, total = await concepts_for_ids(base_qs, concept_ids_param, pagination, mapping_prefetch)
@@ -507,6 +570,10 @@ class Query:
                 source_version,
                 pagination,
                 mapping_prefetch,
+                owner=owner_value,
+                owner_type=owner_type,
+                version_label=version or HEAD if source_version else None,
+                user=user,
             )
 
         serialized = await sync_to_async(serialize_concepts)(concepts)
