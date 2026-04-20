@@ -1343,7 +1343,7 @@ class ChecksumViewTest(OCLAPITestCase):
     'match_standard_minute': '300/minute',
     'match_standard_day': '5000/day',
     'match_core_minute': '1000/minute',
-    'match_core_day': '2000/day',
+    'match_core_day': '20000/day',
 }, clear=True)
 @override_settings(ENABLE_THROTTLING=True)
 class ThrottleUtilTest(OCLTestCase):
@@ -1398,3 +1398,23 @@ class ThrottleUtilTest(OCLTestCase):
 
         self.assertIsInstance(throttles[0], MatchCoreMinuteThrottle)
         self.assertIsInstance(throttles[1], MatchCoreDayThrottle)
+
+    def test_core_user_gets_core_throttle_not_standard(self):
+        """Core group membership must take precedence over the standard fallthrough."""
+        user = UserProfileFactory()
+        user.groups.add(Group.objects.get(name=CORE_USER_GROUP))
+
+        throttles = ThrottleUtil.get_throttles_by_user_plan(user)
+        match_throttles = ThrottleUtil.get_match_throttles_by_user_plan(user)
+
+        # Must NOT fall through to standard
+        self.assertNotIsInstance(throttles[0], StandardMinuteThrottle)
+        self.assertNotIsInstance(throttles[1], StandardDayThrottle)
+        self.assertNotIsInstance(match_throttles[0], MatchStandardMinuteThrottle)
+        self.assertNotIsInstance(match_throttles[1], MatchStandardDayThrottle)
+
+        # Must get core
+        self.assertIsInstance(throttles[0], CoreMinuteThrottle)
+        self.assertIsInstance(throttles[1], CoreDayThrottle)
+        self.assertIsInstance(match_throttles[0], MatchCoreMinuteThrottle)
+        self.assertIsInstance(match_throttles[1], MatchCoreDayThrottle)
