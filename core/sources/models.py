@@ -698,7 +698,9 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             if not self.get_equivalent_concept(concept, equivalency_map_types):
                 cloned_concept = concept.versioned_object.clone()
                 added_concepts += self.clone_concepts([cloned_concept], user, False)
-                if equivalency_map_types and cloned_concept.id:
+                if not cloned_concept.id:
+                    continue
+                if equivalency_map_types:
                     added_mappings += self.clone_mappings(
                         [Mapping.build(
                             map_type=equivalency_map_types[0], from_concept=cloned_concept, to_concept=concept,
@@ -759,9 +761,10 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             mapping.to_source_id = get(to_concept, 'parent_id') or mapping.to_source_id
             mapping.from_source_id = get(from_concept, 'parent_id') or mapping.from_source_id
             self._clone_resource(mapping, user)
-            added.append(mapping)
-            if mapping.id and update_count:
-                _update_count = True
+            if mapping.id:
+                added.append(mapping)
+                if update_count:
+                    _update_count = True
         if _update_count:
             self.update_mappings_count()
         return added
@@ -772,9 +775,10 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         for concept in cloned_concepts:
             concept._parent_concepts = None  # pylint: disable=protected-access
             self._clone_resource(concept, user)
-            added.append(concept)
-            if concept.id and update_count:
-                _update_count = True
+            if concept.id:
+                added.append(concept)
+                if update_count:
+                    _update_count = True
         if _update_count:
             self.update_concepts_count()
         return added
