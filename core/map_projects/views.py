@@ -27,7 +27,8 @@ class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListW
         return self.serializer_class
 
     def get_queryset(self):
-        return self.filter_queryset_by_public_access(self.filter_queryset_by_owner(self.queryset))
+        return self.filter_queryset_by_public_access(self.filter_queryset_by_owner(self.queryset)).select_related(
+            'created_by', 'updated_by', 'organization', 'user')
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
