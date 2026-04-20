@@ -249,10 +249,6 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         return self.has_auth_group(SUPERADMIN_GROUP)
 
     @property
-    def is_core_group(self):
-        return self.has_auth_group(CORE_USER_GROUP)
-
-    @property
     def auth_headers(self):
         return {'Authorization': f'Token {self.get_token()}'}
 
