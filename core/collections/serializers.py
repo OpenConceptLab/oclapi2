@@ -523,13 +523,15 @@ class CollectionReferenceSerializer(ModelSerializer):
 class CollectionReferenceDetailSerializer(CollectionReferenceSerializer):
     concepts = IntegerField(source='concepts_count', read_only=True)
     mappings = IntegerField(source='mappings_count', read_only=True)
+    created_by = DateTimeField(source='created_by.username', read_only=True)
 
     class Meta:
         model = CollectionReference
         fields = (
             *CollectionReferenceSerializer.Meta.fields,
             'code', 'resource_version', 'namespace', 'system', 'version', 'valueset', 'cascade', 'filter', 'display',
-            'created_at', 'updated_at', 'concepts', 'mappings', 'translation', 'transform'
+            'created_at', 'updated_at', 'concepts', 'mappings', 'translation', 'transform',
+            'created_by'
         )
 
 

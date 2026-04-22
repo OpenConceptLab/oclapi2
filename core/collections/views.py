@@ -461,6 +461,9 @@ class CollectionReferencesView(
         else:
             queryset = queryset.order_by('-id')
 
+        if self.is_verbose():
+            queryset = queryset.select_related('created_by')
+
         return self.apply_filters(queryset)
 
     def retrieve(self, request, *args, **kwargs):
