@@ -34,7 +34,7 @@ from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRe
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
 from core.sources.documents import SourceDocument
 from core.sources.mixins import SummaryMixin
-from core.sources.models import Source
+from core.sources.models import Source, CloneError
 from core.sources.search import SourceFacetedSearch
 from core.sources.serializers import (
     SourceDetailSerializer, SourceListSerializer, SourceCreateSerializer, SourceVersionDetailSerializer,
@@ -390,12 +390,16 @@ class SourceConceptsCloneView(SourceBaseView):
                     parent_resources[parent_uri] = Source.objects.filter(uri=parent_uri).first()
                 parent_resource = parent_resources[parent_uri]
                 from core.bundles.models import Bundle
-                bundle = Bundle.clone(
-                    concept_to_clone, parent_resource, instance, request.user,
-                    self.request.get_full_path(), is_verbose, **parameters
-                )
-                result['status'] = status.HTTP_200_OK
-                result['bundle'] = BundleSerializer(bundle, context={'request': request}).data
+                try:
+                    bundle = Bundle.clone(
+                        concept_to_clone, parent_resource, instance, request.user,
+                        self.request.get_full_path(), is_verbose, **parameters
+                    )
+                    result['status'] = status.HTTP_200_OK
+                    result['bundle'] = BundleSerializer(bundle, context={'request': request}).data
+                except CloneError as ex:
+                    result['status'] = status.HTTP_400_BAD_REQUEST
+                    result['errors'] = ex.errors
             else:
                 result['status'] = status.HTTP_404_NOT_FOUND
                 result['errors'] = [f'Concept to clone with expression {expression} not found.']

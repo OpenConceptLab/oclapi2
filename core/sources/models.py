@@ -6,7 +6,7 @@ from dirtyfields import DirtyFieldsMixin
 from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.db.models import UniqueConstraint, F, Max, Count
 from django.db.models.functions import Cast
 from pydash import get, compact
@@ -23,6 +23,12 @@ from core.services.storages.postgres import PostgresQL
 from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE, \
     HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID, LOCALE_EXTERNAL_AUTO_ID_CHOICES
 from core.tasks.models import Task
+
+
+class CloneError(Exception):
+    def __init__(self, errors):
+        super().__init__('Clone failed.')
+        self.errors = errors
 
 
 class Source(DirtyFieldsMixin, ConceptContainerModel):
@@ -689,38 +695,83 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             queryset = queryset.exclude(id=self.id)
         return queryset
 
-    def clone_resources(self, user, concepts, mappings, **kwargs):
+    def clone_resources(self, user, concepts, mappings, **kwargs):  # pylint: disable=too-many-locals,too-many-branches
         from core.mappings.models import Mapping
-        added_concepts, added_mappings = [], []
-        equivalency_map_types = (kwargs.get('equivalency_map_types') or '').split(',')
-        _concepts_to_add_mappings_for = []
-        for concept in concepts:
-            if not self.get_equivalent_concept(concept, equivalency_map_types):
-                cloned_concept = concept.versioned_object.clone()
-                added_concepts += self.clone_concepts([cloned_concept], user, False)
-                if not cloned_concept.id:
+        with transaction.atomic():
+            added_concepts, added_mappings = [], []
+            concept_errors, mapping_errors = [], []
+            equivalency_map_types = (kwargs.get('equivalency_map_types') or '').split(',')
+            _concepts_to_add_mappings_for = []
+            for concept in concepts:
+                if self.get_equivalent_concept(concept, equivalency_map_types):
                     continue
+
+                cloned_concept = concept.versioned_object.clone()
+                self.clone_concepts([cloned_concept], user, False)
+                if cloned_concept.id:
+                    added_concepts.append(cloned_concept)
+                else:
+                    concept_errors.append(self.get_clone_concept_error(cloned_concept, concept))
+                    continue
+
                 if equivalency_map_types:
-                    added_mappings += self.clone_mappings(
-                        [Mapping.build(
-                            map_type=equivalency_map_types[0], from_concept=cloned_concept, to_concept=concept,
-                            parent=self
-                        )],
-                        user,
-                        False
+                    equivalency_mapping = Mapping.build(
+                        map_type=equivalency_map_types[0], from_concept=cloned_concept, to_concept=concept,
+                        parent=self
                     )
+                    self.clone_mappings([equivalency_mapping], user, False)
+                    if equivalency_mapping.id:
+                        added_mappings.append(equivalency_mapping)
+                    else:
+                        mapping_errors.append(self.get_clone_mapping_error(equivalency_mapping))
                 _concepts_to_add_mappings_for.append([concept, cloned_concept])
-        for concept_pair in _concepts_to_add_mappings_for:
-            concept, cloned_concept = concept_pair
-            for mapping in mappings.filter(from_concept__versioned_object_id=concept.versioned_object_id):
-                existing_to_concept = self.get_equivalent_concept(mapping.to_concept, equivalency_map_types)
-                added_mappings += self.clone_mappings(
-                    [mapping.clone(user, cloned_concept, existing_to_concept)], user, False)
 
-        if added_concepts or added_mappings:
-            self.update_children_counts()
+            for concept_pair in _concepts_to_add_mappings_for:
+                concept, cloned_concept = concept_pair
+                for mapping in mappings.filter(from_concept__versioned_object_id=concept.versioned_object_id):
+                    existing_to_concept = self.get_equivalent_concept(mapping.to_concept, equivalency_map_types)
+                    cloned_mapping = mapping.clone(user, cloned_concept, existing_to_concept)
+                    self.clone_mappings([cloned_mapping], user, False)
+                    if cloned_mapping.id:
+                        added_mappings.append(cloned_mapping)
+                    else:
+                        mapping_errors.append(self.get_clone_mapping_error(cloned_mapping, mapping))
 
-        return added_concepts, added_mappings
+            errors = {}
+            if concept_errors:
+                errors['concepts'] = concept_errors
+            if mapping_errors:
+                errors['mappings'] = mapping_errors
+            if errors:
+                raise CloneError(errors)
+
+            if added_concepts or added_mappings:
+                self.update_children_counts()
+
+            return added_concepts, added_mappings
+
+    @staticmethod
+    def get_clone_concept_error(cloned_concept, original_concept=None):
+        source_concept = original_concept or cloned_concept
+        return {
+            'mnemonic': get(source_concept, 'mnemonic'),
+            'source_url': get(source_concept, 'uri'),
+            'errors': get(cloned_concept, 'errors') or {'__all__': ['Failed to clone concept.']}
+        }
+
+    @staticmethod
+    def get_clone_mapping_error(cloned_mapping, original_mapping=None):
+        source_mapping = original_mapping or cloned_mapping
+        return {
+            'map_type': get(source_mapping, 'map_type'),
+            'from_concept_code': (
+                get(source_mapping, 'from_concept_code') or get(source_mapping, 'from_concept.mnemonic')
+            ),
+            'to_concept_code': get(source_mapping, 'to_concept_code') or get(source_mapping, 'to_concept.mnemonic'),
+            'from_source_url': get(source_mapping, 'from_source_url') or get(source_mapping, 'from_source.uri'),
+            'to_source_url': get(source_mapping, 'to_source_url') or get(source_mapping, 'to_source.uri'),
+            'errors': get(cloned_mapping, 'errors') or {'__all__': ['Failed to clone mapping.']}
+        }
 
     def get_equivalent_concept(self, concept, equivalency_map_type):
         equivalent_mapping = self.get_equivalent_mapping(concept, equivalency_map_type)
