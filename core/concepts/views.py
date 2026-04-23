@@ -50,6 +50,7 @@ from core.concepts.serializers import (
     ConceptVersionListSerializer, ConceptSummarySerializer, ConceptMinimalSerializer,
     ConceptChildrenSerializer, ConceptParentsSerializer, ConceptLookupListSerializer, ConceptChecksumSerializer)
 from core.mappings.serializers import MappingListSerializer
+from core.sources.models import CloneError
 from core.tasks.models import Task
 from core.toggles.models import Toggle
 
@@ -468,11 +469,14 @@ class ConceptCloneView(ConceptCascadeView):
         """
         clone_to_source = self.get_clone_to_source()
         self.set_parent_resource(False)
-        bundle = Bundle.clone(
-            self.get_object(), self.parent_resource, clone_to_source, request.user,
-            self.request.get_full_path(), self.is_verbose(), **(request.data.get('parameters') or {})
-        )
-        return Response(BundleSerializer(bundle, context={'request': request}).data)
+        try:
+            bundle = Bundle.clone(
+                self.get_object(), self.parent_resource, clone_to_source, request.user,
+                self.request.get_full_path(), self.is_verbose(), **(request.data.get('parameters') or {})
+            )
+            return Response(BundleSerializer(bundle, context={'request': request}).data)
+        except CloneError as ex:
+            return Response({'errors': ex.errors}, status=status.HTTP_400_BAD_REQUEST)
 
     def get_clone_to_source(self):
         source_uri = self.request.data.get('source_uri')
