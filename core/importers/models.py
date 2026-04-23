@@ -415,8 +415,9 @@ class ConceptImporter(BaseResourceImporter):
     def get_resource_type():
         return 'Concept'
 
-    def __init__(self, data, user, update_if_exists):
+    def __init__(self, data, user, update_if_exists, skip_hierarchy_tasks=False):
         super().__init__(data, user, update_if_exists)
+        self.skip_hierarchy_tasks = skip_hierarchy_tasks
         self.version = False
         self.instance = None
 
@@ -476,8 +477,11 @@ class ConceptImporter(BaseResourceImporter):
             if 'update_comment' in self.data:
                 self.data['comment'] = self.data['update_comment']
                 self.data.pop('update_comment')
+            persist_data = {**self.data, '_counted': None, '_index': False}
+            if self.skip_hierarchy_tasks:
+                persist_data['_skip_hierarchy_tasks'] = True
             self.instance = Concept.persist_new(
-                data={**self.data, '_counted': None, '_index': False, '_skip_hierarchy_tasks': True},
+                data=persist_data,
                 user=self.user, create_parent_version=False)
             if self.instance.id:
                 return CREATED
@@ -734,10 +738,11 @@ class ReferenceImporter(BaseResourceImporter):
 class BulkImportInline(BaseImporter):
     def __init__(  # pylint: disable=too-many-arguments
             self, content, username, update_if_exists=False, input_list=None, user=None, set_user=True,
-            self_task_id=None
+            self_task_id=None, skip_hierarchy_tasks=False
     ):
         super().__init__(content, username, update_if_exists, user, not bool(input_list), set_user)
         self.self_task_id = self_task_id
+        self.skip_hierarchy_tasks = skip_hierarchy_tasks
         self.set_task()
         if input_list:
             self.input_list = input_list
@@ -859,7 +864,9 @@ class BulkImportInline(BaseImporter):
                 )
                 continue
             if item_type == 'concept':
-                concept_importer = ConceptImporter(item, self.user, self.update_if_exists)
+                concept_importer = ConceptImporter(
+                    item, self.user, self.update_if_exists, skip_hierarchy_tasks=self.skip_hierarchy_tasks
+                )
                 _result = concept_importer.delete() if action == 'delete' else concept_importer.run()
                 if self.index_resources and get(concept_importer.instance, 'id'):
                     new_concept_ids.update(set(compact(

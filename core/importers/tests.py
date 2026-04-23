@@ -345,6 +345,30 @@ class BulkImportInlineTest(OCLTestCase):
             sorted([concept.id, concept.get_latest_version().prev_version.id, concept.get_latest_version().id])
         )
 
+    def test_concept_import_processes_hierarchy_for_inline_import(self):
+        source = OrganizationSourceFactory(
+            organization=OrganizationFactory(mnemonic='DemoOrg'), mnemonic='DemoSource', version='HEAD'
+        )
+        parent_concept = ConceptFactory(parent=source, mnemonic='Parent')
+        data = {
+            "type": "Concept", "id": "Child", "concept_class": "Root",
+            "datatype": "None", "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
+            "names": [{"name": "Child", "locale": "en", "locale_preferred": "True", "name_type": "Fully Specified"}],
+            "descriptions": [],
+            "parent_concept_urls": [parent_concept.uri],
+        }
+
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 1)
+        self.assertEqual(importer.failed, [])
+        child_concept = Concept.objects.filter(mnemonic='Child', id=F('versioned_object_id')).first()
+        self.assertEqual(list(child_concept.parent_concept_urls), [parent_concept.uri])
+        parent_concept.refresh_from_db()
+        self.assertEqual(list(parent_concept.child_concept_urls), [child_concept.uri])
+
     @patch('core.importers.models.batch_index_resources')
     def test_concept_import_with_extras_update(self, batch_index_resources_mock):  # pylint: disable=too-many-statements
         batch_index_resources_mock.__name__ = 'batch_index_resources'
@@ -2068,7 +2092,7 @@ class TasksTest(OCLTestCase):
         bulk_import_parts_inline([1, 2], 'username', True)  # pylint: disable=no-value-for-parameter
         bulk_import_inline_mock.assert_called_once_with(
             content=None, username='username', update_if_exists=True, input_list=[1, 2],
-            self_task_id=ANY
+            self_task_id=ANY, skip_hierarchy_tasks=True
         )
         bulk_import_inline_mock().run.assert_called_once()
 
@@ -2706,6 +2730,27 @@ class ResourceImporterTest(OCLAPITestCase):
                                            'ocladmin', 'orgs', 'OCL')
         source = Source.objects.filter(mnemonic='full_name').first()
         self.assertEqual(source.mnemonic, 'full_name')
+
+    @patch('core.importers.models.Concept.persist_new')
+    def test_import_concept_does_not_skip_hierarchy_tasks_by_default(self, persist_new_mock):
+        source = OrganizationSourceFactory(
+            organization=OrganizationFactory(mnemonic='DemoOrg'), mnemonic='DemoSource', version='HEAD'
+        )
+        parent_concept = ConceptFactory(parent=source, mnemonic='Parent')
+        persist_new_mock.return_value = Mock(id=1, errors={})
+
+        result = ResourceImporter().import_resource(
+            {
+                'type': 'concept', 'id': 'Child', 'concept_class': 'Root', 'datatype': 'None',
+                'source': 'DemoSource', 'owner': 'DemoOrg', 'owner_type': 'Organization',
+                'names': [{'name': 'Child', 'locale': 'en', 'locale_preferred': True, 'name_type': 'Fully Specified'}],
+                'descriptions': [], 'parent_concept_urls': [parent_concept.uri]
+            },
+            'ocladmin', 'orgs', 'DemoOrg'
+        )
+
+        self.assertEqual(result, 1)
+        self.assertNotIn('_skip_hierarchy_tasks', persist_new_mock.call_args.kwargs['data'])
 
 
 class ImportContentParserTest(OCLTestCase):

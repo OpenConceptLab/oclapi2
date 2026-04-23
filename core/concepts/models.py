@@ -990,6 +990,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         names = data.pop('names', []) or []
         descriptions = data.pop('descriptions', []) or []
         parent_concept_uris = data.pop('parent_concept_urls', None)
+        skip_hierarchy_tasks = data.pop('_skip_hierarchy_tasks', False)
         mappings_payload = data.pop('mappings_payload', None) or data.pop('mappings', None) or []
         mappings_result = []
         has_mapping_errors = False
@@ -1054,7 +1055,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             else:
                 update_mappings_concept.apply_async((concept.id,), queue='default', permanent=False)
 
-            if parent_concept_uris and not data.get('_skip_hierarchy_tasks'):
+            if parent_concept_uris and not skip_hierarchy_tasks:
                 if get(settings, 'TEST_MODE', False):
                     process_hierarchy_for_new_concept(
                         concept.id, get(initial_version, 'id'), parent_concept_uris, create_parent_version)

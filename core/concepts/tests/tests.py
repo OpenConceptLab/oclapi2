@@ -168,6 +168,21 @@ class ConceptTest(OCLTestCase):
             f'/orgs/{source.organization.mnemonic}/sources/{source.mnemonic}/concepts/{concept.mnemonic}/'
         )
 
+    @patch('core.concepts.models.process_hierarchy_for_new_concept')
+    def test_persist_new_with_skip_hierarchy_tasks_flag(self, process_hierarchy_mock):
+        source = OrganizationSourceFactory(version=HEAD)
+        parent_concept = ConceptFactory(parent=source)
+        concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
+            'parent_concept_urls': [parent_concept.uri],
+            '_skip_hierarchy_tasks': True,
+        })
+
+        self.assertEqual(concept.errors, {})
+        self.assertIsNotNone(concept.id)
+        process_hierarchy_mock.assert_not_called()
+
     def test_persist_new_with_autoid_sequential(self):
         source = OrganizationSourceFactory(
             version=HEAD, autoid_concept_mnemonic='sequential', autoid_concept_external_id='sequential')
