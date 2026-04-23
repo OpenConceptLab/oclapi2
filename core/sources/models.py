@@ -981,12 +981,18 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         }
 
     @staticmethod
-    def changelog(version1, version2, verbosity=0, enrich=False):
+    def changelog(version1, version2, verbosity=0):
         """
         version1 is the older version
         version2 is the newer version
+
+        verbosity >= 4 enables full enrichment: concept_class, datatype, names[]
+        (with external_id), descriptions[], and prev_* fields for changed concepts
+        and mappings.
         """
         from core.common.checksums import ChecksumDiff
+        # Internal diff always runs at verbosity=3 to collect IDs of every category;
+        # per-resource enrichment is a concern of ChecksumChangelog (verbosity>=4).
         concepts_diff = ChecksumDiff(
             resources1=version1.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
             resources2=version2.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
@@ -999,7 +1005,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         )
         concepts_diff.process()
         mappings_diff.process()
-        log = ChecksumChangelog(concepts_diff, mappings_diff, enrich=enrich)
+        log = ChecksumChangelog(concepts_diff, mappings_diff, verbosity=verbosity)
         log.process()
         result = {
             'meta': {

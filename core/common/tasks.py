@@ -896,13 +896,11 @@ def source_version_compare(version1_uri, version2_uri, is_changelog, verbosity, 
     version1 = Source.objects.get(uri=version1_uri)
     version2 = Source.objects.get(uri=version2_uri)
 
-    if is_changelog and format_type == 'markdown':
-        result = Source.changelog(version1, version2, verbosity, enrich=True)
-        from core.sources.changelog_markdown import ChangelogMarkdownGenerator
-        generator = ChangelogMarkdownGenerator(result)
-        result['markdown'] = generator.generate()
-    elif is_changelog:
+    if is_changelog:
         result = Source.changelog(version1, version2, verbosity)
+        if format_type == 'markdown':
+            from core.sources.changelog_markdown import ChangelogMarkdownGenerator
+            result['markdown'] = ChangelogMarkdownGenerator(result).generate()
     else:
         result = Source.compare(version1, version2, verbosity)
 
