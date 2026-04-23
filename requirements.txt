@@ -49,3 +49,4 @@ elastic-transport==8.17
 litellm==1.83.0
 strawberry-graphql==0.285.0
 strawberry-graphql-django==0.67.0
+pyopenssl>=26.0.0 # not directly required, pinned by Snyk to avoid a vulnerability
