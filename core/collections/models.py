@@ -1108,9 +1108,41 @@ class CollectionReference(models.Model):
     def translation(self):
         return CollectionReferenceTranslator(self).translate()
 
-    def get_resolved_repo_versions_serialized(self):
-        system_version = self.resolve_system_version
-        valueset_versions = self.resolve_valueset_versions
+    def _get_resolved_system_version(self, system_version_cache=None):
+        """Resolve and optionally cache the source version for this reference."""
+        if not self.system:
+            return None
+        if system_version_cache is None:
+            return self.resolve_system_version
+
+        cache_key = (self.namespace, self.system, self.version)
+        if cache_key not in system_version_cache:
+            from core.sources.models import Source
+            version, _ = Source.resolve_reference_expression(self.system, self.namespace, self.version)
+            system_version_cache[cache_key] = version if version.id else None
+        return system_version_cache[cache_key]
+
+    def _get_resolved_valueset_versions(self, valueset_version_cache=None):
+        """Resolve and optionally cache collection versions for this reference."""
+        if valueset_version_cache is None:
+            return self.resolve_valueset_versions
+
+        versions = []
+        if isinstance(self.valueset, list):
+            for valueset in self.valueset:  # pylint: disable=not-an-iterable
+                if valueset:
+                    cache_key = (self.namespace, valueset, None)
+                    if cache_key not in valueset_version_cache:
+                        version, _ = Collection.resolve_reference_expression(valueset, self.namespace)
+                        valueset_version_cache[cache_key] = version if version.id else None
+                    if valueset_version_cache[cache_key]:
+                        versions.append(valueset_version_cache[cache_key])
+        return versions
+
+    def get_resolved_repo_versions_serialized(self, system_version_cache=None, valueset_version_cache=None):
+        """Serialize repository versions resolved from this reference's system and valuesets."""
+        system_version = self._get_resolved_system_version(system_version_cache)
+        valueset_versions = self._get_resolved_valueset_versions(valueset_version_cache)
         data = []
         if system_version:
             from core.sources.serializers import SourceVersionListSerializer

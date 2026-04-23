@@ -525,9 +525,13 @@ class CollectionReferenceSerializer(ModelSerializer):
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
         self.include_resolved_repo_versions = False
+        self.resolved_system_version_cache = {}
+        self.resolved_valueset_version_cache = {}
         if params:
             self.query_params = params.dict()
             self.include_resolved_repo_versions = self.query_params.get(INCLUDE_RESOLVED_REPO_VERSIONS) in TRUTHY
+
+        super().__init__(*args, **kwargs)
 
         try:
             if not self.include_resolved_repo_versions:
@@ -535,12 +539,13 @@ class CollectionReferenceSerializer(ModelSerializer):
         except:  # pylint: disable=bare-except
             pass
 
-        super().__init__(*args, **kwargs)
-
     def get_resolved_repo_versions(self, obj):
+        """Return request-scoped memoized repository versions when explicitly requested."""
         if not self.include_resolved_repo_versions:
             return None
-        return obj.get_resolved_repo_versions_serialized()
+        return obj.get_resolved_repo_versions_serialized(
+            self.resolved_system_version_cache, self.resolved_valueset_version_cache
+        )
 
 
 class CollectionReferenceDetailSerializer(CollectionReferenceSerializer):
