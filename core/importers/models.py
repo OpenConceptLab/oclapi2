@@ -477,7 +477,8 @@ class ConceptImporter(BaseResourceImporter):
                 self.data['comment'] = self.data['update_comment']
                 self.data.pop('update_comment')
             self.instance = Concept.persist_new(
-                data={**self.data, '_counted': None, '_index': False}, user=self.user, create_parent_version=False)
+                data={**self.data, '_counted': None, '_index': False, '_skip_hierarchy_tasks': True},
+                user=self.user, create_parent_version=False)
             if self.instance.id:
                 return CREATED
             return self.instance.errors or errors or FAILED

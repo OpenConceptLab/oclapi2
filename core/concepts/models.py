@@ -1054,7 +1054,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             else:
                 update_mappings_concept.apply_async((concept.id,), queue='default', permanent=False)
 
-            if parent_concept_uris:
+            if parent_concept_uris and not data.get('_skip_hierarchy_tasks'):
                 if get(settings, 'TEST_MODE', False):
                     process_hierarchy_for_new_concept(
                         concept.id, get(initial_version, 'id'), parent_concept_uris, create_parent_version)
