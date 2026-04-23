@@ -11,14 +11,13 @@ from rest_framework.serializers import ModelSerializer, Serializer
 from core.client_configs.serializers import ClientConfigSerializer
 from core.collections.models import Collection, CollectionReference, Expansion
 from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, INCLUDE_SUMMARY, \
-    INCLUDE_CLIENT_CONFIGS, INVALID_EXPANSION_URL, INCLUDE_STATES, INCLUDE_TASKS
+    INCLUDE_CLIENT_CONFIGS, INVALID_EXPANSION_URL, INCLUDE_STATES, INCLUDE_TASKS, INCLUDE_RESOLVED_REPO_VERSIONS
 from core.common.serializers import AbstractRepoResourcesSerializer, AbstractResourceSerializer
 from core.common.utils import get_truthy_values
 from core.orgs.models import Organization
 from core.settings import DEFAULT_LOCALE
 from core.sources.serializers import SourceVersionListSerializer
 from core.users.models import UserProfile
-
 
 TRUTHY = get_truthy_values()
 
@@ -514,10 +513,39 @@ class CollectionReferenceSerializer(ModelSerializer):
     reference_type = CharField(read_only=True)
     uuid = CharField(source='id', read_only=True)
     type = CharField(source='resource_type', read_only=True)
+    resolved_repo_versions = SerializerMethodField()
 
     class Meta:
         model = CollectionReference
-        fields = ('expression', 'reference_type', 'id', 'last_resolved_at', 'uri', 'uuid', 'include', 'type')
+        fields = (
+            'expression', 'reference_type', 'id', 'last_resolved_at', 'uri', 'uuid', 'include', 'type',
+            'resolved_repo_versions'
+        )
+
+    def __init__(self, *args, **kwargs):
+        params = get(kwargs, 'context.request.query_params')
+        self.include_resolved_repo_versions = False
+        self.resolved_system_version_cache = {}
+        self.resolved_valueset_version_cache = {}
+        if params:
+            self.query_params = params.dict()
+            self.include_resolved_repo_versions = self.query_params.get(INCLUDE_RESOLVED_REPO_VERSIONS) in TRUTHY
+
+        super().__init__(*args, **kwargs)
+
+        try:
+            if not self.include_resolved_repo_versions:
+                self.fields.pop('resolved_repo_versions', None)
+        except:  # pylint: disable=bare-except
+            pass
+
+    def get_resolved_repo_versions(self, obj):
+        """Return request-scoped memoized repository versions when explicitly requested."""
+        if not self.include_resolved_repo_versions:
+            return None
+        return obj.get_resolved_repo_versions_serialized(
+            self.resolved_system_version_cache, self.resolved_valueset_version_cache
+        )
 
 
 class CollectionReferenceDetailSerializer(CollectionReferenceSerializer):
