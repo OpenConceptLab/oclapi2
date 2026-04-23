@@ -310,3 +310,5 @@ local*.sh
 local*.py
 setup/
 /.claude
+# Added by code-review-graph
+.code-review-graph/
