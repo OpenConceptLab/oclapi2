@@ -335,7 +335,6 @@ class ChecksumChangelog:
         self.mappings_diff = mappings_diff
         self.identity = identity
         self.verbosity = verbosity
-        self.enrich = verbosity >= 4
         self.result = {}
 
     def get_mapping_summary(self, mapping, mapping_id=None, v1_mapping=None):
@@ -347,7 +346,7 @@ class ChecksumChangelog:
             'to_source': mapping.to_source_url,
             'map_type': mapping.map_type,
         }
-        if self.enrich:
+        if self.verbosity >= 4:
             summary['external_id'] = getattr(mapping, 'external_id', None)
             if v1_mapping is not None:
                 summary['prev_to_concept'] = (
@@ -430,9 +429,10 @@ class ChecksumChangelog:
         traversed_mappings = set()
         traversed_concepts = set()
         diff_keys = ['new', 'removed', 'changed_retired', 'changed_major', 'changed_minor']
+        is_enriched = self.verbosity >= 4
 
-        concepts_cache = self._build_concepts_cache(diff_keys) if self.enrich else {}
-        mappings_cache = self._build_mappings_cache(diff_keys) if self.enrich else {}
+        concepts_cache = self._build_concepts_cache(diff_keys) if is_enriched else {}
+        mappings_cache = self._build_mappings_cache(diff_keys) if is_enriched else {}
 
         for key in diff_keys:  # pylint: disable=too-many-nested-blocks
             diff = self.concepts_diff.result.get(key, False)
@@ -443,7 +443,7 @@ class ChecksumChangelog:
                         continue
                     traversed_concepts.add(concept_id)
                     concept_db_id = self.concepts_diff.get_db_id_for(key, concept_id)
-                    if self.enrich:
+                    if is_enriched:
                         concept = concepts_cache.get(concept_db_id)
                     else:
                         concept = Concept.objects.filter(id=concept_db_id).first()
@@ -454,7 +454,7 @@ class ChecksumChangelog:
                         'id': concept_id,
                         'display_name': concept_display_name
                     }
-                    if self.enrich and concept:
+                    if is_enriched and concept:
                         summary['concept_class'] = getattr(concept, 'concept_class', None)
                         summary['datatype'] = getattr(concept, 'datatype', None)
                         summary['names'] = self._names_list(concept)
@@ -480,7 +480,7 @@ class ChecksumChangelog:
                                 if mapping_diff_key not in mappings_diff_summary:
                                     mappings_diff_summary[mapping_diff_key] = []
                                 v1_mapping = None
-                                if self.enrich and mapping_diff_key in ('changed_major', 'changed_minor'):
+                                if is_enriched and mapping_diff_key in ('changed_major', 'changed_minor'):
                                     v1_mapping = self._v1_mapping_for(
                                         get(mapping, self.identity), mapping.id, mappings_cache
                                     )
@@ -508,7 +508,7 @@ class ChecksumChangelog:
                     mapping_db_id = self.mappings_diff.get_db_id_for(key, mapping_id)
                     mapping = Mapping.objects.filter(id=mapping_db_id).first()
                     v1_mapping = None
-                    if self.enrich and key in ('changed_major', 'changed_minor'):
+                    if is_enriched and key in ('changed_major', 'changed_minor'):
                         v1_mapping = self._v1_mapping_for(mapping_id, mapping_db_id, mappings_cache)
                     mapping_summary = self.get_mapping_summary(mapping, mapping_id, v1_mapping=v1_mapping)
                     from_concept_code = get(mapping, 'from_concept_code') or get(mapping.from_concept, 'mnemonic')

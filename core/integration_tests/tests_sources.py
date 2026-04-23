@@ -18,7 +18,7 @@ from core.common.utils import get_latest_dir_in_path
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.serializers import ConceptVersionExportSerializer
-from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
+from core.concepts.tests.factories import ConceptDescriptionFactory, ConceptFactory, ConceptNameFactory
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
 from core.mappings.serializers import MappingDetailSerializer
@@ -2016,6 +2016,177 @@ class SourceConceptsCloneViewTest(OCLAPITestCase):
             self.concept, self.concept.parent, self.clone_to_source, self.user, ANY, False,
             **parameters
         )
+
+class SourceVersionsChangelogOutputViewTest(OCLAPITestCase):
+    def _build_changelog_output_fixture(self):
+        source = OrganizationSourceFactory()
+        source_v1 = OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v1')
+        source_v2 = OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v2')
+        concept_v1 = ConceptFactory(
+            parent=source,
+            mnemonic='concept-detailed',
+            concept_class='Diagnosis',
+            datatype='None',
+            names=[
+                ConceptNameFactory.build(name='Detailed name v1', locale='en', locale_preferred=True),
+            ],
+            descriptions=[
+                ConceptDescriptionFactory.build(name='Detailed description v1', locale='en'),
+            ],
+        )
+        concept_v2 = ConceptFactory(
+            parent=source,
+            mnemonic=concept_v1.mnemonic,
+            version='v2',
+            concept_class='Drug',
+            datatype='Text',
+            names=[
+                ConceptNameFactory.build(name='Detailed name v2', locale='en', locale_preferred=True),
+                ConceptNameFactory.build(name='Nome detalhado', locale='pt', locale_preferred=False),
+            ],
+            descriptions=[
+                ConceptDescriptionFactory.build(name='Detailed description v2', locale='en'),
+            ],
+        )
+        mapping_from_concept = ConceptFactory(parent=source, mnemonic='mapping-from-concept')
+        mapping_target_v1 = ConceptFactory(parent=source, mnemonic='mapping-target-v1')
+        mapping_target_v2 = ConceptFactory(parent=source, mnemonic='mapping-target-v2')
+        mapping_v1 = MappingFactory(
+            parent=source,
+            mnemonic='mapping-detailed',
+            from_concept=mapping_from_concept,
+            to_concept=mapping_target_v1,
+            external_id='mapping-v1',
+        )
+        mapping_v2 = MappingFactory(
+            parent=source,
+            mnemonic=mapping_v1.mnemonic,
+            version='v2',
+            from_concept=mapping_from_concept,
+            to_concept=mapping_target_v2,
+            map_type='NARROWER-THAN',
+            external_id='mapping-v2',
+        )
+
+        source_v1.concepts.add(concept_v1)
+        source_v2.concepts.add(concept_v2)
+        source_v1.mappings.add(mapping_v1)
+        source_v2.mappings.add(mapping_v2)
+
+        for concept in Concept.objects.filter(parent=source):
+            concept.set_checksums()
+
+        for mapping in Mapping.objects.filter(parent=source):
+            mapping.set_checksums()
+
+        return {
+            'concept_v1': concept_v1,
+            'concept_v2': concept_v2,
+            'mapping_v1': mapping_v1,
+            'mapping_v2': mapping_v2,
+            'source': source,
+            'source_v1': source_v1,
+            'source_v2': source_v2,
+        }
+
+    def _post_changelog(self, source_v1, source_v2, token, verbosity, output):  # pylint: disable=too-many-arguments
+        return self.client.post(
+            f'/sources/$changelog/?inline=true&output={output}',
+            {
+                'version1': source_v1.uri,
+                'version2': source_v2.uri,
+                'verbosity': verbosity,
+            },
+            HTTP_AUTHORIZATION=f'Token {token}',
+            format='json'
+        )
+
+    def test_json_output_for_all_verbosity_levels(self):
+        data = self._build_changelog_output_fixture()
+        token = data['source'].created_by.get_token()
+
+        for verbosity in range(1, 5):
+            with self.subTest(output='json', verbosity=verbosity):
+                response = self._post_changelog(
+                    data['source_v1'], data['source_v2'], token, verbosity, output='json'
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertNotIn('markdown', response.data)
+                self.assertEqual(response.data['meta']['diff']['concepts']['changed_major'], 1)
+                self.assertEqual(response.data['meta']['diff']['mappings']['changed_major'], 1)
+
+                changed_concept = response.data['concepts']['changed_major']['concept-detailed']
+                changed_mapping = response.data['mappings']['changed_major']['mapping-detailed']
+
+                if verbosity >= 4:
+                    self.assertEqual(changed_concept['concept_class'], data['concept_v2'].concept_class)
+                    self.assertEqual(changed_concept['prev_concept_class'], data['concept_v1'].concept_class)
+                    self.assertEqual(changed_concept['datatype'], data['concept_v2'].datatype)
+                    self.assertEqual(changed_concept['prev_datatype'], data['concept_v1'].datatype)
+                    self.assertIn('Detailed name v2', [name['name'] for name in changed_concept['names']])
+                    self.assertIn('Nome detalhado', [name['name'] for name in changed_concept['names']])
+                    self.assertIn('Detailed name v1', [name['name'] for name in changed_concept['prev_names']])
+                    self.assertIn(
+                        'Detailed description v2',
+                        [description['description'] for description in changed_concept['descriptions']]
+                    )
+                    self.assertIn(
+                        'Detailed description v1',
+                        [description['description'] for description in changed_concept['prev_descriptions']]
+                    )
+                    self.assertEqual(changed_mapping['external_id'], data['mapping_v2'].external_id)
+                    self.assertEqual(changed_mapping['prev_to_concept'], data['mapping_v1'].to_concept.mnemonic)
+                    self.assertEqual(changed_mapping['to_concept'], data['mapping_v2'].to_concept.mnemonic)
+                    self.assertEqual(changed_mapping['prev_map_type'], data['mapping_v1'].map_type)
+                    self.assertEqual(changed_mapping['map_type'], data['mapping_v2'].map_type)
+                else:
+                    self.assertNotIn('concept_class', changed_concept)
+                    self.assertNotIn('prev_concept_class', changed_concept)
+                    self.assertNotIn('datatype', changed_concept)
+                    self.assertNotIn('prev_datatype', changed_concept)
+                    self.assertNotIn('names', changed_concept)
+                    self.assertNotIn('prev_names', changed_concept)
+                    self.assertNotIn('descriptions', changed_concept)
+                    self.assertNotIn('prev_descriptions', changed_concept)
+                    self.assertNotIn('external_id', changed_mapping)
+                    self.assertNotIn('prev_to_concept', changed_mapping)
+                    self.assertNotIn('prev_map_type', changed_mapping)
+
+    def test_markdown_output_for_all_verbosity_levels(self):
+        data = self._build_changelog_output_fixture()
+        token = data['source'].created_by.get_token()
+
+        for verbosity in range(1, 5):
+            with self.subTest(output='markdown', verbosity=verbosity):
+                response = self._post_changelog(
+                    data['source_v1'], data['source_v2'], token, verbosity, output='markdown'
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertIn('markdown', response.data)
+                self.assertEqual(response.data['meta']['diff']['concepts']['changed_major'], 1)
+                self.assertEqual(response.data['meta']['diff']['mappings']['changed_major'], 1)
+
+                markdown_output = response.data['markdown']
+                self.assertIn('# v2 Changelog', markdown_output)
+                self.assertIn('## Concepts', markdown_output)
+                self.assertIn('## Mappings', markdown_output)
+
+                if verbosity >= 4:
+                    self.assertNotIn('without enrichment', markdown_output)
+                    self.assertIn('## Names', markdown_output)
+                    self.assertIn('## Translations', markdown_output)
+                    self.assertIn('Detailed name v1', markdown_output)
+                    self.assertIn('Detailed name v2', markdown_output)
+                    self.assertIn('Nome detalhado', markdown_output)
+                    self.assertIn('Previous To Concept', markdown_output)
+                    self.assertIn('mapping-target-v1', markdown_output)
+                    self.assertIn('mapping-target-v2', markdown_output)
+                else:
+                    self.assertIn('without enrichment', markdown_output)
+                    self.assertNotIn('## Names', markdown_output)
+                    self.assertNotIn('## Translations', markdown_output)
 
 
 class SourceVersionsComparisonViewTest(OCLAPITestCase):
