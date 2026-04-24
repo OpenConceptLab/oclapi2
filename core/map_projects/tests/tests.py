@@ -19,6 +19,7 @@ class MapProjectAbstractViewTest(OCLAPITestCase):
 
         self.file = SimpleUploadedFile('input.csv', b'content', "application/csv")
 
+
 class MapProjectListViewTest(MapProjectAbstractViewTest):
     @patch('core.services.storages.cloud.aws.S3.upload')
     def test_post(self, upload_mock):
@@ -120,3 +121,35 @@ class MapProjectViewTest(MapProjectAbstractViewTest):
         self.assertEqual(len(response.data['columns']), 1)
         upload_mock.assert_called_once_with(
             key=f"map_projects/{response.data['id']}/input.csv", file_content=ANY)
+
+
+class MapProjectConfigurationsViewTest(MapProjectAbstractViewTest):
+    def test_get(self):
+        project = MapProjectFactory(
+            organization=self.org,
+            algorithms=[{'name': 'exact-match', 'enabled': True}],
+            encoder_model='snowflake-arctic-embed-l-v2.0',
+            filters={'retired': False, 'class': ['LabSet']},
+            include_retired=True,
+            lookup_config={'concepts': {'limit': 20}},
+            score_configuration={'recommended': 95, 'available': 75},
+            target_repo_url='/orgs/CIEL/sources/CIEL/',
+        )
+        project.save()
+
+        response = self.client.get(
+            f'/orgs/CIEL/map-projects/{project.id}/configurations/',
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['id'], project.id)
+        self.assertIsNotNone(response.data['id'])
+        self.assertEqual(response.data['url'], f'/orgs/CIEL/map-projects/{project.id}/')
+        self.assertEqual(response.data['algorithms'], [{'name': 'exact-match', 'enabled': True}])
+        self.assertEqual(response.data['encoder_model'], 'snowflake-arctic-embed-l-v2.0')
+        self.assertEqual(response.data['filters'], {'retired': False, 'class': ['LabSet']})
+        self.assertTrue(response.data['include_retired'])
+        self.assertEqual(response.data['lookup_config'], {'concepts': {'limit': 20}})
+        self.assertEqual(response.data['score_configuration'], {'recommended': 95, 'available': 75})
+        self.assertEqual(response.data['target_repo_url'], '/orgs/CIEL/sources/CIEL/')

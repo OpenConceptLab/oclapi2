@@ -7,7 +7,8 @@ from core.common.permissions import HasOwnership, CanEditConceptDictionary
 from core.common.views import BaseAPIView
 from core.map_projects.models import MapProject
 from core.map_projects.serializers import MapProjectCreateUpdateSerializer, \
-    MapProjectDetailSerializer, MapProjectSummarySerializer, MapProjectLogsSerializer, MapProjectListSerializer
+    MapProjectDetailSerializer, MapProjectSummarySerializer, MapProjectLogsSerializer, MapProjectListSerializer, \
+    MapProjectConfigurationsSerializer
 
 
 class MapProjectBaseView(BaseAPIView):
@@ -59,6 +60,13 @@ class MapProjectView(MapProjectBaseView, RetrieveUpdateDestroyAPIView):
         if self.request.method == 'PUT':
             return MapProjectCreateUpdateSerializer
         return self.serializer_class
+
+
+class MapProjectConfigurationsView(MapProjectBaseView, RetrieveAPIView):
+    serializer_class = MapProjectConfigurationsSerializer
+    lookup_url_kwarg = 'project'
+    lookup_field = 'project'
+    pk_field = 'id'
 
 
 class MapProjectSummaryView(MapProjectBaseView, RetrieveAPIView):
