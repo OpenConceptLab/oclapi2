@@ -327,7 +327,7 @@ def bulk_import_parts_inline(self, input_list, username, update_if_exists):
     from core.importers.models import BulkImportInline
     return BulkImportInline(
         content=None, username=username, update_if_exists=update_if_exists, input_list=input_list,
-        self_task_id=self.request.id
+        self_task_id=self.request.id, skip_hierarchy_tasks=True
     ).run()
 
 

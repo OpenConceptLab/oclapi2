@@ -415,8 +415,9 @@ class ConceptImporter(BaseResourceImporter):
     def get_resource_type():
         return 'Concept'
 
-    def __init__(self, data, user, update_if_exists):
+    def __init__(self, data, user, update_if_exists, skip_hierarchy_tasks=False):
         super().__init__(data, user, update_if_exists)
+        self.skip_hierarchy_tasks = skip_hierarchy_tasks
         self.version = False
         self.instance = None
 
@@ -476,8 +477,12 @@ class ConceptImporter(BaseResourceImporter):
             if 'update_comment' in self.data:
                 self.data['comment'] = self.data['update_comment']
                 self.data.pop('update_comment')
+            persist_data = {**self.data, '_counted': None, '_index': False}
+            if self.skip_hierarchy_tasks:
+                persist_data['_skip_hierarchy_tasks'] = True
             self.instance = Concept.persist_new(
-                data={**self.data, '_counted': None, '_index': False}, user=self.user, create_parent_version=False)
+                data=persist_data,
+                user=self.user, create_parent_version=False)
             if self.instance.id:
                 return CREATED
             return self.instance.errors or errors or FAILED
@@ -733,10 +738,11 @@ class ReferenceImporter(BaseResourceImporter):
 class BulkImportInline(BaseImporter):
     def __init__(  # pylint: disable=too-many-arguments
             self, content, username, update_if_exists=False, input_list=None, user=None, set_user=True,
-            self_task_id=None
+            self_task_id=None, skip_hierarchy_tasks=False
     ):
         super().__init__(content, username, update_if_exists, user, not bool(input_list), set_user)
         self.self_task_id = self_task_id
+        self.skip_hierarchy_tasks = skip_hierarchy_tasks
         self.set_task()
         if input_list:
             self.input_list = input_list
@@ -858,7 +864,10 @@ class BulkImportInline(BaseImporter):
                 )
                 continue
             if item_type == 'concept':
-                concept_importer = ConceptImporter(item, self.user, self.update_if_exists)
+                concept_importer = ConceptImporter(
+                    item, self.user, self.update_if_exists,
+                    skip_hierarchy_tasks=self.skip_hierarchy_tasks and bool(item.get('id'))
+                )
                 _result = concept_importer.delete() if action == 'delete' else concept_importer.run()
                 if self.index_resources and get(concept_importer.instance, 'id'):
                     new_concept_ids.update(set(compact(
@@ -969,6 +978,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self.result = None
         self._json_result = None
         self.concept_hierarchy_map = {}  # child_uri -> [parent_uris], built before input_list is cleared
+        self.hierarchy_reconciliation_done = False
         if self.content:
             self.input_list = self.content if isinstance(self.content, list) else self.content.splitlines()
             self.total = len(self.input_list)
@@ -1111,16 +1121,27 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
     def get_overall_tasks_progress(self):
         return sum(compact(self.get_sub_tasks().values_list('summary__processed', flat=True)))
 
+    def has_hierarchy_reconciliation_step(self):
+        return bool(self.concept_hierarchy_map)
+
+    def get_total_progress_target(self):
+        return self.total + int(self.has_hierarchy_reconciliation_step())
+
+    def get_completed_progress(self):
+        return self.get_overall_tasks_progress() + int(
+            self.has_hierarchy_reconciliation_step() and self.hierarchy_reconciliation_done
+        )
+
     def get_details_to_notify(self):
         summary = f"Started: {self.start_time_formatted} | " \
-            f"Processed: {self.get_overall_tasks_progress()}/{self.total} | " \
+            f"Processed: {self.get_completed_progress()}/{self.get_total_progress_target()} | " \
             f"Time: {self.elapsed_seconds}secs"
 
         return {'summary': summary}
 
     def notify_progress(self):
         if self.task:
-            self.task.summary = {'processed': self.get_overall_tasks_progress(), 'total': self.total}
+            self.task.summary = {'processed': self.get_completed_progress(), 'total': self.get_total_progress_target()}
             self.task.save()
 
     def wait_till_tasks_alive(self):
@@ -1148,6 +1169,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                             self.resource_wise_time[part_type] = 0
                         self.resource_wise_time[part_type] += round(time.time() - start_time, 4)
 
+        self.notify_progress()
         if self.concept_hierarchy_map:
             # P1: restrict reconciliation to concepts the importing user can actually edit,
             # mirroring the has_edit_access guard in ConceptImporter.process(). This excludes
@@ -1171,6 +1193,8 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                     inverted[parent_uri].append(child_uri)
             if inverted:
                 make_hierarchy(inverted)
+            self.hierarchy_reconciliation_done = True
+            self.notify_progress()
 
         post_import_update_resource_counts.apply_async(queue='default', permanent=False)
 
