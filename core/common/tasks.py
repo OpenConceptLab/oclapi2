@@ -880,11 +880,14 @@ def generate_key(*args, **kwargs):
     return "|".join(key_parts)
 
 @app.task(base=QueueOnceCustomTask)
-def source_version_compare(version1_uri, version2_uri, is_changelog, verbosity, ignore_cache=False):
+def source_version_compare(version1_uri, version2_uri, is_changelog, verbosity, ignore_cache=False, format_type='json'):
     ignore_cache = ignore_cache or get(settings, 'TEST_MODE', False)
+    # Include format_type in the cache key only when it differs from the default
+    # to avoid invalidating existing cached JSON results.
+    cache_key_suffix = f'|format={format_type}' if format_type != 'json' else ''
     if not ignore_cache:
         cache_key = generate_key(
-            'source_version_compare', version1_uri, version2_uri, is_changelog, verbosity)
+            'source_version_compare', version1_uri, version2_uri, is_changelog, verbosity) + cache_key_suffix
         result = cache.get(cache_key)
         if result:
             return result
@@ -892,8 +895,15 @@ def source_version_compare(version1_uri, version2_uri, is_changelog, verbosity, 
     from core.sources.models import Source
     version1 = Source.objects.get(uri=version1_uri)
     version2 = Source.objects.get(uri=version2_uri)
-    fn = Source.changelog if is_changelog else Source.compare
-    result = fn(version1, version2, verbosity)
+
+    if is_changelog:
+        result = Source.changelog(version1, version2, verbosity)
+        if format_type == 'markdown':
+            from core.sources.changelog_markdown import ChangelogMarkdownGenerator
+            result['markdown'] = ChangelogMarkdownGenerator(result).generate()
+    else:
+        result = Source.compare(version1, version2, verbosity)
+
     if not ignore_cache:
         cache.set(cache_key, result, timeout=60*60*24*4)
     return result
