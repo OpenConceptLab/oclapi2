@@ -865,7 +865,8 @@ class BulkImportInline(BaseImporter):
                 continue
             if item_type == 'concept':
                 concept_importer = ConceptImporter(
-                    item, self.user, self.update_if_exists, skip_hierarchy_tasks=self.skip_hierarchy_tasks
+                    item, self.user, self.update_if_exists,
+                    skip_hierarchy_tasks=self.skip_hierarchy_tasks and bool(item.get('id'))
                 )
                 _result = concept_importer.delete() if action == 'delete' else concept_importer.run()
                 if self.index_resources and get(concept_importer.instance, 'id'):

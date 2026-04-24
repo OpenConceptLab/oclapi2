@@ -28,7 +28,7 @@ from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
-from core.sources.constants import AUTO_ID_UUID
+from core.sources.constants import AUTO_ID_SEQUENTIAL, AUTO_ID_UUID
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.tasks.models import Task
@@ -365,6 +365,31 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.created), 1)
         self.assertEqual(importer.failed, [])
         child_concept = Concept.objects.filter(mnemonic='Child', id=F('versioned_object_id')).first()
+        self.assertEqual(list(child_concept.parent_concept_urls), [parent_concept.uri])
+        parent_concept.refresh_from_db()
+        self.assertEqual(list(parent_concept.child_concept_urls), [child_concept.uri])
+
+    def test_concept_import_processes_hierarchy_for_auto_id_when_skip_hierarchy_tasks(self):
+        source = OrganizationSourceFactory(
+            organization=OrganizationFactory(mnemonic='DemoOrg'), mnemonic='DemoSource', version='HEAD',
+            autoid_concept_mnemonic=AUTO_ID_SEQUENTIAL
+        )
+        parent_concept = ConceptFactory(parent=source, mnemonic='Parent')
+        data = {
+            "type": "Concept", "concept_class": "Root",
+            "datatype": "None", "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
+            "names": [{"name": "Child", "locale": "en", "locale_preferred": "True", "name_type": "Fully Specified"}],
+            "descriptions": [],
+            "parent_concept_urls": [parent_concept.uri],
+        }
+
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True, skip_hierarchy_tasks=True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 1)
+        self.assertEqual(importer.failed, [])
+        child_concept = Concept.objects.filter(parent=source, mnemonic='1', id=F('versioned_object_id')).first()
         self.assertEqual(list(child_concept.parent_concept_urls), [parent_concept.uri])
         parent_concept.refresh_from_db()
         self.assertEqual(list(parent_concept.child_concept_urls), [child_concept.uri])
