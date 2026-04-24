@@ -261,6 +261,8 @@ class ThrottleHeadersMiddleware(MiddlewareMixin):
             throttles = ThrottleUtil.get_match_throttles_by_user_plan(request.user) if self.is_match_throttled_path(
                 request.path
             ) else ThrottleUtil.get_throttles_by_user_plan(request.user)
+            if not throttles:
+                return response
 
             if minute_limit := ThrottleUtil.get_limit_remaining(throttles[0], request, view):
                 response['X-LimitRemaining-Minute'] = minute_limit

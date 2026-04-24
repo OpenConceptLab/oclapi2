@@ -63,7 +63,10 @@ class ThrottleUtil:
 
     @staticmethod
     def get_throttles_by_user_plan(user):
+        """Return the standard throttles for the user's effective plan."""
         if not settings.ENABLE_THROTTLING:
+            return []
+        if get(user, 'is_superuser'):
             return []
         # order is important, first one has to be minute throttle
         if not get(user, 'is_authenticated') or get(user, 'is_guest_group'):
@@ -74,7 +77,10 @@ class ThrottleUtil:
 
     @staticmethod
     def get_match_throttles_by_user_plan(user):
+        """Return the match throttles for the user's effective plan."""
         if not settings.ENABLE_THROTTLING:
+            return []
+        if get(user, 'is_superuser'):
             return []
         # order is important, first one has to be minute throttle
         if not get(user, 'is_authenticated') or get(user, 'is_guest_group'):

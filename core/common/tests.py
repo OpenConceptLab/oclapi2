@@ -1347,7 +1347,7 @@ class ChecksumViewTest(OCLAPITestCase):
 }, clear=True)
 @override_settings(ENABLE_THROTTLING=True)
 class ThrottleUtilTest(OCLTestCase):
-    """Verify throttle selection for guest, standard, and core auth groups."""
+    """Verify throttle selection for guest, standard, core, and superuser auth groups."""
 
     def test_get_throttles_for_guest_user(self):
         throttles = ThrottleUtil.get_throttles_by_user_plan(AnonymousUser())
@@ -1372,6 +1372,14 @@ class ThrottleUtilTest(OCLTestCase):
         self.assertTrue(user.is_core_group)
         self.assertIsInstance(throttles[0], CoreMinuteThrottle)
         self.assertIsInstance(throttles[1], CoreDayThrottle)
+
+    def test_get_throttles_for_superuser(self):
+        """Superusers must bypass view throttling entirely."""
+        user = UserProfileFactory(is_superuser=True, is_staff=True)
+
+        throttles = ThrottleUtil.get_throttles_by_user_plan(user)
+
+        self.assertEqual(throttles, [])
 
     def test_get_match_throttles_for_guest_user(self):
         user = UserProfileFactory()
@@ -1398,6 +1406,14 @@ class ThrottleUtilTest(OCLTestCase):
 
         self.assertIsInstance(throttles[0], MatchCoreMinuteThrottle)
         self.assertIsInstance(throttles[1], MatchCoreDayThrottle)
+
+    def test_get_match_throttles_for_superuser(self):
+        """Superusers must bypass match throttling entirely."""
+        user = UserProfileFactory(is_superuser=True, is_staff=True)
+
+        throttles = ThrottleUtil.get_match_throttles_by_user_plan(user)
+
+        self.assertEqual(throttles, [])
 
     def test_core_user_gets_core_throttle_not_standard(self):
         """Core group membership must take precedence over the standard fallthrough."""
