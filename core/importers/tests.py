@@ -1174,6 +1174,29 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         task.refresh_from_db()
         self.assertEqual(task.summary, {'processed': 150, 'total': 64})
 
+    def test_notify_progress_includes_hierarchy_reconciliation_step(self):
+        task = Task(id='task-id', name='bulk_import')
+        task.save()
+        Task(id='task-1', name='sub_task', summary={'processed': 100, 'total': 200}).save()
+        Task(id='task-2', name='sub_task', summary={'processed': 50, 'total': 100}).save()
+
+        content = json.dumps({
+            "type": "Concept", "id": "ChildConcept",
+            "owner": "TestOrg", "owner_type": "Organization", "source": "TestSource",
+            "parent_concept_urls": ["/orgs/TestOrg/sources/TestSource/concepts/ParentConcept/"]
+        })
+        importer = BulkImportParallelRunner(content, 'ocladmin', True, None, 'task-id')
+        importer.tasks = [Mock(task_id='task-1'), Mock(task_id='task-2')]
+
+        importer.notify_progress()
+        task.refresh_from_db()
+        self.assertEqual(task.summary, {'processed': 150, 'total': 2})
+
+        importer.hierarchy_reconciliation_done = True
+        importer.notify_progress()
+        task.refresh_from_db()
+        self.assertEqual(task.summary, {'processed': 151, 'total': 2})
+
     def test_chunker_list(self):
         self.assertEqual(
             list(BulkImportParallelRunner.chunker_list([1, 2, 3], 3, False)), [[1], [2], [3]]
@@ -1384,6 +1407,7 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         importer.run()
 
         make_hierarchy_mock.assert_called_once()
+        self.assertTrue(importer.hierarchy_reconciliation_done)
         inverted = make_hierarchy_mock.call_args[0][0]
         self.assertIn(parent.uri, inverted)
         self.assertIn(child.uri, inverted[parent.uri])

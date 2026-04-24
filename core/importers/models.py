@@ -977,6 +977,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self.result = None
         self._json_result = None
         self.concept_hierarchy_map = {}  # child_uri -> [parent_uris], built before input_list is cleared
+        self.hierarchy_reconciliation_done = False
         if self.content:
             self.input_list = self.content if isinstance(self.content, list) else self.content.splitlines()
             self.total = len(self.input_list)
@@ -1119,16 +1120,27 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
     def get_overall_tasks_progress(self):
         return sum(compact(self.get_sub_tasks().values_list('summary__processed', flat=True)))
 
+    def has_hierarchy_reconciliation_step(self):
+        return bool(self.concept_hierarchy_map)
+
+    def get_total_progress_target(self):
+        return self.total + int(self.has_hierarchy_reconciliation_step())
+
+    def get_completed_progress(self):
+        return self.get_overall_tasks_progress() + int(
+            self.has_hierarchy_reconciliation_step() and self.hierarchy_reconciliation_done
+        )
+
     def get_details_to_notify(self):
         summary = f"Started: {self.start_time_formatted} | " \
-            f"Processed: {self.get_overall_tasks_progress()}/{self.total} | " \
+            f"Processed: {self.get_completed_progress()}/{self.get_total_progress_target()} | " \
             f"Time: {self.elapsed_seconds}secs"
 
         return {'summary': summary}
 
     def notify_progress(self):
         if self.task:
-            self.task.summary = {'processed': self.get_overall_tasks_progress(), 'total': self.total}
+            self.task.summary = {'processed': self.get_completed_progress(), 'total': self.get_total_progress_target()}
             self.task.save()
 
     def wait_till_tasks_alive(self):
@@ -1156,6 +1168,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                             self.resource_wise_time[part_type] = 0
                         self.resource_wise_time[part_type] += round(time.time() - start_time, 4)
 
+        self.notify_progress()
         if self.concept_hierarchy_map:
             # P1: restrict reconciliation to concepts the importing user can actually edit,
             # mirroring the has_edit_access guard in ConceptImporter.process(). This excludes
@@ -1179,6 +1192,8 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                     inverted[parent_uri].append(child_uri)
             if inverted:
                 make_hierarchy(inverted)
+            self.hierarchy_reconciliation_done = True
+            self.notify_progress()
 
         post_import_update_resource_counts.apply_async(queue='default', permanent=False)
 
