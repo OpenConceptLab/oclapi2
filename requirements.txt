@@ -46,6 +46,6 @@ pydantic==2.6.4
 minio==7.2.9
 sentence-transformers==5.4.0
 elastic-transport==8.17
-litellm==1.83.0
+litellm==1.83.7
 strawberry-graphql==0.285.0
 strawberry-graphql-django==0.67.0
