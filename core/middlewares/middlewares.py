@@ -6,7 +6,6 @@ from django.conf import settings
 from django.http import HttpResponseNotFound, HttpResponse
 from django.http.response import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
-from pydash import get
 from request_logging.middleware import LoggingMiddleware
 from rest_framework.views import APIView
 
@@ -257,12 +256,13 @@ class ThrottleHeadersMiddleware(MiddlewareMixin):
         return False
 
     def process_response(self, request, response):
-        if request.path.rstrip("/") not in ['', '/swagger', '/redoc', '/version'] and not get(
-                request.user, 'is_superuser', False):
+        if request.path.rstrip("/") not in ['', '/swagger', '/redoc', '/version']:
             view = APIView()
             throttles = ThrottleUtil.get_match_throttles_by_user_plan(request.user) if self.is_match_throttled_path(
                 request.path
             ) else ThrottleUtil.get_throttles_by_user_plan(request.user)
+            if not throttles:
+                return response
 
             if minute_limit := ThrottleUtil.get_limit_remaining(throttles[0], request, view):
                 response['X-LimitRemaining-Minute'] = minute_limit
