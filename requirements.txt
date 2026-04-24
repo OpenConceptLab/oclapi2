@@ -11,7 +11,7 @@ colour_runner==0.1.1
 boto3==1.36.10
 moto==5.0.27
 python-dateutil==2.8.2
-requests==2.32.3
+requests==2.33.0
 factory_boy==3.3.0
 # Celery
 celery[redis]==5.4.0
