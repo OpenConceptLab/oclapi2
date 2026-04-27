@@ -85,6 +85,42 @@ class RequireAuthenticationMiddlewareTest(SimpleTestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    @override_settings(
+        APPROVED_ANONYMOUS_CLIENTS=['oclmap/*', 'oclweb3/2.1.5', 'oclweb2/*']
+    )
+    def test_allows_anonymous_request_for_wildcard_client_header(self):
+        """Wildcard client entries should match any version for the configured client."""
+        response = self.middleware(self.make_request('/orgs/OCL/', HTTP_X_OCL_CLIENT='oclmap/4.2.0'))
+
+        self.assertEqual(response.status_code, 200)
+
+    @override_settings(
+        APPROVED_ANONYMOUS_CLIENTS=['oclmap/*', 'oclweb3/2.1.5', 'oclweb2/*']
+    )
+    def test_allows_anonymous_request_for_exact_version_client_header(self):
+        """Exact client/version entries should still require an exact match."""
+        response = self.middleware(self.make_request('/orgs/OCL/', HTTP_X_OCL_CLIENT='oclweb3/2.1.5'))
+
+        self.assertEqual(response.status_code, 200)
+
+    @override_settings(
+        APPROVED_ANONYMOUS_CLIENTS=['oclmap/*', 'oclweb3/2.1.5', 'oclweb2/*']
+    )
+    def test_blocks_anonymous_request_for_non_matching_exact_version_client_header(self):
+        """Exact client/version entries should reject other versions of the same client."""
+        response = self.middleware(self.make_request('/orgs/OCL/', HTTP_X_OCL_CLIENT='oclweb3/2.1.6'))
+
+        self.assertEqual(response.status_code, 403)
+
+    @override_settings(
+        APPROVED_ANONYMOUS_CLIENTS='oclmap/*,oclweb3/2.1.5,oclweb2/*'
+    )
+    def test_allows_anonymous_request_for_comma_separated_client_string_setting(self):
+        """String settings should be normalized before matching approved clients."""
+        response = self.middleware(self.make_request('/orgs/OCL/', HTTP_X_OCL_CLIENT='oclweb2/9.9.9'))
+
+        self.assertEqual(response.status_code, 200)
+
     def test_blocks_anonymous_request_for_whitespace_client_header(self):
         """Whitespace-only client header values should be rejected after normalization."""
         response = self.middleware(self.make_request('/orgs/OCL/', HTTP_X_OCL_CLIENT='   '))

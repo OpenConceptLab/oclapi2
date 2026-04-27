@@ -194,7 +194,20 @@ class RequireAuthenticationMiddleware(BaseMiddleware):
     def has_approved_client_header(request):
         """Match the configured anonymous allowlist against the X-OCL-CLIENT header."""
         client_name = request.META.get('HTTP_X_OCL_CLIENT', '').strip()
-        return bool(client_name and client_name in settings.APPROVED_ANONYMOUS_CLIENTS)
+        if not client_name:
+            return False
+
+        approved_clients = settings.APPROVED_ANONYMOUS_CLIENTS or set()
+        for approved_client in approved_clients:
+            if approved_client.endswith('/*'):
+                if client_name.startswith(approved_client[:-1]):
+                    return True
+                continue
+
+            if client_name == approved_client:
+                return True
+
+        return False
 
     @staticmethod
     def has_approved_api_key(request):
