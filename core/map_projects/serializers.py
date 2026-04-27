@@ -97,7 +97,7 @@ class MapProjectConfigurationsSerializer(serializers.ModelSerializer):
     class Meta:
         model = MapProject
         fields = [
-            'id', 'url'
+            'id', 'url', 'name'
         ] + MapProject.CONFIGURATION_FIELDS
 
 

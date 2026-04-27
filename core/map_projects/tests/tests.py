@@ -145,6 +145,7 @@ class MapProjectConfigurationsViewTest(MapProjectAbstractViewTest):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['id'], project.id)
         self.assertIsNotNone(response.data['id'])
+        self.assertIsNotNone(response.data['name'])
         self.assertEqual(response.data['url'], f'/orgs/CIEL/map-projects/{project.id}/')
         self.assertEqual(response.data['algorithms'], [{'name': 'exact-match', 'enabled': True}])
         self.assertEqual(response.data['encoder_model'], 'snowflake-arctic-embed-l-v2.0')
