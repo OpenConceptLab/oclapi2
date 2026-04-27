@@ -124,7 +124,7 @@ class MapProjectViewTest(MapProjectAbstractViewTest):
 
 
 class MapProjectConfigurationsViewTest(MapProjectAbstractViewTest):
-    def test_get(self):
+    def test_get_200(self):
         project = MapProjectFactory(
             organization=self.org,
             algorithms=[{'name': 'exact-match', 'enabled': True}],
@@ -153,3 +153,5 @@ class MapProjectConfigurationsViewTest(MapProjectAbstractViewTest):
         self.assertEqual(response.data['lookup_config'], {'concepts': {'limit': 20}})
         self.assertEqual(response.data['score_configuration'], {'recommended': 95, 'available': 75})
         self.assertEqual(response.data['target_repo_url'], '/orgs/CIEL/sources/CIEL/')
+        for field in ['analysis', 'input_file_name', 'candidates', 'matches', 'columns', 'created_by', 'updated_by']:
+            self.assertNotIn(field, response.data)

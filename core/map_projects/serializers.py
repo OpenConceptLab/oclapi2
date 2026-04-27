@@ -97,9 +97,8 @@ class MapProjectConfigurationsSerializer(serializers.ModelSerializer):
     class Meta:
         model = MapProject
         fields = [
-            'id', 'url', 'algorithms', 'encoder_model', 'filters', 'include_retired', 'lookup_config',
-            'score_configuration', 'target_repo_url'
-        ]
+            'id', 'url'
+        ] + MapProject.CONFIGURATION_FIELDS
 
 
 class MapProjectSerializer(MapProjectConfigurationsSerializer):
