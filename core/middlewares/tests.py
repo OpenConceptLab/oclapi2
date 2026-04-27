@@ -113,7 +113,7 @@ class RequireAuthenticationMiddlewareTest(SimpleTestCase):
         self.assertEqual(response.status_code, 403)
 
     @override_settings(
-        APPROVED_ANONYMOUS_CLIENTS='oclmap/*,oclweb3/2.1.5,oclweb2/*'
+        APPROVED_ANONYMOUS_CLIENTS=['oclmap/*', 'oclweb3/2.1.5', 'oclweb2/*']
     )
     def test_allows_anonymous_request_for_comma_separated_client_string_setting(self):
         """String settings should be normalized before matching approved clients."""
