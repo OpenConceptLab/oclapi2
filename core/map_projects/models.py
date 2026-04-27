@@ -41,6 +41,14 @@ class MapProject(BaseModel):
     analysis = models.JSONField(default=dict, null=True, blank=True)
     encoder_model = models.TextField(null=True, blank=True, default=settings.ENCODER_MODEL_NAME)
 
+    # Fields that define how a project matches —
+    # excluding identity, results, logs, and audit metadata.
+    # Used by the copy-project flow.
+    CONFIGURATION_FIELDS = [
+        'algorithms', 'encoder_model', 'filters', 'include_retired',
+        'lookup_config', 'score_configuration', 'target_repo_url',
+    ]
+
     class Meta:
         db_table = 'map_projects'
 

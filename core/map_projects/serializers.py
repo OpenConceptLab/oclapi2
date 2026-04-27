@@ -93,7 +93,15 @@ class MapProjectListSerializer(serializers.ModelSerializer):
         ]
 
 
-class MapProjectSerializer(serializers.ModelSerializer):
+class MapProjectConfigurationsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MapProject
+        fields = [
+            'id', 'url', 'name'
+        ] + MapProject.CONFIGURATION_FIELDS
+
+
+class MapProjectSerializer(MapProjectConfigurationsSerializer):
     created_by = CharField(source='created_by.username', read_only=True)
     updated_by = CharField(source='updated_by.username', read_only=True)
     owner = CharField(source='parent.mnemonic', read_only=True)
@@ -105,13 +113,12 @@ class MapProjectSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = MapProject
-        fields = [
-            'id', 'name', 'input_file_name',
-            'created_by', 'updated_by', 'created_at', 'updated_at', 'url', 'is_active',
+        fields = MapProjectConfigurationsSerializer.Meta.fields + [
+            'name', 'input_file_name',
+            'created_by', 'updated_by', 'created_at', 'updated_at', 'is_active',
             'owner', 'owner_type', 'owner_url', 'public_access',
-            'target_repo_url', 'summary', 'logs', 'include_retired',
-            'score_configuration', 'filters', 'candidates', 'algorithms', 'lookup_config', 'analysis',
-            'encoder_model'
+            'summary', 'logs', 'include_retired',
+            'candidates', 'analysis',
         ]
 
     def __init__(self, *args, **kwargs):
@@ -137,6 +144,7 @@ class MapProjectDetailSerializer(MapProjectSerializer):
     class Meta:
         model = MapProject
         fields = MapProjectSerializer.Meta.fields + ['file_url', 'matches', 'columns']
+
 
 class MapProjectLogsSerializer(serializers.ModelSerializer):
     class Meta:
