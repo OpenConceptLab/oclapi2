@@ -6,9 +6,13 @@ from django.conf import settings
 from django.http import HttpResponseNotFound, HttpResponse
 from django.http.response import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
+from pydash import get
 from request_logging.middleware import LoggingMiddleware
+from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.request import Request
 from rest_framework.views import APIView
 
+from core.common.authentication import OCLAuthentication
 from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER, RESPONSE_TIME_HEADER, REQUEST_URL_HEADER, \
     REQUEST_METHOD_HEADER
 from core.common.throttling import ThrottleUtil
@@ -133,10 +137,39 @@ class RequireAuthenticationMiddleware(BaseMiddleware):
         if request.method == 'OPTIONS' or request.META.get('HTTP_USER_AGENT', '').startswith('ELB-HealthChecker'):
             return True
 
+        return self.is_exempt_path(request.path) or self.has_approved_client_header(request) or \
+            self.has_approved_api_key(request) or self.has_approved_ip(request) or get(
+                self.get_authenticated_user(request), 'is_authenticated', False
+            )
+
+        # user = self.get_authenticated_user(request)
+        # return getattr(user, 'is_authenticated', False)
+
+    @staticmethod
+    def get_authenticated_user(request):
+        """
+        Resolve the authenticated user from either the Django session or the DRF auth stack.
+
+        Django's AuthenticationMiddleware only populates session-backed users. API token and
+        OIDC bearer authentication happen later in DRF views, so this middleware must run that
+        authentication early when header credentials are present.
+        """
         user = getattr(request, 'user', None)
-        return getattr(user, 'is_authenticated', False) or self.is_exempt_path(request.path) or \
-            self.has_approved_client_header(request) or \
-            self.has_approved_api_key(request) or self.has_approved_ip(request)
+        if getattr(user, 'is_authenticated', False):
+            return user
+
+        try:
+            auth_result = OCLAuthentication().authenticate(Request(request))
+        except AuthenticationFailed:
+            return user
+
+        if not auth_result:
+            return user
+
+        authenticated_user, auth = auth_result
+        request.user = authenticated_user
+        request.auth = auth
+        return authenticated_user
 
     @classmethod
     def is_exempt_path(cls, path):

@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
@@ -36,6 +37,28 @@ class RequireAuthenticationMiddlewareTest(SimpleTestCase):
         response = self.middleware(self.make_request(user=user))
 
         self.assertEqual(response.status_code, 200)
+
+    @patch('core.middlewares.middlewares.OCLAuthentication.authenticate')
+    def test_allows_request_authenticated_by_drf_header_auth(self, authenticate_mock):
+        """Header auth should be resolved before enforcing the anonymous access gate."""
+        user = type('AuthenticatedUser', (), {'is_authenticated': True})()
+        authenticate_mock.return_value = (user, 'token-auth')
+        request = self.make_request('/orgs/OCL/', HTTP_AUTHORIZATION='Token real-token')
+
+        response = self.middleware(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIs(request.user, user)
+        self.assertEqual(request.auth, 'token-auth')
+
+    @patch('core.middlewares.middlewares.OCLAuthentication.authenticate')
+    def test_blocks_request_when_drf_header_auth_fails(self, authenticate_mock):
+        """Failed DRF header auth should still leave protected paths blocked."""
+        authenticate_mock.return_value = None
+
+        response = self.middleware(self.make_request('/orgs/OCL/', HTTP_AUTHORIZATION='Token bad-token'))
+
+        self.assertEqual(response.status_code, 403)
 
     def test_blocks_anonymous_request_for_protected_path(self):
         """Anonymous traffic to protected API paths should receive a 403 response."""
