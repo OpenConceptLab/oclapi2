@@ -615,7 +615,10 @@ class MappingImporter(BaseResourceImporter):
             if self.version:
                 queryset = self.get_queryset()
                 if queryset.count() > 1:
-                    queryset = queryset.filter(retired=False)
+                    if queryset.filter(retired=False).exists():
+                        queryset = queryset.filter(retired=False)
+                    else:
+                        queryset = queryset.order_by('-id')
                 self.instance = queryset.first().clone()
                 self.instance._counted = None  # pylint: disable=protected-access
                 self.instance._index = False  # pylint: disable=protected-access
