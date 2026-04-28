@@ -864,34 +864,40 @@ class BulkImportInline(BaseImporter):
                 )
                 continue
             if item_type == 'concept':
-                concept_importer = ConceptImporter(
-                    item, self.user, self.update_if_exists,
-                    skip_hierarchy_tasks=self.skip_hierarchy_tasks and bool(item.get('id'))
-                )
-                _result = concept_importer.delete() if action == 'delete' else concept_importer.run()
-                if self.index_resources and get(concept_importer.instance, 'id'):
-                    new_concept_ids.update(set(compact(
-                        [
-                            concept_importer.instance.versioned_object_id,
-                            get(concept_importer.instance, 'prev_latest_version_id'),
-                            get(concept_importer.instance, 'latest_version_id'),
-                            concept_importer.instance.id,
-                        ]
-                    )))
+                try:
+                    concept_importer = ConceptImporter(
+                        item, self.user, self.update_if_exists,
+                        skip_hierarchy_tasks=self.skip_hierarchy_tasks and bool(item.get('id'))
+                    )
+                    _result = concept_importer.delete() if action == 'delete' else concept_importer.run()
+                    if self.index_resources and get(concept_importer.instance, 'id'):
+                        new_concept_ids.update(set(compact(
+                            [
+                                concept_importer.instance.versioned_object_id,
+                                get(concept_importer.instance, 'prev_latest_version_id'),
+                                get(concept_importer.instance, 'latest_version_id'),
+                                concept_importer.instance.id,
+                            ]
+                        )))
+                except Exception as ex:
+                    _result = {'__all__': str(ex)}
                 self.handle_item_import_result(_result, original_item)
                 continue
             if item_type == 'mapping':
-                mapping_importer = MappingImporter(item, self.user, self.update_if_exists)
-                _result = mapping_importer.delete() if action == 'delete' else mapping_importer.run()
-                if self.index_resources and get(mapping_importer.instance, 'id'):
-                    new_mapping_ids.update(set(compact(
-                        [
-                            mapping_importer.instance.versioned_object_id,
-                            get(mapping_importer.instance, 'prev_latest_version_id'),
-                            get(mapping_importer.instance, 'latest_version_id'),
-                            mapping_importer.instance.id,
-                        ]
-                    )))
+                try:
+                    mapping_importer = MappingImporter(item, self.user, self.update_if_exists)
+                    _result = mapping_importer.delete() if action == 'delete' else mapping_importer.run()
+                    if self.index_resources and get(mapping_importer.instance, 'id'):
+                        new_mapping_ids.update(set(compact(
+                            [
+                                mapping_importer.instance.versioned_object_id,
+                                get(mapping_importer.instance, 'prev_latest_version_id'),
+                                get(mapping_importer.instance, 'latest_version_id'),
+                                mapping_importer.instance.id,
+                            ]
+                        )))
+                except Exception as ex:
+                    _result = {'__all__': str(ex)}
                 self.handle_item_import_result(_result, original_item)
                 continue
             if item_type == 'reference':
