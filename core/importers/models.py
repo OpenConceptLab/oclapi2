@@ -13,6 +13,7 @@ from pydash import compact, get
 
 from core.celery import app
 from core.collections.models import Collection
+from core.common import ERRBIT_LOGGER
 from core.common.constants import HEAD
 from core.common.tasks import bulk_import_parts_inline, delete_organization, batch_index_resources, \
     post_import_update_resource_counts, make_hierarchy
@@ -883,6 +884,7 @@ class BulkImportInline(BaseImporter):
                             ]
                         )))
                 except Exception as ex:
+                    ERRBIT_LOGGER.log(ex)
                     _result = {'__all__': str(ex)}
                 self.handle_item_import_result(_result, original_item)
                 continue
@@ -900,6 +902,7 @@ class BulkImportInline(BaseImporter):
                             ]
                         )))
                 except Exception as ex:
+                    ERRBIT_LOGGER.log(ex)
                     _result = {'__all__': str(ex)}
                 self.handle_item_import_result(_result, original_item)
                 continue
