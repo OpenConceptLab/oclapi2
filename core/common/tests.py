@@ -20,6 +20,7 @@ from rest_framework.test import APITestCase, APITransactionTestCase
 
 from core.collections.models import CollectionReference
 from core.common.constants import HEAD
+from core.common.models import BaseModel
 from core.common.tasks import delete_s3_objects, bulk_import_parallel_inline, resources_report, calculate_checksums
 from core.common.throttling import (
     CoreDayThrottle,
@@ -1039,6 +1040,64 @@ class BaseModelTest(OCLTestCase):
     def test_app_name(self):
         self.assertEqual(Concept().app_name, 'concepts')
         self.assertEqual(Source().app_name, 'sources')
+
+    @override_settings(TEST_MODE=False)
+    def test_batch_index_full_streams_batches_without_parallel_bulk(self):
+        ordered_queryset = Mock()
+        ordered_queryset.iterator.return_value = iter([1, 2])
+
+        queryset = Mock()
+        queryset.order_by.return_value = ordered_queryset
+        queryset.prefetch_related.return_value = queryset
+
+        doc_instance = Mock()
+        doc_instance.django.auto_refresh = False
+        document = Mock(return_value=doc_instance)
+
+        BaseModel.batch_index_full(False, queryset, document, None)
+
+        queryset.order_by.assert_called_once_with('-id')
+        ordered_queryset.iterator.assert_called_once_with(chunk_size=500)
+        self.assertEqual(doc_instance.update.call_args_list, [
+            call([1, 2], parallel=False),
+        ])
+
+    @override_settings(TEST_MODE=False)
+    def test_batch_index_partial_streams_batches_without_parallel_bulk(self):
+        # The document bulk helper stores index metadata on protected members.
+        ordered_queryset = Mock()
+        ordered_queryset.iterator.return_value = iter([10, 11])
+
+        queryset = Mock()
+        queryset.order_by.return_value = ordered_queryset
+        ordered_queryset.values_list.return_value = ordered_queryset
+
+        doc_instance = Mock()
+        doc_instance.django.auto_refresh = False
+        document = Mock(return_value=doc_instance)
+
+        BaseModel.batch_index_partial(queryset, document, False, {'flag': True})
+
+        ordered_queryset.iterator.assert_called_once_with(chunk_size=500)
+        bulk_calls = doc_instance._bulk.call_args_list  # pylint: disable=protected-access
+        self.assertEqual(len(bulk_calls), 1)
+        self.assertEqual(list(bulk_calls[0].args[0]), [
+            {
+                '_op_type': 'update',
+                '_index': doc_instance._index._name,  # pylint: disable=protected-access
+                '_id': 10,
+                'doc': {'flag': True},
+                'doc_as_upsert': True
+            },
+            {
+                '_op_type': 'update',
+                '_index': doc_instance._index._name,  # pylint: disable=protected-access
+                '_id': 11,
+                'doc': {'flag': True},
+                'doc_as_upsert': True
+            }
+        ])
+        self.assertEqual([call.kwargs for call in bulk_calls], [{'parallel': False}])
 
 
 class TaskTest(OCLTestCase):

@@ -218,14 +218,8 @@ class BaseModel(models.Model):
         if single_batch:
             doc.update(queryset.all(), parallel=True)
         else:
-            batch_size = 500
-            start = 0
-            while True:
-                batch = list(queryset.order_by('-id')[start:start + batch_size])
-                if not batch:
-                    break
-                doc.update(batch, parallel=True)
-                start += batch_size
+            for batch in BaseModel.iter_queryset_in_batches(queryset.order_by('-id')):
+                doc.update(batch, parallel=False)
 
     @staticmethod
     def batch_index_partial(queryset, document, single_batch, partial_doc):
@@ -252,15 +246,23 @@ class BaseModel(models.Model):
             ids = queryset.all().values_list('id', flat=True)
             doc._bulk(get_actions(ids), parallel=True, **kwargs)  # pylint: disable=protected-access
         else:
-            batch_size = 500
-            start = 0
             queryset = queryset.order_by('-id').values_list('id', flat=True)
-            while True:
-                batch = list(queryset[start:start + batch_size])
-                if not batch:
-                    break
-                doc._bulk(get_actions(batch), parallel=True, **kwargs)  # pylint: disable=protected-access
-                start += batch_size
+            for batch in BaseModel.iter_queryset_in_batches(queryset):
+                doc._bulk(get_actions(batch), parallel=False, **kwargs)  # pylint: disable=protected-access
+
+    @staticmethod
+    def iter_queryset_in_batches(queryset, batch_size=500):
+        """
+        Yield queryset results in bounded batches to avoid loading large reindex jobs into memory.
+        """
+        batch = []
+        for item in queryset.iterator(chunk_size=batch_size):
+            batch.append(item)
+            if len(batch) == batch_size:
+                yield batch
+                batch = []
+        if batch:
+            yield batch
 
     @staticmethod
     @transaction.atomic
