@@ -582,8 +582,8 @@ def index_expansion_concepts(expansion_id, count=None, concept_versioned_ids=Non
             queryset = expansion.concepts
         expansion.batch_index(
             queryset, ConceptDocument,
-            prefetch=['sources', 'names', 'descriptions',
-                      'expansion_set', 'expansion_set__collection_version']
+            prefetch=['sources', 'names', 'descriptions'],
+            select_related=['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by']
         )
 
 
@@ -603,7 +603,8 @@ def index_expansion_mappings(expansion_id, count=None, mapping_versioned_ids=Non
             queryset = expansion.mappings
         expansion.batch_index(
             queryset, MappingDocument,
-            prefetch=['sources', 'expansion_set', 'expansion_set__collection_version']
+            prefetch=['sources'],
+            select_related=['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by']
         )
 
 
@@ -642,16 +643,18 @@ def index_source_concepts(source_id, partial_doc=None, single_batch=False):
     source = Source.objects.filter(id=source_id).first()
     if source:
         from core.concepts.documents import ConceptDocument
-        prefetch = ['sources', 'names', 'descriptions', 'expansion_set', 'expansion_set__collection_version']
+        prefetch = ['sources', 'names', 'descriptions']
+        select_related = ['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by']
         try:
-            kwargs = {'partial_doc': partial_doc} if partial_doc else {'prefetch': prefetch}
+            kwargs = {'partial_doc': partial_doc} if partial_doc else {
+                'prefetch': prefetch, 'select_related': select_related}
             kwargs['single_batch'] = single_batch
             source.batch_index(source.concepts, ConceptDocument, **kwargs)
         except Exception:  # pragma: no cover
             if not partial_doc:
                 raise
             logger.exception('Falling back to full concept reindex for source %s', source_id)
-            source.batch_index(source.concepts, ConceptDocument, prefetch=prefetch)
+            source.batch_index(source.concepts, ConceptDocument, prefetch=prefetch, select_related=select_related)
 
 
 @app.task(
@@ -666,16 +669,18 @@ def index_source_mappings(source_id, partial_doc=None, single_batch=False):
     source = Source.objects.filter(id=source_id).first()
     if source:
         from core.mappings.documents import MappingDocument
-        prefetch = ['sources', 'expansion_set', 'expansion_set__collection_version']
+        prefetch = ['sources']
+        select_related = ['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by']
         try:
-            kwargs = {'partial_doc': partial_doc} if partial_doc else {'prefetch': prefetch}
+            kwargs = {'partial_doc': partial_doc} if partial_doc else {
+                'prefetch': prefetch, 'select_related': select_related}
             kwargs['single_batch'] = single_batch
             source.batch_index(source.mappings, MappingDocument, **kwargs)
         except Exception:  # pragma: no cover
             if not partial_doc:
                 raise
             logger.exception('Falling back to full mapping reindex for source %s', source_id)
-            source.batch_index(source.mappings, MappingDocument, prefetch=prefetch)
+            source.batch_index(source.mappings, MappingDocument, prefetch=prefetch, select_related=select_related)
 
 
 @app.task(base=QueueOnceCustomTask)

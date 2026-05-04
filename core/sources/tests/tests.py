@@ -1617,7 +1617,8 @@ class TasksTest(OCLTestCase):
         index_source_mappings(source.id)
         batch_index_mock.assert_called_once_with(
             source_mappings_mock, MappingDocument,
-            prefetch=['sources', 'expansion_set', 'expansion_set__collection_version'],
+            prefetch=['sources'],
+            select_related=['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'],
             single_batch=False
         )
 
@@ -1628,7 +1629,8 @@ class TasksTest(OCLTestCase):
         index_source_concepts(source.id)
         batch_index_mock.assert_called_once_with(
             source_concepts_mock, ConceptDocument,
-            prefetch=['sources', 'names', 'descriptions', 'expansion_set', 'expansion_set__collection_version'],
+            prefetch=['sources', 'names', 'descriptions'],
+            select_related=['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'],
             single_batch=False
         )
 
@@ -1666,7 +1668,8 @@ class TasksTest(OCLTestCase):
                 ),
                 call(
                     source_concepts_mock, ConceptDocument,
-                    prefetch=['sources', 'names', 'descriptions', 'expansion_set', 'expansion_set__collection_version']
+                    prefetch=['sources', 'names', 'descriptions'],
+                    select_related=['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'],
                 )
             ]
         )
@@ -1708,7 +1711,8 @@ class TasksTest(OCLTestCase):
                 ),
                 call(
                     source_mappings_mock, MappingDocument,
-                    prefetch=['sources', 'expansion_set', 'expansion_set__collection_version']
+                    prefetch=['sources'],
+                    select_related=['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'],
                 )
             ]
         )

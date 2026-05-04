@@ -199,14 +199,14 @@ class BaseModel(models.Model):
         return criteria
 
     @staticmethod
-    def batch_index(queryset, document, single_batch=False, prefetch=None, partial_doc=None):
+    def batch_index(queryset, document, single_batch=False, prefetch=None, select_related=None, partial_doc=None):  # pylint: disable=too-many-arguments
         if partial_doc:
             BaseModel.batch_index_partial(queryset, document, single_batch, partial_doc)
             return
-        BaseModel.batch_index_full(single_batch, queryset, document, prefetch)
+        BaseModel.batch_index_full(single_batch, queryset, document, prefetch, select_related)
 
     @staticmethod
-    def batch_index_full(single_batch: bool, queryset, document, prefetch):
+    def batch_index_full(single_batch: bool, queryset, document, prefetch, select_related):
         if get(settings, 'TEST_MODE', False):
             return
 
@@ -214,6 +214,8 @@ class BaseModel(models.Model):
 
         if prefetch:
             queryset = queryset.prefetch_related(*prefetch)
+        if select_related:
+            queryset = queryset.select_related(*select_related)
 
         if single_batch:
             doc.update(queryset.all(), parallel=True)

@@ -1049,12 +1049,13 @@ class BaseModelTest(OCLTestCase):
         queryset = Mock()
         queryset.order_by.return_value = ordered_queryset
         queryset.prefetch_related.return_value = queryset
+        queryset.select_related.return_value = queryset
 
         doc_instance = Mock()
         doc_instance.django.auto_refresh = False
         document = Mock(return_value=doc_instance)
 
-        BaseModel.batch_index_full(False, queryset, document, None)
+        BaseModel.batch_index_full(False, queryset, document, None, None)
 
         queryset.order_by.assert_called_once_with('-id')
         ordered_queryset.iterator.assert_called_once_with(chunk_size=500)
