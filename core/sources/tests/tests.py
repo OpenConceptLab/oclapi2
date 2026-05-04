@@ -1617,7 +1617,9 @@ class TasksTest(OCLTestCase):
         index_source_mappings(source.id)
         batch_index_mock.assert_called_once_with(
             source_mappings_mock, MappingDocument,
-            prefetch=['sources', 'expansion_set', 'expansion_set__collection_version'])
+            prefetch=['sources', 'expansion_set', 'expansion_set__collection_version'],
+            single_batch=False
+        )
 
     @patch('core.sources.models.Source.concepts')
     @patch('core.sources.models.Source.batch_index')
@@ -1626,7 +1628,9 @@ class TasksTest(OCLTestCase):
         index_source_concepts(source.id)
         batch_index_mock.assert_called_once_with(
             source_concepts_mock, ConceptDocument,
-            prefetch=['sources', 'names', 'descriptions', 'expansion_set', 'expansion_set__collection_version'])
+            prefetch=['sources', 'names', 'descriptions', 'expansion_set', 'expansion_set__collection_version'],
+            single_batch=False
+        )
 
     @patch('core.sources.models.Source.concepts')
     @patch('core.sources.models.Source.batch_index')
@@ -1637,7 +1641,8 @@ class TasksTest(OCLTestCase):
         index_source_concepts(source.id, {'is_in_latest_source_version': False})
         batch_index_mock.assert_called_once_with(
             source_concepts_mock, ConceptDocument,
-            partial_doc={'is_in_latest_source_version': False}
+            partial_doc={'is_in_latest_source_version': False},
+            single_batch=False
         )
 
     @patch('core.common.tasks.logger.exception')
@@ -1656,7 +1661,8 @@ class TasksTest(OCLTestCase):
             [
                 call(
                     source_concepts_mock, ConceptDocument,
-                    partial_doc={'is_in_latest_source_version': False}
+                    partial_doc={'is_in_latest_source_version': False},
+                    single_batch=False
                 ),
                 call(
                     source_concepts_mock, ConceptDocument,
@@ -1677,7 +1683,8 @@ class TasksTest(OCLTestCase):
         index_source_mappings(source.id, {'is_in_latest_source_version': False})
         batch_index_mock.assert_called_once_with(
             source_mappings_mock, MappingDocument,
-            partial_doc={'is_in_latest_source_version': False}
+            partial_doc={'is_in_latest_source_version': False},
+            single_batch=False
         )
 
     @patch('core.common.tasks.logger.exception')
@@ -1696,7 +1703,8 @@ class TasksTest(OCLTestCase):
             [
                 call(
                     source_mappings_mock, MappingDocument,
-                    partial_doc={'is_in_latest_source_version': False}
+                    partial_doc={'is_in_latest_source_version': False},
+                    single_batch=False
                 ),
                 call(
                     source_mappings_mock, MappingDocument,

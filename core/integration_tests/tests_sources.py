@@ -1757,7 +1757,34 @@ class SourceMappingsIndexViewTest(OCLAPITestCase):
                 'queue': 'indexing',
                 'name': 'index_source_mappings'
             })
-        index_source_mappings_task_mock.apply_async.assert_called_once_with((100,), queue='indexing', task_id=ANY)
+        index_source_mappings_task_mock.apply_async.assert_called_once_with(
+            (100, None, False), queue='indexing', task_id=ANY)
+
+    @patch('core.sources.views.index_source_mappings')
+    def test_post_202_single_batch(self, index_source_mappings_task_mock):
+        index_source_mappings_task_mock.__name__ = 'index_source_mappings'
+        index_source_mappings_task_mock.apply_async = Mock(return_value=Mock(state='PENDING', task_id='task-id-123'))
+        source = OrganizationSourceFactory(id=100)
+        user = UserProfileFactory(is_superuser=True, is_staff=True, username='soop')
+
+        response = self.client.post(
+            source.url + 'mappings/indexes/',
+            {'single_batch': True},
+            HTTP_AUTHORIZATION=f'Token {user.get_token()}'
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(
+            response.data, {
+                'state': 'PENDING',
+                'username': 'soop',
+                'id': ANY,
+                'task': ANY,
+                'queue': 'indexing',
+                'name': 'index_source_mappings'
+            })
+        index_source_mappings_task_mock.apply_async.assert_called_once_with(
+            (100, None, True), queue='indexing', task_id=ANY)
 
 
 class SourceConceptsIndexViewTest(OCLAPITestCase):
@@ -1785,7 +1812,36 @@ class SourceConceptsIndexViewTest(OCLAPITestCase):
                 'name': 'index_source_concepts',
             }
         )
-        index_source_concepts_task_mock.apply_async.assert_called_once_with((100,), queue='indexing', task_id=ANY)
+        index_source_concepts_task_mock.apply_async.assert_called_once_with(
+            (100, None, False), queue='indexing', task_id=ANY)
+
+    @patch('core.sources.views.index_source_concepts')
+    def test_post_202_single_batch(self, index_source_concepts_task_mock):
+        index_source_concepts_task_mock.__name__ = 'index_source_concepts'
+        index_source_concepts_task_mock.apply_async = Mock(return_value=Mock(state='PENDING', task_id='task-id-123'))
+        source = OrganizationSourceFactory(id=100)
+        user = UserProfileFactory(is_superuser=True, is_staff=True, username='soop')
+
+        response = self.client.post(
+            source.url + 'concepts/indexes/',
+            {'single_batch': True},
+            HTTP_AUTHORIZATION=f'Token {user.get_token()}',
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(
+            response.data,
+            {
+                'state': 'PENDING',
+                'username': 'soop',
+                'id': ANY,
+                'task': ANY,
+                'queue': 'indexing',
+                'name': 'index_source_concepts',
+            }
+        )
+        index_source_concepts_task_mock.apply_async.assert_called_once_with(
+            (100, None, True), queue='indexing', task_id=ANY)
 
 
 class SourceVersionProcessingViewTest(OCLAPITestCase):
