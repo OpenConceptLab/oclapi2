@@ -325,9 +325,10 @@ class SourceConceptsIndexView(SourceBaseView):
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         source = self.get_object()
+        single_batch = request.data.get('single_batch', None) in get_truthy_values()
         task = Task.new(queue='indexing', user=request.user, name=index_source_concepts.__name__)
         try:
-            index_source_concepts.apply_async((source.id,), queue=task.queue, task_id=task.id)
+            index_source_concepts.apply_async((source.id, None, single_batch), queue=task.queue, task_id=task.id)
         except AlreadyQueued:
             if task:
                 task.delete()
@@ -349,9 +350,10 @@ class SourceMappingsIndexView(SourceBaseView):
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         source = self.get_object()
+        single_batch = request.data.get('single_batch', None) in get_truthy_values()
         task = Task.new(queue='indexing', user=request.user, name=index_source_mappings.__name__)
         try:
-            index_source_mappings.apply_async((source.id,), queue=task.queue, task_id=task.id)
+            index_source_mappings.apply_async((source.id, None, single_batch), queue=task.queue, task_id=task.id)
         except AlreadyQueued:
             if task:
                 task.delete()

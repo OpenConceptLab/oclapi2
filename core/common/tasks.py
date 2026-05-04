@@ -634,7 +634,7 @@ def make_hierarchy(concept_map):  # pragma: no cover
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
     acks_late=True, reject_on_worker_lost=True, base=QueueOnceCustomTask
 )
-def index_source_concepts(source_id, partial_doc=None):
+def index_source_concepts(source_id, partial_doc=None, single_batch=False):
     """
     Index source concepts, or partially update existing ES documents when `partial_doc` is supplied.
     """
@@ -645,6 +645,7 @@ def index_source_concepts(source_id, partial_doc=None):
         prefetch = ['sources', 'names', 'descriptions', 'expansion_set', 'expansion_set__collection_version']
         try:
             kwargs = {'partial_doc': partial_doc} if partial_doc else {'prefetch': prefetch}
+            kwargs['single_batch'] = single_batch
             source.batch_index(source.concepts, ConceptDocument, **kwargs)
         except Exception:  # pragma: no cover
             if not partial_doc:
@@ -657,7 +658,7 @@ def index_source_concepts(source_id, partial_doc=None):
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
     acks_late=True, reject_on_worker_lost=True, base=QueueOnceCustomTask
 )
-def index_source_mappings(source_id, partial_doc=None):
+def index_source_mappings(source_id, partial_doc=None, single_batch=False):
     """
     Index source mappings, or partially update existing ES documents when `partial_doc` is supplied.
     """
@@ -668,6 +669,7 @@ def index_source_mappings(source_id, partial_doc=None):
         prefetch = ['sources', 'expansion_set', 'expansion_set__collection_version']
         try:
             kwargs = {'partial_doc': partial_doc} if partial_doc else {'prefetch': prefetch}
+            kwargs['single_batch'] = single_batch
             source.batch_index(source.mappings, MappingDocument, **kwargs)
         except Exception:  # pragma: no cover
             if not partial_doc:
