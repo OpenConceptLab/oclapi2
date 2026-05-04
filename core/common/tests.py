@@ -1060,7 +1060,7 @@ class BaseModelTest(OCLTestCase):
         queryset.order_by.assert_called_once_with('-id')
         ordered_queryset.iterator.assert_called_once_with(chunk_size=500)
         self.assertEqual(doc_instance.update.call_args_list, [
-            call([1, 2], parallel=False),
+            call([1, 2], parallel=True),
         ])
 
     @override_settings(TEST_MODE=False)
@@ -1098,7 +1098,7 @@ class BaseModelTest(OCLTestCase):
                 'doc_as_upsert': True
             }
         ])
-        self.assertEqual([call.kwargs for call in bulk_calls], [{'parallel': False}])
+        self.assertEqual([call.kwargs for call in bulk_calls], [{'parallel': True}])
 
 
 class TaskTest(OCLTestCase):
