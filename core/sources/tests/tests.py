@@ -1619,7 +1619,8 @@ class TasksTest(OCLTestCase):
             source_mappings_mock, MappingDocument,
             prefetch=['sources'],
             select_related=['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'],
-            single_batch=False
+            single_batch=False,
+            parallel=True
         )
 
     @patch('core.sources.models.Source.concepts')
@@ -1631,7 +1632,8 @@ class TasksTest(OCLTestCase):
             source_concepts_mock, ConceptDocument,
             prefetch=['sources', 'names', 'descriptions'],
             select_related=['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'],
-            single_batch=False
+            single_batch=False,
+            parallel=True
         )
 
     @patch('core.sources.models.Source.concepts')
@@ -1644,7 +1646,8 @@ class TasksTest(OCLTestCase):
         batch_index_mock.assert_called_once_with(
             source_concepts_mock, ConceptDocument,
             partial_doc={'is_in_latest_source_version': False},
-            single_batch=False
+            single_batch=False,
+            parallel=True
         )
 
     @patch('core.common.tasks.logger.exception')
@@ -1664,12 +1667,14 @@ class TasksTest(OCLTestCase):
                 call(
                     source_concepts_mock, ConceptDocument,
                     partial_doc={'is_in_latest_source_version': False},
-                    single_batch=False
+                    single_batch=False,
+                    parallel=True
                 ),
                 call(
                     source_concepts_mock, ConceptDocument,
                     prefetch=['sources', 'names', 'descriptions'],
                     select_related=['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'],
+                    parallel=True
                 )
             ]
         )
@@ -1687,7 +1692,8 @@ class TasksTest(OCLTestCase):
         batch_index_mock.assert_called_once_with(
             source_mappings_mock, MappingDocument,
             partial_doc={'is_in_latest_source_version': False},
-            single_batch=False
+            single_batch=False,
+            parallel=True
         )
 
     @patch('core.common.tasks.logger.exception')
@@ -1707,12 +1713,14 @@ class TasksTest(OCLTestCase):
                 call(
                     source_mappings_mock, MappingDocument,
                     partial_doc={'is_in_latest_source_version': False},
-                    single_batch=False
+                    single_batch=False,
+                    parallel=True
                 ),
                 call(
                     source_mappings_mock, MappingDocument,
                     prefetch=['sources'],
                     select_related=['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'],
+                    parallel=True
                 )
             ]
         )

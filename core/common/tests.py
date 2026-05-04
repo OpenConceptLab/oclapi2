@@ -2,7 +2,7 @@ import datetime
 import os
 import uuid
 from collections import OrderedDict
-from unittest.mock import patch, Mock, ANY
+from unittest.mock import patch, Mock, MagicMock, ANY
 
 import django
 import factory
@@ -1043,8 +1043,14 @@ class BaseModelTest(OCLTestCase):
 
     @override_settings(TEST_MODE=False)
     def test_batch_index_full_streams_batches_without_parallel_bulk(self):
-        ordered_queryset = Mock()
-        ordered_queryset.iterator.return_value = iter([1, 2])
+        ordered_queryset = MagicMock()
+
+        def get_batch(batch_slice):
+            if batch_slice == slice(0, 500, None):
+                return [1, 2]
+            return []
+
+        ordered_queryset.__getitem__.side_effect = get_batch
 
         queryset = Mock()
         queryset.order_by.return_value = ordered_queryset
@@ -1057,8 +1063,11 @@ class BaseModelTest(OCLTestCase):
 
         BaseModel.batch_index_full(False, queryset, document, None, None)
 
-        queryset.order_by.assert_called_once_with('-id')
-        ordered_queryset.iterator.assert_called_once_with(chunk_size=500)
+        queryset.order_by.assert_called_with('-id')
+        self.assertEqual(ordered_queryset.__getitem__.call_args_list, [
+            call(slice(0, 500, None)),
+            call(slice(500, 1000, None)),
+        ])
         self.assertEqual(doc_instance.update.call_args_list, [
             call([1, 2], parallel=True),
         ])
@@ -1066,12 +1075,19 @@ class BaseModelTest(OCLTestCase):
     @override_settings(TEST_MODE=False)
     def test_batch_index_partial_streams_batches_without_parallel_bulk(self):
         # The document bulk helper stores index metadata on protected members.
-        ordered_queryset = Mock()
-        ordered_queryset.iterator.return_value = iter([10, 11])
+        ids_queryset = MagicMock()
+
+        def get_batch(batch_slice):
+            if batch_slice == slice(0, 500, None):
+                return [10, 11]
+            return []
+
+        ids_queryset.__getitem__.side_effect = get_batch
 
         queryset = Mock()
+        ordered_queryset = Mock()
+        ordered_queryset.values_list.return_value = ids_queryset
         queryset.order_by.return_value = ordered_queryset
-        ordered_queryset.values_list.return_value = ordered_queryset
 
         doc_instance = Mock()
         doc_instance.django.auto_refresh = False
@@ -1079,7 +1095,12 @@ class BaseModelTest(OCLTestCase):
 
         BaseModel.batch_index_partial(queryset, document, False, {'flag': True})
 
-        ordered_queryset.iterator.assert_called_once_with(chunk_size=500)
+        queryset.order_by.assert_called_once_with('-id')
+        ordered_queryset.values_list.assert_called_once_with('id', flat=True)
+        self.assertEqual(ids_queryset.__getitem__.call_args_list, [
+            call(slice(0, 500, None)),
+            call(slice(500, 1000, None)),
+        ])
         bulk_calls = doc_instance._bulk.call_args_list  # pylint: disable=protected-access
         self.assertEqual(len(bulk_calls), 1)
         self.assertEqual(list(bulk_calls[0].args[0]), [

@@ -199,14 +199,16 @@ class BaseModel(models.Model):
         return criteria
 
     @staticmethod
-    def batch_index(queryset, document, single_batch=False, prefetch=None, select_related=None, partial_doc=None):  # pylint: disable=too-many-arguments
+    def batch_index(    # pylint: disable=too-many-arguments
+            queryset, document, single_batch=False, prefetch=None, select_related=None, partial_doc=None, parallel=True
+    ):
         if partial_doc:
-            BaseModel.batch_index_partial(queryset, document, single_batch, partial_doc)
+            BaseModel.batch_index_partial(queryset, document, single_batch, partial_doc, bool(parallel))
             return
-        BaseModel.batch_index_full(single_batch, queryset, document, prefetch, select_related)
+        BaseModel.batch_index_full(single_batch, queryset, document, prefetch, select_related, bool(parallel))
 
     @staticmethod
-    def batch_index_full(single_batch: bool, queryset, document, prefetch, select_related):
+    def batch_index_full(single_batch: bool, queryset, document, prefetch, select_related, parallel=True):  # pylint: disable=too-many-arguments
         if get(settings, 'TEST_MODE', False):
             return
 
@@ -218,13 +220,19 @@ class BaseModel(models.Model):
             queryset = queryset.select_related(*select_related)
 
         if single_batch:
-            doc.update(queryset.all(), parallel=True)
+            doc.update(queryset.all(), parallel=parallel)
         else:
-            for batch in BaseModel.iter_queryset_in_batches(queryset.order_by('-id')):
-                doc.update(batch, parallel=True)
+            batch_size = 500
+            start = 0
+            while True:
+                batch = list(queryset.order_by('-id')[start:start+batch_size])
+                if not batch:
+                    break
+                doc.update(batch, parallel=parallel)
+                start += batch_size
 
     @staticmethod
-    def batch_index_partial(queryset, document, single_batch, partial_doc):
+    def batch_index_partial(queryset, document, single_batch, partial_doc, parallel=True):
         if get(settings, 'TEST_MODE', False):
             return
 
@@ -246,25 +254,17 @@ class BaseModel(models.Model):
 
         if single_batch:
             ids = queryset.all().values_list('id', flat=True)
-            doc._bulk(get_actions(ids), parallel=True, **kwargs)  # pylint: disable=protected-access
+            doc._bulk(get_actions(ids), parallel=parallel, **kwargs)  # pylint: disable=protected-access
         else:
+            batch_size = 500
+            start = 0
             queryset = queryset.order_by('-id').values_list('id', flat=True)
-            for batch in BaseModel.iter_queryset_in_batches(queryset):
-                doc._bulk(get_actions(batch), parallel=True, **kwargs)  # pylint: disable=protected-access
-
-    @staticmethod
-    def iter_queryset_in_batches(queryset, batch_size=500):
-        """
-        Yield queryset results in bounded batches to avoid loading large reindex jobs into memory.
-        """
-        batch = []
-        for item in queryset.iterator(chunk_size=batch_size):
-            batch.append(item)
-            if len(batch) == batch_size:
-                yield batch
-                batch = []
-        if batch:
-            yield batch
+            while True:
+                batch = list(queryset[start:start+batch_size])
+                if not batch:
+                    break
+                doc._bulk(get_actions(batch), parallel=parallel, **kwargs)  # pylint: disable=protected-access
+                start += batch_size
 
     @staticmethod
     @transaction.atomic

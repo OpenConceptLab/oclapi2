@@ -635,7 +635,10 @@ def make_hierarchy(concept_map):  # pragma: no cover
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
     acks_late=True, reject_on_worker_lost=True, base=QueueOnceCustomTask
 )
-def index_source_concepts(source_id, partial_doc=None, single_batch=False):
+def index_source_concepts(
+        source_id, partial_doc=None, single_batch=False, should_prefetch=True, should_select_related=True,
+        parallel=True
+):
     """
     Index source concepts, or partially update existing ES documents when `partial_doc` is supplied.
     """
@@ -643,25 +646,31 @@ def index_source_concepts(source_id, partial_doc=None, single_batch=False):
     source = Source.objects.filter(id=source_id).first()
     if source:
         from core.concepts.documents import ConceptDocument
-        prefetch = ['sources', 'names', 'descriptions']
-        select_related = ['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by']
+        prefetch = ['sources', 'names', 'descriptions'] if should_prefetch else []
+        select_related = [
+            'parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'
+        ] if should_select_related else []
         try:
             kwargs = {'partial_doc': partial_doc} if partial_doc else {
                 'prefetch': prefetch, 'select_related': select_related}
             kwargs['single_batch'] = single_batch
+            kwargs['parallel'] = parallel
             source.batch_index(source.concepts, ConceptDocument, **kwargs)
         except Exception:  # pragma: no cover
             if not partial_doc:
                 raise
             logger.exception('Falling back to full concept reindex for source %s', source_id)
-            source.batch_index(source.concepts, ConceptDocument, prefetch=prefetch, select_related=select_related)
+            source.batch_index(
+                source.concepts, ConceptDocument, prefetch=prefetch, select_related=select_related, parallel=parallel)
 
 
 @app.task(
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
     acks_late=True, reject_on_worker_lost=True, base=QueueOnceCustomTask
 )
-def index_source_mappings(source_id, partial_doc=None, single_batch=False):
+def index_source_mappings(
+        source_id, partial_doc=None, single_batch=False, should_prefetch=True, should_select_related=True, parallel=True
+):
     """
     Index source mappings, or partially update existing ES documents when `partial_doc` is supplied.
     """
@@ -669,18 +678,22 @@ def index_source_mappings(source_id, partial_doc=None, single_batch=False):
     source = Source.objects.filter(id=source_id).first()
     if source:
         from core.mappings.documents import MappingDocument
-        prefetch = ['sources']
-        select_related = ['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by']
+        prefetch = ['sources'] if should_prefetch else []
+        select_related = [
+            'parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'
+        ] if should_select_related else []
         try:
             kwargs = {'partial_doc': partial_doc} if partial_doc else {
                 'prefetch': prefetch, 'select_related': select_related}
             kwargs['single_batch'] = single_batch
+            kwargs['parallel'] = parallel
             source.batch_index(source.mappings, MappingDocument, **kwargs)
         except Exception:  # pragma: no cover
             if not partial_doc:
                 raise
             logger.exception('Falling back to full mapping reindex for source %s', source_id)
-            source.batch_index(source.mappings, MappingDocument, prefetch=prefetch, select_related=select_related)
+            source.batch_index(
+                source.mappings, MappingDocument, prefetch=prefetch, select_related=select_related, parallel=parallel)
 
 
 @app.task(base=QueueOnceCustomTask)

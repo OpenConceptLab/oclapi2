@@ -1813,7 +1813,7 @@ class SourceConceptsIndexViewTest(OCLAPITestCase):
             }
         )
         index_source_concepts_task_mock.apply_async.assert_called_once_with(
-            (100, None, False), queue='indexing', task_id=ANY)
+            (100, None, False, True, True, True), queue='indexing', task_id=ANY)
 
     @patch('core.sources.views.index_source_concepts')
     def test_post_202_single_batch(self, index_source_concepts_task_mock):
@@ -1841,7 +1841,7 @@ class SourceConceptsIndexViewTest(OCLAPITestCase):
             }
         )
         index_source_concepts_task_mock.apply_async.assert_called_once_with(
-            (100, None, True), queue='indexing', task_id=ANY)
+            (100, None, True, True, True, True), queue='indexing', task_id=ANY)
 
 
 class SourceVersionProcessingViewTest(OCLAPITestCase):
