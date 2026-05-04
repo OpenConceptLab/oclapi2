@@ -1125,7 +1125,8 @@ class ConceptRetrieveUpdateDestroyViewTest(OCLAPITestCase):
                 "locale": name.locale,
                 "locale_preferred": False,
                 "name": name.name,
-                "name_type": "FULLY_SPECIFIED"
+                "name_type": "FULLY_SPECIFIED",
+                "retired": False,
             }
         )
 
@@ -1155,7 +1156,8 @@ class ConceptRetrieveUpdateDestroyViewTest(OCLAPITestCase):
                 "locale": 'en',
                 "locale_preferred": False,
                 "name": 'foo',
-                "name_type": "Fully Specified"
+                "name_type": "Fully Specified",
+                "retired": False
             }
         )
         self.assertEqual(concept.names.count(), 2)
@@ -1189,13 +1191,25 @@ class ConceptRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 204)
         self.assertEqual(concept.versions.count(), 2)
-        self.assertEqual(concept.names.count(), 1)
-        self.assertEqual(concept.names.first().name, name1.name)
+        self.assertEqual(concept.names.count(), 2)
+        self.assertEqual(concept.active_names.count(), 1)
+        self.assertEqual(concept.active_names.first().name, name1.name)
+        self.assertEqual(concept.retired_names.count(), 1)
+        self.assertEqual(concept.retired_names.first().name, name2.name)
 
         latest_version = concept.get_latest_version()
-        self.assertEqual(latest_version.names.count(), 1)
-        self.assertEqual(latest_version.names.first().name, name1.name)
-        self.assertEqual(latest_version.comment, f'Deleted {name2.name} in names.')
+        self.assertEqual(latest_version.names.count(), 2)
+        self.assertEqual(latest_version.active_names.count(), 1)
+        self.assertEqual(latest_version.retired_names.count(), 1)
+        self.assertEqual(latest_version.active_names.first().name, name1.name)
+        self.assertEqual(latest_version.retired_names.first().name, name2.name)
+        self.assertEqual(latest_version.comment, f'Retired {name2.name} in names.')
+
+        prev_latest = concept.get_latest_version().prev_version
+        self.assertEqual(prev_latest.active_names.count(), 2)
+        self.assertEqual(prev_latest.retired_names.count(), 0)
+        self.assertEqual(
+            sorted(prev_latest.names.values_list('name', flat=True)), sorted([name1.name, name2.name]))
 
     def test_get_200_with_response_modes(self):
         ConceptFactory(parent=self.source, mnemonic='conceptA')
@@ -2528,8 +2542,85 @@ class ConceptNameRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.concept.versions.count(), 2)
         self.assertEqual(self.concept.get_latest_version().names.first().name, 'brar')
+        self.assertEqual(self.concept.get_latest_version().names.first().retired, False)
         self.assertEqual(self.concept.get_latest_version().prev_version.names.first().name, 'froobar')
+        self.assertEqual(self.concept.get_latest_version().prev_version.names.first().retired, False)
         self.assertEqual(self.concept.names.first().name, 'brar')
+        self.assertEqual(self.concept.names.first().retired, False)
+
+    def test_put_200_retired(self):
+        self.assertEqual(self.concept.versions.count(), 1)
+        self.assertEqual(self.concept.names.count(), 1)
+        self.assertEqual(self.concept.active_names.count(), 1)
+
+        response = self.client.put(
+            self.url,
+            {'retired': True},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'names': ['A concept must have at least one name']})
+        self.assertEqual(self.concept.versions.count(), 1)
+
+        name2 = ConceptNameFactory(locale='fr', name='retraité', concept=self.concept)
+        ConceptNameFactory(locale='fr', name='retraité', concept=self.concept.get_latest_version())
+        self.assertEqual(self.concept.names.count(), 2)
+        self.assertEqual(self.concept.active_names.count(), 2)
+
+        response = self.client.put(
+            self.concept.uri + f'names/{name2.id}/',
+            {'retired': True},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.concept.versions.count(), 2)
+        self.assertEqual(self.concept.get_latest_version().active_names.count(), 1)
+        self.assertEqual(self.concept.get_latest_version().active_names.first().name, 'froobar')
+        self.assertEqual(self.concept.get_latest_version().active_names.first().retired, False)
+        self.assertEqual(self.concept.get_latest_version().retired_names.first().name, 'retraité')
+        self.assertEqual(self.concept.get_latest_version().retired_names.first().retired, True)
+        self.assertEqual(self.concept.get_latest_version().prev_version.active_names.count(), 2)
+        self.assertEqual(self.concept.active_names.count(), 1)
+        self.assertEqual(self.concept.active_names.first().name, 'froobar')
+        self.assertEqual(self.concept.retired_names.first().name, 'retraité')
+
+    def test_delete_204(self):
+        self.assertEqual(self.concept.versions.count(), 1)
+
+        response = self.client.delete(
+            self.url,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'names': ['A concept must have at least one name']})
+
+        name2 = ConceptNameFactory(locale='fr', name='retraité', concept=self.concept)
+        ConceptNameFactory(locale='fr', name='retraité', concept=self.concept.get_latest_version())
+        self.assertEqual(self.concept.names.count(), 2)
+
+        response = self.client.delete(
+            self.concept.uri + f'names/{name2.id}/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+
+        )
+        self.assertEqual(response.status_code, 204)
+
+        self.assertEqual(self.concept.versions.count(), 2)
+        self.assertEqual(self.concept.get_latest_version().active_names.count(), 1)
+        self.assertEqual(self.concept.get_latest_version().active_names.first().name, 'froobar')
+        self.assertEqual(self.concept.get_latest_version().active_names.first().retired, False)
+        self.assertEqual(self.concept.get_latest_version().retired_names.first().name, 'retraité')
+        self.assertEqual(self.concept.get_latest_version().retired_names.first().retired, True)
+        self.assertEqual(self.concept.get_latest_version().prev_version.active_names.count(), 2)
+        self.assertEqual(self.concept.active_names.count(), 1)
+        self.assertEqual(self.concept.active_names.first().name, 'froobar')
+        self.assertEqual(self.concept.retired_names.first().name, 'retraité')
 
 
 class ConceptReactivateViewTest(OCLAPITestCase):

@@ -24,7 +24,8 @@ class LocalizedNameSerializer(ModelSerializer):
     class Meta:
         model = ConceptName
         fields = (
-            'uuid', 'name', 'external_id', 'type', 'locale', 'locale_preferred', 'name_type', 'checksum'
+            'uuid', 'name', 'external_id', 'type', 'locale', 'locale_preferred', 'name_type', 'checksum',
+            'retired'
         )
 
     def to_representation(self, instance):
@@ -42,7 +43,8 @@ class LocalizedDescriptionSerializer(ModelSerializer):
     class Meta:
         model = ConceptName
         fields = (
-            'uuid', 'description', 'external_id', 'type', 'locale', 'locale_preferred', 'description_type', 'checksum'
+            'uuid', 'description', 'external_id', 'type', 'locale', 'locale_preferred', 'description_type', 'checksum',
+            'retired'
         )
 
     def to_representation(self, instance):
@@ -51,7 +53,7 @@ class LocalizedDescriptionSerializer(ModelSerializer):
         return ret
 
 
-class ConceptLabelSerializer(ModelSerializer):
+class ConceptLocaleSerializer(ModelSerializer):
     uuid = CharField(read_only=True, source='id')
     external_id = CharField(required=False)
     locale = CharField(required=True)
@@ -61,7 +63,7 @@ class ConceptLabelSerializer(ModelSerializer):
     class Meta:
         model = ConceptName
         fields = (
-            'uuid', 'external_id', 'type', 'locale', 'locale_preferred', 'concept_id'
+            'uuid', 'external_id', 'type', 'locale', 'locale_preferred', 'concept_id', 'retired'
         )
 
     def create(self, validated_data, instance=None):  # pylint: disable=arguments-differ
@@ -79,13 +81,13 @@ class ConceptLabelSerializer(ModelSerializer):
         return locale
 
 
-class ConceptNameSerializer(ConceptLabelSerializer):
+class ConceptNameSerializer(ConceptLocaleSerializer):
     name = CharField(required=True)
     name_type = CharField(required=False)
 
     class Meta:
         model = ConceptName
-        fields = (*ConceptLabelSerializer.Meta.fields, 'name', 'name_type')
+        fields = (*ConceptLocaleSerializer.Meta.fields, 'name', 'name_type')
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
@@ -93,14 +95,14 @@ class ConceptNameSerializer(ConceptLabelSerializer):
         return ret
 
 
-class ConceptDescriptionSerializer(ConceptLabelSerializer):
+class ConceptDescriptionSerializer(ConceptLocaleSerializer):
     description = CharField(required=True, source='name')
     description_type = CharField(required=False)
 
     class Meta:
         model = ConceptName
         fields = (
-            *ConceptLabelSerializer.Meta.fields, 'description', 'description_type'
+            *ConceptLocaleSerializer.Meta.fields, 'description', 'description_type'
         )
 
     def to_representation(self, instance):  # used to be to_native

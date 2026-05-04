@@ -1193,7 +1193,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     def get_name_locales_queryset(self):
         from core.concepts.models import ConceptName
-        return ConceptName.objects.filter(concept__in=self.get_active_concepts())
+        return ConceptName.objects.filter(concept__in=self.get_active_concepts(), retired=False)
 
     @property
     def concept_names_distribution(self):

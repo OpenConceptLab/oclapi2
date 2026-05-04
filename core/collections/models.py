@@ -216,7 +216,7 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
 
         errors = []
         matching_names_in_concept = {}
-        for name in concept.names.filter(**{attribute: value}).order_by('-id'):
+        for name in concept.active_names.filter(**{attribute: value}).order_by('-id'):
             name_key = f"{name.name}_{name.locale}"
             if name_key in matching_names_in_concept:
                 errors.append(self.__get_conflicting_concept_error(concept, name, error_message))
@@ -225,10 +225,12 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
                 names__name=name.name, names__locale=name.locale, **{f"names__{attribute}": value})
             if other.exclude(versioned_object_id=concept.versioned_object_id).exists():
                 for other_concept in other:
-                    conflicting_concept_name = other_concept.names.filter(
+                    conflicting_concept_name = other_concept.active_names.filter(
                         name=name.name, locale=name.locale, **{attribute: value}).first()
-                    errors.append(
-                        self.__get_conflicting_concept_error(other_concept, conflicting_concept_name, error_message))
+                    if conflicting_concept_name:
+                        errors.append(
+                            self.__get_conflicting_concept_error(
+                                other_concept, conflicting_concept_name, error_message))
         return errors or False
 
     def __get_conflicting_concept_error(self, concept, name, error_message):
