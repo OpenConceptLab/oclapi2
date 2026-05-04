@@ -221,7 +221,7 @@ class BaseModel(models.Model):
             doc.update(queryset.all(), parallel=True)
         else:
             for batch in BaseModel.iter_queryset_in_batches(queryset.order_by('-id')):
-                doc.update(batch, parallel=False)
+                doc.update(batch, parallel=True)
 
     @staticmethod
     def batch_index_partial(queryset, document, single_batch, partial_doc):
@@ -250,7 +250,7 @@ class BaseModel(models.Model):
         else:
             queryset = queryset.order_by('-id').values_list('id', flat=True)
             for batch in BaseModel.iter_queryset_in_batches(queryset):
-                doc._bulk(get_actions(batch), parallel=False, **kwargs)  # pylint: disable=protected-access
+                doc._bulk(get_actions(batch), parallel=True, **kwargs)  # pylint: disable=protected-access
 
     @staticmethod
     def iter_queryset_in_batches(queryset, batch_size=500):
