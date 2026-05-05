@@ -725,7 +725,8 @@ class ConceptLocaleRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDest
                         raise ValidationError(errors)
             except ValidationError as e:
                 return Response(
-                    get(e, 'message_dict') or get(e, 'error_dict') or e, status=status.HTTP_400_BAD_REQUEST)
+                    get(e, 'message_dict') or get(e, 'error_dict') or str(e),
+                    status=status.HTTP_400_BAD_REQUEST)
 
             return Response(serializer.data, status=status.HTTP_200_OK)
 
