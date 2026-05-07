@@ -1014,6 +1014,14 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             self.resource_distribution[data_type].append(data)
 
     def make_parts(self):
+        _type_order = {'concept': 0, 'mapping': 1, 'reference': 2}
+        self.input_list = sorted(
+            self.input_list,
+            key=lambda item: _type_order.get(
+                (item if isinstance(item, dict) else json.loads(item)).get('type', '').lower(),
+                0
+            )
+        )
         prev_line = None
         orgs = self.resource_distribution.pop('Organization', None)
         sources = self.resource_distribution.pop('Source', None)
