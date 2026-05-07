@@ -23,7 +23,7 @@ class MapProjectCreateUpdateSerializer(serializers.ModelSerializer):
             'public_access', 'file', 'user_id', 'organization_id', 'description',
             'target_repo_url', 'include_retired', 'score_configuration',
             'filters', 'candidates', 'algorithms', 'lookup_config', 'analysis', 'encoder_model',
-            'prompt_template_url'
+            'prompt_template_key'
         ]
 
     def prepare_object(self, validated_data, instance=None, file=None):
@@ -38,7 +38,7 @@ class MapProjectCreateUpdateSerializer(serializers.ModelSerializer):
         for attr in [
             'name', 'description', 'extras', 'target_repo_url', 'include_retired',
             'score_configuration', 'filters', 'candidates', 'algorithms', 'lookup_config', 'analysis',
-            'encoder_model', 'prompt_template_url'
+            'encoder_model', 'prompt_template_key'
         ]:
             setattr(instance, attr, validated_data.get(attr, get(instance, attr)))
         if not instance.id:
