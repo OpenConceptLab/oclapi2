@@ -3,7 +3,7 @@ from pydash import flatten, is_number, compact, get
 
 from core.common.constants import FACET_SIZE, HEAD
 from core.common.search import CustomESFacetedSearch, CustomESSearch
-from core.common.utils import get_embeddings, is_canonical_uri
+from core.common.utils import get_embeddings, get_spelling_variant, is_canonical_uri
 from core.concepts.models import Concept
 
 
@@ -177,10 +177,18 @@ class ConceptFuzzySearch:  # pragma: no cover
             if name:
                 knn_queries.append(get_knn_query("_embeddings.vector", name, 0.3))
                 knn_queries.append(get_knn_query("_synonyms_embeddings.vector", name, 0.275))
+                name_variant = get_spelling_variant(name)
+                if name_variant:
+                    knn_queries.append(get_knn_query("_embeddings.vector", name_variant, 0.285))
+                    knn_queries.append(get_knn_query("_synonyms_embeddings.vector", name_variant, 0.26))
             for synonym in synonyms:
                 if synonym is not None:
                     knn_queries.append(get_knn_query("_synonyms_embeddings.vector", synonym, 0.125))
                     knn_queries.append(get_knn_query("_embeddings.vector", synonym, 0.15))
+                    synonym_variant = get_spelling_variant(synonym)
+                    if synonym_variant:
+                        knn_queries.append(get_knn_query("_synonyms_embeddings.vector", synonym_variant, 0.115))
+                        knn_queries.append(get_knn_query("_embeddings.vector", synonym_variant, 0.14))
         else:
             for field in cls.fuzzy_fields:
                 value = data.get(field, None)
@@ -220,53 +228,69 @@ class ConceptFuzzySearch:  # pragma: no cover
 
         if is_semantic:
             if name:
-                search = search.extra(rescore={
-                  "window_size": 250,
-                  "query": {
-                    "score_mode": "total",
-                    "query_weight": 1.0,
-                    "rescore_query_weight": 35.0,
-                    "rescore_query": {
-                      "dis_max": {
-                        "tie_breaker": 0.0,
-                        "queries": [
-                          {
-                            "constant_score": {
-                              "filter": {
-                                "term": {
-                                  "_name": {
-                                    "value": name,
-                                    "case_insensitive": True
-                                  }
-                                }
-                              },
-                              "boost": 3
-                            }
-                          },
-                          {
-                            "constant_score": {
-                              "filter": {
+                name_variant = get_spelling_variant(name)
+                name_terms = [name] + ([name_variant] if name_variant else [])
+                synonym_terms = list(synonyms)
+                for s in synonyms:
+                    sv = get_spelling_variant(s)
+                    if sv:
+                        synonym_terms.append(sv)
+                rescore_queries = [
+                    {
+                        "constant_score": {
+                            "filter": {
                                 "bool": {
-                                  "should": [
-                                      {
-                                          "term": {
-                                              "_synonyms": {
-                                                  "value": synonym,
-                                                  "case_insensitive": True
-                                              }
-                                          }
-                                      } for synonym in synonyms
-                                  ],
-                                  "minimum_should_match": 1
+                                    "should": [
+                                        {
+                                            "term": {
+                                                "_name": {
+                                                    "value": t,
+                                                    "case_insensitive": True
+                                                }
+                                            }
+                                        } for t in name_terms
+                                    ],
+                                    "minimum_should_match": 1
                                 }
-                              },
-                              "boost": 1
-                            }
-                          }
-                        ]
-                      }
+                            },
+                            "boost": 3
+                        }
                     }
-                  }
+                ]
+                if synonym_terms:
+                    rescore_queries.append({
+                        "constant_score": {
+                            "filter": {
+                                "bool": {
+                                    "should": [
+                                        {
+                                            "term": {
+                                                "_synonyms": {
+                                                    "value": t,
+                                                    "case_insensitive": True
+                                                }
+                                            }
+                                        } for t in synonym_terms
+                                    ],
+                                    "minimum_should_match": 1
+                                }
+                            },
+                            "boost": 1
+                        }
+                    })
+                search = search.extra(rescore={
+                    "window_size": 250,
+                    "query": {
+                        "score_mode": "total",
+                        "query_weight": 1.0,
+                        "rescore_query_weight": 35.0,
+                        "rescore_query": {
+                            "dis_max": {
+                                "tie_breaker": 0.0,
+                                "queries": rescore_queries
+                            }
+                        }
+                    }
                 })
 
         highlight = [
