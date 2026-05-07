@@ -1014,12 +1014,25 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             self.resource_distribution[data_type].append(data)
 
     def make_parts(self):
-        _type_order = {'concept': 0, 'mapping': 1, 'reference': 2}
+        # Reflects the dependency order: containers must exist before their contents,
+        # and versioning (snapshots) must happen after all content has been imported.
+        # Organization → Source/Collection → Concept → Mapping → Reference → Versions
+        # Any unknown type falls back to 8, placing it after all known types.
+        _type_order = {
+            'organization':       0,
+            'source':             1,
+            'collection':         2,
+            'concept':            3,
+            'mapping':            4,
+            'reference':          5,
+            'source version':     6,
+            'collection version': 7,
+        }
         self.input_list = sorted(
             self.input_list,
             key=lambda item: _type_order.get(
                 (item if isinstance(item, dict) else json.loads(item)).get('type', '').lower(),
-                0
+                8
             )
         )
         prev_line = None
