@@ -823,6 +823,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
 
         map_config = self.request.data.get('map_config', [])
         filters = self.request.data.get('filter', {})
+        original_filters = filters.copy()
         include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM) in get_truthy_values()
         num_candidates = min(to_int(self.request.query_params.get('numCandidates', 0), 3000), 3000)
         k_nearest = min(to_int(self.request.query_params.get('kNearest', 0), 100), 100)
@@ -863,7 +864,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
             es_search.to_queryset(False, True, False, name, encoder_model)
             print(f"[{cid}] ES Search (including reranker={reranker}) executed in {time.time() - start_time} seconds")
             start_time = time.time()
-            result = {'row': row, 'results': [], 'map_config': map_config, 'filter': filters}
+            result = {'row': row, 'results': [], 'map_config': map_config, 'filter': original_filters}
             for concept in es_search.queryset:
                 concept._highlight = es_search.highlights.get(concept.id, {})  # pylint:disable=protected-access
                 score_info = es_search.scores.get(concept.id, {})
