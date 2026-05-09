@@ -813,6 +813,36 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
 
         return ConceptListSerializer
 
+    @staticmethod
+    def _resolve_variants_repo(value):
+        """Normalize the request's `variants` value into a dictionary URI or None.
+
+        Lexical variant expansion is OFF by default — clients opt in. Same
+        shape will apply to standard concept search (`?variants=...`) when
+        that wiring lands.
+
+        Returns the dictionary URI to use, or None to skip expansion entirely.
+
+        Accepts:
+        - missing / null / false / "false" / "0" → None (disabled, default)
+        - true / "true" / "1" → DEFAULT_LEXICAL_VARIANTS_REPO
+        - non-empty URI string → that URI
+        """
+        from core.common.lexical_variants import DEFAULT_LEXICAL_VARIANTS_REPO
+        if value is True:
+            return DEFAULT_LEXICAL_VARIANTS_REPO
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None
+            lower = stripped.lower()
+            if lower in ('true', '1'):
+                return DEFAULT_LEXICAL_VARIANTS_REPO
+            if lower in ('false', '0'):
+                return None
+            return stripped
+        return None
+
     def filter_queryset(self, _=None):  # pylint: disable=too-many-locals,too-many-statements
         rows = self.request.data.get('rows')
         target_repo_url = self.request.data.get('target_repo_url')
@@ -823,6 +853,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
 
         map_config = self.request.data.get('map_config', [])
         filters = self.request.data.get('filter', {})
+        variants_repo = self._resolve_variants_repo(self.request.data.get('variants'))
         include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM) in get_truthy_values()
         num_candidates = min(to_int(self.request.query_params.get('numCandidates', 0), 3000), 3000)
         k_nearest = min(to_int(self.request.query_params.get('kNearest', 0), 100), 100)
@@ -853,7 +884,8 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
             start_time = time.time()
             search = ConceptFuzzySearch.search(
                 row, target_repo_url, repo_params, include_retired,
-                is_semantic, num_candidates, k_nearest, map_config, faceted_criterion, locale_filter
+                is_semantic, num_candidates, k_nearest, map_config, faceted_criterion, locale_filter,
+                variants_repo=variants_repo,
             )
             print(f"[{cid}] ES Search built in {time.time() - start_time} seconds")
             start_time = time.time()
