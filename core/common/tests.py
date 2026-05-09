@@ -1537,15 +1537,15 @@ class LexicalVariantsTest(OCLTestCase):
         from core.common.lexical_variants import (
             LexicalVariant, get_lexical_variants, get_variant_terms,
         )
-        mock_resolve.return_value = MagicMock(uri='/orgs/ocl/sources/lexical-variants-en/', version='HEAD')
+        mock_resolve.return_value = MagicMock(uri='/orgs/OCL/sources/lexical-variants-en/', version='HEAD')
         mock_load.return_value = {
             'leukaemia': [LexicalVariant(
                 term='leukemia', name_type='Fully Specified', locale='en-US',
-                source_concept_uri='/orgs/ocl/sources/lexical-variants-en/concepts/leukemia/',
+                source_concept_uri='/orgs/OCL/sources/lexical-variants-en/concepts/leukemia/',
             )],
             'leukemia': [LexicalVariant(
                 term='leukaemia', name_type='Fully Specified', locale='en-GB',
-                source_concept_uri='/orgs/ocl/sources/lexical-variants-en/concepts/leukemia/',
+                source_concept_uri='/orgs/OCL/sources/lexical-variants-en/concepts/leukemia/',
             )],
         }
 
@@ -1562,11 +1562,11 @@ class LexicalVariantsTest(OCLTestCase):
     def test_returns_empty_for_unknown_token(self, mock_load, mock_resolve):
         """Regression: words containing 'hem'/'haem' as a substring must NOT match."""
         from core.common.lexical_variants import LexicalVariant, get_lexical_variants
-        mock_resolve.return_value = MagicMock(uri='/orgs/ocl/sources/lexical-variants-en/', version='HEAD')
+        mock_resolve.return_value = MagicMock(uri='/orgs/OCL/sources/lexical-variants-en/', version='HEAD')
         mock_load.return_value = {
             'hemorrhage': [LexicalVariant(
                 term='haemorrhage', name_type='Fully Specified', locale='en-GB',
-                source_concept_uri='/orgs/ocl/sources/lexical-variants-en/concepts/hemorrhage/',
+                source_concept_uri='/orgs/OCL/sources/lexical-variants-en/concepts/hemorrhage/',
             )],
         }
 
@@ -1589,7 +1589,7 @@ class LexicalVariantsTest(OCLTestCase):
     @patch('core.common.lexical_variants._load_dictionary')
     def test_caches_dictionary_per_source_version(self, mock_load, mock_resolve):
         from core.common.lexical_variants import get_lexical_variants, invalidate_cache
-        mock_resolve.return_value = MagicMock(uri='/orgs/ocl/sources/lexical-variants-en/', version='v1.0')
+        mock_resolve.return_value = MagicMock(uri='/orgs/OCL/sources/lexical-variants-en/', version='v1.0')
         mock_load.return_value = {}
 
         get_lexical_variants('leukaemia')
@@ -1605,15 +1605,15 @@ class LexicalVariantsTest(OCLTestCase):
     @patch('core.common.lexical_variants._load_dictionary')
     def test_multi_token_input_expands_each_known_token(self, mock_load, mock_resolve):
         from core.common.lexical_variants import LexicalVariant, get_variant_terms
-        mock_resolve.return_value = MagicMock(uri='/orgs/ocl/sources/lexical-variants-en/', version='HEAD')
+        mock_resolve.return_value = MagicMock(uri='/orgs/OCL/sources/lexical-variants-en/', version='HEAD')
         mock_load.return_value = {
             'leukaemia': [LexicalVariant(
                 term='leukemia', name_type='Fully Specified', locale='en-US',
-                source_concept_uri='/orgs/ocl/sources/lexical-variants-en/concepts/leukemia/',
+                source_concept_uri='/orgs/OCL/sources/lexical-variants-en/concepts/leukemia/',
             )],
             'colour': [LexicalVariant(
                 term='color', name_type='Fully Specified', locale='en-US',
-                source_concept_uri='/orgs/ocl/sources/lexical-variants-en/concepts/color/',
+                source_concept_uri='/orgs/OCL/sources/lexical-variants-en/concepts/color/',
             )],
         }
 

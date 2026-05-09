@@ -16,7 +16,7 @@ from django.conf import settings
 
 
 DEFAULT_LEXICAL_VARIANTS_REPO = getattr(
-    settings, 'DEFAULT_LEXICAL_VARIANTS_REPO', '/orgs/ocl/sources/lexical-variants-en/'
+    settings, 'DEFAULT_LEXICAL_VARIANTS_REPO', '/orgs/OCL/sources/lexical-variants-en/'
 )
 
 
