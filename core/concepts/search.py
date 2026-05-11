@@ -159,7 +159,21 @@ class ConceptFuzzySearch:  # pragma: no cover
             locale_filter = [loc.strip() for loc in locale_filter]
             if locale_filter:
                 def get_locale_filter(path):
-                    return Q({"nested": {"path": path, "query": {"terms": {f"{path}.locale": locale_filter}}}})
+                    return Q({
+                        "nested":
+                            {
+                                "path": path,
+                                "query": {
+                                    "bool": {
+                                        "minimum_should_match": 1,
+                                        "should": [
+                                            {"terms": {f"{path}.locale": locale_filter}},
+                                            {"terms": {f"{path}.locale.keyword": locale_filter}}
+                                        ]
+                                    }
+                                }
+                            }
+                        })
                 filter_query.must.append(Q(
                     "bool",
                     should=[get_locale_filter("_embeddings"), get_locale_filter("_synonyms_embeddings")],
