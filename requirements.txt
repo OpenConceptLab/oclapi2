@@ -18,7 +18,7 @@ celery[redis]==5.4.0
 celery_once==3.0.1
 git+https://github.com/snyaggarwal/flower # use until https://github.com/mher/flower/issues/1231 issue is resolved
 redis==5.2.1
-django-redis==5.4.0 # needed for redis sentinel support
+django-redis==6.0.0 # needed for redis sentinel support
 kombu==5.4.2
 django-elasticsearch-dsl==8.0
 drf-yasg==1.21.15
