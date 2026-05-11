@@ -165,7 +165,7 @@ class ConceptDocument(Document):
 
     @staticmethod
     def prepare_locale(instance):
-        return compact(set(n.locale for n in instance.names.all()))
+        return compact(set(n.locale for n in instance.active_names.all()))
 
     @staticmethod
     def prepare_source_version(instance):
@@ -218,15 +218,15 @@ class ConceptDocument(Document):
 
     @staticmethod
     def prepare_name_types(instance):
-        return compact(set(n.type for n in instance.names.all()))
+        return compact(set(n.type for n in instance.active_names.all()))
 
     @staticmethod
     def prepare_description_types(instance):
-        return compact(set(d.type for d in instance.descriptions.all()))
+        return compact(set(d.type for d in instance.active_descriptions.all()))
 
     @staticmethod
     def prepare_description(instance):
-        return '. '.join(compact(set(d.name for d in instance.descriptions.all())))
+        return '. '.join(compact(set(d.name for d in instance.active_descriptions.all())))
 
     def prepare(self, instance):
         data = super().prepare(instance)
@@ -239,7 +239,7 @@ class ConceptDocument(Document):
         name = get(preferred_locale, 'name') or ''
         data['_name'] = name.lower()
         data['name'] = name.replace('-', '_')
-        synonyms = [n for n in instance.names.all() if n.name and n.name != name]
+        synonyms = [n for n in instance.active_names.all() if n.name and n.name != name]
         data['synonyms'] = compact(set(n.name for n in synonyms))
         data['_synonyms'] = data['synonyms']
 

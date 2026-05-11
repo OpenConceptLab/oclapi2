@@ -2,6 +2,8 @@ import time
 
 from cid.locals import get_cid
 from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import F
 from django.http import Http404
 from drf_yasg import openapi
@@ -675,7 +677,7 @@ class ConceptLabelListCreateView(ConceptBaseView, ListWithHeadersMixin, ListCrea
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestroyAPIView):
+class ConceptLocaleRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestroyAPIView):
     model = ConceptName
     parent_list_attribute = None
     permission_classes = (IsAuthenticatedOrReadOnly,)
@@ -711,12 +713,21 @@ class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestr
             resource_instance = self.get_resource_object()
             locales = get(resource_instance, self.parent_list_attribute).exclude(id=self.kwargs['uuid'])
             new_version = resource_instance.clone()
-            saved_instance = serializer.save()
-            setattr(new_version, subject_label_attr, [*[locale.clone() for locale in locales.all()], saved_instance])
-            new_version.comment = f'Updated {saved_instance.name} in {self.parent_list_attribute}.'
-            errors = new_version.save_as_new_version(request.user)
-            if errors:
-                return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                with transaction.atomic():
+                    saved_instance = serializer.save()
+                    setattr(
+                        new_version, subject_label_attr, [*[locale.clone() for locale in locales.all()], saved_instance]
+                    )
+                    new_version.comment = f'Updated {saved_instance.name} in {self.parent_list_attribute}.'
+                    errors = new_version.save_as_new_version(request.user)
+                    if errors:
+                        raise ValidationError(errors)
+            except ValidationError as e:
+                return Response(
+                    get(e, 'message_dict') or get(e, 'error_dict') or str(e),
+                    status=status.HTTP_400_BAD_REQUEST)
+
             return Response(serializer.data, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -731,8 +742,11 @@ class ConceptLabelRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestr
             labels = [
                 name.clone() for name in getattr(resource_instance, self.parent_list_attribute).exclude(id=instance.id)
             ]
+            retired_locale = instance.clone()
+            retired_locale.retired = True
+            labels.append(retired_locale)
             setattr(new_version, subject_label_attr, labels)
-            new_version.comment = f'Deleted {instance.name} in {self.parent_list_attribute}.'
+            new_version.comment = f'Retired {instance.name} in {self.parent_list_attribute}.'
             errors = new_version.save_as_new_version(request.user)
             if errors:
                 return Response(errors, status=status.HTTP_400_BAD_REQUEST)
@@ -749,12 +763,12 @@ class ConceptNameListCreateView(ConceptLabelListCreateView):
     parent_list_attribute = 'names'
 
 
-class ConceptNameRetrieveUpdateDestroyView(ConceptLabelRetrieveUpdateDestroyView):
+class ConceptNameRetrieveUpdateDestroyView(ConceptLocaleRetrieveUpdateDestroyView):
     parent_list_attribute = 'names'
     serializer_class = ConceptNameSerializer
 
 
-class ConceptDescriptionRetrieveUpdateDestroyView(ConceptLabelRetrieveUpdateDestroyView):
+class ConceptDescriptionRetrieveUpdateDestroyView(ConceptLocaleRetrieveUpdateDestroyView):
     parent_list_attribute = 'descriptions'
     serializer_class = ConceptDescriptionSerializer
 
