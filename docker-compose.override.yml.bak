@@ -59,6 +59,13 @@ services:
       - celery_bulk_import_root
     environment:
       - DEBUG=${DEBUG-TRUE}
+      - EXPORT_SERVICE=core.services.storages.cloud.minio.MinIO
+      - MINIO_ENDPOINT=rustfs:9000
+      - MINIO_EXTERNAL_ENDPOINT=${MINIO_EXTERNAL_ENDPOINT-localhost:${MINIO_PORT:-9000}}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY-rustfsadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY-rustfsadmin}
+      - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME-oclapi2-dev}
+      - MINIO_SECURE=${MINIO_SECURE-false}
   celery_beat:
     build: .
     volumes:

@@ -7,7 +7,8 @@ from core.common.permissions import HasOwnership, CanEditConceptDictionary
 from core.common.views import BaseAPIView
 from core.map_projects.models import MapProject
 from core.map_projects.serializers import MapProjectCreateUpdateSerializer, \
-    MapProjectDetailSerializer, MapProjectSummarySerializer, MapProjectLogsSerializer, MapProjectListSerializer
+    MapProjectDetailSerializer, MapProjectSummarySerializer, MapProjectLogsSerializer, MapProjectListSerializer, \
+    MapProjectConfigurationsSerializer
 
 
 class MapProjectBaseView(BaseAPIView):
@@ -27,7 +28,8 @@ class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListW
         return self.serializer_class
 
     def get_queryset(self):
-        return self.filter_queryset_by_public_access(self.filter_queryset_by_owner(self.queryset))
+        queryset = self.queryset.select_related('created_by', 'updated_by', 'organization', 'user')
+        return self.filter_queryset_by_public_access(self.filter_queryset_by_owner(queryset))
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
@@ -58,6 +60,13 @@ class MapProjectView(MapProjectBaseView, RetrieveUpdateDestroyAPIView):
         if self.request.method == 'PUT':
             return MapProjectCreateUpdateSerializer
         return self.serializer_class
+
+
+class MapProjectConfigurationsView(MapProjectBaseView, RetrieveAPIView):
+    serializer_class = MapProjectConfigurationsSerializer
+    lookup_url_kwarg = 'project'
+    lookup_field = 'project'
+    pk_field = 'id'
 
 
 class MapProjectSummaryView(MapProjectBaseView, RetrieveAPIView):

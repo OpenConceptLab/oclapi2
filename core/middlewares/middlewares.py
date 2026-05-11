@@ -6,9 +6,13 @@ from django.conf import settings
 from django.http import HttpResponseNotFound, HttpResponse
 from django.http.response import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
+from pydash import get
 from request_logging.middleware import LoggingMiddleware
+from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.request import Request
 from rest_framework.views import APIView
 
+from core.common.authentication import OCLAuthentication
 from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER, RESPONSE_TIME_HEADER, REQUEST_URL_HEADER, \
     REQUEST_METHOD_HEADER
 from core.common.throttling import ThrottleUtil
@@ -133,10 +137,39 @@ class RequireAuthenticationMiddleware(BaseMiddleware):
         if request.method == 'OPTIONS' or request.META.get('HTTP_USER_AGENT', '').startswith('ELB-HealthChecker'):
             return True
 
+        return self.is_exempt_path(request.path) or self.has_approved_client_header(request) or \
+            self.has_approved_api_key(request) or self.has_approved_ip(request) or get(
+                self.get_authenticated_user(request), 'is_authenticated', False
+            )
+
+        # user = self.get_authenticated_user(request)
+        # return getattr(user, 'is_authenticated', False)
+
+    @staticmethod
+    def get_authenticated_user(request):
+        """
+        Resolve the authenticated user from either the Django session or the DRF auth stack.
+
+        Django's AuthenticationMiddleware only populates session-backed users. API token and
+        OIDC bearer authentication happen later in DRF views, so this middleware must run that
+        authentication early when header credentials are present.
+        """
         user = getattr(request, 'user', None)
-        return getattr(user, 'is_authenticated', False) or self.is_exempt_path(request.path) or \
-            self.has_approved_client_header(request) or \
-            self.has_approved_api_key(request) or self.has_approved_ip(request)
+        if getattr(user, 'is_authenticated', False):
+            return user
+
+        try:
+            auth_result = OCLAuthentication().authenticate(Request(request))
+        except AuthenticationFailed:
+            return user
+
+        if not auth_result:
+            return user
+
+        authenticated_user, auth = auth_result
+        request.user = authenticated_user
+        request.auth = auth
+        return authenticated_user
 
     @classmethod
     def is_exempt_path(cls, path):
@@ -161,7 +194,20 @@ class RequireAuthenticationMiddleware(BaseMiddleware):
     def has_approved_client_header(request):
         """Match the configured anonymous allowlist against the X-OCL-CLIENT header."""
         client_name = request.META.get('HTTP_X_OCL_CLIENT', '').strip()
-        return bool(client_name and client_name in settings.APPROVED_ANONYMOUS_CLIENTS)
+        if not client_name:
+            return False
+
+        approved_clients = settings.APPROVED_ANONYMOUS_CLIENTS or set()
+        for approved_client in approved_clients:
+            if approved_client.endswith('/*'):
+                if client_name.startswith(approved_client[:-1]):
+                    return True
+                continue
+
+            if client_name == approved_client:
+                return True
+
+        return False
 
     @staticmethod
     def has_approved_api_key(request):
@@ -261,6 +307,8 @@ class ThrottleHeadersMiddleware(MiddlewareMixin):
             throttles = ThrottleUtil.get_match_throttles_by_user_plan(request.user) if self.is_match_throttled_path(
                 request.path
             ) else ThrottleUtil.get_throttles_by_user_plan(request.user)
+            if not throttles:
+                return response
 
             if minute_limit := ThrottleUtil.get_limit_remaining(throttles[0], request, view):
                 response['X-LimitRemaining-Minute'] = minute_limit
@@ -275,11 +323,13 @@ class AnalyticsMiddleware(BaseMiddleware):
         response = self.get_response(request)
         path = request.path
 
-        ignore_any_under_paths = ['/users/logout/', '/users/signup/']
+        # /users/signup/ and /users/logout/ are tracked — they're real
+        # user-intent events (top-of-funnel + session-end signal). Login
+        # tracking was added previously via ocl_online#55.
+        ignore_any_under_paths = []
         ignore_paths = [
             '', '/swagger', '/redoc', '/version', '/toggles', '/users/oidc/code-exchange', '/favicon.ico',
             '/users/api-token', '/users/password/reset', '/user',
-            *[p.rstrip('/') for p in ignore_any_under_paths]
         ]
         if path.rstrip("/") not in ignore_paths and not any(path.startswith(p) for p in ignore_any_under_paths):
             duration_ms = int((time.monotonic() - start) * 1000)

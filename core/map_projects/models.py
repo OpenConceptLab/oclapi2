@@ -1,6 +1,7 @@
 import json
 from collections import Counter
 
+from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models, IntegrityError
@@ -38,6 +39,16 @@ class MapProject(BaseModel):
     candidates = models.JSONField(default=dict, null=True, blank=True)
     lookup_config = models.JSONField(default=dict, null=True, blank=True)
     analysis = models.JSONField(default=dict, null=True, blank=True)
+    encoder_model = models.TextField(null=True, blank=True, default=settings.ENCODER_MODEL_NAME)
+    prompt_template_key = models.TextField(null=True, blank=True)
+
+    # Fields that define how a project matches —
+    # excluding identity, results, logs, and audit metadata.
+    # Used by the copy-project flow.
+    CONFIGURATION_FIELDS = [
+        'algorithms', 'encoder_model', 'filters', 'include_retired',
+        'lookup_config', 'score_configuration', 'target_repo_url', 'prompt_template_key'
+    ]
 
     class Meta:
         db_table = 'map_projects'
@@ -193,13 +204,23 @@ class MapProject(BaseModel):
 
     def clean(self):
         self.clean_filters()
-        if not self.include_retired:
-            self.include_retired = False
+        self.clean_include_retired()
+        self.clean_encoder_model()
+        self.clean_matches()
+
+    def clean_matches(self):
         if self.matches:
             try:
                 self.matches = json.loads(self.matches)
             except (json.JSONDecodeError, TypeError):
                 pass
+
+    def clean_include_retired(self):
+        if not self.include_retired:
+            self.include_retired = False
+
+    def clean_encoder_model(self):
+        self.encoder_model = self.encoder_model.strip() if self.encoder_model else settings.ENCODER_MODEL_NAME
 
     def clean_filters(self):
         if not self.filters:

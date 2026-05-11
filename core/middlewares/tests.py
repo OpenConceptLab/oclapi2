@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
@@ -37,6 +38,28 @@ class RequireAuthenticationMiddlewareTest(SimpleTestCase):
 
         self.assertEqual(response.status_code, 200)
 
+    @patch('core.middlewares.middlewares.OCLAuthentication.authenticate')
+    def test_allows_request_authenticated_by_drf_header_auth(self, authenticate_mock):
+        """Header auth should be resolved before enforcing the anonymous access gate."""
+        user = type('AuthenticatedUser', (), {'is_authenticated': True})()
+        authenticate_mock.return_value = (user, 'token-auth')
+        request = self.make_request('/orgs/OCL/', HTTP_AUTHORIZATION='Token real-token')
+
+        response = self.middleware(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIs(request.user, user)
+        self.assertEqual(request.auth, 'token-auth')
+
+    @patch('core.middlewares.middlewares.OCLAuthentication.authenticate')
+    def test_blocks_request_when_drf_header_auth_fails(self, authenticate_mock):
+        """Failed DRF header auth should still leave protected paths blocked."""
+        authenticate_mock.return_value = None
+
+        response = self.middleware(self.make_request('/orgs/OCL/', HTTP_AUTHORIZATION='Token bad-token'))
+
+        self.assertEqual(response.status_code, 403)
+
     def test_blocks_anonymous_request_for_protected_path(self):
         """Anonymous traffic to protected API paths should receive a 403 response."""
         response = self.middleware(self.make_request('/orgs/OCL/'))
@@ -61,6 +84,42 @@ class RequireAuthenticationMiddlewareTest(SimpleTestCase):
         response = self.middleware(self.make_request('/orgs/OCL/', HTTP_X_OCL_CLIENT='unknown-client'))
 
         self.assertEqual(response.status_code, 403)
+
+    @override_settings(
+        APPROVED_ANONYMOUS_CLIENTS=['oclmap/*', 'oclweb3/2.1.5', 'oclweb2/*']
+    )
+    def test_allows_anonymous_request_for_wildcard_client_header(self):
+        """Wildcard client entries should match any version for the configured client."""
+        response = self.middleware(self.make_request('/orgs/OCL/', HTTP_X_OCL_CLIENT='oclmap/4.2.0'))
+
+        self.assertEqual(response.status_code, 200)
+
+    @override_settings(
+        APPROVED_ANONYMOUS_CLIENTS=['oclmap/*', 'oclweb3/2.1.5', 'oclweb2/*']
+    )
+    def test_allows_anonymous_request_for_exact_version_client_header(self):
+        """Exact client/version entries should still require an exact match."""
+        response = self.middleware(self.make_request('/orgs/OCL/', HTTP_X_OCL_CLIENT='oclweb3/2.1.5'))
+
+        self.assertEqual(response.status_code, 200)
+
+    @override_settings(
+        APPROVED_ANONYMOUS_CLIENTS=['oclmap/*', 'oclweb3/2.1.5', 'oclweb2/*']
+    )
+    def test_blocks_anonymous_request_for_non_matching_exact_version_client_header(self):
+        """Exact client/version entries should reject other versions of the same client."""
+        response = self.middleware(self.make_request('/orgs/OCL/', HTTP_X_OCL_CLIENT='oclweb3/2.1.6'))
+
+        self.assertEqual(response.status_code, 403)
+
+    @override_settings(
+        APPROVED_ANONYMOUS_CLIENTS=['oclmap/*', 'oclweb3/2.1.5', 'oclweb2/*']
+    )
+    def test_allows_anonymous_request_for_comma_separated_client_string_setting(self):
+        """String settings should be normalized before matching approved clients."""
+        response = self.middleware(self.make_request('/orgs/OCL/', HTTP_X_OCL_CLIENT='oclweb2/9.9.9'))
+
+        self.assertEqual(response.status_code, 200)
 
     def test_blocks_anonymous_request_for_whitespace_client_header(self):
         """Whitespace-only client header values should be rejected after normalization."""

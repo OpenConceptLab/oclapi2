@@ -12,7 +12,7 @@ from core.common.tasks import seed_children_to_new_version
 from core.common.tasks import update_source_active_concepts_count
 from core.common.tasks import update_source_active_mappings_count
 from core.common.tasks import update_validation_schema
-from core.common.tests import OCLTestCase
+from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
@@ -21,7 +21,7 @@ from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.services.storages.postgres import PostgresQL
 from core.sources.documents import SourceDocument
-from core.sources.models import Source
+from core.sources.models import Source, CloneError
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.url_registry.factories import OrganizationURLRegistryFactory, GlobalURLRegistryFactory
 from core.users.models import UserProfile
@@ -1232,6 +1232,133 @@ class SourceTest(OCLTestCase):
         self.assertEqual(result.cascaded_entries['concepts'].count(), 0)
         self.assertEqual(result.cascaded_entries['mappings'].count(), 0)
 
+    def test_clone_with_cascade_rolls_back_when_mapping_clone_fails(self):
+        source1 = OrganizationSourceFactory(mnemonic='source1')
+        source1_concept1 = ConceptFactory(
+            mnemonic='concept1', parent=source1, names=[ConceptNameFactory.build(name='concept1')])
+        source1_concept2 = ConceptFactory(
+            mnemonic='concept2', parent=source1, names=[ConceptNameFactory.build(name='concept2')])
+        MappingFactory(
+            from_concept=source1_concept2, to_concept=source1_concept1, parent=source1, map_type='Q-AND-A')
+
+        source2 = OrganizationSourceFactory(mnemonic='source2')
+
+        with patch('core.mappings.models.Mapping.save_cloned', autospec=True) as save_cloned_mock:
+            def fail_save_cloned(mapping):
+                mapping.errors = {'__all__': ['mapping clone failed']}
+
+            save_cloned_mock.side_effect = fail_save_cloned
+
+            with self.assertRaisesMessage(CloneError, 'Clone failed.'):
+                source2.clone_with_cascade(
+                    concept_to_clone=source1_concept2,
+                    user=source1_concept2.created_by,
+                    map_types='Q-AND-A',
+                    equivalency_map_types='SAME-AS'
+                )
+
+        self.assertEqual(source2.get_active_concepts().count(), 0)
+        self.assertEqual(source2.get_active_mappings().count(), 0)
+
+    def test_clone_with_cascade_returns_concept_object_errors_in_clone_error(self):
+        source1 = OrganizationSourceFactory(mnemonic='source1')
+        source1_concept = ConceptFactory(
+            mnemonic='concept1', parent=source1, names=[ConceptNameFactory.build(name='concept1')])
+        source2 = OrganizationSourceFactory(mnemonic='source2')
+
+        with patch('core.concepts.models.Concept.save_cloned', autospec=True) as save_cloned_mock:
+            def fail_save_cloned(concept):
+                concept.errors = {'external_id': ['duplicate external id']}
+
+            save_cloned_mock.side_effect = fail_save_cloned
+
+            with self.assertRaises(CloneError) as raised:
+                source2.clone_with_cascade(
+                    concept_to_clone=source1_concept,
+                    user=source1_concept.created_by,
+                    equivalency_map_types='SAME-AS'
+                )
+
+        self.assertEqual(
+            raised.exception.errors['concepts'],
+            [{
+                'mnemonic': source1_concept.mnemonic,
+                'source_url': source1_concept.uri,
+                'errors': {'external_id': ['duplicate external id']}
+            }]
+        )
+        self.assertEqual(source2.get_active_concepts().count(), 0)
+
+    def test_clone_with_cascade_returns_mapping_object_errors_in_clone_error(self):
+        source1 = OrganizationSourceFactory(mnemonic='source1')
+        source1_concept1 = ConceptFactory(
+            mnemonic='concept1', parent=source1, names=[ConceptNameFactory.build(name='concept1')])
+        source1_concept2 = ConceptFactory(
+            mnemonic='concept2', parent=source1, names=[ConceptNameFactory.build(name='concept2')])
+        failed_mapping = MappingFactory(
+            from_concept=source1_concept2, to_concept=source1_concept1, parent=source1, map_type='Q-AND-A',
+            from_source=source1, to_source=source1
+        )
+        source2 = OrganizationSourceFactory(mnemonic='source2')
+
+        with patch('core.mappings.models.Mapping.save_cloned', autospec=True) as save_cloned_mock:
+            def fail_save_cloned(mapping):
+                mapping.errors = {'map_type': ['unsupported in target source']}
+
+            save_cloned_mock.side_effect = fail_save_cloned
+
+            with self.assertRaises(CloneError) as raised:
+                source2.clone_with_cascade(
+                    concept_to_clone=source1_concept2,
+                    user=source1_concept2.created_by,
+                    map_types='Q-AND-A'
+                )
+
+        self.assertIn(
+            {
+                'map_type': failed_mapping.map_type,
+                'from_concept_code': failed_mapping.from_concept.mnemonic,
+                'to_concept_code': failed_mapping.to_concept.mnemonic,
+                'from_source_url': failed_mapping.from_source.uri,
+                'to_source_url': failed_mapping.to_source.uri,
+                'errors': {'map_type': ['unsupported in target source']}
+            },
+            raised.exception.errors['mappings']
+        )
+        self.assertEqual(source2.get_active_concepts().count(), 0)
+        self.assertEqual(source2.get_active_mappings().count(), 0)
+
+
+class SourceCloneAPITest(OCLAPITestCase):
+    def test_clone_api_returns_structured_errors_and_rolls_back(self):
+        source1 = OrganizationSourceFactory(mnemonic='source1')
+        concept_to_clone = ConceptFactory(
+            mnemonic='concept1', parent=source1, names=[ConceptNameFactory.build(name='concept1')])
+        source2 = OrganizationSourceFactory(mnemonic='source2')
+        user = source2.created_by
+        source2.organization.members.add(user)
+        self.client.force_authenticate(user=user)
+
+        url = f'/orgs/{source2.organization.mnemonic}/sources/{source2.mnemonic}/concepts/$clone/'
+
+        with patch('core.concepts.models.Concept.save_cloned', autospec=True) as save_cloned_mock:
+            def fail_save_cloned(concept):
+                concept.errors = {'__all__': ['concept clone failed']}
+
+            save_cloned_mock.side_effect = fail_save_cloned
+            response = self.client.post(url, {'expressions': [concept_to_clone.uri]}, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.data[concept_to_clone.uri]
+        self.assertEqual(payload['status'], 400)
+        self.assertEqual(payload['errors']['concepts'][0]['mnemonic'], concept_to_clone.mnemonic)
+        self.assertEqual(payload['errors']['concepts'][0]['source_url'], concept_to_clone.uri)
+        self.assertEqual(payload['errors']['concepts'][0]['errors'], {'__all__': ['concept clone failed']})
+        self.assertEqual(source2.get_active_concepts().count(), 0)
+        self.assertEqual(source2.get_active_mappings().count(), 0)
+
+
+class SourceValidationTest(OCLTestCase):
     def test_clean_properties_valid(self):
         source = Source(properties=[
             {'code': 'height', 'type': 'integer'},
@@ -1287,6 +1414,7 @@ class SourceTest(OCLTestCase):
         source = Source(filters=[{'code': 'gender', 'operator': ['='], 'value': 'female', 'extra': 'nope'}])
         with self.assertRaises(ValidationError):
             source.clean_filters()
+
 
 class TasksTest(OCLTestCase):
     @patch('core.sources.models.Source.index_children')
@@ -1489,7 +1617,11 @@ class TasksTest(OCLTestCase):
         index_source_mappings(source.id)
         batch_index_mock.assert_called_once_with(
             source_mappings_mock, MappingDocument,
-            prefetch=['sources', 'expansion_set', 'expansion_set__collection_version'])
+            prefetch=['sources'],
+            select_related=['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'],
+            single_batch=False,
+            parallel=True
+        )
 
     @patch('core.sources.models.Source.concepts')
     @patch('core.sources.models.Source.batch_index')
@@ -1498,7 +1630,11 @@ class TasksTest(OCLTestCase):
         index_source_concepts(source.id)
         batch_index_mock.assert_called_once_with(
             source_concepts_mock, ConceptDocument,
-            prefetch=['sources', 'names', 'descriptions', 'expansion_set', 'expansion_set__collection_version'])
+            prefetch=['sources', 'names', 'descriptions'],
+            select_related=['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'],
+            single_batch=False,
+            parallel=True
+        )
 
     @patch('core.sources.models.Source.concepts')
     @patch('core.sources.models.Source.batch_index')
@@ -1509,7 +1645,9 @@ class TasksTest(OCLTestCase):
         index_source_concepts(source.id, {'is_in_latest_source_version': False})
         batch_index_mock.assert_called_once_with(
             source_concepts_mock, ConceptDocument,
-            partial_doc={'is_in_latest_source_version': False}
+            partial_doc={'is_in_latest_source_version': False},
+            single_batch=False,
+            parallel=True
         )
 
     @patch('core.common.tasks.logger.exception')
@@ -1528,11 +1666,15 @@ class TasksTest(OCLTestCase):
             [
                 call(
                     source_concepts_mock, ConceptDocument,
-                    partial_doc={'is_in_latest_source_version': False}
+                    partial_doc={'is_in_latest_source_version': False},
+                    single_batch=False,
+                    parallel=True
                 ),
                 call(
                     source_concepts_mock, ConceptDocument,
-                    prefetch=['sources', 'names', 'descriptions', 'expansion_set', 'expansion_set__collection_version']
+                    prefetch=['sources', 'names', 'descriptions'],
+                    select_related=['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'],
+                    parallel=True
                 )
             ]
         )
@@ -1549,7 +1691,9 @@ class TasksTest(OCLTestCase):
         index_source_mappings(source.id, {'is_in_latest_source_version': False})
         batch_index_mock.assert_called_once_with(
             source_mappings_mock, MappingDocument,
-            partial_doc={'is_in_latest_source_version': False}
+            partial_doc={'is_in_latest_source_version': False},
+            single_batch=False,
+            parallel=True
         )
 
     @patch('core.common.tasks.logger.exception')
@@ -1568,11 +1712,15 @@ class TasksTest(OCLTestCase):
             [
                 call(
                     source_mappings_mock, MappingDocument,
-                    partial_doc={'is_in_latest_source_version': False}
+                    partial_doc={'is_in_latest_source_version': False},
+                    single_batch=False,
+                    parallel=True
                 ),
                 call(
                     source_mappings_mock, MappingDocument,
-                    prefetch=['sources', 'expansion_set', 'expansion_set__collection_version']
+                    prefetch=['sources'],
+                    select_related=['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'],
+                    parallel=True
                 )
             ]
         )

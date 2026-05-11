@@ -34,7 +34,7 @@ from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRe
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
 from core.sources.documents import SourceDocument
 from core.sources.mixins import SummaryMixin
-from core.sources.models import Source
+from core.sources.models import Source, CloneError
 from core.sources.search import SourceFacetedSearch
 from core.sources.serializers import (
     SourceDetailSerializer, SourceListSerializer, SourceCreateSerializer, SourceVersionDetailSerializer,
@@ -325,9 +325,17 @@ class SourceConceptsIndexView(SourceBaseView):
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         source = self.get_object()
+        single_batch = request.data.get('single_batch', None) in get_truthy_values()
+        parallel = request.data.get('parallel', True) in get_truthy_values() if 'parallel' in request.data else True
+        should_prefetch = request.data.get(
+            'should_prefetch', True) in get_truthy_values() if 'should_prefetch' in request.data else True
+        should_select_related = request.data.get(
+            'should_select_related', True) in get_truthy_values() if 'should_select_related' in request.data else True
         task = Task.new(queue='indexing', user=request.user, name=index_source_concepts.__name__)
         try:
-            index_source_concepts.apply_async((source.id,), queue=task.queue, task_id=task.id)
+            index_source_concepts.apply_async(
+                (source.id, None, single_batch, should_prefetch, should_select_related, parallel),
+                queue=task.queue, task_id=task.id)
         except AlreadyQueued:
             if task:
                 task.delete()
@@ -349,9 +357,10 @@ class SourceMappingsIndexView(SourceBaseView):
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         source = self.get_object()
+        single_batch = request.data.get('single_batch', None) in get_truthy_values()
         task = Task.new(queue='indexing', user=request.user, name=index_source_mappings.__name__)
         try:
-            index_source_mappings.apply_async((source.id,), queue=task.queue, task_id=task.id)
+            index_source_mappings.apply_async((source.id, None, single_batch), queue=task.queue, task_id=task.id)
         except AlreadyQueued:
             if task:
                 task.delete()
@@ -390,12 +399,16 @@ class SourceConceptsCloneView(SourceBaseView):
                     parent_resources[parent_uri] = Source.objects.filter(uri=parent_uri).first()
                 parent_resource = parent_resources[parent_uri]
                 from core.bundles.models import Bundle
-                bundle = Bundle.clone(
-                    concept_to_clone, parent_resource, instance, request.user,
-                    self.request.get_full_path(), is_verbose, **parameters
-                )
-                result['status'] = status.HTTP_200_OK
-                result['bundle'] = BundleSerializer(bundle, context={'request': request}).data
+                try:
+                    bundle = Bundle.clone(
+                        concept_to_clone, parent_resource, instance, request.user,
+                        self.request.get_full_path(), is_verbose, **parameters
+                    )
+                    result['status'] = status.HTTP_200_OK
+                    result['bundle'] = BundleSerializer(bundle, context={'request': request}).data
+                except CloneError as ex:
+                    result['status'] = status.HTTP_400_BAD_REQUEST
+                    result['errors'] = ex.errors
             else:
                 result['status'] = status.HTTP_404_NOT_FOUND
                 result['errors'] = [f'Concept to clone with expression {expression} not found.']

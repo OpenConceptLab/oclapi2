@@ -327,7 +327,7 @@ def bulk_import_parts_inline(self, input_list, username, update_if_exists):
     from core.importers.models import BulkImportInline
     return BulkImportInline(
         content=None, username=username, update_if_exists=update_if_exists, input_list=input_list,
-        self_task_id=self.request.id
+        self_task_id=self.request.id, skip_hierarchy_tasks=True
     ).run()
 
 
@@ -582,8 +582,8 @@ def index_expansion_concepts(expansion_id, count=None, concept_versioned_ids=Non
             queryset = expansion.concepts
         expansion.batch_index(
             queryset, ConceptDocument,
-            prefetch=['sources', 'names', 'descriptions',
-                      'expansion_set', 'expansion_set__collection_version']
+            prefetch=['sources', 'names', 'descriptions'],
+            select_related=['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by']
         )
 
 
@@ -603,7 +603,8 @@ def index_expansion_mappings(expansion_id, count=None, mapping_versioned_ids=Non
             queryset = expansion.mappings
         expansion.batch_index(
             queryset, MappingDocument,
-            prefetch=['sources', 'expansion_set', 'expansion_set__collection_version']
+            prefetch=['sources'],
+            select_related=['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by']
         )
 
 
@@ -634,7 +635,10 @@ def make_hierarchy(concept_map):  # pragma: no cover
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
     acks_late=True, reject_on_worker_lost=True, base=QueueOnceCustomTask
 )
-def index_source_concepts(source_id, partial_doc=None):
+def index_source_concepts(
+        source_id, partial_doc=None, single_batch=False, should_prefetch=True, should_select_related=True,
+        parallel=True
+):
     """
     Index source concepts, or partially update existing ES documents when `partial_doc` is supplied.
     """
@@ -642,22 +646,31 @@ def index_source_concepts(source_id, partial_doc=None):
     source = Source.objects.filter(id=source_id).first()
     if source:
         from core.concepts.documents import ConceptDocument
-        prefetch = ['sources', 'names', 'descriptions', 'expansion_set', 'expansion_set__collection_version']
+        prefetch = ['sources', 'names', 'descriptions'] if should_prefetch else []
+        select_related = [
+            'parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'
+        ] if should_select_related else []
         try:
-            kwargs = {'partial_doc': partial_doc} if partial_doc else {'prefetch': prefetch}
+            kwargs = {'partial_doc': partial_doc} if partial_doc else {
+                'prefetch': prefetch, 'select_related': select_related}
+            kwargs['single_batch'] = single_batch
+            kwargs['parallel'] = parallel
             source.batch_index(source.concepts, ConceptDocument, **kwargs)
         except Exception:  # pragma: no cover
             if not partial_doc:
                 raise
             logger.exception('Falling back to full concept reindex for source %s', source_id)
-            source.batch_index(source.concepts, ConceptDocument, prefetch=prefetch)
+            source.batch_index(
+                source.concepts, ConceptDocument, prefetch=prefetch, select_related=select_related, parallel=parallel)
 
 
 @app.task(
     ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
     acks_late=True, reject_on_worker_lost=True, base=QueueOnceCustomTask
 )
-def index_source_mappings(source_id, partial_doc=None):
+def index_source_mappings(
+        source_id, partial_doc=None, single_batch=False, should_prefetch=True, should_select_related=True, parallel=True
+):
     """
     Index source mappings, or partially update existing ES documents when `partial_doc` is supplied.
     """
@@ -665,15 +678,22 @@ def index_source_mappings(source_id, partial_doc=None):
     source = Source.objects.filter(id=source_id).first()
     if source:
         from core.mappings.documents import MappingDocument
-        prefetch = ['sources', 'expansion_set', 'expansion_set__collection_version']
+        prefetch = ['sources'] if should_prefetch else []
+        select_related = [
+            'parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'
+        ] if should_select_related else []
         try:
-            kwargs = {'partial_doc': partial_doc} if partial_doc else {'prefetch': prefetch}
+            kwargs = {'partial_doc': partial_doc} if partial_doc else {
+                'prefetch': prefetch, 'select_related': select_related}
+            kwargs['single_batch'] = single_batch
+            kwargs['parallel'] = parallel
             source.batch_index(source.mappings, MappingDocument, **kwargs)
         except Exception:  # pragma: no cover
             if not partial_doc:
                 raise
             logger.exception('Falling back to full mapping reindex for source %s', source_id)
-            source.batch_index(source.mappings, MappingDocument, prefetch=prefetch)
+            source.batch_index(
+                source.mappings, MappingDocument, prefetch=prefetch, select_related=select_related, parallel=parallel)
 
 
 @app.task(base=QueueOnceCustomTask)

@@ -22,6 +22,7 @@ from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from core.mappings.documents import MappingDocument
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
+from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.models import UserProfile
 
@@ -632,6 +633,49 @@ class CollectionReferenceTest(OCLTestCase):
         )
         reference.clean()
         self.assertEqual(reference.reference_type, 'mappings')
+
+    def test_get_resolved_repo_versions_serialized(self):
+        collection = OrganizationCollectionFactory()
+        system = OrganizationSourceFactory()
+        valueset = OrganizationCollectionFactory()
+
+        system_reference = CollectionReference(
+            expression=f'{system.uri}concepts/foo/', collection=collection, system=system.uri, version='HEAD'
+        )
+        valueset_reference = CollectionReference(
+            expression=f'{valueset.uri}concepts/foo/', collection=collection, valueset=[valueset.uri]
+        )
+        combined_reference = CollectionReference(
+            expression=f'{system.uri}concepts/foo/', collection=collection, system=system.uri,
+            version='HEAD', valueset=[valueset.uri]
+        )
+        empty_reference = CollectionReference(expression='/concepts/foo/', collection=collection)
+
+        system_data = system_reference.get_resolved_repo_versions_serialized()
+        valueset_data = valueset_reference.get_resolved_repo_versions_serialized()
+        combined_data = combined_reference.get_resolved_repo_versions_serialized()
+
+        self.assertEqual([item['version_url'] for item in system_data], [system.uri])
+        self.assertEqual([item['version_url'] for item in valueset_data], [valueset.uri])
+        self.assertCountEqual([item['version_url'] for item in combined_data], [system.uri, valueset.uri])
+        self.assertEqual(empty_reference.get_resolved_repo_versions_serialized(), [])
+
+    def test_get_resolved_repo_versions_serialized_uses_cache(self):
+        collection = OrganizationCollectionFactory()
+        system = OrganizationSourceFactory()
+        first_reference = CollectionReference(
+            expression=f'{system.uri}concepts/foo/', collection=collection, system=system.uri, version='HEAD'
+        )
+        second_reference = CollectionReference(
+            expression=f'{system.uri}concepts/bar/', collection=collection, system=system.uri, version='HEAD'
+        )
+        system_version_cache = {}
+
+        with patch.object(Source, 'resolve_reference_expression', wraps=Source.resolve_reference_expression) as mock:
+            first_reference.get_resolved_repo_versions_serialized(system_version_cache=system_version_cache)
+            second_reference.get_resolved_repo_versions_serialized(system_version_cache=system_version_cache)
+
+        self.assertEqual(mock.call_count, 1)
 
     def test_reference_as_concept_version(self):
         collection = OrganizationCollectionFactory()

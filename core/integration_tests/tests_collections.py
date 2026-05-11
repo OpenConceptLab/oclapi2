@@ -17,6 +17,7 @@ from core.concepts.tests.factories import ConceptFactory
 from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
+from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.tasks.models import Task
 from core.users.models import UserProfile
@@ -554,6 +555,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['expression'], self.concept.uri)
         self.assertEqual(response.data[0]['reference_type'], 'concepts')
+        self.assertNotIn('resolved_repo_versions', response.data[0])
 
         response = self.client.get(
             self.collection.uri + f'references/?q={self.concept.uri}&search_sort=desc',
@@ -580,6 +582,31 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
+
+    def test_get_200_with_resolved_repo_versions(self):
+        duplicate_reference = CollectionReference(
+            expression=f'{self.concept.parent.uri}concepts/duplicate/',
+            collection=self.collection,
+            system=self.concept.parent.uri,
+            version='HEAD'
+        )
+        duplicate_reference.save()
+
+        with patch.object(Source, 'resolve_reference_expression', wraps=Source.resolve_reference_expression) as mock:
+            response = self.client.get(
+                self.collection.uri + 'references/?includeResolvedRepoVersions=true',
+                format='json'
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(mock.call_count, 1)
+        for reference in response.data:
+            self.assertIn('resolved_repo_versions', reference)
+            self.assertEqual(
+                [version['version_url'] for version in reference['resolved_repo_versions']],
+                [self.concept.parent.uri]
+            )
 
     def test_delete_400(self):
         response = self.client.delete(

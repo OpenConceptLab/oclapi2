@@ -18,6 +18,7 @@ from rest_framework.views import APIView
 from core.bundles.models import Bundle
 from core.bundles.serializers import BundleSerializer
 from core.collections.documents import CollectionDocument
+from core.common import ERRBIT_LOGGER
 from core.common.constants import (
     HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE, LIMIT_PARAM, LIST_DEFAULT_LIMIT)
 from core.common.exceptions import Http400, Http403, Http409
@@ -49,6 +50,7 @@ from core.concepts.serializers import (
     ConceptVersionListSerializer, ConceptSummarySerializer, ConceptMinimalSerializer,
     ConceptChildrenSerializer, ConceptParentsSerializer, ConceptLookupListSerializer, ConceptChecksumSerializer)
 from core.mappings.serializers import MappingListSerializer
+from core.sources.models import CloneError
 from core.tasks.models import Task
 from core.toggles.models import Toggle
 
@@ -467,11 +469,14 @@ class ConceptCloneView(ConceptCascadeView):
         """
         clone_to_source = self.get_clone_to_source()
         self.set_parent_resource(False)
-        bundle = Bundle.clone(
-            self.get_object(), self.parent_resource, clone_to_source, request.user,
-            self.request.get_full_path(), self.is_verbose(), **(request.data.get('parameters') or {})
-        )
-        return Response(BundleSerializer(bundle, context={'request': request}).data)
+        try:
+            bundle = Bundle.clone(
+                self.get_object(), self.parent_resource, clone_to_source, request.user,
+                self.request.get_full_path(), self.is_verbose(), **(request.data.get('parameters') or {})
+            )
+            return Response(BundleSerializer(bundle, context={'request': request}).data)
+        except CloneError as ex:
+            return Response({'errors': ex.errors}, status=status.HTTP_400_BAD_REQUEST)
 
     def get_clone_to_source(self):
         source_uri = self.request.data.get('source_uri')
@@ -818,6 +823,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
 
         map_config = self.request.data.get('map_config', [])
         filters = self.request.data.get('filter', {})
+        original_filters = filters.copy()
         include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM) in get_truthy_values()
         num_candidates = min(to_int(self.request.query_params.get('numCandidates', 0), 3000), 3000)
         k_nearest = min(to_int(self.request.query_params.get('kNearest', 0), 100), 100)
@@ -858,7 +864,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
             es_search.to_queryset(False, True, False, name, encoder_model)
             print(f"[{cid}] ES Search (including reranker={reranker}) executed in {time.time() - start_time} seconds")
             start_time = time.time()
-            result = {'row': row, 'results': [], 'map_config': map_config, 'filter': filters}
+            result = {'row': row, 'results': [], 'map_config': map_config, 'filter': original_filters}
             for concept in es_search.queryset:
                 concept._highlight = es_search.highlights.get(concept.id, {})  # pylint:disable=protected-access
                 score_info = es_search.scores.get(concept.id, {})
@@ -987,7 +993,15 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
                 {'detail': 'You are currently in waitlist for $match operation.'},
                 status=status.HTTP_403_FORBIDDEN
             )
-        return Response(self.filter_queryset())
+        results = self.filter_queryset()
+        response = Response(results)
+        # num_returned is picked up by the analytics middleware as
+        # APITransaction.item_count (see ocl_online#73).
+        if isinstance(results, list):
+            response['num_returned'] = sum(
+                len(r.get('results', [])) for r in results if isinstance(r, dict)
+            )
+        return response
 
 
 class RerankConceptsListView(BaseAPIView):
@@ -995,7 +1009,7 @@ class RerankConceptsListView(BaseAPIView):
     serializer_class = ConceptListSerializer
     permission_classes = (IsAuthenticated,)
 
-    def post(self, request, **kwargs):  # pylint: disable=unused-argument
+    def post(self, request, **kwargs):  # pylint: disable=unused-argument,too-many-return-statements
         user = self.request.user
         if user.is_mapper_waitlisted or not user.is_mapper_approved:
             return Response(
@@ -1007,6 +1021,12 @@ class RerankConceptsListView(BaseAPIView):
         name_key = self.request.data.get('name_key', None) or 'display_name'
         text = self.request.data.get('q', None)
         score_key = self.request.data.get('score_key', None)
+        encoder_model = self.request.data.get('encoder_model', None)
+        if encoder_model and encoder_model != settings.ENCODER_MODEL_NAME and not user.is_core_group:
+            return Response(
+                {'detail': 'You do not have permission to request for custom encoder models.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
         if not isinstance(rows, list) or not rows:
             return Response(
@@ -1018,7 +1038,14 @@ class RerankConceptsListView(BaseAPIView):
                 {'detail': 'Missing "q" in request body.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-
-        return Response(
-            Reranker().rerank(hits=rows, name_key=name_key, txt=text, score_key=score_key, order_results=True)
-        )
+        try:
+            reranker = Reranker(model_name=encoder_model)
+            results = reranker.rerank(hits=rows, name_key=name_key, txt=text, score_key=score_key, order_results=True)
+            return Response(results)
+        except (ValueError, RuntimeError, OSError) as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            ERRBIT_LOGGER.log(e)
+            return Response(
+                {'detail': 'An error occurred while processing the rerank request.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR)

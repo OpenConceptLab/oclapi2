@@ -344,14 +344,7 @@ class CollectionReferenceResolveView(CollectionReferenceAbstractResourcesView): 
 
     def get(self, request, *args, **kwargs):
         reference = self.get_queryset()
-        system_version = reference.resolve_system_version
-        valueset_versions = reference.resolve_valueset_versions
-        data = []
-        if system_version:
-            from core.sources.serializers import SourceVersionListSerializer
-            data.append(SourceVersionListSerializer(system_version).data)
-        if valueset_versions:
-            data += CollectionVersionListSerializer(valueset_versions, many=True).data
+        data = reference.get_resolved_repo_versions_serialized()
         return Response(data)
 
 
@@ -460,6 +453,9 @@ class CollectionReferencesView(
             queryset = queryset.filter(expression__icontains=search_query).order_by(sort + 'expression')
         else:
             queryset = queryset.order_by('-id')
+
+        if self.is_verbose():
+            queryset = queryset.select_related('created_by')
 
         return self.apply_filters(queryset)
 
