@@ -52,7 +52,6 @@ from core.graphql.tests.conftest import bootstrap_super_user, create_user_with_t
 from core.graphql.views import AuthenticatedGraphQLView
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
-from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 
 
@@ -292,19 +291,11 @@ class QueryHelperTests(OCLTestCase):
         self.assertIsNone(resolve_is_set_flag(self.concept1))
         self.assertTrue(resolve_is_set_flag(SimpleNamespace(is_set='yes')))
 
-        class MissingParent:
-            def __getattr__(self, _):
-                raise Source.DoesNotExist
+        concept = ConceptFactory()
+        ConceptDescriptionFactory(name='No preferred', locale='es', locale_preferred=False, concept=concept)
+        concept.parent = None
 
-        no_pref_desc = SimpleNamespace(
-            descriptions=SimpleNamespace(
-                all=lambda: [
-                    SimpleNamespace(description='No preferred', locale='es', locale_preferred=False)
-                ]
-            ),
-            parent=MissingParent(),
-        )
-        self.assertEqual(resolve_description(no_pref_desc), 'No preferred')
+        self.assertEqual(resolve_description(concept), 'No preferred')
 
         self.assertFalse(resolve_is_set_flag(SimpleNamespace(is_set='false')))
 
