@@ -2,7 +2,7 @@ from elasticsearch_dsl import TermsFacet, Q, NestedFacet
 from pydash import flatten, is_number, compact, get
 
 from core.common.constants import FACET_SIZE, HEAD
-from core.common.lexical_variants import get_variant_terms
+from core.common.lexical_variants import LexicalVariantDictionary
 from core.common.search import CustomESFacetedSearch, CustomESSearch
 from core.common.utils import get_embeddings, is_canonical_uri
 from core.concepts.models import Concept
@@ -193,7 +193,7 @@ class ConceptFuzzySearch:  # pragma: no cover
                 knn_queries.append(get_knn_query("_embeddings.vector", name, 0.3))
                 knn_queries.append(get_knn_query("_synonyms_embeddings.vector", name, 0.275))
                 if variants_repo:
-                    for name_variant in get_variant_terms(name, source_uri=variants_repo):
+                    for name_variant in LexicalVariantDictionary.get_variant_terms(name, source_uri=variants_repo):
                         knn_queries.append(get_knn_query("_embeddings.vector", name_variant, 0.285))
                         knn_queries.append(get_knn_query("_synonyms_embeddings.vector", name_variant, 0.26))
             for synonym in synonyms:
@@ -201,7 +201,7 @@ class ConceptFuzzySearch:  # pragma: no cover
                     knn_queries.append(get_knn_query("_synonyms_embeddings.vector", synonym, 0.125))
                     knn_queries.append(get_knn_query("_embeddings.vector", synonym, 0.15))
                     if variants_repo:
-                        for synonym_variant in get_variant_terms(synonym, source_uri=variants_repo):
+                        for synonym_variant in LexicalVariantDictionary.get_variant_terms(synonym, source_uri=variants_repo):
                             knn_queries.append(get_knn_query("_synonyms_embeddings.vector", synonym_variant, 0.115))
                             knn_queries.append(get_knn_query("_embeddings.vector", synonym_variant, 0.14))
         else:
@@ -244,10 +244,10 @@ class ConceptFuzzySearch:  # pragma: no cover
         if is_semantic:
             if name:
                 if variants_repo:
-                    name_terms = [name] + list(get_variant_terms(name, source_uri=variants_repo))
+                    name_terms = [name] + list(LexicalVariantDictionary.get_variant_terms(name, source_uri=variants_repo))
                     synonym_terms = list(synonyms)
                     for s in synonyms:
-                        synonym_terms.extend(get_variant_terms(s, source_uri=variants_repo))
+                        synonym_terms.extend(LexicalVariantDictionary.get_variant_terms(s, source_uri=variants_repo))
                 else:
                     name_terms = [name]
                     synonym_terms = list(synonyms)

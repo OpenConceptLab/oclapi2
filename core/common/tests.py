@@ -1517,26 +1517,28 @@ class ThrottleUtilTest(OCLTestCase):
         self.assertIsInstance(match_throttles[1], MatchCoreDayThrottle)
 
 
+@override_settings(CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}})
 class LexicalVariantsTest(OCLTestCase):
     def setUp(self):
         super().setUp()
-        from core.common import lexical_variants
-        lexical_variants.invalidate_cache()
+        from django.core.cache import cache
+        # locmem has no delete_pattern; add a shim so invalidate_cache() works in tests
+        if not hasattr(cache, 'delete_pattern'):
+            cache.delete_pattern = lambda pattern: cache.clear()
+        cache.clear()
 
     def test_tokenize_lowercases_and_splits(self):
-        from core.common.lexical_variants import _tokenize
-        self.assertEqual(_tokenize("Leukaemia"), ["leukaemia"])
-        self.assertEqual(_tokenize("Anti-HCV IgG"), ["anti", "hcv", "igg"])
-        self.assertEqual(_tokenize("  spaced   out  "), ["spaced", "out"])
-        self.assertEqual(_tokenize(""), [])
-        self.assertEqual(_tokenize(None), [])
+        from core.common.lexical_variants import LexicalVariantDictionary
+        self.assertEqual(LexicalVariantDictionary._tokenize("Leukaemia"), ["leukaemia"])
+        self.assertEqual(LexicalVariantDictionary._tokenize("Anti-HCV IgG"), ["anti", "hcv", "igg"])
+        self.assertEqual(LexicalVariantDictionary._tokenize("  spaced   out  "), ["spaced", "out"])
+        self.assertEqual(LexicalVariantDictionary._tokenize(""), [])
+        self.assertEqual(LexicalVariantDictionary._tokenize(None), [])
 
-    @patch('core.common.lexical_variants._resolve_source')
-    @patch('core.common.lexical_variants._load_dictionary')
+    @patch('core.common.lexical_variants.LexicalVariantDictionary._resolve_source')
+    @patch('core.common.lexical_variants.LexicalVariantDictionary._load_dictionary')
     def test_returns_variants_for_known_token(self, mock_load, mock_resolve):
-        from core.common.lexical_variants import (
-            LexicalVariant, get_lexical_variants, get_variant_terms,
-        )
+        from core.common.lexical_variants import LexicalVariant, LexicalVariantDictionary
         mock_resolve.return_value = MagicMock(uri='/orgs/OCL/sources/lexical-variants-en/', version='HEAD')
         mock_load.return_value = {
             'leukaemia': [LexicalVariant(
@@ -1549,19 +1551,19 @@ class LexicalVariantsTest(OCLTestCase):
             )],
         }
 
-        variants = get_lexical_variants('leukaemia')
+        variants = LexicalVariantDictionary.get_lexical_variants('leukaemia')
         self.assertEqual(len(variants), 1)
         self.assertEqual(variants[0].term, 'leukemia')
         self.assertEqual(variants[0].locale, 'en-US')
 
-        terms = get_variant_terms('leukemia')
+        terms = LexicalVariantDictionary.get_variant_terms('leukemia')
         self.assertEqual(terms, ['leukaemia'])
 
-    @patch('core.common.lexical_variants._resolve_source')
-    @patch('core.common.lexical_variants._load_dictionary')
+    @patch('core.common.lexical_variants.LexicalVariantDictionary._resolve_source')
+    @patch('core.common.lexical_variants.LexicalVariantDictionary._load_dictionary')
     def test_returns_empty_for_unknown_token(self, mock_load, mock_resolve):
         """Regression: words containing 'hem'/'haem' as a substring must NOT match."""
-        from core.common.lexical_variants import LexicalVariant, get_lexical_variants
+        from core.common.lexical_variants import LexicalVariant, LexicalVariantDictionary
         mock_resolve.return_value = MagicMock(uri='/orgs/OCL/sources/lexical-variants-en/', version='HEAD')
         mock_load.return_value = {
             'hemorrhage': [LexicalVariant(
@@ -1572,39 +1574,39 @@ class LexicalVariantsTest(OCLTestCase):
 
         for false_positive in ['themselves', 'anthem', 'hemisphere', 'hemp', 'hemlock', 'remember']:
             with self.subTest(token=false_positive):
-                self.assertEqual(get_lexical_variants(false_positive), [])
+                self.assertEqual(LexicalVariantDictionary.get_lexical_variants(false_positive), [])
 
-    @patch('core.common.lexical_variants._resolve_source')
+    @patch('core.common.lexical_variants.LexicalVariantDictionary._resolve_source')
     def test_returns_empty_when_source_missing(self, mock_resolve):
-        from core.common.lexical_variants import get_lexical_variants
+        from core.common.lexical_variants import LexicalVariantDictionary
         mock_resolve.return_value = None
-        self.assertEqual(get_lexical_variants('leukaemia'), [])
+        self.assertEqual(LexicalVariantDictionary.get_lexical_variants('leukaemia'), [])
 
     def test_returns_empty_for_empty_input(self):
-        from core.common.lexical_variants import get_lexical_variants
-        self.assertEqual(get_lexical_variants(''), [])
-        self.assertEqual(get_lexical_variants(None), [])
+        from core.common.lexical_variants import LexicalVariantDictionary
+        self.assertEqual(LexicalVariantDictionary.get_lexical_variants(''), [])
+        self.assertEqual(LexicalVariantDictionary.get_lexical_variants(None), [])
 
-    @patch('core.common.lexical_variants._resolve_source')
-    @patch('core.common.lexical_variants._load_dictionary')
+    @patch('core.common.lexical_variants.LexicalVariantDictionary._resolve_source')
+    @patch('core.common.lexical_variants.LexicalVariantDictionary._load_dictionary')
     def test_caches_dictionary_per_source_version(self, mock_load, mock_resolve):
-        from core.common.lexical_variants import get_lexical_variants, invalidate_cache
+        from core.common.lexical_variants import LexicalVariantDictionary
         mock_resolve.return_value = MagicMock(uri='/orgs/OCL/sources/lexical-variants-en/', version='v1.0')
         mock_load.return_value = {}
 
-        get_lexical_variants('leukaemia')
-        get_lexical_variants('color')
-        get_lexical_variants('anything')
+        LexicalVariantDictionary.get_lexical_variants('leukaemia')
+        LexicalVariantDictionary.get_lexical_variants('color')
+        LexicalVariantDictionary.get_lexical_variants('anything')
         self.assertEqual(mock_load.call_count, 1)
 
-        invalidate_cache()
-        get_lexical_variants('leukaemia')
+        LexicalVariantDictionary.invalidate_cache()
+        LexicalVariantDictionary.get_lexical_variants('leukaemia')
         self.assertEqual(mock_load.call_count, 2)
 
-    @patch('core.common.lexical_variants._resolve_source')
-    @patch('core.common.lexical_variants._load_dictionary')
+    @patch('core.common.lexical_variants.LexicalVariantDictionary._resolve_source')
+    @patch('core.common.lexical_variants.LexicalVariantDictionary._load_dictionary')
     def test_multi_token_input_expands_each_known_token(self, mock_load, mock_resolve):
-        from core.common.lexical_variants import LexicalVariant, get_variant_terms
+        from core.common.lexical_variants import LexicalVariant, LexicalVariantDictionary
         mock_resolve.return_value = MagicMock(uri='/orgs/OCL/sources/lexical-variants-en/', version='HEAD')
         mock_load.return_value = {
             'leukaemia': [LexicalVariant(
@@ -1617,5 +1619,5 @@ class LexicalVariantsTest(OCLTestCase):
             )],
         }
 
-        terms = get_variant_terms('childhood leukaemia colour')
+        terms = LexicalVariantDictionary.get_variant_terms('childhood leukaemia colour')
         self.assertEqual(set(terms), {'leukemia', 'color'})

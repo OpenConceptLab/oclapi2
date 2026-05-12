@@ -828,16 +828,15 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         - true / "true" / "1" → DEFAULT_LEXICAL_VARIANTS_REPO
         - non-empty URI string → that URI
         """
-        from core.common.lexical_variants import DEFAULT_LEXICAL_VARIANTS_REPO
         if value is True:
-            return DEFAULT_LEXICAL_VARIANTS_REPO
+            return settings.DEFAULT_LEXICAL_VARIANTS_REPO
         if isinstance(value, str):
             stripped = value.strip()
             if not stripped:
                 return None
             lower = stripped.lower()
             if lower in ('true', '1'):
-                return DEFAULT_LEXICAL_VARIANTS_REPO
+                return settings.DEFAULT_LEXICAL_VARIANTS_REPO
             if lower in ('false', '0'):
                 return None
             return stripped
