@@ -6,6 +6,7 @@ from pydash import omit
 from core.collections.models import CollectionReference
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import OPENMRS_VALIDATION_SCHEMA, HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW
+from core.common.search import Reranker
 from core.common.tests import OCLTestCase
 from core.concepts.constants import (
     OPENMRS_MUST_HAVE_EXACTLY_ONE_PREFERRED_NAME,
@@ -106,6 +107,21 @@ class ConceptTest(OCLTestCase):
         concept = ConceptFactory(names=(preferred_locale,))
 
         self.assertEqual(concept.display_locale, preferred_locale.locale)
+
+    @patch.object(Reranker, '_get_encoder')
+    def test_reranker_uses_finite_fallback_score_for_missing_candidate_text(self, get_encoder_mock):
+        get_encoder_mock.return_value = None
+        reranker = Reranker()
+
+        scores = reranker._predict_scores(  # pylint: disable=protected-access
+            hits=[{'_source': {'name': '  '}}, {'_source': {'name': None}}],
+            txt='malaria',
+            name_key='name',
+            source_attr='_source',
+            should_convert_source_to_dict=True,
+        )
+
+        self.assertEqual(scores, [Reranker.MISSING_SCORE, Reranker.MISSING_SCORE])
 
     def test_default_name_locales(self):
         es_locale = ConceptNameFactory.build(locale='es')
