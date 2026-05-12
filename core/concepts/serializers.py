@@ -66,19 +66,30 @@ class ConceptLocaleSerializer(ModelSerializer):
             'uuid', 'external_id', 'type', 'locale', 'locale_preferred', 'concept_id', 'retired'
         )
 
+    @staticmethod
+    def get_locale_type(validated_data, locale):
+        """Resolve the persisted locale type from wrapper and alias fields."""
+        locale_type = validated_data.get('type', None)
+        if locale_type in ['ConceptName', 'ConceptDescription']:
+            locale_type = None
+        return validated_data.get('name_type', validated_data.get('description_type', locale_type or locale.type))
+
     def create(self, validated_data, instance=None):  # pylint: disable=arguments-differ
+        """Create or update a localized concept label."""
         locale = instance if instance else ConceptName()
         locale.name = validated_data.get('name', locale.name)
         locale.locale = validated_data.get('locale', locale.locale)
         locale.locale_preferred = validated_data.get('locale_preferred', locale.locale_preferred)
-        _type = validated_data.get('type', None)
-        if _type in ['ConceptName', 'ConceptDescription']:
-            _type = validated_data.get('name_type', validated_data.get('description_type', locale.type))
-        locale.type = _type
+        locale.retired = validated_data.get('retired', locale.retired)
+        locale.type = self.get_locale_type(validated_data, locale)
         locale.external_id = validated_data.get('external_id', locale.external_id)
         locale.concept_id = validated_data.get('concept_id', locale.concept_id)
         locale.save()
         return locale
+
+    def update(self, instance, validated_data):
+        """Update a localized concept label using the same alias handling as create."""
+        return self.create(validated_data, instance=instance)
 
 
 class ConceptNameSerializer(ConceptLocaleSerializer):

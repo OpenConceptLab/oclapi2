@@ -2548,6 +2548,40 @@ class ConceptNameRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(self.concept.names.first().name, 'brar')
         self.assertEqual(self.concept.names.first().retired, False)
 
+    def test_put_200_name_type(self):
+        self.assertEqual(self.concept.versions.count(), 1)
+
+        response = self.client.put(
+            self.url,
+            {'name_type': 'Fully Specified', 'name': 'brar'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['name'], 'brar')
+        self.assertEqual(response.data['name_type'], 'Fully Specified')
+        self.assertEqual(self.concept.versions.count(), 2)
+        self.assertEqual(self.concept.get_latest_version().names.first().type, 'Fully Specified')
+        self.assertEqual(self.concept.names.first().type, 'Fully Specified')
+
+    def test_patch_200_name_type(self):
+        self.assertEqual(self.concept.versions.count(), 1)
+
+        response = self.client.patch(
+            self.url,
+            {'name_type': 'Short'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['name'], 'froobar')
+        self.assertEqual(response.data['name_type'], 'Short')
+        self.assertEqual(self.concept.versions.count(), 2)
+        self.assertEqual(self.concept.get_latest_version().names.first().type, 'Short')
+        self.assertEqual(self.concept.names.first().type, 'Short')
+
     def test_put_200_retired(self):
         self.assertEqual(self.concept.versions.count(), 1)
         self.assertEqual(self.concept.names.count(), 1)
