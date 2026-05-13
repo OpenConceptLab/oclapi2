@@ -134,6 +134,9 @@ class MapProjectConfigurationsViewTest(MapProjectAbstractViewTest):
             lookup_config={'concepts': {'limit': 20}},
             score_configuration={'recommended': 95, 'available': 75},
             target_repo_url='/orgs/CIEL/sources/CIEL/',
+            prompt_template_key='match-recommend',
+            prompt_output_locale='pt-BR',
+            use_lexical_variants=True
         )
         project.save()
 
@@ -154,5 +157,8 @@ class MapProjectConfigurationsViewTest(MapProjectAbstractViewTest):
         self.assertEqual(response.data['lookup_config'], {'concepts': {'limit': 20}})
         self.assertEqual(response.data['score_configuration'], {'recommended': 95, 'available': 75})
         self.assertEqual(response.data['target_repo_url'], '/orgs/CIEL/sources/CIEL/')
+        self.assertEqual(response.data['prompt_template_key'], 'match-recommend')
+        self.assertEqual(response.data['prompt_output_locale'], 'pt-BR')
+        self.assertTrue(response.data['use_lexical_variants'])
         for field in ['analysis', 'input_file_name', 'candidates', 'matches', 'columns', 'created_by', 'updated_by']:
             self.assertNotIn(field, response.data)
