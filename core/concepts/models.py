@@ -466,8 +466,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         unsaved_names = get(self, 'cloned_names', [])
 
         if self.id:
+            # Keep persisted names in a deterministic order, keeps tests from being flaky.
             return compact([
-                *list(self.active_names.all()),
+                *list(self.active_names.order_by('id')),
                 *[locale for locale in unsaved_names if not locale.retired]
             ])
 
