@@ -343,13 +343,18 @@ class ChecksumDiff:
         print(self.pretty_print_dict(self.result))
 
     def get_db_id_for(self, diff_key, identity):
-        if diff_key == 'retired':
-            return get(
-                self.resources2_map_retired, f'{identity}.id'
-            ) or self.resources1_map_retired[identity]['id']
-        return get(
-            self.resources2_map, f'{identity}.id'
-        ) or self.resources1_map[identity]['id']
+        """Return the concrete resource DB id represented by a changelog diff key."""
+        if diff_key == 'changed_retired':
+            db_id = get(self.resources2_map_retired, f'{identity}.id')
+        elif diff_key == 'removed':
+            db_id = get(self.resources1_map, f'{identity}.id')
+        else:
+            db_id = get(self.resources2_map, f'{identity}.id') or get(self.resources1_map, f'{identity}.id')
+
+        if not db_id:
+            raise KeyError(f'Unable to resolve DB id for {diff_key}:{identity}')
+
+        return db_id
 
 
 class ChecksumChangelog:
