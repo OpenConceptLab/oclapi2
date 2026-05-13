@@ -23,8 +23,18 @@ class MapProjectCreateUpdateSerializer(serializers.ModelSerializer):
             'public_access', 'file', 'user_id', 'organization_id', 'description',
             'target_repo_url', 'include_retired', 'score_configuration',
             'filters', 'candidates', 'algorithms', 'lookup_config', 'analysis', 'encoder_model',
-            'prompt_template_key'
+            'prompt_template_key', 'prompt_output_locale',
         ]
+
+    def validate_prompt_output_locale(self, value):
+        if not value or value == 'auto':
+            return value
+        import re
+        if not re.match(r'^[a-z]{2,3}(-[A-Z]{2})?$', value):
+            raise serializers.ValidationError(
+                'Invalid locale. Use "auto" or a BCP-47 code like "en" or "pt-BR".'
+            )
+        return value
 
     def prepare_object(self, validated_data, instance=None, file=None):
         instance = instance or MapProject()
@@ -38,7 +48,7 @@ class MapProjectCreateUpdateSerializer(serializers.ModelSerializer):
         for attr in [
             'name', 'description', 'extras', 'target_repo_url', 'include_retired',
             'score_configuration', 'filters', 'candidates', 'algorithms', 'lookup_config', 'analysis',
-            'encoder_model', 'prompt_template_key'
+            'encoder_model', 'prompt_template_key', 'prompt_output_locale',
         ]:
             setattr(instance, attr, validated_data.get(attr, get(instance, attr)))
         if not instance.id:
