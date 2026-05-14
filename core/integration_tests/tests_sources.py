@@ -2682,6 +2682,10 @@ class SourceVersionsChangelogViewTest(OCLAPITestCase):
         for mapping in Mapping.objects.filter(parent=source):
             mapping.set_checksums()
 
+        # Simulate legacy production data where one checksum flavor was never persisted.
+        mapping4.refresh_from_db()
+        Mapping.objects.filter(id=mapping4.id).update(checksums={'standard': mapping4.checksums['standard']})
+
         token = source.created_by.get_token()
         response = self.client.post(
             '/sources/$changelog/?inline=true',
