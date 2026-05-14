@@ -367,6 +367,7 @@ class Reranker:
         "cross-encoder/ms-marco-MiniLM-L-6-v2",
     ]
     SCORE_KEY = 'search_rerank_score'
+    MISSING_SCORE = -1000000.0
 
     def __init__(self, model_name=None):
         self.model_name = model_name
@@ -386,9 +387,10 @@ class Reranker:
     def _predict_scores(self, hits, txt, name_key, source_attr, should_convert_source_to_dict):  # pylint: disable=too-many-arguments
         if not hits or not txt:
             return []
-        scores_full = [float("-inf")] * len(hits)  # or 0.0
+        # Keep unscorable candidates sortable while remaining JSON-safe.
+        scores_full = [self.MISSING_SCORE] * len(hits)
         if not isinstance(txt, str) or not txt.strip():
-            return scores_full  # or 0.0
+            return scores_full
 
         docs = [get(self._get_source(hit, source_attr, should_convert_source_to_dict), name_key) for hit in hits]
         valid = []

@@ -26,6 +26,16 @@ class MapProjectCreateUpdateSerializer(serializers.ModelSerializer):
             'prompt_template_key', 'prompt_output_locale', 'use_lexical_variants',
         ]
 
+    def validate_prompt_output_locale(self, value):
+        if not value or value == 'auto':
+            return value
+        import re
+        if not re.match(r'^[a-z]{2,3}(-[A-Z]{2})?$', value):
+            raise serializers.ValidationError(
+                'Invalid locale. Use "auto" or a BCP-47 code like "en" or "pt-BR".'
+            )
+        return value
+
     def prepare_object(self, validated_data, instance=None, file=None):
         instance = instance or MapProject()
         instance.public_access = validated_data.get('public_access', instance.public_access or DEFAULT_ACCESS_TYPE)

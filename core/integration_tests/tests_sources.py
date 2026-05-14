@@ -2074,7 +2074,7 @@ class SourceConceptsCloneViewTest(OCLAPITestCase):
         )
 
 class SourceVersionsChangelogOutputViewTest(OCLAPITestCase):
-    def _build_changelog_output_fixture(self):
+    def _build_changelog_output_fixture(self):  # pylint: disable=too-many-locals
         source = OrganizationSourceFactory()
         source_v1 = OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v1')
         source_v2 = OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v2')
@@ -2104,6 +2104,26 @@ class SourceVersionsChangelogOutputViewTest(OCLAPITestCase):
                 ConceptDescriptionFactory.build(name='Detailed description v2', locale='en'),
             ],
         )
+        concept_retired_v1 = ConceptFactory(
+            parent=source,
+            mnemonic='concept-retired',
+            concept_class='Diagnosis',
+            datatype='None',
+            names=[
+                ConceptNameFactory.build(name='Retired name v1', locale='en', locale_preferred=True),
+            ],
+        )
+        concept_retired_v2 = ConceptFactory(
+            parent=source,
+            mnemonic=concept_retired_v1.mnemonic,
+            version='v2',
+            concept_class='Diagnosis',
+            datatype='None',
+            retired=True,
+            names=[
+                ConceptNameFactory.build(name='Retired name v2', locale='en', locale_preferred=True),
+            ],
+        )
         mapping_from_concept = ConceptFactory(parent=source, mnemonic='mapping-from-concept')
         mapping_target_v1 = ConceptFactory(parent=source, mnemonic='mapping-target-v1')
         mapping_target_v2 = ConceptFactory(parent=source, mnemonic='mapping-target-v2')
@@ -2123,11 +2143,31 @@ class SourceVersionsChangelogOutputViewTest(OCLAPITestCase):
             map_type='NARROWER-THAN',
             external_id='mapping-v2',
         )
+        mapping_retired_v1 = MappingFactory(
+            parent=source,
+            mnemonic='mapping-retired',
+            from_concept=mapping_from_concept,
+            to_concept=mapping_target_v1,
+            external_id='mapping-retired-v1',
+        )
+        mapping_retired_v2 = MappingFactory(
+            parent=source,
+            mnemonic=mapping_retired_v1.mnemonic,
+            version='v2',
+            from_concept=mapping_from_concept,
+            to_concept=mapping_target_v1,
+            external_id='mapping-retired-v2',
+            retired=True,
+        )
 
         source_v1.concepts.add(concept_v1)
+        source_v1.concepts.add(concept_retired_v1)
         source_v2.concepts.add(concept_v2)
+        source_v2.concepts.add(concept_retired_v2)
         source_v1.mappings.add(mapping_v1)
+        source_v1.mappings.add(mapping_retired_v1)
         source_v2.mappings.add(mapping_v2)
+        source_v2.mappings.add(mapping_retired_v2)
 
         for concept in Concept.objects.filter(parent=source):
             concept.set_checksums()
@@ -2138,8 +2178,10 @@ class SourceVersionsChangelogOutputViewTest(OCLAPITestCase):
         return {
             'concept_v1': concept_v1,
             'concept_v2': concept_v2,
+            'concept_retired_v2': concept_retired_v2,
             'mapping_v1': mapping_v1,
             'mapping_v2': mapping_v2,
+            'mapping_retired_v2': mapping_retired_v2,
             'source': source,
             'source_v1': source_v1,
             'source_v2': source_v2,
@@ -2196,6 +2238,11 @@ class SourceVersionsChangelogOutputViewTest(OCLAPITestCase):
                     self.assertEqual(changed_mapping['to_concept'], data['mapping_v2'].to_concept.mnemonic)
                     self.assertEqual(changed_mapping['prev_map_type'], data['mapping_v1'].map_type)
                     self.assertEqual(changed_mapping['map_type'], data['mapping_v2'].map_type)
+                    retired_concept = response.data['concepts']['changed_retired']['concept-retired']
+                    self.assertEqual(retired_concept['concept_class'], data['concept_retired_v2'].concept_class)
+                    self.assertIn('Retired name v2', [name['name'] for name in retired_concept['names']])
+                    retired_mapping = response.data['mappings']['changed_retired']['mapping-retired']
+                    self.assertEqual(retired_mapping['external_id'], data['mapping_retired_v2'].external_id)
                 else:
                     self.assertNotIn('concept_class', changed_concept)
                     self.assertNotIn('prev_concept_class', changed_concept)
