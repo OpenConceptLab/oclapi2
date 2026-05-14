@@ -201,7 +201,11 @@ class ConceptFuzzySearch:  # pragma: no cover
                     knn_queries.append(get_knn_query("_synonyms_embeddings.vector", synonym, 0.125))
                     knn_queries.append(get_knn_query("_embeddings.vector", synonym, 0.15))
                     if variants_repo:
-                        for synonym_variant in LexicalVariantDictionary.get_variant_terms(synonym, source_uri=variants_repo):
+                        synonym_variants = LexicalVariantDictionary.get_variant_terms(
+                            synonym,
+                            source_uri=variants_repo,
+                        )
+                        for synonym_variant in synonym_variants:
                             knn_queries.append(get_knn_query("_synonyms_embeddings.vector", synonym_variant, 0.115))
                             knn_queries.append(get_knn_query("_embeddings.vector", synonym_variant, 0.14))
         else:
@@ -244,7 +248,12 @@ class ConceptFuzzySearch:  # pragma: no cover
         if is_semantic:
             if name:
                 if variants_repo:
-                    name_terms = [name] + list(LexicalVariantDictionary.get_variant_terms(name, source_uri=variants_repo))
+                    name_terms = [name] + list(
+                        LexicalVariantDictionary.get_variant_terms(
+                            name,
+                            source_uri=variants_repo,
+                        )
+                    )
                     synonym_terms = list(synonyms)
                     for s in synonyms:
                         synonym_terms.extend(LexicalVariantDictionary.get_variant_terms(s, source_uri=variants_repo))

@@ -49,7 +49,7 @@ class LexicalVariantDictionary:
 
         seen = set()
         out = []
-        for token in cls._tokenize(text):
+        for token in cls.tokenize(text):
             for variant in index.get(token, []):
                 dedup_key = (variant.term, variant.locale)
                 if dedup_key in seen:
@@ -141,7 +141,12 @@ class LexicalVariantDictionary:
     def _serialize_index(index):
         return {
             token: [
-                {'term': v.term, 'name_type': v.name_type, 'locale': v.locale, 'source_concept_uri': v.source_concept_uri}
+                {
+                    'term': v.term,
+                    'name_type': v.name_type,
+                    'locale': v.locale,
+                    'source_concept_uri': v.source_concept_uri,
+                }
                 for v in variants
             ]
             for token, variants in index.items()
@@ -155,7 +160,13 @@ class LexicalVariantDictionary:
         }
 
     @staticmethod
+    def tokenize(text):
+        """Return normalized alphanumeric tokens for variant matching."""
+        return LexicalVariantDictionary._tokenize(text)
+
+    @staticmethod
     def _tokenize(text):
+        """Normalize text for token-based dictionary lookups."""
         if not text:
             return []
         cleaned = ''.join(ch if ch.isalnum() or ch.isspace() else ' ' for ch in text.lower())

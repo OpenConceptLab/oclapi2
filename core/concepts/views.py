@@ -843,21 +843,19 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         - true / "true" / "1" → DEFAULT_LEXICAL_VARIANTS_REPO
         - non-empty URI string → that URI
         """
+        repo = None
         if value in TRUTHY:
-            return settings.DEFAULT_LEXICAL_VARIANTS_REPO
-        if value in FALSY:
-            return None
-        if isinstance(value, str):
+            repo = settings.DEFAULT_LEXICAL_VARIANTS_REPO
+        elif isinstance(value, str):
             stripped = value.strip()
-            if not stripped:
-                return None
-            lower = stripped.lower()
-            if lower in TRUTHY:
-                return settings.DEFAULT_LEXICAL_VARIANTS_REPO
-            if lower in FALSY:
-                return None
-            return stripped
-        return None
+            if stripped:
+                lower = stripped.lower()
+                if lower in TRUTHY:
+                    repo = settings.DEFAULT_LEXICAL_VARIANTS_REPO
+                elif lower not in FALSY:
+                    repo = stripped
+
+        return repo
 
     def filter_queryset(self, _=None):  # pylint: disable=too-many-locals,too-many-statements
         is_core_user = self.request.user.is_core_group

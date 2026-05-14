@@ -1529,11 +1529,11 @@ class LexicalVariantsTest(OCLTestCase):
 
     def test_tokenize_lowercases_and_splits(self):
         from core.common.lexical_variants import LexicalVariantDictionary
-        self.assertEqual(LexicalVariantDictionary._tokenize("Leukaemia"), ["leukaemia"])
-        self.assertEqual(LexicalVariantDictionary._tokenize("Anti-HCV IgG"), ["anti", "hcv", "igg"])
-        self.assertEqual(LexicalVariantDictionary._tokenize("  spaced   out  "), ["spaced", "out"])
-        self.assertEqual(LexicalVariantDictionary._tokenize(""), [])
-        self.assertEqual(LexicalVariantDictionary._tokenize(None), [])
+        self.assertEqual(LexicalVariantDictionary.tokenize("Leukaemia"), ["leukaemia"])
+        self.assertEqual(LexicalVariantDictionary.tokenize("Anti-HCV IgG"), ["anti", "hcv", "igg"])
+        self.assertEqual(LexicalVariantDictionary.tokenize("  spaced   out  "), ["spaced", "out"])
+        self.assertEqual(LexicalVariantDictionary.tokenize(""), [])
+        self.assertEqual(LexicalVariantDictionary.tokenize(None), [])
 
     @patch('core.common.lexical_variants.LexicalVariantDictionary._resolve_source')
     @patch('core.common.lexical_variants.LexicalVariantDictionary._load_dictionary')
