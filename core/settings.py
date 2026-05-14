@@ -649,3 +649,7 @@ ANALYTICS_API = os.environ.get('ANALYTICS_API', 'http://host.docker.internal:800
 if ANALYTICS_API:
     MIDDLEWARE = [*MIDDLEWARE, 'core.middlewares.middlewares.AnalyticsMiddleware']
 SERVICE_NAME = os.environ.get('SERVICE_NAME', 'oclapi2')
+
+DEFAULT_LEXICAL_VARIANTS_REPO = os.environ.get(
+    'DEFAULT_LEXICAL_VARIANTS_REPO', '/orgs/OCL/sources/lexical-variants-en/')
+LEXICAL_VARIANTS_CACHE_TIMEOUT = int(os.environ.get('LEXICAL_VARIANTS_CACHE_TIMEOUT', 60 * 60 * 24 * 4))

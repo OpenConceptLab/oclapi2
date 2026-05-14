@@ -42,6 +42,7 @@ class MapProject(BaseModel):
     encoder_model = models.TextField(null=True, blank=True, default=settings.ENCODER_MODEL_NAME)
     prompt_template_key = models.TextField(null=True, blank=True)
     prompt_output_locale = models.CharField(max_length=10, null=True, blank=True)
+    use_lexical_variants = models.BooleanField(default=False)
 
     # Fields that define how a project matches —
     # excluding identity, results, logs, and audit metadata.
@@ -49,7 +50,7 @@ class MapProject(BaseModel):
     CONFIGURATION_FIELDS = [
         'algorithms', 'encoder_model', 'filters', 'include_retired',
         'lookup_config', 'score_configuration', 'target_repo_url', 'prompt_template_key',
-        'prompt_output_locale'
+        'prompt_output_locale', 'use_lexical_variants'
     ]
 
     class Meta:

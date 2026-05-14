@@ -38,7 +38,7 @@ from core.common.swagger_parameters import (
 from core.common.tasks import delete_concept, make_hierarchy
 from core.common.throttling import ThrottleUtil
 from core.common.utils import (to_parent_uri_from_kwargs, generate_temp_version, get_truthy_values, to_int,
-                               drop_version)
+                               drop_version, get_falsy_values)
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
 from core.concepts.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT
@@ -57,6 +57,7 @@ from core.tasks.models import Task
 from core.toggles.models import Toggle
 
 TRUTHY = get_truthy_values()
+FALSY = get_falsy_values()
 
 
 class ConceptBaseView(SourceChildCommonBaseView):
@@ -827,7 +828,39 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
 
         return ConceptListSerializer
 
+    @staticmethod
+    def _resolve_variants_repo(value):
+        """Normalize the request's `variants` value into a dictionary URI or None.
+
+        Lexical variant expansion is OFF by default — clients opt in. Same
+        shape will apply to standard concept search (`?variants=...`) when
+        that wiring lands.
+
+        Returns the dictionary URI to use, or None to skip expansion entirely.
+
+        Accepts:
+        - missing / null / false / "false" / "0" → None (disabled, default)
+        - true / "true" / "1" → DEFAULT_LEXICAL_VARIANTS_REPO
+        - non-empty URI string → that URI
+        """
+        if value in TRUTHY:
+            return settings.DEFAULT_LEXICAL_VARIANTS_REPO
+        if value in FALSY:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None
+            lower = stripped.lower()
+            if lower in TRUTHY:
+                return settings.DEFAULT_LEXICAL_VARIANTS_REPO
+            if lower in FALSY:
+                return None
+            return stripped
+        return None
+
     def filter_queryset(self, _=None):  # pylint: disable=too-many-locals,too-many-statements
+        is_core_user = self.request.user.is_core_group
         rows = self.request.data.get('rows')
         target_repo_url = self.request.data.get('target_repo_url')
         target_repo_params = self.request.data.get('target_repo')
@@ -837,8 +870,9 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
 
         map_config = self.request.data.get('map_config', [])
         filters = self.request.data.get('filter', {})
+        variants_repo = self._resolve_variants_repo(self.request.data.get('variants')) if is_core_user else None
         original_filters = filters.copy()
-        include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM) in get_truthy_values()
+        include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM) in TRUTHY
         num_candidates = min(to_int(self.request.query_params.get('numCandidates', 0), 3000), 3000)
         k_nearest = min(to_int(self.request.query_params.get('kNearest', 0), 100), 100)
         offset = max(to_int(self.request.GET.get('offset'), 0), 0)
@@ -846,16 +880,16 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         page = max(to_int(self.request.GET.get('page'), 1), 1)
         start = offset or (page - 1) * limit
         end = start + limit
-        is_semantic = self.request.query_params.get('semantic', None) in get_truthy_values() and Toggle.get(
+        is_semantic = self.request.query_params.get('semantic', None) in TRUTHY and Toggle.get(
             'SEMANTIC_SEARCH_TOGGLE')
-        best_match = self.request.query_params.get('bestMatch', None) in get_truthy_values()
+        best_match = self.request.query_params.get('bestMatch', None) in TRUTHY
         score_threshold = self.score_threshold_semantic_very_high if is_semantic else self.score_threshold
         repo_params = self.get_repo_params(is_semantic, target_repo_params, target_repo_url)
         locale_filter = filters.pop('locale', None) if is_semantic else get(filters, 'locale', None)
         faceted_criterion = self.get_faceted_criterion(False, filters, minimum_should_match=1) if filters else None
         apply_for_name_locale = locale_filter and isinstance(locale_filter, str) and len(locale_filter.split(',')) == 1
         encoder_model = self.request.GET.get('encoder_model', None)
-        reranker = self.request.GET.get('reranker', None) in get_truthy_values()
+        reranker = self.request.GET.get('reranker', None) in TRUTHY
         score_to_sort = 'search_rerank_score' if reranker else 'search_normalized_score'
         cid = get_cid()
         target_repo_filter = filters.get('target_repo', None)
@@ -868,7 +902,8 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
             start_time = time.time()
             search = ConceptFuzzySearch.search(
                 row, target_repo_url, repo_params, include_retired,
-                is_semantic, num_candidates, k_nearest, map_config, faceted_criterion, locale_filter
+                is_semantic, num_candidates, k_nearest, map_config, faceted_criterion, locale_filter,
+                variants_repo=variants_repo,
             )
             print(f"[{cid}] ES Search built in {time.time() - start_time} seconds")
             start_time = time.time()

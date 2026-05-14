@@ -23,7 +23,7 @@ class MapProjectCreateUpdateSerializer(serializers.ModelSerializer):
             'public_access', 'file', 'user_id', 'organization_id', 'description',
             'target_repo_url', 'include_retired', 'score_configuration',
             'filters', 'candidates', 'algorithms', 'lookup_config', 'analysis', 'encoder_model',
-            'prompt_template_key', 'prompt_output_locale',
+            'prompt_template_key', 'prompt_output_locale', 'use_lexical_variants',
         ]
 
     def validate_prompt_output_locale(self, value):
@@ -48,7 +48,7 @@ class MapProjectCreateUpdateSerializer(serializers.ModelSerializer):
         for attr in [
             'name', 'description', 'extras', 'target_repo_url', 'include_retired',
             'score_configuration', 'filters', 'candidates', 'algorithms', 'lookup_config', 'analysis',
-            'encoder_model', 'prompt_template_key', 'prompt_output_locale',
+            'encoder_model', 'prompt_template_key', 'prompt_output_locale', 'use_lexical_variants',
         ]:
             setattr(instance, attr, validated_data.get(attr, get(instance, attr)))
         if not instance.id:
