@@ -71,6 +71,7 @@ class LexicalVariantDictionary:
 
     @classmethod
     def _cache_key(cls, source):
+        # HEAD edits reuse the same cache key and may stay stale until TTL expiry.
         version = getattr(source, 'version', 'HEAD') or 'HEAD'
         return f'{cls.CACHE_KEY_PREFIX}|{source.uri}|{version}'
 
