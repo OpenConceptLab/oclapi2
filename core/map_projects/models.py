@@ -42,6 +42,10 @@ class MapProject(BaseModel):
     encoder_model = models.TextField(null=True, blank=True, default=settings.ENCODER_MODEL_NAME)
     prompt_template_key = models.TextField(null=True, blank=True)
     prompt_output_locale = models.CharField(max_length=10, null=True, blank=True)
+    # Plural by design — the UI currently exposes single-select, but the
+    # field is shaped for the multi-select workflow planned in a few weeks.
+    # No further migration needed at that point.
+    input_locales = ArrayField(models.CharField(max_length=10), null=True, blank=True, default=list)
     use_lexical_variants = models.BooleanField(default=False)
 
     # Fields that define how a project matches —
@@ -50,7 +54,7 @@ class MapProject(BaseModel):
     CONFIGURATION_FIELDS = [
         'algorithms', 'encoder_model', 'filters', 'include_retired',
         'lookup_config', 'score_configuration', 'target_repo_url', 'prompt_template_key',
-        'prompt_output_locale', 'use_lexical_variants'
+        'prompt_output_locale', 'input_locales', 'use_lexical_variants'
     ]
 
     class Meta:
@@ -184,6 +188,7 @@ class MapProject(BaseModel):
         cls.format_json(new_data, 'analysis')
         cls.format_json(new_data, 'algorithms')
         cls.format_json(new_data, 'lookup_config')
+        cls.format_json(new_data, 'input_locales')
 
         if parent_resource:
             new_data[parent_resource.resource_type.lower() + '_id'] = parent_resource.id

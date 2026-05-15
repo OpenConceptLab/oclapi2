@@ -33,6 +33,10 @@ class MapProjectListViewTest(MapProjectAbstractViewTest):
                 {'label': 'category', 'hidden': False, 'dataKey': 'category', 'original': 'category'},
                 {'label': 'loinc_code', 'hidden': False, 'dataKey': 'loinc_code', 'original': 'loinc_code'}
             ]),
+            # Multipart-shaped wire format used by oclmap — input_locales is
+            # JSON-stringified so format_request_data can json.loads it back
+            # into the list that the ArrayField expects.
+            'input_locales': json.dumps(['pt-BR']),
         }
         response = self.client.post(
             '/orgs/CIEL/map-projects/',
@@ -42,6 +46,7 @@ class MapProjectListViewTest(MapProjectAbstractViewTest):
         self.assertEqual(response.status_code, 201)
         self.assertIsNotNone(response.data['id'])
         self.assertEqual(self.org.map_projects.count(), 1)
+        self.assertEqual(response.data.get('input_locales'), ['pt-BR'])
         upload_mock.assert_called_once_with(
             key=f"map_projects/{response.data['id']}/input.csv", file_content=ANY)
 
@@ -136,6 +141,7 @@ class MapProjectConfigurationsViewTest(MapProjectAbstractViewTest):
             target_repo_url='/orgs/CIEL/sources/CIEL/',
             prompt_template_key='match-recommend',
             prompt_output_locale='pt-BR',
+            input_locales=['pt-BR'],
             use_lexical_variants=True
         )
         project.save()
@@ -159,6 +165,7 @@ class MapProjectConfigurationsViewTest(MapProjectAbstractViewTest):
         self.assertEqual(response.data['target_repo_url'], '/orgs/CIEL/sources/CIEL/')
         self.assertEqual(response.data['prompt_template_key'], 'match-recommend')
         self.assertEqual(response.data['prompt_output_locale'], 'pt-BR')
+        self.assertEqual(response.data['input_locales'], ['pt-BR'])
         self.assertTrue(response.data['use_lexical_variants'])
         for field in ['analysis', 'input_file_name', 'candidates', 'matches', 'columns', 'created_by', 'updated_by']:
             self.assertNotIn(field, response.data)
