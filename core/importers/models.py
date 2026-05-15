@@ -13,9 +13,10 @@ from pydash import compact, get
 
 from core.celery import app
 from core.collections.models import Collection
+from core.common import ERRBIT_LOGGER
 from core.common.constants import HEAD
 from core.common.tasks import bulk_import_parts_inline, delete_organization, batch_index_resources, \
-    post_import_update_resource_counts
+    post_import_update_resource_counts, make_hierarchy
 from core.common.utils import drop_version, is_url_encoded_string, encode_string, to_parent_uri, chunks
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -415,8 +416,9 @@ class ConceptImporter(BaseResourceImporter):
     def get_resource_type():
         return 'Concept'
 
-    def __init__(self, data, user, update_if_exists):
+    def __init__(self, data, user, update_if_exists, skip_hierarchy_tasks=False):
         super().__init__(data, user, update_if_exists)
+        self.skip_hierarchy_tasks = skip_hierarchy_tasks
         self.version = False
         self.instance = None
 
@@ -476,8 +478,12 @@ class ConceptImporter(BaseResourceImporter):
             if 'update_comment' in self.data:
                 self.data['comment'] = self.data['update_comment']
                 self.data.pop('update_comment')
+            persist_data = {**self.data, '_counted': None, '_index': False}
+            if self.skip_hierarchy_tasks:
+                persist_data['_skip_hierarchy_tasks'] = True
             self.instance = Concept.persist_new(
-                data={**self.data, '_counted': None, '_index': False}, user=self.user, create_parent_version=False)
+                data=persist_data,
+                user=self.user, create_parent_version=False)
             if self.instance.id:
                 return CREATED
             return self.instance.errors or errors or FAILED
@@ -610,7 +616,10 @@ class MappingImporter(BaseResourceImporter):
             if self.version:
                 queryset = self.get_queryset()
                 if queryset.count() > 1:
-                    queryset = queryset.filter(retired=False)
+                    if queryset.filter(retired=False).exists():
+                        queryset = queryset.filter(retired=False)
+                    else:
+                        queryset = queryset.order_by('-id')
                 self.instance = queryset.first().clone()
                 self.instance._counted = None  # pylint: disable=protected-access
                 self.instance._index = False  # pylint: disable=protected-access
@@ -733,10 +742,11 @@ class ReferenceImporter(BaseResourceImporter):
 class BulkImportInline(BaseImporter):
     def __init__(  # pylint: disable=too-many-arguments
             self, content, username, update_if_exists=False, input_list=None, user=None, set_user=True,
-            self_task_id=None
+            self_task_id=None, skip_hierarchy_tasks=False
     ):
         super().__init__(content, username, update_if_exists, user, not bool(input_list), set_user)
         self.self_task_id = self_task_id
+        self.skip_hierarchy_tasks = skip_hierarchy_tasks
         self.set_task()
         if input_list:
             self.input_list = input_list
@@ -858,31 +868,42 @@ class BulkImportInline(BaseImporter):
                 )
                 continue
             if item_type == 'concept':
-                concept_importer = ConceptImporter(item, self.user, self.update_if_exists)
-                _result = concept_importer.delete() if action == 'delete' else concept_importer.run()
-                if self.index_resources and get(concept_importer.instance, 'id'):
-                    new_concept_ids.update(set(compact(
-                        [
-                            concept_importer.instance.versioned_object_id,
-                            get(concept_importer.instance, 'prev_latest_version_id'),
-                            get(concept_importer.instance, 'latest_version_id'),
-                            concept_importer.instance.id,
-                        ]
-                    )))
+                try:
+                    concept_importer = ConceptImporter(
+                        item, self.user, self.update_if_exists,
+                        skip_hierarchy_tasks=self.skip_hierarchy_tasks and bool(item.get('id'))
+                    )
+                    _result = concept_importer.delete() if action == 'delete' else concept_importer.run()
+                    if self.index_resources and get(concept_importer.instance, 'id'):
+                        new_concept_ids.update(set(compact(
+                            [
+                                concept_importer.instance.versioned_object_id,
+                                get(concept_importer.instance, 'prev_latest_version_id'),
+                                get(concept_importer.instance, 'latest_version_id'),
+                                concept_importer.instance.id,
+                            ]
+                        )))
+                except Exception as ex:
+                    ERRBIT_LOGGER.log(ex)
+                    _result = {'__all__': str(ex)}
                 self.handle_item_import_result(_result, original_item)
                 continue
             if item_type == 'mapping':
-                mapping_importer = MappingImporter(item, self.user, self.update_if_exists)
-                _result = mapping_importer.delete() if action == 'delete' else mapping_importer.run()
-                if self.index_resources and get(mapping_importer.instance, 'id'):
-                    new_mapping_ids.update(set(compact(
-                        [
-                            mapping_importer.instance.versioned_object_id,
-                            get(mapping_importer.instance, 'prev_latest_version_id'),
-                            get(mapping_importer.instance, 'latest_version_id'),
-                            mapping_importer.instance.id,
-                        ]
-                    )))
+                try:
+                    mapping_importer = MappingImporter(item, self.user, self.update_if_exists)
+                    _result = mapping_importer.delete() if action == 'delete' else mapping_importer.run()
+                    if self.index_resources and get(mapping_importer.instance, 'id'):
+                        new_mapping_ids.update(set(compact(
+                            [
+                                mapping_importer.instance.versioned_object_id,
+                                get(mapping_importer.instance, 'prev_latest_version_id'),
+                                get(mapping_importer.instance, 'latest_version_id'),
+                                mapping_importer.instance.id,
+                            ]
+                        )))
+                except Exception as ex:
+                    ERRBIT_LOGGER.log(ex)
+                    _result = {'__all__': str(ex)}
                 self.handle_item_import_result(_result, original_item)
                 continue
             if item_type == 'reference':
@@ -968,11 +989,14 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self.parts = deque([])
         self.result = None
         self._json_result = None
+        self.concept_hierarchy_map = {}  # child_uri -> [parent_uris], built before input_list is cleared
+        self.hierarchy_reconciliation_done = False
         if self.content:
             self.input_list = self.content if isinstance(self.content, list) else self.content.splitlines()
             self.total = len(self.input_list)
         self.make_resource_distribution()
         self.make_parts()
+        self.collect_concept_hierarchy_map()
         self.content = None  # memory optimization
         self.input_list = []  # memory optimization
 
@@ -1021,6 +1045,25 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                 else:
                     self.parts[-1].append(line)
                 prev_line = line
+
+    def collect_concept_hierarchy_map(self):
+        for data in self.input_list:
+            line = data if isinstance(data, dict) else json.loads(data)
+            if line.get('type', '').lower() != 'concept':
+                continue
+            parent_urls = line.get('parent_concept_urls') or []
+            concept_id = line.get('id')
+            owner = line.get('owner')
+            source = line.get('source')
+            if parent_urls and concept_id and owner and source:
+                owner_type = line.get('owner_type', '').lower()
+                owner_prefix = 'users' if owner_type in ['user', 'users'] else 'orgs'
+                # P2: normalize concept_id the same way ConceptImporter.parse() does,
+                # so the URI matches what was actually persisted in the database.
+                if not is_url_encoded_string(concept_id):
+                    concept_id = encode_string(concept_id)
+                child_uri = f'/{owner_prefix}/{owner}/sources/{source}/concepts/{concept_id}/'
+                self.concept_hierarchy_map[child_uri] = parent_urls
 
     @staticmethod
     def chunker_list(seq, size, is_child):  # pylint: disable=too-many-locals
@@ -1090,16 +1133,27 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
     def get_overall_tasks_progress(self):
         return sum(compact(self.get_sub_tasks().values_list('summary__processed', flat=True)))
 
+    def has_hierarchy_reconciliation_step(self):
+        return bool(self.concept_hierarchy_map)
+
+    def get_total_progress_target(self):
+        return self.total + int(self.has_hierarchy_reconciliation_step())
+
+    def get_completed_progress(self):
+        return self.get_overall_tasks_progress() + int(
+            self.has_hierarchy_reconciliation_step() and self.hierarchy_reconciliation_done
+        )
+
     def get_details_to_notify(self):
         summary = f"Started: {self.start_time_formatted} | " \
-            f"Processed: {self.get_overall_tasks_progress()}/{self.total} | " \
+            f"Processed: {self.get_completed_progress()}/{self.get_total_progress_target()} | " \
             f"Time: {self.elapsed_seconds}secs"
 
         return {'summary': summary}
 
     def notify_progress(self):
         if self.task:
-            self.task.summary = {'processed': self.get_overall_tasks_progress(), 'total': self.total}
+            self.task.summary = {'processed': self.get_completed_progress(), 'total': self.get_total_progress_target()}
             self.task.save()
 
     def wait_till_tasks_alive(self):
@@ -1126,6 +1180,33 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                         if part_type not in self.resource_wise_time:
                             self.resource_wise_time[part_type] = 0
                         self.resource_wise_time[part_type] += round(time.time() - start_time, 4)
+
+        self.notify_progress()
+        if self.concept_hierarchy_map:
+            # P1: restrict reconciliation to concepts the importing user can actually edit,
+            # mirroring the has_edit_access guard in ConceptImporter.process(). This excludes
+            # PERMISSION_DENIED rows and prevents hierarchy changes on sources the user does
+            # not own, even when those concepts already exist in the database.
+            user = UserProfile.objects.filter(username=self.username).first()
+            accessible_uris = set(
+                concept.uri
+                for concept in Concept.objects.filter(
+                    uri__in=self.concept_hierarchy_map.keys(), id=F('versioned_object_id')
+                ).select_related('parent')
+                if concept.parent.has_edit_access(user)
+            )
+            inverted = {}
+            for child_uri, parent_uris in self.concept_hierarchy_map.items():
+                if child_uri not in accessible_uris:
+                    continue
+                for parent_uri in parent_uris:
+                    if parent_uri not in inverted:
+                        inverted[parent_uri] = []
+                    inverted[parent_uri].append(child_uri)
+            if inverted:
+                make_hierarchy(inverted)
+            self.hierarchy_reconciliation_done = True
+            self.notify_progress()
 
         post_import_update_resource_counts.apply_async(queue='default', permanent=False)
 

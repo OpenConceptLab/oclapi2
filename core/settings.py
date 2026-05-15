@@ -49,6 +49,17 @@ if not ENV or ENV in ['ci', 'dev', 'development']:
 else:
     ENABLE_THROTTLING = os.environ.get('ENABLE_THROTTLING', False) in ['true', 'True', 'TRUE', True]
 
+
+def get_set_from_env(name):
+    """Return a trimmed set for comma-separated environment variables."""
+    return {value.strip() for value in os.environ.get(name, '').split(',') if value.strip()}
+
+
+REQUIRE_AUTHENTICATION = os.environ.get('REQUIRE_AUTHENTICATION', 'false').lower() in ['true', '1']
+APPROVED_ANONYMOUS_CLIENTS = get_set_from_env('APPROVED_ANONYMOUS_CLIENTS')
+APPROVED_ANONYMOUS_API_KEYS = get_set_from_env('APPROVED_ANONYMOUS_API_KEYS')
+APPROVED_ANONYMOUS_IPS = get_set_from_env('APPROVED_ANONYMOUS_IPS')
+
 ALLOWED_HOSTS = ['*']
 
 CORS_ALLOW_HEADERS = default_headers + (
@@ -194,10 +205,19 @@ if ENABLE_THROTTLING:
         'guest_day': '10000/day',
         'standard_minute': '500/minute',
         'standard_day': '20000/day',
-        'match_standard_minute': '120/minute',
-        'match_standard_day': '2000/day',
+        'core_minute': '1000/minute',
+        'core_day': '40000/day',
+        'match_standard_minute': '300/minute',
+        'match_standard_day': '5000/day',
+        'match_core_minute': '1000/minute',
+        'match_core_day': '20000/day',
     }
     MIDDLEWARE = [*MIDDLEWARE, 'core.middlewares.middlewares.ThrottleHeadersMiddleware']
+
+if REQUIRE_AUTHENTICATION:
+    auth_middleware = 'django.contrib.auth.middleware.AuthenticationMiddleware'
+    auth_index = MIDDLEWARE.index(auth_middleware)
+    MIDDLEWARE.insert(auth_index + 1, 'core.middlewares.middlewares.RequireAuthenticationMiddleware')
 
 
 ROOT_URLCONF = 'core.urls'
@@ -609,6 +629,8 @@ if ENV == 'development':
 
 # MINIO storage settings
 MINIO_ENDPOINT = os.environ.get('MINIO_ENDPOINT', '')
+MINIO_EXTERNAL_ENDPOINT = os.environ.get('MINIO_EXTERNAL_ENDPOINT', '')
+MINIO_REGION = os.environ.get('MINIO_REGION', 'us-east-1')
 MINIO_ACCESS_KEY = os.environ.get('MINIO_ACCESS_KEY', '')
 MINIO_SECRET_KEY = os.environ.get('MINIO_SECRET_KEY', '')
 MINIO_BUCKET_NAME = os.environ.get('MINIO_BUCKET_NAME', '')

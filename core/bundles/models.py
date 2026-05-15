@@ -229,7 +229,13 @@ class Bundle:
                 _parameters['source_to_concepts'] = bundle.cascade_method == SOURCE_TO_CONCEPTS
 
         added_concepts, added_mappings = clone_to_source.clone_with_cascade(concept_to_clone, user, **_parameters)
-        bundle.root = clone_to_source.find_concept_by_mnemonic(concept_to_clone.mnemonic)
+        added_concepts = [concept for concept in added_concepts if get(concept, 'id')]
+        added_mappings = [mapping for mapping in added_mappings if get(mapping, 'id')]
+        bundle.root = (
+            clone_to_source.find_concept_by_mnemonic(concept_to_clone.mnemonic)
+            or next((concept for concept in added_concepts if get(concept, 'id')), None)
+            or clone_to_source
+        )
         bundle.concepts = added_concepts
         bundle.mappings = added_mappings
         bundle.set_total()

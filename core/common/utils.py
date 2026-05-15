@@ -229,6 +229,9 @@ def write_export_file(
         concepts_qs = Concept.sources.through.objects.filter(source_id=version.id)
         mappings_qs = Mapping.sources.through.objects.filter(source_id=version.id)
 
+    concept_id_field = 'concept_id' if hasattr(concepts_qs.model, 'concept_id') else 'id'
+    mapping_id_field = 'mapping_id' if hasattr(mappings_qs.model, 'mapping_id') else 'id'
+
     filters = {}
 
     if not is_collection:
@@ -246,7 +249,9 @@ def write_export_file(
         start = 0
         while True:
             batch_ids = list(
-                concepts_qs.order_by('-concept_id')[start:start + batch_size].values_list('concept_id', flat=True)
+                concepts_qs.order_by(f'-{concept_id_field}')[start:start + batch_size].values_list(
+                    concept_id_field, flat=True
+                )
             )
             if not batch_ids:
                 break
@@ -296,7 +301,9 @@ def write_export_file(
         start = 0
         while True:
             batch_ids = list(
-                mappings_qs.order_by('-mapping_id')[start:start + batch_size].values_list('mapping_id', flat=True)
+                mappings_qs.order_by(f'-{mapping_id_field}')[start:start + batch_size].values_list(
+                    mapping_id_field, flat=True
+                )
             )
             if not batch_ids:
                 break
@@ -432,6 +439,11 @@ def queue_bulk_import(  # pylint: disable=too-many-arguments
             task_func = bulk_import_parallel_inline
             args = (to_import, username, update_if_exists, threads)
         else:
+            # TODO: bulk_import_inline is unreachable from the current view layer —
+            # import_response always passes `parallel_threads = request.data.get('parallel') or 5`
+            # which is always truthy, so the `elif threads` branch above is always taken.
+            # Consider removing bulk_import_inline and this branch once confirmed no external
+            # callers rely on it (check API consumers and the test suite first).
             task_func = bulk_import_inline
     else:
         task_func = bulk_import

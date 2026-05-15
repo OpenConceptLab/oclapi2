@@ -2,11 +2,17 @@ import logging
 import time
 
 import requests
+from django.conf import settings
 from django.http import HttpResponseNotFound, HttpResponse
+from django.http.response import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
+from pydash import get
 from request_logging.middleware import LoggingMiddleware
+from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.request import Request
 from rest_framework.views import APIView
 
+from core.common.authentication import OCLAuthentication
 from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER, RESPONSE_TIME_HEADER, REQUEST_URL_HEADER, \
     REQUEST_METHOD_HEADER
 from core.common.throttling import ThrottleUtil
@@ -52,7 +58,6 @@ class ResponseHeadersMiddleware(BaseMiddleware):
     def __call__(self, request):
         start_time = time.time()
         response = self.get_response(request)
-        from django.conf import settings
         response[VERSION_HEADER] = settings.VERSION
         try:
             response[REQUEST_USER_HEADER] = str(getattr(request, 'user', None))
@@ -89,6 +94,151 @@ class TokenAuthMiddleWare(BaseMiddleware):
         return response
 
 
+class RequireAuthenticationMiddleware(BaseMiddleware):
+    """Block anonymous API access unless the request matches an approved bypass."""
+
+    exempt_path_prefixes = (
+        '/healthcheck/',
+        '/users/api-token/',
+        '/users/login/',
+        '/users/logout/',
+        '/users/signup/',
+        '/users/password/reset/',
+        '/users/oidc/',
+        '/oidc/',
+        '/fhir/',
+        '/swagger',
+        '/redoc/',
+        '/admin/',
+    )
+    exempt_exact_paths = {
+        '/',
+        '/version',
+        '/changelog',
+        '/feedback',
+        '/toggles',
+        '/locales',
+        '/events',
+    }
+    forbidden_response = {
+        'detail': 'Authentication required. Anonymous API access is disabled.',
+        'upgrade_url': 'https://app.openconceptlab.org/pricing',
+    }
+
+    def __call__(self, request):
+        """Allow exempt and approved anonymous traffic, otherwise return 403."""
+        if self.is_request_allowed(request):
+            return self.get_response(request)
+
+        return JsonResponse(self.forbidden_response, status=403)
+
+    def is_request_allowed(self, request):
+        """Return whether the current request can bypass authentication enforcement."""
+        if request.method == 'OPTIONS' or request.META.get('HTTP_USER_AGENT', '').startswith('ELB-HealthChecker'):
+            return True
+
+        return self.is_exempt_path(request.path) or self.has_approved_client_header(request) or \
+            self.has_approved_api_key(request) or self.has_approved_ip(request) or get(
+                self.get_authenticated_user(request), 'is_authenticated', False
+            )
+
+        # user = self.get_authenticated_user(request)
+        # return getattr(user, 'is_authenticated', False)
+
+    @staticmethod
+    def get_authenticated_user(request):
+        """
+        Resolve the authenticated user from either the Django session or the DRF auth stack.
+
+        Django's AuthenticationMiddleware only populates session-backed users. API token and
+        OIDC bearer authentication happen later in DRF views, so this middleware must run that
+        authentication early when header credentials are present.
+        """
+        user = getattr(request, 'user', None)
+        if getattr(user, 'is_authenticated', False):
+            return user
+
+        try:
+            auth_result = OCLAuthentication().authenticate(Request(request))
+        except AuthenticationFailed:
+            return user
+
+        if not auth_result:
+            return user
+
+        authenticated_user, auth = auth_result
+        request.user = authenticated_user
+        request.auth = auth
+        return authenticated_user
+
+    @classmethod
+    def is_exempt_path(cls, path):
+        """Return whether a request path must remain accessible to anonymous users."""
+        normalized_path = path.rstrip('/') or '/'
+        if normalized_path in cls.exempt_exact_paths:
+            return True
+
+        if any(path.startswith(prefix) for prefix in cls.exempt_path_prefixes):
+            return True
+
+        return (
+            path.startswith('/users/')
+            and (
+                '/verify/' in path
+                or path.endswith('/sso-migrate/')
+                or path.endswith('/following/')
+            )
+        )
+
+    @staticmethod
+    def has_approved_client_header(request):
+        """Match the configured anonymous allowlist against the X-OCL-CLIENT header."""
+        client_name = request.META.get('HTTP_X_OCL_CLIENT', '').strip()
+        if not client_name:
+            return False
+
+        approved_clients = settings.APPROVED_ANONYMOUS_CLIENTS or set()
+        for approved_client in approved_clients:
+            if approved_client.endswith('/*'):
+                if client_name.startswith(approved_client[:-1]):
+                    return True
+                continue
+
+            if client_name == approved_client:
+                return True
+
+        return False
+
+    @staticmethod
+    def has_approved_api_key(request):
+        """Match allowlisted anonymous API keys from common request locations."""
+        approved_keys = settings.APPROVED_ANONYMOUS_API_KEYS
+        if not approved_keys:
+            return False
+
+        authorization = request.META.get('HTTP_AUTHORIZATION', '').strip()
+        x_api_key = request.META.get('HTTP_X_API_KEY', '').strip()
+        tokens = [authorization, x_api_key]
+        bearer_token = authorization.split(None, 1)[1].strip() if ' ' in authorization else ''
+        if bearer_token:
+            tokens.append(bearer_token)
+
+        return any(token and token in approved_keys for token in tokens)
+
+    @staticmethod
+    def has_approved_ip(request):
+        """Match source IPs using the socket address only."""
+        approved_ips = settings.APPROVED_ANONYMOUS_IPS
+        if not approved_ips:
+            return False
+
+        remote_addr = request.META.get('REMOTE_ADDR', '').strip()
+        if not remote_addr:
+            return False
+
+        return remote_addr in approved_ips
+
+
 class FhirMiddleware(BaseMiddleware):
     """
     It is used to expose FHIR endpoints under FHIR subdomain only and convert content from xml to json.
@@ -98,7 +248,6 @@ class FhirMiddleware(BaseMiddleware):
     def __call__(self, request):
         absolute_uri = request.build_absolute_uri()
 
-        from django.conf import settings
         if settings.FHIR_SUBDOMAIN:
             uri = absolute_uri.split('/')
             domain = uri[2] if len(uri) > 2 else ''
@@ -144,7 +293,8 @@ class FhirMiddleware(BaseMiddleware):
 
 
 class ThrottleHeadersMiddleware(MiddlewareMixin):
-    match_throttled_paths = ['recommend-beta', '$match']
+    match_throttled_paths = ['$match', '/concepts/$match/']
+
     def is_match_throttled_path(self, path):
         for match_path in self.match_throttled_paths:
             if match_path in path:
@@ -157,6 +307,8 @@ class ThrottleHeadersMiddleware(MiddlewareMixin):
             throttles = ThrottleUtil.get_match_throttles_by_user_plan(request.user) if self.is_match_throttled_path(
                 request.path
             ) else ThrottleUtil.get_throttles_by_user_plan(request.user)
+            if not throttles:
+                return response
 
             if minute_limit := ThrottleUtil.get_limit_remaining(throttles[0], request, view):
                 response['X-LimitRemaining-Minute'] = minute_limit
@@ -171,11 +323,13 @@ class AnalyticsMiddleware(BaseMiddleware):
         response = self.get_response(request)
         path = request.path
 
-        ignore_any_under_paths = ['/users/login/', '/users/logout/', '/users/signup/']
+        # /users/signup/ and /users/logout/ are tracked — they're real
+        # user-intent events (top-of-funnel + session-end signal). Login
+        # tracking was added previously via ocl_online#55.
+        ignore_any_under_paths = []
         ignore_paths = [
             '', '/swagger', '/redoc', '/version', '/toggles', '/users/oidc/code-exchange', '/favicon.ico',
             '/users/api-token', '/users/password/reset', '/user',
-            *[p.rstrip('/') for p in ignore_any_under_paths]
         ]
         if path.rstrip("/") not in ignore_paths and not any(path.startswith(p) for p in ignore_any_under_paths):
             duration_ms = int((time.monotonic() - start) * 1000)

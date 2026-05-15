@@ -196,13 +196,14 @@ def serialize_names(concept: Concept) -> List[ConceptNameType]:
             locale=name.locale,
             type=name.type,
             preferred=name.locale_preferred,
+            retired=name.retired,
         )
         for name in concept.names.all()
     ]
 
 
 def resolve_description(concept: Concept) -> Optional[str]:
-    descriptions = list(concept.descriptions.all())
+    descriptions = list(concept.active_descriptions.all())
     if not descriptions:
         return None
 

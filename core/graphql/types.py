@@ -11,6 +11,7 @@ class ConceptNameType:
     locale: str = strawberry.field(description="Locale/ISO code for the name.")
     type: Optional[str] = strawberry.field(description="Name type (e.g. FULLY_SPECIFIED, SHORT).")
     preferred: bool = strawberry.field(description="Indicates whether this name is preferred for its locale.")
+    retired: bool = strawberry.field(description="Indicates whether this name is retired.")
 
 
 @strawberry.type

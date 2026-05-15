@@ -2,7 +2,6 @@ import base64
 import mimetypes
 from io import BytesIO
 
-from django.http import StreamingHttpResponse
 from minio import Minio, S3Error
 from minio.deleteobjects import DeleteObject
 from pydash import get
@@ -15,12 +14,22 @@ class MinIO(CloudStorageServiceInterface):
     def __init__(self):
         super().__init__()
         self.endpoint = settings.MINIO_ENDPOINT
+        self.external_endpoint = settings.MINIO_EXTERNAL_ENDPOINT or self.endpoint
         self.access_key = settings.MINIO_ACCESS_KEY
         self.secret_key = settings.MINIO_SECRET_KEY
         self.bucket_name = settings.MINIO_BUCKET_NAME
         self.secure = settings.MINIO_SECURE
         self.client = Minio(endpoint=self.endpoint, access_key=self.access_key, secret_key=self.secret_key,
                             secure=self.secure)
+        # Dedicated client for presigned URL generation.
+        # Uses the external endpoint so the signature carries the publicly accessible host.
+        # Region is set explicitly to avoid a network round-trip for region discovery
+        # (the external endpoint is not reachable from inside the container).
+        # All other operations use self.client (internal endpoint) since they run server-side.
+        self._presign_client = Minio(
+            endpoint=self.external_endpoint, access_key=self.access_key, secret_key=self.secret_key,
+            secure=self.secure, region=settings.MINIO_REGION
+        ) if self.external_endpoint != self.endpoint else self.client
         # Ensure the bucket exists
         if not self.client.bucket_exists(self.bucket_name):
             self.client.make_bucket(self.bucket_name)
@@ -78,11 +87,14 @@ class MinIO(CloudStorageServiceInterface):
 
     def url_for(self, file_path):
         """
-        Generates a presigned URL for the given file.
+        Generates a presigned URL for the given file using the external client so the
+        signature is computed with the publicly accessible host (MINIO_EXTERNAL_ENDPOINT).
+        Falls back to the internal client when no external endpoint is configured.
         """
         try:
-            return self.client.get_presigned_url(method='GET', bucket_name=self.bucket_name, object_name=file_path) \
-                if file_path else None
+            return self._presign_client.get_presigned_url(
+                method='GET', bucket_name=self.bucket_name, object_name=file_path
+            ) if file_path else None
         except S3Error as e:
             raise Exception(f"Could not generate presigned URL for file {file_path}. Error: {e}") from e  # pylint: disable=broad-exception-raised
 
@@ -167,21 +179,6 @@ class MinIO(CloudStorageServiceInterface):
         """
         response = self.client.get_object(bucket_name=self.bucket_name, object_name=key)
         return response
-
-    def get_streaming_response(self, key):
-        """
-        Streams the file from MinIO using Django's StreamingHttpResponse.
-        """
-        try:
-            response = self.get_object(key)
-            streaming_http_response = StreamingHttpResponse(
-                self.file_iterator(response),
-                content_type=response.headers['Content-Type']
-            )
-            streaming_http_response['Content-Disposition'] = f'attachment; filename={key.split("/")[-1]}'
-            return streaming_http_response
-        except S3Error as e:
-            raise FileNotFoundError(f"File {key} not found in bucket {self.bucket_name}. Error: {e}") from e
 
     @staticmethod
     def file_iterator(file_obj, chunk_size=8192):

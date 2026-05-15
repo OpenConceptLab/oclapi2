@@ -5,7 +5,6 @@ from botocore.config import Config
 from botocore.exceptions import ClientError, NoCredentialsError, WaiterError
 from django.conf import settings
 from django.core.files.base import ContentFile
-from django.http import StreamingHttpResponse
 from pydash import get
 
 from core.services.storages.cloud.core import CloudStorageServiceInterface
@@ -118,16 +117,6 @@ class S3(CloudStorageServiceInterface):
     @staticmethod
     def file_iterator(response):
         yield from response['Body'].iter_chunks()
-
-    def get_streaming_response(self, key):
-        s3_response = self.get_object(key)
-        response = StreamingHttpResponse(
-            self.file_iterator(s3_response),
-            content_type=s3_response['ContentType']
-        )
-        response['Content-Disposition'] = f'attachment; filename={key.split("/")[-1]}'
-
-        return response
 
     # private
     def _generate_signed_url(self, accessor, key, metadata=None):

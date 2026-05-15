@@ -34,7 +34,7 @@ from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRe
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
 from core.sources.documents import SourceDocument
 from core.sources.mixins import SummaryMixin
-from core.sources.models import Source
+from core.sources.models import Source, CloneError
 from core.sources.search import SourceFacetedSearch
 from core.sources.serializers import (
     SourceDetailSerializer, SourceListSerializer, SourceCreateSerializer, SourceVersionDetailSerializer,
@@ -325,9 +325,17 @@ class SourceConceptsIndexView(SourceBaseView):
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         source = self.get_object()
+        single_batch = request.data.get('single_batch', None) in get_truthy_values()
+        parallel = request.data.get('parallel', True) in get_truthy_values() if 'parallel' in request.data else True
+        should_prefetch = request.data.get(
+            'should_prefetch', True) in get_truthy_values() if 'should_prefetch' in request.data else True
+        should_select_related = request.data.get(
+            'should_select_related', True) in get_truthy_values() if 'should_select_related' in request.data else True
         task = Task.new(queue='indexing', user=request.user, name=index_source_concepts.__name__)
         try:
-            index_source_concepts.apply_async((source.id,), queue=task.queue, task_id=task.id)
+            index_source_concepts.apply_async(
+                (source.id, None, single_batch, should_prefetch, should_select_related, parallel),
+                queue=task.queue, task_id=task.id)
         except AlreadyQueued:
             if task:
                 task.delete()
@@ -349,9 +357,10 @@ class SourceMappingsIndexView(SourceBaseView):
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         source = self.get_object()
+        single_batch = request.data.get('single_batch', None) in get_truthy_values()
         task = Task.new(queue='indexing', user=request.user, name=index_source_mappings.__name__)
         try:
-            index_source_mappings.apply_async((source.id,), queue=task.queue, task_id=task.id)
+            index_source_mappings.apply_async((source.id, None, single_batch), queue=task.queue, task_id=task.id)
         except AlreadyQueued:
             if task:
                 task.delete()
@@ -390,12 +399,16 @@ class SourceConceptsCloneView(SourceBaseView):
                     parent_resources[parent_uri] = Source.objects.filter(uri=parent_uri).first()
                 parent_resource = parent_resources[parent_uri]
                 from core.bundles.models import Bundle
-                bundle = Bundle.clone(
-                    concept_to_clone, parent_resource, instance, request.user,
-                    self.request.get_full_path(), is_verbose, **parameters
-                )
-                result['status'] = status.HTTP_200_OK
-                result['bundle'] = BundleSerializer(bundle, context={'request': request}).data
+                try:
+                    bundle = Bundle.clone(
+                        concept_to_clone, parent_resource, instance, request.user,
+                        self.request.get_full_path(), is_verbose, **parameters
+                    )
+                    result['status'] = status.HTTP_200_OK
+                    result['bundle'] = BundleSerializer(bundle, context={'request': request}).data
+                except CloneError as ex:
+                    result['status'] = status.HTTP_400_BAD_REQUEST
+                    result['errors'] = ex.errors
             else:
                 result['status'] = status.HTTP_404_NOT_FOUND
                 result['errors'] = [f'Concept to clone with expression {expression} not found.']
@@ -658,12 +671,13 @@ class AbstractSourceVersionsDiffView(BaseAPIView, TaskMixin):
     changelog = False
 
     def get_objects(self):
-        version1_uri = self.request.data.get('version1')  # older version
-        version2_uri = self.request.data.get('version2')  # newer version
+        version1_uri = self.request.data.get('version1')  # caller-supplied older version
+        version2_uri = self.request.data.get('version2')  # caller-supplied newer version
         version1 = get_object_or_404(Source.objects.filter(uri=version1_uri))
         version2 = get_object_or_404(Source.objects.filter(uri=version2_uri))
-        if version1.created_at > version2.created_at:
-            raise Http400('version1 must be older than version2')
+        # Auto-swap to ensure version1 is always the older release using created_at.
+        if version1.created_at and version2.created_at and version1.created_at > version2.created_at:
+            version1, version2 = version2, version1
         self.check_object_permissions(self.request, version1)
         self.check_object_permissions(self.request, version2)
         return version1, version2
@@ -674,12 +688,17 @@ class AbstractSourceVersionsDiffView(BaseAPIView, TaskMixin):
         except:  # pylint: disable=bare-except
             return 0
 
-    def post(self, _):
+    def get_format_type(self):
+        # NOTE: DRF reserves '?format=' for content negotiation, so we use '?output=' instead.
+        return self.request.query_params.get('output', 'json')
+
+    def post(self, _, **kwargs):  # pylint: disable=unused-argument
         version1, version2 = self.get_objects()
         ignore_cache = bool(version1.is_head or version2.is_head)
+        format_type = self.get_format_type() if self.changelog else 'json'
         result = self.perform_task(
             source_version_compare,
-            (version1.uri, version2.uri, self.changelog, self.get_verbosity(), ignore_cache)
+            (version1.uri, version2.uri, self.changelog, self.get_verbosity(), ignore_cache, format_type)
         )
 
         if isinstance(result, Response):

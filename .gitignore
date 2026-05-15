@@ -257,6 +257,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+docker-compose.override.yml
 
 # Spyder project settings
 .spyderproject

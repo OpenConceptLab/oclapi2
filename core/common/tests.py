@@ -2,15 +2,16 @@ import datetime
 import os
 import uuid
 from collections import OrderedDict
-from unittest.mock import patch, Mock, ANY
+from unittest.mock import patch, Mock, MagicMock, ANY
 
 import django
 import factory
 from colour_runner.django_runner import ColourRunnerMixin
 from django.conf import settings
+from django.contrib.auth.models import AnonymousUser, Group
 from django.core.files.base import File
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.test.runner import DiscoverRunner
 from mock.mock import call
 from requests.auth import HTTPBasicAuth
@@ -19,7 +20,21 @@ from rest_framework.test import APITestCase, APITransactionTestCase
 
 from core.collections.models import CollectionReference
 from core.common.constants import HEAD
+from core.common.models import BaseModel
 from core.common.tasks import delete_s3_objects, bulk_import_parallel_inline, resources_report, calculate_checksums
+from core.common.throttling import (
+    CoreDayThrottle,
+    CoreMinuteThrottle,
+    GuestDayThrottle,
+    GuestMinuteThrottle,
+    MatchCoreDayThrottle,
+    MatchCoreMinuteThrottle,
+    MatchStandardDayThrottle,
+    MatchStandardMinuteThrottle,
+    StandardDayThrottle,
+    StandardMinuteThrottle,
+    ThrottleUtil,
+)
 from core.common.utils import (
     compact_dict_by_values, to_snake_case, flower_get,
     to_camel_case,
@@ -31,6 +46,7 @@ from core.common.utils import (
 from core.concepts.models import Concept
 from core.orgs.models import Organization
 from core.sources.models import Source
+from core.users.constants import CORE_USER_GROUP, GUEST_GROUP
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 from .backends import OCLOIDCAuthenticationBackend
@@ -1025,6 +1041,86 @@ class BaseModelTest(OCLTestCase):
         self.assertEqual(Concept().app_name, 'concepts')
         self.assertEqual(Source().app_name, 'sources')
 
+    @override_settings(TEST_MODE=False)
+    def test_batch_index_full_streams_batches_without_parallel_bulk(self):
+        ordered_queryset = MagicMock()
+
+        def get_batch(batch_slice):
+            if batch_slice == slice(0, 500, None):
+                return [1, 2]
+            return []
+
+        ordered_queryset.__getitem__.side_effect = get_batch
+
+        queryset = Mock()
+        queryset.order_by.return_value = ordered_queryset
+        queryset.prefetch_related.return_value = queryset
+        queryset.select_related.return_value = queryset
+
+        doc_instance = Mock()
+        doc_instance.django.auto_refresh = False
+        document = Mock(return_value=doc_instance)
+
+        BaseModel.batch_index_full(False, queryset, document, None, None)
+
+        queryset.order_by.assert_called_with('-id')
+        self.assertEqual(ordered_queryset.__getitem__.call_args_list, [
+            call(slice(0, 500, None)),
+            call(slice(500, 1000, None)),
+        ])
+        self.assertEqual(doc_instance.update.call_args_list, [
+            call([1, 2], parallel=True),
+        ])
+
+    @override_settings(TEST_MODE=False)
+    def test_batch_index_partial_streams_batches_without_parallel_bulk(self):
+        # The document bulk helper stores index metadata on protected members.
+        ids_queryset = MagicMock()
+
+        def get_batch(batch_slice):
+            if batch_slice == slice(0, 500, None):
+                return [10, 11]
+            return []
+
+        ids_queryset.__getitem__.side_effect = get_batch
+
+        queryset = Mock()
+        ordered_queryset = Mock()
+        ordered_queryset.values_list.return_value = ids_queryset
+        queryset.order_by.return_value = ordered_queryset
+
+        doc_instance = Mock()
+        doc_instance.django.auto_refresh = False
+        document = Mock(return_value=doc_instance)
+
+        BaseModel.batch_index_partial(queryset, document, False, {'flag': True})
+
+        queryset.order_by.assert_called_once_with('-id')
+        ordered_queryset.values_list.assert_called_once_with('id', flat=True)
+        self.assertEqual(ids_queryset.__getitem__.call_args_list, [
+            call(slice(0, 500, None)),
+            call(slice(500, 1000, None)),
+        ])
+        bulk_calls = doc_instance._bulk.call_args_list  # pylint: disable=protected-access
+        self.assertEqual(len(bulk_calls), 1)
+        self.assertEqual(list(bulk_calls[0].args[0]), [
+            {
+                '_op_type': 'update',
+                '_index': doc_instance._index._name,  # pylint: disable=protected-access
+                '_id': 10,
+                'doc': {'flag': True},
+                'doc_as_upsert': True
+            },
+            {
+                '_op_type': 'update',
+                '_index': doc_instance._index._name,  # pylint: disable=protected-access
+                '_id': 11,
+                'doc': {'flag': True},
+                'doc_as_upsert': True
+            }
+        ])
+        self.assertEqual([call.kwargs for call in bulk_calls], [{'parallel': True}])
+
 
 class TaskTest(OCLTestCase):
     @patch('core.common.tasks.get_export_service')
@@ -1316,3 +1412,106 @@ class ChecksumViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, 'checksum')
+
+
+@patch.dict('rest_framework.throttling.UserRateThrottle.THROTTLE_RATES', {
+    'guest_minute': '400/minute',
+    'guest_day': '10000/day',
+    'standard_minute': '500/minute',
+    'standard_day': '20000/day',
+    'core_minute': '1000/minute',
+    'core_day': '40000/day',
+    'match_standard_minute': '300/minute',
+    'match_standard_day': '5000/day',
+    'match_core_minute': '1000/minute',
+    'match_core_day': '20000/day',
+}, clear=True)
+@override_settings(ENABLE_THROTTLING=True)
+class ThrottleUtilTest(OCLTestCase):
+    """Verify throttle selection for guest, standard, core, and superuser auth groups."""
+
+    def test_get_throttles_for_guest_user(self):
+        throttles = ThrottleUtil.get_throttles_by_user_plan(AnonymousUser())
+
+        self.assertIsInstance(throttles[0], GuestMinuteThrottle)
+        self.assertIsInstance(throttles[1], GuestDayThrottle)
+
+    def test_get_throttles_for_standard_user(self):
+        user = UserProfileFactory()
+
+        throttles = ThrottleUtil.get_throttles_by_user_plan(user)
+
+        self.assertIsInstance(throttles[0], StandardMinuteThrottle)
+        self.assertIsInstance(throttles[1], StandardDayThrottle)
+
+    def test_get_throttles_for_core_user(self):
+        user = UserProfileFactory()
+        user.groups.add(Group.objects.get(name=CORE_USER_GROUP))
+
+        throttles = ThrottleUtil.get_throttles_by_user_plan(user)
+
+        self.assertTrue(user.is_core_group)
+        self.assertIsInstance(throttles[0], CoreMinuteThrottle)
+        self.assertIsInstance(throttles[1], CoreDayThrottle)
+
+    def test_get_throttles_for_superuser(self):
+        """Superusers must bypass view throttling entirely."""
+        user = UserProfileFactory(is_superuser=True, is_staff=True)
+
+        throttles = ThrottleUtil.get_throttles_by_user_plan(user)
+
+        self.assertEqual(throttles, [])
+
+    def test_get_match_throttles_for_guest_user(self):
+        user = UserProfileFactory()
+        user.groups.add(Group.objects.get(name=GUEST_GROUP))
+
+        throttles = ThrottleUtil.get_match_throttles_by_user_plan(user)
+
+        self.assertIsInstance(throttles[0], GuestMinuteThrottle)
+        self.assertIsInstance(throttles[1], GuestDayThrottle)
+
+    def test_get_match_throttles_for_standard_user(self):
+        user = UserProfileFactory()
+
+        throttles = ThrottleUtil.get_match_throttles_by_user_plan(user)
+
+        self.assertIsInstance(throttles[0], MatchStandardMinuteThrottle)
+        self.assertIsInstance(throttles[1], MatchStandardDayThrottle)
+
+    def test_get_match_throttles_for_core_user(self):
+        user = UserProfileFactory()
+        user.groups.add(Group.objects.get(name=CORE_USER_GROUP))
+
+        throttles = ThrottleUtil.get_match_throttles_by_user_plan(user)
+
+        self.assertIsInstance(throttles[0], MatchCoreMinuteThrottle)
+        self.assertIsInstance(throttles[1], MatchCoreDayThrottle)
+
+    def test_get_match_throttles_for_superuser(self):
+        """Superusers must bypass match throttling entirely."""
+        user = UserProfileFactory(is_superuser=True, is_staff=True)
+
+        throttles = ThrottleUtil.get_match_throttles_by_user_plan(user)
+
+        self.assertEqual(throttles, [])
+
+    def test_core_user_gets_core_throttle_not_standard(self):
+        """Core group membership must take precedence over the standard fallthrough."""
+        user = UserProfileFactory()
+        user.groups.add(Group.objects.get(name=CORE_USER_GROUP))
+
+        throttles = ThrottleUtil.get_throttles_by_user_plan(user)
+        match_throttles = ThrottleUtil.get_match_throttles_by_user_plan(user)
+
+        # Must NOT fall through to standard
+        self.assertNotIsInstance(throttles[0], StandardMinuteThrottle)
+        self.assertNotIsInstance(throttles[1], StandardDayThrottle)
+        self.assertNotIsInstance(match_throttles[0], MatchStandardMinuteThrottle)
+        self.assertNotIsInstance(match_throttles[1], MatchStandardDayThrottle)
+
+        # Must get core
+        self.assertIsInstance(throttles[0], CoreMinuteThrottle)
+        self.assertIsInstance(throttles[1], CoreDayThrottle)
+        self.assertIsInstance(match_throttles[0], MatchCoreMinuteThrottle)
+        self.assertIsInstance(match_throttles[1], MatchCoreDayThrottle)

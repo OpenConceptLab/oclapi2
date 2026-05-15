@@ -11,7 +11,7 @@ colour_runner==0.1.1
 boto3==1.36.10
 moto==5.0.27
 python-dateutil==2.8.2
-requests==2.32.3
+requests==2.33.0
 factory_boy==3.3.0
 # Celery
 celery[redis]==5.4.0
@@ -23,12 +23,12 @@ kombu==5.4.2
 django-elasticsearch-dsl==8.0
 drf-yasg==1.21.15
 git+https://github.com/snyaggarwal/django-queryset-csv
-ocldev==0.2.2
+ocldev==0.2.3
 coverage==7.3.0
 tblib==2.0.0
 django-ordered-model==3.7.4
 django-health-check==3.17.0
-markdown==3.4.4
+markdown==3.8.1
 mock==5.1.0
 django-request-logging==0.7.5
 django-cid==2.3
@@ -44,8 +44,8 @@ ijson==3.2.3
 responses==0.25.0
 pydantic==2.6.4
 minio==7.2.9
-sentence-transformers==3.3.1
+sentence-transformers==5.4.0
 elastic-transport==8.17
-litellm==1.77.0
+litellm==1.83.0
 strawberry-graphql==0.285.0
 strawberry-graphql-django==0.67.0

@@ -33,6 +33,7 @@ class AbstractLocalizedText(ChecksumModel):
     locale = models.TextField()
     locale_preferred = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+    retired = models.BooleanField(default=False)
 
     SMART_CHECKSUM_KEY = None
 
@@ -42,7 +43,8 @@ class AbstractLocalizedText(ChecksumModel):
             'name': self.name,
             'type': self.type,
             'locale': self.locale,
-            'locale_preferred': self.locale_preferred
+            'locale_preferred': self.locale_preferred,
+            'retired': self.retired,
         }
 
     def clone(self):
@@ -51,7 +53,8 @@ class AbstractLocalizedText(ChecksumModel):
             name=self.name,
             type=self.type,
             locale=self.locale,
-            locale_preferred=self.locale_preferred
+            locale_preferred=self.locale_preferred,
+            retired=self.retired,
         )
 
     @staticmethod
@@ -99,6 +102,13 @@ class ConceptDescription(AbstractLocalizedText):
 
     class Meta:
         db_table = 'concept_descriptions'
+        indexes = [
+                      HashIndex(fields=['name']),
+                      models.Index(fields=['locale']),
+                      models.Index(fields=['created_at']),
+                      models.Index(fields=['type']),
+                      models.Index(fields=['retired']),
+                  ]
 
     @property
     def description_type(self):
@@ -136,10 +146,21 @@ class ConceptName(AbstractLocalizedText):
                       models.Index(fields=['locale']),
                       models.Index(fields=['created_at']),
                       models.Index(fields=['type']),
+                      models.Index(fields=['retired']),
+                      models.Index(
+                          name='active_locale',
+                          fields=['locale'], condition=models.Q(retired=False)),
+                      models.Index(
+                          name='last_created_locale',
+                          fields=['-created_at'], condition=models.Q(retired=False)),
+                      models.Index(
+                          name='last_preferred_locale',
+                          fields=['-created_at'], condition=models.Q(locale_preferred=True, retired=False)
+                      ),
                       models.Index(
                           name='preferred_locale',
                           fields=['concept', 'locale_preferred', 'locale', '-created_at'],
-                          condition=Q(locale_preferred=True)
+                          condition=Q(locale_preferred=True, retired=False)
                       ),
                   ]
 
@@ -326,34 +347,37 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         system_default_locale = settings.DEFAULT_LOCALE
 
         return get(
-            self.__names_qs({'locale': system_default_locale, 'locale_preferred': True}, 'created_at', 'desc'), '0'
+            self.__names_qs({'locale': system_default_locale, 'locale_preferred': True, 'retired': False},
+                            'created_at', 'desc'), '0'
         ) or get(
-            self.__names_qs({'locale': system_default_locale}, 'created_at', 'desc'), '0'
+            self.__names_qs({'locale': system_default_locale, 'retired': False}, 'created_at', 'desc'), '0'
         )
 
     def __get_parent_default_locale_name(self):
         parent_default_locale = self._requested_locale or self.parent.default_locale
         return get(
-            self.__names_qs({'locale': parent_default_locale, 'locale_preferred': True}, 'created_at', 'desc'), '0'
+            self.__names_qs({'locale': parent_default_locale, 'locale_preferred': True, 'retired': False},
+                            'created_at', 'desc'), '0'
         ) or get(
-            self.__names_qs({'locale': parent_default_locale}, 'created_at', 'desc'), '0'
+            self.__names_qs({'locale': parent_default_locale, 'retired': False}, 'created_at', 'desc'), '0'
         )
 
     def __get_parent_supported_locale_name(self):
         parent_supported_locales = self.parent.supported_locales
         return get(
             self.__names_qs(
-                {'locale__in': parent_supported_locales, 'locale_preferred': True}, 'created_at', 'desc'
+                {'locale__in': parent_supported_locales, 'locale_preferred': True, 'retired': False},
+                'created_at', 'desc'
             ), '0'
         ) or get(
-            self.__names_qs({'locale__in': parent_supported_locales}, 'created_at', 'desc'), '0'
+            self.__names_qs({'locale__in': parent_supported_locales, 'retired': False}, 'created_at', 'desc'), '0'
         )
 
     def __get_last_created_locale(self):
-        return get(self.__names_qs({}, 'created_at', 'desc'), '0')
+        return get(self.__names_qs({'retired': False}, 'created_at', 'desc'), '0')
 
     def __get_preferred_locale(self):
-        return get(self.__names_qs({'locale_preferred': True}, 'created_at', 'desc'), '0')
+        return get(self.__names_qs({'locale_preferred': True, 'retired': False}, 'created_at', 'desc'), '0')
 
     def __names_qs(self, filters, order_by=None, order='desc'):
         if getattr(self, '_prefetched_objects_cache', None) and \
@@ -393,7 +417,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     @staticmethod
     def get_default_locales(locales):
-        return locales.filter(locale=settings.DEFAULT_LOCALE)
+        return locales.filter(locale=settings.DEFAULT_LOCALE, retired=False)
 
     @property
     def names_for_default_locale(self):
@@ -405,21 +429,36 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     @property
     def iso_639_1_locale(self):
-        return get(self.__names_qs({'type': ISO_639_1}), '0.name')
+        return get(self.__names_qs({'type': ISO_639_1, 'retired': False}), '0.name')
 
     @property
     def custom_validation_schema(self):
         return get(self, 'parent.custom_validation_schema')
 
     @property
-    def all_names(self):
-        return list(self.names.values_list('name', flat=True))
+    def active_names(self):
+        return self.names.filter(retired=False)
+
+    @property
+    def active_descriptions(self):
+        return self.descriptions.filter(retired=False)
+
+    @property
+    def retired_names(self):
+        return self.names.filter(retired=True)
+
+    @property
+    def retired_descriptions(self):
+        return self.descriptions.filter(retired=True)
 
     @property
     def saved_unsaved_descriptions(self):
         unsaved_descriptions = get(self, 'cloned_descriptions', [])
         if self.id:
-            return compact([*list(self.descriptions.all()), *unsaved_descriptions])
+            return compact([
+                *list(self.active_descriptions.all()),
+                *[locale for locale in unsaved_descriptions if not locale.retired]
+            ])
         return unsaved_descriptions
 
     @property
@@ -427,7 +466,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         unsaved_names = get(self, 'cloned_names', [])
 
         if self.id:
-            return compact([*list(self.names.all()), *unsaved_names])
+            # Keep persisted names in a deterministic order, keeps tests from being flaky.
+            return compact([
+                *list(self.active_names.order_by('id')),
+                *[locale for locale in unsaved_names if not locale.retired]
+            ])
 
         return unsaved_names
 
@@ -990,6 +1033,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         names = data.pop('names', []) or []
         descriptions = data.pop('descriptions', []) or []
         parent_concept_uris = data.pop('parent_concept_urls', None)
+        skip_hierarchy_tasks = data.pop('_skip_hierarchy_tasks', False)
         mappings_payload = data.pop('mappings_payload', None) or data.pop('mappings', None) or []
         mappings_result = []
         has_mapping_errors = False
@@ -1054,7 +1098,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             else:
                 update_mappings_concept.apply_async((concept.id,), queue='default', permanent=False)
 
-            if parent_concept_uris:
+            if parent_concept_uris and not skip_hierarchy_tasks:
                 if get(settings, 'TEST_MODE', False):
                     process_hierarchy_for_new_concept(
                         concept.id, get(initial_version, 'id'), parent_concept_uris, create_parent_version)

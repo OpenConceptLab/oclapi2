@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 class AnalyticsEventEmitter:  # pragma: no cover
     ANALYTICS_ENDPOINT = settings.ANALYTICS_API + '/api-transactions/'
-    TIMEOUT_SECONDS = 0.1  # 100ms hard cap
+    TIMEOUT_SECONDS = 0.5  # 500ms — was 100ms, which silently dropped events under load
     SENSITIVE_HEADERS = {
         "authorization",
         "cookie",
