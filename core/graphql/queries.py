@@ -394,9 +394,9 @@ def concept_ids_from_es(
         search = ConceptDocument.search()
         search = search.filter('term', retired=False)
         if source_version:
-            search = search.filter('term', source=source_version.mnemonic)
+            search = search.filter('term', source=source_version.mnemonic.lower())
             if owner and owner_type:
-                search = search.filter('term', owner=owner).filter('term', owner_type=owner_type)
+                search = search.filter('term', owner=owner.lower()).filter('term', owner_type=owner_type)
 
             effective_version = version_label or HEAD
             if effective_version == HEAD:
@@ -573,7 +573,7 @@ class Query(PermissionsMixin):
                 mapping_prefetch,
                 owner=owner_value,
                 owner_type=owner_type,
-                version_label=version or HEAD if source_version else None,
+                version_label=(version or HEAD) if source_version else None,
                 user=user,
             )
 

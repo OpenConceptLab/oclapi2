@@ -2,6 +2,7 @@ import strawberry
 from strawberry_django.optimizer import DjangoOptimizerExtension
 
 from .constants import EXPECTED_GRAPHQL_ERROR_CODES, get_graphql_error_code
+from .extensions import AuthStatusExtension
 from .queries import Query
 
 
@@ -17,5 +18,5 @@ class OCLGraphQLSchema(strawberry.Schema):
 
 schema = OCLGraphQLSchema(
     query=Query,
-    extensions=[DjangoOptimizerExtension],
+    extensions=[AuthStatusExtension, DjangoOptimizerExtension],
 )

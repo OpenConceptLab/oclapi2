@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from functools import wraps
-from types import SimpleNamespace
 from typing import Any, Awaitable, Callable, Optional
 
 from asgiref.sync import sync_to_async
@@ -11,7 +10,7 @@ from django.contrib.auth.models import AnonymousUser
 from strawberry.exceptions import GraphQLError
 
 from core.common.constants import ACCESS_TYPE_NONE
-from core.common.permissions import CanViewConceptDictionary
+from core.common.permissions import user_can_view_concept_dictionary
 from core.common.search import apply_document_public_visibility_filter
 
 from .constants import AUTHENTICATION_FAILED, FORBIDDEN, build_expected_graphql_error
@@ -33,12 +32,10 @@ def get_permission_target(instance, resolver):
 
 async def ensure_can_view_repo(user, source_version) -> None:
     """Raise a GraphQL forbidden error when the repository is not visible to the user."""
-    request = SimpleNamespace(user=user)
-    permission = CanViewConceptDictionary()
     allowed = await sync_to_async(
-        permission.has_object_permission,
+        user_can_view_concept_dictionary,
         thread_sensitive=True,
-    )(request, None, source_version)
+    )(user, source_version)
 
     if not allowed:
         raise build_expected_graphql_error(FORBIDDEN)
