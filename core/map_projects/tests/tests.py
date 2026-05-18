@@ -71,6 +71,31 @@ class MapProjectListViewTest(MapProjectAbstractViewTest):
         self.assertEqual(response.data[0]['id'], project.id)
         self.assertEqual(response.data[0]['url'], f'/orgs/CIEL/map-projects/{project.id}/')
 
+    def test_get_verbose(self):
+        project = MapProjectFactory(
+            organization=self.org,
+            name="Verbose Project",
+            matches=[{'state': 'matched', 'id': 1}],
+            candidates={'1': ['a', 'b']},
+            analysis={'score': 0.9},
+        )
+        project.save()
+
+        response = self.client.get(
+            '/orgs/CIEL/map-projects/?verbose=true',
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        result = response.data[0]
+        self.assertEqual(result['id'], project.id)
+        self.assertIn('matches', result)
+        self.assertIn('columns', result)
+        self.assertIn('candidates', result)
+        self.assertIn('analysis', result)
+        self.assertEqual(result['matches'], project.matches)
+        self.assertEqual(result['candidates'], project.candidates)
+
 
 class MapProjectViewTest(MapProjectAbstractViewTest):
     def setUp(self):

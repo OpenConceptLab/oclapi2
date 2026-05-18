@@ -29,6 +29,11 @@ class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListW
 
     def get_queryset(self):
         queryset = self.queryset.select_related('created_by', 'updated_by', 'organization', 'user')
+        if self.request.method == 'GET' and not self.is_verbose():
+            queryset = queryset.defer(
+                'matches', 'columns', 'candidates', 'analysis', 'logs', 'extras', 'algorithms', 'filters',
+                'lookup_config', 'input_locales'
+            )
         return self.filter_queryset_by_public_access(self.filter_queryset_by_owner(queryset))
 
     def get(self, request, *args, **kwargs):
