@@ -137,6 +137,9 @@ class MapProjectViewTest(MapProjectAbstractViewTest):
                     'original': 'itemid'
                 }
             ]),
+            # Multipart clients send locale arrays as JSON strings, so the
+            # view must decode them before serializer validation.
+            'input_locales': json.dumps(['en']),
         }
         response = self.client.put(
             f'/orgs/CIEL/map-projects/{self.project.id}/',
@@ -149,6 +152,7 @@ class MapProjectViewTest(MapProjectAbstractViewTest):
         self.assertEqual(self.org.map_projects.count(), 1)
         self.assertEqual(response.data['name'], 'Test Project')
         self.assertEqual(len(response.data['columns']), 1)
+        self.assertEqual(response.data['input_locales'], ['en'])
         upload_mock.assert_called_once_with(
             key=f"map_projects/{response.data['id']}/input.csv", file_content=ANY)
 

@@ -66,6 +66,19 @@ class MapProjectView(MapProjectBaseView, RetrieveUpdateDestroyAPIView):
             return MapProjectCreateUpdateSerializer
         return self.serializer_class
 
+    def update(self, request, *args, **kwargs):
+        """Normalize multipart PUT payloads before serializer validation."""
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(
+            instance,
+            data=MapProject.format_request_data(request.data),
+            partial=partial
+        )
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(serializer.data)
+
 
 class MapProjectConfigurationsView(MapProjectBaseView, RetrieveAPIView):
     serializer_class = MapProjectConfigurationsSerializer
