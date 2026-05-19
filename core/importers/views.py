@@ -160,6 +160,8 @@ class BulkImportParallelInlineView(APIView):
         deprecated=True
     )
     def post(self, request, import_queue=None):
+        if isinstance(request.data, list):
+            return Response({'exception': "Invalid input."}, status=status.HTTP_400_BAD_REQUEST)
         parallel_threads = request.data.get('parallel') or 5
         is_upload = 'file' in request.data
         is_file_url = 'file_url' in request.data

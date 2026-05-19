@@ -1794,6 +1794,16 @@ class BulkImportViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, {'exception': "Invalid input."})
 
+        response = self.client.post(
+            '/importers/bulk-import/?update_if_exists=true',
+            [{'type': 'Concept', 'id': '1'}],
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'exception': "Invalid input."})
+
     @patch('core.importers.views.queue_bulk_import')
     def test_post_409(self, queue_bulk_import_mock):
         queue_bulk_import_mock.side_effect = AlreadyQueued('already-queued')
