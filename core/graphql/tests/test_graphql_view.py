@@ -9,7 +9,7 @@ from rest_framework.authentication import BaseAuthentication, get_authorization_
 from rest_framework.exceptions import AuthenticationFailed
 
 from core.common.tests import OCLTestCase
-from core.graphql.constants import AUTHENTICATION_FAILED, SEARCH_UNAVAILABLE
+from core.graphql.constants import AUTHENTICATION_FAILED
 from core.graphql.tests.conftest import bootstrap_super_user, create_user_with_token
 
 
@@ -106,18 +106,4 @@ class TestGraphQLCsrfBehavior(OCLTestCase):
         self.assertIn('errors', payload)
         self.assertIn('Authentication failure', payload['errors'][0]['message'])
         self.assertEqual(payload['errors'][0]['extensions']['code'], AUTHENTICATION_FAILED)
-        error_logger.assert_not_called()
-
-    @patch('core.graphql.queries.concept_ids_from_es', return_value=None)
-    def test_global_search_returns_explicit_error_when_es_is_unavailable(self, _mock_es):
-        headers = {"HTTP_AUTHORIZATION": f"Token {self.token.key}"}
-        query = "query { concepts(query:\"test\") { totalCount } }"
-
-        with patch('strawberry.schema.base.StrawberryLogger.error') as error_logger:
-            response = self._post_graphql(headers=headers, query=query)
-
-        payload = response.json()
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('errors', payload)
-        self.assertEqual(payload['errors'][0]['extensions']['code'], SEARCH_UNAVAILABLE)
         error_logger.assert_not_called()

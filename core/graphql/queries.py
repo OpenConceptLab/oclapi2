@@ -10,19 +10,18 @@ from django.contrib.auth.models import AnonymousUser
 from django.db.models import Case, F, IntegerField, Prefetch, Q, When
 from django.utils import timezone
 from elasticsearch import ConnectionError as ESConnectionError, TransportError
+from elasticsearch_dsl import Q as ES_Q
 from pydash import get
 from strawberry.exceptions import GraphQLError
 
 from core.common.constants import HEAD
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
-from core.concepts.search import apply_concept_text_search
 from core.mappings.models import Mapping
 from core.orgs.constants import ORG_OBJECT_TYPE
 from core.sources.models import Source
 from core.users.constants import USER_OBJECT_TYPE
 
-from .constants import SEARCH_UNAVAILABLE, build_expected_graphql_error
 from .permissions import (
     PermissionsMixin,
     apply_es_visibility_filter,
@@ -105,9 +104,11 @@ async def resolve_source_version(
     return instance
 
 
-def build_base_queryset(source_version: Source = None):
-    if source_version:
-        return source_version.get_concepts_queryset().filter(is_active=True, retired=False)
+def build_source_version_queryset(source_version: Source):
+    return source_version.get_concepts_queryset().filter(is_active=True, retired=False)
+
+
+def build_global_head_queryset():
     return Concept.objects.filter(is_active=True, retired=False, id=F('versioned_object_id'))
 
 
@@ -392,7 +393,6 @@ def concept_ids_from_es(
 
     try:
         search = ConceptDocument.search()
-        search = search.filter('term', retired=False)
         if source_version:
             search = search.filter('term', source=source_version.mnemonic.lower())
             if owner and owner_type:
@@ -400,15 +400,20 @@ def concept_ids_from_es(
 
             effective_version = version_label or HEAD
             if effective_version == HEAD:
-                search = search.filter('term', source_version=HEAD)
                 search = search.filter('term', is_latest_version=True)
             else:
                 search = search.filter('term', source_version=effective_version)
         else:
             search = search.filter('term', is_latest_version=True)
             search = apply_es_visibility_filter(search, user or AnonymousUser())
+        search = search.filter('term', retired=False)
 
-        search, _ = apply_concept_text_search(search, trimmed, include_rescore=True)
+        should_queries = [
+            ES_Q('match', id={'query': trimmed, 'boost': 6, 'operator': 'AND'}),
+            ES_Q('match_phrase_prefix', name={'query': trimmed, 'boost': 4}),
+            ES_Q('match', synonyms={'query': trimmed, 'boost': 2, 'operator': 'AND'}),
+        ]
+        search = search.query(ES_Q('bool', should=should_queries, minimum_should_match=1))
 
         if pagination:
             search = search[pagination['start']:pagination['end']]
@@ -437,13 +442,13 @@ async def concepts_for_ids(
     """Fetch concepts by mnemonic while preserving the client-provided ordering."""
     ordered_ids = list(dict.fromkeys(concept_id for concept_id in concept_ids if concept_id))
     if not ordered_ids:
-        raise GraphQLError('conceptIds must contain at least one value.')
+        raise GraphQLError('conceptIds must include at least one value when provided.')
 
     ordering = Case(
         *[When(mnemonic=concept_id, then=pos) for pos, concept_id in enumerate(ordered_ids)],
         output_field=IntegerField(),
     )
-    qs = base_qs.filter(mnemonic__in=ordered_ids).order_by(ordering)
+    qs = base_qs.filter(mnemonic__in=ordered_ids).order_by(ordering, 'mnemonic')
     total = await sync_to_async(qs.count)()
     qs = apply_slice(qs, pagination)
     qs = with_concept_related(qs, mapping_prefetch)
@@ -457,7 +462,7 @@ def build_db_search_queryset(base_qs, query: str):
         return base_qs.none()
 
     return base_qs.filter(
-        Q(names__name__icontains=trimmed) | Q(descriptions__name__icontains=trimmed)
+        Q(mnemonic__icontains=trimmed) | Q(names__name__icontains=trimmed, names__retired=False)
     ).distinct()
 
 
@@ -483,22 +488,24 @@ async def concepts_for_query(
     )
     if es_result is not None:
         concept_ids, total = es_result
-        if concept_ids:
+        if not concept_ids:
+            if total == 0:
+                logger.info(
+                    'ES returned zero hits for query="%s" in source "%s" version "%s". Falling back to DB search.',
+                    query,
+                    get(source_version, 'mnemonic'),
+                    get(source_version, 'version'),
+                )
+            else:
+                return [], total
+        else:
             ordering = Case(
                 *[When(id=pk, then=pos) for pos, pk in enumerate(concept_ids)],
                 output_field=IntegerField()
             )
             qs = base_qs.filter(id__in=concept_ids).order_by(ordering)
             qs = with_concept_related(qs, mapping_prefetch)
-            concepts = await sync_to_async(list)(qs)
-            if len(concepts) == len(concept_ids):
-                return concepts, total
-        elif total > 0:
-            return [], total
-
-    if source_version is None:
-        # Global search is ES-backed because the DB fallback is both broader and much more expensive under outage.
-        raise build_expected_graphql_error(SEARCH_UNAVAILABLE)
+            return await sync_to_async(list)(qs), total
 
     qs = build_db_search_queryset(base_qs, query).order_by('mnemonic')
     total = await sync_to_async(qs.count)()
@@ -554,12 +561,12 @@ class Query(PermissionsMixin):
 
         if (org or owner) and source:
             source_version = await permission_target.get_source_version(info, org, owner, source, version)
-            base_qs = build_base_queryset(source_version)
+            base_qs = build_source_version_queryset(source_version)
             mapping_prefetch = build_mapping_prefetch(source_version)
         else:
             # Global search across all repositories
             source_version = None
-            base_qs = permission_target.filter_global_queryset(build_base_queryset(), user)
+            base_qs = permission_target.filter_global_queryset(build_global_head_queryset(), user)
             mapping_prefetch = build_global_mapping_prefetch(user)
 
         if concept_ids_param:

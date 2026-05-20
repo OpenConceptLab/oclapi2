@@ -21,10 +21,7 @@ def filter_concept_search_fields(fields, include_map_codes=True):
     if include_map_codes:
         return fields
 
-    if isinstance(fields, dict):
-        return {key: value for key, value in fields.items() if not key.endswith('map_codes')}
-
-    return [field for field in fields if not field.endswith('map_codes')]
+    return {key: value for key, value in fields.items() if not key.endswith('map_codes')}
 
 
 def get_concept_search_string(query, lower=True, decode=True):
@@ -51,16 +48,24 @@ def get_concept_exact_search_criterion(query, include_map_codes=True):
     ), fields
 
 
-def get_concept_wildcard_search_criterion(query, include_map_codes=True):
-    """Build the wildcard clause used by both REST and GraphQL concept search."""
+def _build_concept_wildcard_criterion(normalized_query, include_map_codes=True):
+    """Wildcard clause builder that skips re-normalization for already-clean tokens."""
     fields = filter_concept_search_fields(
         ConceptDocument.get_wildcard_search_attrs(),
         include_map_codes=include_map_codes,
     )
     return CustomESSearch.get_wildcard_match_criterion(
-        search_str=get_concept_search_string(query),
+        search_str=CustomESSearch.get_search_string(normalized_query, lower=True, decode=True),
         fields=fields,
     ), list(fields.keys())
+
+
+def get_concept_wildcard_search_criterion(query, include_map_codes=True):
+    """Build the wildcard clause used by both REST and GraphQL concept search."""
+    return _build_concept_wildcard_criterion(
+        normalize_concept_search_query(query),
+        include_map_codes=include_map_codes,
+    )
 
 
 def get_concept_fuzzy_search_criterion(
@@ -81,7 +86,7 @@ def get_concept_mandatory_words_criteria(query, include_map_codes=True):
     """Build the required-word wildcard clauses shared by REST and GraphQL."""
     criterion = None
     for must_have in CustomESSearch.get_must_haves(normalize_concept_search_query(query)):
-        criteria, _ = get_concept_wildcard_search_criterion(
+        criteria, _ = _build_concept_wildcard_criterion(
             f"{must_have}*",
             include_map_codes=include_map_codes,
         )
@@ -93,7 +98,7 @@ def get_concept_mandatory_exclude_words_criteria(query, include_map_codes=True):
     """Build the excluded-word wildcard clauses shared by REST and GraphQL."""
     criterion = None
     for must_not_have in CustomESSearch.get_must_not_haves(normalize_concept_search_query(query)):
-        criteria, _ = get_concept_wildcard_search_criterion(
+        criteria, _ = _build_concept_wildcard_criterion(
             f"{must_not_have}*",
             include_map_codes=include_map_codes,
         )

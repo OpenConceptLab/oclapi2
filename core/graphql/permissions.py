@@ -18,16 +18,13 @@ from .constants import AUTHENTICATION_FAILED, FORBIDDEN, build_expected_graphql_
 SOURCE_VERSION_CACHE_ATTR = '_graphql_source_version_cache'
 
 
-def get_permission_target(instance, resolver):
+def get_permission_target(instance, resolver):  # pylint: disable=unused-argument
     """Return a resolver helper instance even when Strawberry passes a null root value."""
     if instance is not None:
         return instance
 
-    owner_name = resolver.__qualname__.split('.', 1)[0]
-    owner_class = resolver.__globals__.get(owner_name)
-    if owner_class is None:
-        raise GraphQLError('Resolver permission target is not available.')
-    return owner_class()
+    from .queries import Query  # local import to avoid circular dependency
+    return Query()
 
 
 async def ensure_can_view_repo(user, source_version) -> None:

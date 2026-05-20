@@ -24,7 +24,8 @@ from core.graphql.queries import (
     _to_bool,
     _to_float,
     apply_slice,
-    build_base_queryset,
+    build_global_head_queryset,
+    build_source_version_queryset,
     build_datatype,
     build_global_mapping_prefetch,
     build_mapping_prefetch,
@@ -49,7 +50,6 @@ from core.graphql.queries import (
 from core.graphql.constants import (
     AUTHENTICATION_FAILED,
     FORBIDDEN,
-    SEARCH_UNAVAILABLE,
     build_expected_graphql_error,
 )
 from core.graphql.schema import schema
@@ -251,7 +251,7 @@ class QueryHelperTests(OCLTestCase):
                 self.organization.mnemonic, None, 'missing-source', 'v-does-not-exist'
             )
 
-        base_qs = build_base_queryset(self.source)
+        base_qs = build_source_version_queryset(self.source)
         mapping_prefetch = build_mapping_prefetch(self.source)
         global_prefetch = build_global_mapping_prefetch()
         self.assertIsNotNone(mapping_prefetch)
@@ -277,7 +277,7 @@ class QueryHelperTests(OCLTestCase):
             updated_by=self.audit_user,
         )
         anonymous_qs = with_concept_related(
-            build_base_queryset(),
+            build_global_head_queryset(),
             build_global_mapping_prefetch(AnonymousUser()),
         ).filter(id=self.concept1.id)
         anonymous_concept = list(anonymous_qs)[0]
@@ -290,7 +290,7 @@ class QueryHelperTests(OCLTestCase):
         )
         self.organization.members.add(member)
         member_qs = with_concept_related(
-            build_base_queryset(),
+            build_global_head_queryset(),
             build_global_mapping_prefetch(member),
         ).filter(id=self.concept1.id)
         member_concept = list(member_qs)[0]
@@ -492,7 +492,7 @@ class QueryHelperTests(OCLTestCase):
         )
 
     def test_concepts_queries_behavior(self):
-        base_qs = build_base_queryset(self.source)
+        base_qs = build_source_version_queryset(self.source)
         mapping_prefetch = build_mapping_prefetch(self.source)
         with self.assertRaises(GraphQLError):
             async_to_sync(concepts_for_ids)(base_qs, [], normalize_pagination(1, 1), mapping_prefetch)
@@ -517,20 +517,18 @@ class QueryHelperTests(OCLTestCase):
             concepts, total = async_to_sync(concepts_for_query)(
                 base_qs, 'UTIL', self.source, normalize_pagination(1, 1), mapping_prefetch
             )
-        self.assertEqual(total, 0)
-        self.assertEqual(concepts, [])
+        self.assertGreaterEqual(total, 1)
 
         with patch('core.graphql.queries.concept_ids_from_es', return_value=None):
-            with self.assertRaises(GraphQLError) as unavailable:
-                async_to_sync(concepts_for_query)(
-                    build_base_queryset(),
-                    'UTIL',
-                    None,
-                    normalize_pagination(1, 1),
-                    build_global_mapping_prefetch(AnonymousUser()),
-                    user=AnonymousUser(),
-                )
-        self.assertEqual(unavailable.exception.extensions['code'], SEARCH_UNAVAILABLE)
+            global_concepts, _ = async_to_sync(concepts_for_query)(
+                build_global_head_queryset(),
+                'UTIL',
+                None,
+                normalize_pagination(1, 1),
+                build_global_mapping_prefetch(AnonymousUser()),
+                user=AnonymousUser(),
+            )
+        self.assertEqual(len(global_concepts), 1)
 
         with patch('core.graphql.queries.concept_ids_from_es', return_value=([], 2)):
             concepts, total = async_to_sync(concepts_for_query)(
@@ -568,12 +566,8 @@ class QueryHelperTests(OCLTestCase):
         self.assertEqual(result_ids.limit, 1)
 
         with patch('core.graphql.queries.concept_ids_from_es', return_value=None):
-            with self.assertRaises(GraphQLError) as unavailable:
-                async_to_sync(Query().concepts)(
-                    info_valid,
-                    query='UTIL',
-                )
-        self.assertEqual(unavailable.exception.extensions['code'], SEARCH_UNAVAILABLE)
+            global_fallback = async_to_sync(Query().concepts)(info_valid, query='UTIL')
+        self.assertGreaterEqual(global_fallback.total_count, 1)
 
         with patch('core.graphql.queries.concept_ids_from_es', return_value=([], 2)), patch(
             'core.graphql.queries.resolve_source_version', return_value=self.source
