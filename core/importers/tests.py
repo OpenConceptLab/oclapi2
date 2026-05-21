@@ -18,6 +18,7 @@ from core.common.constants import OPENMRS_VALIDATION_SCHEMA, DEPRECATED_API_HEAD
 from core.common.tasks import post_import_update_resource_counts, bulk_import_parts_inline, bulk_import_inline, \
     bulk_import
 from core.common.tests import OCLAPITestCase, OCLTestCase
+from core.common.utils import decode_string
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
 from core.importers.importer import ImporterSubtask, ImportTask, Importer, ResourceImporter
@@ -844,6 +845,11 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.others), 0)
         self.assertEqual(len(importer.permission_denied), 0)
         self.assertEqual(batch_index_resources_mock.apply_async.call_count, 0)
+
+        food_slash_papaya = Concept.objects.filter(mnemonic='Food%2FPapaya').first()
+        self.assertEqual(decode_string(food_slash_papaya.mnemonic), 'Food/Papaya')
+        self.assertEqual(food_slash_papaya.uri, "/orgs/DemoOrg/sources/DemoSource/concepts/Food%2FPapaya/")
+        self.assertEqual(food_slash_papaya.get_indirect_mappings().count(), 1)
 
         data = {
             "type": "Concept", "id": "Corn", "concept_class": "Root",

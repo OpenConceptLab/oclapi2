@@ -796,7 +796,7 @@ class CollectionReference(models.Model):
             references.append(CollectionReference(
                 expression=resource.uri,
                 reference_type=resource_type,
-                code=encode_string(resource.mnemonic) if resource_type == 'concepts' else resource.mnemonic,
+                code=encode_string(resource.mnemonic, safe='') if resource_type == 'concepts' else resource.mnemonic,
                 collection_id=self.collection_id,
                 created_by=self.created_by,
                 resource_version=resource_version,
