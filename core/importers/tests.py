@@ -825,7 +825,7 @@ class BulkImportInlineTest(OCLTestCase):
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.importers.models.batch_index_resources')
-    def test_sample_import(self, batch_index_resources_mock):
+    def test_sample_import(self, batch_index_resources_mock):  # pylint: disable=too-many-statements
         importer = BulkImportInline(
             open(
                 os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r'
