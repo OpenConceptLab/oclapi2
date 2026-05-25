@@ -144,10 +144,17 @@ class ChecksumDiff:
             'retired': self._get_resource_map(resources.filter(retired=True))
         }
 
+    @staticmethod
+    def _get_resource_checksums(resource):
+        """Return complete resource checksums, repairing legacy incomplete values on demand."""
+        if not resource.checksums or not resource.has_all_checksums():
+            return resource.get_checksums()
+        return resource.checksums
+
     def _get_resource_map(self, resources):
         return {
             get(resource, self.identity): {
-                'checksums': resource.checksums,
+                'checksums': self._get_resource_checksums(resource),
                 'id': resource.id
             } for resource in resources
         }

@@ -6,7 +6,7 @@ from rest_framework.serializers import ModelSerializer
 from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPINGS_PARAM, INCLUDE_EXTRAS_PARAM, \
     INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS, INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS, \
     CREATE_PARENT_VERSION_QUERY_PARAM, INCLUDE_HIERARCHY_PATH, INCLUDE_PARENT_CONCEPT_URLS, \
-    INCLUDE_CHILD_CONCEPT_URLS, HEAD, INCLUDE_SUMMARY, INCLUDE_VERBOSE_REFERENCES, VERBOSE_PARAM
+    INCLUDE_CHILD_CONCEPT_URLS, HEAD, INCLUDE_SUMMARY, INCLUDE_VERBOSE_REFERENCES, VERBOSE_PARAM, INCLUDE_RETIRED_PARAM
 from core.common.fields import EncodedDecodedCharField
 from core.common.serializers import AbstractResourceSerializer
 from core.common.utils import to_parent_uri_from_kwargs, get_truthy_values
@@ -213,6 +213,7 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
         is_mapping_brief = request.query_params.get('mappingBrief', None) in TRUTHY
         map_types = compact((request.query_params.get('mapTypes', '') or '').split(','))
         target_repo_urls = compact((request.query_params.get('targetRepoUrls', '') or '').split(','))
+        include_retired = request.query_params.get(INCLUDE_RETIRED_PARAM, None) in TRUTHY
         serializer_class = MappingMinimalSerializer if is_mapping_brief else MappingDetailSerializer
         is_collection = 'collection' in self.view_kwargs
         collection_version = self.view_kwargs.get('version', HEAD) if is_collection else None
@@ -221,6 +222,8 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
             mappings = obj.get_bidirectional_mappings_for_collection(
                 parent_uri, collection_version
             ) if is_collection else obj.get_bidirectional_mappings()
+            if not include_retired:
+                mappings = mappings.filter(retired=False)
             return serializer_class(mappings, many=True).data
         if self.include_direct_mappings:
             mappings = obj.get_unidirectional_mappings_for_collection(
@@ -229,6 +232,8 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
                 mappings = mappings.filter(map_type__in=map_types)
             if target_repo_urls:
                 mappings = mappings.filter(to_source_url__in=target_repo_urls)
+            if not include_retired:
+                mappings = mappings.filter(retired=False)
             return serializer_class(mappings, many=True).data
 
         return []

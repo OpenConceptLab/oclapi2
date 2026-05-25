@@ -2,6 +2,7 @@ from elasticsearch_dsl import TermsFacet, Q, NestedFacet
 from pydash import flatten, is_number, compact, get
 
 from core.common.constants import FACET_SIZE, HEAD
+from core.common.lexical_variants import LexicalVariantDictionary
 from core.common.search import CustomESFacetedSearch, CustomESSearch
 from core.common.utils import get_embeddings, is_canonical_uri
 from core.concepts.documents import ConceptDocument
@@ -308,7 +309,7 @@ class ConceptFuzzySearch:  # pragma: no cover
     def search(  # pylint: disable=too-many-locals,too-many-arguments,too-many-branches,too-many-statements
             cls, data, repo_url, repo_params=None, include_retired=False,
             is_semantic=False, num_candidates=2000, k_nearest=50, map_config=None, additional_filter_criterion=None,
-            locale_filter=None
+            locale_filter=None, variants_repo=None
     ):
         from core.concepts.documents import ConceptDocument
         map_config = map_config or []
@@ -380,10 +381,22 @@ class ConceptFuzzySearch:  # pragma: no cover
             if name:
                 knn_queries.append(get_knn_query("_embeddings.vector", name, 0.3))
                 knn_queries.append(get_knn_query("_synonyms_embeddings.vector", name, 0.275))
+                if variants_repo:
+                    for name_variant in LexicalVariantDictionary.get_variant_terms(name, source_uri=variants_repo):
+                        knn_queries.append(get_knn_query("_embeddings.vector", name_variant, 0.285))
+                        knn_queries.append(get_knn_query("_synonyms_embeddings.vector", name_variant, 0.26))
             for synonym in synonyms:
                 if synonym is not None:
                     knn_queries.append(get_knn_query("_synonyms_embeddings.vector", synonym, 0.125))
                     knn_queries.append(get_knn_query("_embeddings.vector", synonym, 0.15))
+                    if variants_repo:
+                        synonym_variants = LexicalVariantDictionary.get_variant_terms(
+                            synonym,
+                            source_uri=variants_repo,
+                        )
+                        for synonym_variant in synonym_variants:
+                            knn_queries.append(get_knn_query("_synonyms_embeddings.vector", synonym_variant, 0.115))
+                            knn_queries.append(get_knn_query("_embeddings.vector", synonym_variant, 0.14))
         else:
             for field in cls.fuzzy_fields:
                 value = data.get(field, None)
@@ -423,53 +436,75 @@ class ConceptFuzzySearch:  # pragma: no cover
 
         if is_semantic:
             if name:
-                search = search.extra(rescore={
-                  "window_size": 250,
-                  "query": {
-                    "score_mode": "total",
-                    "query_weight": 1.0,
-                    "rescore_query_weight": 35.0,
-                    "rescore_query": {
-                      "dis_max": {
-                        "tie_breaker": 0.0,
-                        "queries": [
-                          {
-                            "constant_score": {
-                              "filter": {
-                                "term": {
-                                  "_name": {
-                                    "value": name,
-                                    "case_insensitive": True
-                                  }
-                                }
-                              },
-                              "boost": 3
-                            }
-                          },
-                          {
-                            "constant_score": {
-                              "filter": {
+                if variants_repo:
+                    name_terms = [name] + list(
+                        LexicalVariantDictionary.get_variant_terms(
+                            name,
+                            source_uri=variants_repo,
+                        )
+                    )
+                    synonym_terms = list(synonyms)
+                    for s in synonyms:
+                        synonym_terms.extend(LexicalVariantDictionary.get_variant_terms(s, source_uri=variants_repo))
+                else:
+                    name_terms = [name]
+                    synonym_terms = list(synonyms)
+                rescore_queries = [
+                    {
+                        "constant_score": {
+                            "filter": {
                                 "bool": {
-                                  "should": [
-                                      {
-                                          "term": {
-                                              "_synonyms": {
-                                                  "value": synonym,
-                                                  "case_insensitive": True
-                                              }
-                                          }
-                                      } for synonym in synonyms
-                                  ],
-                                  "minimum_should_match": 1
+                                    "should": [
+                                        {
+                                            "term": {
+                                                "_name": {
+                                                    "value": t,
+                                                    "case_insensitive": True
+                                                }
+                                            }
+                                        } for t in name_terms
+                                    ],
+                                    "minimum_should_match": 1
                                 }
-                              },
-                              "boost": 1
-                            }
-                          }
-                        ]
-                      }
+                            },
+                            "boost": 3
+                        }
                     }
-                  }
+                ]
+                if synonym_terms:
+                    rescore_queries.append({
+                        "constant_score": {
+                            "filter": {
+                                "bool": {
+                                    "should": [
+                                        {
+                                            "term": {
+                                                "_synonyms": {
+                                                    "value": t,
+                                                    "case_insensitive": True
+                                                }
+                                            }
+                                        } for t in synonym_terms
+                                    ],
+                                    "minimum_should_match": 1
+                                }
+                            },
+                            "boost": 1
+                        }
+                    })
+                search = search.extra(rescore={
+                    "window_size": 250,
+                    "query": {
+                        "score_mode": "total",
+                        "query_weight": 1.0,
+                        "rescore_query_weight": 35.0,
+                        "rescore_query": {
+                            "dis_max": {
+                                "tie_breaker": 0.0,
+                                "queries": rescore_queries
+                            }
+                        }
+                    }
                 })
 
         highlight = [

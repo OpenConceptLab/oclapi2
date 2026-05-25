@@ -33,6 +33,10 @@ class MapProjectListViewTest(MapProjectAbstractViewTest):
                 {'label': 'category', 'hidden': False, 'dataKey': 'category', 'original': 'category'},
                 {'label': 'loinc_code', 'hidden': False, 'dataKey': 'loinc_code', 'original': 'loinc_code'}
             ]),
+            # Multipart-shaped wire format used by oclmap — input_locales is
+            # JSON-stringified so format_request_data can json.loads it back
+            # into the list that the ArrayField expects.
+            'input_locales': json.dumps(['pt-BR']),
         }
         response = self.client.post(
             '/orgs/CIEL/map-projects/',
@@ -42,6 +46,7 @@ class MapProjectListViewTest(MapProjectAbstractViewTest):
         self.assertEqual(response.status_code, 201)
         self.assertIsNotNone(response.data['id'])
         self.assertEqual(self.org.map_projects.count(), 1)
+        self.assertEqual(response.data.get('input_locales'), ['pt-BR'])
         upload_mock.assert_called_once_with(
             key=f"map_projects/{response.data['id']}/input.csv", file_content=ANY)
 
@@ -65,6 +70,31 @@ class MapProjectListViewTest(MapProjectAbstractViewTest):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], project.id)
         self.assertEqual(response.data[0]['url'], f'/orgs/CIEL/map-projects/{project.id}/')
+
+    def test_get_verbose(self):
+        project = MapProjectFactory(
+            organization=self.org,
+            name="Verbose Project",
+            matches=[{'state': 'matched', 'id': 1}],
+            candidates={'1': ['a', 'b']},
+            analysis={'score': 0.9},
+        )
+        project.save()
+
+        response = self.client.get(
+            '/orgs/CIEL/map-projects/?verbose=true',
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        result = response.data[0]
+        self.assertEqual(result['id'], project.id)
+        self.assertIn('matches', result)
+        self.assertIn('columns', result)
+        self.assertIn('candidates', result)
+        self.assertIn('analysis', result)
+        self.assertEqual(result['matches'], project.matches)
+        self.assertEqual(result['candidates'], project.candidates)
 
 
 class MapProjectViewTest(MapProjectAbstractViewTest):
@@ -107,6 +137,9 @@ class MapProjectViewTest(MapProjectAbstractViewTest):
                     'original': 'itemid'
                 }
             ]),
+            # Multipart clients send locale arrays as JSON strings, so the
+            # view must decode them before serializer validation.
+            'input_locales': json.dumps(['en']),
         }
         response = self.client.put(
             f'/orgs/CIEL/map-projects/{self.project.id}/',
@@ -119,6 +152,7 @@ class MapProjectViewTest(MapProjectAbstractViewTest):
         self.assertEqual(self.org.map_projects.count(), 1)
         self.assertEqual(response.data['name'], 'Test Project')
         self.assertEqual(len(response.data['columns']), 1)
+        self.assertEqual(response.data['input_locales'], ['en'])
         upload_mock.assert_called_once_with(
             key=f"map_projects/{response.data['id']}/input.csv", file_content=ANY)
 
@@ -135,7 +169,9 @@ class MapProjectConfigurationsViewTest(MapProjectAbstractViewTest):
             score_configuration={'recommended': 95, 'available': 75},
             target_repo_url='/orgs/CIEL/sources/CIEL/',
             prompt_template_key='match-recommend',
-            prompt_output_locale='pt-BR'
+            prompt_output_locale='pt-BR',
+            input_locales=['pt-BR'],
+            use_lexical_variants=True
         )
         project.save()
 
@@ -158,5 +194,7 @@ class MapProjectConfigurationsViewTest(MapProjectAbstractViewTest):
         self.assertEqual(response.data['target_repo_url'], '/orgs/CIEL/sources/CIEL/')
         self.assertEqual(response.data['prompt_template_key'], 'match-recommend')
         self.assertEqual(response.data['prompt_output_locale'], 'pt-BR')
+        self.assertEqual(response.data['input_locales'], ['pt-BR'])
+        self.assertTrue(response.data['use_lexical_variants'])
         for field in ['analysis', 'input_file_name', 'candidates', 'matches', 'columns', 'created_by', 'updated_by']:
             self.assertNotIn(field, response.data)

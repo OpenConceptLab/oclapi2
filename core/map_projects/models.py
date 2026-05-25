@@ -42,6 +42,11 @@ class MapProject(BaseModel):
     encoder_model = models.TextField(null=True, blank=True, default=settings.ENCODER_MODEL_NAME)
     prompt_template_key = models.TextField(null=True, blank=True)
     prompt_output_locale = models.CharField(max_length=10, null=True, blank=True)
+    # Plural by design — the UI currently exposes single-select, but the
+    # field is shaped for the multi-select workflow planned in a few weeks.
+    # No further migration needed at that point.
+    input_locales = ArrayField(models.CharField(max_length=10), null=True, blank=True, default=list)
+    use_lexical_variants = models.BooleanField(default=False)
 
     # Fields that define how a project matches —
     # excluding identity, results, logs, and audit metadata.
@@ -49,7 +54,7 @@ class MapProject(BaseModel):
     CONFIGURATION_FIELDS = [
         'algorithms', 'encoder_model', 'filters', 'include_retired',
         'lookup_config', 'score_configuration', 'target_repo_url', 'prompt_template_key',
-        'prompt_output_locale'
+        'prompt_output_locale', 'input_locales', 'use_lexical_variants'
     ]
 
     class Meta:
@@ -171,9 +176,16 @@ class MapProject(BaseModel):
 
     @classmethod
     def format_request_data(cls, data, parent_resource=None):
+        # Multipart requests can wrap JSON-capable fields in single-item lists.
+        # Keep list-shaped config fields intact so ArrayField-backed values like
+        # input_locales do not collapse into a scalar during update flows.
         new_data = {
-            key: val[0] if isinstance(val, list) and len(val) == 1 and key not in [
-                'candidates', 'analysis'] else val for key, val in data.items()
+            key: val[0] if (
+                isinstance(val, list) and
+                len(val) == 1 and
+                not isinstance(val[0], (dict, list)) and
+                key not in ['candidates', 'analysis', 'input_locales']
+            ) else val for key, val in data.items()
         }
         cls.format_json(new_data, 'matches')
         cls.format_json(new_data, 'columns')
@@ -183,6 +195,7 @@ class MapProject(BaseModel):
         cls.format_json(new_data, 'analysis')
         cls.format_json(new_data, 'algorithms')
         cls.format_json(new_data, 'lookup_config')
+        cls.format_json(new_data, 'input_locales')
 
         if parent_resource:
             new_data[parent_resource.resource_type.lower() + '_id'] = parent_resource.id

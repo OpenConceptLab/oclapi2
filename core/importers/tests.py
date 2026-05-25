@@ -18,6 +18,7 @@ from core.common.constants import OPENMRS_VALIDATION_SCHEMA, DEPRECATED_API_HEAD
 from core.common.tasks import post_import_update_resource_counts, bulk_import_parts_inline, bulk_import_inline, \
     bulk_import
 from core.common.tests import OCLAPITestCase, OCLTestCase
+from core.common.utils import decode_string
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
 from core.importers.importer import ImporterSubtask, ImportTask, Importer, ResourceImporter
@@ -824,7 +825,7 @@ class BulkImportInlineTest(OCLTestCase):
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.importers.models.batch_index_resources')
-    def test_sample_import(self, batch_index_resources_mock):
+    def test_sample_import(self, batch_index_resources_mock):  # pylint: disable=too-many-statements
         importer = BulkImportInline(
             open(
                 os.path.join(os.path.dirname(__file__), '..', 'samples/sample_ocldev.json'), 'r'
@@ -844,6 +845,11 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.others), 0)
         self.assertEqual(len(importer.permission_denied), 0)
         self.assertEqual(batch_index_resources_mock.apply_async.call_count, 0)
+
+        food_slash_papaya = Concept.objects.filter(mnemonic='Food%2FPapaya').first()
+        self.assertEqual(decode_string(food_slash_papaya.mnemonic), 'Food/Papaya')
+        self.assertEqual(food_slash_papaya.uri, "/orgs/DemoOrg/sources/DemoSource/concepts/Food%2FPapaya/")
+        self.assertEqual(food_slash_papaya.get_indirect_mappings().count(), 1)
 
         data = {
             "type": "Concept", "id": "Corn", "concept_class": "Root",
@@ -1787,6 +1793,16 @@ class BulkImportViewTest(OCLAPITestCase):
 
         response = self.client.post(
             '/importers/bulk-import/?update_if_exists=true',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'exception': "Invalid input."})
+
+        response = self.client.post(
+            '/importers/bulk-import/?update_if_exists=true',
+            [{'type': 'Concept', 'id': '1'}],
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )

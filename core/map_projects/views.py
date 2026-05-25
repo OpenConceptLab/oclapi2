@@ -29,6 +29,11 @@ class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListW
 
     def get_queryset(self):
         queryset = self.queryset.select_related('created_by', 'updated_by', 'organization', 'user')
+        if self.request.method == 'GET' and not self.is_verbose():
+            queryset = queryset.defer(
+                'matches', 'columns', 'candidates', 'analysis', 'logs', 'extras', 'algorithms', 'filters',
+                'lookup_config', 'input_locales'
+            )
         return self.filter_queryset_by_public_access(self.filter_queryset_by_owner(queryset))
 
     def get(self, request, *args, **kwargs):
@@ -60,6 +65,19 @@ class MapProjectView(MapProjectBaseView, RetrieveUpdateDestroyAPIView):
         if self.request.method == 'PUT':
             return MapProjectCreateUpdateSerializer
         return self.serializer_class
+
+    def update(self, request, *args, **kwargs):
+        """Normalize multipart PUT payloads before serializer validation."""
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(
+            instance,
+            data=MapProject.format_request_data(request.data),
+            partial=partial
+        )
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(serializer.data)
 
 
 class MapProjectConfigurationsView(MapProjectBaseView, RetrieveAPIView):

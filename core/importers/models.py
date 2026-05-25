@@ -430,8 +430,11 @@ class ConceptImporter(BaseResourceImporter):
             return self.queryset
 
         parent_uri = f'/{"users" if self.is_user_owner() else "orgs"}/{self.get("owner")}/sources/{self.get("source")}/'
+        mnemonic = self.get('id')
+        if mnemonic and not is_url_encoded_string(mnemonic):
+            mnemonic = encode_string(mnemonic, safe='')
         self.queryset = Concept.objects.filter(
-            parent__uri=parent_uri, mnemonic=self.get('id'), id=F('versioned_object_id')
+            parent__uri=parent_uri, mnemonic=mnemonic, id=F('versioned_object_id')
         )
         return self.queryset
 
@@ -443,7 +446,7 @@ class ConceptImporter(BaseResourceImporter):
         self.data['parent'] = source
         self.data['mnemonic'] = str(self.data.pop('id', ''))
         if not is_url_encoded_string(self.data['mnemonic']):
-            self.data['mnemonic'] = encode_string(self.data['mnemonic'])
+            self.data['mnemonic'] = encode_string(self.data['mnemonic'], safe='')
         for locale in [*(self.data.get('names', []) or []), *(self.data.get('descriptions', []) or [])]:
             locale.pop('checksum', None)
 
@@ -1061,7 +1064,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                 # P2: normalize concept_id the same way ConceptImporter.parse() does,
                 # so the URI matches what was actually persisted in the database.
                 if not is_url_encoded_string(concept_id):
-                    concept_id = encode_string(concept_id)
+                    concept_id = encode_string(concept_id, safe='')
                 child_uri = f'/{owner_prefix}/{owner}/sources/{source}/concepts/{concept_id}/'
                 self.concept_hierarchy_map[child_uri] = parent_urls
 

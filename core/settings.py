@@ -206,11 +206,11 @@ if ENABLE_THROTTLING:
         'standard_minute': '500/minute',
         'standard_day': '20000/day',
         'core_minute': '1000/minute',
-        'core_day': '40000/day',
+        'core_day': '80000/day',
         'match_standard_minute': '300/minute',
         'match_standard_day': '5000/day',
         'match_core_minute': '1000/minute',
-        'match_core_day': '20000/day',
+        'match_core_day': '30000/day',
     }
     MIDDLEWARE = [*MIDDLEWARE, 'core.middlewares.middlewares.ThrottleHeadersMiddleware']
 
@@ -649,3 +649,7 @@ ANALYTICS_API = os.environ.get('ANALYTICS_API', 'http://host.docker.internal:800
 if ANALYTICS_API:
     MIDDLEWARE = [*MIDDLEWARE, 'core.middlewares.middlewares.AnalyticsMiddleware']
 SERVICE_NAME = os.environ.get('SERVICE_NAME', 'oclapi2')
+
+DEFAULT_LEXICAL_VARIANTS_REPO = os.environ.get(
+    'DEFAULT_LEXICAL_VARIANTS_REPO', '/orgs/OCL/sources/lexical-variants-en/')
+LEXICAL_VARIANTS_CACHE_TIMEOUT = int(os.environ.get('LEXICAL_VARIANTS_CACHE_TIMEOUT', 60 * 60 * 24 * 4))
