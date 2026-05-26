@@ -56,6 +56,7 @@ class AbstractLocalizedText(ChecksumModel):
             locale=self.locale,
             locale_preferred=self.locale_preferred,
             retired=self.retired,
+            retire_reason=self.retire_reason,
         )
 
     @staticmethod
