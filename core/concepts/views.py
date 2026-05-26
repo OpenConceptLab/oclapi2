@@ -409,7 +409,8 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         comment = request.data.get('update_comment', None) or request.data.get('comment', None)
-        errors = concept.retire(request.user, comment)
+        reason = request.data.get('retire_reason', None)
+        errors = concept.retire(request.user, comment, reason)
 
         if errors:
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)

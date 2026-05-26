@@ -307,7 +307,7 @@ class ConceptListSerializer(ConceptAbstractSerializer):
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
             'locale', 'version_created_by', 'version_created_on', 'mappings', 'is_latest_version', 'versions_url',
             'version_url', 'extras', 'type', 'versioned_object_id', 'version_updated_on', 'version_updated_by',
-            'latest_source_version', 'property'
+            'latest_source_version', 'property', 'retire_reason'
         )
 
 
@@ -466,7 +466,7 @@ class ConceptDetailSerializer(ConceptAbstractSerializer):
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',
             'created_on', 'updated_on', 'versions_url', 'version', 'extras', 'parent_id', 'type',
             'update_comment', 'version_url', 'updated_by', 'created_by',
-            'public_can_view', 'versioned_object_id', 'latest_source_version', 'property'
+            'public_can_view', 'versioned_object_id', 'latest_source_version', 'property', 'retire_reason'
         )
 
     def create(self, validated_data):
@@ -518,7 +518,8 @@ class ConceptVersionExportSerializer(ModelSerializer):
             'names', 'descriptions', 'extras', 'retired', 'source', 'source_url', 'owner', 'owner_name', 'owner_url',
             'version', 'created_on', 'updated_on', 'version_created_on', 'version_created_by', 'update_comment',
             'is_latest_version', 'locale', 'url', 'owner_type', 'version_url', 'previous_version_url',
-            'parent_concept_urls', 'child_concept_urls', 'version_updated_on', 'version_updated_by', 'checksums'
+            'parent_concept_urls', 'child_concept_urls', 'version_updated_on', 'version_updated_by', 'checksums',
+            'retire_reason'
         )
 
     @staticmethod
@@ -597,7 +598,7 @@ class ConceptVersionDetailSerializer(ModelSerializer):
             'is_latest_version', 'locale', 'url', 'owner_type', 'version_url', 'mappings', 'previous_version_url',
             'parent_concepts', 'child_concepts', 'parent_concept_urls', 'child_concept_urls',
             'source_versions', 'collection_versions', 'versioned_object_id', 'references', 'checksums',
-            'version_updated_on', 'version_updated_by', 'latest_source_version',
+            'version_updated_on', 'version_updated_by', 'latest_source_version', 'retire_reason'
         )
 
     def get_references(self, obj):

@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.db import transaction
+from django.db import transaction, models
 from django.db.models import Q, F, QuerySet
 from django.http import HttpResponseForbidden, Http404
 from django.shortcuts import get_object_or_404, redirect
@@ -601,6 +601,15 @@ class SourceContainerMixin:
 
 
 class SourceChildMixin(ChecksumModel):
+    external_id = models.TextField(null=True, blank=True)
+    comment = models.TextField(null=True, blank=True)
+    retire_reason = models.TextField(null=True, blank=True)
+    versioned_object = models.ForeignKey(
+        'self', related_name='versions_set', null=True, blank=True, on_delete=models.CASCADE
+    )
+    _counted = models.BooleanField(default=True, null=True, blank=True)
+    _index = models.BooleanField(default=True)
+
     class Meta:
         abstract = True
 
@@ -721,23 +730,24 @@ class SourceChildMixin(ChecksumModel):
     def parent_url(self):
         return get(self.parent, 'uri')
 
-    def retire(self, user, comment=None):
+    def retire(self, user, comment=None, reason=None):
         if self.versioned_object.retired:
             return {'__all__': self.ALREADY_RETIRED}
 
-        return self.__update_retire(True, comment or self.WAS_RETIRED, user)
+        return self.__update_retire(True, user, comment or self.WAS_RETIRED, reason)
 
     def unretire(self, user, comment=None):
         if not self.versioned_object.retired:
             return {'__all__': self.ALREADY_NOT_RETIRED}
 
-        return self.__update_retire(False, comment or self.WAS_UNRETIRED, user)
+        return self.__update_retire(False, user, comment or self.WAS_UNRETIRED)
 
-    def __update_retire(self, retired, comment, user):
+    def __update_retire(self, retired, user, comment, reason=None):
         latest_version = self.get_latest_version() or self.get_last_version()
         new_version = latest_version.clone()
         new_version.retired = retired
         new_version.comment = comment
+        new_version.retire_reason = reason if retired else None
         return new_version.save_as_new_version(user)
 
     @classmethod

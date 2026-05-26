@@ -130,7 +130,7 @@ class MappingListSerializer(AbstractMappingSerializer):
             'is_latest_version', 'update_comment', 'version_url', 'uuid', 'version_created_on',
             'from_source_version', 'to_source_version', 'from_concept_name_resolved',
             'to_concept_name_resolved', 'type', 'sort_weight',
-            'version_updated_on', 'version_updated_by', 'latest_source_version'
+            'version_updated_on', 'version_updated_by', 'latest_source_version', 'retire_reason'
         )
 
 

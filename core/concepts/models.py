@@ -34,6 +34,7 @@ class AbstractLocalizedText(ChecksumModel):
     locale_preferred = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     retired = models.BooleanField(default=False)
+    retire_reason = models.TextField(null=True, blank=True)
 
     SMART_CHECKSUM_KEY = None
 
@@ -226,23 +227,16 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                       )
                   ] + VersionedModel.Meta.indexes
 
-    external_id = models.TextField(null=True, blank=True)
     concept_class = models.TextField()
     datatype = models.TextField()
-    comment = models.TextField(null=True, blank=True)
     parent = models.ForeignKey('sources.Source', related_name='concepts_set', on_delete=models.CASCADE)
     sources = models.ManyToManyField('sources.Source', related_name='concepts')
-    versioned_object = models.ForeignKey(
-        'self', related_name='versions_set', null=True, blank=True, on_delete=models.CASCADE
-    )
     parent_concepts = models.ManyToManyField(
         'self', through='HierarchicalConcepts', symmetrical=False, related_name='child_concepts'
     )
     mnemonic = models.CharField(
         max_length=255, validators=[RegexValidator(regex=CONCEPT_REGEX)],
     )
-    _counted = models.BooleanField(default=True, null=True, blank=True)
-    _index = models.BooleanField(default=True)
     logo_path = None
     name = None
     full_name = None
@@ -531,6 +525,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             concept_class=self.concept_class,
             datatype=self.datatype,
             retired=self.retired,
+            retire_reason=self.retire_reason,
             released=self.released,
             extras=self.extras or {},
             parent=self.parent,
@@ -584,6 +579,14 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         instance.extras = data.get('extras', instance.extras)
         instance.external_id = data.get('external_id', instance.external_id)
         instance.comment = data.get('update_comment') or data.get('comment')
+        instance.retire_reason = data.get('retire_reason', instance.retire_reason)
+        is_retired = data.get('retired', None)
+        if is_retired is True and not instance.retired:
+            instance.retire_comment = instance.comment
+            instance.comment = instance.WAS_RETIRED
+        elif instance.retired and is_retired is False:
+            instance.retire_comment = None
+            instance.comment = instance.comment or instance.WAS_RETIRED
         instance.retired = data.get('retired', instance.retired)
         if is_patch:
             prev = instance.versions.exclude(id=instance.id).filter(is_latest_version=True).first()
@@ -1143,6 +1146,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         concept.concept_class = self.concept_class
         concept.datatype = self.datatype
         concept.retired = self.retired
+        concept.retire_reason = self.retire_reason
         concept.external_id = self.external_id or concept.external_id
         concept.updated_by_id = self.updated_by_id
         concept.save()

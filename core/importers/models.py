@@ -409,7 +409,7 @@ class ConceptImporter(BaseResourceImporter):
     mandatory_fields = {"concept_class"}
     allowed_fields = [
         "id", "external_id", "concept_class", "datatype", "names", "descriptions", "retired", "extras",
-        "parent_concept_urls", 'update_comment', 'comment'
+        "parent_concept_urls", 'update_comment', 'comment', 'retire_reason'
     ]
 
     @staticmethod
@@ -502,7 +502,11 @@ class ConceptImporter(BaseResourceImporter):
             try:
                 if parent.has_edit_access(self.user):
                     concept = self.get_queryset().first()
-                    concept.retire(self.user)
+                    concept.retire(
+                        self.user,
+                        self.data.get('update_comment') or self.data.get('comment'),
+                        self.data.get('retire_reason')
+                    )
                     return DELETED
                 return PERMISSION_DENIED
             except Exception as ex:
@@ -515,7 +519,8 @@ class MappingImporter(BaseResourceImporter):
     mandatory_fields = {"map_type", "from_concept_url"}
     allowed_fields = [
         "id", "map_type", "from_concept_url", "to_source_url", "to_concept_url", "to_concept_code",
-        "to_concept_name", "extras", "external_id", "retired", 'update_comment', 'comment', 'sort_weight'
+        "to_concept_name", "extras", "external_id", "retired", 'update_comment', 'comment', 'sort_weight',
+        'retire_reason'
     ]
 
     @staticmethod
@@ -649,7 +654,11 @@ class MappingImporter(BaseResourceImporter):
             try:
                 if parent.has_edit_access(self.user):
                     mapping = self.get_queryset().first()
-                    mapping.retire(self.user)
+                    mapping.retire(
+                        self.user,
+                        self.data.get('update_comment') or self.data.get('comment'),
+                        self.data.get('retire_reason')
+                    )
                     return DELETED
                 return PERMISSION_DENIED
             except Exception as ex:
