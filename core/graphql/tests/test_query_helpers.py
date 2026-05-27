@@ -715,3 +715,221 @@ class QueryHelperTests(OCLTestCase):
             {concept.concept_id for concept in member_global.results},
             {private_concept.mnemonic, public_concept.mnemonic},
         )
+
+    # ------------------------------------------------------------------
+    # Regression tests for blockers caught in code review
+    # ------------------------------------------------------------------
+
+    def test_concept_ids_from_es_uses_resolved_version_not_client_label(self):
+        """B1 regression: when a client asks for an unreleased version and the resolver falls back
+        to ``find_latest_released_version_by``, the ES filter must follow the resolved Source.version,
+        not the original client label (which would produce zero hits)."""
+
+        from types import SimpleNamespace as NS
+
+        class RecordingResponse:
+            def __init__(self):
+                self.hits = NS(total=NS(value=0))
+
+            def __iter__(self):
+                return iter([])
+
+        class RecordingSearch:
+            def __init__(self):
+                self.filters = []
+
+            def filter(self, *args, **kwargs):
+                self.filters.append((args, kwargs))
+                return self
+
+            def query(self, *_args, **_kwargs):
+                return self
+
+            def __getitem__(self, _key):
+                return self
+
+            def params(self, **_kwargs):
+                return self
+
+            def extra(self, **_kwargs):
+                return self
+
+            def execute(self):
+                return RecordingResponse()
+
+        resolved_source = NS(
+            mnemonic='SRC',
+            version='v2.0',           # what the resolver actually returned
+            is_head=False,
+        )
+        recording = RecordingSearch()
+        with patch('core.graphql.queries.ConceptDocument.search', return_value=recording):
+            concept_ids_from_es('text', resolved_source, None)
+
+        # The source_version filter must use the *resolved* version label, not whatever the
+        # client originally typed in (the old code used `version_label or HEAD`).
+        version_filters = [
+            (args, kwargs) for args, kwargs in recording.filters
+            if args == ('term',) and kwargs.get('source_version') == 'v2.0'
+        ]
+        self.assertEqual(len(version_filters), 1)
+        # And it must NOT have applied the is_latest_version=True filter when the resolved
+        # version is a concrete (non-HEAD) release.
+        is_latest_filters = [
+            (args, kwargs) for args, kwargs in recording.filters
+            if kwargs.get('is_latest_version') is True
+        ]
+        self.assertEqual(is_latest_filters, [])
+
+    def test_concept_ids_from_es_uses_is_latest_for_head_source(self):
+        """B1 sibling: HEAD sources must continue to filter by is_latest_version=True."""
+        from types import SimpleNamespace as NS
+
+        class RecordingResponse:
+            def __init__(self):
+                self.hits = NS(total=NS(value=0))
+
+            def __iter__(self):
+                return iter([])
+
+        class RecordingSearch:
+            def __init__(self):
+                self.filters = []
+
+            def filter(self, *args, **kwargs):
+                self.filters.append((args, kwargs))
+                return self
+
+            def query(self, *_args, **_kwargs):
+                return self
+
+            def __getitem__(self, _key):
+                return self
+
+            def params(self, **_kwargs):
+                return self
+
+            def extra(self, **_kwargs):
+                return self
+
+            def execute(self):
+                return RecordingResponse()
+
+        head_source = NS(mnemonic='SRC', version=HEAD, is_head=True)
+        recording = RecordingSearch()
+        with patch('core.graphql.queries.ConceptDocument.search', return_value=recording):
+            concept_ids_from_es('text', head_source, None)
+
+        is_latest_filters = [
+            (args, kwargs) for args, kwargs in recording.filters
+            if kwargs.get('is_latest_version') is True
+        ]
+        self.assertEqual(len(is_latest_filters), 1)
+
+    def test_filter_global_queryset_fails_closed_without_apply_user_criteria(self):
+        """S1 regression: an authenticated non-staff user must not see ACCESS_TYPE_NONE rows when
+        the queryset model does not implement ``apply_user_criteria``."""
+        from core.graphql.permissions import filter_global_queryset
+
+        class FakeModel:
+            # Intentionally no apply_user_criteria
+            pass
+
+        class FakeQuerySet:
+            def __init__(self):
+                self.model = FakeModel
+                self.excluded = None
+
+            def exclude(self, **kwargs):
+                self.excluded = kwargs
+                return self
+
+        qs = FakeQuerySet()
+        non_staff_user = SimpleNamespace(is_anonymous=False, is_staff=False)
+        filter_global_queryset(qs, non_staff_user)
+        self.assertEqual(qs.excluded, {'public_access': ACCESS_TYPE_NONE})
+
+    def test_filter_global_queryset_uses_apply_user_criteria_when_available(self):
+        """S1 sibling: when the model exposes ``apply_user_criteria`` we delegate to it."""
+        from core.graphql.permissions import filter_global_queryset
+
+        sentinel = object()
+
+        class FakeModel:
+            @staticmethod
+            def apply_user_criteria(qs, user):  # pylint: disable=unused-argument
+                return sentinel
+
+        class FakeQuerySet:
+            model = FakeModel
+
+            def exclude(self, **_kwargs):  # pragma: no cover - must not be called
+                raise AssertionError('exclude must not be called when apply_user_criteria exists')
+
+        non_staff_user = SimpleNamespace(is_anonymous=False, is_staff=False)
+        self.assertIs(filter_global_queryset(FakeQuerySet(), non_staff_user), sentinel)
+
+    def test_filter_global_queryset_staff_sees_everything(self):
+        """S1 sibling: staff users bypass visibility filters entirely."""
+        from core.graphql.permissions import filter_global_queryset
+
+        class FakeQuerySet:
+            model = object  # never reached
+
+            def exclude(self, **_kwargs):  # pragma: no cover
+                raise AssertionError('staff path must not filter')
+
+        staff_user = SimpleNamespace(is_anonymous=False, is_staff=True)
+        qs = FakeQuerySet()
+        self.assertIs(filter_global_queryset(qs, staff_user), qs)
+
+    def test_validation_errors_carry_validation_error_code(self):
+        """All client-side validation failures must surface a stable VALIDATION_ERROR code so
+        clients can branch on it and the schema's process_errors can suppress server-error logs."""
+        from core.graphql.constants import VALIDATION_ERROR
+
+        info_valid = SimpleNamespace(context=SimpleNamespace(auth_status='valid', user=self.audit_user))
+
+        # 1. Neither conceptIds nor query
+        with self.assertRaises(GraphQLError) as missing_args:
+            async_to_sync(Query().concepts)(info_valid)
+        self.assertEqual(missing_args.exception.extensions['code'], VALIDATION_ERROR)
+
+        # 2. Both org and owner
+        with self.assertRaises(GraphQLError) as both_owners:
+            async_to_sync(Query().concepts)(
+                info_valid, org='X', owner='Y', source='S', query='q'
+            )
+        self.assertEqual(both_owners.exception.extensions['code'], VALIDATION_ERROR)
+
+        # 3. Source without org/owner
+        with self.assertRaises(GraphQLError) as orphan_source:
+            async_to_sync(Query().concepts)(info_valid, source='S', query='q')
+        self.assertEqual(orphan_source.exception.extensions['code'], VALIDATION_ERROR)
+
+        # 4. Pagination out of range
+        with self.assertRaises(GraphQLError) as bad_page:
+            async_to_sync(Query().concepts)(info_valid, query='q', page=0, limit=1)
+        self.assertEqual(bad_page.exception.extensions['code'], VALIDATION_ERROR)
+
+    def test_validation_errors_are_suppressed_from_server_error_log(self):
+        """VALIDATION_ERROR codes must be in EXPECTED_GRAPHQL_ERROR_CODES so schema.process_errors
+        does not log them as unexpected server errors."""
+        from core.graphql.constants import VALIDATION_ERROR, build_validation_error, EXPECTED_GRAPHQL_ERROR_CODES
+
+        self.assertIn(VALIDATION_ERROR, EXPECTED_GRAPHQL_ERROR_CODES)
+
+        with patch('strawberry.schema.base.StrawberryLogger.error') as error_logger:
+            schema.process_errors([build_validation_error('bad input')])
+        error_logger.assert_not_called()
+
+    def test_resolve_source_version_error_does_not_leak_owner(self):
+        """S7 regression: when the source is not found, the error must not differentiate between
+        a missing repo and a missing owner."""
+        with patch('core.graphql.queries.Source.get_version', return_value=None), patch(
+            'core.graphql.queries.Source.find_latest_released_version_by', return_value=None
+        ):
+            with self.assertRaises(GraphQLError) as missing:
+                async_to_sync(resolve_source_version)('ORG', None, 'SRC', None)
+        # Message must be the generic form — no "for org 'ORG'" suffix.
+        self.assertEqual(str(missing.exception), "Source 'SRC' with version 'HEAD' was not found.")

@@ -21,7 +21,27 @@ def get_document_public_visibility_criteria(
     include_owner_private_access=False,
     include_organization_memberships=False,
 ):
-    """Return a shared Elasticsearch visibility criterion for owner-scoped documents."""
+    """Return a shared Elasticsearch visibility criterion for owner-scoped documents.
+
+    The base criterion is always ``public_can_view=True``. Anonymous users get only that.
+    Authenticated users may additionally see private documents matched by the OR of the
+    enabled flags below — each flag widens visibility in a specific way:
+
+    - ``include_creator_private_access``: include private docs where ``created_by`` equals
+      the current user's username. Mirrors the historical REST concept/source-child rule
+      (a creator always sees their own private content). Used by REST list endpoints.
+
+    - ``include_owner_private_access``: include private docs owned by the user itself
+      (``owner_type=USER`` and ``owner=username``). Used by GraphQL to mirror how list APIs
+      expose a user's own private repositories.
+
+    - ``include_organization_memberships``: include private docs owned by any organization
+      the user belongs to (``owner_type=ORG`` and ``owner IN user.orgs``). Used by GraphQL
+      so organization members see private repos belonging to their orgs.
+
+    Flags are independent OR-combined extensions. Staff bypass goes through
+    ``apply_document_public_visibility_filter`` (this helper itself does not check staff).
+    """
     criteria = Q('term', public_can_view=True)
     if not getattr(user, 'is_authenticated', False):
         return criteria

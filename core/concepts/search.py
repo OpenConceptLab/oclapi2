@@ -153,50 +153,6 @@ def get_concept_search_rescore(query):
     }
 
 
-def apply_concept_text_search(
-    search,
-    query,
-    include_wildcard=True,
-    include_fuzzy=True,
-    include_map_codes=True,
-    fuzzy_boost_divide_by=CONCEPT_FUZZY_BOOST_DIVIDE_BY,
-    fuzzy_expansions=CONCEPT_FUZZY_EXPANSIONS,
-    include_rescore=False,
-):
-    """Apply the shared concept text-search clauses to an Elasticsearch search object."""
-    criterion, fields = get_concept_exact_search_criterion(query, include_map_codes=include_map_codes)
-
-    if include_wildcard:
-        wildcard_criterion, wildcard_fields = get_concept_wildcard_search_criterion(
-            query,
-            include_map_codes=include_map_codes,
-        )
-        criterion |= wildcard_criterion
-        fields += wildcard_fields
-
-    if include_fuzzy:
-        criterion |= get_concept_fuzzy_search_criterion(
-            query,
-            boost_divide_by=fuzzy_boost_divide_by,
-            expansions=fuzzy_expansions,
-        )
-
-    search = search.query(criterion)
-
-    must_have_criterion = get_concept_mandatory_words_criteria(query, include_map_codes=include_map_codes)
-    if must_have_criterion is not None:
-        search = search.filter(must_have_criterion)
-
-    must_not_criterion = get_concept_mandatory_exclude_words_criteria(query, include_map_codes=include_map_codes)
-    if must_not_criterion is not None:
-        search = search.filter(~must_not_criterion)
-
-    if include_rescore:
-        search = search.extra(rescore=get_concept_search_rescore(query))
-
-    return search, fields
-
-
 class ConceptFacetedSearch(CustomESFacetedSearch):
     index = 'concepts'
     doc_types = [Concept]

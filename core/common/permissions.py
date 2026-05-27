@@ -58,7 +58,7 @@ def user_can_view_concept_dictionary(user, obj) -> bool:
     return False
 
 
-class CanViewConceptDictionary(HasPrivateAccess):
+class CanViewConceptDictionary(BasePermission):
     """
     The user can view this source
     """
