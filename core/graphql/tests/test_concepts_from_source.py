@@ -82,6 +82,7 @@ class ConceptsFromSourceQueryTests(OCLTestCase):
             from_concept=self.concept1,
             to_concept=self.concept2,
             map_type='Same As',
+            sort_weight=1.5,
             comment='primary link',
             created_by=self.audit_user,
             updated_by=self.audit_user,
@@ -136,7 +137,8 @@ class ConceptsFromSourceQueryTests(OCLTestCase):
              results {
                conceptId
                display
-               mappings { mapType toSource { url name } toCode comment }
+               mappings { mapType toSource { url name } toCode toConceptName sortWeight comment }
+               extras
              }
           }
         }
@@ -161,6 +163,9 @@ class ConceptsFromSourceQueryTests(OCLTestCase):
         self.assertEqual(len(payload['results']), 1)
         self.assertEqual(payload['results'][0]['conceptId'], self.concept1.mnemonic)
         self.assertEqual(payload['results'][0]['mappings'][0]['toCode'], self.concept2.mnemonic)
+        self.assertEqual(payload['results'][0]['mappings'][0]['toConceptName'], self.concept2.display_name)
+        self.assertEqual(payload['results'][0]['mappings'][0]['sortWeight'], self.mapping.sort_weight)
+        self.assertEqual(payload['results'][0]['extras'], self.concept1.extras)
 
     def test_concepts_include_metadata_fields(self):
         query = """

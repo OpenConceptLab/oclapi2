@@ -184,6 +184,8 @@ def serialize_mappings(concept: Concept) -> List[MappingType]:
                     name=mapping.to_source_name
                 ) if mapping.to_source_url or mapping.to_source_name else None,
                 to_code=mapping.get_to_concept_code(),
+                to_concept_name=mapping.get_to_concept_name(),
+                sort_weight=mapping.sort_weight,
                 comment=mapping.comment,
             )
         )
@@ -373,6 +375,7 @@ def serialize_concepts(concepts: Iterable[Concept]) -> List[ConceptType]:
                 concept_class=concept.concept_class,
                 datatype=build_datatype(concept),
                 metadata=build_metadata(concept),
+                extras=concept.extras or {},
             )
         )
     return output

@@ -314,6 +314,9 @@ class QueryHelperTests(OCLTestCase):
         self.concept1.graphql_mappings = [self.mapping]
         serialized = serialize_concepts([self.concept1])[0]
         self.assertEqual(serialized.mappings[0].to_code, self.concept2.mnemonic)
+        self.assertEqual(serialized.mappings[0].to_concept_name, self.concept2.display_name)
+        self.assertEqual(serialized.mappings[0].sort_weight, self.mapping.sort_weight)
+        self.assertEqual(serialized.extras, self.concept1.extras)
         self.assertEqual(serialized.metadata.created_by, self.audit_user.username)
         self.assertEqual(serialized.description, 'FR description')
 
