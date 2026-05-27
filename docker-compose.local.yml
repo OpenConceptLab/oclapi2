@@ -1,0 +1,23 @@
+# Opt-in override for local native builds on arm64 hosts (Apple Silicon Macs,
+# arm64 Linux). The published openconceptlab/oclapi2 images are amd64-only;
+# on arm64 they run under Rosetta/QEMU emulation, and once Celery indexing
+# kicks in the emulated cores saturate hard enough to block the API for
+# tens of seconds at a time. Building from the local Dockerfile (which uses
+# python:3.12-slim, a multi-arch base) gives a native image and ~200x faster
+# requests in practice.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+#
+# If you previously pulled the amd64 image, force a one-time rebuild:
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml build api
+#
+# The api service is the only one that needs `build:` — all other services
+# that share the openconceptlab/oclapi2 image tag will reuse the locally-
+# built image once it exists.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
