@@ -25,7 +25,7 @@ class LocalizedNameSerializer(ModelSerializer):
         model = ConceptName
         fields = (
             'uuid', 'name', 'external_id', 'type', 'locale', 'locale_preferred', 'name_type', 'checksum',
-            'retired'
+            'retired', 'retire_reason'
         )
 
     def to_representation(self, instance):
@@ -44,7 +44,7 @@ class LocalizedDescriptionSerializer(ModelSerializer):
         model = ConceptName
         fields = (
             'uuid', 'description', 'external_id', 'type', 'locale', 'locale_preferred', 'description_type', 'checksum',
-            'retired'
+            'retired', 'retire_reason'
         )
 
     def to_representation(self, instance):
