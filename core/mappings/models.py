@@ -396,18 +396,11 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         instance.populate_fields_from_relations(data)
         instance.extras = data.get('extras', instance.extras)
         instance.external_id = data.get('external_id', instance.external_id)
-        instance.comment = data.get('update_comment') or data.get('comment')
         instance.mnemonic = data.get('mnemonic', instance.mnemonic)
         instance.map_type = data.get('map_type', instance.map_type)
         instance.sort_weight = data.get('sort_weight', instance.sort_weight)
+        instance.comment = data.get('update_comment') or data.get('comment')
         instance.retire_reason = data.get('retire_reason', instance.retire_reason)
-        is_retired = data.get('retired', None)
-        if is_retired is True and not instance.retired:
-            instance.retire_comment = instance.comment
-            instance.comment = instance.WAS_RETIRED
-        elif instance.retired and is_retired is False:
-            instance.retire_comment = None
-            instance.comment = instance.comment or instance.WAS_RETIRED
         instance.retired = data.get('retired', instance.retired)
 
         return instance.save_as_new_version(user)

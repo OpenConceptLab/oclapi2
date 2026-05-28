@@ -581,13 +581,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         instance.external_id = data.get('external_id', instance.external_id)
         instance.comment = data.get('update_comment') or data.get('comment')
         instance.retire_reason = data.get('retire_reason', instance.retire_reason)
-        is_retired = data.get('retired', None)
-        if is_retired is True and not instance.retired:
-            instance.retire_comment = instance.comment
-            instance.comment = instance.WAS_RETIRED
-        elif instance.retired and is_retired is False:
-            instance.retire_comment = None
-            instance.comment = instance.comment or instance.WAS_RETIRED
         instance.retired = data.get('retired', instance.retired)
         if is_patch:
             prev = instance.versions.exclude(id=instance.id).filter(is_latest_version=True).first()

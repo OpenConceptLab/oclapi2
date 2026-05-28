@@ -1015,8 +1015,8 @@ class ConceptRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         self.assertFalse(unretired_version.retired)
         self.assertFalse(concept.retired)
-        self.assertIsNone(unretired_version.retire_reason)
-        self.assertIsNone(concept.retire_reason)
+        self.assertEqual(unretired_version.retire_reason, retire_reason)
+        self.assertEqual(concept.retire_reason, retire_reason)
         self.assertEqual(unretired_version.comment, unretire_comment)
         self.assertTrue(unretired_prev_version.retired)
         self.assertEqual(unretired_prev_version.retire_reason, retire_reason)
@@ -2872,10 +2872,10 @@ class ConceptNameRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         self.assertEqual(self.concept.versions.count(), 4)
         self.assertFalse(unretired_name.retired)
-        self.assertIsNone(unretired_name.retire_reason)
+        self.assertEqual(unretired_name.retire_reason, 'Not needed!')
         self.assertEqual(unretired_name.type, 'Short')
         self.assertFalse(self.concept.active_names.get(locale='fr', name='retraité').retired)
-        self.assertIsNone(self.concept.active_names.get(locale='fr', name='retraité').retire_reason)
+        self.assertEqual(self.concept.active_names.get(locale='fr', name='retraité').retire_reason, 'Not needed!')
         self.assertEqual(self.concept.active_names.get(locale='fr', name='retraité').type, 'Short')
         self.assertTrue(unretired_prev_name.retired)
         self.assertEqual(unretired_prev_name.retire_reason, retire_reason)

@@ -747,7 +747,8 @@ class SourceChildMixin(ChecksumModel):
         new_version = latest_version.clone()
         new_version.retired = retired
         new_version.comment = comment
-        new_version.retire_reason = reason if retired else None
+        if reason is not None:
+            new_version.retire_reason = reason
         return new_version.save_as_new_version(user)
 
     @classmethod

@@ -996,7 +996,7 @@ class ConceptTest(OCLTestCase):
         latest_version = concept.get_latest_version()
         self.assertFalse(latest_version.retired)
         self.assertEqual(latest_version.comment, 'World needs you!')
-        self.assertEqual(latest_version.retire_reason, None)
+        self.assertEqual(latest_version.retire_reason, 'unwanted')
 
         self.assertEqual(
             concept.unretire(concept.created_by),

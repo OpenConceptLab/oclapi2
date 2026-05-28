@@ -80,14 +80,9 @@ class ConceptLocaleSerializer(ModelSerializer):
         locale.name = validated_data.get('name', locale.name)
         locale.locale = validated_data.get('locale', locale.locale)
         locale.locale_preferred = validated_data.get('locale_preferred', locale.locale_preferred)
-
-        retired = validated_data.get('retired', None)
-        if retired is True and not locale.retired:
-            locale.retire_reason = validated_data.get('retire_reason', None)
-        elif locale.retired and retired is False:
-            locale.retire_reason = None
         locale.retired = validated_data.get('retired', locale.retired)
-
+        if 'retire_reason' in validated_data:
+            locale.retire_reason = validated_data.get('retire_reason')
         locale.type = self.get_locale_type(validated_data, locale)
         locale.external_id = validated_data.get('external_id', locale.external_id)
         locale.concept_id = validated_data.get('concept_id', locale.concept_id)

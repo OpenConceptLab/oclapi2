@@ -1274,8 +1274,8 @@ class ExportSourceTaskTest(OCLAPITestCase):
         s3_mock.url_for = Mock(return_value='https://s3-url')
         s3_mock.upload_file = Mock()
         source = OrganizationSourceFactory()
-        concept1 = ConceptFactory(parent=source)
-        concept2 = ConceptFactory(parent=source)
+        concept1 = ConceptFactory(parent=source, names=1)
+        concept2 = ConceptFactory(parent=source, names=1)
         mapping = MappingFactory(from_concept=concept2, to_concept=concept1, parent=source)
 
         source_v1 = OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v1')
@@ -1312,6 +1312,7 @@ class ExportSourceTaskTest(OCLAPITestCase):
         self.assertEqual(len(exported_concepts), 2)
         self.assertIn(expected_concepts[0], exported_concepts)
         self.assertIn(expected_concepts[1], exported_concepts)
+        self.assertTrue('retire_reason' in exported_concepts[0]['names'][0])
 
         exported_mappings = exported_data['mappings']
         expected_mappings = MappingDetailSerializer([mapping], many=True).data

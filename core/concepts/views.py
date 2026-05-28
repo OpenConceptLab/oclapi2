@@ -746,7 +746,8 @@ class ConceptLocaleRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDest
             ]
             retired_locale = instance.clone()
             retired_locale.retired = True
-            retired_locale.retire_reason = request.data.get('retire_reason', None)
+            if 'retire_reason' in request.data:
+                retired_locale.retire_reason = request.data.get('retire_reason')
             labels.append(retired_locale)
             setattr(new_version, subject_label_attr, labels)
             new_version.comment = f'Retired {instance.name} in {self.parent_list_attribute}.'
