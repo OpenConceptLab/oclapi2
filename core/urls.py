@@ -31,6 +31,7 @@ from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogV
 from core.concepts.views import ConceptsHierarchyAmendAdminView
 from core.events.views import GuestEventsView
 from core.importers.views import BulkImportView
+from core.map_projects.views import AutomatchRunView
 from core.settings import ENV
 
 api_info = openapi.Info(
@@ -70,6 +71,11 @@ urlpatterns = [
     path('sources/', include('core.sources.urls'), name='sources_url'),
     path('repos/', include('core.repos.urls'), name='repos_url'),
     path('url-registry/', include('core.url_registry.urls'), name='url_registry_url'),
+    # Single auto-match run by id. Runs are created/listed under the owner-scoped
+    # project path (map-projects/<id>/auto-match-runs/); the run id is globally
+    # unique, so progress/completion PATCHes address it here. Authz is enforced
+    # against the parent project, not the id (ocl_online#105 OQ2).
+    path('auto-match-runs/<int:run>/', AutomatchRunView.as_view(), name='automatch-run-detail'),
     # GraphQL path
     path('', include('core.graphql.urls')),
 

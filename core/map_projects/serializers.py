@@ -1,11 +1,12 @@
 
+from django.utils import timezone
 from pydash import get
 from rest_framework import serializers
 from rest_framework.fields import CharField, DateTimeField, IntegerField, FileField
 
 from core.common.constants import DEFAULT_ACCESS_TYPE, INCLUDE_SUMMARY, INCLUDE_LOGS
 from core.common.utils import get_truthy_values
-from core.map_projects.models import MapProject
+from core.map_projects.models import MapProject, AutomatchRun
 
 
 class MapProjectCreateUpdateSerializer(serializers.ModelSerializer):
@@ -175,3 +176,83 @@ class MapProjectLogsSerializer(serializers.ModelSerializer):
     class Meta:
         model = MapProject
         fields = ['id', 'logs', 'url']
+
+
+class AutomatchRunListSerializer(serializers.ModelSerializer):
+    id = IntegerField(read_only=True)
+    url = CharField(read_only=True)
+    map_project_id = IntegerField(read_only=True)
+    parent_run_id = IntegerField(read_only=True)
+    started_by = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AutomatchRun
+        fields = [
+            'id', 'url', 'map_project_id', 'started_at', 'completed_at',
+            'intended_rows', 'completed_rows', 'failed_rows',
+            'completion_status', 'trigger_source', 'parent_run_id', 'started_by',
+        ]
+
+    @staticmethod
+    def get_started_by(obj):
+        # started_by is nullable (on_delete=SET_NULL), so guard the username lookup.
+        return obj.started_by.username if obj.started_by_id else None
+
+
+class AutomatchRunDetailSerializer(AutomatchRunListSerializer):
+    class Meta:
+        model = AutomatchRun
+        fields = AutomatchRunListSerializer.Meta.fields + [
+            'config_snapshot', 'client_user_agent', 'client_ip', 'created_at', 'updated_at',
+        ]
+
+
+class AutomatchRunCreateSerializer(serializers.ModelSerializer):
+    id = IntegerField(read_only=True)
+    url = CharField(read_only=True)
+    intended_rows = IntegerField(min_value=0)
+    trigger_source = serializers.ChoiceField(choices=AutomatchRun.TRIGGER_SOURCES)
+    parent_run = serializers.PrimaryKeyRelatedField(
+        queryset=AutomatchRun.objects.all(), required=False, allow_null=True)
+
+    class Meta:
+        model = AutomatchRun
+        # A run always starts 'running' (the model default); completion is reported
+        # later via PATCH, so completion_status is intentionally not settable here.
+        fields = ['id', 'url', 'intended_rows', 'config_snapshot', 'trigger_source', 'parent_run']
+
+    def validate(self, attrs):
+        # A retry must link to a run within the SAME project — both a data-integrity
+        # rule and an authorization guard (a caller must not chain a run onto another
+        # project's run). See ocl_online#105 OQ3 (re-run semantics) / OQ2 (authz).
+        parent_run = attrs.get('parent_run')
+        map_project = self.context.get('map_project')
+        if parent_run and map_project and parent_run.map_project_id != map_project.id:
+            raise serializers.ValidationError(
+                {'parent_run': 'parent_run must belong to the same map project.'})
+        return attrs
+
+
+class AutomatchRunUpdateSerializer(serializers.ModelSerializer):
+    id = IntegerField(read_only=True)
+    url = CharField(read_only=True)
+    completion_status = serializers.ChoiceField(choices=AutomatchRun.COMPLETION_STATUSES, required=False)
+
+    class Meta:
+        model = AutomatchRun
+        # Only lifecycle fields are mutable post-creation. intended_rows,
+        # config_snapshot, trigger_source, parent_run and started_by are an
+        # immutable run-start snapshot and are intentionally omitted (ocl_online#105 OQ3).
+        fields = [
+            'id', 'url', 'completed_rows', 'failed_rows', 'completion_status', 'completed_at',
+        ]
+
+    def update(self, instance, validated_data):
+        # Stamp completed_at the first time a run reaches a terminal status, unless
+        # the client set it explicitly. Already-completed runs keep their timestamp.
+        new_status = validated_data.get('completion_status', instance.completion_status)
+        if (new_status in AutomatchRun.TERMINAL_STATUSES
+                and 'completed_at' not in validated_data
+                and instance.completed_at is None):
+            validated_data['completed_at'] = timezone.now()
+        return super().update(instance, validated_data)
