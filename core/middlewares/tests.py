@@ -224,3 +224,15 @@ class RequireAuthenticationSettingsTest(SimpleTestCase):
     def test_authentication_middleware_not_inserted_when_disabled(self):
         """RequireAuthenticationMiddleware should be absent when the feature is disabled."""
         self.assertNotIn('core.middlewares.middlewares.RequireAuthenticationMiddleware', settings.MIDDLEWARE)
+
+    def test_cors_allows_analytics_attribution_headers(self):
+        """CORS should allow the analytics attribution headers introduced for #109."""
+        for header in (
+            'X-OCL-REQUEST-SOURCE',
+            'X-OCL-EVENT-METADATA',
+            'X-OCL-REQUEST-IDEMPOTENCY-KEY',
+            'X-OCL-PROMPT-TEMPLATE-KEY',
+            'X-OCL-PROMPT-TEMPLATE-VERSION',
+        ):
+            with self.subTest(header=header):
+                self.assertIn(header, settings.CORS_ALLOW_HEADERS)
