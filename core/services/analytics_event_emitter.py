@@ -53,7 +53,16 @@ class AnalyticsEventEmitter:  # pragma: no cover
         'content_type',
         'content_length',
         'tz',
-
+        # Retrospective process-attribution headers (ocl_online#105 §E). These are
+        # forwarded verbatim into the api-transactions payload so the analytics-api
+        # parser (ocl_online#111) can populate request_source + event_metadata; off
+        # the allow-list they would be stripped and every oclapi2-served row would
+        # stay request_source='unknown' / event_metadata={}.
+        'http_x_ocl_request_source',
+        'http_x_ocl_event_metadata',
+        'http_x_ocl_request_idempotency_key',
+        'http_x_ocl_prompt_template_key',
+        'http_x_ocl_prompt_template_version',
     }
     REDACTED = "[REDACTED]"
     ANONYMOUS = "Anonymous"

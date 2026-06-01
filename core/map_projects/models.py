@@ -263,3 +263,67 @@ class MapProject(BaseModel):
                     ] or col['label'].lower().startswith('property:')
             )
         ] if self.columns else []
+
+
+class AutomatchRun(BaseModel):
+    """
+    System-of-record for a single Mapper auto-match run — a child of MapProject.
+
+    Tracks the lifecycle of one auto-match execution: how many input rows were
+    intended, how many completed/failed, the project configuration captured at
+    run start (``config_snapshot``), who/what triggered it, and the originating
+    client. It is created at run start and PATCHed as rows complete (see
+    OpenConceptLab/ocl_online#105 §A, #109).
+
+    Re-run semantics (ocl_online#105 OQ3): re-running the failed rows of a run
+    creates a *new* AutomatchRun with ``parent_run`` set and
+    ``trigger_source='ui-rerun-row'``. The retry's ``intended_rows`` is the count
+    of *failed* rows being re-run (not the original total) and its
+    ``config_snapshot`` is the config at retry time. The parent run's
+    ``failed_rows`` / ``completion_status`` are an immutable snapshot and are
+    never mutated retrospectively; "all attempts" queries walk the
+    ``parent_run`` chain.
+    """
+    OBJECT_TYPE = 'AutomatchRun'
+
+    # completion_status vocabulary
+    RUNNING = 'running'
+    COMPLETED = 'completed'
+    FAILED = 'failed'
+    CANCELLED = 'cancelled'
+    PARTIAL = 'partial'
+    COMPLETION_STATUSES = [RUNNING, COMPLETED, FAILED, CANCELLED, PARTIAL]
+    # Statuses that close out a run; reaching one stamps completed_at.
+    TERMINAL_STATUSES = [COMPLETED, FAILED, CANCELLED, PARTIAL]
+
+    # trigger_source vocabulary
+    TRIGGER_SOURCES = ['ui-auto-match', 'ui-rerun-row', 'api', 'cli', 'scheduled']
+
+    map_project = models.ForeignKey(
+        MapProject, on_delete=models.CASCADE, related_name='auto_match_runs')
+    started_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    intended_rows = models.IntegerField()  # set at run start from input
+    completed_rows = models.IntegerField(default=0)  # updated as rows complete
+    failed_rows = models.IntegerField(default=0)
+    # algorithms, encoder, template, score_config, filters AT START
+    config_snapshot = models.JSONField(default=dict)
+    started_by = models.ForeignKey(
+        'users.UserProfile', on_delete=models.SET_NULL, null=True, related_name='started_auto_match_runs')
+    completion_status = models.CharField(max_length=16, default=RUNNING)
+    trigger_source = models.CharField(max_length=32)
+    # set when a re-run of failed rows spawns a new run
+    parent_run = models.ForeignKey(
+        'self', null=True, blank=True, on_delete=models.SET_NULL, related_name='retry_runs')
+    client_user_agent = models.TextField(null=True, blank=True)
+    client_ip = models.GenericIPAddressField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'automatch_runs'
+        indexes = [
+            models.Index(fields=['map_project', '-started_at']),
+            models.Index(fields=['completion_status']),
+        ]
+
+    def calculate_uri(self):
+        return f"/auto-match-runs/{self.id or generate_temp_version()}/"

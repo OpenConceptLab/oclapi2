@@ -4,7 +4,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from mock import patch, ANY
 
 from core.common.tests import OCLAPITestCase
-from core.map_projects.tests.factories import MapProjectFactory
+from core.map_projects.tests.factories import MapProjectFactory, AutomatchRunFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.users.tests.factories import UserProfileFactory
 
@@ -198,3 +198,207 @@ class MapProjectConfigurationsViewTest(MapProjectAbstractViewTest):
         self.assertTrue(response.data['use_lexical_variants'])
         for field in ['analysis', 'input_file_name', 'candidates', 'matches', 'columns', 'created_by', 'updated_by']:
             self.assertNotIn(field, response.data)
+
+
+class AutomatchRunListViewTest(MapProjectAbstractViewTest):
+    def setUp(self):
+        super().setUp()
+        self.project = MapProjectFactory(organization=self.org, name="Run Project")
+        self.url = f'/orgs/CIEL/map-projects/{self.project.id}/auto-match-runs/'
+
+    def test_post_creates_run(self):
+        response = self.client.post(
+            self.url,
+            data={
+                'intended_rows': 200,
+                'trigger_source': 'ui-auto-match',
+                'config_snapshot': {'encoder_model': 'snowflake', 'algorithms': ['ocl-semantic']},
+            },
+            format='json',
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertIsNotNone(response.data['id'])
+        self.assertEqual(response.data['map_project_id'], self.project.id)
+        self.assertEqual(response.data['intended_rows'], 200)
+        self.assertEqual(response.data['completed_rows'], 0)
+        self.assertEqual(response.data['failed_rows'], 0)
+        self.assertEqual(response.data['completion_status'], 'running')
+        self.assertEqual(response.data['trigger_source'], 'ui-auto-match')
+        self.assertIsNone(response.data['completed_at'])
+        self.assertIsNone(response.data['parent_run_id'])
+        self.assertEqual(response.data['started_by'], self.user.username)
+        self.assertEqual(
+            response.data['config_snapshot'], {'encoder_model': 'snowflake', 'algorithms': ['ocl-semantic']})
+        self.assertEqual(response.data['url'], f"/auto-match-runs/{response.data['id']}/")
+        self.assertEqual(self.project.auto_match_runs.count(), 1)
+        # client metadata is captured server-side from the request, not the payload
+        self.assertEqual(self.project.auto_match_runs.first().client_ip, '127.0.0.1')
+
+    def test_post_captures_user_agent(self):
+        response = self.client.post(
+            self.url,
+            data={'intended_rows': 5, 'trigger_source': 'api'},
+            format='json',
+            HTTP_USER_AGENT='oclmap/0.0.1-alpha',
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            self.project.auto_match_runs.get(id=response.data['id']).client_user_agent, 'oclmap/0.0.1-alpha')
+
+    def test_post_missing_required_400(self):
+        # trigger_source is required (no model default)
+        response = self.client.post(
+            self.url, data={'intended_rows': 10}, format='json',
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('trigger_source', response.data)
+        # intended_rows is required (no model default)
+        response = self.client.post(
+            self.url, data={'trigger_source': 'api'}, format='json',
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('intended_rows', response.data)
+
+    def test_post_invalid_trigger_source_400(self):
+        response = self.client.post(
+            self.url, data={'intended_rows': 10, 'trigger_source': 'bogus'}, format='json',
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('trigger_source', response.data)
+
+    def test_post_rerun_links_parent_and_leaves_parent_immutable(self):
+        # A failed-row re-run is a NEW run pointing at the parent; the parent's
+        # failure snapshot must never be mutated (ocl_online#105 OQ3).
+        parent = AutomatchRunFactory(
+            map_project=self.project, intended_rows=200, completed_rows=190,
+            failed_rows=10, completion_status='partial')
+        response = self.client.post(
+            self.url,
+            data={'intended_rows': 10, 'trigger_source': 'ui-rerun-row', 'parent_run': parent.id},
+            format='json',
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['parent_run_id'], parent.id)
+        self.assertEqual(response.data['intended_rows'], 10)  # only the failed rows, not the original total
+        self.assertEqual(response.data['trigger_source'], 'ui-rerun-row')
+        parent.refresh_from_db()
+        self.assertEqual(parent.failed_rows, 10)
+        self.assertEqual(parent.completion_status, 'partial')
+        self.assertEqual(parent.retry_runs.count(), 1)
+
+    def test_post_rerun_cross_project_parent_400(self):
+        other_project = MapProjectFactory(organization=self.org, name="Other")
+        foreign_parent = AutomatchRunFactory(map_project=other_project)
+        response = self.client.post(
+            self.url,
+            data={'intended_rows': 3, 'trigger_source': 'ui-rerun-row', 'parent_run': foreign_parent.id},
+            format='json',
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('parent_run', response.data)
+
+    def test_get_lists_only_this_projects_runs(self):
+        run1 = AutomatchRunFactory(map_project=self.project)
+        run2 = AutomatchRunFactory(map_project=self.project)
+        other_project = MapProjectFactory(organization=self.org, name="Other")
+        AutomatchRunFactory(map_project=other_project)  # must not leak into this project's list
+
+        response = self.client.get(self.url, HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual({r['id'] for r in response.data}, {run1.id, run2.id})
+
+    def test_non_member_cannot_create_or_list(self):
+        token = UserProfileFactory().get_token()
+        self.assertEqual(
+            self.client.get(self.url, HTTP_AUTHORIZATION='Token ' + token).status_code, 403)
+        self.assertEqual(
+            self.client.post(
+                self.url, data={'intended_rows': 1, 'trigger_source': 'api'}, format='json',
+                HTTP_AUTHORIZATION='Token ' + token).status_code, 403)
+
+
+class AutomatchRunViewTest(MapProjectAbstractViewTest):
+    def setUp(self):
+        super().setUp()
+        self.project = MapProjectFactory(organization=self.org, name="Run Project")
+        self.run = AutomatchRunFactory(map_project=self.project, started_by=self.user, intended_rows=200)
+        self.url = f'/auto-match-runs/{self.run.id}/'
+
+    def test_get_single(self):
+        response = self.client.get(self.url, HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['id'], self.run.id)
+        self.assertEqual(response.data['map_project_id'], self.project.id)
+        self.assertEqual(response.data['intended_rows'], 200)
+        self.assertEqual(response.data['started_by'], self.user.username)
+        self.assertIn('config_snapshot', response.data)
+
+    def test_patch_progress(self):
+        response = self.client.patch(
+            self.url, data={'completed_rows': 150, 'failed_rows': 5}, format='json',
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+        self.assertEqual(response.status_code, 200)
+        self.run.refresh_from_db()
+        self.assertEqual(self.run.completed_rows, 150)
+        self.assertEqual(self.run.failed_rows, 5)
+        self.assertEqual(self.run.completion_status, 'running')
+        self.assertIsNone(self.run.completed_at)
+
+    def test_patch_completion_stamps_completed_at(self):
+        response = self.client.patch(
+            self.url,
+            data={'completed_rows': 195, 'failed_rows': 5, 'completion_status': 'partial'},
+            format='json',
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+        self.assertEqual(response.status_code, 200)
+        self.run.refresh_from_db()
+        self.assertEqual(self.run.completion_status, 'partial')
+        self.assertIsNotNone(self.run.completed_at)
+
+    def test_patch_invalid_status_400(self):
+        response = self.client.patch(
+            self.url, data={'completion_status': 'bogus'}, format='json',
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('completion_status', response.data)
+
+    def test_patch_cannot_mutate_snapshot_fields(self):
+        response = self.client.patch(
+            self.url,
+            data={
+                'intended_rows': 9999, 'trigger_source': 'cli',
+                'config_snapshot': {'x': 1}, 'completed_rows': 10,
+            },
+            format='json',
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+        self.assertEqual(response.status_code, 200)
+        self.run.refresh_from_db()
+        self.assertEqual(self.run.completed_rows, 10)  # mutable lifecycle field applied
+        self.assertEqual(self.run.intended_rows, 200)  # run-start snapshot untouched
+        self.assertEqual(self.run.trigger_source, 'ui-auto-match')
+        self.assertEqual(self.run.config_snapshot, {})
+
+    def test_non_member_cannot_get_or_patch(self):
+        token = UserProfileFactory().get_token()
+        self.assertEqual(
+            self.client.get(self.url, HTTP_AUTHORIZATION='Token ' + token).status_code, 403)
+        self.assertEqual(
+            self.client.patch(
+                self.url, data={'completed_rows': 1}, format='json',
+                HTTP_AUTHORIZATION='Token ' + token).status_code, 403)
+        self.run.refresh_from_db()
+        self.assertEqual(self.run.completed_rows, 0)  # the rejected PATCH changed nothing
+
+    def test_put_not_allowed(self):
+        # Updates are PATCH-only; a whole-object PUT must be rejected (405).
+        response = self.client.put(
+            self.url, data={'completed_rows': 1}, format='json',
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+        self.assertEqual(response.status_code, 405)
+
+    def test_get_404_for_missing_run(self):
+        response = self.client.get(
+            '/auto-match-runs/99999999/', HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+        self.assertEqual(response.status_code, 404)
