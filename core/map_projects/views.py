@@ -163,7 +163,9 @@ class AutomatchRunListView(AutomatchRunBaseView, ListWithHeadersMixin):
         # The create serializer needs the parent project to validate that a
         # retry's parent_run belongs to the same project (see its validate()).
         context = super().get_serializer_context()
-        if self.request.method == 'POST':
+        # drf_yasg instantiates the view without route kwargs while building the
+        # schema, so skip parent-project resolution for that synthetic request.
+        if self.request.method == 'POST' and not getattr(self, 'swagger_fake_view', False):
             context['map_project'] = self.get_map_project()
         return context
 

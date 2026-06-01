@@ -2,8 +2,10 @@ import json
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from mock import patch, ANY
+from rest_framework.test import APIRequestFactory
 
 from core.common.tests import OCLAPITestCase
+from core.map_projects.views import AutomatchRunListView
 from core.map_projects.tests.factories import MapProjectFactory, AutomatchRunFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.users.tests.factories import UserProfileFactory
@@ -317,6 +319,19 @@ class AutomatchRunListViewTest(MapProjectAbstractViewTest):
             self.client.post(
                 self.url, data={'intended_rows': 1, 'trigger_source': 'api'}, format='json',
                 HTTP_AUTHORIZATION='Token ' + token).status_code, 403)
+
+    def test_post_serializer_context_skips_project_lookup_for_swagger_schema(self):
+        factory = APIRequestFactory()
+        view = AutomatchRunListView()
+        view.request = view.initialize_request(factory.post('/schema/auto-match-runs/'))
+        view.kwargs = {}
+        view.format_kwarg = None
+        view.swagger_fake_view = True
+
+        context = view.get_serializer_context()
+
+        self.assertEqual(context['request'].method, 'POST')
+        self.assertNotIn('map_project', context)
 
 
 class AutomatchRunViewTest(MapProjectAbstractViewTest):
