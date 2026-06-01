@@ -880,6 +880,41 @@ class ConceptTest(OCLTestCase):
         self.assertTrue(concept.is_versioned_object)
         self.assertTrue(concept_v1.is_latest_version)
 
+        concept_v1.retire(concept_v1.created_by, None, 'Forceful retirement')  # concept will become old/prev version
+        concept.refresh_from_db()
+        concept_v1.refresh_from_db()
+
+        self.assertFalse(concept_v1.is_latest_version)
+        self.assertEqual(concept.versions.count(), 3)
+        self.assertTrue(concept.retired)
+        latest_version = concept.get_latest_version()
+        self.assertTrue(latest_version.retired)
+        self.assertEqual(latest_version.retire_reason, 'Forceful retirement')
+        self.assertEqual(latest_version.comment, 'Concept was retired')
+
+        self.assertEqual(
+            concept.retire(concept.created_by),
+            {'__all__': CONCEPT_IS_ALREADY_RETIRED}
+        )
+
+    def test_retire_without_retire_reason(self):
+        source = OrganizationSourceFactory(version=HEAD)
+        concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
+        })
+        concept_v1 = concept.clone()
+        concept_v1.datatype = 'foobar'
+        concept_v1.save_as_new_version(concept.created_by)
+        concept_v1 = Concept.objects.order_by('-created_at').first()
+        concept.refresh_from_db()
+
+        self.assertEqual(concept.versions.count(), 2)
+        self.assertFalse(concept.retired)
+        self.assertFalse(concept.is_latest_version)
+        self.assertTrue(concept.is_versioned_object)
+        self.assertTrue(concept_v1.is_latest_version)
+
         concept_v1.retire(concept_v1.created_by, 'Forceful retirement')  # concept will become old/prev version
         concept.refresh_from_db()
         concept_v1.refresh_from_db()
@@ -889,7 +924,43 @@ class ConceptTest(OCLTestCase):
         self.assertTrue(concept.retired)
         latest_version = concept.get_latest_version()
         self.assertTrue(latest_version.retired)
+        self.assertEqual(latest_version.retire_reason, None)
         self.assertEqual(latest_version.comment, 'Forceful retirement')
+
+        self.assertEqual(
+            concept.retire(concept.created_by),
+            {'__all__': CONCEPT_IS_ALREADY_RETIRED}
+        )
+
+    def test_retire_with_default_comment(self):
+        source = OrganizationSourceFactory(version=HEAD)
+        concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
+        })
+        concept_v1 = concept.clone()
+        concept_v1.datatype = 'foobar'
+        concept_v1.save_as_new_version(concept.created_by)
+        concept_v1 = Concept.objects.order_by('-created_at').first()
+        concept.refresh_from_db()
+
+        self.assertEqual(concept.versions.count(), 2)
+        self.assertFalse(concept.retired)
+        self.assertFalse(concept.is_latest_version)
+        self.assertTrue(concept.is_versioned_object)
+        self.assertTrue(concept_v1.is_latest_version)
+
+        concept_v1.retire(concept_v1.created_by)  # concept will become old/prev version
+        concept.refresh_from_db()
+        concept_v1.refresh_from_db()
+
+        self.assertFalse(concept_v1.is_latest_version)
+        self.assertEqual(concept.versions.count(), 3)
+        self.assertTrue(concept.retired)
+        latest_version = concept.get_latest_version()
+        self.assertTrue(latest_version.retired)
+        self.assertEqual(latest_version.retire_reason, None)
+        self.assertEqual(latest_version.comment, 'Concept was retired')
 
         self.assertEqual(
             concept.retire(concept.created_by),
@@ -899,8 +970,9 @@ class ConceptTest(OCLTestCase):
     def test_unretire(self):
         source = OrganizationSourceFactory(version=HEAD)
         concept = Concept.persist_new({
-            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source, 'retired': True,
-            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
+            'retire_reason': 'unwanted', 'retired': True
         })
         concept_v1 = concept.clone()
         concept_v1.datatype = 'foobar'
@@ -924,6 +996,7 @@ class ConceptTest(OCLTestCase):
         latest_version = concept.get_latest_version()
         self.assertFalse(latest_version.retired)
         self.assertEqual(latest_version.comment, 'World needs you!')
+        self.assertEqual(latest_version.retire_reason, 'unwanted')
 
         self.assertEqual(
             concept.unretire(concept.created_by),

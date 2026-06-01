@@ -234,12 +234,13 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
         mapping = self.get_object()
         parent = mapping.parent
         comment = request.data.get('update_comment', None) or request.data.get('comment', None)
+        reason = request.data.get('retire_reason', None)
         if self.is_hard_delete_requested():
             mapping.delete()
             parent.update_mappings_count()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
-        errors = mapping.retire(request.user, comment)
+        errors = mapping.retire(request.user, comment, reason)
 
         if errors:
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)

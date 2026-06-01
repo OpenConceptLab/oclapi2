@@ -245,7 +245,7 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
                 if ConceptMapDetailSerializer.is_mapping_same(mapping, new_mapping):
                     found = True
             if not found:
-                mapping.retire(user, 'Deleted from ConceptMap resource')
+                mapping.retire(user, None, 'Deleted from ConceptMap resource')
 
         source.refresh_from_db()
 

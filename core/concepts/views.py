@@ -409,7 +409,8 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         comment = request.data.get('update_comment', None) or request.data.get('comment', None)
-        errors = concept.retire(request.user, comment)
+        reason = request.data.get('retire_reason', None)
+        errors = concept.retire(request.user, comment, reason)
 
         if errors:
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
@@ -745,6 +746,8 @@ class ConceptLocaleRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDest
             ]
             retired_locale = instance.clone()
             retired_locale.retired = True
+            if 'retire_reason' in request.data:
+                retired_locale.retire_reason = request.data.get('retire_reason')
             labels.append(retired_locale)
             setattr(new_version, subject_label_attr, labels)
             new_version.comment = f'Retired {instance.name} in {self.parent_list_attribute}.'

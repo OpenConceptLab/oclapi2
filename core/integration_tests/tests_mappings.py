@@ -708,6 +708,7 @@ class MappingRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         latest_version = self.mapping.get_latest_version()
         self.assertTrue(latest_version.retired)
         self.assertEqual(latest_version.comment, 'Mapping was retired')
+        self.assertEqual(latest_version.retire_reason, None)
 
         self.mapping.refresh_from_db()
         self.assertTrue(self.mapping.retired)

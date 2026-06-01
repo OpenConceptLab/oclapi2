@@ -69,11 +69,6 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     map_type = models.TextField()
     sort_weight = models.FloatField(db_index=True, null=True, blank=True)
     sources = models.ManyToManyField('sources.Source', related_name='mappings')
-    external_id = models.TextField(null=True, blank=True)
-    comment = models.TextField(null=True, blank=True)
-    versioned_object = models.ForeignKey(
-        'self', related_name='versions_set', null=True, blank=True, on_delete=models.CASCADE
-    )
     mnemonic = models.CharField(
         max_length=255, validators=[RegexValidator(regex=NAMESPACE_REGEX)], default=uuid.uuid4,
     )
@@ -100,8 +95,6 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     to_concept_name = models.TextField(null=True, blank=True)
     to_source_url = models.TextField(null=True, blank=True, db_index=True)
     to_source_version = models.TextField(null=True, blank=True)
-    _counted = models.BooleanField(default=True, null=True, blank=True)
-    _index = models.BooleanField(default=True)
 
     logo_path = None
     name = None
@@ -274,6 +267,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             parent_id=self.parent_id,
             map_type=self.map_type,
             retired=self.retired,
+            retire_reason=self.retire_reason,
             released=self.released,
             is_latest_version=self.is_latest_version,
             extras=self.extras,
@@ -402,11 +396,12 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         instance.populate_fields_from_relations(data)
         instance.extras = data.get('extras', instance.extras)
         instance.external_id = data.get('external_id', instance.external_id)
-        instance.comment = data.get('update_comment') or data.get('comment')
-        instance.retired = data.get('retired', instance.retired)
         instance.mnemonic = data.get('mnemonic', instance.mnemonic)
         instance.map_type = data.get('map_type', instance.map_type)
         instance.sort_weight = data.get('sort_weight', instance.sort_weight)
+        instance.comment = data.get('update_comment') or data.get('comment')
+        instance.retire_reason = data.get('retire_reason', instance.retire_reason)
+        instance.retired = data.get('retired', instance.retired)
 
         return instance.save_as_new_version(user)
 

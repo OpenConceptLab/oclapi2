@@ -877,6 +877,41 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertFalse(concept.get_latest_version().prev_version.retired)
 
         data = {
+            "type": "Concept", "id": "Cherry", "concept_class": "Product",
+            "datatype": "None", "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
+            "names": [
+                {"name": "Cherry", "locale": "en", "locale_preferred": "True", "name_type": "Fully Specified",
+                 "retire_reason": "Not needed", "retired": True},
+                {"name": "Cherri", "locale": "en", "locale_preferred": "True", "name_type": "Fully Specified"}
+            ],
+            "descriptions": [],
+        }
+
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 0)
+        self.assertEqual(len(importer.exists), 0)
+        self.assertEqual(len(importer.updated), 1)
+        self.assertEqual(len(importer.deleted), 0)
+        self.assertEqual(len(importer.failed), 0)
+        self.assertEqual(len(importer.invalid), 0)
+        self.assertEqual(len(importer.others), 0)
+        self.assertEqual(len(importer.permission_denied), 0)
+        self.assertEqual(batch_index_resources_mock.apply_async.call_count, 0)
+        concept = Concept.objects.filter(mnemonic='Cherry').first()
+        latest = concept.get_latest_version()
+        prev = latest.prev_version
+        self.assertEqual(latest.names.count(), 2)
+        self.assertTrue(latest.names.filter(name='Cherry', retired=True, retire_reason='Not needed').exists())
+        self.assertTrue(latest.names.filter(name='Cherri', retired=False, retire_reason__isnull=True).exists())
+        self.assertTrue(latest.display_name, 'Cherri')
+        self.assertEqual(prev.names.count(), 1)
+        self.assertFalse(prev.names.filter(name='Cherri').exists())
+        self.assertTrue(prev.names.filter(name='Cherry', retired=False, retire_reason__isnull=True).exists())
+
+        data = {
             "to_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Corn/",
             "from_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Vegetable/",
             "type": "Mapping", "source": "DemoSource",
