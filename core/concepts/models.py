@@ -1,3 +1,4 @@
+from celery.states import SUCCESS
 from django.conf import settings
 from django.contrib.postgres.indexes import HashIndex
 from django.core.exceptions import ValidationError
@@ -20,6 +21,7 @@ from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCAL
     MAX_NAMES_LIMIT, MAX_DESCRIPTIONS_LIMIT
 from core.concepts.mixins import ConceptValidationMixin
 from core.services.storages.postgres import PostgresQL
+from core.tasks.models import Task
 
 
 class AbstractLocalizedText(ChecksumModel):
@@ -907,6 +909,32 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return Concept.sources.through.objects.filter(
             concept_id__in=concept_ids,
         ).exclude(source__version=HEAD).exists()
+
+    def has_pending_source_version_seed(self):
+        """Return whether an unfinished source snapshot may include this concept."""
+        versioned_object_id = self.versioned_object_id or self.id
+        concept_created_at = Concept.objects.filter(id=versioned_object_id).values_list(
+            'created_at', flat=True
+        ).first()
+        if not concept_created_at:
+            return False
+
+        source = self.parent
+        source_version_ids = source.__class__.objects.filter(
+            mnemonic=source.mnemonic,
+            organization_id=source.organization_id,
+            user_id=source.user_id,
+            created_at__gte=concept_created_at,
+        ).exclude(version=HEAD).values_list('id', flat=True)
+
+        for source_version_id in source_version_ids:
+            seed_task = Task.find(
+                name__iendswith='seed_children_to_new_version',
+                args__contains=['source', source_version_id],
+            )
+            if seed_task and seed_task.state != SUCCESS:
+                return True
+        return False
 
     def get_source_version_before_creation(self):
         return self.sources.exclude(version=HEAD).filter(

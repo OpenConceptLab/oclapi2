@@ -406,6 +406,8 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
 
         parent = concept.parent
         with transaction.atomic():
+            # Source version creation locks the same HEAD row before registering its seed task.
+            parent.__class__.objects.select_for_update().get(id=concept.parent_id)
             locked_concepts = list(Concept.objects.select_for_update().filter(
                 parent_id=concept.parent_id,
                 versioned_object_id=concept.versioned_object_id,
@@ -418,7 +420,10 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
                 raise Http404()
 
             is_admin = IsAdminUser().has_permission(request, self)
-            if not is_admin and versioned_concept.belongs_to_non_head_source_version():
+            if not is_admin and (
+                    versioned_concept.belongs_to_non_head_source_version() or
+                    versioned_concept.has_pending_source_version_seed()
+            ):
                 return Response(
                     {'detail': CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY},
                     status=status.HTTP_409_CONFLICT,

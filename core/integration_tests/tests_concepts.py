@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch
 
+from celery.states import PENDING
 from django.conf import settings
 from mock import ANY
 
@@ -17,6 +18,7 @@ from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
+from core.tasks.models import Task
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -1613,6 +1615,55 @@ class ConceptHeadOnlyHardDeleteTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.data, {'detail': CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY})
         self.assertTrue(Concept.objects.filter(id=concept.id).exists())
+
+    def test_editor_cannot_hard_delete_while_source_version_seed_is_pending(self):
+        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        member = UserProfileFactory(organizations=[source.organization])
+        concept = ConceptFactory(parent=source)
+        source_version = OrganizationSourceFactory(
+            organization=source.organization,
+            mnemonic=source.mnemonic,
+            version='pending-v1',
+        )
+        Task.new(
+            user=member,
+            name='seed_children_to_new_version',
+            args=('source', source_version.id, True, False),
+            state=PENDING,
+        )
+
+        response = self.client.delete(
+            concept.uri + '?hardDelete=true',
+            HTTP_AUTHORIZATION='Token ' + member.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data, {'detail': CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY})
+        self.assertTrue(Concept.objects.filter(id=concept.id).exists())
+
+    def test_pending_seed_does_not_block_concept_created_after_source_version(self):
+        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        member = UserProfileFactory(organizations=[source.organization])
+        source_version = OrganizationSourceFactory(
+            organization=source.organization,
+            mnemonic=source.mnemonic,
+            version='pending-v1',
+        )
+        Task.new(
+            user=member,
+            name='seed_children_to_new_version',
+            args=('source', source_version.id, True, False),
+            state=PENDING,
+        )
+        concept = ConceptFactory(parent=source)
+
+        response = self.client.delete(
+            concept.uri + '?hardDelete=true',
+            HTTP_AUTHORIZATION='Token ' + member.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Concept.objects.filter(id=concept.id).exists())
 
     def test_historical_concept_version_in_release_blocks_hard_delete(self):
         source = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
