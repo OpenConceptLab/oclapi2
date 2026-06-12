@@ -260,6 +260,8 @@ services:
       - 8008:8008
     environment:
       - INFINITY_API_KEY=${INFINITY_API_KEY-infinity-api-key-123}
+      - DO_NOT_TRACK=1
+      - INFINITY_ANONYMOUS_USAGE_STATS=0
     volumes:
       - embeddings-cache:/app/.cache
     healthcheck:
