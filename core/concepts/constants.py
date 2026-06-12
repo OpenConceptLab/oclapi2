@@ -38,6 +38,9 @@ CONCEPT_WAS_RETIRED = 'Concept was retired'
 CONCEPT_WAS_UNRETIRED = 'Concept was un-retired'
 CONCEPT_IS_ALREADY_RETIRED = 'Concept is already retired'
 CONCEPT_IS_ALREADY_NOT_RETIRED = 'Concept is already not retired'
+CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY = (
+    'Concept cannot be hard deleted because it belongs to a source version.'
+)
 ALREADY_EXISTS = "Concept ID must be unique within a source."
 PERSIST_CLONE_SPECIFY_USER_ERROR = "Must specify which user is attempting to create a new version."
 PERSIST_CLONE_ERROR = 'An error occurred while saving new version.'

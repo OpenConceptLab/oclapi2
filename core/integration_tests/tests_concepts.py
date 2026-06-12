@@ -6,9 +6,10 @@ from mock import ANY
 
 from core.bundles.models import Bundle
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
-from core.common.constants import OPENMRS_VALIDATION_SCHEMA
+from core.common.constants import ACCESS_TYPE_NONE, OPENMRS_VALIDATION_SCHEMA
 from core.common.tasks import rebuild_indexes
 from core.common.tests import OCLAPITestCase
+from core.concepts.constants import CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory, ConceptDescriptionFactory
@@ -1445,6 +1446,317 @@ class ConceptRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['mappings'][0]['uuid'], str(mapping.id))
         self.assertTrue('/concepts/?page=1&limit=1&verbose=true&includeInverseMappings=true' in response['previous'])
         self.assertFalse(response.has_header('next'))
+
+
+class ConceptHeadOnlyHardDeleteTest(OCLAPITestCase):
+    def _create_private_user_source_concept(self):
+        owner = UserProfileFactory()
+        source = UserSourceFactory(user=owner, public_access=ACCESS_TYPE_NONE)
+        concept = ConceptFactory(
+            parent=source,
+            names=[ConceptNameFactory.build(name='Head-only concept')],
+            descriptions=[ConceptDescriptionFactory.build(name='Head-only description')],
+        )
+        return owner, source, concept
+
+    @staticmethod
+    def _create_source_version(source, concept, *, released):
+        source_version = OrganizationSourceFactory(
+            organization=source.organization,
+            mnemonic=source.mnemonic,
+            version='released-v1' if released else 'draft-v1',
+            released=released,
+        )
+        source_version.concepts.add(concept.get_latest_version())
+        return source_version
+
+    def test_user_source_owner_can_hard_delete_head_only_concept(self):
+        owner, source, concept = self._create_private_user_source_concept()
+        source.update_concepts_count(sync=True)
+        self.assertEqual(source.active_concepts, 1)
+
+        response = self.client.delete(
+            concept.uri + '?hardDelete=true',
+            HTTP_AUTHORIZATION='Token ' + owner.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Concept.objects.filter(parent_id=source.id, mnemonic=concept.mnemonic).exists())
+        source.refresh_from_db()
+        self.assertEqual(source.active_concepts, 0)
+
+    def test_organization_member_can_hard_delete_head_only_concept(self):
+        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        member = UserProfileFactory(organizations=[source.organization])
+        concept = ConceptFactory(parent=source)
+
+        response = self.client.delete(
+            concept.uri + '?hardDelete=true',
+            HTTP_AUTHORIZATION='Token ' + member.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Concept.objects.filter(id=concept.id).exists())
+
+    def test_authenticated_user_can_hard_delete_from_public_edit_source(self):
+        source = OrganizationSourceFactory()
+        user = UserProfileFactory()
+        concept = ConceptFactory(parent=source)
+
+        response = self.client.delete(
+            concept.uri + '?hardDelete=true',
+            HTTP_AUTHORIZATION='Token ' + user.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Concept.objects.filter(id=concept.id).exists())
+
+    def test_same_mnemonic_in_versioned_different_source_does_not_block_delete(self):
+        source = OrganizationSourceFactory()
+        other_source = OrganizationSourceFactory()
+        user = UserProfileFactory()
+        concept = ConceptFactory(parent=source, mnemonic='shared-id')
+        other_concept = ConceptFactory(parent=other_source, mnemonic='shared-id')
+        self._create_source_version(other_source, other_concept, released=True)
+
+        response = self.client.delete(
+            concept.uri + '?hardDelete=true',
+            HTTP_AUTHORIZATION='Token ' + user.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Concept.objects.filter(id=concept.id).exists())
+        self.assertTrue(Concept.objects.filter(id=other_concept.id).exists())
+
+    def test_hard_delete_removes_all_head_only_concept_versions(self):
+        source = OrganizationSourceFactory()
+        user = UserProfileFactory()
+        concept = ConceptFactory(
+            parent=source,
+            names=[ConceptNameFactory.build(name='Edited HEAD-only concept')],
+        )
+
+        for index in range(4):
+            response = self.client.patch(
+                concept.uri,
+                {'extras': {'edit': index}},
+                HTTP_AUTHORIZATION='Token ' + user.get_token(),
+                format='json',
+            )
+            self.assertEqual(response.status_code, 200, response.data)
+
+        concept_versions = Concept.objects.filter(
+            parent_id=source.id,
+            versioned_object_id=concept.id,
+        )
+        self.assertEqual(concept_versions.count(), 6)
+        self.assertFalse(concept.belongs_to_non_head_source_version())
+
+        response = self.client.delete(
+            concept.uri + '?hardDelete=true',
+            HTTP_AUTHORIZATION='Token ' + user.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Concept.objects.filter(
+            parent_id=source.id,
+            versioned_object_id=concept.id,
+        ).exists())
+
+    def test_user_without_write_access_cannot_hard_delete(self):
+        _, _, concept = self._create_private_user_source_concept()
+        user = UserProfileFactory()
+
+        response = self.client.delete(
+            concept.uri + '?hardDelete=true',
+            HTTP_AUTHORIZATION='Token ' + user.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Concept.objects.filter(id=concept.id).exists())
+
+    def test_anonymous_user_cannot_hard_delete_from_public_edit_source(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source)
+
+        response = self.client.delete(concept.uri + '?hardDelete=true')
+
+        self.assertEqual(response.status_code, 401)
+        self.assertTrue(Concept.objects.filter(id=concept.id).exists())
+
+    def test_editor_cannot_hard_delete_concept_in_released_source_version(self):
+        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        member = UserProfileFactory(organizations=[source.organization])
+        concept = ConceptFactory(parent=source)
+        self._create_source_version(source, concept, released=True)
+
+        response = self.client.delete(
+            concept.uri + '?hardDelete=true',
+            HTTP_AUTHORIZATION='Token ' + member.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data, {'detail': CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY})
+        self.assertTrue(Concept.objects.filter(id=concept.id).exists())
+
+    def test_editor_cannot_hard_delete_concept_in_draft_source_version(self):
+        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        member = UserProfileFactory(organizations=[source.organization])
+        concept = ConceptFactory(parent=source)
+        self._create_source_version(source, concept, released=False)
+
+        response = self.client.delete(
+            concept.uri + '?hardDelete=true',
+            HTTP_AUTHORIZATION='Token ' + member.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data, {'detail': CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY})
+        self.assertTrue(Concept.objects.filter(id=concept.id).exists())
+
+    def test_historical_concept_version_in_release_blocks_hard_delete(self):
+        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        member = UserProfileFactory(organizations=[source.organization])
+        concept = ConceptFactory(
+            parent=source,
+            names=[ConceptNameFactory.build(name='Historically released concept')],
+        )
+        released_version = self._create_source_version(source, concept, released=True)
+        released_concept_version_id = concept.get_latest_version().id
+
+        update_response = self.client.patch(
+            concept.uri,
+            {'datatype': 'Text'},
+            HTTP_AUTHORIZATION='Token ' + member.get_token(),
+            format='json',
+        )
+        self.assertEqual(update_response.status_code, 200, update_response.data)
+        self.assertNotEqual(concept.get_latest_version().id, released_concept_version_id)
+        self.assertTrue(released_version.concepts.filter(id=released_concept_version_id).exists())
+
+        response = self.client.delete(
+            concept.uri + '?hardDelete=true',
+            HTTP_AUTHORIZATION='Token ' + member.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(Concept.objects.filter(id=concept.id).exists())
+
+    def test_blocked_hard_delete_preserves_related_data(self):
+        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        member = UserProfileFactory(organizations=[source.organization])
+        concept = ConceptFactory(
+            parent=source,
+            names=[ConceptNameFactory.build(name='Published concept')],
+            descriptions=[ConceptDescriptionFactory.build(name='Published description')],
+        )
+        target = ConceptFactory(parent=source)
+        mapping = MappingFactory(
+            parent=source,
+            from_concept=concept.get_latest_version(),
+            to_concept=target.get_latest_version(),
+        )
+        source_version = self._create_source_version(source, concept, released=True)
+        concept_ids = list(Concept.objects.filter(
+            parent_id=source.id,
+            versioned_object_id=concept.id,
+        ).values_list('id', flat=True))
+        counts_before = {
+            'concepts': Concept.objects.filter(id__in=concept_ids).count(),
+            'names': sum(Concept.objects.get(id=cid).names.count() for cid in concept_ids),
+            'descriptions': sum(Concept.objects.get(id=cid).descriptions.count() for cid in concept_ids),
+            'source_associations': Concept.sources.through.objects.filter(concept_id__in=concept_ids).count(),
+            'mappings': Mapping.objects.filter(id=mapping.id).count(),
+        }
+
+        response = self.client.delete(
+            concept.uri + '?hardDelete=true',
+            HTTP_AUTHORIZATION='Token ' + member.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            {
+                'concepts': Concept.objects.filter(id__in=concept_ids).count(),
+                'names': sum(Concept.objects.get(id=cid).names.count() for cid in concept_ids),
+                'descriptions': sum(Concept.objects.get(id=cid).descriptions.count() for cid in concept_ids),
+                'source_associations': Concept.sources.through.objects.filter(concept_id__in=concept_ids).count(),
+                'mappings': Mapping.objects.filter(id=mapping.id).count(),
+            },
+            counts_before,
+        )
+        self.assertTrue(source_version.concepts.filter(id__in=concept_ids).exists())
+
+    def test_admin_can_hard_delete_concept_in_released_source_version(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source)
+        self._create_source_version(source, concept, released=True)
+        admin = UserProfile.objects.get(username='ocladmin')
+
+        response = self.client.delete(
+            concept.uri + '?hardDelete=true',
+            HTTP_AUTHORIZATION='Token ' + admin.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Concept.objects.filter(id=concept.id).exists())
+
+    def test_editor_cannot_use_async_hard_delete(self):
+        source = OrganizationSourceFactory()
+        user = UserProfileFactory()
+        concept = ConceptFactory(parent=source)
+
+        response = self.client.delete(
+            concept.uri + '?async=true&hardDelete=true',
+            HTTP_AUTHORIZATION='Token ' + user.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Concept.objects.filter(id=concept.id).exists())
+
+    def test_editor_cannot_use_db_hard_delete(self):
+        source = OrganizationSourceFactory()
+        user = UserProfileFactory()
+        concept = ConceptFactory(parent=source)
+
+        response = self.client.delete(
+            concept.uri + '?db=true&hardDelete=true',
+            HTTP_AUTHORIZATION='Token ' + user.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Concept.objects.filter(id=concept.id).exists())
+
+    def test_editor_cannot_hard_delete_individual_concept_version(self):
+        source = OrganizationSourceFactory()
+        user = UserProfileFactory()
+        concept = ConceptFactory(parent=source)
+        concept_version = concept.get_latest_version()
+
+        response = self.client.delete(
+            f'{concept.uri}{concept_version.version}/?hardDelete=true',
+            HTTP_AUTHORIZATION='Token ' + user.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Concept.objects.filter(id=concept_version.id).exists())
+
+    def test_regular_delete_still_retires_for_editor(self):
+        source = OrganizationSourceFactory()
+        user = UserProfileFactory()
+        concept = ConceptFactory(parent=source)
+
+        response = self.client.delete(
+            concept.uri,
+            {'comment': 'Retired instead of deleted'},
+            HTTP_AUTHORIZATION='Token ' + user.get_token(),
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 204)
+        concept.refresh_from_db()
+        self.assertTrue(concept.retired)
+        self.assertEqual(concept.get_latest_version().comment, 'Retired instead of deleted')
 
 
 class ConceptVersionRetrieveViewTest(OCLAPITestCase):

@@ -897,6 +897,17 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def latest_source_version(self):
         return self.sources.exclude(version=HEAD).order_by('-created_at').first()
 
+    def belongs_to_non_head_source_version(self):
+        """Return whether any version of this source-scoped concept was snapshotted."""
+        versioned_object_id = self.versioned_object_id or self.id
+        concept_ids = Concept.objects.filter(
+            parent_id=self.parent_id,
+            versioned_object_id=versioned_object_id,
+        ).values_list('id', flat=True)
+        return Concept.sources.through.objects.filter(
+            concept_id__in=concept_ids,
+        ).exclude(source__version=HEAD).exists()
+
     def get_source_version_before_creation(self):
         return self.sources.exclude(version=HEAD).filter(
             created_at__lte=self.created_at).order_by('-created_at').first()

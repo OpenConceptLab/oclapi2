@@ -41,7 +41,10 @@ from core.common.utils import (to_parent_uri_from_kwargs, generate_temp_version,
                                drop_version, get_falsy_values)
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
-from core.concepts.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT
+from core.concepts.constants import (
+    CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY,
+    PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT,
+)
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept, ConceptName
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
@@ -344,7 +347,10 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
         if self.request.method in ['GET']:
             return [CanViewParentDictionary(), ]
 
-        if self.request.method == 'DELETE' and self.is_hard_delete_requested():
+        if (
+                self.request.method == 'DELETE' and self.is_hard_delete_requested() and
+                (self.is_async_requested() or self.is_db_delete_requested())
+        ):
             return [IsAdminUser(), ]
 
         return [CanEditParentDictionary(), ]
@@ -383,30 +389,59 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
     def is_db_delete_requested(self):
         return self.request.query_params.get('db', None) in TRUTHY
 
+    def _db_hard_delete(self):
+        parent_filters = Concept.get_parent_and_owner_filters_from_kwargs(self.kwargs)
+        concepts = Concept.objects.filter(mnemonic=self.kwargs['concept'], **parent_filters)
+        concept = concepts.filter(id=F('versioned_object_id')).first()
+        parent = concept.parent
+        result = concepts.delete()
+        parent.update_concepts_count()
+        return Response(result, status=status.HTTP_204_NO_CONTENT)
+
+    def _hard_delete(self, request, concept):
+        if self.is_async_requested():
+            task = Task.new(queue='default', user=request.user, name=delete_concept.__name__)
+            delete_concept.apply_async((concept.id,), queue=task.queue, task_id=task.id)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        parent = concept.parent
+        with transaction.atomic():
+            locked_concepts = list(Concept.objects.select_for_update().filter(
+                parent_id=concept.parent_id,
+                versioned_object_id=concept.versioned_object_id,
+            ))
+            versioned_concept = next(
+                (candidate for candidate in locked_concepts if candidate.id == concept.id),
+                None,
+            )
+            if not versioned_concept:
+                raise Http404()
+
+            is_admin = IsAdminUser().has_permission(request, self)
+            if not is_admin and versioned_concept.belongs_to_non_head_source_version():
+                return Response(
+                    {'detail': CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY},
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            # Versions reference the versioned concept with on_delete=CASCADE.
+            # Deleting the root removes every HEAD-only version and its related rows.
+            versioned_concept.delete()
+        parent.update_concepts_count()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     def destroy(self, request, *args, **kwargs):
         if self.is_container_version_specified():
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
         is_hard_delete_requested = self.is_hard_delete_requested()
         if self.is_db_delete_requested() and is_hard_delete_requested:
-            parent_filters = Concept.get_parent_and_owner_filters_from_kwargs(self.kwargs)
-            concepts = Concept.objects.filter(mnemonic=self.kwargs['concept'], **parent_filters)
-            concept = concepts.filter(id=F('versioned_object_id')).first()
-            parent = concept.parent
-            result = concepts.delete()
-            parent.update_concepts_count()
-            return Response(result, status=status.HTTP_204_NO_CONTENT)
+            return self._db_hard_delete()
 
         concept = self.get_object()
         parent = concept.parent
 
         if is_hard_delete_requested:
-            if self.is_async_requested():
-                task = Task.new(queue='default', user=request.user, name=delete_concept.__name__)
-                delete_concept.apply_async((concept.id,), queue=task.queue, task_id=task.id)
-                return Response(status=status.HTTP_204_NO_CONTENT)
-            concept.delete()
-            parent.update_concepts_count()
-            return Response(status=status.HTTP_204_NO_CONTENT)
+            return self._hard_delete(request, concept)
 
         comment = request.data.get('update_comment', None) or request.data.get('comment', None)
         reason = request.data.get('retire_reason', None)
