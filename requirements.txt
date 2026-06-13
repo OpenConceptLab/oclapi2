@@ -38,7 +38,7 @@ mozilla-django-oidc==5.0.1
 django-celery-beat==2.9.0
 jsondiff==2.0.0
 django-silk==5.5.0
-azure-storage-blob==12.19.0
+azure-storage-blob==12.28.0
 fhir.resources==7.1.0
 ijson==3.2.3
 responses==0.25.0
