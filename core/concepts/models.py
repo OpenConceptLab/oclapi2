@@ -21,7 +21,6 @@ from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCAL
     MAX_NAMES_LIMIT, MAX_DESCRIPTIONS_LIMIT
 from core.concepts.mixins import ConceptValidationMixin
 from core.services.storages.postgres import PostgresQL
-from core.tasks.models import Task
 
 
 class AbstractLocalizedText(ChecksumModel):
@@ -901,13 +900,12 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     def belongs_to_non_head_source_version(self):
         """Return whether any version of this source-scoped concept was snapshotted."""
+        # Snapshots link the `is_latest_version=True` row (see Source.seed_concepts), not the
+        # versioned-object row this method is usually called on, so aggregate across all versions.
         versioned_object_id = self.versioned_object_id or self.id
-        concept_ids = Concept.objects.filter(
-            parent_id=self.parent_id,
-            versioned_object_id=versioned_object_id,
-        ).values_list('id', flat=True)
         return Concept.sources.through.objects.filter(
-            concept_id__in=concept_ids,
+            concept__parent_id=self.parent_id,
+            concept__versioned_object_id=versioned_object_id,
         ).exclude(source__version=HEAD).exists()
 
     def has_pending_source_version_seed(self):
@@ -919,19 +917,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         if not concept_created_at:
             return False
 
-        source = self.parent
-        source_version_ids = source.__class__.objects.filter(
-            mnemonic=source.mnemonic,
-            organization_id=source.organization_id,
-            user_id=source.user_id,
-            created_at__gte=concept_created_at,
-        ).exclude(version=HEAD).values_list('id', flat=True)
-
-        for source_version_id in source_version_ids:
-            seed_task = Task.find(
-                name__iendswith='seed_children_to_new_version',
-                args__contains=['source', source_version_id],
-            )
+        source_versions = self.parent.versions.exclude(version=HEAD).filter(created_at__gte=concept_created_at)
+        for source_version in source_versions:
+            seed_task = source_version.get_seed_new_version_task()
             if seed_task and seed_task.state != SUCCESS:
                 return True
         return False

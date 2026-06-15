@@ -347,9 +347,12 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
         if self.request.method in ['GET']:
             return [CanViewParentDictionary(), ]
 
+        # `db=true` is a raw bypass of the HEAD-only safety check, so it stays admin-only.
+        # Every other hard delete (including async) is open to repo editors and guarded in
+        # `_hard_delete`, which returns 409 for non-admins targeting a snapshotted concept.
         if (
                 self.request.method == 'DELETE' and self.is_hard_delete_requested() and
-                (self.is_async_requested() or self.is_db_delete_requested())
+                self.is_db_delete_requested()
         ):
             return [IsAdminUser(), ]
 
@@ -399,11 +402,6 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
         return Response(result, status=status.HTTP_204_NO_CONTENT)
 
     def _hard_delete(self, request, concept):
-        if self.is_async_requested():
-            task = Task.new(queue='default', user=request.user, name=delete_concept.__name__)
-            delete_concept.apply_async((concept.id,), queue=task.queue, task_id=task.id)
-            return Response(status=status.HTTP_204_NO_CONTENT)
-
         parent = concept.parent
         with transaction.atomic():
             # Source version creation locks the same HEAD row before registering its seed task.
@@ -428,6 +426,11 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
                     {'detail': CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY},
                     status=status.HTTP_409_CONFLICT,
                 )
+
+            if self.is_async_requested():
+                task = Task.new(queue='default', user=request.user, name=delete_concept.__name__)
+                delete_concept.apply_async((concept.id,), queue=task.queue, task_id=task.id)
+                return Response(status=status.HTTP_204_NO_CONTENT)
 
             # Versions reference the versioned concept with on_delete=CASCADE.
             # Deleting the root removes every HEAD-only version and its related rows.

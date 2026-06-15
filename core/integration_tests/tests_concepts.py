@@ -1752,17 +1752,47 @@ class ConceptHeadOnlyHardDeleteTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertFalse(Concept.objects.filter(id=concept.id).exists())
 
-    def test_editor_cannot_use_async_hard_delete(self):
-        source = OrganizationSourceFactory()
-        user = UserProfileFactory()
+    @patch('core.concepts.views.delete_concept')
+    def test_editor_can_async_hard_delete_head_only_concept(self, delete_concept_task_mock):
+        delete_concept_task_mock.__name__ = 'delete_concept'
+        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        member = UserProfileFactory(organizations=[source.organization])
         concept = ConceptFactory(parent=source)
 
         response = self.client.delete(
             concept.uri + '?async=true&hardDelete=true',
-            HTTP_AUTHORIZATION='Token ' + user.get_token(),
+            HTTP_AUTHORIZATION='Token ' + member.get_token(),
         )
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 204)
+        delete_concept_task_mock.apply_async.assert_called_once_with(
+            (concept.id,), queue='default', task_id=ANY)
+
+    @patch('core.concepts.views.delete_concept')
+    def test_editor_cannot_async_hard_delete_concept_in_released_source_version(self, delete_concept_task_mock):
+        delete_concept_task_mock.__name__ = 'delete_concept'
+        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        member = UserProfileFactory(organizations=[source.organization])
+        concept = ConceptFactory(parent=source)
+        self._create_source_version(source, concept, released=True)
+
+        response = self.client.delete(
+            concept.uri + '?async=true&hardDelete=true',
+            HTTP_AUTHORIZATION='Token ' + member.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data, {'detail': CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY})
+        delete_concept_task_mock.apply_async.assert_not_called()
+        self.assertTrue(Concept.objects.filter(id=concept.id).exists())
+
+    def test_anonymous_user_cannot_async_hard_delete(self):
+        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        concept = ConceptFactory(parent=source)
+
+        response = self.client.delete(concept.uri + '?async=true&hardDelete=true')
+
+        self.assertEqual(response.status_code, 401)
         self.assertTrue(Concept.objects.filter(id=concept.id).exists())
 
     def test_editor_cannot_use_db_hard_delete(self):
