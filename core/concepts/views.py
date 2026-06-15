@@ -47,7 +47,7 @@ from core.concepts.constants import (
 )
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept, ConceptName
-from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
+from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary, CanAdministerParentDictionary
 from core.concepts.search import ConceptFacetedSearch, ConceptFuzzySearch
 from core.concepts.serializers import (
     ConceptDetailSerializer, ConceptListSerializer, ConceptDescriptionSerializer, ConceptNameSerializer,
@@ -347,14 +347,14 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
         if self.request.method in ['GET']:
             return [CanViewParentDictionary(), ]
 
-        # `db=true` is a raw bypass of the HEAD-only safety check, so it stays admin-only.
-        # Every other hard delete (including async) is open to repo editors and guarded in
-        # `_hard_delete`, which returns 409 for non-admins targeting a snapshotted concept.
+        # async/db hard deletes are power operations reserved for repo admins (the dictionary's
+        # owner/org-members) and platform staff. A regular HEAD-only hard delete stays open to any
+        # repo editor. The HEAD-only safety check (409 for non-staff) is enforced in the handlers.
         if (
                 self.request.method == 'DELETE' and self.is_hard_delete_requested() and
-                self.is_db_delete_requested()
+                (self.is_async_requested() or self.is_db_delete_requested())
         ):
-            return [IsAdminUser(), ]
+            return [CanAdministerParentDictionary(), ]
 
         return [CanEditParentDictionary(), ]
 
@@ -396,6 +396,21 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
         parent_filters = Concept.get_parent_and_owner_filters_from_kwargs(self.kwargs)
         concepts = Concept.objects.filter(mnemonic=self.kwargs['concept'], **parent_filters)
         concept = concepts.filter(id=F('versioned_object_id')).first()
+        if not concept:
+            raise Http404()
+        self.check_object_permissions(self.request, concept)
+
+        # The raw delete skips the cascade path, so re-apply the HEAD-only guard non-staff would
+        # otherwise hit in `_hard_delete`, keeping snapshotted concepts protected from `db=true`.
+        if not IsAdminUser().has_permission(self.request, self) and (
+                concept.belongs_to_non_head_source_version() or
+                concept.has_pending_source_version_seed()
+        ):
+            return Response(
+                {'detail': CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY},
+                status=status.HTTP_409_CONFLICT,
+            )
+
         parent = concept.parent
         result = concepts.delete()
         parent.update_concepts_count()

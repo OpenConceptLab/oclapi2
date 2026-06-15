@@ -1795,8 +1795,8 @@ class ConceptHeadOnlyHardDeleteTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 401)
         self.assertTrue(Concept.objects.filter(id=concept.id).exists())
 
-    def test_editor_cannot_use_db_hard_delete(self):
-        source = OrganizationSourceFactory()
+    def test_non_member_editor_cannot_use_db_hard_delete(self):
+        source = OrganizationSourceFactory()  # public edit access
         user = UserProfileFactory()
         concept = ConceptFactory(parent=source)
 
@@ -1806,6 +1806,50 @@ class ConceptHeadOnlyHardDeleteTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+        self.assertTrue(Concept.objects.filter(id=concept.id).exists())
+
+    @patch('core.concepts.views.delete_concept')
+    def test_non_member_editor_cannot_use_async_hard_delete(self, delete_concept_task_mock):
+        delete_concept_task_mock.__name__ = 'delete_concept'
+        source = OrganizationSourceFactory()  # public edit access
+        user = UserProfileFactory()
+        concept = ConceptFactory(parent=source)
+
+        response = self.client.delete(
+            concept.uri + '?async=true&hardDelete=true',
+            HTTP_AUTHORIZATION='Token ' + user.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 403)
+        delete_concept_task_mock.apply_async.assert_not_called()
+        self.assertTrue(Concept.objects.filter(id=concept.id).exists())
+
+    def test_org_member_can_db_hard_delete_head_only_concept(self):
+        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        member = UserProfileFactory(organizations=[source.organization])
+        concept = ConceptFactory(parent=source)
+
+        response = self.client.delete(
+            concept.uri + '?db=true&hardDelete=true',
+            HTTP_AUTHORIZATION='Token ' + member.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Concept.objects.filter(id=concept.id).exists())
+
+    def test_org_member_cannot_db_hard_delete_concept_in_released_source_version(self):
+        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        member = UserProfileFactory(organizations=[source.organization])
+        concept = ConceptFactory(parent=source)
+        self._create_source_version(source, concept, released=True)
+
+        response = self.client.delete(
+            concept.uri + '?db=true&hardDelete=true',
+            HTTP_AUTHORIZATION='Token ' + member.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data, {'detail': CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY})
         self.assertTrue(Concept.objects.filter(id=concept.id).exists())
 
     def test_editor_cannot_hard_delete_individual_concept_version(self):
