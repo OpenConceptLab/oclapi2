@@ -37,7 +37,6 @@ services:
     environment:
       - ENVIRONMENT=development
       - DEBUG=${DEBUG-TRUE}
-      - NO_LM=TRUE
       - EXPORT_SERVICE=core.services.storages.cloud.minio.MinIO
       - MINIO_ENDPOINT=rustfs:9000
       - MINIO_EXTERNAL_ENDPOINT=${MINIO_EXTERNAL_ENDPOINT-localhost:${MINIO_PORT:-9000}}
