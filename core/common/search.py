@@ -2,6 +2,7 @@ import re
 import time
 import urllib
 
+import requests
 from cid.locals import get_cid
 from django.conf import settings
 from django.db.models import Case, When, IntegerField
@@ -348,8 +349,7 @@ class VectorEmbed:
 
     def _get_embedding_from_service(self, txt):
         try:
-            import requests as req
-            response = req.post(
+            response = requests.post(
                 f'{settings.EMBEDDING_SERVICE_URL}/embeddings',
                 headers={'Authorization': f'Bearer {settings.INFINITY_API_KEY}'},
                 json={'model': self.model_name, 'input': str(txt)},
@@ -415,8 +415,7 @@ class Reranker:
 
     def _get_rerank_scores_from_service(self, txt, docs):
         try:
-            import requests as req
-            response = req.post(
+            response = requests.post(
                 f'{settings.EMBEDDING_SERVICE_URL}/rerank',
                 headers={'Authorization': f'Bearer {settings.INFINITY_API_KEY}'},
                 json={
