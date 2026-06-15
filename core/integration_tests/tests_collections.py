@@ -3,6 +3,7 @@ import zipfile
 
 from celery_once import AlreadyQueued
 from mock import patch, Mock, ANY
+from mock.mock import PropertyMock
 from rest_framework.exceptions import ErrorDetail
 
 from core.collections.models import CollectionReference, Collection
@@ -2614,7 +2615,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
         response = self.client.get(
             self.collection.uri + 'HEAD/export/',
-            HTTP_AUTHORIZATION='Token ' + self.admin_token,
+            HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
@@ -2662,7 +2663,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
         response = self.client.get(
             self.collection.uri + 'HEAD/export/',
-            HTTP_AUTHORIZATION='Token ' + self.admin_token,
+            HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
@@ -2679,7 +2680,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
         response = self.client.get(
             self.collection.uri + 'HEAD/export/',
-            HTTP_AUTHORIZATION='Token ' + self.admin_token,
+            HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
@@ -2689,18 +2690,20 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         s3_url_for_mock.assert_called_once_with(f"users/username/username_coll_vHEAD.{self.HEAD_updated_at}.zip")
 
     def test_get_405(self):
+        random_user = UserProfileFactory()
         response = self.client.get(
             f'/users/{self.collection.parent.mnemonic}/collections/{self.collection.mnemonic}/{"HEAD"}/export/',
-            HTTP_AUTHORIZATION='Token ' + self.token,
+            HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
             format='json'
         )
 
         self.assertEqual(response.status_code, 405)
 
     def test_post_405(self):
+        random_user = UserProfileFactory()
         response = self.client.post(
             f'/users/{self.collection.parent.mnemonic}/collections/{self.collection.mnemonic}/{"HEAD"}/export/',
-            HTTP_AUTHORIZATION='Token ' + self.token,
+            HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
             format='json'
         )
 
@@ -2711,7 +2714,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         s3_exists_mock.return_value = True
         response = self.client.post(
             self.collection.uri + 'HEAD/export/',
-            HTTP_AUTHORIZATION='Token ' + self.admin_token,
+            HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
@@ -2739,7 +2742,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         export_collection_mock.__name__ = 'export_collection'
         response = self.client.post(
             self.collection.uri + 'HEAD/export/',
-            HTTP_AUTHORIZATION='Token ' + self.admin_token,
+            HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
@@ -2773,7 +2776,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         export_collection_mock.apply_async.side_effect = AlreadyQueued('already-queued')
         response = self.client.post(
             self.collection.uri + 'HEAD/export/',
-            HTTP_AUTHORIZATION='Token ' + self.admin_token,
+            HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
@@ -2801,6 +2804,31 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
             (self.collection_v1.id,), task_id=ANY, queue='default')
         self.assertEqual(
             Task.objects.filter(created_by=self.user, state='PENDING', name='export_collection').count(), 0)
+
+    def test_delete_405_head(self):
+        random_user = UserProfileFactory()
+        response = self.client.delete(
+            self.collection.uri + 'HEAD/export/',
+            HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 405)
+
+    @patch('core.collections.models.Collection.version_export_path', new_callable=PropertyMock)
+    @patch('core.collections.models.Collection.has_export')
+    @patch('core.services.storages.cloud.aws.S3.remove')
+    def test_delete_204_head(self, s3_remove_mock, has_export_mock, export_path_mock):
+        has_export_mock.return_value = True
+        export_path_mock.return_value = 'head/export/path'
+        response = self.client.delete(
+            self.collection.uri + 'HEAD/export/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        s3_remove_mock.assert_called_once_with('head/export/path')
 
 
 class CollectionVersionListViewTest(OCLAPITestCase):
