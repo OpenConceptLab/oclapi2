@@ -339,6 +339,8 @@ class CustomESSearch:
 
 
 class VectorEmbed:
+    _LOCAL_MODELS = {}
+
     def __init__(self, model_name=None):
         self.model_name = model_name or settings.LM_MODEL_NAME
 
@@ -362,9 +364,11 @@ class VectorEmbed:
             return self._get_embedding_locally(txt)
 
     def _get_embedding_locally(self, txt):
-        from sentence_transformers import SentenceTransformer
-        model = SentenceTransformer(self.model_name)
-        return list(model.encode(str(txt)))
+        model = self._LOCAL_MODELS.get(self.model_name)
+        if model is None:
+            from sentence_transformers import SentenceTransformer
+            model = self._LOCAL_MODELS[self.model_name] = SentenceTransformer(self.model_name)
+        return model.encode(str(txt)).tolist()
 
 
 class Reranker:
