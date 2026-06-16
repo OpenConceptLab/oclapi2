@@ -45,6 +45,7 @@ from core.common.mixins import (
     ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin,
     ConceptContainerExportMixin,
     ConceptContainerProcessingMixin)
+from core.repos.mixins import RepoExternalExportMixin
 from core.common.permissions import (
     CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject,
     CanViewConceptDictionaryVersion
@@ -1182,6 +1183,10 @@ class CollectionVersionExportView(ConceptContainerExportMixin, CollectionVersion
             if task:
                 task.delete()
             return status.HTTP_409_CONFLICT
+
+
+class CollectionVersionExternalExportView(RepoExternalExportMixin, CollectionVersionBaseView):
+    permission_classes = (CanViewConceptDictionary, IsAuthenticated)
 
 
 class CollectionSummaryView(SummaryMixin, CollectionBaseView, RetrieveAPIView):

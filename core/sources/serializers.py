@@ -9,14 +9,14 @@ from rest_framework.serializers import ModelSerializer
 
 from core.client_configs.serializers import ClientConfigSerializer
 from core.common.constants import DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, HEAD, \
-    INCLUDE_SUMMARY, INCLUDE_CLIENT_CONFIGS, INCLUDE_HIERARCHY_ROOT, INCLUDE_STATES, INCLUDE_TASKS
+    INCLUDE_SUMMARY, INCLUDE_CLIENT_CONFIGS, INCLUDE_HIERARCHY_ROOT, INCLUDE_STATES, INCLUDE_TASKS, \
+    INCLUDE_EXTERNAL_EXPORTS
 from core.common.serializers import AbstractRepoResourcesSerializer, AbstractResourceSerializer
 from core.common.utils import get_truthy_values
 from core.orgs.models import Organization
 from core.settings import DEFAULT_LOCALE
 from core.sources.models import Source
 from core.users.models import UserProfile
-
 
 TRUTHY = get_truthy_values()
 
@@ -97,18 +97,41 @@ class SourceVersionListSerializer(ModelSerializer):
     url = CharField(source='versioned_object_url')
     previous_version_url = CharField(source='prev_version_uri')
     checksums = SerializerMethodField()
+    external_exports = SerializerMethodField()
 
     class Meta:
         model = Source
         fields = (
             'type', 'short_code', 'name', 'url', 'canonical_url', 'owner', 'owner_type', 'owner_url', 'version',
             'created_at', 'id', 'source_type', 'updated_at', 'released', 'retired', 'version_url',
-            'previous_version_url', 'checksums', 'match_algorithms'
+            'previous_version_url', 'checksums', 'match_algorithms', 'external_exports'
         )
+
+    def __init__(self, *args, **kwargs):
+        params = get(kwargs, 'context.request.query_params')
+
+        self.query_params = {}
+        if params:
+            self.query_params = params if isinstance(params, dict) else params.dict()
+        self.include_external_exports = self.query_params.get(INCLUDE_EXTERNAL_EXPORTS) in TRUTHY
+
+        try:
+            if not self.include_external_exports:
+                self.fields.pop('external_exports', None)
+        except:  # pylint: disable=bare-except
+            pass
+
+        super().__init__(*args, **kwargs)
 
     @staticmethod
     def get_checksums(obj):
         return obj.get_all_checksums()
+
+    @staticmethod
+    def get_external_exports(obj):
+        from core.repos.serializers import RepoExternalExportSerializer
+        queryset = obj.external_exports.filter()
+        return RepoExternalExportSerializer(queryset, many=True).data
 
 
 class SourceCreateOrUpdateSerializer(ModelSerializer):
@@ -458,6 +481,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
     tasks = SerializerMethodField()
     hierarchy_root_url = CharField(source='hierarchy_root.url', required=False, allow_blank=True, allow_null=True)
     filters = ListField(required=False, allow_null=True)
+    external_exports = SerializerMethodField()
 
     class Meta:
         model = Source
@@ -472,7 +496,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
             'content_type', 'revision_date', 'summary', 'text', 'meta',
             'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
             'version_needed', 'hierarchy_root_url', 'checksums', 'states', 'tasks', 'properties', 'filters',
-            'match_algorithms'
+            'match_algorithms', 'external_exports'
         ) + AbstractRepoResourcesSerializer.Meta.fields
 
     def __init__(self, *args, **kwargs):
@@ -485,6 +509,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
             self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in TRUTHY
             self.include_states = self.query_params.get(INCLUDE_STATES) in TRUTHY
             self.include_tasks = self.query_params.get(INCLUDE_TASKS) in TRUTHY
+            self.include_external_exports = self.query_params.get(INCLUDE_EXTERNAL_EXPORTS) in TRUTHY
 
         try:
             if not self.include_summary:
@@ -493,6 +518,8 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
                 self.fields.pop('states', None)
             if not self.include_tasks:
                 self.fields.pop('tasks', None)
+            if not self.include_external_exports:
+                self.fields.pop('external_exports', None)
         except:  # pylint: disable=bare-except
             pass
 
@@ -521,6 +548,12 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
             tasks = obj.get_tasks_info()
 
         return tasks
+
+    @staticmethod
+    def get_external_exports(obj):
+        from core.repos.serializers import RepoExternalExportSerializer
+        queryset = obj.external_exports.filter()
+        return RepoExternalExportSerializer(queryset, many=True).data
 
     def to_representation(self, instance):  # used to be to_native
         ret = super().to_representation(instance)

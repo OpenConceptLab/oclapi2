@@ -68,6 +68,11 @@ urlpatterns = [
         views.SourceVersionExportView.as_view(),
         name='sourceversion-latest-export-detail'
     ),
+    path(
+        '<str:source>/latest/export/<str:external_export_key>/',
+        views.SourceVersionExternalExportView.as_view(),
+        name='sourceversion-latest-external-export-detail'
+    ),
     path("<str:source>/concepts/$clone/", views.SourceConceptsCloneView.as_view()),
     path("<str:source>/concepts/indexes/", views.SourceConceptsIndexView.as_view()),
     path("<str:source>/mappings/indexes/", views.SourceMappingsIndexView.as_view()),
@@ -108,6 +113,10 @@ urlpatterns = [
     path(
         '<str:source>/<str:version>/export/',
         views.SourceVersionExportView.as_view(), name='sourceversion-export'
+    ),
+    path(
+        '<str:source>/<str:version>/export/<str:external_export_key>/',
+        views.SourceVersionExternalExportView.as_view(), name='sourceversion-external-export'
     ),
     path(
         "<str:source>/<str:version>/extras/",

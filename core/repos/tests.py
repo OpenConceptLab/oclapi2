@@ -1,8 +1,9 @@
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory
-from core.common.tests import OCLAPITestCase
+from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.orgs.tests.factories import OrganizationFactory
+from core.repos.models import RepoExternalExport
 from core.sources.documents import SourceDocument
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
@@ -66,6 +67,34 @@ class ReposListViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
+
+
+class RepoExternalExportTest(OCLTestCase):
+    def test_uri(self):
+        source_v1 = UserSourceFactory(version='v1', mnemonic='source1')
+        instance = RepoExternalExport(resource=source_v1, key='openmrs23-sql', file_path='foo/bar.zip',)
+
+        self.assertEqual(instance.uri, source_v1.uri + 'export/openmrs23-sql/')
+
+    def test_get_external_export_path(self):
+        source_v1 = UserSourceFactory(version='v1', mnemonic='source1')
+        owner_mnemonic = source_v1.parent.mnemonic
+
+        path = source_v1.get_external_export_path('openmrs23-sql', 'openmrs23.sql.zip')
+
+        self.assertEqual(
+            path, f"users/{owner_mnemonic}/{owner_mnemonic}_source1_v1/external/openmrs23-sql_openmrs23.sql.zip"
+        )
+
+    def test_get_external_export_path_sanitizes_filename(self):
+        source_v1 = UserSourceFactory(version='v1', mnemonic='source1')
+        owner_mnemonic = source_v1.parent.mnemonic
+
+        path = source_v1.get_external_export_path('openmrs23-sql', '../etc/passwd')
+
+        self.assertEqual(
+            path, f"users/{owner_mnemonic}/{owner_mnemonic}_source1_v1/external/openmrs23-sql_.._etc_passwd"
+        )
 
 
 class UserOrganizationRepoListViewTest(OCLAPITestCase):

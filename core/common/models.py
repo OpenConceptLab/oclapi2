@@ -481,6 +481,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         'url_registry.URLRegistry', object_id_field='repo_id', content_type_field='repo_type'
     )
     followers = GenericRelation('users.Follow', object_id_field='following_id', content_type_field='following_type')
+    external_exports = GenericRelation(
+        'repos.RepoExternalExport', object_id_field='resource_id', content_type_field='resource_type'
+    )
 
     class Meta:
         abstract = True
@@ -1002,6 +1005,11 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         return path
 
+    def get_external_export_path(self, key, filename):
+        base_path = self.get_version_export_path(suffix=None).rstrip('.')
+        safe_filename = filename.replace('/', '_').replace('\\', '_')
+        return f"{base_path}/external/{key}_{safe_filename}"
+
     def get_export_path(self):
         if self.is_head:
             return self.version_export_path
@@ -1286,6 +1294,10 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             'indexed_mappings': index_mappings_task,
             'exported': export_task,
         }
+
+    def upload_external_export(self, key, file, user, description=None):
+        from core.repos.models import RepoExternalExport
+        return RepoExternalExport.upsert(self, key, file, user, description)
 
 
 class CelerySignalProcessor(RealTimeSignalProcessor):

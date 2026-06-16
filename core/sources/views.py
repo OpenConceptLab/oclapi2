@@ -20,6 +20,7 @@ from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM
 from core.common.exceptions import Http405, Http400
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin, \
     ConceptContainerExportMixin, ConceptContainerProcessingMixin
+from core.repos.mixins import RepoExternalExportMixin
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
     CanViewConceptDictionaryVersion
 from core.common.serializers import TaskSerializer
@@ -557,6 +558,10 @@ class SourceVersionExportView(ConceptContainerExportMixin, SourceVersionBaseView
             if task:
                 task.delete()
             return status.HTTP_409_CONFLICT
+
+
+class SourceVersionExternalExportView(RepoExternalExportMixin, SourceVersionBaseView):
+    permission_classes = (CanViewConceptDictionary, IsAuthenticated)
 
 
 class SourceHierarchyView(SourceBaseView, RetrieveAPIView):
