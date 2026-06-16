@@ -780,7 +780,10 @@ class ConceptLocaleRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDest
                         new_version, subject_label_attr, [*[locale.clone() for locale in locales.all()], saved_instance]
                     )
                     new_version.comment = f'Updated {saved_instance.name} in {self.parent_list_attribute}.'
-                    errors = new_version.save_as_new_version(request.user)
+                    # (Un)retiring a locale doesn't affect the standard checksum, so skip the
+                    # duplicate-version guard for it; content edits still change the checksum.
+                    errors = new_version.save_as_new_version(
+                        request.user, skip_duplicate_version_check='retired' in request.data)
                     if errors:
                         raise ValidationError(errors)
             except ValidationError as e:
@@ -809,7 +812,9 @@ class ConceptLocaleRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDest
             labels.append(retired_locale)
             setattr(new_version, subject_label_attr, labels)
             new_version.comment = f'Retired {instance.name} in {self.parent_list_attribute}.'
-            errors = new_version.save_as_new_version(request.user)
+            # Retiring a locale is an intentional change, but the standard checksum ignores the
+            # locale `retired` flag, so skip the duplicate-version guard that would block it.
+            errors = new_version.save_as_new_version(request.user, skip_duplicate_version_check=True)
             if errors:
                 return Response(errors, status=status.HTTP_400_BAD_REQUEST)
         return Response(status=status.HTTP_204_NO_CONTENT)
