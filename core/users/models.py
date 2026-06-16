@@ -168,8 +168,11 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
         Token.objects.create(user=self, key=token)
 
     def is_admin_for(self, concept_container):  # pragma: no cover
-        parent_id = concept_container.parent_id
-        return parent_id == self.id or self.organizations.filter(id=parent_id).exists()
+        user_id = concept_container.user_id
+        if user_id and user_id == self.id:
+            return True
+        organization_id = concept_container.organization_id
+        return self.organizations.filter(id=organization_id).exists()
 
     def __create_token(self):
         return Token.objects.create(user=self)

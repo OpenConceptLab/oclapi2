@@ -983,7 +983,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         response = self.client.get(
             self.source.uri + 'HEAD/export/',
-            HTTP_AUTHORIZATION='Token ' + self.admin_token,
+            HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
@@ -1011,7 +1011,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         response = self.client.get(
             self.source.uri + 'HEAD/export/',
-            HTTP_AUTHORIZATION='Token ' + self.admin_token,
+            HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
@@ -1048,7 +1048,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         response = self.client.get(
             self.source.uri + 'HEAD/export/',
-            HTTP_AUTHORIZATION='Token ' + self.admin_token,
+            HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
@@ -1064,7 +1064,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         response = self.client.get(
             self.source.uri + 'HEAD/export/',
-            HTTP_AUTHORIZATION='Token ' + self.admin_token,
+            HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
@@ -1086,18 +1086,20 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         s3_has_path_mock.assert_not_called()
 
     def test_get_405(self):
+        random_user = UserProfileFactory()
         response = self.client.get(
             f'/users/{self.source.parent.mnemonic}/sources/{self.source.mnemonic}/{"HEAD"}/export/',
-            HTTP_AUTHORIZATION='Token ' + self.token,
+            HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
             format='json'
         )
 
         self.assertEqual(response.status_code, 405)
 
     def test_post_405(self):
+        random_user = UserProfileFactory()
         response = self.client.post(
             f'/users/{self.source.parent.mnemonic}/sources/{self.source.mnemonic}/{"HEAD"}/export/',
-            HTTP_AUTHORIZATION='Token ' + self.token,
+            HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
             format='json'
         )
 
@@ -1108,7 +1110,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         s3_exists_mock.return_value = True
         response = self.client.post(
             self.source.uri + 'HEAD/export/',
-            HTTP_AUTHORIZATION='Token ' + self.admin_token,
+            HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
@@ -1136,7 +1138,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         s3_exists_mock.return_value = False
         response = self.client.post(
             self.source.uri + 'HEAD/export/',
-            HTTP_AUTHORIZATION='Token ' + self.admin_token,
+            HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
@@ -1181,7 +1183,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         s3_exists_mock.return_value = False
         response = self.client.post(
             self.source.uri + 'HEAD/export/',
-            HTTP_AUTHORIZATION='Token ' + self.admin_token,
+            HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
@@ -1214,6 +1216,21 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 405)
+
+    @patch('core.sources.models.Source.version_export_path', new_callable=PropertyMock)
+    @patch('core.sources.models.Source.has_export')
+    @patch('core.services.storages.cloud.aws.S3.remove')
+    def test_delete_204_head(self, s3_remove_mock, has_export_mock, export_path_mock):
+        has_export_mock.return_value = True
+        export_path_mock.return_value = 'head/export/path'
+        response = self.client.delete(
+            self.source.uri + 'HEAD/export/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        s3_remove_mock.assert_called_once_with('head/export/path')
 
     def test_delete_403(self):
         random_user = UserProfileFactory()

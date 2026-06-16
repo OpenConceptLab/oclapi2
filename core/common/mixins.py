@@ -969,6 +969,11 @@ class SourceChildMixin(ChecksumModel):
 class ConceptContainerExportMixin:
     permission_classes = (CanViewConceptDictionaryVersion, IsAuthenticated)
 
+    @staticmethod
+    def is_head_export_permitted(user, version):
+        """Allow HEAD exports for repo admins, not just staff users."""
+        return user.is_staff or user.is_superuser or user.is_admin_for(version)
+
     def get_object(self):
         queryset = self.get_queryset()
         if 'version' not in self.kwargs:
@@ -988,7 +993,7 @@ class ConceptContainerExportMixin:
         logger.debug(
             'Export requested for %s version %s', self.entity.lower(), version.version
         )
-        if version.is_head and not request.user.is_staff:
+        if version.is_head and not self.is_head_export_permitted(request.user, version):
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
         if version.is_exporting:
@@ -1014,7 +1019,7 @@ class ConceptContainerExportMixin:
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         version = self.get_object()
 
-        if version.is_head and not request.user.is_staff:
+        if version.is_head and not self.is_head_export_permitted(request.user, version):
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
         logger.debug('%s Export requested for version %s (post)', self.entity, version.version)
@@ -1040,7 +1045,7 @@ class ConceptContainerExportMixin:
         user = request.user
         version = self.get_object()
 
-        if version.is_head and not user.is_staff:
+        if version.is_head and not self.is_head_export_permitted(user, version):
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
         permitted = user.is_staff or user.is_superuser or user.is_admin_for(version)
