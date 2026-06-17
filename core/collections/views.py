@@ -905,7 +905,8 @@ class CollectionVersionExpansionView(CollectionVersionExpansionBaseView, Retriev
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class CollectionVersionExpansionResolvedRepoUpdatesView(CollectionVersionExpansionBaseView, RetrieveAPIView, DestroyAPIView):
+class CollectionVersionExpansionResolvedRepoUpdatesView(
+    CollectionVersionExpansionBaseView, RetrieveAPIView, DestroyAPIView):
     serializer_class = ExpansionDetailSerializer
     permission_classes = (HasAccessToVersionedObject, )
 

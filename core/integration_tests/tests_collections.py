@@ -18,6 +18,7 @@ from core.concepts.tests.factories import ConceptFactory
 from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
+from core.common.constants import ACCESS_TYPE_NONE
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.tasks.models import Task
@@ -3965,3 +3966,70 @@ class CollectionExpansionsViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 3)
         self.assertEqual([expansion['mnemonic'] for expansion in response.data], ['e2-head', 'e1-v1', 'e1-head'])
+
+
+class CollectionVersionExpansionResolvedRepoUpdatesViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.collection = OrganizationCollectionFactory()
+        self.expansion = ExpansionFactory(collection_version=self.collection)
+        self.collection.expansion_uri = self.expansion.uri
+        self.collection.save()
+        self.token = self.collection.created_by.get_token()
+
+    def test_get_200_empty(self):
+        # No explicit repo versions linked — response should be an empty dict
+        response = self.client.get(
+            self.expansion.url + 'resolved-repo-updates/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, {})
+
+    def test_get_200_with_updates(self):
+        # HEAD source must exist for resolve_reference_expression to find the latest released version
+        source_head = OrganizationSourceFactory()
+        source_v1 = OrganizationSourceFactory(
+            mnemonic=source_head.mnemonic, organization=source_head.organization, version='v1', released=True)
+        source_v2 = OrganizationSourceFactory(
+            mnemonic=source_head.mnemonic, organization=source_head.organization, version='v2', released=True)
+        self.expansion.explicit_source_versions.add(source_v1)
+
+        response = self.client.get(
+            self.expansion.url + 'resolved-repo-updates/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertIn(source_v1.url, response.data)
+        self.assertEqual(response.data[source_v1.url], source_v2.url)
+
+    def test_get_401_unauthenticated_private_collection(self):
+        # Private collection — unauthenticated request should be denied (403 via custom permission)
+        private_collection = OrganizationCollectionFactory(public_access=ACCESS_TYPE_NONE)
+        expansion = ExpansionFactory(collection_version=private_collection)
+
+        response = self.client.get(
+            expansion.url + 'resolved-repo-updates/',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_get_403_unauthorized_private_collection(self):
+        # Private collection — user not in the owning org should be denied
+        private_collection = OrganizationCollectionFactory(public_access=ACCESS_TYPE_NONE)
+        expansion = ExpansionFactory(collection_version=private_collection)
+        other_user = UserProfileFactory()
+
+        response = self.client.get(
+            expansion.url + 'resolved-repo-updates/',
+            HTTP_AUTHORIZATION='Token ' + other_user.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 403)

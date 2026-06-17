@@ -1499,6 +1499,40 @@ class ExpansionTest(OCLTestCase):
         self.assertTrue(expansion.explicit_source_versions.exists())
         self.assertEqual(expansion.explicit_source_versions.first(), concept.parent)
 
+    def test_get_resolved_repo_version_diff_with_latest_updates(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+
+        # No repo versions linked yet — diff should be empty
+        self.assertEqual(expansion.get_resolved_repo_version_diff_with_latest_updates(), {})
+
+        # HEAD must exist so resolve_reference_expression can find the latest released version
+        source_head = OrganizationSourceFactory()
+        source_v1 = OrganizationSourceFactory(
+            mnemonic=source_head.mnemonic, organization=source_head.organization, version='v1', released=True)
+        source_v2 = OrganizationSourceFactory(
+            mnemonic=source_head.mnemonic, organization=source_head.organization, version='v2', released=True)
+        expansion.explicit_source_versions.add(source_v1)
+
+        diff = expansion.get_resolved_repo_version_diff_with_latest_updates()
+
+        # source_v1 has a newer released version (source_v2), so it should appear in the diff
+        self.assertEqual(len(diff), 1)
+        self.assertIn(source_v1.url, diff)
+        self.assertEqual(diff[source_v1.url], source_v2.url)
+
+        # A source version that is already the latest released should not appear in the diff
+        source2_head = OrganizationSourceFactory()
+        source2_v1 = OrganizationSourceFactory(
+            mnemonic=source2_head.mnemonic, organization=source2_head.organization, version='v1', released=True)
+        expansion.explicit_source_versions.add(source2_v1)
+
+        diff = expansion.get_resolved_repo_version_diff_with_latest_updates()
+
+        self.assertEqual(len(diff), 1)
+        self.assertIn(source_v1.url, diff)
+        self.assertNotIn(source2_v1.url, diff)
+
 
 class ExpansionParametersTest(OCLTestCase):
     def test_apply_active_only(self):
