@@ -899,14 +899,15 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return self.sources.exclude(version=HEAD).order_by('-created_at').first()
 
     def belongs_to_non_head_source_version(self):
-        """Return whether any version of this source-scoped concept was snapshotted."""
-        # Snapshots link the `is_latest_version=True` row (see Source.seed_concepts), not the
-        # versioned-object row this method is usually called on, so aggregate across all versions.
         versioned_object_id = self.versioned_object_id or self.id
-        return Concept.sources.through.objects.filter(
-            concept__parent_id=self.parent_id,
-            concept__versioned_object_id=versioned_object_id,
-        ).exclude(source__version=HEAD).exists()
+        versions = Concept.objects.filter(
+            parent_id=self.parent_id,
+            versioned_object_id=versioned_object_id,
+        ).prefetch_related('sources')
+        return any(
+            any(source.version != HEAD for source in version.sources.all())
+            for version in versions
+        )
 
     def has_pending_source_version_seed(self):
         """Return whether an unfinished source snapshot may include this concept."""
