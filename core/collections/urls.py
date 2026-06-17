@@ -147,6 +147,11 @@ urlpatterns = [
         name='collection-version-expansion-detail'
     ),
     path(
+        '<str:collection>/<str:version>/expansions/<str:expansion>/resolved-repo-updates/',
+        views.CollectionVersionExpansionResolvedRepoUpdatesView.as_view(),
+        name='collection-version-expansion-resolved-repo-updates'
+    ),
+    path(
         '<str:collection>/<str:version>/expansions/<str:expansion>/re-evaluate/',
         views.CollectionVersionExpansionReEvaluateView.as_view(),
         name='collection-version-expansion-re-evaluate'

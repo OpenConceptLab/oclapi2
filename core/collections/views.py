@@ -905,6 +905,15 @@ class CollectionVersionExpansionView(CollectionVersionExpansionBaseView, Retriev
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class CollectionVersionExpansionResolvedRepoUpdatesView(CollectionVersionExpansionBaseView, RetrieveAPIView, DestroyAPIView):
+    serializer_class = ExpansionDetailSerializer
+    permission_classes = (HasAccessToVersionedObject, )
+
+    def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        obj = self.get_object()
+        return Response(obj.get_resolved_repo_version_diff_with_latest_updates(), status=status.HTTP_200_OK)
+
+
 class CollectionVersionExpansionReEvaluateView(CollectionVersionExpansionBaseView, TaskMixin):
     serializer_class = TaskSerializer
     permission_classes = (CanViewConceptDictionary, )

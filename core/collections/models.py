@@ -1614,6 +1614,27 @@ class Expansion(BaseResourceModel):
             if version:
                 self.explicit_source_versions.add(version)
 
+    def get_resolved_repo_version_diff_with_latest_updates(self):
+        rels = [
+            'explicit_source_versions', 'evaluated_source_versions',
+            'explicit_collection_versions', 'evaluated_collection_versions'
+        ]
+        diff = {}
+
+        def update_diffs(rel):
+            for version in get(self, rel).filter():
+                if version.url in diff:
+                    continue
+                repo_url = drop_version(version.url)
+                resolved, _ = ConceptContainerModel.resolve_reference_expression(repo_url)
+                if resolved and resolved.url != version.url:
+                    diff[version.url] = resolved.url
+
+        for relation in rels:
+            update_diffs(relation)
+
+        return diff
+
 
 class ExpansionParameters:
     ACTIVE = 'activeOnly'
