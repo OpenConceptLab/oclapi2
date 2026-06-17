@@ -1,4 +1,3 @@
-from celery.states import SUCCESS
 from django.conf import settings
 from django.contrib.postgres.indexes import HashIndex
 from django.core.exceptions import ValidationError
@@ -897,33 +896,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     @property
     def latest_source_version(self):
         return self.sources.exclude(version=HEAD).order_by('-created_at').first()
-
-    def belongs_to_non_head_source_version(self):
-        versioned_object_id = self.versioned_object_id or self.id
-        versions = Concept.objects.filter(
-            parent_id=self.parent_id,
-            versioned_object_id=versioned_object_id,
-        ).prefetch_related('sources')
-        return any(
-            any(source.version != HEAD for source in version.sources.all())
-            for version in versions
-        )
-
-    def has_pending_source_version_seed(self):
-        """Return whether an unfinished source snapshot may include this concept."""
-        versioned_object_id = self.versioned_object_id or self.id
-        concept_created_at = Concept.objects.filter(id=versioned_object_id).values_list(
-            'created_at', flat=True
-        ).first()
-        if not concept_created_at:
-            return False
-
-        source_versions = self.parent.versions.exclude(version=HEAD).filter(created_at__gte=concept_created_at)
-        for source_version in source_versions:
-            seed_task = source_version.get_seed_new_version_task()
-            if seed_task and seed_task.state != SUCCESS:
-                return True
-        return False
 
     def get_source_version_before_creation(self):
         return self.sources.exclude(version=HEAD).filter(

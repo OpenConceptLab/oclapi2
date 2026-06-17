@@ -3,6 +3,7 @@ from math import ceil
 from urllib import parse
 from urllib.parse import urlencode
 
+from celery.states import SUCCESS
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
@@ -633,6 +634,32 @@ class SourceChildMixin(ChecksumModel):
     @cached_property
     def _cached_latest_source_version(self):
         return self.parent.get_latest_released_version()
+
+    def belongs_to_non_head_source_version(self):
+        versioned_object_id = self.versioned_object_id or self.id
+        version_ids = self.__class__.objects.filter(
+            parent_id=self.parent_id,
+            versioned_object_id=versioned_object_id,
+        ).values('id')
+        return self.sources.through.objects.filter(
+            **{f'{self._meta.model_name}_id__in': version_ids}
+        ).exclude(source__version=HEAD).exists()
+
+    def has_pending_source_version_seed(self):
+        """Return whether an unfinished source snapshot may include this resource."""
+        versioned_object_id = self.versioned_object_id or self.id
+        created_at = self.__class__.objects.filter(id=versioned_object_id).values_list(
+            'created_at', flat=True
+        ).first()
+        if not created_at:
+            return False
+
+        source_versions = self.parent.versions.exclude(version=HEAD).filter(created_at__gte=created_at)
+        for source_version in source_versions:
+            seed_task = source_version.get_seed_new_version_task()
+            if seed_task and seed_task.state != SUCCESS:
+                return True
+        return False
 
     @staticmethod
     def is_strictly_equal(instance1, instance2):
