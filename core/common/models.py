@@ -11,6 +11,7 @@ from django.db.models import Value, Q, Count
 from django.db.models.expressions import CombinedExpression, F
 from django.utils import timezone
 from django.utils.functional import cached_property
+from django.utils.text import get_valid_filename
 from django_elasticsearch_dsl.registries import registry
 from django_elasticsearch_dsl.signals import RealTimeSignalProcessor
 from elasticsearch import TransportError
@@ -1007,7 +1008,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     def get_external_export_path(self, key, filename):
         base_path = self.get_version_export_path(suffix=None).rstrip('.')
-        safe_filename = filename.replace('/', '_').replace('\\', '_')
+        safe_filename = get_valid_filename(filename)
         return f"{base_path}/external/{key}_{safe_filename}"
 
     def get_export_path(self):

@@ -93,7 +93,17 @@ class RepoExternalExportTest(OCLTestCase):
         path = source_v1.get_external_export_path('openmrs23-sql', '../etc/passwd')
 
         self.assertEqual(
-            path, f"users/{owner_mnemonic}/{owner_mnemonic}_source1_v1/external/openmrs23-sql_.._etc_passwd"
+            path, f"users/{owner_mnemonic}/{owner_mnemonic}_source1_v1/external/openmrs23-sql_..etcpasswd"
+        )
+
+    def test_get_external_export_path_normalizes_invalid_filename_characters(self):
+        source_v1 = UserSourceFactory(version='v1', mnemonic='source1')
+        owner_mnemonic = source_v1.parent.mnemonic
+
+        path = source_v1.get_external_export_path('openmrs23-sql', 'foo bar:baz*.zip')
+
+        self.assertEqual(
+            path, f"users/{owner_mnemonic}/{owner_mnemonic}_source1_v1/external/openmrs23-sql_foo_barbaz.zip"
         )
 
 
