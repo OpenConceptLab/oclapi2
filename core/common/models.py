@@ -775,6 +775,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     @classmethod
     def persist_new_version(cls, obj, user=None, **kwargs):
+        """Persist a repository version and schedule its children snapshot."""
         errors = {}
 
         obj.is_active = True
@@ -787,24 +788,39 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         if not head:
             errors[repo_resource_name.lower()] = 'Version Head not found.'
             return errors
-        obj.update_version_data(head)
-        obj.save(**kwargs)
-
-        if obj.id:
-            obj.sibling_versions.update(is_latest_version=False)
 
         is_test_mode = get(settings, 'TEST_MODE', False)
-        if is_test_mode or sync:
-            seed_children_to_new_version(obj.resource_type.lower(), obj.id, not is_test_mode, sync)
-        else:
-            from core.tasks.models import Task
-            task = Task.new(queue='default', user=user, name=seed_children_to_new_version.__name__)
-            seed_children_to_new_version.apply_async(
-                (obj.resource_type.lower(), obj.id, True, sync),
-                task_id=task.id,
-                queue='default',
-                persist_args=True
-            )
+        with transaction.atomic():
+            # Serialize version creation with destructive child operations on the HEAD repository.
+            head = cls.objects.select_for_update().get(id=head.id)
+            obj.update_version_data(head)
+            obj.save(**kwargs)
+
+            if obj.id:
+                obj.sibling_versions.update(is_latest_version=False)
+
+            task_args = (obj.resource_type.lower(), obj.id, not is_test_mode, sync)
+            if is_test_mode or sync:
+                seed_children_to_new_version(*task_args)
+            else:
+                from core.tasks.models import Task
+                task = Task.new(
+                    queue='default',
+                    user=user,
+                    name=seed_children_to_new_version.__name__,
+                    args=task_args,
+                )
+
+                def enqueue_seed_task():
+                    """Queue snapshot seeding only after its repository version is committed."""
+                    seed_children_to_new_version.apply_async(
+                        task_args,
+                        task_id=task.id,
+                        queue='default',
+                        persist_args=True
+                    )
+
+                transaction.on_commit(enqueue_seed_task)
 
         return errors
 

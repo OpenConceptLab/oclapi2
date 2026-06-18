@@ -1,6 +1,7 @@
 import factory
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.test import override_settings
 from mock import patch, Mock, ANY, PropertyMock, call
 
 from core.collections.models import Collection
@@ -23,6 +24,7 @@ from core.services.storages.postgres import PostgresQL
 from core.sources.documents import SourceDocument
 from core.sources.models import Source, CloneError
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
+from core.tasks.models import Task
 from core.url_registry.factories import OrganizationURLRegistryFactory, GlobalURLRegistryFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
@@ -262,6 +264,28 @@ class SourceTest(OCLTestCase):
         self.assertEqual(version1.concepts.count(), 1)
         self.assertEqual(version1.concepts.first(), source.concepts.filter(is_latest_version=True).first())
         self.assertEqual(version1.concepts_set.count(), 0)  # no direct child
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.common.models.seed_children_to_new_version.apply_async')
+    def test_persist_new_version_registers_seed_task_before_enqueue(self, apply_async):
+        source = OrganizationSourceFactory(version=HEAD)
+        source_version = OrganizationSourceFactory.build(
+            version='v1',
+            mnemonic=source.mnemonic,
+            organization=source.organization,
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            Source.persist_new_version(source_version, source.created_by)
+
+        task = Task.objects.get(name='seed_children_to_new_version')
+        self.assertEqual(task.args, ['source', source_version.id, True, False])
+        apply_async.assert_called_once_with(
+            ('source', source_version.id, True, False),
+            task_id=task.id,
+            queue='default',
+            persist_args=True,
+        )
 
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))

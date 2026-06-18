@@ -41,10 +41,13 @@ from core.common.utils import (to_parent_uri_from_kwargs, generate_temp_version,
                                drop_version, get_falsy_values)
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
-from core.concepts.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT
+from core.concepts.constants import (
+    CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY,
+    PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT,
+)
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept, ConceptName
-from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
+from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary, CanAdministerParentDictionary
 from core.concepts.search import ConceptFacetedSearch, ConceptFuzzySearch
 from core.concepts.serializers import (
     ConceptDetailSerializer, ConceptListSerializer, ConceptDescriptionSerializer, ConceptNameSerializer,
@@ -344,8 +347,14 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
         if self.request.method in ['GET']:
             return [CanViewParentDictionary(), ]
 
-        if self.request.method == 'DELETE' and self.is_hard_delete_requested():
-            return [IsAdminUser(), ]
+        # async/db hard deletes are power operations reserved for repo admins (the dictionary's
+        # owner/org-members) and platform staff. A regular HEAD-only hard delete stays open to any
+        # repo editor. The HEAD-only safety check (409 for non-staff) is enforced in the handlers.
+        if (
+                self.request.method == 'DELETE' and self.is_hard_delete_requested() and
+                (self.is_async_requested() or self.is_db_delete_requested())
+        ):
+            return [CanAdministerParentDictionary(), ]
 
         return [CanEditParentDictionary(), ]
 
@@ -383,30 +392,79 @@ class ConceptRetrieveUpdateDestroyView(ConceptBaseView, RetrieveAPIView, UpdateA
     def is_db_delete_requested(self):
         return self.request.query_params.get('db', None) in TRUTHY
 
+    def _db_hard_delete(self):
+        parent_filters = Concept.get_parent_and_owner_filters_from_kwargs(self.kwargs)
+        concepts = Concept.objects.filter(mnemonic=self.kwargs['concept'], **parent_filters)
+        concept = concepts.filter(id=F('versioned_object_id')).first()
+        if not concept:
+            raise Http404()
+        self.check_object_permissions(self.request, concept)
+
+        # The raw delete skips the cascade path, so re-apply the HEAD-only guard non-staff would
+        # otherwise hit in `_hard_delete`, keeping snapshotted concepts protected from `db=true`.
+        if not IsAdminUser().has_permission(self.request, self) and (
+                concept.belongs_to_non_head_source_version() or
+                concept.has_pending_source_version_seed()
+        ):
+            return Response(
+                {'detail': CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        parent = concept.parent
+        result = concepts.delete()
+        parent.update_concepts_count()
+        return Response(result, status=status.HTTP_204_NO_CONTENT)
+
+    def _hard_delete(self, request, concept):
+        parent = concept.parent
+        with transaction.atomic():
+            # Source version creation locks the same HEAD row before registering its seed task.
+            parent.__class__.objects.select_for_update().get(id=concept.parent_id)
+            locked_concepts = list(Concept.objects.select_for_update().filter(
+                parent_id=concept.parent_id,
+                versioned_object_id=concept.versioned_object_id,
+            ))
+            versioned_concept = next(
+                (candidate for candidate in locked_concepts if candidate.id == concept.id),
+                None,
+            )
+            if not versioned_concept:
+                raise Http404()
+
+            is_admin = IsAdminUser().has_permission(request, self)
+            if not is_admin and (
+                    versioned_concept.belongs_to_non_head_source_version() or
+                    versioned_concept.has_pending_source_version_seed()
+            ):
+                return Response(
+                    {'detail': CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY},
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            if self.is_async_requested():
+                task = Task.new(queue='default', user=request.user, name=delete_concept.__name__)
+                delete_concept.apply_async((concept.id,), queue=task.queue, task_id=task.id)
+                return Response(status=status.HTTP_204_NO_CONTENT)
+
+            # Versions reference the versioned concept with on_delete=CASCADE.
+            # Deleting the root removes every HEAD-only version and its related rows.
+            versioned_concept.delete()
+        parent.update_concepts_count()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     def destroy(self, request, *args, **kwargs):
         if self.is_container_version_specified():
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
         is_hard_delete_requested = self.is_hard_delete_requested()
         if self.is_db_delete_requested() and is_hard_delete_requested:
-            parent_filters = Concept.get_parent_and_owner_filters_from_kwargs(self.kwargs)
-            concepts = Concept.objects.filter(mnemonic=self.kwargs['concept'], **parent_filters)
-            concept = concepts.filter(id=F('versioned_object_id')).first()
-            parent = concept.parent
-            result = concepts.delete()
-            parent.update_concepts_count()
-            return Response(result, status=status.HTTP_204_NO_CONTENT)
+            return self._db_hard_delete()
 
         concept = self.get_object()
         parent = concept.parent
 
         if is_hard_delete_requested:
-            if self.is_async_requested():
-                task = Task.new(queue='default', user=request.user, name=delete_concept.__name__)
-                delete_concept.apply_async((concept.id,), queue=task.queue, task_id=task.id)
-                return Response(status=status.HTTP_204_NO_CONTENT)
-            concept.delete()
-            parent.update_concepts_count()
-            return Response(status=status.HTTP_204_NO_CONTENT)
+            return self._hard_delete(request, concept)
 
         comment = request.data.get('update_comment', None) or request.data.get('comment', None)
         reason = request.data.get('retire_reason', None)
@@ -722,7 +780,10 @@ class ConceptLocaleRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDest
                         new_version, subject_label_attr, [*[locale.clone() for locale in locales.all()], saved_instance]
                     )
                     new_version.comment = f'Updated {saved_instance.name} in {self.parent_list_attribute}.'
-                    errors = new_version.save_as_new_version(request.user)
+                    # (Un)retiring a locale doesn't affect the standard checksum, so skip the
+                    # duplicate-version guard for it; content edits still change the checksum.
+                    errors = new_version.save_as_new_version(
+                        request.user, skip_duplicate_version_check='retired' in request.data)
                     if errors:
                         raise ValidationError(errors)
             except ValidationError as e:
@@ -751,7 +812,9 @@ class ConceptLocaleRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDest
             labels.append(retired_locale)
             setattr(new_version, subject_label_attr, labels)
             new_version.comment = f'Retired {instance.name} in {self.parent_list_attribute}.'
-            errors = new_version.save_as_new_version(request.user)
+            # Retiring a locale is an intentional change, but the standard checksum ignores the
+            # locale `retired` flag, so skip the duplicate-version guard that would block it.
+            errors = new_version.save_as_new_version(request.user, skip_duplicate_version_check=True)
             if errors:
                 return Response(errors, status=status.HTTP_400_BAD_REQUEST)
         return Response(status=status.HTTP_204_NO_CONTENT)
