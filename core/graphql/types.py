@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 import strawberry
+from strawberry.scalars import JSON
 
 
 @strawberry.type
@@ -33,6 +34,14 @@ class MappingType:
     to_code: Optional[str] = strawberry.field(
         name="toCode",
         description="Identifier of the target concept in the mapped source.",
+    )
+    to_concept_name: Optional[str] = strawberry.field(
+        name="toConceptName",
+        description="Display name of the target concept when available.",
+    )
+    sort_weight: Optional[float] = strawberry.field(
+        name="sortWeight",
+        description="Numeric weight used to order mappings within the same mapping type.",
     )
     comment: Optional[str] = strawberry.field(description="Optional notes attached to the mapping.")
 
@@ -162,3 +171,4 @@ class ConceptType:
     metadata: MetadataType = strawberry.field(
         description="Operational metadata such as status and audit fields."
     )
+    extras: JSON = strawberry.field(description="Additional custom metadata attached to the concept.")

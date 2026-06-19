@@ -1,13 +1,23 @@
+"""GraphQL resolvers (Strawberry).
+
+Pure helpers live in ``core/graphql/search.py`` (queryset builders, pagination, DB fallback)
+and ``core/graphql/serializers.py`` (ORM → Strawberry mapping). This module hosts:
+
+* the Elasticsearch boundary (``concept_ids_from_es`` + orchestrator ``concepts_for_query``),
+* the ``Query`` Strawberry type and its resolvers,
+* permissions/validation orchestration,
+* and back-compat re-exports of helpers so existing imports continue to work.
+"""
+
 from __future__ import annotations
 
-from datetime import timezone as datetime_timezone
 import logging
-from typing import Iterable, List, Optional, Sequence
+from typing import List, Optional
 
 import strawberry
 from asgiref.sync import sync_to_async
-from django.db.models import Case, IntegerField, Prefetch, Q, When
-from django.utils import timezone
+from django.contrib.auth.models import AnonymousUser
+from django.db.models import Case, IntegerField, Prefetch, When
 from elasticsearch import ConnectionError as ESConnectionError, TransportError
 from elasticsearch_dsl import Q as ES_Q
 from pydash import get
@@ -16,24 +26,80 @@ from strawberry.exceptions import GraphQLError
 from core.common.constants import HEAD
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
-from core.mappings.models import Mapping
 from core.sources.models import Source
 
-from .types import (
-    CodedDatatypeDetails,
-    ConceptNameType,
-    ConceptType,
-    DatatypeDetails,
-    DatatypeType,
-    MappingType,
-    MetadataType,
-    NumericDatatypeDetails,
-    TextDatatypeDetails,
-    ToSourceType,
+from .constants import build_validation_error
+from .permissions import (
+    PermissionsMixin,
+    apply_es_visibility_filter,
+    check_user_permission,
+    resolve_owner,
 )
+from .search import (
+    apply_slice,
+    build_db_search_queryset,
+    build_global_head_queryset,
+    build_global_mapping_prefetch,
+    build_mapping_prefetch,
+    build_source_version_queryset,
+    concepts_for_ids,
+    has_next,
+    normalize_pagination,
+    with_concept_related,
+)
+from .serializers import (
+    _to_bool,
+    _to_float,
+    build_datatype,
+    build_metadata,
+    format_datetime_for_api,
+    resolve_coded_datatype_details,
+    resolve_datatype_details,
+    resolve_description,
+    resolve_is_set_flag,
+    resolve_numeric_datatype_details,
+    resolve_text_datatype_details,
+    serialize_concepts,
+    serialize_mappings,
+    serialize_names,
+)
+from .types import ConceptType
 
 logger = logging.getLogger(__name__)
 ES_MAX_WINDOW = 10_000
+
+# Back-compat re-exports for tests and callers that import these names from this module.
+__all__ = [
+    'ConceptSearchResult',
+    'Query',
+    'resolve_source_version',
+    'concept_ids_from_es',
+    'concepts_for_query',
+    '_to_bool',
+    '_to_float',
+    'apply_slice',
+    'build_db_search_queryset',
+    'build_datatype',
+    'build_global_head_queryset',
+    'build_global_mapping_prefetch',
+    'build_mapping_prefetch',
+    'build_metadata',
+    'build_source_version_queryset',
+    'concepts_for_ids',
+    'format_datetime_for_api',
+    'has_next',
+    'normalize_pagination',
+    'resolve_coded_datatype_details',
+    'resolve_datatype_details',
+    'resolve_description',
+    'resolve_is_set_flag',
+    'resolve_numeric_datatype_details',
+    'resolve_text_datatype_details',
+    'serialize_concepts',
+    'serialize_mappings',
+    'serialize_names',
+    'with_concept_related',
+]
 
 
 @strawberry.type
@@ -67,8 +133,18 @@ class ConceptSearchResult:
     )
 
 
-async def resolve_source_version(org: str, source: str, version: Optional[str]) -> Source:
-    filters = {'organization__mnemonic': org}
+async def resolve_source_version(
+    org: Optional[str],
+    owner: Optional[str],
+    source: str,
+    version: Optional[str],
+) -> Source:
+    if org:
+        filters = {'organization__mnemonic': org}
+    elif owner:
+        filters = {'user__username': owner}
+    else:
+        raise build_validation_error("Either org or owner must be provided to resolve a source version.")
     target_version = version or HEAD
     instance = await sync_to_async(Source.get_version)(source, target_version, filters)
 
@@ -76,284 +152,19 @@ async def resolve_source_version(org: str, source: str, version: Optional[str]) 
         instance = await sync_to_async(Source.find_latest_released_version_by)({**filters, 'mnemonic': source})
 
     if not instance:
-        raise GraphQLError(
-            f"Source '{source}' with version '{version or 'HEAD'}' was not found for org '{org}'."
-        )
+        # Generic message: do not leak whether the owner exists when the source is missing.
+        raise GraphQLError(f"Source '{source}' with version '{version or 'HEAD'}' was not found.")
 
     return instance
-
-
-def build_base_queryset(source_version: Source):
-    return source_version.get_concepts_queryset().filter(is_active=True, retired=False)
-
-
-def build_mapping_prefetch(source_version: Source) -> Prefetch:
-    mapping_qs = (
-        Mapping.objects.filter(
-            sources__id=source_version.id,
-            from_concept_id__isnull=False,
-            is_active=True,
-            retired=False,
-        )
-        .select_related('to_source', 'to_concept', 'to_concept__parent')
-        .order_by('map_type', 'to_concept_code', 'to_concept__mnemonic')
-        .distinct()
-    )
-
-    return Prefetch('mappings_from', queryset=mapping_qs, to_attr='graphql_mappings')
-
-
-def build_global_mapping_prefetch() -> Prefetch:
-    mapping_qs = (
-        Mapping.objects.filter(
-            from_concept_id__isnull=False,
-            is_active=True,
-            retired=False,
-        )
-        .select_related('to_source', 'to_concept', 'to_concept__parent')
-        .order_by('map_type', 'to_concept_code', 'to_concept__mnemonic')
-        .distinct()
-    )
-
-    return Prefetch('mappings_from', queryset=mapping_qs, to_attr='graphql_mappings')
-
-
-def normalize_pagination(page: Optional[int], limit: Optional[int]) -> Optional[dict]:
-    if page is None or limit is None:
-        return None
-    if page < 1 or limit < 1:
-        raise GraphQLError('page and limit must be >= 1 when provided.')
-    start = (page - 1) * limit
-    end = start + limit
-    return {'page': page, 'limit': limit, 'start': start, 'end': end}
-
-
-def has_next(total: int, pagination: Optional[dict]) -> bool:
-    if not pagination:
-        return False
-    return total > pagination['end']
-
-
-def apply_slice(qs, pagination: Optional[dict]):
-    if not pagination:
-        return qs
-    return qs[pagination['start']:pagination['end']]
-
-
-def with_concept_related(qs, mapping_prefetch: Prefetch):
-    return qs.select_related('created_by', 'updated_by').prefetch_related('names', 'descriptions', mapping_prefetch)
-
-
-def serialize_mappings(concept: Concept) -> List[MappingType]:
-    mappings = getattr(concept, 'graphql_mappings', []) or []
-    result: List[MappingType] = []
-    for mapping in mappings:
-        result.append(
-            MappingType(
-                map_type=str(mapping.map_type),
-                to_source=ToSourceType(
-                    url=mapping.to_source_url,
-                    name=mapping.to_source_name
-                ) if mapping.to_source_url or mapping.to_source_name else None,
-                to_code=mapping.get_to_concept_code(),
-                comment=mapping.comment,
-            )
-        )
-    return result
-
-
-def serialize_names(concept: Concept) -> List[ConceptNameType]:
-    return [
-        ConceptNameType(
-            name=name.name,
-            locale=name.locale,
-            type=name.type,
-            preferred=name.locale_preferred,
-            retired=name.retired,
-        )
-        for name in concept.names.all()
-    ]
-
-
-def resolve_description(concept: Concept) -> Optional[str]:
-    descriptions = list(concept.active_descriptions.all())
-    if not descriptions:
-        return None
-
-    def pick(predicate):
-        for desc in descriptions:
-            if predicate(desc):
-                return desc.description
-        return None
-
-    try:
-        default_locale = getattr(concept.parent, 'default_locale', None)
-    except Source.DoesNotExist:
-        default_locale = None
-    if default_locale:
-        match = pick(lambda desc: desc.locale == default_locale and desc.locale_preferred)
-        if match:
-            return match
-        match = pick(lambda desc: desc.locale == default_locale)
-        if match:
-            return match
-
-    match = pick(lambda desc: desc.locale_preferred)
-    if match:
-        return match
-    return descriptions[0].description
-
-
-def resolve_is_set_flag(concept: Concept) -> Optional[bool]:
-    value = getattr(concept, 'is_set', None)
-    if value is None:
-        extras = concept.extras or {}
-        if 'is_set' not in extras:
-            return None
-        value = extras['is_set']
-
-    if isinstance(value, str):
-        lowered = value.strip().lower()
-        if lowered in {'true', '1', 'yes'}:
-            return True
-        if lowered in {'false', '0', 'no'}:
-            return False
-    return bool(value)
-
-
-def _to_float(value) -> Optional[float]:
-    if value in (None, ''):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _to_bool(value) -> Optional[bool]:
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    if isinstance(value, str):
-        lowered = value.strip().lower()
-        if lowered in {'true', '1', 'yes'}:
-            return True
-        if lowered in {'false', '0', 'no'}:
-            return False
-    return None
-
-
-def resolve_numeric_datatype_details(concept: Concept) -> Optional[NumericDatatypeDetails]:
-    extras = concept.extras or {}
-    numeric_values = {
-        'low_absolute': _to_float(extras.get('low_absolute')),
-        'high_absolute': _to_float(extras.get('hi_absolute')),
-        'low_normal': _to_float(extras.get('low_normal')),
-        'high_normal': _to_float(extras.get('hi_normal')),
-        'low_critical': _to_float(extras.get('low_critical')),
-        'high_critical': _to_float(extras.get('hi_critical')),
-    }
-    units = extras.get('units')
-    if not units and not any(value is not None for value in numeric_values.values()):
-        return None
-    return NumericDatatypeDetails(
-        units=units,
-        low_absolute=numeric_values['low_absolute'],
-        high_absolute=numeric_values['high_absolute'],
-        low_normal=numeric_values['low_normal'],
-        high_normal=numeric_values['high_normal'],
-        low_critical=numeric_values['low_critical'],
-        high_critical=numeric_values['high_critical'],
-    )
-
-
-def resolve_coded_datatype_details(concept: Concept) -> Optional[CodedDatatypeDetails]:
-    extras = concept.extras or {}
-    allow_multiple = extras.get('allow_multiple')
-    if allow_multiple is None:
-        allow_multiple = extras.get('allow_multiple_answers')
-    if allow_multiple is None:
-        allow_multiple = extras.get('allowMultipleAnswers')
-    allow_multiple = _to_bool(allow_multiple)
-    if allow_multiple is None:
-        return None
-    return CodedDatatypeDetails(allow_multiple=allow_multiple)
-
-
-def resolve_text_datatype_details(concept: Concept) -> Optional[TextDatatypeDetails]:
-    extras = concept.extras or {}
-    text_format = extras.get('text_format') or extras.get('textFormat')
-    if not text_format:
-        return None
-    return TextDatatypeDetails(text_format=text_format)
-
-
-def resolve_datatype_details(concept: Concept) -> Optional[DatatypeDetails]:
-    datatype = (concept.datatype or '').strip().lower()
-    if datatype == 'numeric':
-        return resolve_numeric_datatype_details(concept)
-    if datatype == 'coded':
-        return resolve_coded_datatype_details(concept)
-    if datatype == 'text':
-        return resolve_text_datatype_details(concept)
-    return None
-
-
-def format_datetime_for_api(value) -> Optional[str]:
-    if not value:
-        return None
-    if timezone.is_naive(value):
-        value = timezone.make_aware(value, datetime_timezone.utc)
-    return value.astimezone(datetime_timezone.utc).isoformat().replace('+00:00', 'Z')
-
-
-def build_datatype(concept: Concept) -> Optional[DatatypeType]:
-    if not concept.datatype:
-        return None
-    return DatatypeType(
-        name=concept.datatype,
-        details=resolve_datatype_details(concept),
-    )
-
-
-def build_metadata(concept: Concept) -> MetadataType:
-    return MetadataType(
-        is_set=resolve_is_set_flag(concept),
-        is_retired=concept.retired,
-        created_by=getattr(concept.created_by, 'username', None),
-        created_at=format_datetime_for_api(concept.created_at),
-        updated_by=getattr(concept.updated_by, 'username', None),
-        updated_at=format_datetime_for_api(concept.updated_at),
-    )
-
-
-def serialize_concepts(concepts: Iterable[Concept]) -> List[ConceptType]:
-    output: List[ConceptType] = []
-    for concept in concepts:
-        output.append(
-            ConceptType(
-                id=str(concept.id),
-                external_id=concept.external_id,
-                concept_id=concept.mnemonic,
-                display=concept.display_name,
-                names=serialize_names(concept),
-                mappings=serialize_mappings(concept),
-                description=resolve_description(concept),
-                concept_class=concept.concept_class,
-                datatype=build_datatype(concept),
-                metadata=build_metadata(concept),
-            )
-        )
-    return output
 
 
 def concept_ids_from_es(
         query: str,
         source_version: Optional[Source],
         pagination: Optional[dict],
+        owner: Optional[str] = None,
+        owner_type: Optional[str] = None,
+        user=None,
 ) -> Optional[tuple[list[int], int]]:
     trimmed = query.strip()
     if not trimmed:
@@ -363,10 +174,20 @@ def concept_ids_from_es(
         search = ConceptDocument.search()
         if source_version:
             search = search.filter('term', source=source_version.mnemonic.lower())
-            if source_version.is_head:
+            if owner and owner_type:
+                search = search.filter('term', owner=owner.lower()).filter('term', owner_type=owner_type)
+
+            # Always derive the effective version from the resolved Source object so that a
+            # HEAD-fallback (find_latest_released_version_by) does not get filtered by the
+            # client-supplied label, which would silently return zero hits.
+            effective_version = source_version.version
+            if effective_version == HEAD or source_version.is_head:
                 search = search.filter('term', is_latest_version=True)
             else:
-                search = search.filter('term', source_version=source_version.version)
+                search = search.filter('term', source_version=effective_version)
+        else:
+            search = search.filter('term', is_latest_version=True)
+            search = apply_es_visibility_filter(search, user or AnonymousUser())
         search = search.filter('term', retired=False)
 
         should_queries = [
@@ -394,45 +215,24 @@ def concept_ids_from_es(
     return None
 
 
-def fallback_db_search(base_qs, query: str):
-    trimmed = query.strip()
-    if not trimmed:
-        return base_qs.none()
-    return base_qs.filter(
-        Q(mnemonic__icontains=trimmed) | Q(names__name__icontains=trimmed, names__retired=False)
-    ).distinct()
-
-
-async def concepts_for_ids(
-        base_qs,
-        concept_ids: Sequence[str],
-        pagination: Optional[dict],
-        mapping_prefetch: Prefetch,
-) -> tuple[List[Concept], int]:
-    unique_ids = list(dict.fromkeys([cid for cid in concept_ids if cid]))
-    if not unique_ids:
-        raise GraphQLError('conceptIds must include at least one value when provided.')
-
-    qs = base_qs.filter(mnemonic__in=unique_ids)
-    total = await sync_to_async(qs.count)()
-    ordering = Case(
-        *[When(mnemonic=value, then=pos) for pos, value in enumerate(unique_ids)],
-        output_field=IntegerField()
-    )
-    qs = qs.order_by(ordering, 'mnemonic')
-    qs = apply_slice(qs, pagination)
-    qs = with_concept_related(qs, mapping_prefetch)
-    return await sync_to_async(list)(qs), total
-
-
 async def concepts_for_query(
         base_qs,
         query: str,
-        source_version: Source,
+        source_version: Optional[Source],
         pagination: Optional[dict],
         mapping_prefetch: Prefetch,
+        owner: Optional[str] = None,
+        owner_type: Optional[str] = None,
+        user=None,
 ) -> tuple[List[Concept], int]:
-    es_result = await sync_to_async(concept_ids_from_es)(query, source_version, pagination)
+    es_result = await sync_to_async(concept_ids_from_es)(
+        query,
+        source_version,
+        pagination,
+        owner=owner,
+        owner_type=owner_type,
+        user=user,
+    )
     if es_result is not None:
         concept_ids, total = es_result
         if not concept_ids:
@@ -448,13 +248,13 @@ async def concepts_for_query(
         else:
             ordering = Case(
                 *[When(id=pk, then=pos) for pos, pk in enumerate(concept_ids)],
-                output_field=IntegerField()
+                output_field=IntegerField(),
             )
             qs = base_qs.filter(id__in=concept_ids).order_by(ordering)
             qs = with_concept_related(qs, mapping_prefetch)
             return await sync_to_async(list)(qs), total
 
-    qs = fallback_db_search(base_qs, query).order_by('mnemonic')
+    qs = build_db_search_queryset(base_qs, query).order_by('mnemonic')
     total = await sync_to_async(qs.count)()
     qs = apply_slice(qs, pagination)
     qs = with_concept_related(qs, mapping_prefetch)
@@ -462,12 +262,24 @@ async def concepts_for_query(
 
 
 @strawberry.type
-class Query:
+class Query(PermissionsMixin):
+    async def resolve_source_version_for_permissions(
+        self,
+        org: Optional[str],
+        owner: Optional[str],
+        source: str,
+        version: Optional[str],
+    ) -> Source:
+        """Resolve repository versions through the shared GraphQL helper."""
+        return await resolve_source_version(org, owner, source, version)
+
     @strawberry.field(name="concepts")
+    @check_user_permission
     async def concepts(  # pylint: disable=too-many-arguments,too-many-locals
         self,
-        info,  # pylint: disable=unused-argument
+        info,
         org: Optional[str] = None,
+        owner: Optional[str] = None,
         source: Optional[str] = None,
         version: Optional[str] = None,
         conceptIds: Optional[List[str]] = None,
@@ -475,29 +287,32 @@ class Query:
         page: Optional[int] = None,
         limit: Optional[int] = None,
     ) -> ConceptSearchResult:
-        if info.context.auth_status == 'none':
-            raise GraphQLError('Authentication required')
-
-        if info.context.auth_status == 'invalid':
-            raise GraphQLError('Authentication failure')
-
         concept_ids_param = conceptIds or []
         text_query = (query or '').strip()
+        user = getattr(info.context, 'user', AnonymousUser())
 
         if not concept_ids_param and not text_query:
-            raise GraphQLError('Either conceptIds or query must be provided.')
+            raise build_validation_error('Either conceptIds or query must be provided.')
 
         pagination = normalize_pagination(page, limit)
 
-        if org and source:
-            source_version = await resolve_source_version(org, source, version)
-            base_qs = build_base_queryset(source_version)
+        if org and owner:
+            raise build_validation_error('Provide either org or owner, not both.')
+
+        if source and not org and not owner:
+            raise build_validation_error('Either org or owner must be provided when source is specified.')
+
+        owner_value, owner_type = resolve_owner(org, owner)
+
+        if (org or owner) and source:
+            source_version = await self.get_source_version(info, org, owner, source, version)
+            base_qs = build_source_version_queryset(source_version)
             mapping_prefetch = build_mapping_prefetch(source_version)
         else:
             # Global search across all repositories
             source_version = None
-            base_qs = Concept.objects.filter(is_active=True, retired=False)
-            mapping_prefetch = build_global_mapping_prefetch()
+            base_qs = self.filter_global_queryset(build_global_head_queryset(), user)
+            mapping_prefetch = build_global_mapping_prefetch(user)
 
         if concept_ids_param:
             concepts, total = await concepts_for_ids(base_qs, concept_ids_param, pagination, mapping_prefetch)
@@ -508,6 +323,9 @@ class Query:
                 source_version,
                 pagination,
                 mapping_prefetch,
+                owner=owner_value,
+                owner_type=owner_type,
+                user=user,
             )
 
         serialized = await sync_to_async(serialize_concepts)(concepts)

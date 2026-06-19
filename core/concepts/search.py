@@ -5,7 +5,152 @@ from core.common.constants import FACET_SIZE, HEAD
 from core.common.lexical_variants import LexicalVariantDictionary
 from core.common.search import CustomESFacetedSearch, CustomESSearch
 from core.common.utils import get_embeddings, is_canonical_uri
+from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
+
+CONCEPT_FUZZY_BOOST_DIVIDE_BY = 10000
+CONCEPT_FUZZY_EXPANSIONS = 2
+
+
+def normalize_concept_search_query(query):
+    """Normalize raw concept search text so all callers share the same preprocessing."""
+    return str(query or '').replace('"', '').replace("'", '').strip()
+
+
+def filter_concept_search_fields(fields, include_map_codes=True):
+    """Optionally remove map-code fields to match the REST search toggle semantics."""
+    if include_map_codes:
+        return fields
+
+    return {key: value for key, value in fields.items() if not key.endswith('map_codes')}
+
+
+def get_concept_search_string(query, lower=True, decode=True):
+    """Return the normalized concept query string in the same format used by REST search."""
+    return CustomESSearch.get_search_string(
+        normalize_concept_search_query(query),
+        lower=lower,
+        decode=decode,
+    )
+
+
+def get_concept_exact_search_criterion(query, include_map_codes=True):
+    """Build the exact-match clause used by both REST and GraphQL concept search."""
+    match_phrase_field_list = ConceptDocument.get_match_phrase_attrs()
+    match_word_fields_map = filter_concept_search_fields(
+        ConceptDocument.get_exact_match_attrs(),
+        include_map_codes=include_map_codes,
+    )
+    fields = match_phrase_field_list + list(match_word_fields_map.keys())
+    return CustomESSearch.get_exact_match_criterion(
+        get_concept_search_string(query, lower=False, decode=False),
+        match_phrase_field_list,
+        match_word_fields_map,
+    ), fields
+
+
+def _build_concept_wildcard_criterion(normalized_query, include_map_codes=True):
+    """Wildcard clause builder that skips re-normalization for already-clean tokens."""
+    fields = filter_concept_search_fields(
+        ConceptDocument.get_wildcard_search_attrs(),
+        include_map_codes=include_map_codes,
+    )
+    return CustomESSearch.get_wildcard_match_criterion(
+        search_str=CustomESSearch.get_search_string(normalized_query, lower=True, decode=True),
+        fields=fields,
+    ), list(fields.keys())
+
+
+def get_concept_wildcard_search_criterion(query, include_map_codes=True):
+    """Build the wildcard clause used by both REST and GraphQL concept search."""
+    return _build_concept_wildcard_criterion(
+        normalize_concept_search_query(query),
+        include_map_codes=include_map_codes,
+    )
+
+
+def get_concept_fuzzy_search_criterion(
+    query,
+    boost_divide_by=CONCEPT_FUZZY_BOOST_DIVIDE_BY,
+    expansions=CONCEPT_FUZZY_EXPANSIONS,
+):
+    """Build the fuzzy clause used by both REST and GraphQL concept search."""
+    return CustomESSearch.get_fuzzy_match_criterion(
+        search_str=get_concept_search_string(query, decode=False),
+        fields=ConceptDocument.get_fuzzy_search_attrs(),
+        boost_divide_by=boost_divide_by,
+        expansions=expansions,
+    )
+
+
+def get_concept_mandatory_words_criteria(query, include_map_codes=True):
+    """Build the required-word wildcard clauses shared by REST and GraphQL."""
+    criterion = None
+    for must_have in CustomESSearch.get_must_haves(normalize_concept_search_query(query)):
+        criteria, _ = _build_concept_wildcard_criterion(
+            f"{must_have}*",
+            include_map_codes=include_map_codes,
+        )
+        criterion = criteria if criterion is None else criterion & criteria
+    return criterion
+
+
+def get_concept_mandatory_exclude_words_criteria(query, include_map_codes=True):
+    """Build the excluded-word wildcard clauses shared by REST and GraphQL."""
+    criterion = None
+    for must_not_have in CustomESSearch.get_must_not_haves(normalize_concept_search_query(query)):
+        criteria, _ = _build_concept_wildcard_criterion(
+            f"{must_not_have}*",
+            include_map_codes=include_map_codes,
+        )
+        criterion = criteria if criterion is None else criterion | criteria
+    return criterion
+
+
+def get_concept_search_rescore(query):
+    """Return the concept-specific ES rescore block shared by REST and GraphQL."""
+    search_str = get_concept_search_string(query, lower=False)
+    return {
+        "window_size": 400,
+        "query": {
+            "score_mode": "total",
+            "query_weight": 1.0,
+            "rescore_query_weight": 800.0,
+            "rescore_query": {
+                "dis_max": {
+                    "tie_breaker": 0.0,
+                    "queries": [
+                        {
+                            "constant_score": {
+                                "filter": {
+                                    "term": {
+                                        "_name": {
+                                            "value": search_str,
+                                            "case_insensitive": True,
+                                        }
+                                    }
+                                },
+                                "boost": 10.0,
+                            }
+                        },
+                        {
+                            "constant_score": {
+                                "filter": {
+                                    "term": {
+                                        "_synonyms": {
+                                            "value": search_str,
+                                            "case_insensitive": True,
+                                        }
+                                    }
+                                },
+                                "boost": 8.0,
+                            }
+                        },
+                    ]
+                }
+            },
+        },
+    }
 
 
 class ConceptFacetedSearch(CustomESFacetedSearch):
