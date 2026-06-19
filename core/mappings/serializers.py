@@ -266,6 +266,42 @@ class MappingDetailSerializer(MappingListSerializer):
         return instance
 
 
+class MappingVersionExportSerializer(ModelSerializer):
+    type = CharField(source='resource_type', read_only=True)
+    uuid = CharField(source='id', read_only=True)
+    id = CharField(source='mnemonic', required=False)
+    source = CharField(source='parent_resource', read_only=True)
+    owner = CharField(source='owner_name', read_only=True)
+    update_comment = CharField(source='comment', required=False, allow_null=True, allow_blank=True)
+    url = CharField(source='versioned_object_url', read_only=True)
+    version_url = CharField(source='uri', read_only=True)
+    version_created_on = DateTimeField(source='created_at', read_only=True)
+    version_updated_on = DateTimeField(source='updated_at', read_only=True)
+    to_concept_code = EncodedDecodedCharField(required=False)
+    from_concept_code = EncodedDecodedCharField(required=False)
+    checksums = SerializerMethodField()
+
+    class Meta:
+        model = Mapping
+        fields = (
+            'type', 'uuid', 'id', 'external_id', 'retired', 'map_type',
+            'source', 'owner', 'owner_type', 'owner_url',
+            'from_concept_code', 'from_concept_name', 'from_concept_url',
+            'to_concept_code', 'to_concept_name', 'to_concept_url',
+            'from_source_owner', 'from_source_owner_type', 'from_source_url', 'from_source_name',
+            'to_source_owner', 'to_source_owner_type', 'to_source_url', 'to_source_name',
+            'from_source_version', 'to_source_version',
+            'url', 'version', 'versioned_object_id', 'versioned_object_url',
+            'is_latest_version', 'update_comment', 'version_url',
+            'version_created_on', 'version_updated_on',
+            'sort_weight', 'retire_reason', 'extras', 'public_can_view', 'checksums',
+        )
+
+    @staticmethod
+    def get_checksums(obj):
+        return obj.get_checksums()
+
+
 class MappingVersionDetailSerializer(MappingDetailSerializer):
     previous_version_url = CharField(read_only=True, source='prev_version_uri')
     source_versions = ListField(read_only=True)
