@@ -679,7 +679,6 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
     @property
     def last_concept_update(self):
         if self.is_head:
-            from core.concepts.models import Concept
             return Concept.objects.filter(
                 parent_id=self.id, id=F('versioned_object_id')
             ).order_by('-updated_at').values_list('updated_at', flat=True).first()
