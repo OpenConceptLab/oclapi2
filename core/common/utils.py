@@ -337,7 +337,7 @@ def write_export_file(
                 'from_source', 'from_source__organization', 'from_source__user',
                 'to_source', 'to_source__organization', 'to_source__user',
                 'from_concept', 'to_concept', 'created_by', 'updated_by',
-            ).order_by('-id')
+            ).prefetch_related('from_concept__names', 'to_concept__names').order_by('-id')
             mapping_versions = list(queryset)
             if mapping_versions:
                 if written_mappings:
