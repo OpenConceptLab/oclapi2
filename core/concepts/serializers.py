@@ -507,10 +507,10 @@ class ConceptVersionExportSerializer(ModelSerializer):
     version_updated_by = CharField(source='updated_by')
     locale = CharField(source='iso_639_1_locale')
     url = CharField(source='versioned_object_url', read_only=True)
-    previous_version_url = CharField(source='prev_version_uri', read_only=True)
     update_comment = CharField(source='comment', required=False, allow_null=True, allow_blank=True)
-    parent_concept_urls = ListField(read_only=True)
-    child_concept_urls = ListField(read_only=True)
+    previous_version_url = SerializerMethodField()
+    parent_concept_urls = SerializerMethodField()
+    child_concept_urls = SerializerMethodField()
     checksums = SerializerMethodField()
 
     class Meta:
@@ -527,6 +527,28 @@ class ConceptVersionExportSerializer(ModelSerializer):
     @staticmethod
     def get_checksums(obj):
         return obj.get_checksums()
+
+    def get_previous_version_url(self, obj):
+        prev_uris = self.context.get('prev_version_uris')
+        if prev_uris is not None:
+            return prev_uris.get(obj.versioned_object_id)
+        return obj.prev_version_uri
+
+    @staticmethod
+    def get_parent_concept_urls(obj):
+        uris = set(c.uri for c in obj.parent_concepts.all())
+        versioned = getattr(obj, 'versioned_object', None)
+        if versioned:
+            uris.update(c.uri for c in versioned.parent_concepts.all())
+        return list(uris)
+
+    @staticmethod
+    def get_child_concept_urls(obj):
+        uris = set(c.uri for c in obj.child_concepts.all())
+        versioned = getattr(obj, 'versioned_object', None)
+        if versioned:
+            uris.update(c.uri for c in versioned.child_concepts.all())
+        return list(uris)
 
 
 class ConceptVersionDetailSerializer(ModelSerializer):

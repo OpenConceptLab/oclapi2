@@ -21,7 +21,7 @@ from core.concepts.serializers import ConceptVersionExportSerializer
 from core.concepts.tests.factories import ConceptDescriptionFactory, ConceptFactory, ConceptNameFactory
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
-from core.mappings.serializers import MappingDetailSerializer
+from core.mappings.serializers import MappingVersionExportSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
 from core.sources.models import Source
@@ -1332,7 +1332,7 @@ class ExportSourceTaskTest(OCLAPITestCase):
         self.assertTrue('retire_reason' in exported_concepts[0]['names'][0])
 
         exported_mappings = exported_data['mappings']
-        expected_mappings = MappingDetailSerializer([mapping], many=True).data
+        expected_mappings = MappingVersionExportSerializer([mapping], many=True).data
 
         self.assertEqual(len(exported_mappings), 1)
         self.assertEqual(expected_mappings, exported_mappings)

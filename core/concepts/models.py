@@ -225,7 +225,17 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                           name='repo_version_concepts',
                           fields=['id', '-updated_at'],
                           condition=Q(is_active=True, retired=False)
-                      )
+                      ),
+                      models.Index(
+                          name='concepts_prev_version',
+                          fields=['versioned_object_id', '-created_at'],
+                          condition=Q(is_active=True),
+                      ),
+                      models.Index(
+                          name='concepts_prev_ver_non_latest',
+                          fields=['versioned_object_id', '-created_at'],
+                          condition=Q(is_active=True, is_latest_version=False),
+                      ),
                   ] + VersionedModel.Meta.indexes
 
     concept_class = models.TextField()

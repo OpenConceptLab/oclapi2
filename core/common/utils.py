@@ -245,6 +245,22 @@ def write_export_file(
         out.write(f'{resource_string[:-1]}, "concepts": [')
 
         concept_serializer_class = get_class('core.concepts.serializers.ConceptVersionExportSerializer')
+        if version.is_head:
+            all_versioned_object_ids = list(
+                Concept.objects.filter(
+                    id__in=concepts_qs.values(concept_id_field)).filter(**filters
+                ).values_list('versioned_object_id', flat=True)
+            )
+            all_prev_version_uris = dict(
+                Concept.objects.filter(
+                    versioned_object_id__in=all_versioned_object_ids,
+                    is_active=True, is_latest_version=False,
+                ).order_by('versioned_object_id', '-created_at').distinct(
+                    'versioned_object_id'
+                ).values_list('versioned_object_id', 'uri')
+            )
+        else:
+            all_prev_version_uris = None
         written_concepts = False
         start = 0
         while True:
@@ -257,12 +273,19 @@ def write_export_file(
                 break
             logger.info(f'Serializing concepts {start + 1:d} - {start + len(batch_ids):d}...')
             queryset = Concept.objects.filter(
-                id__in=batch_ids).filter(**filters).prefetch_related('names', 'descriptions').order_by('-id')
+                id__in=batch_ids).filter(**filters).select_related(
+                'parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by', 'versioned_object'
+            ).prefetch_related(
+                'names', 'descriptions', 'parent_concepts', 'child_concepts',
+                'versioned_object__parent_concepts', 'versioned_object__child_concepts'
+            ).order_by('-id')
             concept_versions = list(queryset)
             if concept_versions:
                 if written_concepts:
                     out.write(', ')
-                data = concept_serializer_class(concept_versions, many=True).data
+                data = concept_serializer_class(
+                    concept_versions, many=True, context={'prev_version_uris': all_prev_version_uris}
+                ).data
                 concept_string = json.dumps(data, cls=encoders.JSONEncoder)
                 out.write(concept_string[1:-1])
                 written_concepts = True
@@ -296,7 +319,7 @@ def write_export_file(
 
         out.write('], "mappings": [')
 
-        mapping_serializer_class = get_class('core.mappings.serializers.MappingDetailSerializer')
+        mapping_serializer_class = get_class('core.mappings.serializers.MappingVersionExportSerializer')
         written_mappings = False
         start = 0
         while True:
@@ -309,8 +332,12 @@ def write_export_file(
                 break
             logger.info(f'Serializing mappings {start + 1:d} - {start + len(batch_ids):d}...')
             queryset = Mapping.objects.filter(
-                id__in=batch_ids).filter(**filters).prefetch_related(
-                'from_concept', 'to_concept', 'from_source', 'to_source').order_by('-id')
+                id__in=batch_ids).filter(**filters).select_related(
+                'parent', 'parent__organization', 'parent__user',
+                'from_source', 'from_source__organization', 'from_source__user',
+                'to_source', 'to_source__organization', 'to_source__user',
+                'from_concept', 'to_concept',
+            ).order_by('-id')
             mapping_versions = list(queryset)
             if mapping_versions:
                 if written_mappings:
