@@ -9,16 +9,16 @@ from rest_framework.exceptions import ErrorDetail
 from core.collections.models import CollectionReference, Collection
 from core.collections.serializers import CollectionVersionExportSerializer, CollectionReferenceDetailSerializer
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory, ExpansionFactory
+from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tasks import export_collection
 from core.common.tests import OCLAPITestCase
 from core.common.utils import get_latest_dir_in_path, drop_version
 from core.concepts.models import Concept
 from core.concepts.serializers import ConceptVersionExportSerializer, ConceptListSerializer
 from core.concepts.tests.factories import ConceptFactory
-from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer
+from core.mappings.serializers import MappingListSerializer, MappingVersionExportSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
-from core.common.constants import ACCESS_TYPE_NONE
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.tasks.models import Task
@@ -2983,7 +2983,7 @@ class ExportCollectionTaskTest(OCLAPITestCase):
         self.assertIn(expected_concepts[1], exported_concepts)
 
         exported_mappings = exported_data['mappings']
-        expected_mappings = MappingDetailSerializer([mapping.get_latest_version()], many=True).data
+        expected_mappings = MappingVersionExportSerializer([mapping.get_latest_version()], many=True).data
 
         self.assertEqual(len(exported_mappings), 1)
         self.assertEqual(expected_mappings[0]['checksums'], exported_mappings[0]['checksums'])

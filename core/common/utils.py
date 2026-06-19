@@ -245,7 +245,7 @@ def write_export_file(
         out.write(f'{resource_string[:-1]}, "concepts": [')
 
         concept_serializer_class = get_class('core.concepts.serializers.ConceptVersionExportSerializer')
-        if version.is_head:
+        if version.is_head and not is_collection:
             all_versioned_object_ids = list(
                 Concept.objects.filter(
                     id__in=concepts_qs.values(concept_id_field)).filter(**filters
