@@ -678,10 +678,20 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
 
     @property
     def last_concept_update(self):
+        if self.is_head:
+            from core.concepts.models import Concept
+            return Concept.objects.filter(
+                parent_id=self.id, id=F('versioned_object_id')
+            ).order_by('-updated_at').values_list('updated_at', flat=True).first()
         return self.get_max_concept_attribute('updated_at')
 
     @property
     def last_mapping_update(self):
+        if self.is_head:
+            from core.mappings.models import Mapping
+            return Mapping.objects.filter(
+                parent_id=self.id, id=F('versioned_object_id')
+            ).order_by('-updated_at').values_list('updated_at', flat=True).first()
         return self.get_max_mapping_attribute('updated_at')
 
     def get_mapped_sources(self, exclude_self=True):
