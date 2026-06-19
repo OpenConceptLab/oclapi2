@@ -275,10 +275,17 @@ class MappingVersionExportSerializer(ModelSerializer):
     update_comment = CharField(source='comment', required=False, allow_null=True, allow_blank=True)
     url = CharField(source='versioned_object_url', read_only=True)
     version_url = CharField(source='uri', read_only=True)
+    created_on = DateTimeField(source='created_at', read_only=True)
+    updated_on = DateTimeField(source='updated_at', read_only=True)
     version_created_on = DateTimeField(source='created_at', read_only=True)
     version_updated_on = DateTimeField(source='updated_at', read_only=True)
+    created_by = CharField(source='created_by.username', read_only=True)
+    updated_by = CharField(source='created_by.username', read_only=True)
+    version_updated_by = CharField(source='updated_by.username', read_only=True)
     to_concept_code = EncodedDecodedCharField(required=False)
     from_concept_code = EncodedDecodedCharField(required=False)
+    from_concept_name_resolved = CharField(source='from_concept.display_name', read_only=True)
+    to_concept_name_resolved = CharField(source='to_concept.display_name', read_only=True)
     checksums = SerializerMethodField()
 
     class Meta:
@@ -293,7 +300,9 @@ class MappingVersionExportSerializer(ModelSerializer):
             'from_source_version', 'to_source_version',
             'url', 'version', 'versioned_object_id', 'versioned_object_url',
             'is_latest_version', 'update_comment', 'version_url',
-            'version_created_on', 'version_updated_on',
+            'created_on', 'updated_on', 'created_by', 'updated_by',
+            'version_created_on', 'version_updated_on', 'version_updated_by',
+            'from_concept_name_resolved', 'to_concept_name_resolved',
             'sort_weight', 'retire_reason', 'extras', 'public_can_view', 'checksums',
         )
 
