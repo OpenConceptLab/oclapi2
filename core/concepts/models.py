@@ -182,7 +182,7 @@ class ConceptName(AbstractLocalizedText):
         return ConceptName(
             **{
                 **{k: v for k, v in params.items() if k in [
-                    'external_id', 'name', 'locale', 'locale_preferred', 'retired', 'retired_reason'
+                    'external_id', 'name', 'locale', 'locale_preferred', 'retired', 'retire_reason'
                 ]},
                 'type': name_type
             }
