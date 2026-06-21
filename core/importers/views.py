@@ -174,7 +174,10 @@ class BulkImportParallelInlineView(APIView):
             owner_type=get(request.data, 'owner_type') or None,
             version=get(request.data, 'version') or None,
         )
-        parser.parse()
+        try:
+            parser.parse()
+        except Exception as ex:  # pylint: disable=broad-except
+            return Response({'exception': f'Failed to parse input. ({str(ex)})'}, status=status.HTTP_400_BAD_REQUEST)
         if parser.errors:
             return Response({'exception': ' '.join(parser.errors)}, status=status.HTTP_400_BAD_REQUEST)
 
