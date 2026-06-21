@@ -130,7 +130,9 @@ class ConceptDescription(AbstractLocalizedText):
         description_name = params.get('description', None) or params.get('name', None)
         return ConceptDescription(
             **{
-                **{k: v for k, v in params.items() if k not in ['description', 'name', 'type', 'description_type']},
+                **{k: v for k, v in params.items() if k in [
+                    'external_id', 'locale', 'locale_preferred', 'retired', 'retire_reason',
+                ]},
                 'type': description_type,
                 'name': description_name,
             }
@@ -179,7 +181,9 @@ class ConceptName(AbstractLocalizedText):
 
         return ConceptName(
             **{
-                **{k: v for k, v in params.items() if k not in ['type', 'name_type']},
+                **{k: v for k, v in params.items() if k in [
+                    'external_id', 'name', 'locale', 'locale_preferred', 'retired', 'retired_reason'
+                ]},
                 'type': name_type
             }
         )
