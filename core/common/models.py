@@ -948,7 +948,10 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     def remove_processing(self, process_id):
         if self.id and self._background_process_ids and process_id in self._background_process_ids:
             self._background_process_ids.remove(process_id)
-            self.save(update_fields=['_background_process_ids'])
+            try:
+                self.save(update_fields=['_background_process_ids'])
+            except:  # pylint: disable=bare-except
+                pass
 
     @property
     def is_processing(self):
@@ -968,7 +971,10 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     def clear_processing(self):
         self._background_process_ids = []
-        self.save(update_fields=['_background_process_ids'])
+        try:
+            self.save(update_fields=['_background_process_ids'])
+        except:  # pylint: disable=bare-except
+            pass
 
     def get_supported_locales(self):
         locales = [self.default_locale]
