@@ -1435,7 +1435,7 @@ class ConceptTest(OCLTestCase):
             root.url
         )
 
-    @patch('core.common.checksums.ChecksumBase.generate')
+    @patch('core.common.checksums.OCLAPIChecksum.generate')
     def test_checksum(self, checksum_generate_mock):
         checksum_generate_mock.side_effect = [
             'standard-checksum', 'smart-checksum'
