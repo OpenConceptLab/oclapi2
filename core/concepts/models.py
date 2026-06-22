@@ -574,48 +574,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         initial_version.save()
         return initial_version
 
-    @staticmethod
-    def _locale_status_changed(previous_locales, new_locales, locale_payloads):
-        """Detect locale status edits that the standard checksum intentionally ignores."""
-        previous_by_identity = {
-            (
-                locale.external_id,
-                locale.name,
-                locale.type,
-                locale.locale,
-                locale.locale_preferred,
-            ): locale
-            for locale in previous_locales
-        }
-        previous_by_content = {
-            (locale.name, locale.type, locale.locale, locale.locale_preferred): locale
-            for locale in previous_locales
-        }
-        status_fields = {'retired', 'retire_reason'}
-        for new_locale, locale_payload in zip(new_locales, locale_payloads):
-            if not status_fields.intersection(locale_payload):
-                continue
-            previous_locale = previous_by_identity.get((
-                new_locale.external_id,
-                new_locale.name,
-                new_locale.type,
-                new_locale.locale,
-                new_locale.locale_preferred,
-            ))
-            if not previous_locale:
-                previous_locale = previous_by_content.get((
-                    new_locale.name,
-                    new_locale.type,
-                    new_locale.locale,
-                    new_locale.locale_preferred,
-                ))
-            if previous_locale and (
-                    previous_locale.retired != new_locale.retired or
-                    previous_locale.retire_reason != new_locale.retire_reason
-            ):
-                return True
-        return False
-
     @classmethod
     def create_new_version_for(
             cls, instance, data, user, create_parent_version=True, add_prev_version_children=True,
@@ -625,8 +583,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         prev_latest = Concept.objects.filter(
             mnemonic=instance.mnemonic, parent_id=instance.parent_id, is_latest_version=True
         ).first()
-        names_payload = data.get('names', [])
-        descriptions_payload = data.get('descriptions', [])
         instance.id = None  # Clear id so it is persisted as a new object
         instance.version = data.get('version', None)
         instance.concept_class = data.get('concept_class', instance.concept_class)
@@ -655,21 +611,13 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         if not parent_concept_uris and has_parent_concept_uris_attr:
             parent_concept_uris = []
 
-        has_locale_status_change = False
-        if prev_latest:
-            has_locale_status_change = cls._locale_status_changed(
-                prev_latest.clone_name_locales(), instance.cloned_names, names_payload
-            ) or cls._locale_status_changed(
-                prev_latest.clone_description_locales(), instance.cloned_descriptions, descriptions_payload
-            )
-
         errors = instance.save_as_new_version(
             user=user,
             create_parent_version=create_parent_version,
             parent_concept_uris=parent_concept_uris,
             add_prev_version_children=add_prev_version_children,
             _hierarchy_processing=_hierarchy_processing,
-            skip_duplicate_version_check=bool(mappings_payload) or has_locale_status_change
+            skip_duplicate_version_check=bool(mappings_payload)
         )
 
         if errors or mappings_payload is None:

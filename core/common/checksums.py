@@ -1,6 +1,6 @@
 from django.conf import settings
 from django.db import models
-from ocldev.checksum import Checksum as ChecksumBase
+from ocldev.checksum import Checksum as OCLDevChecksum, getvalue
 from pydash import get
 
 
@@ -18,6 +18,18 @@ SAME_RESOURCE_IDS_VERBOSITY = 3
 
 # Include expanded changelog fields such as names, descriptions, and previous values.
 CHANGELOG_ENRICHMENT_VERBOSITY = 4
+
+
+class ChecksumBase(OCLDevChecksum):
+    def _locales_for_checksums(self, data, relation, predicate_func):
+        """Include locale status in standard concept checksums."""
+        locales = list(getvalue(data, relation, []))
+        checksum_locales = super()._locales_for_checksums(data, relation, predicate_func)
+        if self.checksum_type == 'standard':
+            included_locales = [locale for locale in locales if predicate_func(locale)]
+            for checksum_locale, locale in zip(checksum_locales, included_locales):
+                checksum_locale.update({field: get(locale, field, None) for field in ['retired', 'retire_reason']})
+        return checksum_locales
 
 
 class ChecksumModel(models.Model):

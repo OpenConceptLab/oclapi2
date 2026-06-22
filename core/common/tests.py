@@ -50,7 +50,7 @@ from core.users.constants import CORE_USER_GROUP, GUEST_GROUP
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 from .backends import OCLOIDCAuthenticationBackend
-from .checksums import Checksum
+from .checksums import Checksum, ChecksumBase
 from .fhir_helpers import translate_fhir_query
 from .serializers import IdentifierSerializer
 from .validators import URIValidator
@@ -1340,7 +1340,6 @@ class ChecksumTest(OCLTestCase):
 
         concept1 = ConceptFactory(mnemonic=encode_string('Foo/bar', safe=' '))
 
-        from ocldev.checksum import Checksum as ChecksumBase
         self.assertEqual(
             ChecksumBase('concept', ConceptDetailSerializer(concept1).data, 'standard').generate(),
             concept1.checksums['standard']
@@ -1359,6 +1358,74 @@ class ChecksumTest(OCLTestCase):
         self.assertEqual(
             ChecksumBase('mapping', mapping_data, 'smart').generate(),
             mapping1.checksums['smart']
+        )
+
+    def test_concept_standard_checksum_includes_locale_status(self):
+        concept_data = {
+            'concept_class': 'Diagnosis',
+            'datatype': 'None',
+            'retired': False,
+            'names': [
+                {
+                    'locale': 'es',
+                    'locale_preferred': False,
+                    'name': 'Nombre de prueba OCL local',
+                    'name_type': 'FULLY_SPECIFIED',
+                    'external_id': None,
+                    'retired': False,
+                    'retire_reason': None,
+                }
+            ],
+            'descriptions': [
+                {
+                    'locale': 'es',
+                    'locale_preferred': False,
+                    'description': 'Descripcion de prueba',
+                    'description_type': 'Description',
+                    'external_id': None,
+                    'retired': False,
+                    'retire_reason': None,
+                }
+            ],
+        }
+        concept_data_with_retired_name = {
+            **concept_data,
+            'names': [{**concept_data['names'][0], 'retired': True}],
+        }
+        concept_data_with_name_retire_reason = {
+            **concept_data,
+            'names': [{**concept_data['names'][0], 'retire_reason': 'Duplicate'}],
+        }
+        concept_data_with_retired_description = {
+            **concept_data,
+            'descriptions': [{**concept_data['descriptions'][0], 'retired': True}],
+        }
+        concept_data_with_description_retire_reason = {
+            **concept_data,
+            'descriptions': [{**concept_data['descriptions'][0], 'retire_reason': 'Duplicate'}],
+        }
+        standard_checksum = ChecksumBase('concept', concept_data, 'standard').generate()
+        smart_checksum = ChecksumBase('concept', concept_data, 'smart').generate()
+
+        self.assertNotEqual(
+            standard_checksum,
+            ChecksumBase('concept', concept_data_with_retired_name, 'standard').generate()
+        )
+        self.assertNotEqual(
+            standard_checksum,
+            ChecksumBase('concept', concept_data_with_name_retire_reason, 'standard').generate()
+        )
+        self.assertNotEqual(
+            standard_checksum,
+            ChecksumBase('concept', concept_data_with_retired_description, 'standard').generate()
+        )
+        self.assertNotEqual(
+            standard_checksum,
+            ChecksumBase('concept', concept_data_with_description_retire_reason, 'standard').generate()
+        )
+        self.assertEqual(
+            smart_checksum,
+            ChecksumBase('concept', concept_data_with_retired_name, 'smart').generate()
         )
 
 
