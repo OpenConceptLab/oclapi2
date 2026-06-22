@@ -1,6 +1,6 @@
 from django.conf import settings
 from django.db import models
-from ocldev.checksum import Checksum as ChecksumBase, getvalue
+from ocldev.checksum import Checksum as OCLDevChecksum, getvalue
 from pydash import get
 
 
@@ -22,7 +22,7 @@ CHANGELOG_ENRICHMENT_VERBOSITY = 4
 LOCALE_STATUS_CHECKSUM_FIELDS = ('retired', 'retire_reason')
 
 
-class OCLAPIChecksum(ChecksumBase):
+class ChecksumBase(OCLDevChecksum):
     def _locales_for_checksums(self, data, relation, predicate_func):
         """Include locale status in standard concept checksums."""
         locales = list(getvalue(data, relation, []))
@@ -49,7 +49,7 @@ class ChecksumModel(models.Model):
             resource_name = 'user'
         if resource_name == 'org':
             resource_name = 'organization'
-        return OCLAPIChecksum(resource_name, data or self, checksum_type)
+        return ChecksumBase(resource_name, data or self, checksum_type)
 
     def get_checksums(self, queue=False, recalculate=False):
         _checksums = None
@@ -112,7 +112,7 @@ class ChecksumModel(models.Model):
 
     @staticmethod
     def generate_checksum_from_many(resource, data, checksum_type='standard'):
-        return OCLAPIChecksum(resource, data, checksum_type).generate()
+        return ChecksumBase(resource, data, checksum_type).generate()
 
     def _calculate_standard_checksum(self):
         return self.generate_checksum('standard')
@@ -127,7 +127,7 @@ class ChecksumModel(models.Model):
 class Checksum:
     @classmethod
     def generate(cls, obj):
-        return OCLAPIChecksum(None, obj).generate()
+        return ChecksumBase(None, obj).generate()
 
 
 class ChecksumDiff:

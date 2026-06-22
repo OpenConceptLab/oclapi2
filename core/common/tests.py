@@ -50,7 +50,7 @@ from core.users.constants import CORE_USER_GROUP, GUEST_GROUP
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 from .backends import OCLOIDCAuthenticationBackend
-from .checksums import Checksum, OCLAPIChecksum
+from .checksums import Checksum, ChecksumBase
 from .fhir_helpers import translate_fhir_query
 from .serializers import IdentifierSerializer
 from .validators import URIValidator
@@ -1341,7 +1341,7 @@ class ChecksumTest(OCLTestCase):
         concept1 = ConceptFactory(mnemonic=encode_string('Foo/bar', safe=' '))
 
         self.assertEqual(
-            OCLAPIChecksum('concept', ConceptDetailSerializer(concept1).data, 'standard').generate(),
+            ChecksumBase('concept', ConceptDetailSerializer(concept1).data, 'standard').generate(),
             concept1.checksums['standard']
         )
         concept2 = ConceptFactory(mnemonic=encode_string('bar/bar', safe=' '))
@@ -1352,11 +1352,11 @@ class ChecksumTest(OCLTestCase):
 
         mapping_data = MappingDetailSerializer(mapping1).data
         self.assertEqual(
-            OCLAPIChecksum('mapping', mapping_data, 'standard').generate(),
+            ChecksumBase('mapping', mapping_data, 'standard').generate(),
             mapping1.checksums['standard']
         )
         self.assertEqual(
-            OCLAPIChecksum('mapping', mapping_data, 'smart').generate(),
+            ChecksumBase('mapping', mapping_data, 'smart').generate(),
             mapping1.checksums['smart']
         )
 
@@ -1388,8 +1388,8 @@ class ChecksumTest(OCLTestCase):
                 }
             ],
         }
-        standard_checksum = OCLAPIChecksum('concept', concept_data, 'standard').generate()
-        smart_checksum = OCLAPIChecksum('concept', concept_data, 'smart').generate()
+        standard_checksum = ChecksumBase('concept', concept_data, 'standard').generate()
+        smart_checksum = ChecksumBase('concept', concept_data, 'smart').generate()
         locale_status_variants = [
             {**concept_data, 'names': [{**concept_data['names'][0], 'retired': True}]},
             {**concept_data, 'names': [{**concept_data['names'][0], 'retire_reason': 'Duplicate'}]},
@@ -1398,11 +1398,11 @@ class ChecksumTest(OCLTestCase):
         ]
 
         for concept_data_variant in locale_status_variants:
-            self.assertNotEqual(standard_checksum, OCLAPIChecksum(
+            self.assertNotEqual(standard_checksum, ChecksumBase(
                 'concept', concept_data_variant, 'standard').generate())
         self.assertEqual(
             smart_checksum,
-            OCLAPIChecksum('concept', locale_status_variants[0], 'smart').generate()
+            ChecksumBase('concept', locale_status_variants[0], 'smart').generate()
         )
 
 
@@ -1443,7 +1443,7 @@ class ChecksumViewTest(OCLAPITestCase):
         self.assertEqual(response.data, {'error': 'Invalid resource: foobar'})
         checksum_generate_mock.assert_not_called()
 
-    @patch('core.common.checksums.OCLAPIChecksum.generate')
+    @patch('core.common.checksums.ChecksumBase.generate')
     def test_post_200_concept(self, checksum_generate_mock):
         checksum_generate_mock.return_value = 'checksum'
 
