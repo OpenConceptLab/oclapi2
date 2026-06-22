@@ -7,7 +7,7 @@ from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError, transaction
-from django.db.models import Value, Q, Count
+from django.db.models import Value, Q, Count, Func
 from django.db.models.expressions import CombinedExpression, F
 from django.utils import timezone
 from django.utils.functional import cached_property
@@ -16,6 +16,7 @@ from django_elasticsearch_dsl.signals import RealTimeSignalProcessor
 from elasticsearch import TransportError
 from pydash import get, compact
 
+from core.celery import app as celery_app
 from core.common.tasks import update_collection_active_concepts_count, update_collection_active_mappings_count, \
     delete_s3_objects
 from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version, \
@@ -946,28 +947,58 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             self._background_process_ids.append(process_id)
 
     def remove_processing(self, process_id):
-        if self.id and self._background_process_ids and process_id in self._background_process_ids:
-            self._background_process_ids.remove(process_id)
+        if self.id:
             try:
-                self.save(update_fields=['_background_process_ids'])
-            except:  # pylint: disable=bare-except
-                pass
+                self.__class__.objects.filter(id=self.id).update(
+                    _background_process_ids=Func(
+                        F('_background_process_ids'),
+                        Value(process_id, output_field=models.CharField(max_length=255)),
+                        function='array_remove'
+                    )
+                )
+            except Exception as ex:  # pylint: disable=broad-except
+                ERRBIT_LOGGER.log(ex)
+        if self._background_process_ids and process_id in self._background_process_ids:
+            self._background_process_ids.remove(process_id)
+
+    def remove_processing_many(self, process_ids):
+        for process_id in process_ids:
+            self.remove_processing(process_id)
 
     @property
-    def is_processing(self):
+    def is_processing(self):  # pylint: disable=too-many-branches
         background_ids = self._background_process_ids
-        if background_ids:
-            for process_id in background_ids.copy():
-                if process_id:
-                    res = AsyncResult(process_id)
-                    if res.successful() or res.failed():
-                        self.remove_processing(process_id)
-                    else:
-                        return True
-                else:
-                    self.remove_processing(process_id)
+        if not background_ids:
+            return False
 
-        return False
+        falsy_ids = [process_id for process_id in background_ids if not process_id]
+        valid_ids = [process_id for process_id in background_ids if process_id]
+
+        if falsy_ids:
+            self.remove_processing_many(falsy_ids)
+
+        if not valid_ids:
+            return False
+
+        finished_ids = set()
+        try:
+            # Batch-resolve all task statuses in a single round-trip to the result backend instead of
+            # one AsyncResult() lookup per id - HEAD versions can accumulate thousands of stale ids.
+            for task_id, _ in celery_app.backend.get_many(
+                valid_ids, interval=0, timeout=None, max_iterations=1
+            ):
+                finished_ids.add(task_id)
+        except Exception:  # pylint: disable=broad-except
+            finished_ids = set()
+
+        still_processing = False
+        for process_id in valid_ids:
+            if process_id in finished_ids:
+                self.remove_processing(process_id)
+            else:
+                still_processing = True
+
+        return still_processing
 
     def clear_processing(self):
         self._background_process_ids = []
