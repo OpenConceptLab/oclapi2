@@ -75,7 +75,7 @@ class S3(CloudStorageServiceInterface):
 
     def exists(self, key):
         try:
-            self.__resource().Object(settings.AWS_STORAGE_BUCKET_NAME, key).wait_until_exists()
+            self.__resource().Object(settings.AWS_STORAGE_BUCKET_NAME, key).load()
         except (WaiterError, ClientError, NoCredentialsError):
             return False
 
