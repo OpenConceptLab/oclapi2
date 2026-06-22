@@ -494,6 +494,64 @@ class ConceptRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['display_name'], prev_version.display_name)
         self.assertEqual(concept.datatype, "N/A")
 
+    def test_put_200_when_name_retired_changes_only(self):
+        names = [
+            ConceptNameFactory.build(name='Active name', locale='es', locale_preferred=True),
+            ConceptNameFactory.build(name='Retirable name', locale='es', locale_preferred=False),
+        ]
+        concept = ConceptFactory(
+            parent=self.source,
+            concept_class='Procedure',
+            datatype='Coded',
+            names=names,
+            descriptions=[
+                ConceptDescriptionFactory.build(
+                    name='Concept description', locale='es', locale_preferred=True
+                )
+            ]
+        )
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
+        names_payload = [
+            {
+                'external_id': name.external_id,
+                'name': name.name,
+                'locale': name.locale,
+                'locale_preferred': name.locale_preferred,
+                'name_type': name.type,
+                'retired': name.name == 'Retirable name',
+            }
+            for name in concept.names.order_by('id')
+        ]
+
+        response = self.client.put(
+            concepts_url,
+            {
+                'datatype': concept.datatype,
+                'concept_class': concept.concept_class,
+                'extras': concept.extras,
+                'descriptions': [
+                    {
+                        'description': description.name,
+                        'description_type': description.type,
+                        'external_id': description.external_id,
+                        'locale': description.locale,
+                        'locale_preferred': description.locale_preferred,
+                    }
+                    for description in concept.descriptions.order_by('id')
+                ],
+                'external_id': concept.external_id or '',
+                'id': concept.mnemonic,
+                'names': names_payload,
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(concept.versions.count(), 2)
+        self.assertFalse(concept.get_latest_version().active_names.get(name='Active name').retired)
+        self.assertTrue(concept.get_latest_version().retired_names.get(name='Retirable name').retired)
+
     def test_put_200_with_mappings(self):  # pylint: disable=too-many-statements
         concept = ConceptFactory(parent=self.source, datatype="N/A")
         self.assertEqual(concept.versions.count(), 1)
