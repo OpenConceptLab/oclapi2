@@ -66,6 +66,7 @@ from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
 from core.mappings.search import MappingFacetedSearch
 from core.repos.mixins import RepoExternalExportMixin
+from core.repos.serializers import RepoExternalExportSerializer
 from core.sources.mixins import SummaryMixin
 from core.tasks.mixins import TaskMixin
 from core.tasks.models import Task
@@ -1196,7 +1197,7 @@ class CollectionVersionExportView(ConceptContainerExportMixin, CollectionVersion
 
 
 class CollectionVersionExternalExportView(RepoExternalExportMixin, CollectionVersionBaseView):
-    pass
+    serializer_class = RepoExternalExportSerializer
 
 
 class CollectionSummaryView(SummaryMixin, CollectionBaseView, RetrieveAPIView):

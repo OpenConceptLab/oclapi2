@@ -32,6 +32,7 @@ from core.common.utils import parse_boolean_query_param, compact_dict_by_values,
     get_truthy_values
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.repos.mixins import RepoExternalExportMixin
+from core.repos.serializers import RepoExternalExportSerializer
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
 from core.sources.documents import SourceDocument
 from core.sources.mixins import SummaryMixin
@@ -561,7 +562,7 @@ class SourceVersionExportView(ConceptContainerExportMixin, SourceVersionBaseView
 
 
 class SourceVersionExternalExportView(RepoExternalExportMixin, SourceVersionBaseView):
-    pass
+    serializer_class = RepoExternalExportSerializer
 
 
 class SourceHierarchyView(SourceBaseView, RetrieveAPIView):
