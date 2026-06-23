@@ -105,6 +105,14 @@ jobs:
           docker-images: false
           large-packages: false
           swap-storage: false
+      - name: Create Elasticsearch indices
+        env:
+          DB_HOST: 0.0.0.0
+          ES_HOST: 0.0.0.0
+          ENVIRONMENT: ci
+        run: |
+          . venv/bin/activate
+          python manage.py search_index --create
       - name: Run Tests
         env:
           DB_HOST: 0.0.0.0
