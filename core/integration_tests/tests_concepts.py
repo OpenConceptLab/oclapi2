@@ -1,11 +1,13 @@
 from unittest.mock import patch
 
 from celery.states import PENDING
+from django.conf import settings
 from mock import ANY
 
 from core.bundles.models import Bundle
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE, OPENMRS_VALIDATION_SCHEMA
+from core.common.tasks import rebuild_indexes
 from core.common.tests import OCLAPITestCase
 from core.concepts.constants import CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY
 from core.concepts.documents import ConceptDocument
@@ -2742,6 +2744,8 @@ class ConceptListViewTest(OCLAPITestCase):
         self.random_user = UserProfileFactory()
 
     def test_search(self):  # pylint: disable=too-many-statements
+        if settings.ENV == 'ci':
+            rebuild_indexes(['concepts'])
         ConceptDocument().update(self.source.concepts_set.all())
 
         response = self.client.get(self.source.concepts_url + '?q=MyConcept2')
@@ -2844,6 +2848,8 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 2)
 
     def test_search_with_latest_released_repo_search(self):  # pylint: disable=too-many-statements
+        if settings.ENV == 'ci':
+            rebuild_indexes(['concepts'])
         ConceptDocument().update(self.source.concepts_set.all())
 
         response = self.client.get(
@@ -2970,6 +2976,8 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 1)
 
     def test_facets(self):
+        if settings.ENV == 'ci':
+            rebuild_indexes(['concepts'])
         ConceptDocument().update(self.source.concepts_set.all())
 
         response = self.client.get(
@@ -2988,6 +2996,8 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertFalse(class_b_facet[2])
 
     def test_facets_with_latest_released_repo_search(self):
+        if settings.ENV == 'ci':
+            rebuild_indexes(['concepts'])
         ConceptDocument().update(self.source.concepts_set.all())
 
         response = self.client.get(
