@@ -23,7 +23,7 @@ kombu==5.4.2
 django-elasticsearch-dsl==8.0
 drf-yasg==1.21.15
 git+https://github.com/snyaggarwal/django-queryset-csv
-ocldev==0.2.3
+ocldev==0.2.4
 coverage==7.3.0
 tblib==2.0.0
 django-ordered-model==3.7.4

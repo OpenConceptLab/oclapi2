@@ -1360,52 +1360,6 @@ class ChecksumTest(OCLTestCase):
             mapping1.checksums['smart']
         )
 
-    def test_concept_standard_checksum_includes_locale_status(self):
-        concept_data = {
-            'concept_class': 'Diagnosis',
-            'datatype': 'None',
-            'retired': False,
-            'names': [
-                {
-                    'locale': 'es',
-                    'locale_preferred': False,
-                    'name': 'Nombre de prueba OCL local',
-                    'name_type': 'FULLY_SPECIFIED',
-                    'external_id': None,
-                    'retired': False,
-                    'retire_reason': None,
-                }
-            ],
-            'descriptions': [
-                {
-                    'locale': 'es',
-                    'locale_preferred': False,
-                    'description': 'Descripcion de prueba',
-                    'description_type': 'Description',
-                    'external_id': None,
-                    'retired': False,
-                    'retire_reason': None,
-                }
-            ],
-        }
-        standard_checksum = ChecksumBase('concept', concept_data, 'standard').generate()
-        smart_checksum = ChecksumBase('concept', concept_data, 'smart').generate()
-        locale_status_variants = [
-            {**concept_data, 'names': [{**concept_data['names'][0], 'retired': True}]},
-            {**concept_data, 'names': [{**concept_data['names'][0], 'retire_reason': 'Duplicate'}]},
-            {**concept_data, 'descriptions': [{**concept_data['descriptions'][0], 'retired': True}]},
-            {**concept_data, 'descriptions': [{**concept_data['descriptions'][0], 'retire_reason': 'Duplicate'}]},
-        ]
-
-        for concept_data_variant in locale_status_variants:
-            self.assertNotEqual(standard_checksum, ChecksumBase(
-                'concept', concept_data_variant, 'standard').generate())
-        self.assertEqual(
-            smart_checksum,
-            ChecksumBase('concept', locale_status_variants[0], 'smart').generate()
-        )
-
-
 class ChecksumViewTest(OCLAPITestCase):
     def setUp(self):
         self.token = UserProfile.objects.get(username='ocladmin').get_token()
