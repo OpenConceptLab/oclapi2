@@ -70,6 +70,10 @@ class SetupTestEnvironment:
     settings.TEST_MODE = True
     settings.ELASTICSEARCH_DSL_AUTOSYNC = True
     settings.ES_SYNC = True
+    if settings.ENV == 'ci':
+        # No redis service available on CI; use a no-op cache so cache reads/writes are harmless no-ops
+        # instead of raising connection errors.
+        settings.CACHES = {'default': {'BACKEND': 'django.core.cache.backends.dummy.DummyCache'}}
 
 
 class BaseTestCase(SetupTestEnvironment):
