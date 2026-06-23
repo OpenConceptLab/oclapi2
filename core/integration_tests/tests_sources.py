@@ -1,10 +1,8 @@
 import json
 import time
-import unittest
 import zipfile
 
 from celery_once import AlreadyQueued
-from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
 from mock import patch, Mock, ANY, PropertyMock
@@ -13,7 +11,7 @@ from rest_framework.exceptions import ErrorDetail
 
 from core.bundles.models import Bundle
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
-from core.common.tasks import export_source, rebuild_indexes
+from core.common.tasks import export_source
 from core.common.tests import OCLAPITestCase
 from core.common.utils import get_latest_dir_in_path
 from core.concepts.documents import ConceptDocument
@@ -1574,8 +1572,6 @@ class SourceVersionSummaryViewTest(OCLAPITestCase):
 
 class SourceSummaryViewTest(OCLAPITestCase):
     def index(self):
-        if settings.ENV == 'ci':
-            rebuild_indexes(['concepts', 'mappings'])
         ConceptDocument().update(self.source.concepts_set.all())
         MappingDocument().update(self.source.mappings_set.all())
 
@@ -1609,7 +1605,6 @@ class SourceSummaryViewTest(OCLAPITestCase):
         self.assertEqual(response.data['active_concepts'], 2)
         self.assertEqual(response.data['active_mappings'], 1)
 
-    @unittest.skipIf(settings.ENV == 'ci', "Skipping due to ES tests failing on CI")
     def test_get_200_verbose(self):  # pylint: disable=too-many-statements
         self.source.active_concepts = 2
         self.source.active_mappings = 1

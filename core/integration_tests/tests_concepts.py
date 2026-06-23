@@ -1,14 +1,11 @@
-import unittest
 from unittest.mock import patch
 
 from celery.states import PENDING
-from django.conf import settings
 from mock import ANY
 
 from core.bundles.models import Bundle
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE, OPENMRS_VALIDATION_SCHEMA
-from core.common.tasks import rebuild_indexes
 from core.common.tests import OCLAPITestCase
 from core.concepts.constants import CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY
 from core.concepts.documents import ConceptDocument
@@ -2744,49 +2741,46 @@ class ConceptListViewTest(OCLAPITestCase):
         self.token = self.user.get_token()
         self.random_user = UserProfileFactory()
 
-    @unittest.skipIf(settings.ENV == 'ci', "Skipping due to ES tests failing on CI")
     def test_search(self):  # pylint: disable=too-many-statements
-        if settings.ENV == 'ci':
-            rebuild_indexes(['concepts'])
         ConceptDocument().update(self.source.concepts_set.all())
 
-        response = self.client.get('/concepts/?q=MyConcept2')
+        response = self.client.get(self.source.concepts_url + '?q=MyConcept2')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], 'MyConcept2')
         self.assertEqual(response.data[0]['uuid'], str(self.concept2.get_latest_version().id))
         self.assertEqual(response.data[0]['versioned_object_id'], self.concept2.id)
 
-        response = self.client.get('/concepts/?q=MyConcept1')
+        response = self.client.get(self.source.concepts_url + '?q=MyConcept1')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], 'MyConcept1')
 
-        response = self.client.get('/concepts/?q=MyConcept1&exact_match=on')
+        response = self.client.get(self.source.concepts_url + '?q=MyConcept1&exact_match=on')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], 'MyConcept1')
 
-        response = self.client.get('/concepts/?q=MyConcept&conceptClass=classA')
+        response = self.client.get(self.source.concepts_url + '?q=MyConcept&conceptClass=classA')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], 'MyConcept1')
 
-        response = self.client.get('/concepts/?q=MyConcept1&conceptClass=classB')
+        response = self.client.get(self.source.concepts_url + '?q=MyConcept1&conceptClass=classB')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
 
-        response = self.client.get('/concepts/?conceptClass=classA')
+        response = self.client.get(self.source.concepts_url + '?conceptClass=classA')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], 'MyConcept1')
 
-        response = self.client.get('/concepts/?extras.foo=bar')
+        response = self.client.get(self.source.concepts_url + '?extras.foo=bar')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], 'MyConcept1')
 
-        response = self.client.get('/concepts/?extras.exists=bar')
+        response = self.client.get(self.source.concepts_url + '?extras.exists=bar')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], 'MyConcept2')
@@ -2849,14 +2843,11 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 2)
 
-    @unittest.skipIf(settings.ENV == 'ci', "Skipping due to ES tests failing on CI")
     def test_search_with_latest_released_repo_search(self):  # pylint: disable=too-many-statements
-        if settings.ENV == 'ci':
-            rebuild_indexes(['concepts'])
         ConceptDocument().update(self.source.concepts_set.all())
 
         response = self.client.get(
-            '/concepts/?q=MyConcept',
+            f'/concepts/?q=MyConcept&owner={self.source.parent.mnemonic}&ownerType=Organization',
             HTTP_INCLUDESEARCHLATEST=True,
         )
         self.assertEqual(response.status_code, 200)
@@ -2866,21 +2857,21 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['versioned_object_id'], self.concept2.id)
 
         response = self.client.get(
-            '/concepts/?q=MyConcept1',
+            f'/concepts/?q=MyConcept1&owner={self.source.parent.mnemonic}&ownerType=Organization',
             HTTP_INCLUDESEARCHLATEST=True,
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
 
         response = self.client.get(
-            '/concepts/?q=MyConcept&conceptClass=classA',
+            f'/concepts/?q=MyConcept&conceptClass=classA&owner={self.source.parent.mnemonic}&ownerType=Organization',
             HTTP_INCLUDESEARCHLATEST=True,
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
 
         response = self.client.get(
-            '/concepts/?q=MyConcept2&conceptClass=classB',
+            f'/concepts/?q=MyConcept2&conceptClass=classB&owner={self.source.parent.mnemonic}&ownerType=Organization',
             HTTP_INCLUDESEARCHLATEST=True,
         )
         self.assertEqual(response.status_code, 200)
@@ -2890,21 +2881,21 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['versioned_object_id'], self.concept2.id)
 
         response = self.client.get(
-            '/concepts/?conceptClass=classA',
+            f'/concepts/?conceptClass=classA&owner={self.source.parent.mnemonic}&ownerType=Organization',
             HTTP_INCLUDESEARCHLATEST=True,
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
 
         response = self.client.get(
-            '/concepts/?extras.foo=bar',
+            f'/concepts/?extras.foo=bar&owner={self.source.parent.mnemonic}&ownerType=Organization',
             HTTP_INCLUDESEARCHLATEST=True,
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
 
         response = self.client.get(
-            '/concepts/?extras.exists=bar',
+            f'/concepts/?extras.exists=bar&owner={self.source.parent.mnemonic}&ownerType=Organization',
             HTTP_INCLUDESEARCHLATEST=True,
         )
         self.assertEqual(response.status_code, 200)
@@ -2978,14 +2969,11 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
 
-    @unittest.skipIf(settings.ENV == 'ci', "Skipping due to ES tests failing on CI")
     def test_facets(self):
-        if settings.ENV == 'ci':
-            rebuild_indexes(['concepts'])
         ConceptDocument().update(self.source.concepts_set.all())
 
         response = self.client.get(
-            '/concepts/?facetsOnly=true'
+            self.source.concepts_url + '?facetsOnly=true'
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(list(response.data.keys()), ['facets'])
@@ -2999,14 +2987,11 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertTrue(class_b_facet[1] >= 1)
         self.assertFalse(class_b_facet[2])
 
-    @unittest.skipIf(settings.ENV == 'ci', "Skipping due to ES tests failing on CI")
     def test_facets_with_latest_released_repo_search(self):
-        if settings.ENV == 'ci':
-            rebuild_indexes(['concepts'])
         ConceptDocument().update(self.source.concepts_set.all())
 
         response = self.client.get(
-            '/concepts/?facetsOnly=true',
+            f'/concepts/?facetsOnly=true&owner={self.source.parent.mnemonic}&ownerType=Organization',
             HTTP_INCLUDESEARCHLATEST=True,
         )
         self.assertEqual(response.status_code, 200)
