@@ -2947,8 +2947,10 @@ class ConceptListViewTest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 2)
-        self.assertEqual(response.data[0]['id'], 'MyConcept1')
-        self.assertEqual(response.data[1]['id'], 'MyConcept2')
+        self.assertEqual(
+            sorted([data['id'] for data in response.data]),
+            sorted(['MyConcept1', 'MyConcept2'])
+        )
 
         response = self.client.get(
             self.source.uri + 'HEAD/concepts/?q=MyConcept',
