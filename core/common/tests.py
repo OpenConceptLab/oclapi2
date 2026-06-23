@@ -74,6 +74,27 @@ class SetupTestEnvironment:
 
 class BaseTestCase(SetupTestEnvironment):
     @staticmethod
+    def patch_concept_es_mapping_for_ci():
+        """
+        On a freshly created CI Elasticsearch index, `*_text` fields are plain `text` fields with no
+        `.keyword` multi-field, unlike long-lived indexes (local/staging/prod) where this sub-field
+        already exists. Facet/filter assertions need it, so patch it in additively for CI test runs
+        only, rather than declaring it in the Document mapping itself.
+        """
+        if settings.ENV != 'ci':
+            return
+        from elasticsearch_dsl.connections import connections  # pylint: disable=import-outside-toplevel
+        connections.get_connection().indices.put_mapping(
+            index='concepts',
+            body={
+                'properties': {
+                    field: {'type': 'text', 'fields': {'keyword': {'type': 'keyword'}}}
+                    for field in ('concept_class_text', 'datatype_text', 'source_text', 'owner_text')
+                }
+            }
+        )
+
+    @staticmethod
     def create_lookup_concept_classes(user=None, org=None):
         org = org or Organization.objects.get(mnemonic='OCL')
         user = user or UserProfile.objects.get(username='ocladmin')

@@ -1572,6 +1572,7 @@ class SourceVersionSummaryViewTest(OCLAPITestCase):
 
 class SourceSummaryViewTest(OCLAPITestCase):
     def index(self):
+        self.patch_concept_es_mapping_for_ci()
         ConceptDocument().update(self.source.concepts_set.all())
         MappingDocument().update(self.source.mappings_set.all())
 

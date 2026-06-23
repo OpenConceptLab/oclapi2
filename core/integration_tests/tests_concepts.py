@@ -2722,6 +2722,7 @@ class ConceptCascadeViewTest(OCLAPITestCase):
 class ConceptListViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
+        self.patch_concept_es_mapping_for_ci()
         self.source = OrganizationSourceFactory(mnemonic='MySource')
         self.source_v1 = OrganizationSourceFactory(
             version='v1', mnemonic='MySource', organization=self.source.parent,
