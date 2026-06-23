@@ -15,7 +15,7 @@ class RepoExternalExportMixin:
     def get_object(self):
         queryset = self.get_queryset()
         if 'version' not in self.kwargs:
-            queryset = queryset.filter(released=True)
+            queryset = queryset.filter(is_latest_version=True)
 
         instance = queryset.first()
 

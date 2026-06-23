@@ -20,7 +20,6 @@ from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM
 from core.common.exceptions import Http405, Http400
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin, \
     ConceptContainerExportMixin, ConceptContainerProcessingMixin
-from core.repos.mixins import RepoExternalExportMixin
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
     CanViewConceptDictionaryVersion
 from core.common.serializers import TaskSerializer
@@ -32,6 +31,7 @@ from core.common.tasks import export_source, index_source_concepts, index_source
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values, to_parent_uri, decode_string, \
     get_truthy_values
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
+from core.repos.mixins import RepoExternalExportMixin
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
 from core.sources.documents import SourceDocument
 from core.sources.mixins import SummaryMixin
@@ -561,7 +561,7 @@ class SourceVersionExportView(ConceptContainerExportMixin, SourceVersionBaseView
 
 
 class SourceVersionExternalExportView(RepoExternalExportMixin, SourceVersionBaseView):
-    permission_classes = (CanViewConceptDictionary, IsAuthenticated)
+    pass
 
 
 class SourceHierarchyView(SourceBaseView, RetrieveAPIView):

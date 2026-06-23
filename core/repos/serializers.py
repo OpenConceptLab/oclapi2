@@ -9,10 +9,11 @@ from core.sources.serializers import SourceListSerializer
 
 class RepoExternalExportSerializer(serializers.ModelSerializer):
     url = serializers.CharField(source='uri', read_only=True)
+    filename = serializers.CharField(read_only=True)
 
     class Meta:
         model = RepoExternalExport
-        fields = ('key', 'description', 'url', 'created_at', 'updated_at', 'file_path')
+        fields = ('key', 'description', 'url', 'created_at', 'updated_at', 'filename')
 
 
 class RepoListSerializer(serializers.Serializer):  # pylint: disable=abstract-method

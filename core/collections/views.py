@@ -45,7 +45,6 @@ from core.common.mixins import (
     ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin,
     ConceptContainerExportMixin,
     ConceptContainerProcessingMixin)
-from core.repos.mixins import RepoExternalExportMixin
 from core.common.permissions import (
     CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject,
     CanViewConceptDictionaryVersion
@@ -66,6 +65,7 @@ from core.concepts.views import ConceptCascadeView
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
 from core.mappings.search import MappingFacetedSearch
+from core.repos.mixins import RepoExternalExportMixin
 from core.sources.mixins import SummaryMixin
 from core.tasks.mixins import TaskMixin
 from core.tasks.models import Task
@@ -1186,7 +1186,7 @@ class CollectionVersionExportView(ConceptContainerExportMixin, CollectionVersion
 
 
 class CollectionVersionExternalExportView(RepoExternalExportMixin, CollectionVersionBaseView):
-    permission_classes = (CanViewConceptDictionary, IsAuthenticated)
+    pass
 
 
 class CollectionSummaryView(SummaryMixin, CollectionBaseView, RetrieveAPIView):

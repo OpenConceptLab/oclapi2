@@ -53,6 +53,10 @@ class RepoExternalExport(models.Model):
     def file_url(self):
         return get_export_service().url_for(self.file_path)
 
+    @property
+    def filename(self):
+        return self.file_path.split('/')[-1] if self.file_path else None
+
     @classmethod
     def upsert(cls, repo_version, key, file, user, description=None):  # pylint: disable=too-many-arguments
         instance = repo_version.external_exports.filter(key=key).first()
