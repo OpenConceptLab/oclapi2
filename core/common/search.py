@@ -340,11 +340,14 @@ class CustomESSearch:
 
 class VectorEmbed:
     _LOCAL_MODELS = {}
+    SERVICE_TIMEOUT = 3
 
     def __init__(self, model_name=None):
         self.model_name = model_name or settings.LM_MODEL_NAME
 
     def embed(self, txt):
+        if settings.ENV == 'ci':
+            return None
         if settings.EMBEDDING_SERVICE_URL:
             return self._get_embedding_from_service(txt)
         return self._get_embedding_locally(txt)
@@ -355,7 +358,7 @@ class VectorEmbed:
                 f'{settings.EMBEDDING_SERVICE_URL}/embeddings',
                 headers={'Authorization': f'Bearer {settings.INFINITY_API_KEY}'},
                 json={'model': self.model_name, 'input': str(txt)},
-                timeout=10
+                timeout=self.SERVICE_TIMEOUT
             )
             response.raise_for_status()
             return response.json()['data'][0]['embedding']
@@ -378,6 +381,7 @@ class VectorEmbed:
 class Reranker:
     SCORE_KEY = 'search_rerank_score'
     MISSING_SCORE = -1000000.0
+    SERVICE_TIMEOUT = 60
     _LOCAL_MODELS = {}
 
     def __init__(self, model_name=None):
@@ -417,6 +421,8 @@ class Reranker:
         return scores_full
 
     def _get_rerank_scores(self, txt, docs):
+        if settings.ENV == 'ci' or not self.model_name:
+            return [self.MISSING_SCORE] * len(docs)
         if settings.EMBEDDING_SERVICE_URL:
             return self._get_rerank_scores_from_service(txt, docs)
         return self._get_rerank_scores_locally(txt, docs)
@@ -431,7 +437,7 @@ class Reranker:
                     'query': txt,
                     'documents': [d for _, d in docs],
                 },
-                timeout=60
+                timeout=self.SERVICE_TIMEOUT
             )
             response.raise_for_status()
             results = response.json()['results']

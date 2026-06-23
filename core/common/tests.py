@@ -1682,6 +1682,17 @@ class VectorEmbedTest(OCLTestCase):
             result = embedder.embed('hypertension')
             self.assertIsNone(result)
 
+    @override_settings(EMBEDDING_SERVICE_URL='http://embed-service:8008', ENV='ci')
+    def test_embed_short_circuits_in_ci(self):
+        from core.common.search import VectorEmbed
+        embedder = VectorEmbed()
+        with patch.object(embedder, '_get_embedding_locally') as mock_local, \
+                patch('requests.post') as mock_post:
+            result = embedder.embed('malaria')
+            self.assertIsNone(result)
+            mock_local.assert_not_called()
+            mock_post.assert_not_called()
+
 
 class RerankerTest(OCLTestCase):
     def _make_hit(self, name, use_search_meta=False):
@@ -1792,6 +1803,26 @@ class RerankerTest(OCLTestCase):
         result = Reranker().rerank(hits, 'malaria', order_results=False)
         self.assertEqual(result[0]['search_meta']['search_rerank_score'], 0.5)
         self.assertEqual(result[0]['search_meta']['search_normalized_score'], 50.0)
+
+    @override_settings(EMBEDDING_SERVICE_URL='http://embed-service:8008', ENV='ci')
+    def test_rerank_short_circuits_in_ci(self):
+        from core.common.search import Reranker
+        reranker = Reranker()
+        with patch.object(reranker, '_get_rerank_scores_locally') as mock_local, \
+                patch('requests.post') as mock_post:
+            result = reranker.rerank([self._make_hit('malaria')], 'malaria', order_results=False)
+            self.assertEqual(result[0]['search_rerank_score'], Reranker.MISSING_SCORE)
+            mock_local.assert_not_called()
+            mock_post.assert_not_called()
+
+    @override_settings(EMBEDDING_SERVICE_URL='http://embed-service:8008', ENCODER_MODEL_NAME=None)
+    def test_rerank_skips_when_no_default_model_configured(self):
+        # qa sets ENCODER_MODEL_NAME to None so reranking is a no-op unless an explicit model is requested
+        from core.common.search import Reranker
+        with patch('requests.post') as mock_post:
+            result = Reranker().rerank([self._make_hit('malaria')], 'malaria', order_results=False)
+            self.assertEqual(result[0]['search_rerank_score'], Reranker.MISSING_SCORE)
+            mock_post.assert_not_called()
 
     @override_settings(EMBEDDING_SERVICE_URL='')
     def test_rerank_caches_local_encoder_across_instances(self):

@@ -644,7 +644,7 @@ EMBEDDING_SERVICE_URL = os.environ.get('EMBEDDING_SERVICE_URL', '')
 INFINITY_API_KEY = os.environ.get('INFINITY_API_KEY', '')
 
 LM_MODEL_NAME = 'sentence-transformers/all-MiniLM-L6-v2'
-ENCODER_MODEL_NAME = "BAAI/bge-reranker-v2-m3"
+ENCODER_MODEL_NAME = None if ENV == 'qa' else "BAAI/bge-reranker-v2-m3"
 
 ANALYTICS_API = os.environ.get('ANALYTICS_API', 'http://host.docker.internal:8002')
 if ANALYTICS_API:
