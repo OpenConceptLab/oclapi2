@@ -5,6 +5,7 @@ import zipfile
 
 from celery_once import AlreadyQueued
 from django.conf import settings
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
 from mock import patch, Mock, ANY, PropertyMock
 from mock.mock import call
@@ -1280,6 +1281,157 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 401)
+        s3_remove_mock.assert_not_called()
+
+
+class SourceVersionExternalExportViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.admin = UserProfile.objects.get(username='ocladmin')
+        self.admin_token = self.admin.get_token()
+        self.user = UserProfileFactory(username='username')
+        self.token = self.user.get_token()
+        self.source_v1 = UserSourceFactory(version='v1', mnemonic='source1', user=self.user)
+
+    def test_get_404_unknown_key(self):
+        response = self.client.get(
+            self.source_v1.uri + 'export/openmrs23-sql/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    @patch('core.services.storages.cloud.aws.S3.remove')
+    @patch('core.services.storages.cloud.aws.S3.upload')
+    def test_post_201_create_then_get_302_and_delete_204(self, s3_upload_mock, s3_remove_mock):
+        uploaded_file = SimpleUploadedFile('openmrs23.sql.zip', b'content', content_type='application/zip')
+
+        response = self.client.post(
+            self.source_v1.uri + 'export/openmrs23-sql/',
+            {'file': uploaded_file},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['key'], 'openmrs23-sql')
+        self.assertEqual(response.data['url'], self.source_v1.uri + 'export/openmrs23-sql/')
+        s3_upload_mock.assert_called_once()
+
+        from core.repos.models import RepoExternalExport
+        instance = RepoExternalExport.objects.get(key='openmrs23-sql')
+
+        with patch('core.services.storages.cloud.aws.S3.url_for') as s3_url_for_mock:
+            s3_url_for_mock.return_value = 'https://signed.example/openmrs23.sql.zip'
+            response = self.client.get(
+                self.source_v1.uri + 'export/openmrs23-sql/',
+                HTTP_AUTHORIZATION='Token ' + self.token,
+                format='json'
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], 'https://signed.example/openmrs23.sql.zip')
+
+        response = self.client.delete(
+            self.source_v1.uri + 'export/openmrs23-sql/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        s3_remove_mock.assert_called_once_with(instance.file_path)
+        self.assertFalse(RepoExternalExport.objects.filter(key='openmrs23-sql').exists())
+
+    @patch('core.services.storages.cloud.aws.S3.remove')
+    @patch('core.services.storages.cloud.aws.S3.upload')
+    def test_post_200_update_existing(self, s3_upload_mock, s3_remove_mock):
+        from core.repos.models import RepoExternalExport
+
+        first_file = SimpleUploadedFile('openmrs23.sql.zip', b'v1', content_type='application/zip')
+        response = self.client.post(
+            self.source_v1.uri + 'export/openmrs23-sql/',
+            {'file': first_file},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+        self.assertEqual(response.status_code, 201)
+        first_file_path = RepoExternalExport.objects.get(key='openmrs23-sql').file_path
+
+        second_file = SimpleUploadedFile('openmrs23-v2.sql.zip', b'v2-content', content_type='application/zip')
+        response = self.client.post(
+            self.source_v1.uri + 'export/openmrs23-sql/',
+            {'file': second_file},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(RepoExternalExport.objects.filter(key='openmrs23-sql').count(), 1)
+        s3_remove_mock.assert_called_once_with(first_file_path)
+        s3_upload_mock.assert_called()
+
+    def test_post_400_no_file(self):
+        response = self.client.post(
+            self.source_v1.uri + 'export/openmrs23-sql/',
+            {},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_post_403_non_admin(self):
+        random_user = UserProfileFactory()
+        uploaded_file = SimpleUploadedFile('openmrs23.sql.zip', b'content', content_type='application/zip')
+
+        response = self.client.post(
+            self.source_v1.uri + 'export/openmrs23-sql/',
+            {'file': uploaded_file},
+            HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    @patch('core.services.storages.cloud.aws.S3.upload')
+    def test_export_serializer_includes_external_exports(self, s3_upload_mock):  # pylint: disable=unused-argument
+        uploaded_file = SimpleUploadedFile('openmrs23.sql.zip', b'content', content_type='application/zip')
+        self.client.post(
+            self.source_v1.uri + 'export/openmrs23-sql/',
+            {'file': uploaded_file},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        self.source_v1.refresh_from_db()
+        external_exports = SourceVersionExportSerializer(self.source_v1).data['external_exports']
+
+        self.assertEqual(len(external_exports), 1)
+        self.assertEqual(external_exports[0]['key'], 'openmrs23-sql')
+        self.assertEqual(external_exports[0]['url'], self.source_v1.uri + 'export/openmrs23-sql/')
+
+    def test_delete_404_unknown_key(self):
+        response = self.client.delete(
+            self.source_v1.uri + 'export/openmrs23-sql/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    @patch('core.services.storages.cloud.aws.S3.remove')
+    @patch('core.services.storages.cloud.aws.S3.upload')
+    def test_delete_403_non_admin(self, s3_upload_mock, s3_remove_mock):  # pylint: disable=unused-argument
+        uploaded_file = SimpleUploadedFile('openmrs23.sql.zip', b'content', content_type='application/zip')
+        self.client.post(
+            self.source_v1.uri + 'export/openmrs23-sql/',
+            {'file': uploaded_file},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+        )
+
+        random_user = UserProfileFactory()
+        response = self.client.delete(
+            self.source_v1.uri + 'export/openmrs23-sql/',
+            HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 403)
         s3_remove_mock.assert_not_called()
 
 

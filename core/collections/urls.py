@@ -47,6 +47,11 @@ urlpatterns = [
         name='collectionversion-latest-export-detail'
     ),
     path(
+        '<str:collection>/latest/export/<str:external_export_key>/',
+        views.CollectionVersionExternalExportView.as_view(),
+        name='collectionversion-latest-external-export-detail'
+    ),
+    path(
         "<str:collection>/concepts/<str:concept>/mappings/",
         views.CollectionVersionConceptMappingsView.as_view(),
         name='concept-mappings'
@@ -219,6 +224,10 @@ urlpatterns = [
     path(
         '<str:collection>/<str:version>/export/',
         views.CollectionVersionExportView.as_view(), name='collectionversion-export'
+    ),
+    path(
+        '<str:collection>/<str:version>/export/<str:external_export_key>/',
+        views.CollectionVersionExternalExportView.as_view(), name='collectionversion-external-export'
     ),
     path(
         "<str:collection>/<str:version>/extras/",

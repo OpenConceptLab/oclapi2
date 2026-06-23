@@ -31,6 +31,7 @@ from core.common.tasks import export_source, index_source_concepts, index_source
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values, to_parent_uri, decode_string, \
     get_truthy_values
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
+from core.repos.mixins import RepoExternalExportMixin
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
 from core.sources.documents import SourceDocument
 from core.sources.mixins import SummaryMixin
@@ -557,6 +558,10 @@ class SourceVersionExportView(ConceptContainerExportMixin, SourceVersionBaseView
             if task:
                 task.delete()
             return status.HTTP_409_CONFLICT
+
+
+class SourceVersionExternalExportView(RepoExternalExportMixin, SourceVersionBaseView):
+    pass
 
 
 class SourceHierarchyView(SourceBaseView, RetrieveAPIView):

@@ -11,7 +11,8 @@ from rest_framework.serializers import ModelSerializer, Serializer
 from core.client_configs.serializers import ClientConfigSerializer
 from core.collections.models import Collection, CollectionReference, Expansion
 from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, INCLUDE_SUMMARY, \
-    INCLUDE_CLIENT_CONFIGS, INVALID_EXPANSION_URL, INCLUDE_STATES, INCLUDE_TASKS, INCLUDE_RESOLVED_REPO_VERSIONS
+    INCLUDE_CLIENT_CONFIGS, INVALID_EXPANSION_URL, INCLUDE_STATES, INCLUDE_TASKS, INCLUDE_RESOLVED_REPO_VERSIONS, \
+    INCLUDE_EXTERNAL_EXPORTS
 from core.common.serializers import AbstractRepoResourcesSerializer, AbstractResourceSerializer
 from core.common.utils import get_truthy_values
 from core.orgs.models import Organization
@@ -106,18 +107,41 @@ class CollectionVersionListSerializer(ModelSerializer):
     autoexpand = BooleanField(source='should_auto_expand')
     expansion_url = CharField(source='expansion_uri', read_only=True)
     checksums = SerializerMethodField()
+    external_exports = SerializerMethodField()
 
     class Meta:
         model = Collection
         fields = (
             'type', 'short_code', 'name', 'url', 'canonical_url', 'owner', 'owner_type', 'owner_url', 'version',
             'created_at', 'id', 'collection_type', 'updated_at', 'released', 'retired', 'version_url',
-            'previous_version_url', 'autoexpand', 'expansion_url', 'checksums'
+            'previous_version_url', 'autoexpand', 'expansion_url', 'checksums', 'external_exports'
         )
+
+    def __init__(self, *args, **kwargs):
+        params = get(kwargs, 'context.request.query_params')
+
+        self.query_params = {}
+        if params:
+            self.query_params = params if isinstance(params, dict) else params.dict()
+        self.include_external_exports = self.query_params.get(INCLUDE_EXTERNAL_EXPORTS) in TRUTHY
+
+        try:
+            if not self.include_external_exports:
+                self.fields.pop('external_exports', None)
+        except:  # pylint: disable=bare-except
+            pass
+
+        super().__init__(*args, **kwargs)
 
     @staticmethod
     def get_checksums(obj):
         return obj.get_all_checksums()
+
+    @staticmethod
+    def get_external_exports(obj):
+        from core.repos.serializers import RepoExternalExportSerializer
+        queryset = obj.external_exports.filter()
+        return RepoExternalExportSerializer(queryset, many=True).data
 
 
 class CollectionCreateOrUpdateSerializer(ModelSerializer):
@@ -442,6 +466,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer, Abst
     expansion_url = CharField(source='expansion_uri', allow_null=True, allow_blank=True)
     states = SerializerMethodField()
     tasks = SerializerMethodField()
+    external_exports = SerializerMethodField()
 
     class Meta:
         model = Collection
@@ -454,7 +479,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer, Abst
             'version', 'concepts_url', 'mappings_url', 'expansions_url', 'is_processing', 'released', 'retired',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright', 'meta',
             'immutable', 'revision_date', 'summary', 'text', 'experimental', 'locked_date',
-            'autoexpand', 'expansion_url', 'checksums', 'states', 'tasks'
+            'autoexpand', 'expansion_url', 'checksums', 'states', 'tasks', 'external_exports'
         ) + AbstractRepoResourcesSerializer.Meta.fields
 
     def __init__(self, *args, **kwargs):
@@ -467,6 +492,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer, Abst
             self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in TRUTHY
             self.include_states = self.query_params.get(INCLUDE_STATES) in TRUTHY
             self.include_tasks = self.query_params.get(INCLUDE_TASKS) in TRUTHY
+            self.include_external_exports = self.query_params.get(INCLUDE_EXTERNAL_EXPORTS) in TRUTHY
 
         try:
             if not self.include_summary:
@@ -475,6 +501,8 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer, Abst
                 self.fields.pop('states', None)
             if not self.include_tasks:
                 self.fields.pop('tasks', None)
+            if not self.include_external_exports:
+                self.fields.pop('external_exports', None)
         except:  # pylint: disable=bare-except
             pass
 
@@ -507,6 +535,12 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer, Abst
     @staticmethod
     def get_autoexpand(obj):
         return obj.should_auto_expand
+
+    @staticmethod
+    def get_external_exports(obj):
+        from core.repos.serializers import RepoExternalExportSerializer
+        queryset = obj.external_exports.filter()
+        return RepoExternalExportSerializer(queryset, many=True).data
 
 
 class CollectionReferenceSerializer(ModelSerializer):

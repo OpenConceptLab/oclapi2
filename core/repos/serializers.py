@@ -2,8 +2,18 @@ from rest_framework import serializers
 
 from core.collections.models import Collection
 from core.collections.serializers import CollectionListSerializer
+from core.repos.models import RepoExternalExport
 from core.sources.models import Source
 from core.sources.serializers import SourceListSerializer
+
+
+class RepoExternalExportSerializer(serializers.ModelSerializer):
+    url = serializers.CharField(source='uri', read_only=True)
+    filename = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = RepoExternalExport
+        fields = ('key', 'description', 'url', 'created_at', 'updated_at', 'filename')
 
 
 class RepoListSerializer(serializers.Serializer):  # pylint: disable=abstract-method

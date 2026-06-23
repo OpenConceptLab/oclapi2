@@ -65,6 +65,7 @@ from core.concepts.views import ConceptCascadeView
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
 from core.mappings.search import MappingFacetedSearch
+from core.repos.mixins import RepoExternalExportMixin
 from core.sources.mixins import SummaryMixin
 from core.tasks.mixins import TaskMixin
 from core.tasks.models import Task
@@ -1192,6 +1193,10 @@ class CollectionVersionExportView(ConceptContainerExportMixin, CollectionVersion
             if task:
                 task.delete()
             return status.HTTP_409_CONFLICT
+
+
+class CollectionVersionExternalExportView(RepoExternalExportMixin, CollectionVersionBaseView):
+    pass
 
 
 class CollectionSummaryView(SummaryMixin, CollectionBaseView, RetrieveAPIView):
