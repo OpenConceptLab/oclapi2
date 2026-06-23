@@ -1674,6 +1674,14 @@ class VectorEmbedTest(OCLTestCase):
         VectorEmbed(model_name='custom/model').embed('test')
         self.assertEqual(mock_post.call_args[1]['json']['model'], 'custom/model')
 
+    @override_settings(EMBEDDING_SERVICE_URL='')
+    def test_embed_returns_none_when_local_load_fails(self):
+        from core.common.search import VectorEmbed
+        embedder = VectorEmbed()
+        with patch('sentence_transformers.SentenceTransformer', side_effect=Exception('disk full')):
+            result = embedder.embed('hypertension')
+            self.assertIsNone(result)
+
 
 class RerankerTest(OCLTestCase):
     def _make_hit(self, name, use_search_meta=False):
@@ -1784,6 +1792,16 @@ class RerankerTest(OCLTestCase):
         result = Reranker().rerank(hits, 'malaria', order_results=False)
         self.assertEqual(result[0]['search_meta']['search_rerank_score'], 0.5)
         self.assertEqual(result[0]['search_meta']['search_normalized_score'], 50.0)
+
+    @override_settings(EMBEDDING_SERVICE_URL='')
+    def test_rerank_caches_local_encoder_across_instances(self):
+        from core.common.search import Reranker
+        Reranker._LOCAL_MODELS.clear()  # pylint: disable=protected-access
+        with patch.object(Reranker, '_get_encoder') as mock_get_encoder:
+            mock_get_encoder.return_value = Mock(predict=Mock(return_value=[0.5]))
+            Reranker().rerank([self._make_hit('malaria')], 'malaria', order_results=False)
+            Reranker().rerank([self._make_hit('malaria')], 'malaria', order_results=False)
+            mock_get_encoder.assert_called_once()
 
     @override_settings(EMBEDDING_SERVICE_URL='http://embed-service:8008', INFINITY_API_KEY='test-key')
     @patch('requests.post')

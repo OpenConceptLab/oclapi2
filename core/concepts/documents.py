@@ -246,17 +246,19 @@ class ConceptDocument(Document):
 
         if instance.parent.has_semantic_match_algorithm:
             _embedder = VectorEmbed()
-            data['_embeddings'] = {
-                'vector': _embedder.embed(name),
-                'type': get(preferred_locale, 'type'),
-                'locale': get(preferred_locale, 'locale')
-            }
+            name_vector = _embedder.embed(name)
+            if name_vector is not None:
+                data['_embeddings'] = {
+                    'vector': name_vector,
+                    'type': get(preferred_locale, 'type'),
+                    'locale': get(preferred_locale, 'locale')
+                }
             data['_synonyms_embeddings'] = [
                 {
-                    'vector': _embedder.embed(s.name),
+                    'vector': vector,
                     'type': get(s, 'type'),
                     'locale': get(s, 'locale')
-                } for s in synonyms
+                } for s, vector in ((s, _embedder.embed(s.name)) for s in synonyms) if vector is not None
             ]
 
         return data
