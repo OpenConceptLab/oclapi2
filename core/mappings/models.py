@@ -317,7 +317,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         initial_version.save()
         return initial_version
 
-    def populate_fields_from_relations(self, data):  # pylint: disable=too-many-locals
+    def populate_fields_from_relations(self, data, cache=None):  # pylint: disable=too-many-locals
         from core.concepts.models import Concept
         from core.sources.models import Source
 
@@ -328,19 +328,33 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         from_source_url = data.get('from_source_url', None) or to_parent_uri(from_concept_url)
         to_source_url = data.get('to_source_url', None) or to_parent_uri(to_concept_url)
 
+        concept_cache = None if cache is None else cache.setdefault('concept_by_expr', {})
+        source_cache = None if cache is None else cache.setdefault('source_resolve_ref', {})
+
         def get_concept(expr):
             if expr and not expr.endswith('/'):
                 expr = expr + '/'
+            if concept_cache is not None and expr in concept_cache:
+                return concept_cache[expr]
             concept = Concept.objects.filter(
                 uri=expr).first() or Concept.objects.filter(uri=encode_string(expr, safe='/')).first()
 
-            return concept or {'mnemonic': expr.replace(to_parent_uri(expr), '').replace('concepts/', '').split('/')[0]}
+            result = concept or {'mnemonic': expr.replace(to_parent_uri(expr), '').replace('concepts/', '').split('/')[0]}
+            if concept_cache is not None:
+                concept_cache[expr] = result
+            return result
 
         def get_source(url):
+            if source_cache is not None and url in source_cache:
+                return source_cache[url]
             source, _ = Source.resolve_reference_expression(url, None, HEAD)
             if source.id:
-                return source, source.versioned_object_url or source.resolution_url or url
-            return None, source.resolution_url or url
+                result = (source, source.versioned_object_url or source.resolution_url or url)
+            else:
+                result = (None, source.resolution_url or url)
+            if source_cache is not None:
+                source_cache[url] = result
+            return result
 
         self.from_source, self.from_source_url = get_source(from_source_url)
         self.to_source, self.to_source_url = get_source(to_source_url)
@@ -392,8 +406,8 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         return self.sources.exclude(version=HEAD).order_by('-created_at').first()
 
     @classmethod
-    def create_new_version_for(cls, instance, data, user):
-        instance.populate_fields_from_relations(data)
+    def create_new_version_for(cls, instance, data, user, cache=None):
+        instance.populate_fields_from_relations(data, cache=cache)
         instance.extras = data.get('extras', instance.extras)
         instance.external_id = data.get('external_id', instance.external_id)
         instance.mnemonic = data.get('mnemonic', instance.mnemonic)
@@ -464,7 +478,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         return None
 
     @classmethod
-    def persist_new(cls, data, user):  # pylint: disable=too-many-statements
+    def persist_new(cls, data, user, cache=None):  # pylint: disable=too-many-statements
         related_fields = ['from_concept_url', 'to_concept_url', 'to_source_url', 'from_source_url']
         field_data = {k: v for k, v in data.items() if k not in related_fields}
         url_params = {k: v for k, v in data.items() if k in related_fields}
@@ -478,7 +492,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         if mapping.is_existing_in_parent():
             mapping.errors = {'__all__': [ALREADY_EXISTS]}
             return mapping
-        mapping.populate_fields_from_relations(url_params)
+        mapping.populate_fields_from_relations(url_params, cache=cache)
 
         try:
             mapping.full_clean()
