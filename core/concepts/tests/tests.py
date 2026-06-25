@@ -1894,6 +1894,51 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             }
         )
 
+    def test_duplicate_fully_specified_name_should_not_fail_when_existing_name_is_retired(self):
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
+
+        concept1 = Concept.persist_new(
+            {
+                'mnemonic': 'c1',
+                'version': HEAD,
+                'parent': source,
+                'concept_class': 'Diagnosis',
+                'datatype': 'None',
+                'names': [
+                    ConceptNameFactory.build(
+                        name='FullySpecifiedName1', locale='en', locale_preferred=True,
+                        type='Fully Specified', retired=True
+                    ),
+                    ConceptNameFactory.build(
+                        name='FullySpecifiedName2', locale='en', locale_preferred=False,
+                        type='Fully Specified'
+                    ),
+                ]
+            }
+        )
+        concept2 = Concept.persist_new(
+            {
+                'mnemonic': 'c2',
+                'version': HEAD,
+                'parent': source,
+                'concept_class': 'Diagnosis',
+                'datatype': 'None',
+                'names': [
+                    ConceptNameFactory.build(
+                        name='FullySpecifiedName1', locale='en', locale_preferred=False, type='Fully Specified'
+                    ),
+                ]
+            }
+        )
+
+        self.assertEqual(concept1.errors, {})
+        self.assertTrue(concept1.id is not None)
+        self.assertTrue(
+            concept1.names.filter(name='FullySpecifiedName1', retired=True).exists()
+        )
+        self.assertEqual(concept2.errors, {})
+        self.assertTrue(concept2.id is not None)
+
     # def test_duplicate_fully_specified_name_per_source_should_fail_case_insensitively_even_with_null_typed_name(self):
     #     """Regression for #2406: duplicate FSNs must be rejected case-insensitively even with NULL-typed names."""
     #     source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)

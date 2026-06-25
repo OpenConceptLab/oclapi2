@@ -118,6 +118,7 @@ class OpenMRSConceptValidator(BaseConceptValidator):
             concept__is_latest_version=True,
             locale=name.locale,
             name=name.name,
+            retired=False,
             **filters
         ).exists()
 
