@@ -89,7 +89,10 @@ class BaseModel(models.Model):
     def update_extras(self, key, value):
         self.extras = self.extras or {}
         self.extras[key] = value
-        self.save(update_fields=['extras'])
+        try:
+            self.save(update_fields=['extras'])
+        except:  # pylint: disable=bare-except
+            pass
 
     @property
     def model_name(self):
