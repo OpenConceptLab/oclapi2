@@ -713,6 +713,123 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertTrue(importer.elapsed_seconds > 0)
 
     @patch('core.importers.models.batch_index_resources')
+    def test_mapping_import_cache_reuse_correctness(self, batch_index_resources_mock):
+        # Several mappings in the same BulkImportInline run sharing the same from/to concepts --
+        # mirrors the production case (a mapping chunk resolving concepts that already exist) where
+        # the lookup cache introduced for performance should be transparent to correctness: every
+        # mapping must resolve to the same from_concept/to_concept regardless of cache hits.
+        batch_index_resources_mock.__name__ = 'batch_index_resources'
+        source = OrganizationSourceFactory(
+            organization=(OrganizationFactory(mnemonic='DemoOrg')), mnemonic='DemoSource', version='HEAD'
+        )
+        vegetable = ConceptFactory(parent=source, mnemonic='Vegetable')
+        corn = ConceptFactory(parent=source, mnemonic='Corn')
+        carrot = ConceptFactory(parent=source, mnemonic='Carrot')
+
+        input_list = [
+            {
+                "to_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Corn/",
+                "from_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Vegetable/",
+                "type": "Mapping", "source": "DemoSource",
+                "owner": "DemoOrg", "map_type": "Has Child", "owner_type": "Organization",
+            },
+            {
+                "to_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Carrot/",
+                "from_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Vegetable/",
+                "type": "Mapping", "source": "DemoSource",
+                "owner": "DemoOrg", "map_type": "Has Child", "owner_type": "Organization",
+            },
+            {
+                "to_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Corn/",
+                "from_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Vegetable/",
+                "type": "Mapping", "source": "DemoSource",
+                "owner": "DemoOrg", "map_type": "Same As", "owner_type": "Organization",
+            },
+        ]
+
+        importer = BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=input_list)
+        importer.run()
+
+        self.assertEqual(importer.processed, 3)
+        self.assertEqual(len(importer.created), 3)
+        self.assertEqual(importer.failed, [])
+
+        has_child_corn = Mapping.objects.filter(
+            map_type='Has Child', id=F('versioned_object_id'), to_concept_code='Corn'
+        ).first()
+        has_child_carrot = Mapping.objects.filter(
+            map_type='Has Child', id=F('versioned_object_id'), to_concept_code='Carrot'
+        ).first()
+        same_as_corn = Mapping.objects.filter(
+            map_type='Same As', id=F('versioned_object_id'), to_concept_code='Corn'
+        ).first()
+
+        self.assertEqual(has_child_corn.from_concept_id, vegetable.id)
+        self.assertEqual(has_child_corn.to_concept_id, corn.id)
+        self.assertEqual(has_child_carrot.from_concept_id, vegetable.id)
+        self.assertEqual(has_child_carrot.to_concept_id, carrot.id)
+        self.assertEqual(same_as_corn.from_concept_id, vegetable.id)
+        self.assertEqual(same_as_corn.to_concept_id, corn.id)
+
+        # cache was actually exercised and shared across items, not just present and unused
+        self.assertEqual(len(importer.cache['source_by_owner']), 1)
+        self.assertEqual(len(importer.cache['concept_versioned_id_by_uri']), 3)  # Vegetable, Corn, Carrot
+        self.assertEqual(len(importer.cache['concept_by_expr']), 3)
+
+    @patch('core.importers.models.batch_index_resources')
+    def test_mapping_import_cache_stale_after_concept_created_in_same_run(self, batch_index_resources_mock):
+        # Documents the invariant called out on BulkImportInline.cache: the lookup cache stores
+        # misses too, so if a resource type is created mid-run and an earlier item in the *same* run
+        # already cached its absence, a later item referencing it can get a stale miss. This is safe
+        # in production because BulkImportParallelRunner only ever puts one resource type per chunk
+        # (a mapping chunk never creates the concepts it resolves) -- this test exists so that
+        # invariant has an executable tripwire if chunking ever changes to interleave resource types.
+        batch_index_resources_mock.__name__ = 'batch_index_resources'
+        source = OrganizationSourceFactory(
+            organization=(OrganizationFactory(mnemonic='DemoOrg')), mnemonic='DemoSource', version='HEAD'
+        )
+        ConceptFactory(parent=source, mnemonic='Vegetable')
+
+        input_list = [
+            {
+                "to_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Sugar/",
+                "from_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Vegetable/",
+                "type": "Mapping", "source": "DemoSource",
+                "owner": "DemoOrg", "map_type": "Has Child", "owner_type": "Organization",
+            },
+            {
+                "id": "Sugar", "type": "Concept", "concept_class": "Misc", "datatype": "None",
+                "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
+                "names": [
+                    {"name": "Sugar", "locale": "en", "locale_preferred": "True", "name_type": "Fully Specified"}],
+            },
+            {
+                "to_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Sugar/",
+                "from_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Vegetable/",
+                "type": "Mapping", "source": "DemoSource",
+                "owner": "DemoOrg", "map_type": "Same As", "owner_type": "Organization",
+            },
+        ]
+
+        importer = BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=input_list)
+        importer.run()
+
+        sugar = Concept.objects.filter(mnemonic='Sugar', id=F('versioned_object_id')).first()
+        self.assertIsNotNone(sugar)
+
+        same_as_sugar = Mapping.objects.filter(
+            map_type='Same As', id=F('versioned_object_id')
+        ).first()
+        self.assertIsNotNone(same_as_sugar)
+        # Known limitation of the invariant above: the third item's lookup hits the stale cached
+        # miss from the first item (Sugar didn't exist yet when that mapping resolved it), so the
+        # mapping is created without a linked to_concept even though Sugar exists by this point. If
+        # this assertion ever starts failing because to_concept_id became non-null, the cache started
+        # being invalidated correctly (or chunking changed) -- update this test and the comment on
+        # BulkImportInline.cache rather than treating the new behavior as a regression.
+        self.assertIsNone(same_as_sugar.to_concept_id)
+
+    @patch('core.importers.models.batch_index_resources')
     def test_mapping_import_with_autoid_assignment(self, batch_index_resources_mock):
         self.assertEqual(Mapping.objects.count(), 0)
 

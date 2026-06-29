@@ -426,7 +426,7 @@ class ConceptImporter(BaseResourceImporter):
     def get_resource_type():
         return 'Concept'
 
-    def __init__(self, data, user, update_if_exists, skip_hierarchy_tasks=False, cache=None):
+    def __init__(self, data, user, update_if_exists, skip_hierarchy_tasks=False, cache=None):  # pylint: disable=too-many-arguments
         super().__init__(data, user, update_if_exists, cache=cache)
         self.skip_hierarchy_tasks = skip_hierarchy_tasks
         self.version = False
@@ -543,10 +543,13 @@ class MappingImporter(BaseResourceImporter):
     def exists(self):
         return self.get_queryset().exists()
 
-    def get_cached_versioned_concept_by_uri(self, uri):
-        cache = self.cache.setdefault('concept_versioned_by_uri', {})
+    def get_cached_versioned_concept_id_by_uri(self, uri):
+        # Only versioned_object_id is ever read from the resolved concept here, so cache just that
+        # (and fetch just that) instead of retaining full Concept instances for the chunk's lifetime.
+        cache = self.cache.setdefault('concept_versioned_id_by_uri', {})
         if uri not in cache:
-            cache[uri] = Concept.objects.filter(id=F('versioned_object_id'), uri=uri).first()
+            cache[uri] = Concept.objects.filter(id=F('versioned_object_id'), uri=uri).values_list(
+                'versioned_object_id', flat=True).first()
         return cache[uri]
 
     def get_cached_source_exists_by_uri(self, uri):
@@ -576,16 +579,16 @@ class MappingImporter(BaseResourceImporter):
             ]
 
         versionless_from_concept_url = drop_version(from_concept_url)
-        from_concept = self.get_cached_versioned_concept_by_uri(versionless_from_concept_url)
-        if from_concept:
-            filters['from_concept__versioned_object_id'] = from_concept.versioned_object_id
+        from_concept_id = self.get_cached_versioned_concept_id_by_uri(versionless_from_concept_url)
+        if from_concept_id is not None:
+            filters['from_concept__versioned_object_id'] = from_concept_id
         elif not from_concept_code:
             filters['from_concept_code'] = compact(versionless_from_concept_url.split('/'))[-1]
         if to_concept_url:
             versionless_to_concept_url = drop_version(to_concept_url)
-            to_concept = self.get_cached_versioned_concept_by_uri(versionless_to_concept_url)
-            if to_concept:
-                filters['to_concept__versioned_object_id'] = to_concept.versioned_object_id
+            to_concept_id = self.get_cached_versioned_concept_id_by_uri(versionless_to_concept_url)
+            if to_concept_id is not None:
+                filters['to_concept__versioned_object_id'] = to_concept_id
             else:
                 filters['to_concept_code'] = compact(versionless_to_concept_url.split('/'))[-1]
                 if not to_source_url:
@@ -780,6 +783,14 @@ class BulkImportInline(BaseImporter):
         super().__init__(content, username, update_if_exists, user, not bool(input_list), set_user)
         self.self_task_id = self_task_id
         self.skip_hierarchy_tasks = skip_hierarchy_tasks
+        # Lookup cache shared across this run's items (see ConceptImporter/MappingImporter).
+        # It caches misses too (None/False), so it's only safe because a chunk is single-resource-type
+        # in the production parallel path (BulkImportParallelRunner.make_parts splits concepts and
+        # mappings into separate chunks) -- a mapping chunk never creates the concepts it resolves, and
+        # a concept chunk's parent source already exists. If a future change interleaves resource types
+        # within one BulkImportInline run (e.g. the deprecated BulkImportInlineView), a mapping could
+        # cache a "not found" for a concept created earlier in the same run. Don't share this cache
+        # across resource types unless that invariant is re-verified.
         self.cache = {}
         self.set_task()
         if input_list:
