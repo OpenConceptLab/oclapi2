@@ -317,7 +317,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         initial_version.save()
         return initial_version
 
-    def populate_fields_from_relations(self, data, cache=None):  # pylint: disable=too-many-locals
+    def populate_fields_from_relations(self, data, cache=None):  # pylint: disable=too-many-locals,too-many-statements
         from core.concepts.models import Concept
         from core.sources.models import Source
 
@@ -339,7 +339,8 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             concept = Concept.objects.filter(
                 uri=expr).first() or Concept.objects.filter(uri=encode_string(expr, safe='/')).first()
 
-            result = concept or {'mnemonic': expr.replace(to_parent_uri(expr), '').replace('concepts/', '').split('/')[0]}
+            result = concept or {
+                'mnemonic': expr.replace(to_parent_uri(expr), '').replace('concepts/', '').split('/')[0]}
             if concept_cache is not None:
                 concept_cache[expr] = result
             return result
