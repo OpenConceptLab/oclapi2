@@ -109,12 +109,13 @@ class BaseResourceImporter:
     mandatory_fields = set()
     allowed_fields = []
 
-    def __init__(self, data, user, update_if_exists=False):
+    def __init__(self, data, user, update_if_exists=False, cache=None):
         self.user = user
         self.data = data
         self.update_if_exists = update_if_exists
         self.queryset = None
         self.index_resources = False
+        self.cache = cache if cache is not None else {}
 
     @classmethod
     def can_handle(cls, obj):
@@ -126,6 +127,15 @@ class BaseResourceImporter:
 
     def get(self, attr, default_value=None):
         return self.data.get(attr, default_value)
+
+    def get_cached_parent_source(self):
+        cache = self.cache.setdefault('source_by_owner', {})
+        key = (self.get_owner_type_filter(), self.get('owner'), self.get('source'))
+        if key not in cache:
+            cache[key] = Source.objects.filter(
+                **{self.get_owner_type_filter(): self.get('owner')}, mnemonic=self.get('source'), version=HEAD
+            ).first()
+        return cache[key]
 
     def parse(self):
         self.data = self.get_filter_allowed_fields()
@@ -416,8 +426,8 @@ class ConceptImporter(BaseResourceImporter):
     def get_resource_type():
         return 'Concept'
 
-    def __init__(self, data, user, update_if_exists, skip_hierarchy_tasks=False):
-        super().__init__(data, user, update_if_exists)
+    def __init__(self, data, user, update_if_exists, skip_hierarchy_tasks=False, cache=None):  # pylint: disable=too-many-arguments
+        super().__init__(data, user, update_if_exists, cache=cache)
         self.skip_hierarchy_tasks = skip_hierarchy_tasks
         self.version = False
         self.instance = None
@@ -439,9 +449,7 @@ class ConceptImporter(BaseResourceImporter):
         return self.queryset
 
     def parse(self):
-        source = Source.objects.filter(
-            **{self.get_owner_type_filter(): self.get('owner')}, mnemonic=self.get('source'), version=HEAD
-        ).first()
+        source = self.get_cached_parent_source()
         super().parse()
         self.data['parent'] = source
         self.data['mnemonic'] = str(self.data.pop('id', ''))
@@ -527,13 +535,28 @@ class MappingImporter(BaseResourceImporter):
     def get_resource_type():
         return 'Mapping'
 
-    def __init__(self, data, user, update_if_exists):
-        super().__init__(data, user, update_if_exists)
+    def __init__(self, data, user, update_if_exists, cache=None):
+        super().__init__(data, user, update_if_exists, cache=cache)
         self.version = False
         self.instance = None
 
     def exists(self):
         return self.get_queryset().exists()
+
+    def get_cached_versioned_concept_id_by_uri(self, uri):
+        # Only versioned_object_id is ever read from the resolved concept here, so cache just that
+        # (and fetch just that) instead of retaining full Concept instances for the chunk's lifetime.
+        cache = self.cache.setdefault('concept_versioned_id_by_uri', {})
+        if uri not in cache:
+            cache[uri] = Concept.objects.filter(id=F('versioned_object_id'), uri=uri).values_list(
+                'versioned_object_id', flat=True).first()
+        return cache[uri]
+
+    def get_cached_source_exists_by_uri(self, uri):
+        cache = self.cache.setdefault('source_exists_by_uri', {})
+        if uri not in cache:
+            cache[uri] = Source.objects.filter(uri=uri).exists()
+        return cache[uri]
 
     def get_queryset(self):  # pylint: disable=too-many-branches
         if self.queryset:
@@ -556,21 +579,21 @@ class MappingImporter(BaseResourceImporter):
             ]
 
         versionless_from_concept_url = drop_version(from_concept_url)
-        from_concept = Concept.objects.filter(id=F('versioned_object_id'), uri=versionless_from_concept_url).first()
-        if from_concept:
-            filters['from_concept__versioned_object_id'] = from_concept.versioned_object_id
+        from_concept_id = self.get_cached_versioned_concept_id_by_uri(versionless_from_concept_url)
+        if from_concept_id is not None:
+            filters['from_concept__versioned_object_id'] = from_concept_id
         elif not from_concept_code:
             filters['from_concept_code'] = compact(versionless_from_concept_url.split('/'))[-1]
         if to_concept_url:
             versionless_to_concept_url = drop_version(to_concept_url)
-            to_concept = Concept.objects.filter(id=F('versioned_object_id'), uri=versionless_to_concept_url).first()
-            if to_concept:
-                filters['to_concept__versioned_object_id'] = to_concept.versioned_object_id
+            to_concept_id = self.get_cached_versioned_concept_id_by_uri(versionless_to_concept_url)
+            if to_concept_id is not None:
+                filters['to_concept__versioned_object_id'] = to_concept_id
             else:
                 filters['to_concept_code'] = compact(versionless_to_concept_url.split('/'))[-1]
                 if not to_source_url:
                     to_source_uri = to_parent_uri(versionless_to_concept_url)
-                    if Source.objects.filter(uri=drop_version(to_source_uri)).exists():
+                    if self.get_cached_source_exists_by_uri(drop_version(to_source_uri)):
                         filters['to_source__uri'] = to_source_uri
 
         if self.get('id'):
@@ -589,9 +612,7 @@ class MappingImporter(BaseResourceImporter):
         return self.queryset
 
     def parse(self):
-        source = Source.objects.filter(
-            **{self.get_owner_type_filter(): self.get('owner')}, mnemonic=self.get('source'), version=HEAD
-        ).first()
+        source = self.get_cached_parent_source()
         self.data = self.get_filter_allowed_fields()
         self.data['parent'] = source
 
@@ -631,14 +652,15 @@ class MappingImporter(BaseResourceImporter):
                 self.instance = queryset.first().clone()
                 self.instance._counted = None  # pylint: disable=protected-access
                 self.instance._index = False  # pylint: disable=protected-access
-                errors = Mapping.create_new_version_for(self.instance, self.data, self.user)
+                errors = Mapping.create_new_version_for(self.instance, self.data, self.user, cache=self.cache)
                 if errors and Mapping.is_standard_checksum_error(errors):
                     return UNCHANGED
                 return errors or UPDATED
             if 'update_comment' in self.data:
                 self.data['comment'] = self.data['update_comment']
                 self.data.pop('update_comment')
-            self.instance = Mapping.persist_new({**self.data, '_counted': None, '_index': False}, self.user)
+            self.instance = Mapping.persist_new(
+                {**self.data, '_counted': None, '_index': False}, self.user, cache=self.cache)
             if self.instance.id:
                 return CREATED
             return self.instance.errors or errors or FAILED
@@ -752,6 +774,8 @@ class ReferenceImporter(BaseResourceImporter):
 
 
 class BulkImportInline(BaseImporter):
+    PROGRESS_NOTIFY_INTERVAL_SECONDS = 2
+
     def __init__(  # pylint: disable=too-many-arguments
             self, content, username, update_if_exists=False, input_list=None, user=None, set_user=True,
             self_task_id=None, skip_hierarchy_tasks=False
@@ -759,6 +783,15 @@ class BulkImportInline(BaseImporter):
         super().__init__(content, username, update_if_exists, user, not bool(input_list), set_user)
         self.self_task_id = self_task_id
         self.skip_hierarchy_tasks = skip_hierarchy_tasks
+        # Lookup cache shared across this run's items (see ConceptImporter/MappingImporter).
+        # It caches misses too (None/False), so it's only safe because a chunk is single-resource-type
+        # in the production parallel path (BulkImportParallelRunner.make_parts splits concepts and
+        # mappings into separate chunks) -- a mapping chunk never creates the concepts it resolves, and
+        # a concept chunk's parent source already exists. If a future change interleaves resource types
+        # within one BulkImportInline run (e.g. the deprecated BulkImportInlineView), a mapping could
+        # cache a "not found" for a concept created earlier in the same run. Don't share this cache
+        # across resource types unless that invariant is re-verified.
+        self.cache = {}
         self.set_task()
         if input_list:
             self.input_list = input_list
@@ -777,6 +810,7 @@ class BulkImportInline(BaseImporter):
         self.processed = 0
         self.total = len(self.input_list)
         self.start_time = time.time()
+        self.last_progress_notified_at = 0
         self.elapsed_seconds = 0
         self.index_resources = False
 
@@ -819,21 +853,26 @@ class BulkImportInline(BaseImporter):
         print("****Unexpected Result****", result)
         self.others.append(item)
 
-    def notify_progress(self):
-        if self.task:  # pragma: no cover
-            self.task.summary = {
-                'total': self.total,
-                'processed': self.processed,
-                'created': len(self.created),
-                'updated': len(self.updated),
-                'invalid': len(self.invalid),
-                'failed': len(self.failed),
-                'deleted': len(self.deleted),
-                'not_found': len(self.not_found),
-                'permission_denied': len(self.permission_denied),
-                'unchanged': len(self.unchanged),
-            }
-            self.task.save()
+    def notify_progress(self, force=False):
+        if not self.task:
+            return
+        now = time.time()
+        if not force and (now - self.last_progress_notified_at) < self.PROGRESS_NOTIFY_INTERVAL_SECONDS:
+            return
+        self.last_progress_notified_at = now
+        self.task.summary = {  # pragma: no cover
+            'total': self.total,
+            'processed': self.processed,
+            'created': len(self.created),
+            'updated': len(self.updated),
+            'invalid': len(self.invalid),
+            'failed': len(self.failed),
+            'deleted': len(self.deleted),
+            'not_found': len(self.not_found),
+            'permission_denied': len(self.permission_denied),
+            'unchanged': len(self.unchanged),
+        }
+        self.task.save()
 
     def run(self):  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         if self.self_task_id:  # pragma: no cover
@@ -883,7 +922,8 @@ class BulkImportInline(BaseImporter):
                 try:
                     concept_importer = ConceptImporter(
                         item, self.user, self.update_if_exists,
-                        skip_hierarchy_tasks=self.skip_hierarchy_tasks and bool(item.get('id'))
+                        skip_hierarchy_tasks=self.skip_hierarchy_tasks and bool(item.get('id')),
+                        cache=self.cache
                     )
                     _result = concept_importer.delete() if action == 'delete' else concept_importer.run()
                     if self.index_resources and get(concept_importer.instance, 'id'):
@@ -902,7 +942,7 @@ class BulkImportInline(BaseImporter):
                 continue
             if item_type == 'mapping':
                 try:
-                    mapping_importer = MappingImporter(item, self.user, self.update_if_exists)
+                    mapping_importer = MappingImporter(item, self.user, self.update_if_exists, cache=self.cache)
                     _result = mapping_importer.delete() if action == 'delete' else mapping_importer.run()
                     if self.index_resources and get(mapping_importer.instance, 'id'):
                         new_mapping_ids.update(set(compact(
@@ -925,6 +965,7 @@ class BulkImportInline(BaseImporter):
                 )
                 continue
 
+        self.notify_progress(force=True)
         if new_concept_ids:
             for chunk in chunks(list(set(new_concept_ids)), 5000):
                 batch_index_resources.apply_async(
