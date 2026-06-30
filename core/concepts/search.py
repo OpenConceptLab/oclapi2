@@ -4,7 +4,8 @@ from pydash import flatten, is_number, compact, get
 from core.common.constants import FACET_SIZE, HEAD
 from core.common.lexical_variants import LexicalVariantDictionary
 from core.common.search import CustomESFacetedSearch, CustomESSearch
-from core.common.utils import get_embeddings, is_canonical_uri
+from core.common.search import VectorEmbed
+from core.common.utils import is_canonical_uri
 from core.concepts.models import Concept
 
 
@@ -123,6 +124,14 @@ class ConceptFuzzySearch:  # pragma: no cover
             locale_filter=None, variants_repo=None
     ):
         from core.concepts.documents import ConceptDocument
+        _embedder = VectorEmbed()
+        _embedded_values = {}
+
+        def _get_embedded_values(_val):
+            if _val not in _embedded_values:
+                _embedded_values[_val] = _embedder.embed(_val)
+            return _embedded_values[_val]
+
         map_config = map_config or []
         filter_query = cls.get_filter_criteria(
             data, include_retired, repo_params, repo_url, additional_filter_criterion)
@@ -183,7 +192,7 @@ class ConceptFuzzySearch:  # pragma: no cover
             def get_knn_query(_field, _value, _boost):
                 return {
                         "field": _field,
-                        "query_vector": get_embeddings(_value).tolist(),
+                        "query_vector": list(_get_embedded_values(_value)),
                         "k": k_nearest,
                         "num_candidates": num_candidates,
                         "filter": filter_query,

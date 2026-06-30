@@ -2,7 +2,8 @@ from django_elasticsearch_dsl import Document, fields
 from django_elasticsearch_dsl.registries import registry
 from pydash import compact, get
 
-from core.common.utils import jsonify_safe, flatten_dict, get_embeddings, drop_version
+from core.common.search import VectorEmbed
+from core.common.utils import jsonify_safe, flatten_dict, drop_version
 from core.concepts.models import Concept
 
 
@@ -244,17 +245,20 @@ class ConceptDocument(Document):
         data['_synonyms'] = data['synonyms']
 
         if instance.parent.has_semantic_match_algorithm:
-            data['_embeddings'] = {
-                'vector': get_embeddings(name),
-                'type': get(preferred_locale, 'type'),
-                'locale': get(preferred_locale, 'locale')
-            }
+            _embedder = VectorEmbed()
+            name_vector = _embedder.embed(name)
+            if name_vector is not None:
+                data['_embeddings'] = {
+                    'vector': name_vector,
+                    'type': get(preferred_locale, 'type'),
+                    'locale': get(preferred_locale, 'locale')
+                }
             data['_synonyms_embeddings'] = [
                 {
-                    'vector': get_embeddings(s.name),
+                    'vector': vector,
                     'type': get(s, 'type'),
                     'locale': get(s, 'locale')
-                } for s in synonyms
+                } for s, vector in ((s, _embedder.embed(s.name)) for s in synonyms) if vector is not None
             ]
 
         return data
