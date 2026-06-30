@@ -47,7 +47,7 @@ from core.common.mixins import (
     ConceptContainerProcessingMixin)
 from core.common.permissions import (
     CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject,
-    CanViewConceptDictionaryVersion
+    CanViewConceptDictionaryVersion, HasOwnership
 )
 from core.common.serializers import TaskSerializer
 from core.common.swagger_parameters import q_param, compress_header, page_param, verbose_param, \
@@ -1308,3 +1308,23 @@ class ReferenceExpressionResolveView(APIView):
     )
     def post(self, _):
         return Response(self.get_results(), status=status.HTTP_200_OK)
+
+
+class CollectionVersionExpansionProcessingView(CollectionVersionExpansionBaseView):
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            return [HasOwnership(), IsAuthenticated()]
+
+        return [CanViewConceptDictionary(), ]
+
+    def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        expansion = self.get_object()
+        response = Response(status=200)
+        response.content = expansion.is_processing
+        return response
+
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        expansion = self.get_object()
+        expansion.clear_processing()
+
+        return Response(status=status.HTTP_200_OK)

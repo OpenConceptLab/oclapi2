@@ -431,9 +431,7 @@ def seed_children_to_expansion(expansion_id, index=True, force_reevaluate=False)
     expansion = Expansion.objects.filter(id=expansion_id).first()
     if expansion:
         expansion.seed_children(index=index, force_reevaluate=force_reevaluate)
-        if expansion.is_processing:
-            expansion.is_processing = False
-            expansion.save()
+        expansion.clear_processing(True)
 
 
 @app.task

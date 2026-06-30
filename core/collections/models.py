@@ -1635,6 +1635,14 @@ class Expansion(BaseResourceModel):
 
         return diff
 
+    def clear_processing(self, full_save=False):
+        if self.is_processing:
+            self.is_processing = False
+            if full_save:
+                self.save()
+            else:
+                self.save(update_fields=['is_processing'])
+
 
 class ExpansionParameters:
     ACTIVE = 'activeOnly'
