@@ -1575,6 +1575,7 @@ class Expansion(BaseResourceModel):
         temp_version = not bool(expansion.mnemonic)
         if temp_version:
             expansion.mnemonic = generate_temp_version()
+        expansion.is_processing = True
         expansion.clean()
         expansion.full_clean()
         expansion.save()
