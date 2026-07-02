@@ -30,7 +30,7 @@ from .checksums import ChecksumModel
 from .exceptions import Http403
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
     to_owner_uri, parse_updated_since_param, get_export_service, to_int, get_truthy_values, generate_temp_version, \
-    canonical_url_to_url_and_version, decode_string
+    canonical_url_to_url_and_version, decode_string, to_parent_kwargs_from_uri, to_parent_uri
 from ..concepts.constants import PERSIST_CLONE_ERROR
 from ..toggles.models import Toggle
 
@@ -739,11 +739,11 @@ class SourceChildMixin(ChecksumModel):
 
     @property
     def owner_name(self):
-        return str(self.owner or '')
+        return get(self.parent_url_kwargs, 'owner') or ''
 
     @property
     def owner_type(self):
-        return get(self.owner, 'resource_type')
+        return get(self.parent_url_kwargs, 'owner_type')
 
     @property
     def owner_url(self):
@@ -751,11 +751,19 @@ class SourceChildMixin(ChecksumModel):
 
     @property
     def parent_resource(self):
-        return get(self.parent, 'mnemonic')
+        return get(self.parent_url_kwargs, 'repo')
 
     @property
     def parent_url(self):
-        return get(self.parent, 'uri')
+        return to_parent_uri(self.uri)
+
+    @property
+    def parent_url_kwargs(self):
+        kwargs = to_parent_kwargs_from_uri(self.uri)
+
+        if 'version' in kwargs and kwargs['version'] == HEAD:
+            kwargs['version'] = None
+        return kwargs
 
     def retire(self, user, comment=None, reason=None):
         if self.versioned_object.retired:
