@@ -1541,11 +1541,17 @@ class Expansion(BaseResourceModel):
                 if concepts_updated is not False:
                     filters = {
                         'versioned_object_id__in': list(concepts_updated.values_list('versioned_object_id', flat=True))}
-                    batch_index_resources.apply_async(('concept', filters), queue='indexing', permanent=False)
+                    if get(settings, 'TEST_MODE', False):
+                        batch_index_resources('concept', filters)
+                    else:
+                        batch_index_resources.apply_async(('concept', filters), queue='indexing', permanent=False)
                 if mappings_updated is not False:
                     filters = {
                         'versioned_object_id__in': list(mappings_updated.values_list('versioned_object_id', flat=True))}
-                    batch_index_resources.apply_async(('mapping', filters), queue='indexing', permanent=False)
+                    if get(settings, 'TEST_MODE', False):
+                        batch_index_resources('mapping', filters)
+                    else:
+                        batch_index_resources.apply_async(('mapping', filters), queue='indexing', permanent=False)
 
         self.explicit_collection_versions.add(*compact(explicit_valueset_versions))
         self.explicit_source_versions.add(*compact(explicit_system_versions))
