@@ -1270,7 +1270,7 @@ class Expansion(BaseResourceModel):
         }
     """
 
-    def batch_index(self, queryset, document, **kwargs):  # pylint: disable=arguments-differ
+    def batch_index(self, queryset, document, **kwargs):  # pylint: disable=arguments-differ,unused-argument
         """
         Override: append this expansion's 5 collection membership fields to each resource's ES doc.
         No DB query — all values are derived from self.uri and self.mnemonic.

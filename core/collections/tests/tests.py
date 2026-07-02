@@ -1554,10 +1554,14 @@ class ExpansionTest(OCLTestCase):
                     self.assertEqual(action['_index'], 'concepts')
                     self.assertIn(action['_id'], [concept1.id, concept2.id])
                     self.assertEqual(action['script']['params']['expansion'], [expansion.mnemonic])
-                    self.assertEqual(action['script']['params']['collection_version'], [expansion.collection_version_name])
-                    self.assertEqual(action['script']['params']['collection'], [expansion.collection_version_mnemonic])
-                    self.assertEqual(action['script']['params']['collection_url'], [expansion.collection_version_url])
-                    self.assertEqual(action['script']['params']['collection_owner_url'], [expansion.owner_url])
+                    self.assertEqual(
+                        action['script']['params']['collection_version'], [expansion.collection_version_name])
+                    self.assertEqual(
+                        action['script']['params']['collection'], [expansion.collection_version_mnemonic])
+                    self.assertEqual(
+                        action['script']['params']['collection_url'], [expansion.collection_version_url])
+                    self.assertEqual(
+                        action['script']['params']['collection_owner_url'], [expansion.owner_url])
                     self.assertEqual(action['upsert'], action['script']['params'])
                     self.assertTrue(action['scripted_upsert'])
 
