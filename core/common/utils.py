@@ -535,6 +535,10 @@ def to_parent_uri(expression):
         splitter = '/concepts/'
     elif '/mappings/' in expression:
         splitter = '/mappings/'
+    elif '/references/' in expression:
+        splitter = '/references/'
+    elif '/expansions/' in expression:
+        splitter = '/expansions/'
 
     if splitter:
         return expression.split(splitter)[0] + '/'

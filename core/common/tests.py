@@ -638,6 +638,30 @@ class UtilsTest(OCLTestCase):
             "/users/user/collections/coll/coll-version/"
         )
         self.assertEqual(
+            to_parent_uri("/users/user/collections/coll/coll-version/references/r1/"),
+            "/users/user/collections/coll/coll-version/"
+        )
+        self.assertEqual(
+            to_parent_uri("/users/user/collections/coll/references/r1/"),
+            "/users/user/collections/coll/"
+        )
+        self.assertEqual(
+            to_parent_uri("/users/user/collections/coll/references/"),
+            "/users/user/collections/coll/"
+        )
+        self.assertEqual(
+            to_parent_uri("/users/user/collections/coll/coll-version/expansions/e1/"),
+            "/users/user/collections/coll/coll-version/"
+        )
+        self.assertEqual(
+            to_parent_uri("/users/user/collections/coll/expansions/e1/"),
+            "/users/user/collections/coll/"
+        )
+        self.assertEqual(
+            to_parent_uri("/users/user/collections/coll/expansions/"),
+            "/users/user/collections/coll/"
+        )
+        self.assertEqual(
             to_parent_uri("/users/user/collections/coll/"),
             "/users/user/collections/coll/"
         )
