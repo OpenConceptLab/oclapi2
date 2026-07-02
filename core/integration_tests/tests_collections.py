@@ -4094,6 +4094,56 @@ class CollectionExpansionsViewTest(OCLAPITestCase):
         self.assertEqual([expansion['mnemonic'] for expansion in response.data], ['e2-head', 'e1-v1', 'e1-head'])
 
 
+class CollectionVersionExpansionProcessingViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.collection = OrganizationCollectionFactory()
+        self.expansion = ExpansionFactory(collection_version=self.collection)
+        self.token = self.collection.created_by.get_token()
+
+    def test_get_200(self):
+        response = self.client.get(
+            self.expansion.url + 'processing/',
+            HTTP_AUTHORIZATION=f'Token {self.token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b'False')
+
+        self.expansion.is_processing = True
+        self.expansion.save(update_fields=['is_processing'])
+
+        response = self.client.get(
+            self.expansion.url + 'processing/',
+            HTTP_AUTHORIZATION=f'Token {self.token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b'True')
+
+    def test_post_200(self):
+        self.expansion.is_processing = True
+        self.expansion.save(update_fields=['is_processing'])
+
+        response = self.client.post(
+            self.expansion.url + 'processing/',
+            HTTP_AUTHORIZATION=f'Token {self.token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.expansion.refresh_from_db()
+        self.assertFalse(self.expansion.is_processing)
+
+        response = self.client.post(
+            self.expansion.url + 'processing/',
+            HTTP_AUTHORIZATION=f'Token {self.token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.expansion.refresh_from_db()
+        self.assertFalse(self.expansion.is_processing)
+
+
 class CollectionVersionExpansionResolvedRepoUpdatesViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()

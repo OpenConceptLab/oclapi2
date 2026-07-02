@@ -1575,6 +1575,7 @@ class Expansion(BaseResourceModel):
         temp_version = not bool(expansion.mnemonic)
         if temp_version:
             expansion.mnemonic = generate_temp_version()
+        expansion.is_processing = True
         expansion.clean()
         expansion.full_clean()
         expansion.save()
@@ -1634,6 +1635,14 @@ class Expansion(BaseResourceModel):
             update_diffs(relation)
 
         return diff
+
+    def clear_processing(self, full_save=False):
+        if self.is_processing:
+            self.is_processing = False
+            if full_save:
+                self.save()
+            else:
+                self.save(update_fields=['is_processing'])
 
 
 class ExpansionParameters:
