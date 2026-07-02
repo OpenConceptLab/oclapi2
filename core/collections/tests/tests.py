@@ -1562,8 +1562,9 @@ class ExpansionTest(OCLTestCase):
                         action['script']['params']['collection_url'], [expansion.collection_version_url])
                     self.assertEqual(
                         action['script']['params']['collection_owner_url'], [expansion.owner_url])
-                    self.assertEqual(action['upsert'], action['script']['params'])
-                    self.assertTrue(action['scripted_upsert'])
+                    self.assertEqual(action['retry_on_conflict'], 3)
+                    self.assertNotIn('upsert', action)
+                    self.assertNotIn('scripted_upsert', action)
 
             with patch.object(MappingDocument, '_bulk') as mapping_bulk_mock:
                 expansion.batch_index(expansion.mappings, MappingDocument)

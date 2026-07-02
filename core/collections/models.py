@@ -1284,17 +1284,19 @@ class Expansion(BaseResourceModel):
         index_name = document()._index._name  # pylint: disable=protected-access
 
         def get_actions(batch_ids):
+            # Resources must already be indexed before they are added to an expansion,
+            # so the docs exist in ES. Omitting scripted_upsert avoids creating a skeleton
+            # doc (5 collection fields only) if a race or _index=False causes the doc to be absent.
             for rid in batch_ids:
                 yield {
                     '_op_type': 'update',
                     '_index': index_name,
                     '_id': rid,
+                    'retry_on_conflict': 3,
                     'script': {
                         'source': Expansion._APPEND_COLLECTION_FIELDS_SCRIPT,
                         'params': collection_fields,
                     },
-                    'upsert': collection_fields,
-                    'scripted_upsert': True,
                 }
 
         BaseModel.batch_index_partial_by_ids(queryset, document, get_actions)
