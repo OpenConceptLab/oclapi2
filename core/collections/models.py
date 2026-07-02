@@ -30,8 +30,7 @@ from core.common.tasks import seed_children_to_expansion, batch_index_resources,
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
     get_resource_class_from_resource_name, to_snake_case, \
     es_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
-    get_truthy_values, get_falsy_values, get_current_authorized_user, to_camel_case, to_parent_uri, \
-    to_parent_kwargs_from_uri
+    get_truthy_values, get_falsy_values, get_current_authorized_user, to_camel_case, to_parent_kwargs_from_uri
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
