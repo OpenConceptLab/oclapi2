@@ -558,7 +558,7 @@ FLOWER_HOST = os.environ.get('FLOWER_HOST', 'flower')
 FLOWER_PORT = os.environ.get('FLOWER_PORT', 5555)
 FHIR_SUBDOMAIN = os.environ.get('FHIR_SUBDOMAIN', None)
 DATA_UPLOAD_MAX_MEMORY_SIZE = 200*1024*1024  # i.e. 200MBs before throwing RequestDataTooBig
-FILE_UPLOAD_MAX_MEMORY_SIZE = 25*1024*1024  # i.e. 3MBs before file is streamed directly to temp file
+FILE_UPLOAD_MAX_MEMORY_SIZE = 25*1024*1024  # i.e. 25MBs before file is streamed directly to temp file
 
 # Mail settings
 EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
