@@ -1359,8 +1359,6 @@ class Expansion(BaseResourceModel):
     def delete_references(self, references):
         refs, _ = self.to_ref_list_separated(references)
 
-        index_concepts = []
-        index_mappings = []
         any_ref_with_resources = False
         for reference in refs:
             concepts = reference.concepts
@@ -1368,7 +1366,6 @@ class Expansion(BaseResourceModel):
                 any_ref_with_resources = True
                 resources_updated = list(concepts.values_list('versioned_object_id', flat=True))
                 filters = {'versioned_object_id__in': resources_updated}
-                index_concepts = [*index_concepts, *resources_updated]
                 self.concepts.set(self.concepts.exclude(**filters))
                 batch_index_resources.apply_async(('concept', filters), queue='indexing', permanent=False)
             mappings = reference.mappings
@@ -1376,11 +1373,8 @@ class Expansion(BaseResourceModel):
                 any_ref_with_resources = True
                 resources_updated = list(mappings.values_list('versioned_object_id', flat=True))
                 filters = {'versioned_object_id__in': resources_updated}
-                index_mappings = [*index_mappings, *resources_updated]
                 self.mappings.set(self.mappings.exclude(**filters))
                 batch_index_resources.apply_async(('mapping', filters), queue='indexing', permanent=False)
-
-        self.index_resources(index_concepts, index_mappings)
 
         if any_ref_with_resources:
             removed_reference_ids = [ref.id for ref in self.to_ref_list(references)]
@@ -1538,10 +1532,15 @@ class Expansion(BaseResourceModel):
             concepts, mappings = get_ref_results(reference)
             concepts_updated = self.__exclude_resources(reference, self.concepts, concepts, Concept)
             mappings_updated = self.__exclude_resources(reference, self.mappings, mappings, Mapping)
-            if index and concepts_updated is not False:
-                index_concepts = [*index_concepts, *concepts_updated.values_list('versioned_object_id', flat=True)]
-            if index and mappings_updated is not False:
-                index_mappings = [*index_mappings, *mappings_updated.values_list('versioned_object_id', flat=True)]
+            if index:
+                if concepts_updated is not False:
+                    filters = {
+                        'versioned_object_id__in': list(concepts_updated.values_list('versioned_object_id', flat=True))}
+                    batch_index_resources.apply_async(('concept', filters), queue='indexing', permanent=False)
+                if mappings_updated is not False:
+                    filters = {
+                        'versioned_object_id__in': list(mappings_updated.values_list('versioned_object_id', flat=True))}
+                    batch_index_resources.apply_async(('mapping', filters), queue='indexing', permanent=False)
 
         self.explicit_collection_versions.add(*compact(explicit_valueset_versions))
         self.explicit_source_versions.add(*compact(explicit_system_versions))
