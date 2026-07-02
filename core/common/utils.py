@@ -29,7 +29,7 @@ from requests.auth import HTTPBasicAuth
 from rest_framework.utils import encoders
 
 from core.common.constants import UPDATED_SINCE_PARAM, BULK_IMPORT_QUEUES_COUNT, CURRENT_USER, REQUEST_URL, \
-    TEMP_PREFIX
+    TEMP_PREFIX, HEAD
 from core.settings import EXPORT_SERVICE
 
 
@@ -544,6 +544,25 @@ def to_parent_uri(expression):
 
 def to_owner_uri(expression):
     return '/' + '/'.join(compact(expression.split('/'))[:2]) + '/'
+
+
+def to_parent_kwargs_from_uri(expression):
+    if not expression:
+        return {}
+    # Parse positionally: /orgs|users / owner / repo_type / repo / version / ...
+    parent_uri = to_parent_uri(expression)
+    parts = parent_uri.strip('/').split('/')
+    if len(parts) < 4:
+        return {}
+    version = parts[4] if len(parts) > 4 else HEAD
+    return {
+        'owner_type': 'Organization' if parts[0] == 'orgs' else 'User',
+        'owner': parts[1],
+        'repo_type': f"{parts[2][0].upper()}{parts[2][1:]}",
+        'repo': parts[3],
+        'version': version,
+        'url': '/' + '/'.join(parts[:5]) + '/',
+    }
 
 
 def separate_version(expression):

@@ -30,7 +30,8 @@ from core.common.tasks import seed_children_to_expansion, batch_index_resources,
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
     get_resource_class_from_resource_name, to_snake_case, \
     es_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
-    get_truthy_values, get_falsy_values, get_current_authorized_user, to_camel_case
+    get_truthy_values, get_falsy_values, get_current_authorized_user, to_camel_case, to_parent_uri, \
+    to_parent_kwargs_from_uri
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -1206,7 +1207,8 @@ class Expansion(BaseResourceModel):
 
     @property
     def auto_generated_mnemonic(self):
-        return self.get_auto_expand_mnemonic(get(self, 'collection_version.version'))
+        version = self.collection_version_name or get(self, 'collection_version.version')
+        return self.get_auto_expand_mnemonic(version)
 
     @staticmethod
     def get_auto_expand_mnemonic(version):
@@ -1243,6 +1245,59 @@ class Expansion(BaseResourceModel):
     @property
     def owner_url(self):
         return to_owner_uri(self.uri)
+
+    @property
+    def collection_version_url(self):
+        return to_parent_uri(self.uri)
+
+    @property
+    def collection_version_name(self):
+        return to_parent_kwargs_from_uri(self.uri).get('version')
+
+    @property
+    def collection_version_mnemonic(self):
+        return to_parent_kwargs_from_uri(self.uri).get('repo')
+
+    # Painless script: append each value to the list field only if not already present
+    _APPEND_COLLECTION_FIELDS_SCRIPT = """
+        for (entry in params.entrySet()) {
+            def key = entry.getKey();
+            def vals = entry.getValue();
+            if (ctx._source[key] == null) { ctx._source[key] = []; }
+            for (v in vals) {
+                if (!ctx._source[key].contains(v)) { ctx._source[key].add(v); }
+            }
+        }
+    """
+
+    def batch_index(self, queryset, document, **kwargs):  # pylint: disable=arguments-differ
+        """
+        Override: append this expansion's 5 collection membership fields to each resource's ES doc.
+        No DB query — all values are derived from self.uri and self.mnemonic.
+        Uses a Painless script so existing values from other expansions are preserved.
+        """
+        if get(settings, 'TEST_MODE', False):
+            return
+
+        collection_fields = self._get_resources_index_collection_fields()
+        from core.common.models import BaseModel  # avoid circular import at module level
+        index_name = document()._index._name  # pylint: disable=protected-access
+
+        def get_actions(batch_ids):
+            for rid in batch_ids:
+                yield {
+                    '_op_type': 'update',
+                    '_index': index_name,
+                    '_id': rid,
+                    'script': {
+                        'source': Expansion._APPEND_COLLECTION_FIELDS_SCRIPT,
+                        'params': collection_fields,
+                    },
+                    'upsert': collection_fields,
+                    'scripted_upsert': True,
+                }
+
+        BaseModel.batch_index_partial_by_ids(queryset, document, get_actions)
 
     def apply_parameters(self, queryset, is_concept_queryset):
         parameters = ExpansionParameters(self.parameters, is_concept_queryset)
@@ -1536,9 +1591,12 @@ class Expansion(BaseResourceModel):
             self.index_mappings(mappings)
 
     def seed_children(self, index=True, force_reevaluate=False):
-        return self.add_references(
-            references=self.collection_version.references, index=index,
-            is_adding_all=True, force_reevaluate=force_reevaluate)
+        self.add_references(
+            references=self.collection_version.references,
+            index=index,
+            is_adding_all=True,
+            force_reevaluate=force_reevaluate
+        )
 
     def wait_until_processed(self):  # pragma: no cover
         processing = self.is_processing
@@ -1634,6 +1692,15 @@ class Expansion(BaseResourceModel):
             update_diffs(relation)
 
         return diff
+
+    def _get_resources_index_collection_fields(self):
+        return {
+            'expansion': [self.mnemonic],
+            'collection_version': [self.collection_version_name],
+            'collection': [self.collection_version_mnemonic],
+            'collection_url': [self.collection_version_url],
+            'collection_owner_url': [self.owner_url],
+        }
 
 
 class ExpansionParameters:
