@@ -1634,6 +1634,7 @@ class Expansion(BaseResourceModel):
         temp_version = not bool(expansion.mnemonic)
         if temp_version:
             expansion.mnemonic = generate_temp_version()
+        expansion.is_processing = True
         expansion.clean()
         expansion.full_clean()
         expansion.save()
@@ -1702,6 +1703,14 @@ class Expansion(BaseResourceModel):
             'collection_url': [self.collection_version_url],
             'collection_owner_url': [self.owner_url],
         }
+
+    def clear_processing(self, full_save=False):
+        if self.is_processing:
+            self.is_processing = False
+            if full_save:
+                self.save()
+            else:
+                self.save(update_fields=['is_processing'])
 
 
 class ExpansionParameters:
