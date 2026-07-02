@@ -30,7 +30,7 @@ from core.common.tasks import seed_children_to_expansion, batch_index_resources,
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
     get_resource_class_from_resource_name, to_snake_case, \
     es_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
-    get_truthy_values, get_falsy_values, get_current_authorized_user, to_camel_case
+    get_truthy_values, get_falsy_values, get_current_authorized_user, to_camel_case, to_parent_kwargs_from_uri
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -1206,7 +1206,8 @@ class Expansion(BaseResourceModel):
 
     @property
     def auto_generated_mnemonic(self):
-        return self.get_auto_expand_mnemonic(get(self, 'collection_version.version'))
+        version = self.collection_version_name or get(self, 'collection_version.version')
+        return self.get_auto_expand_mnemonic(version)
 
     @staticmethod
     def get_auto_expand_mnemonic(version):
@@ -1243,6 +1244,65 @@ class Expansion(BaseResourceModel):
     @property
     def owner_url(self):
         return to_owner_uri(self.uri)
+
+    @property
+    def collection_version_url(self):
+        return get(self.collection_kwargs, 'url')
+
+    @property
+    def collection_version_name(self):
+        return get(self.collection_kwargs, 'version')
+
+    @property
+    def collection_version_mnemonic(self):
+        return get(self.collection_kwargs, 'repo')
+
+    @cached_property
+    def collection_kwargs(self):
+        return to_parent_kwargs_from_uri(self.uri)
+
+    # Painless script: append each value to the list field only if not already present
+    _APPEND_COLLECTION_FIELDS_SCRIPT = """
+        for (entry in params.entrySet()) {
+            def key = entry.getKey();
+            def vals = entry.getValue();
+            if (ctx._source[key] == null) { ctx._source[key] = []; }
+            for (v in vals) {
+                if (!ctx._source[key].contains(v)) { ctx._source[key].add(v); }
+            }
+        }
+    """
+
+    def batch_index(self, queryset, document, **kwargs):  # pylint: disable=arguments-differ,unused-argument
+        """
+        Override: append this expansion's 5 collection membership fields to each resource's ES doc.
+        No DB query — all values are derived from self.uri and self.mnemonic.
+        Uses a Painless script so existing values from other expansions are preserved.
+        """
+        if get(settings, 'TEST_MODE', False):
+            return
+
+        collection_fields = self._get_resources_index_collection_fields()
+        from core.common.models import BaseModel  # avoid circular import at module level
+        index_name = document()._index._name  # pylint: disable=protected-access
+
+        def get_actions(batch_ids):
+            # Resources must already be indexed before they are added to an expansion,
+            # so the docs exist in ES. Omitting scripted_upsert avoids creating a skeleton
+            # doc (5 collection fields only) if a race or _index=False causes the doc to be absent.
+            for rid in batch_ids:
+                yield {
+                    '_op_type': 'update',
+                    '_index': index_name,
+                    '_id': rid,
+                    'retry_on_conflict': 3,
+                    'script': {
+                        'source': Expansion._APPEND_COLLECTION_FIELDS_SCRIPT,
+                        'params': collection_fields,
+                    },
+                }
+
+        BaseModel.batch_index_partial_by_ids(queryset, document, get_actions)
 
     def apply_parameters(self, queryset, is_concept_queryset):
         parameters = ExpansionParameters(self.parameters, is_concept_queryset)
@@ -1304,8 +1364,6 @@ class Expansion(BaseResourceModel):
     def delete_references(self, references):
         refs, _ = self.to_ref_list_separated(references)
 
-        index_concepts = []
-        index_mappings = []
         any_ref_with_resources = False
         for reference in refs:
             concepts = reference.concepts
@@ -1313,7 +1371,6 @@ class Expansion(BaseResourceModel):
                 any_ref_with_resources = True
                 resources_updated = list(concepts.values_list('versioned_object_id', flat=True))
                 filters = {'versioned_object_id__in': resources_updated}
-                index_concepts = [*index_concepts, *resources_updated]
                 self.concepts.set(self.concepts.exclude(**filters))
                 batch_index_resources.apply_async(('concept', filters), queue='indexing', permanent=False)
             mappings = reference.mappings
@@ -1321,11 +1378,8 @@ class Expansion(BaseResourceModel):
                 any_ref_with_resources = True
                 resources_updated = list(mappings.values_list('versioned_object_id', flat=True))
                 filters = {'versioned_object_id__in': resources_updated}
-                index_mappings = [*index_mappings, *resources_updated]
                 self.mappings.set(self.mappings.exclude(**filters))
                 batch_index_resources.apply_async(('mapping', filters), queue='indexing', permanent=False)
-
-        self.index_resources(index_concepts, index_mappings)
 
         if any_ref_with_resources:
             removed_reference_ids = [ref.id for ref in self.to_ref_list(references)]
@@ -1483,10 +1537,15 @@ class Expansion(BaseResourceModel):
             concepts, mappings = get_ref_results(reference)
             concepts_updated = self.__exclude_resources(reference, self.concepts, concepts, Concept)
             mappings_updated = self.__exclude_resources(reference, self.mappings, mappings, Mapping)
-            if index and concepts_updated is not False:
-                index_concepts = [*index_concepts, *concepts_updated.values_list('versioned_object_id', flat=True)]
-            if index and mappings_updated is not False:
-                index_mappings = [*index_mappings, *mappings_updated.values_list('versioned_object_id', flat=True)]
+            if index:
+                if concepts_updated is not False:
+                    filters = {
+                        'versioned_object_id__in': list(concepts_updated.values_list('versioned_object_id', flat=True))}
+                    batch_index_resources.apply_async(('concept', filters), queue='indexing', permanent=False)
+                if mappings_updated is not False:
+                    filters = {
+                        'versioned_object_id__in': list(mappings_updated.values_list('versioned_object_id', flat=True))}
+                    batch_index_resources.apply_async(('mapping', filters), queue='indexing', permanent=False)
 
         self.explicit_collection_versions.add(*compact(explicit_valueset_versions))
         self.explicit_source_versions.add(*compact(explicit_system_versions))
@@ -1536,9 +1595,12 @@ class Expansion(BaseResourceModel):
             self.index_mappings(mappings)
 
     def seed_children(self, index=True, force_reevaluate=False):
-        return self.add_references(
-            references=self.collection_version.references, index=index,
-            is_adding_all=True, force_reevaluate=force_reevaluate)
+        self.add_references(
+            references=self.collection_version.references,
+            index=index,
+            is_adding_all=True,
+            force_reevaluate=force_reevaluate
+        )
 
     def wait_until_processed(self):  # pragma: no cover
         processing = self.is_processing
@@ -1635,6 +1697,15 @@ class Expansion(BaseResourceModel):
             update_diffs(relation)
 
         return diff
+
+    def _get_resources_index_collection_fields(self):
+        return {
+            'expansion': [self.mnemonic],
+            'collection_version': [self.collection_version_name],
+            'collection': [self.collection_version_mnemonic],
+            'collection_url': [self.collection_version_url],
+            'collection_owner_url': [self.owner_url],
+        }
 
     def clear_processing(self, full_save=False):
         if self.is_processing:

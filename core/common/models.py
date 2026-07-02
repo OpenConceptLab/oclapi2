@@ -237,25 +237,15 @@ class BaseModel(models.Model):
                 start += batch_size
 
     @staticmethod
-    def batch_index_partial(queryset, document, single_batch, partial_doc, parallel=True):
+    def batch_index_partial_by_ids(queryset, document, get_actions, single_batch=False, parallel=True):
+        """Shared batching loop. get_actions(batch_ids) must yield ES action dicts."""
         if get(settings, 'TEST_MODE', False):
             return
 
         doc = document()
-
         kwargs = {}
         if doc.django.auto_refresh:
             kwargs['refresh'] = doc.django.auto_refresh
-
-        def get_actions(ids):
-            for object_id in ids:
-                yield {
-                    '_op_type': 'update',
-                    '_index': doc._index._name,  # pylint: disable=protected-access
-                    '_id': object_id,
-                    'doc': partial_doc,
-                    'doc_as_upsert': True
-                }
 
         if single_batch:
             ids = queryset.all().values_list('id', flat=True)
@@ -263,13 +253,29 @@ class BaseModel(models.Model):
         else:
             batch_size = 500
             start = 0
-            queryset = queryset.order_by('-id').values_list('id', flat=True)
+            id_qs = queryset.order_by('-id').values_list('id', flat=True)
             while True:
-                batch = list(queryset[start:start+batch_size])
+                batch = list(id_qs[start:start + batch_size])
                 if not batch:
                     break
                 doc._bulk(get_actions(batch), parallel=parallel, **kwargs)  # pylint: disable=protected-access
                 start += batch_size
+
+    @staticmethod
+    def batch_index_partial(queryset, document, single_batch, partial_doc, parallel=True):
+        index_name = document()._index._name  # pylint: disable=protected-access
+
+        def get_actions(ids):
+            for object_id in ids:
+                yield {
+                    '_op_type': 'update',
+                    '_index': index_name,
+                    '_id': object_id,
+                    'doc': partial_doc,
+                    'doc_as_upsert': True,
+                }
+
+        BaseModel.batch_index_partial_by_ids(queryset, document, get_actions, single_batch, parallel)
 
     @staticmethod
     @transaction.atomic

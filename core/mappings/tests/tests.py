@@ -132,16 +132,28 @@ class MappingTest(OCLTestCase):
         user = UserProfile(id=123, username='user')
 
         self.assertEqual(Mapping().owner_name, '')
-        self.assertEqual(Mapping(parent=Source(organization=org)).owner_name, 'org')
-        self.assertEqual(Mapping(parent=Source(user=user)).owner_name, 'user')
+        self.assertEqual(
+            Mapping(parent=Source(organization=org), uri='/orgs/org/sources/source/mappings/m1/').owner_name,
+            'org'
+        )
+        self.assertEqual(
+            Mapping(parent=Source(user=user), uri='/users/user/sources/source/mappings/m1/').owner_name,
+            'user'
+        )
 
     def test_owner_type(self):
         org = Organization(id=123, mnemonic='org')
         user = UserProfile(id=123, username='user')
 
         self.assertIsNone(Mapping().owner_type)
-        self.assertEqual(Mapping(parent=Source(organization=org)).owner_type, 'Organization')
-        self.assertEqual(Mapping(parent=Source(user=user)).owner_type, 'User')
+        self.assertEqual(
+            Mapping(parent=Source(organization=org), uri='/orgs/org/sources/source/mappings/m1/').owner_type,
+            'Organization'
+        )
+        self.assertEqual(
+            Mapping(parent=Source(user=user), uri='/users/user/sources/source/mappings/m1/').owner_type,
+            'User'
+        )
 
     def test_persist_new(self):
         source = OrganizationSourceFactory(version=HEAD)

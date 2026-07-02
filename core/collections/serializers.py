@@ -611,7 +611,7 @@ class ExpansionSerializer(ModelSerializer):
     summary = SerializerMethodField()
     url = CharField(source='uri', read_only=True)
     parameters = JSONField()
-    collection_version = CharField(read_only=True, source='collection_version.version')
+    collection_version = CharField(read_only=True, source='collection_version_name')
 
     class Meta:
         model = Expansion
@@ -654,7 +654,7 @@ class ExpansionDetailSerializer(ModelSerializer):
     explicit_source_versions = SourceVersionListSerializer(many=True, read_only=True)
     evaluated_collection_versions = CollectionVersionListSerializer(many=True, read_only=True)
     evaluated_source_versions = SourceVersionListSerializer(many=True, read_only=True)
-    collection_version = CharField(read_only=True, source='collection_version.version')
+    collection_version = CharField(read_only=True, source='collection_version_name')
 
     class Meta:
         model = Expansion

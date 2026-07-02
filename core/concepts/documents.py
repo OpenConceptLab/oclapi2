@@ -172,26 +172,6 @@ class ConceptDocument(Document):
         return [s.version for s in instance.sources.all()]
 
     @staticmethod
-    def prepare_collection_version(instance):
-        return list(set(instance.expansion_set.values_list('collection_version__version', flat=True)))
-
-    @staticmethod
-    def prepare_expansion(instance):
-        return list(instance.expansion_set.values_list('mnemonic', flat=True))
-
-    @staticmethod
-    def prepare_collection(instance):
-        return list(set(instance.expansion_set.values_list('collection_version__mnemonic', flat=True)))
-
-    @staticmethod
-    def prepare_collection_url(instance):
-        return list(set(list(instance.expansion_set.values_list('collection_version__uri', flat=True))))
-
-    @staticmethod
-    def prepare_collection_owner_url(instance):
-        return list(set(expansion.owner_url for expansion in instance.expansion_set.all()))
-
-    @staticmethod
     def prepare_extras(instance):
         value = {}
 
@@ -256,6 +236,13 @@ class ConceptDocument(Document):
                     'locale': get(s, 'locale')
                 } for s in synonyms
             ]
+
+        expansions = list(instance.expansion_set.only('mnemonic', 'uri'))
+        data['expansion'] = [e.mnemonic for e in expansions]
+        data['collection_version'] = list({e.collection_version_name for e in expansions})
+        data['collection'] = list({e.collection_version_mnemonic for e in expansions})
+        data['collection_url'] = list({e.collection_version_url for e in expansions})
+        data['collection_owner_url'] = list({e.owner_url for e in expansions})
 
         return data
 

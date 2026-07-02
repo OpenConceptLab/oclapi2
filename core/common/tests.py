@@ -42,7 +42,8 @@ from core.common.utils import (
     get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string, to_parent_uri_from_kwargs,
     set_current_user, get_current_user, set_request_url, get_request_url, nested_dict_values, chunks, api_get,
     split_list_by_condition, is_zip_file, get_date_range_label, get_prev_month, from_string_to_date, get_end_of_month,
-    get_start_of_month, es_id_in, web_url, get_queue_task_names, get_resource_class_from_resource_uri, encode_string)
+    get_start_of_month, es_id_in, web_url, get_queue_task_names, get_resource_class_from_resource_uri, encode_string,
+    to_parent_kwargs_from_uri)
 from core.concepts.models import Concept
 from core.orgs.models import Organization
 from core.sources.models import Source
@@ -637,6 +638,30 @@ class UtilsTest(OCLTestCase):
             "/users/user/collections/coll/coll-version/"
         )
         self.assertEqual(
+            to_parent_uri("/users/user/collections/coll/coll-version/references/r1/"),
+            "/users/user/collections/coll/coll-version/"
+        )
+        self.assertEqual(
+            to_parent_uri("/users/user/collections/coll/references/r1/"),
+            "/users/user/collections/coll/"
+        )
+        self.assertEqual(
+            to_parent_uri("/users/user/collections/coll/references/"),
+            "/users/user/collections/coll/"
+        )
+        self.assertEqual(
+            to_parent_uri("/users/user/collections/coll/coll-version/expansions/e1/"),
+            "/users/user/collections/coll/coll-version/"
+        )
+        self.assertEqual(
+            to_parent_uri("/users/user/collections/coll/expansions/e1/"),
+            "/users/user/collections/coll/"
+        )
+        self.assertEqual(
+            to_parent_uri("/users/user/collections/coll/expansions/"),
+            "/users/user/collections/coll/"
+        )
+        self.assertEqual(
             to_parent_uri("/users/user/collections/coll/"),
             "/users/user/collections/coll/"
         )
@@ -1055,6 +1080,55 @@ class UtilsTest(OCLTestCase):
             task_new_mock.mock_calls[9],
             call(queue='bulk_import_1', username='datim-admin', import_queue='merfy25')
         )
+
+    def test_to_parent_kwargs_from_uri(self):
+        self.assertEqual(
+            to_parent_kwargs_from_uri('/orgs/o/collections/c/HEAD/expansions/e1/'),
+            {'owner_type': 'Organization', 'owner': 'o', 'repo_type': 'Collections',
+             'repo': 'c', 'version': 'HEAD', 'url': '/orgs/o/collections/c/HEAD/'}
+        )
+        self.assertEqual(
+            to_parent_kwargs_from_uri('/orgs/OCL/collections/MyCol/v1.0/expansions/e1/'),
+            {'owner_type': 'Organization', 'owner': 'OCL', 'repo_type': 'Collections',
+             'repo': 'MyCol', 'version': 'v1.0', 'url': '/orgs/OCL/collections/MyCol/v1.0/'}
+        )
+        self.assertEqual(
+            to_parent_kwargs_from_uri('/users/admin/collections/c1/v2/'),
+            {'owner_type': 'User', 'owner': 'admin', 'repo_type': 'Collections',
+             'repo': 'c1', 'version': 'v2', 'url': '/users/admin/collections/c1/v2/'}
+        )
+        self.assertEqual(
+            to_parent_kwargs_from_uri('/users/admin/collections/c1/'),
+            {'owner_type': 'User', 'owner': 'admin', 'repo_type': 'Collections',
+             'repo': 'c1', 'version': HEAD, 'url': '/users/admin/collections/c1/'}
+        )
+        self.assertEqual(
+            to_parent_kwargs_from_uri('/orgs/CIEL/sources/CIEL/v2026-02-26/'),
+            {'owner_type': 'Organization', 'owner': 'CIEL', 'repo_type': 'Sources',
+             'repo': 'CIEL', 'version': 'v2026-02-26', 'url': '/orgs/CIEL/sources/CIEL/v2026-02-26/'}
+        )
+        self.assertEqual(
+            to_parent_kwargs_from_uri('/orgs/CIEL/sources/CIEL/v2026-02-26/concepts/123/456/'),
+            {'owner_type': 'Organization', 'owner': 'CIEL', 'repo_type': 'Sources',
+             'repo': 'CIEL', 'version': 'v2026-02-26', 'url': '/orgs/CIEL/sources/CIEL/v2026-02-26/'}
+        )
+        self.assertEqual(
+            to_parent_kwargs_from_uri('/orgs/CIEL/sources/CIEL/v2026-02-26/mappings/123/456/'),
+            {'owner_type': 'Organization', 'owner': 'CIEL', 'repo_type': 'Sources',
+             'repo': 'CIEL', 'version': 'v2026-02-26', 'url': '/orgs/CIEL/sources/CIEL/v2026-02-26/'}
+        )
+        self.assertEqual(
+            to_parent_kwargs_from_uri('/orgs/CIEL/sources/CIEL/concepts/123/456/'),
+            {'owner_type': 'Organization', 'owner': 'CIEL', 'repo_type': 'Sources',
+             'repo': 'CIEL', 'version': 'HEAD', 'url': '/orgs/CIEL/sources/CIEL/'}
+        )
+        self.assertEqual(
+            to_parent_kwargs_from_uri('/orgs/CIEL/sources/CIEL/mappings/123/456/'),
+            {'owner_type': 'Organization', 'owner': 'CIEL', 'repo_type': 'Sources',
+             'repo': 'CIEL', 'version': 'HEAD', 'url': '/orgs/CIEL/sources/CIEL/'}
+        )
+        self.assertEqual(to_parent_kwargs_from_uri(''), {})
+        self.assertEqual(to_parent_kwargs_from_uri(None), {})
 
 
 class BaseModelTest(OCLTestCase):

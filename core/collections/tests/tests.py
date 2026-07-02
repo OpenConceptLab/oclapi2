@@ -1533,6 +1533,55 @@ class ExpansionTest(OCLTestCase):
         self.assertIn(source_v1.url, diff)
         self.assertNotIn(source2_v1.url, diff)
 
+    def test_batch_index(self):
+        from django.test import override_settings
+        collection = OrganizationCollectionFactory(version='v1')
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        concept1 = ConceptFactory()
+        concept2 = ConceptFactory(parent=concept1.parent)
+        mapping = MappingFactory(from_concept=concept1, to_concept=concept2, parent=concept1.parent)
+        expansion.concepts.set([concept1, concept2])
+        expansion.mappings.set([mapping])
+
+        with override_settings(TEST_MODE=False):
+            with patch.object(ConceptDocument, '_bulk') as concept_bulk_mock:
+                expansion.batch_index(expansion.concepts, ConceptDocument)
+                self.assertEqual(concept_bulk_mock.call_count, 1)
+                actions = list(concept_bulk_mock.call_args[0][0])
+                self.assertEqual(len(actions), 2)
+                for action in actions:
+                    self.assertEqual(action['_op_type'], 'update')
+                    self.assertEqual(action['_index'], 'concepts')
+                    self.assertIn(action['_id'], [concept1.id, concept2.id])
+                    self.assertEqual(action['script']['params']['expansion'], [expansion.mnemonic])
+                    self.assertEqual(
+                        action['script']['params']['collection_version'], [expansion.collection_version_name])
+                    self.assertEqual(
+                        action['script']['params']['collection'], [expansion.collection_version_mnemonic])
+                    self.assertEqual(
+                        action['script']['params']['collection_url'], [expansion.collection_version_url])
+                    self.assertEqual(
+                        action['script']['params']['collection_owner_url'], [expansion.owner_url])
+                    self.assertEqual(action['retry_on_conflict'], 3)
+                    self.assertNotIn('upsert', action)
+                    self.assertNotIn('scripted_upsert', action)
+
+            with patch.object(MappingDocument, '_bulk') as mapping_bulk_mock:
+                expansion.batch_index(expansion.mappings, MappingDocument)
+                self.assertEqual(mapping_bulk_mock.call_count, 1)
+                actions = list(mapping_bulk_mock.call_args[0][0])
+                self.assertEqual(len(actions), 1)
+                self.assertEqual(actions[0]['_id'], mapping.id)
+                self.assertEqual(actions[0]['script']['params']['expansion'], [expansion.mnemonic])
+
+    def test_batch_index_empty_queryset(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+
+        with patch.object(ConceptDocument, '_bulk') as bulk_mock:
+            expansion.batch_index(Concept.objects.none(), ConceptDocument)
+            bulk_mock.assert_not_called()
+
 
 class ExpansionParametersTest(OCLTestCase):
     def test_apply_active_only(self):
