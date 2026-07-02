@@ -755,9 +755,9 @@ class SourceChildMixin(ChecksumModel):
 
     @property
     def parent_url(self):
-        return to_parent_uri(self.uri)
+        return get(self.parent_url_kwargs, 'url')
 
-    @property
+    @cached_property
     def parent_url_kwargs(self):
         kwargs = to_parent_kwargs_from_uri(self.uri)
 

@@ -1248,15 +1248,19 @@ class Expansion(BaseResourceModel):
 
     @property
     def collection_version_url(self):
-        return to_parent_uri(self.uri)
+        return get(self.collection_kwargs, 'url')
 
     @property
     def collection_version_name(self):
-        return to_parent_kwargs_from_uri(self.uri).get('version')
+        return get(self.collection_kwargs, 'version')
 
     @property
     def collection_version_mnemonic(self):
-        return to_parent_kwargs_from_uri(self.uri).get('repo')
+        return get(self.collection_kwargs, 'repo')
+
+    @cached_property
+    def collection_kwargs(self):
+        return to_parent_kwargs_from_uri(self.uri)
 
     # Painless script: append each value to the list field only if not already present
     _APPEND_COLLECTION_FIELDS_SCRIPT = """
