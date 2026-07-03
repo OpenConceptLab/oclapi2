@@ -1,6 +1,7 @@
-from unittest.mock import patch, ANY
+from unittest.mock import ANY, Mock, patch
 
 import factory
+from django.test import override_settings
 from pydash import omit
 
 from core.collections.models import CollectionReference
@@ -122,6 +123,102 @@ class ConceptTest(OCLTestCase):
         )
 
         self.assertEqual(scores, [Reranker.MISSING_SCORE, Reranker.MISSING_SCORE])
+
+    @patch.object(Reranker, '_get_encoder')
+    def test_reranker_uses_sigmoid_activation_for_qwen_models(self, get_encoder_mock):
+        encoder_mock = Mock()
+        encoder_mock.predict.return_value = [0.42]
+        get_encoder_mock.return_value = encoder_mock
+        reranker = Reranker(model_name='Qwen/Qwen3-Reranker-0.6B')
+
+        scores = reranker._predict_scores(  # pylint: disable=protected-access
+            hits=[{'_source': {'name': 'malaria test'}}],
+            txt='malaria',
+            name_key='name',
+            source_attr='_source',
+            should_convert_source_to_dict=True,
+        )
+
+        self.assertEqual(scores, [0.42])
+        _, kwargs = encoder_mock.predict.call_args
+        self.assertIsNotNone(kwargs['activation_fn'])
+        self.assertEqual(kwargs['activation_fn'].__class__.__name__, 'Sigmoid')
+
+    @patch.object(Reranker, '_get_encoder')
+    def test_reranker_uses_legacy_activation_fct_kwarg_when_needed(self, get_encoder_mock):
+        class LegacyEncoder:
+            def predict(self, _pairs, activation_fct=None):
+                self.activation_fct = activation_fct
+                return [0.42]
+
+        encoder = LegacyEncoder()
+        get_encoder_mock.return_value = encoder
+        reranker = Reranker(model_name='Qwen/Qwen3-Reranker-0.6B')
+
+        scores = reranker._predict_scores(  # pylint: disable=protected-access
+            hits=[{'_source': {'name': 'malaria test'}}],
+            txt='malaria',
+            name_key='name',
+            source_attr='_source',
+            should_convert_source_to_dict=True,
+        )
+
+        self.assertEqual(scores, [0.42])
+        self.assertIsNotNone(encoder.activation_fct)
+        self.assertEqual(encoder.activation_fct.__class__.__name__, 'Sigmoid')
+
+    @override_settings(RERANKER_CUSTOM_ENCODER_CACHE_SIZE=1, RERANKER_CUSTOM_ENCODER_CACHE_TTL=300)
+    @patch.object(Reranker, '_load_encoder')
+    def test_custom_reranker_encoder_is_cached_between_requests(self, load_encoder_mock):
+        encoder = Mock()
+        load_encoder_mock.return_value = encoder
+        Reranker.CUSTOM_ENCODER_CACHE.clear()
+
+        first = Reranker(model_name='Qwen/Qwen3-Reranker-0.6B')
+        second = Reranker(model_name='Qwen/Qwen3-Reranker-0.6B')
+
+        self.assertIs(first.encoder, second.encoder)
+        load_encoder_mock.assert_called_once_with('Qwen/Qwen3-Reranker-0.6B')
+        Reranker.CUSTOM_ENCODER_CACHE.clear()
+
+    @override_settings(RERANKER_CUSTOM_ENCODER_CACHE_SIZE=1, RERANKER_CUSTOM_ENCODER_CACHE_TTL=300)
+    @patch.object(Reranker, '_release_encoder')
+    @patch.object(Reranker, '_load_encoder')
+    def test_custom_reranker_encoder_eviction_releases_previous_model(self, load_encoder_mock, release_encoder_mock):
+        old_encoder = Mock()
+        new_encoder = Mock()
+        load_encoder_mock.side_effect = [old_encoder, new_encoder]
+        Reranker.CUSTOM_ENCODER_CACHE.clear()
+
+        first = Reranker(model_name='Qwen/Qwen3-Reranker-0.6B')
+        second = Reranker(model_name='BAAI/bge-reranker-v2-m3-custom')
+
+        self.assertIs(first.encoder, old_encoder)
+        self.assertIs(second.encoder, new_encoder)
+        release_encoder_mock.assert_called_once_with(old_encoder)
+        self.assertEqual(list(Reranker.CUSTOM_ENCODER_CACHE.keys()), ['BAAI/bge-reranker-v2-m3-custom'])
+        Reranker.CUSTOM_ENCODER_CACHE.clear()
+
+    @override_settings(RERANKER_CUSTOM_ENCODER_CACHE_SIZE=1, RERANKER_CUSTOM_ENCODER_CACHE_TTL=10)
+    @patch.object(Reranker, '_release_encoder')
+    @patch.object(Reranker, '_load_encoder')
+    @patch('core.common.search.time.time')
+    def test_custom_reranker_encoder_ttl_expiry_reloads_model(
+            self, time_mock, load_encoder_mock, release_encoder_mock):
+        first_encoder = Mock()
+        second_encoder = Mock()
+        time_mock.side_effect = [100, 111]
+        load_encoder_mock.side_effect = [first_encoder, second_encoder]
+        Reranker.CUSTOM_ENCODER_CACHE.clear()
+
+        first = Reranker(model_name='Qwen/Qwen3-Reranker-0.6B')
+        second = Reranker(model_name='Qwen/Qwen3-Reranker-0.6B')
+
+        self.assertIs(first.encoder, first_encoder)
+        self.assertIs(second.encoder, second_encoder)
+        release_encoder_mock.assert_called_once_with(first_encoder)
+        self.assertEqual(load_encoder_mock.call_count, 2)
+        Reranker.CUSTOM_ENCODER_CACHE.clear()
 
     def test_default_name_locales(self):
         es_locale = ConceptNameFactory.build(locale='es')
