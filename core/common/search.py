@@ -375,7 +375,7 @@ class Reranker:
     ]
     SCORE_KEY = 'search_rerank_score'
     MISSING_SCORE = -1000000.0
-    QWEN_RERANKER_PREFIX = 'Qwen/'
+    SIGMOID_MODELS = ['Qwen/']
     CUSTOM_ENCODER_CACHE = OrderedDict()
     CUSTOM_ENCODER_CACHE_LOCK = threading.Lock()
 
@@ -423,9 +423,19 @@ class Reranker:
     def _get_activation_fn(self):
         """Return the score activation required by the configured reranker model."""
         model_name = self.model_name or self.default_model
-        if isinstance(model_name, str) and model_name.startswith(self.QWEN_RERANKER_PREFIX):
+        if isinstance(model_name, str) and self.is_sigmoid_model(model_name):
             return torch.nn.Sigmoid()
         return None
+
+    def is_sigmoid_model(self, model_name):
+        result = False
+        for model in self.SIGMOID_MODELS:
+            result = model_name == model
+            if not result:
+                result = model_name.startswith(model)
+            if result:
+                break
+        return result
 
     def _get_predict_kwargs(self):
         """Return compatibility kwargs for CrossEncoder.predict across library versions."""
