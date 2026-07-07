@@ -1720,3 +1720,226 @@ class LexicalVariantsTest(OCLTestCase):
 
         terms = LexicalVariantDictionary.get_variant_terms('childhood leukaemia colour')
         self.assertEqual(set(terms), {'leukemia', 'color'})
+
+
+class VectorEmbedTest(OCLTestCase):
+    def setUp(self):
+        self.embedder = None
+
+    @override_settings(EMBEDDING_SERVICE_URL='http://embed-service:8008', INFINITY_API_KEY='test-key')
+    @patch('requests.post')
+    def test_embed_uses_service_when_url_configured(self, mock_post):
+        mock_post.return_value = Mock(
+            status_code=200,
+            json=Mock(return_value={'data': [{'embedding': [0.1, 0.2, 0.3]}]})
+        )
+        from core.common.search import VectorEmbed
+        result = VectorEmbed().embed('malaria')
+        self.assertEqual(result, [0.1, 0.2, 0.3])
+        mock_post.assert_called_once()
+        call_kwargs = mock_post.call_args
+        self.assertIn('/embeddings', call_kwargs[0][0])
+        self.assertEqual(call_kwargs[1]['headers']['Authorization'], 'Bearer test-key')
+        self.assertEqual(call_kwargs[1]['json']['input'], 'malaria')
+
+    @override_settings(EMBEDDING_SERVICE_URL='http://embed-service:8008', INFINITY_API_KEY='')
+    @patch('requests.post')
+    def test_embed_falls_back_to_local_on_service_error(self, mock_post):
+        mock_post.side_effect = Exception('connection refused')
+        from core.common.search import VectorEmbed
+        embedder = VectorEmbed()
+        with patch.object(embedder, '_get_embedding_locally', return_value=[0.4, 0.5]) as mock_local:
+            result = embedder.embed('diabetes')
+            mock_local.assert_called_once_with('diabetes')
+            self.assertEqual(result, [0.4, 0.5])
+
+    @override_settings(EMBEDDING_SERVICE_URL='')
+    def test_embed_uses_local_when_no_service_url(self):
+        from core.common.search import VectorEmbed
+        embedder = VectorEmbed()
+        with patch.object(embedder, '_get_embedding_locally', return_value=[0.1, 0.2]) as mock_local:
+            result = embedder.embed('hypertension')
+            mock_local.assert_called_once_with('hypertension')
+            self.assertEqual(result, [0.1, 0.2])
+
+    @override_settings(EMBEDDING_SERVICE_URL='http://embed-service:8008', INFINITY_API_KEY='')
+    @patch('requests.post')
+    def test_embed_uses_custom_model_name(self, mock_post):
+        mock_post.return_value = Mock(
+            status_code=200,
+            json=Mock(return_value={'data': [{'embedding': [0.9]}]})
+        )
+        from core.common.search import VectorEmbed
+        VectorEmbed(model_name='custom/model').embed('test')
+        self.assertEqual(mock_post.call_args[1]['json']['model'], 'custom/model')
+
+    @override_settings(EMBEDDING_SERVICE_URL='')
+    def test_embed_returns_none_when_local_load_fails(self):
+        from core.common.search import VectorEmbed
+        embedder = VectorEmbed()
+        with patch('sentence_transformers.SentenceTransformer', side_effect=Exception('disk full')):
+            result = embedder.embed('hypertension')
+            self.assertIsNone(result)
+
+    @override_settings(EMBEDDING_SERVICE_URL='http://embed-service:8008', ENV='ci')
+    def test_embed_short_circuits_in_ci(self):
+        from core.common.search import VectorEmbed
+        embedder = VectorEmbed()
+        with patch.object(embedder, '_get_embedding_locally') as mock_local, \
+                patch('requests.post') as mock_post:
+            result = embedder.embed('malaria')
+            self.assertIsNone(result)
+            mock_local.assert_not_called()
+            mock_post.assert_not_called()
+
+
+class RerankerTest(OCLTestCase):
+    def _make_hit(self, name, use_search_meta=False):
+        if use_search_meta:
+            return {'name': name, 'search_meta': {}}
+        return {'name': name}
+
+    @override_settings(EMBEDDING_SERVICE_URL='http://embed-service:8008', INFINITY_API_KEY='test-key')
+    @patch('requests.post')
+    def test_rerank_uses_service_when_url_configured(self, mock_post):
+        mock_post.return_value = Mock(
+            status_code=200,
+            json=Mock(return_value={
+                'results': [
+                    {'index': 0, 'relevance_score': 0.9},
+                    {'index': 1, 'relevance_score': 0.3},
+                ]
+            })
+        )
+        from core.common.search import Reranker
+        hits = [self._make_hit('malaria fever'), self._make_hit('diabetes')]
+        result = Reranker().rerank(hits, 'malaria', order_results=False)
+        self.assertEqual(result[0]['search_rerank_score'], 0.9)
+        self.assertEqual(result[1]['search_rerank_score'], 0.3)
+        mock_post.assert_called_once()
+        self.assertIn('/rerank', mock_post.call_args[0][0])
+
+    @override_settings(EMBEDDING_SERVICE_URL='http://embed-service:8008', INFINITY_API_KEY='test-key')
+    @patch('requests.post')
+    def test_rerank_falls_back_to_local_on_service_error(self, mock_post):
+        mock_post.side_effect = Exception('timeout')
+        from core.common.search import Reranker
+        reranker = Reranker()
+        hits = [self._make_hit('malaria')]
+        with patch.object(reranker, '_get_rerank_scores_locally', return_value=[0.7]) as mock_local:
+            reranker.rerank(hits, 'malaria', order_results=False)
+            mock_local.assert_called_once()
+
+    @override_settings(EMBEDDING_SERVICE_URL='http://embed-service:8008', INFINITY_API_KEY='test-key')
+    @patch('requests.post')
+    def test_rerank_returns_missing_score_when_both_fail(self, mock_post):
+        mock_post.side_effect = Exception('timeout')
+        from core.common.search import Reranker
+        reranker = Reranker()
+        with patch.object(reranker, '_get_rerank_scores_locally', return_value=[Reranker.MISSING_SCORE]):
+            hits = [self._make_hit('malaria')]
+            result = reranker.rerank(hits, 'malaria', order_results=False)
+            self.assertEqual(result[0]['search_rerank_score'], Reranker.MISSING_SCORE)
+
+    @override_settings(EMBEDDING_SERVICE_URL='')
+    def test_rerank_uses_local_when_no_service_url(self):
+        from core.common.search import Reranker
+        reranker = Reranker()
+        hits = [self._make_hit('malaria')]
+        with patch.object(reranker, '_get_rerank_scores_locally', return_value=[0.8]) as mock_local:
+            reranker.rerank(hits, 'malaria', order_results=False)
+            mock_local.assert_called_once()
+
+    def test_rerank_returns_empty_on_no_hits(self):
+        from core.common.search import Reranker
+        result = Reranker().rerank([], 'malaria')
+        self.assertEqual(result, [])
+
+    def test_rerank_returns_missing_score_on_blank_query(self):
+        from core.common.search import Reranker
+        hits = [self._make_hit('malaria')]
+        result = Reranker().rerank(hits, '   ', order_results=False)
+        self.assertEqual(result[0]['search_rerank_score'], Reranker.MISSING_SCORE)
+
+    def test_rerank_skips_hits_with_missing_name(self):
+        from core.common.search import Reranker
+        reranker = Reranker()
+        hits = [self._make_hit(''), self._make_hit('malaria')]
+        with patch.object(reranker, '_get_rerank_scores_locally', return_value=[0.9]) as mock_local:
+            result = reranker.rerank(hits, 'malaria', order_results=False)
+            # only one valid doc passed to scorer
+            self.assertEqual(len(mock_local.call_args[0][1]), 1)
+            self.assertEqual(result[0]['search_rerank_score'], Reranker.MISSING_SCORE)
+            self.assertEqual(result[1]['search_rerank_score'], 0.9)
+
+    @override_settings(EMBEDDING_SERVICE_URL='http://embed-service:8008', INFINITY_API_KEY='test-key')
+    @patch('requests.post')
+    def test_rerank_orders_results_by_score_descending(self, mock_post):
+        mock_post.return_value = Mock(
+            status_code=200,
+            json=Mock(return_value={
+                'results': [
+                    {'index': 0, 'relevance_score': 0.2},
+                    {'index': 1, 'relevance_score': 0.8},
+                ]
+            })
+        )
+        from core.common.search import Reranker
+        hits = [self._make_hit('diabetes'), self._make_hit('malaria fever')]
+        result = Reranker().rerank(hits, 'malaria')
+        self.assertEqual(result[0]['name'], 'malaria fever')
+        self.assertEqual(result[1]['name'], 'diabetes')
+
+    @override_settings(EMBEDDING_SERVICE_URL='http://embed-service:8008', INFINITY_API_KEY='test-key')
+    @patch('requests.post')
+    def test_rerank_assigns_score_to_search_meta_when_present(self, mock_post):
+        mock_post.return_value = Mock(
+            status_code=200,
+            json=Mock(return_value={'results': [{'index': 0, 'relevance_score': 0.5}]})
+        )
+        from core.common.search import Reranker
+        hits = [self._make_hit('malaria', use_search_meta=True)]
+        result = Reranker().rerank(hits, 'malaria', order_results=False)
+        self.assertEqual(result[0]['search_meta']['search_rerank_score'], 0.5)
+        self.assertEqual(result[0]['search_meta']['search_normalized_score'], 50.0)
+
+    @override_settings(EMBEDDING_SERVICE_URL='http://embed-service:8008', ENV='ci')
+    def test_rerank_short_circuits_in_ci(self):
+        from core.common.search import Reranker
+        reranker = Reranker()
+        with patch.object(reranker, '_get_rerank_scores_locally') as mock_local, \
+                patch('requests.post') as mock_post:
+            result = reranker.rerank([self._make_hit('malaria')], 'malaria', order_results=False)
+            self.assertEqual(result[0]['search_rerank_score'], Reranker.MISSING_SCORE)
+            mock_local.assert_not_called()
+            mock_post.assert_not_called()
+
+    @override_settings(EMBEDDING_SERVICE_URL='http://embed-service:8008', ENCODER_MODEL_NAME=None)
+    def test_rerank_skips_when_no_default_model_configured(self):
+        # qa sets ENCODER_MODEL_NAME to None so reranking is a no-op unless an explicit model is requested
+        from core.common.search import Reranker
+        with patch('requests.post') as mock_post:
+            result = Reranker().rerank([self._make_hit('malaria')], 'malaria', order_results=False)
+            self.assertEqual(result[0]['search_rerank_score'], Reranker.MISSING_SCORE)
+            mock_post.assert_not_called()
+
+    @override_settings(EMBEDDING_SERVICE_URL='')
+    def test_rerank_caches_local_encoder_across_instances(self):
+        from core.common.search import Reranker
+        Reranker._LOCAL_MODELS.clear()  # pylint: disable=protected-access
+        with patch.object(Reranker, '_get_encoder') as mock_get_encoder:
+            mock_get_encoder.return_value = Mock(predict=Mock(return_value=[0.5]))
+            Reranker().rerank([self._make_hit('malaria')], 'malaria', order_results=False)
+            Reranker().rerank([self._make_hit('malaria')], 'malaria', order_results=False)
+            mock_get_encoder.assert_called_once()
+
+    @override_settings(EMBEDDING_SERVICE_URL='http://embed-service:8008', INFINITY_API_KEY='test-key')
+    @patch('requests.post')
+    def test_rerank_uses_custom_model(self, mock_post):
+        mock_post.return_value = Mock(
+            status_code=200,
+            json=Mock(return_value={'results': [{'index': 0, 'relevance_score': 0.6}]})
+        )
+        from core.common.search import Reranker
+        Reranker(model_name='custom/reranker').rerank([self._make_hit('malaria')], 'malaria')
+        self.assertEqual(mock_post.call_args[1]['json']['model'], 'custom/reranker')
