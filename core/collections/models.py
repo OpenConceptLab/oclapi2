@@ -1273,23 +1273,22 @@ class Expansion(BaseResourceModel):
         }
     """
 
-    def batch_index(self, queryset, document, **kwargs):  # pylint: disable=arguments-differ,unused-argument
+    def batch_index(self, queryset, document, **kwargs):  # pylint: disable=arguments-differ
         """
         Override: append this expansion's 5 collection membership fields to each resource's ES doc.
         No DB query — all values are derived from self.uri and self.mnemonic.
         Uses a Painless script so existing values from other expansions are preserved.
+        Falls back to full re-index for any docs not yet present in ES.
         """
         if get(settings, 'TEST_MODE', False):
             return
 
         collection_fields = self._get_resources_index_collection_fields()
         from core.common.models import BaseModel  # avoid circular import at module level
+        from elasticsearch.helpers import BulkIndexError  # noqa: PLC0415
         index_name = document()._index._name  # pylint: disable=protected-access
 
         def get_actions(batch_ids):
-            # Resources must already be indexed before they are added to an expansion,
-            # so the docs exist in ES. Omitting scripted_upsert avoids creating a skeleton
-            # doc (5 collection fields only) if a race or _index=False causes the doc to be absent.
             for rid in batch_ids:
                 yield {
                     '_op_type': 'update',
@@ -1302,7 +1301,26 @@ class Expansion(BaseResourceModel):
                     },
                 }
 
-        BaseModel.batch_index_partial_by_ids(queryset, document, get_actions)
+        try:
+            BaseModel.batch_index_partial_by_ids(queryset, document, get_actions)
+        except BulkIndexError as err:
+            missing_ids = {
+                e['update']['_id']
+                for e in err.errors
+                if e.get('update', {}).get('status') == 404
+            }
+            real_errors = [e for e in err.errors if e.get('update', {}).get('status') != 404]
+            if real_errors:
+                raise BulkIndexError(f'{len(real_errors)} document(s) failed to index.', real_errors) from err
+            if missing_ids:
+                # Docs not yet in ES — full index so they appear with all fields including collection membership
+                BaseModel.batch_index_full(
+                    single_batch=False,
+                    queryset=queryset.filter(id__in=missing_ids),
+                    document=document,
+                    prefetch=kwargs.get('prefetch', []),
+                    select_related=kwargs.get('select_related', []),
+                )
 
     def apply_parameters(self, queryset, is_concept_queryset):
         parameters = ExpansionParameters(self.parameters, is_concept_queryset)
