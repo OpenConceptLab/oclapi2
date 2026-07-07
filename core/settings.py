@@ -644,6 +644,10 @@ MINIO_SECURE = os.environ.get('MINIO_SECURE') == 'TRUE'
 NO_LM = os.environ.get('NO_LM') == 'TRUE'
 RERANKER_CUSTOM_ENCODER_CACHE_SIZE = int(os.environ.get('RERANKER_CUSTOM_ENCODER_CACHE_SIZE', 1))
 RERANKER_CUSTOM_ENCODER_CACHE_TTL = int(os.environ.get('RERANKER_CUSTOM_ENCODER_CACHE_TTL', 60 * 5))
+RERANKER_SIGMOID_MODEL_PREFIXES = [
+    value.strip() for value in os.environ.get('RERANKER_SIGMOID_MODEL_PREFIXES', 'Qwen/').split(',')
+    if value.strip()
+]
 ENCODER_MODEL_NAME = None
 if ENV not in ['ci', 'demo'] and not NO_LM:
     LM_MODEL_NAME = 'all-MiniLM-L6-v2'

@@ -1,3 +1,4 @@
+import threading
 from unittest.mock import ANY, Mock, patch
 
 import factory
@@ -109,9 +110,9 @@ class ConceptTest(OCLTestCase):
 
         self.assertEqual(concept.display_locale, preferred_locale.locale)
 
-    @patch.object(Reranker, '_get_encoder')
-    def test_reranker_uses_finite_fallback_score_for_missing_candidate_text(self, get_encoder_mock):
-        get_encoder_mock.return_value = None
+    @patch.object(Reranker, '_get_encoder_state')
+    def test_reranker_uses_finite_fallback_score_for_missing_candidate_text(self, get_encoder_state_mock):
+        get_encoder_state_mock.return_value = {'encoder': None, 'predict_lock': Mock()}
         reranker = Reranker()
 
         scores = reranker._predict_scores(  # pylint: disable=protected-access
@@ -124,11 +125,11 @@ class ConceptTest(OCLTestCase):
 
         self.assertEqual(scores, [Reranker.MISSING_SCORE, Reranker.MISSING_SCORE])
 
-    @patch.object(Reranker, '_get_encoder')
-    def test_reranker_uses_sigmoid_activation_for_qwen_models(self, get_encoder_mock):
+    @patch.object(Reranker, '_get_encoder_state')
+    def test_reranker_uses_sigmoid_activation_for_qwen_models(self, get_encoder_state_mock):
         encoder_mock = Mock()
         encoder_mock.predict.return_value = [0.42]
-        get_encoder_mock.return_value = encoder_mock
+        get_encoder_state_mock.return_value = {'encoder': encoder_mock, 'predict_lock': threading.Lock()}
         reranker = Reranker(model_name='Qwen/Qwen3-Reranker-0.6B')
 
         scores = reranker._predict_scores(  # pylint: disable=protected-access
@@ -144,16 +145,13 @@ class ConceptTest(OCLTestCase):
         self.assertIsNotNone(kwargs['activation_fn'])
         self.assertEqual(kwargs['activation_fn'].__class__.__name__, 'Sigmoid')
 
-    @patch.object(Reranker, '_get_encoder')
-    def test_reranker_uses_legacy_activation_fct_kwarg_when_needed(self, get_encoder_mock):
-        class LegacyEncoder:
-            def predict(self, _pairs, activation_fct=None):
-                self.activation_fct = activation_fct
-                return [0.42]
-
-        encoder = LegacyEncoder()
-        get_encoder_mock.return_value = encoder
-        reranker = Reranker(model_name='Qwen/Qwen3-Reranker-0.6B')
+    @override_settings(RERANKER_SIGMOID_MODEL_PREFIXES=['myorg/qwen3-reranker-ft'])
+    @patch.object(Reranker, '_get_encoder_state')
+    def test_reranker_uses_configured_sigmoid_prefixes(self, get_encoder_state_mock):
+        encoder_mock = Mock()
+        encoder_mock.predict.return_value = [0.42]
+        get_encoder_state_mock.return_value = {'encoder': encoder_mock, 'predict_lock': threading.Lock()}
+        reranker = Reranker(model_name='myorg/qwen3-reranker-ft-v1')
 
         scores = reranker._predict_scores(  # pylint: disable=protected-access
             hits=[{'_source': {'name': 'malaria test'}}],
@@ -164,8 +162,9 @@ class ConceptTest(OCLTestCase):
         )
 
         self.assertEqual(scores, [0.42])
-        self.assertIsNotNone(encoder.activation_fct)
-        self.assertEqual(encoder.activation_fct.__class__.__name__, 'Sigmoid')
+        _, kwargs = encoder_mock.predict.call_args
+        self.assertIsNotNone(kwargs['activation_fn'])
+        self.assertEqual(kwargs['activation_fn'].__class__.__name__, 'Sigmoid')
 
     @override_settings(RERANKER_CUSTOM_ENCODER_CACHE_SIZE=1, RERANKER_CUSTOM_ENCODER_CACHE_TTL=300)
     @patch.object(Reranker, '_load_encoder')
@@ -182,9 +181,9 @@ class ConceptTest(OCLTestCase):
         Reranker.CUSTOM_ENCODER_CACHE.clear()
 
     @override_settings(RERANKER_CUSTOM_ENCODER_CACHE_SIZE=1, RERANKER_CUSTOM_ENCODER_CACHE_TTL=300)
-    @patch.object(Reranker, '_release_encoder')
+    @patch.object(Reranker, '_release_memory')
     @patch.object(Reranker, '_load_encoder')
-    def test_custom_reranker_encoder_eviction_releases_previous_model(self, load_encoder_mock, release_encoder_mock):
+    def test_custom_reranker_encoder_eviction_releases_previous_model(self, load_encoder_mock, release_memory_mock):
         old_encoder = Mock()
         new_encoder = Mock()
         load_encoder_mock.side_effect = [old_encoder, new_encoder]
@@ -195,28 +194,27 @@ class ConceptTest(OCLTestCase):
 
         self.assertIs(first.encoder, old_encoder)
         self.assertIs(second.encoder, new_encoder)
-        release_encoder_mock.assert_called_once_with(old_encoder)
+        release_memory_mock.assert_called_once_with()
         self.assertEqual(list(Reranker.CUSTOM_ENCODER_CACHE.keys()), ['BAAI/bge-reranker-v2-m3-custom'])
         Reranker.CUSTOM_ENCODER_CACHE.clear()
 
     @override_settings(RERANKER_CUSTOM_ENCODER_CACHE_SIZE=1, RERANKER_CUSTOM_ENCODER_CACHE_TTL=10)
-    @patch.object(Reranker, '_release_encoder')
+    @patch.object(Reranker, '_release_memory')
     @patch.object(Reranker, '_load_encoder')
-    @patch('core.common.search.time.time')
     def test_custom_reranker_encoder_ttl_expiry_reloads_model(
-            self, time_mock, load_encoder_mock, release_encoder_mock):
+            self, load_encoder_mock, release_memory_mock):
         first_encoder = Mock()
         second_encoder = Mock()
-        time_mock.side_effect = [100, 111]
         load_encoder_mock.side_effect = [first_encoder, second_encoder]
         Reranker.CUSTOM_ENCODER_CACHE.clear()
 
         first = Reranker(model_name='Qwen/Qwen3-Reranker-0.6B')
+        Reranker.CUSTOM_ENCODER_CACHE['Qwen/Qwen3-Reranker-0.6B']['expires_at'] = 0
         second = Reranker(model_name='Qwen/Qwen3-Reranker-0.6B')
 
         self.assertIs(first.encoder, first_encoder)
         self.assertIs(second.encoder, second_encoder)
-        release_encoder_mock.assert_called_once_with(first_encoder)
+        release_memory_mock.assert_called_once_with()
         self.assertEqual(load_encoder_mock.call_count, 2)
         Reranker.CUSTOM_ENCODER_CACHE.clear()
 
