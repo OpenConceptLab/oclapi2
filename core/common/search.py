@@ -1,6 +1,9 @@
+import gc
 import re
+import threading
 import time
 import urllib
+from collections import OrderedDict
 
 from cid.locals import get_cid
 from django.conf import settings
@@ -8,6 +11,7 @@ from django.db.models import Case, When, IntegerField
 from elasticsearch_dsl import FacetedSearch, Q
 from pydash import compact, get, has, set_
 from sentence_transformers import CrossEncoder
+import torch
 
 from core.common.constants import ES_REQUEST_TIMEOUT
 from core.common.utils import is_url_encoded_string
@@ -337,6 +341,8 @@ class CustomESSearch:
 
 
 class Reranker:
+    """Rerank semantic search hits with model-specific score normalization."""
+
     ENCODERS = [
         # Best and Fastest overall lightweight medical reranker
         # Size: ~110M
@@ -368,10 +374,16 @@ class Reranker:
     ]
     SCORE_KEY = 'search_rerank_score'
     MISSING_SCORE = -1000000.0
+    CUSTOM_ENCODER_CACHE = OrderedDict()
+    CUSTOM_ENCODER_CACHE_LOCK = threading.Lock()
+    CUSTOM_ENCODER_LOAD_LOCKS = {}
+    DEFAULT_ENCODER_PREDICT_LOCK = threading.Lock()
 
     def __init__(self, model_name=None):
         self.model_name = model_name
-        self.encoder = self._get_encoder(self.model_name)
+        self.encoder_state = self._get_encoder_state(self.model_name)
+        self.encoder = self.encoder_state['encoder']
+        self.encoder_predict_lock = self.encoder_state['predict_lock']
 
     def rerank(  # pylint: disable=too-many-arguments
             self, hits, txt, name_key='name', source_attr=None, should_convert_source_to_dict=True,
@@ -381,6 +393,11 @@ class Reranker:
 
     @property
     def default_model(self):
+        return self._get_default_model_name()
+
+    @classmethod
+    def _get_default_model_name(cls):
+        """Return the default boot-time reranker model name."""
         return settings.ENCODER_MODEL_NAME
 
     # private
@@ -399,11 +416,31 @@ class Reranker:
                 valid.append((i, d.strip()))
         if not valid:
             return scores_full
-        scores = self.encoder.predict([(txt, d) for _, d in valid])
+        with self.encoder_predict_lock:
+            scores = self.encoder.predict([(txt, d) for _, d in valid], **self._get_predict_kwargs())
         for (i, _), s in zip(valid, scores):
             scores_full[i] = float(s)
 
         return scores_full
+
+    def _get_activation_fn(self):
+        """Return the score activation required by the configured reranker model."""
+        model_name = self.model_name or self.default_model
+        if isinstance(model_name, str) and self._is_sigmoid_model(model_name):
+            return torch.nn.Sigmoid()
+        return None
+
+    @staticmethod
+    def _is_sigmoid_model(model_name):
+        return any(model_name == prefix or model_name.startswith(prefix)
+                   for prefix in settings.RERANKER_SIGMOID_MODEL_PREFIXES)
+
+    def _get_predict_kwargs(self):
+        """Return extra kwargs for CrossEncoder.predict for the configured model."""
+        activation_fn = self._get_activation_fn()
+        if activation_fn is None:
+            return {}
+        return {'activation_fn': activation_fn}
 
     def _assign_score(self, hits, scores, score_key, order_results):
         score_key = score_key or self.SCORE_KEY
@@ -420,18 +457,71 @@ class Reranker:
     def _order(hits, key_to_order):
         return sorted(hits, key=lambda hit: get(hit, key_to_order), reverse=True)
 
-    def _get_encoder(self, model_name):
-        if model_name and model_name != self.default_model:
-            return self._load_encoder(model_name)
-        return self._load_default_encoder()
+    @classmethod
+    def _get_encoder_state(cls, model_name):
+        if model_name and model_name != cls._get_default_model_name():
+            return cls._get_custom_encoder_state(model_name)
+        return cls._load_default_encoder_state()
+
+    @classmethod
+    def _get_custom_encoder_state(cls, model_name):
+        """Return a bounded cached custom encoder to avoid repeated large-model loads."""
+        now = time.time()
+        with cls.CUSTOM_ENCODER_CACHE_LOCK:
+            cls._evict_expired_custom_encoders(now)
+            cached_encoder_state = cls.CUSTOM_ENCODER_CACHE.get(model_name)
+            if cached_encoder_state:
+                cls.CUSTOM_ENCODER_CACHE.move_to_end(model_name)
+                cached_encoder_state['expires_at'] = now + cls._get_custom_encoder_cache_ttl()
+                return cached_encoder_state
+            load_lock = cls.CUSTOM_ENCODER_LOAD_LOCKS.setdefault(model_name, threading.Lock())
+
+        with load_lock:
+            with cls.CUSTOM_ENCODER_CACHE_LOCK:
+                cls._evict_expired_custom_encoders(time.time())
+                cached_encoder_state = cls.CUSTOM_ENCODER_CACHE.get(model_name)
+                if cached_encoder_state:
+                    cls.CUSTOM_ENCODER_CACHE.move_to_end(model_name)
+                    cached_encoder_state['expires_at'] = time.time() + cls._get_custom_encoder_cache_ttl()
+                    return cached_encoder_state
+
+            loaded_encoder = cls._load_encoder(model_name)
+            loaded_encoder_state = {
+                'encoder': loaded_encoder,
+                'predict_lock': threading.Lock(),
+            }
+
+            cached_encoder_state = None
+            with cls.CUSTOM_ENCODER_CACHE_LOCK:
+                cls._evict_expired_custom_encoders(time.time())
+                cached_encoder_state = cls.CUSTOM_ENCODER_CACHE.get(model_name)
+                if cached_encoder_state:
+                    cls.CUSTOM_ENCODER_CACHE.move_to_end(model_name)
+                    cached_encoder_state['expires_at'] = time.time() + cls._get_custom_encoder_cache_ttl()
+                else:
+                    cls._evict_custom_encoders_for_capacity()
+                    # Cache size bounds cache references only; in-flight requests may still
+                    # keep an evicted encoder alive briefly via their own instance state.
+                    loaded_encoder_state['expires_at'] = time.time() + cls._get_custom_encoder_cache_ttl()
+                    cls.CUSTOM_ENCODER_CACHE[model_name] = loaded_encoder_state
+
+            if cached_encoder_state:
+                del loaded_encoder
+                del loaded_encoder_state
+                cls._release_memory()
+                return cached_encoder_state
+            return loaded_encoder_state
 
     @staticmethod
     def _load_encoder(model_name):
         return CrossEncoder(model_name, device="cpu", max_length=128)
 
     @staticmethod
-    def _load_default_encoder():
-        return settings.ENCODER
+    def _load_default_encoder_state():
+        return {
+            'encoder': settings.ENCODER,
+            'predict_lock': Reranker.DEFAULT_ENCODER_PREDICT_LOCK,
+        }
 
     @staticmethod
     def _get_source(data, source_attr, should_convert_source_to_dict):
@@ -439,3 +529,39 @@ class Reranker:
         if should_convert_source_to_dict and source:
             source = dict(source)
         return source
+
+    @classmethod
+    def _get_custom_encoder_cache_size(cls):
+        """Return the max number of custom encoders that may stay loaded per process."""
+        return max(1, settings.RERANKER_CUSTOM_ENCODER_CACHE_SIZE)
+
+    @classmethod
+    def _get_custom_encoder_cache_ttl(cls):
+        """Return the idle TTL for custom encoders in seconds."""
+        return max(1, settings.RERANKER_CUSTOM_ENCODER_CACHE_TTL)
+
+    @classmethod
+    def _evict_custom_encoders_for_capacity(cls):
+        """Evict least-recently-used custom encoders before loading another large model."""
+        while len(cls.CUSTOM_ENCODER_CACHE) >= cls._get_custom_encoder_cache_size():
+            cls.CUSTOM_ENCODER_CACHE.popitem(last=False)
+            cls._release_memory()
+
+    @classmethod
+    def _evict_expired_custom_encoders(cls, now=None):
+        """Remove expired custom encoders so idle large models do not stay resident forever."""
+        now = now or time.time()
+        expired_models = [
+            model_name for model_name, cached_encoder_state in cls.CUSTOM_ENCODER_CACHE.items()
+            if cached_encoder_state['expires_at'] <= now
+        ]
+        for model_name in expired_models:
+            if cls.CUSTOM_ENCODER_CACHE.pop(model_name, None):
+                cls._release_memory()
+
+    @staticmethod
+    def _release_memory():
+        """Reclaim memory after the last cache reference to an evicted encoder has been dropped."""
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
