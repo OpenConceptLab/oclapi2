@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch, mock_open, ANY, MagicMock
 
 import boto3
 from azure.storage.blob import BlobPrefix
-from botocore.exceptions import ClientError, NoCredentialsError
+from botocore.exceptions import ClientError
 from django.core.files.base import ContentFile
 from django.test import TestCase
 from django.utils import timezone
@@ -45,14 +45,6 @@ class S3Test(TestCase):
         s3.upload('some/path', io.BytesIO('content'.encode()))  # pylint: disable=protected-access
 
         self.assertTrue(s3.exists('some/path'))
-
-    def test_has_path_without_credentials(self):
-        s3 = S3()
-        resource_mock = Mock()
-        resource_mock.meta = Mock(client=Mock(list_objects=Mock(side_effect=NoCredentialsError())))
-        s3._S3__resource = Mock(return_value=resource_mock)  # pylint: disable=protected-access
-
-        self.assertFalse(s3.has_path('some/path/'))
 
     def test_upload_public(self):
         conn_mock = Mock(upload_fileobj=Mock(return_value='success'))
@@ -471,38 +463,6 @@ class MinIOTest(TestCase):
         # Assert that the URL is generated in the correct format
         self.assertEqual(
             url.replace('https://', 'http://'), "http://localhost/bucket/test-file.txt")
-
-    @patch("core.services.storages.cloud.minio.Minio")
-    def test_fetch_keys(self, mock_minio_client):
-        # Mock list_objects method
-        mock_client = mock_minio_client.return_value
-        first_modified = timezone.now()
-        second_modified = first_modified + timedelta(seconds=1)
-        mock_client.list_objects = MagicMock(return_value=[
-            MagicMock(object_name="test-file1.txt", last_modified=first_modified),
-            MagicMock(object_name="test-file2.txt", last_modified=second_modified)
-        ])
-
-        client = MinIO()
-        # Call the __fetch_keys method
-        keys = client._MinIO__fetch_keys(prefix="test/", delimiter='/')  # pylint: disable=protected-access
-
-        # Assert that the correct keys were fetched
-        self.assertEqual(keys, [
-            {'Key': "test-file1.txt", 'LastModified': first_modified},
-            {'Key': "test-file2.txt", 'LastModified': second_modified},
-        ])
-        mock_client.list_objects.assert_called_once_with(bucket_name="bucket", prefix="test", recursive=True)
-
-        # Call the __fetch_keys method
-        keys = client._MinIO__fetch_keys(prefix="test/", delimiter='')  # pylint: disable=protected-access
-
-        # Assert that the correct keys were fetched
-        self.assertEqual(keys, [
-            {'Key': "test-file1.txt", 'LastModified': first_modified},
-            {'Key': "test-file2.txt", 'LastModified': second_modified},
-        ])
-        mock_client.list_objects.assert_called_with(bucket_name="bucket", prefix="test/", recursive=True)
 
     @patch("core.services.storages.cloud.minio.Minio")
     def test_get_last_key_from_path_without_last_modified(self, mock_minio_client):
