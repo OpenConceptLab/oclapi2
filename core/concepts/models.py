@@ -835,7 +835,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                     if not errors and not created.id:
                         errors['__all__'] = ['Something bad happened while creating the mapping.']
                     if not errors and created.id:
-                        applied_operations.append({'__action': 'create', 'id': created.versioned_object_id})
+                        applied_operations.append({
+                            '__action': 'create', 'versioned_object_id': created.versioned_object_id})
             except Exception as ex:  # pylint: disable=broad-except
                 error_dict = get(ex, 'message_dict') or get(ex, 'error_dict')
                 if error_dict:
