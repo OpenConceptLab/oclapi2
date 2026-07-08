@@ -32,6 +32,7 @@ markdown==3.8.1
 mock==5.1.0
 django-request-logging==0.7.5
 django-cid==2.3
+setuptools==80.9.0  # django-cid imports pkg_resources, removed in setuptools>=81
 django-dirtyfields==1.9.2
 jsonpath-ng==1.5.3
 mozilla-django-oidc==5.0.1
