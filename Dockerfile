@@ -34,7 +34,7 @@ RUN apt-get update && apt-get upgrade -y && \
     libpq-dev bash curl && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --upgrade pip
+RUN pip install --upgrade pip "setuptools==80.9.0"
 
 COPY --from=builder /code/wheels /wheels
 COPY --from=builder /code/requirements.txt .
