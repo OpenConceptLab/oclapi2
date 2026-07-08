@@ -1247,7 +1247,10 @@ class Expansion(BaseResourceModel):
 
     @property
     def collection_version_url(self):
-        return get(self.collection_kwargs, 'url')
+        url = get(self.collection_kwargs, 'url')
+        if url.endswith('/HEAD/'):
+            url = '/'.join(url.rsplit('/HEAD/', 1))
+        return url
 
     @property
     def collection_version_name(self):
