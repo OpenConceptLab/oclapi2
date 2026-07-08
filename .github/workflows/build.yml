@@ -74,7 +74,8 @@ jobs:
         run: |
           python -m venv venv
           . venv/bin/activate
-          pip install --cache-dir ~/.cache/pip -r requirements.txt
+          python -m pip install --cache-dir ~/.cache/pip --upgrade pip "setuptools==80.9.0"
+          python -m pip install --cache-dir ~/.cache/pip -r requirements.txt
       - name: Wait for Postgres
         run: |
           echo "Waiting for Postgres..."
