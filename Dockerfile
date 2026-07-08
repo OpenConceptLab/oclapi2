@@ -38,7 +38,8 @@ RUN pip install --upgrade pip
 
 COPY --from=builder /code/wheels /wheels
 COPY --from=builder /code/requirements.txt .
-RUN pip install --no-cache-dir /wheels/*
+RUN pip install --no-cache-dir /wheels/* && \
+    pip install --no-cache-dir setuptools==80.9.0
 RUN rm -rf /wheels
 
 ADD --chown=ocl:ocl . $APP_HOME
