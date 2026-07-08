@@ -56,11 +56,14 @@ services:
       - AZURE_STORAGE_CONTAINER_NAME
       - AZURE_STORAGE_CONNECTION_STRING
       - FHIR_VALIDATOR_URL=${FHIR_VALIDATOR_URL-http://fhir_validator:3500}
-      - MINIO_ACCESS_KEY
-      - MINIO_BUCKET_NAME
-      - MINIO_ENDPOINT
-      - MINIO_SECRET_KEY
-      - MINIO_SECURE
+      # Export storage defaults to host-published local RustFS/MinIO-compatible storage.
+      - EXPORT_SERVICE=${EXPORT_SERVICE-core.services.storages.cloud.minio.MinIO}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT-host.docker.internal:${MINIO_PORT:-9090}}
+      - MINIO_EXTERNAL_ENDPOINT=${MINIO_EXTERNAL_ENDPOINT-localhost:${MINIO_PORT:-9090}}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY-rustfsadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY-rustfsadmin}
+      - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME-oclapi2-dev}
+      - MINIO_SECURE=${MINIO_SECURE-FALSE}
       - ENABLE_THROTTLING
       - SERVICE_NAME=${SERVICE_NAME-oclapi2}
       - NO_LM=${NO_LM-FALSE}
@@ -98,6 +101,14 @@ services:
       - AWS_SECRET_ACCESS_KEY
       - AWS_STORAGE_BUCKET_NAME
       - AWS_REGION_NAME
+      # The default queue runs export tasks, so it needs the same storage config as the API.
+      - EXPORT_SERVICE=${EXPORT_SERVICE-core.services.storages.cloud.minio.MinIO}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT-host.docker.internal:${MINIO_PORT:-9090}}
+      - MINIO_EXTERNAL_ENDPOINT=${MINIO_EXTERNAL_ENDPOINT-localhost:${MINIO_PORT:-9090}}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY-rustfsadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY-rustfsadmin}
+      - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME-oclapi2-dev}
+      - MINIO_SECURE=${MINIO_SECURE-FALSE}
       - NO_LM=${NO_LM-TRUE}
     volumes:
       - upload-data:/code/uploads

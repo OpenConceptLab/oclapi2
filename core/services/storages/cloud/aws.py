@@ -82,7 +82,10 @@ class S3(CloudStorageServiceInterface):
         return True
 
     def has_path(self, prefix='/', delimiter='/'):
-        return len(self.__fetch_keys(prefix, delimiter)) > 0
+        try:
+            return len(self.__fetch_keys(prefix, delimiter)) > 0
+        except (ClientError, NoCredentialsError):
+            return False
 
     def get_last_key_from_path(self, prefix='/', delimiter='/'):
         keys = self.__fetch_keys(prefix, delimiter, True)
