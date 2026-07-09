@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime
 
+from dirtyfields import DirtyFieldsMixin
 from django.contrib.auth.models import AbstractUser, Group
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
@@ -43,7 +44,7 @@ class Follow(models.Model):
         return f"/users/{self.follower.username}/following/{self.id}/"
 
 
-class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin, ChecksumModel):
+class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin, ChecksumModel):
     class Meta:
         db_table = 'user_profiles'
         swappable = 'AUTH_USER_MODEL'
@@ -310,9 +311,10 @@ class UserProfile(AbstractUser, BaseModel, CommonLogoModel, SourceContainerMixin
             referenced_object_url=following.url,
         )
 
-    def set_groups(self, groups, verify=True):
+    def set_groups(self, groups, verify=True, _save=True):
         if not verify or sorted(self.groups.values_list('name', flat=True)) != sorted(groups):
             self.groups.set(Group.objects.filter(name__in=groups))
             self.is_staff = self.has_auth_group(STAFF_GROUP)
             self.is_superuser = self.has_auth_group(SUPERADMIN_GROUP)
-            self.save()
+            if _save:
+                self.save()

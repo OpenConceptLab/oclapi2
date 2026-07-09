@@ -1375,6 +1375,7 @@ class OCLOIDCAuthenticationBackendTest(OCLTestCase):
 
     def test_update_user(self):
         user = Mock()
+        user.is_dirty.return_value = True
 
         self.backend.update_user(user, self.claim)
 
@@ -1383,6 +1384,23 @@ class OCLOIDCAuthenticationBackendTest(OCLTestCase):
         self.assertEqual(user.email, 'batman@gotham.com')
 
         user.save.assert_called_once()
+        user.set_groups.assert_called_once_with([], _save=False)
+        user.set_checksums.assert_called_once()
+
+    def test_update_user_skips_save_when_not_dirty(self):
+        user = Mock()
+        user.first_name = 'Bruce'
+        user.last_name = 'Wayne'
+        user.email = 'batman@gotham.com'
+        user.company = None
+        user.location = None
+        user.is_dirty.return_value = False
+
+        self.backend.update_user(user, self.claim)
+
+        user.save.assert_not_called()
+        user.set_groups.assert_called_once_with([], _save=False)
+        user.set_checksums.assert_not_called()
 
     def test_filter_users_by_claims(self):
         batman = UserProfileFactory(username='batman')

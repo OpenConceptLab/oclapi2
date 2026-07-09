@@ -75,9 +75,13 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         user.email = claims.get('email') or user.email
         user.company = claims.get('company', None) or user.company
         user.location = claims.get('location', None) or user.location
-        user.save()
-        user.set_checksums()
-        user.set_groups(claims.get('groups', []))
+
+        user.set_groups(claims.get('groups', []), _save=False)
+
+        if user.is_dirty():
+            user.save()
+            user.set_checksums()
+
         return user
 
     def filter_users_by_claims(self, claims):
