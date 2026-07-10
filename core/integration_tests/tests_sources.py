@@ -445,6 +445,41 @@ class SourceVersionListViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.data['detail'], "Source version 'v1' already exist.")
 
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    def test_post_201_released_as_string(self):
+        response = self.client.post(
+            f'/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/versions/',
+            {
+                'id': 'v1',
+                'description': 'Version 1',
+                'released': 'true'
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(self.source.versions.count(), 2)
+        self.assertIs(self.source.versions.get(version='v1').released, True)
+
+    def test_post_400_released_invalid_string(self):
+        response = self.client.post(
+            f'/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/versions/',
+            {
+                'id': 'v1',
+                'description': 'Version 1',
+                'released': 'yeah'
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data, {'released': [ErrorDetail(string='Must be a valid boolean.', code='invalid')]})
+        self.assertEqual(self.source.versions.count(), 1)
+
     @patch('core.sources.views.export_source')
     def test_post_400(self, export_source_mock):
         response = self.client.post(

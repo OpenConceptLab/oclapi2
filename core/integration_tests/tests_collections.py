@@ -3001,6 +3001,39 @@ class CollectionVersionListViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['version'], 'v1')
 
+    def test_post_201_released_as_string(self):
+        response = self.client.post(
+            self.collection.uri + 'versions/',
+            {
+                'id': 'v1',
+                'description': 'version1',
+                'released': 'true'
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(self.collection.versions.count(), 2)
+        self.assertIs(self.collection.versions.get(version='v1').released, True)
+
+    def test_post_400_released_invalid_string(self):
+        response = self.client.post(
+            self.collection.uri + 'versions/',
+            {
+                'id': 'v1',
+                'description': 'version1',
+                'released': 'yeah'
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data, {'released': [ErrorDetail(string='Must be a valid boolean.', code='invalid')]})
+        self.assertEqual(self.collection.versions.count(), 1)
+
     def test_post_201(self):
         response = self.client.post(
             self.collection.uri + 'versions/',

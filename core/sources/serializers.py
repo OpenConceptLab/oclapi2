@@ -5,7 +5,7 @@ from pydash import get, compact
 from rest_framework.fields import CharField, IntegerField, DateTimeField, ChoiceField, JSONField, ListField, \
     BooleanField, SerializerMethodField
 from rest_framework.relations import PrimaryKeyRelatedField
-from rest_framework.serializers import ModelSerializer
+from rest_framework.serializers import ModelSerializer, ValidationError
 
 from core.client_configs.serializers import ClientConfigSerializer
 from core.common.constants import DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, HEAD, \
@@ -249,6 +249,18 @@ class SourceCreateSerializer(SourceCreateOrUpdateSerializer):
     hierarchy_meaning = CharField(required=False, allow_null=True, allow_blank=True)
     collection_reference = CharField(required=False, allow_null=True, allow_blank=True)
     hierarchy_root_url = CharField(allow_null=True, allow_blank=True, required=False)
+
+    def validate(self, attrs):
+        # create/create_version consume the raw payload (not validated_data), so DRF's boolean
+        # coercion never applies and a non-boolean 'released' would blow up on model save.
+        # Coerce it in initial_data — the same dict the view passes to create_version.
+        released = self.initial_data.get('released', None)
+        if released is not None and not isinstance(released, bool):
+            try:
+                self.initial_data['released'] = BooleanField().to_internal_value(released)
+            except ValidationError as ex:
+                raise ValidationError({'released': ex.detail}) from ex
+        return attrs
 
     def create(self, validated_data):
         source = self.prepare_object(validated_data)

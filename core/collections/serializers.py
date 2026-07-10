@@ -6,7 +6,7 @@ from pydash import get
 from rest_framework.fields import CharField, ChoiceField, ListField, IntegerField, DateTimeField, JSONField, \
     BooleanField, SerializerMethodField
 from rest_framework.relations import PrimaryKeyRelatedField
-from rest_framework.serializers import ModelSerializer, Serializer
+from rest_framework.serializers import ModelSerializer, Serializer, ValidationError
 
 from core.client_configs.serializers import ClientConfigSerializer
 from core.collections.models import Collection, CollectionReference, Expansion
@@ -253,6 +253,18 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
     locked_date = DateTimeField(required=False, allow_null=True)
     autoexpand_head = BooleanField(required=False, default=True)
     autoexpand = BooleanField(required=False, default=True)
+
+    def validate(self, attrs):
+        # create/create_version consume the raw payload (not validated_data), so DRF's boolean
+        # coercion never applies and a non-boolean 'released' would blow up on model save.
+        # Coerce it in initial_data — the same dict the view passes to create_version.
+        released = self.initial_data.get('released', None)
+        if released is not None and not isinstance(released, bool):
+            try:
+                self.initial_data['released'] = BooleanField().to_internal_value(released)
+            except ValidationError as ex:
+                raise ValidationError({'released': ex.detail}) from ex
+        return attrs
 
     def create(self, validated_data):
         collection = self.prepare_object(validated_data)
