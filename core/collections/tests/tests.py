@@ -110,6 +110,19 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection.active_concepts, 1)
         self.assertEqual(concept.references.count(), 1)
 
+    def test_add_expressions_unexpected_error_is_json_serializable(self):
+        collection = OrganizationCollectionFactory()
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source, sources=[source])
+
+        with patch.object(
+                CollectionReference, 'save',
+                side_effect=AttributeError("'NoneType' object has no attribute 'foo'")
+        ):
+            _, errors = collection.add_expressions({'expressions': [concept.uri]}, collection.created_by)
+
+        self.assertEqual(errors, {concept.uri: "'NoneType' object has no attribute 'foo'"})
+
     def test_add_expressions_openmrs_schema(self):
         collection = OrganizationCollectionFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
         expansion = ExpansionFactory(collection_version=collection)

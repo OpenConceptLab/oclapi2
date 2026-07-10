@@ -277,7 +277,7 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
                     continue
                 reference.save()
             except Exception as ex:
-                errors[reference.expression] = ex.messages if hasattr(ex, 'messages') else ex
+                errors[reference.expression] = ex.messages if hasattr(ex, 'messages') else str(ex)
                 continue
             if reference.id:
                 added_references.append(reference)
@@ -704,7 +704,7 @@ class CollectionReference(models.Model):
         if self.should_transform_to_latest_version():
             concept_queryset = self._update_by_transform_to_latest_version(concept_queryset, Concept)
             mapping_queryset = self.transform_to_latest_version(mapping_queryset, Mapping)
-        if self.should_transform_to_versioned() and not system_version.is_head:  # For HEAD it will be versioned
+        if self.should_transform_to_versioned() and not get(system_version, 'is_head'):  # For HEAD it will be versioned
             self.version = HEAD
             concept_queryset = Concept.objects.filter(
                 id__in=concept_queryset.values_list('versioned_object_id', flat=True))
