@@ -2449,7 +2449,7 @@ class SourceVersionsChangelogOutputViewTest(OCLAPITestCase):
                     self.assertIn('Detailed name v1', markdown_output)
                     self.assertIn('Detailed name v2', markdown_output)
                     self.assertIn('Nome detalhado', markdown_output)
-                    self.assertIn('Previous To Concept', markdown_output)
+                    self.assertIn('| From Concept | Previous Mapping | Updated Mapping |', markdown_output)
                     self.assertIn('mapping-target-v1', markdown_output)
                     self.assertIn('mapping-target-v2', markdown_output)
                 else:
