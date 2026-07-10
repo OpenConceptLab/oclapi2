@@ -558,7 +558,10 @@ class ConceptChildrenView(ConceptBaseView, ListWithHeadersMixin):
     default_qs_sort_attr = 'mnemonic'
 
     def get_queryset(self):
-        instance = super().get_queryset().filter(id=F('versioned_object_id')).first()
+        queryset = super().get_queryset()
+        if 'version' not in self.kwargs or self.kwargs['version'] == HEAD:
+            queryset = queryset.filter(id=F('versioned_object_id'))
+        instance = queryset.first()
         if not instance:
             raise Http404()
 
@@ -573,7 +576,10 @@ class ConceptParentsView(ConceptBaseView, ListWithHeadersMixin):
     serializer_class = ConceptParentsSerializer
 
     def get_queryset(self):
-        instance = super().get_queryset().filter(id=F('versioned_object_id')).first()
+        queryset = super().get_queryset()
+        if 'version' not in self.kwargs or self.kwargs['version'] == HEAD:
+            queryset = queryset.filter(id=F('versioned_object_id'))
+        instance = queryset.first()
         if not instance:
             raise Http404()
 
