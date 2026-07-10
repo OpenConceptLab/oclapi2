@@ -395,11 +395,15 @@ class CollectionReferencesMixin:
                 criterion.append(Q(version__iexact=value))
             elif key == 'cascade':
                 if value in ['any', 'true']:
-                    criterion.append(Q(cascade__isnull=False))
+                    criterion.append(Q(cascade__isnull=False) & ~Q(cascade=''))
                 elif value in ['false', 'none']:
-                    criterion.append(Q(cascade__isnull=True))
+                    criterion.append(Q(cascade__isnull=True) | Q(cascade=''))
                 else:
-                    criterion.append(Q(cascade__iexact=value) | Q(cascade__method__iexact=value))
+                    values = [value] if value.lower() == value else [value, value.lower()]
+                    if len(values) == 1:
+                        criterion.append(Q(cascade=values[0]) | Q(cascade__method=values[0]))
+                    else:
+                        criterion.append(Q(cascade__in=values) | Q(cascade__method__in=values))
             elif key == 'definition_type':
                 if value == 'intensional':
                     criterion.append(Q(transform=TRANSFORM_TO_RESOURCE_VERSIONS))
