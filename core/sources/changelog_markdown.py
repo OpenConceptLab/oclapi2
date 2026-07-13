@@ -1004,7 +1004,7 @@ class ChangelogMarkdownGenerator:
         codes and canonical URLs pass through unchanged (both are valid tokens).
         """
         if not source_url:
-            return self._source_prefix.strip('/').split('/')[-1] if self._source_prefix else ''
+            return self._source_prefix.strip('/').split('/')[-1] if self._source_prefix else ''  # pylint: disable=use-maxsplit-arg,line-too-long
         token = str(source_url)
         if token.startswith('/'):
             parts = token.strip('/').split('/')
