@@ -405,7 +405,9 @@ class CollectionReferencesMixin:
                     else:
                         criterion.append(Q(cascade__in=values) | Q(cascade__method__in=values))
             elif key == 'definition_type':
-                if value == 'intensional':
+                if value in ['false', 'none']:
+                    criterion.append(Q(transform__isnull=True) | Q(transform=''))
+                if value in ['intensional', TRANSFORM_TO_RESOURCE_VERSIONS]:
                     criterion.append(Q(transform=TRANSFORM_TO_RESOURCE_VERSIONS))
                 elif value == TRANSFORM_TO_EXTENSIONAL:
                     criterion.append(Q(transform=TRANSFORM_TO_EXTENSIONAL))
