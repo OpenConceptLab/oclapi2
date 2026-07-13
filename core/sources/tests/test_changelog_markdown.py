@@ -1,6 +1,6 @@
 # pylint: disable=protected-access,too-many-arguments
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 
 from core.sources.changelog_markdown import ChangelogMarkdownGenerator
 
@@ -134,11 +134,35 @@ class TestChangelogMarkdownGeneratorSummaryTable(SimpleTestCase):
         self.assertNotIn('| Concepts |', summary_block)
         self.assertNotIn('| Mappings |', summary_block)
 
-    def test_json_diff_download_link(self):
+    def test_summary_table_has_description_column(self):
         data = _make_data()
         md = ChangelogMarkdownGenerator(data).generate()
-        self.assertIn('Download full JSON diff', md)
-        self.assertIn('/sources/$changelog/', md)
+        self.assertIn('| Category | Count | Description |', md)
+        # Major/minor descriptions must spell out the smart-vs-standard checksum split.
+        self.assertIn('concept class, datatype, retirement status or a Fully Specified Name', md)
+        self.assertIn('synonyms and other names, descriptions, extras, external IDs or hierarchy', md)
+
+    def test_no_json_diff_download_link(self):
+        # The $changelog endpoint requires token auth, so a browser click on a
+        # markdown link can never resolve — the link must not be emitted.
+        data = _make_data()
+        md = ChangelogMarkdownGenerator(data).generate()
+        self.assertNotIn('Download full JSON diff', md)
+        self.assertNotIn('/sources/$changelog/', md)
+
+    @override_settings(WEB_URL='http://localhost:4000')
+    def test_concept_links_use_web_url_when_configured(self):
+        data = _make_data(concepts={'new': {'c1': {'id': 'c1', 'display_name': 'Foo', 'concept_class': 'Drug'}}})
+        md = ChangelogMarkdownGenerator(data).generate()
+        self.assertIn('[#c1](http://localhost:4000/#/orgs/CIEL/sources/CIEL/concepts/c1/)', md)
+
+    @override_settings(WEB_URL=None)
+    def test_concept_links_fall_back_to_api_url(self):
+        data = _make_data(concepts={'new': {'c1': {'id': 'c1', 'display_name': 'Foo', 'concept_class': 'Drug'}}})
+        md = ChangelogMarkdownGenerator(data).generate()
+        self.assertIn('/orgs/CIEL/sources/CIEL/concepts/c1/)', md)
+        self.assertNotIn('/#/orgs/', md)
+
 
 
 class TestChangelogMarkdownGeneratorOverview(SimpleTestCase):
@@ -539,8 +563,9 @@ class TestChangelogMarkdownGeneratorMappingsSection(SimpleTestCase):
         md = ChangelogMarkdownGenerator(data).generate()
         self.assertIn('## Mappings', md)
         self.assertIn('### Added', md)
-        self.assertIn('SAME-AS', md)
-        self.assertIn('12345', md)
+        self.assertIn('| From Concept | Mapping |', md)
+        # Target side rendered in the inline mapping syntax
+        self.assertIn('[SAME-AS] http://snomed.info/sct:12345', md)
 
     def test_mappings_section_omitted_if_empty(self):
         data = _make_data()
@@ -566,16 +591,63 @@ class TestChangelogMarkdownGeneratorMappingsSection(SimpleTestCase):
         })
         md = ChangelogMarkdownGenerator(data).generate()
         self.assertIn('### Updated', md)
-        # Previous and current values both appear
-        self.assertIn('719700', md)
-        self.assertIn('719709', md)
-        self.assertIn('NARROWER-THAN', md)
-        self.assertIn('SAME-AS', md)
+        # Previous and updated sides rendered in the inline mapping syntax
+        self.assertIn('[NARROWER-THAN] IMO:719700', md)
+        self.assertIn('[SAME-AS] IMO:719709', md)
         # Column headers indicate before/after
-        self.assertIn('Previous To Concept', md)
-        self.assertIn('Updated To Concept', md)
-        self.assertIn('Previous Map Type', md)
-        self.assertIn('Updated Map Type', md)
+        self.assertIn('| From Concept | Previous Mapping | Updated Mapping |', md)
+
+    def test_mappings_updated_identical_rows_filtered_out(self):
+        # Enriched rows whose previous and updated render identically
+        # (checksum-only change) are noise and must be dropped.
+        data = _make_data(mappings={
+            'changed_minor': {
+                'm1': {
+                    'id': 'm1',
+                    'external_id': 'abc',
+                    'from_concept': 'c1',
+                    'to_concept': '123',
+                    'to_source': 'IMO',
+                    'map_type': 'SAME-AS',
+                    'prev_to_concept': '123',
+                    'prev_to_source': 'IMO',
+                    'prev_map_type': 'SAME-AS',
+                }
+            }
+        })
+        md = ChangelogMarkdownGenerator(data).generate()
+        self.assertNotIn('## Mappings', md)
+
+    def test_inline_mapping_source_token_from_relative_url(self):
+        data = _make_data(mappings={
+            'new': {
+                'm1': {
+                    'id': 'm1',
+                    'from_concept': 'c1',
+                    'to_concept': 'A01.1',
+                    'to_source': '/orgs/WHO/sources/ICD-10/v2023/',
+                    'map_type': 'NARROWER-THAN',
+                }
+            }
+        })
+        md = ChangelogMarkdownGenerator(data).generate()
+        self.assertIn('[NARROWER-THAN] ICD-10(v2023):A01.1', md)
+
+    def test_inline_mapping_internal_target_uses_own_source_code(self):
+        # to_source missing → target lives in the source being compared (CIEL)
+        data = _make_data(mappings={
+            'new': {
+                'm1': {
+                    'id': 'm1',
+                    'from_concept': 'c1',
+                    'to_concept': '1015',
+                    'to_source': None,
+                    'map_type': 'CONCEPT-SET',
+                }
+            }
+        })
+        md = ChangelogMarkdownGenerator(data).generate()
+        self.assertIn('[CONCEPT-SET] CIEL:1015', md)
 
     def test_mappings_updated_without_prev_falls_back_to_current(self):
         # Legacy data without prev_* fields (verbosity<4) still renders gracefully

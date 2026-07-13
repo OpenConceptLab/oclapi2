@@ -62,6 +62,7 @@ class ChangelogMarkdownGenerator:
         self._v2_meta = self.meta.get('version2', {})
         self._source_prefix = self._extract_source_prefix(self._v2_meta.get('uri', ''))
         self._mapping_collections_cache = None
+        self._changed_mapping_rows_cache = None
         self.is_enriched = self._detect_enrichment()
 
     def _detect_enrichment(self):
@@ -189,7 +190,8 @@ class ChangelogMarkdownGenerator:
             len(self.concepts.get('changed_mappings_only') or {})
         )
 
-        mappings_added, mappings_removed, mappings_changed = self._mapping_collections()
+        mappings_added, mappings_removed, _ = self._mapping_collections()
+        mappings_changed = self._changed_mapping_rows()
 
         lines = [
             '## Overview',
@@ -221,26 +223,38 @@ class ChangelogMarkdownGenerator:
 
         mappings_added, mappings_removed, _ = self._mapping_collections()
 
-        v1_uri = self._v1_meta.get('uri', '')
-        v2_uri = self._v2_meta.get('uri', '')
-        base = getattr(settings, 'API_BASE_URL', '')
-        diff_url = f'{base}/sources/$changelog/?version1={v1_uri}&version2={v2_uri}'
-
+        # NOTE: no "Download full JSON diff" link here — the $changelog endpoint
+        # requires token auth, so a plain browser click from the rendered
+        # markdown can never resolve. A downloadable persisted diff is planned
+        # via the export-files flow (ocl_issues #2516/#2517).
+        # Major/minor mirror OCL's checksums: the smart checksum only covers the
+        # core definition (class, datatype, retired, Fully Specified Names), so a
+        # smart change is "major"; a standard-only change is "minor".
         lines = [
             '## Summary',
             '',
-            '| Category | Count |',
-            '|----------|------:|',
-            f'| New concepts | {concepts_new:,} |',
-            f'| Removed concepts | {concepts_removed:,} |',
-            f'| Retired concepts | {concepts_retired:,} |',
-            f'| Major changes | {concepts_major:,} |',
-            f'| Minor changes | {concepts_minor:,} |',
-            f'| Mapping-only changes | {concepts_mappings_only:,} |',
-            f'| Mappings added | {len(mappings_added):,} |',
-            f'| Mappings removed | {len(mappings_removed):,} |',
-            '',
-            f'[Download full JSON diff]({diff_url})',
+            '| Category | Count | Description |',
+            '|----------|------:|-------------|',
+            f'| New concepts | {concepts_new:,} | Concepts introduced in this release. |',
+            f'| Removed concepts | {concepts_removed:,} | Concepts deleted from the source entirely. |',
+            (
+                f'| Retired concepts | {concepts_retired:,} | Concepts flagged as retired — '
+                'kept for reference but no longer recommended for use. |'
+            ),
+            (
+                f'| Major changes | {concepts_major:,} | Changes to the core definition of a concept: '
+                'concept class, datatype, retirement status or a Fully Specified Name. |'
+            ),
+            (
+                f'| Minor changes | {concepts_minor:,} | Changes outside the core definition: '
+                'synonyms and other names, descriptions, extras, external IDs or hierarchy. |'
+            ),
+            (
+                f'| Mapping-only changes | {concepts_mappings_only:,} | Concepts whose only change '
+                'is in their mappings. |'
+            ),
+            f'| Mappings added | {len(mappings_added):,} | New relationships between concepts. |',
+            f'| Mappings removed | {len(mappings_removed):,} | Relationships deleted in this release. |',
             '',
             '---',
         ]
@@ -316,13 +330,13 @@ class ChangelogMarkdownGenerator:
         return subs
 
     def _mapping_subsections(self):
-        added, removed, changed = self._mapping_collections()
+        added, removed, _ = self._mapping_collections()
         subs = []
         if added:
             subs.append(('Added', 'mappings-added'))
         if removed:
             subs.append(('Removed', 'mappings-removed'))
-        if changed:
+        if self._changed_mapping_rows():
             subs.append(('Updated', 'mappings-updated'))
         return subs
 
@@ -905,17 +919,51 @@ class ChangelogMarkdownGenerator:
         self._mapping_collections_cache = added, removed, changed
         return self._mapping_collections_cache
 
-    def _mappings_section(self):
-        if not self._has_mappings():
-            return ''
+    def _changed_mapping_rows(self):
+        """
+        Return ``(from_concept, previous, updated)`` rows for changed mappings,
+        with both sides rendered in the inline mapping syntax.
 
-        added, removed, changed = self._mapping_collections()
+        In an enriched document, rows whose previous/updated strings render
+        identically (checksum-only change, e.g. sort weight, or a v1 pair the
+        enrichment could not resolve) are dropped — showing
+        "SAME-AS → SAME-AS" is noise for reviewers. In non-enriched documents
+        (verbosity<4 input) rows are kept, falling back to current values.
+        """
+        if self._changed_mapping_rows_cache is not None:
+            return self._changed_mapping_rows_cache
+
+        _, _, changed = self._mapping_collections()
+        rows = []
+        for m in changed.values():
+            updated = self._inline_mapping(m.get('to_concept'), m.get('to_source'), m.get('map_type'))
+            prev_to = m.get('prev_to_concept')
+            prev_source = m.get('prev_to_source')
+            prev_map_type = m.get('prev_map_type')
+            has_prev = prev_to is not None or prev_source is not None or prev_map_type is not None
+            previous = self._inline_mapping(
+                m.get('to_concept') if prev_to is None else prev_to,
+                m.get('to_source') if prev_source is None else prev_source,
+                m.get('map_type') if prev_map_type is None else prev_map_type,
+            )
+            if (has_prev or self.is_enriched) and previous == updated:
+                continue
+            rows.append((m.get('from_concept'), previous, updated))
+
+        self._changed_mapping_rows_cache = rows
+        return rows
+
+    def _mappings_section(self):
+        added, removed, _ = self._mapping_collections()
+        changed_rows = self._changed_mapping_rows()
+        if not (added or removed or changed_rows):
+            return ''
 
         highlight = self._static_highlight(
             'Mappings',
             added=len(added),
             removed=len(removed),
-            changed=len(changed),
+            changed=len(changed_rows),
         )
 
         parts = ['## Mappings', '', f'*{highlight}*']
@@ -925,9 +973,9 @@ class ChangelogMarkdownGenerator:
         if removed:
             parts += ['', self._anchor('mappings-removed'), '### Removed', '']
             parts += self._mappings_table(removed)
-        if changed:
+        if changed_rows:
             parts += ['', self._anchor('mappings-updated'), '### Updated', '']
-            parts += self._mappings_updated_table(changed)
+            parts += self._mappings_updated_table(changed_rows)
 
         return '\n'.join(parts)
 
@@ -945,46 +993,64 @@ class ChangelogMarkdownGenerator:
             return f'<a id="mappings-{from_concept}"></a>{base}'
         return builder
 
+    def _source_token(self, source_url):
+        """
+        Short ``<SOURCE>`` token for the inline mapping syntax.
+
+        Relative OCL URLs collapse to the source short code, with an optional
+        version in parentheses (``/orgs/WHO/sources/ICD-10/v2023/`` →
+        ``ICD-10(v2023)``). A missing to_source means the target lives in the
+        source this changelog is about, so its own short code is used. Short
+        codes and canonical URLs pass through unchanged (both are valid tokens).
+        """
+        if not source_url:
+            return self._source_prefix.strip('/').split('/')[-1] if self._source_prefix else ''
+        token = str(source_url)
+        if token.startswith('/'):
+            parts = token.strip('/').split('/')
+            try:
+                idx = parts.index('sources')
+                source = parts[idx + 1]
+                version = parts[idx + 2] if len(parts) > idx + 2 else None
+                return f'{source}({version})' if version else source
+            except (ValueError, IndexError):
+                return token
+        return token
+
+    def _inline_mapping(self, to_concept, to_source, map_type):
+        """
+        Render the target side of a mapping in the inline mapping syntax:
+        ``[map-type] <SOURCE>:<code>``. The map type is always emitted so that
+        Previous/Updated cells stay unambiguous even for SAME-AS.
+        """
+        code = self._display_code(to_concept)
+        token = self._escape(self._source_token(to_source))
+        target = f'{token}:{code}' if token else code
+        map_type = map_type or ''
+        return f'[{self._escape(map_type)}] {target}' if map_type else target
+
     def _mappings_table(self, mappings_dict):
         rows = [
-            '| From Concept | To Concept | To Source | Map Type |',
-            '|-------------|-----------|----------|---------|',
+            '| From Concept | Mapping |',
+            '|-------------|---------|',
         ]
         make_link = self._from_link_builder()
         for m in mappings_dict.values():
             rows.append(
                 f'| {make_link(m.get("from_concept"))} '
-                f'| {self._display_code(m.get("to_concept"))} '
-                f'| {self._escape(m.get("to_source") or "")} '
-                f'| {self._escape(m.get("map_type") or "")} |'
+                f'| {self._inline_mapping(m.get("to_concept"), m.get("to_source"), m.get("map_type"))} |'
             )
         return rows
 
-    def _mappings_updated_table(self, mappings_dict):
-        """Before/after table for changed mappings, highlighting fields that changed."""
+    def _mappings_updated_table(self, changed_rows):
+        """Before/after table for changed mappings using the inline mapping syntax."""
         rows = [
-            '| From Concept | Previous To Concept | Updated To Concept | '
-            'Previous Map Type | Updated Map Type | To Source |',
-            '|-------------|--------------------|--------------------|'
-            '------------------|------------------|----------|',
+            '| From Concept | Previous Mapping | Updated Mapping |',
+            '|-------------|------------------|-----------------|',
         ]
         make_link = self._from_link_builder()
-        for m in mappings_dict.values():
-            to_concept = m.get('to_concept') or ''
-            map_type = m.get('map_type') or ''
-            prev_to = m.get('prev_to_concept')
-            prev_mt = m.get('prev_map_type')
-            # Fall back to current value when prev is missing (e.g. verbosity<4 consumer).
-            prev_to_display = prev_to if prev_to is not None else to_concept
-            prev_mt_display = prev_mt if prev_mt is not None else map_type
-            rows.append(
-                f'| {make_link(m.get("from_concept"))} '
-                f'| {self._display_code(prev_to_display)} '
-                f'| {self._display_code(to_concept)} '
-                f'| {self._escape(prev_mt_display)} '
-                f'| {self._escape(map_type)} '
-                f'| {self._escape(m.get("to_source") or "")} |'
-            )
+        for from_concept, previous, updated in changed_rows:
+            rows.append(f'| {make_link(from_concept)} | {previous} | {updated} |')
         return rows
 
     # ------------------------------------------------------------------
@@ -998,8 +1064,8 @@ class ChangelogMarkdownGenerator:
         return False
 
     def _has_mappings(self):
-        added, removed, changed = self._mapping_collections()
-        return bool(added or removed or changed)
+        added, removed, _ = self._mapping_collections()
+        return bool(added or removed or self._changed_mapping_rows())
 
     # ------------------------------------------------------------------
     # Deterministic highlight (placeholder for future LLM integration)
@@ -1052,9 +1118,14 @@ class ChangelogMarkdownGenerator:
     def _concept_link(self, concept_id):
         if not concept_id:
             return ''
-        base = getattr(settings, 'API_BASE_URL', '')
         if self._source_prefix:
-            url = f'{base}{self._source_prefix}concepts/{concept_id}/'
+            # Prefer the TermBrowser (WEB_URL, hash-routed) so readers land on a
+            # browsable page; the API URL requires token auth in a browser.
+            web_base = getattr(settings, 'WEB_URL', None)
+            if web_base:
+                url = f'{web_base.rstrip("/")}/#{self._source_prefix}concepts/{concept_id}/'
+            else:
+                url = f'{getattr(settings, "API_BASE_URL", "")}{self._source_prefix}concepts/{concept_id}/'
             return f'[#{concept_id}]({url})'
         return f'#{concept_id}'
 

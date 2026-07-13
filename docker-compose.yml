@@ -45,6 +45,7 @@ services:
       - API_SUPERUSER_TOKEN=${API_SUPERUSER_TOKEN-891b4b17feab99f3ff7e5b5d04ccc5da7aa96da6}
       - API_BASE_URL=${API_BASE_URL-http://localhost:8000}
       - API_INTERNAL_BASE_URL=${API_INTERNAL_BASE_URL-http://api:8000}
+      - WEB_URL
       - EMAIL_NOREPLY_PASSWORD
       - AWS_ACCESS_KEY_ID
       - AWS_SECRET_ACCESS_KEY
@@ -92,6 +93,7 @@ services:
       - ES_HOSTS=${ES_HOSTS-es:9200}
       - ES_SCHEME=${ES_SCHEME-http}
       - DEBUG=${DEBUG-FALSE}
+      - WEB_URL
       - ERRBIT_URL
       - ERRBIT_KEY
       - AWS_ACCESS_KEY_ID
