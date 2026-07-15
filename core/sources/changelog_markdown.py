@@ -365,32 +365,37 @@ class ChangelogMarkdownGenerator:
             changed=len(visible_major) + len(visible_minor),
         )
 
+        v1_uri = self._v1_meta.get('uri', '')
+        v2_uri = self._v2_meta.get('uri', '')
+
         parts = ['## Concepts', '', f'*{highlight}*']
 
         if added:
             parts += ['', self._anchor('concepts-added'), '### Added', '']
-            parts += self._concept_table(added)
+            parts += self._concept_table(added, version_uri=v2_uri)
         if removed:
             parts += ['', self._anchor('concepts-removed'), '### Removed', '']
-            parts += self._concept_table(removed)
+            parts += self._concept_table(removed, version_uri=v1_uri)
         if retired:
             parts += ['', self._anchor('concepts-retired'), '### Retired', '']
-            parts += self._concept_table(retired)
+            parts += self._concept_table(retired, version_uri=v2_uri)
         if visible_major:
             parts += ['', self._anchor('concepts-updated-major'), '### Updated (Major)', '']
             parts += self._concept_table(
-                visible_major, show_changes=self.is_enriched, axes_as_links=self.is_enriched
+                visible_major, show_changes=self.is_enriched, axes_as_links=self.is_enriched,
+                version_uri=v2_uri,
             )
         if visible_minor:
             parts += ['', self._anchor('concepts-updated-minor'), '### Updated (Minor)', '']
             parts += self._concept_table(
-                visible_minor, show_changes=self.is_enriched, axes_as_links=self.is_enriched
+                visible_minor, show_changes=self.is_enriched, axes_as_links=self.is_enriched,
+                version_uri=v2_uri,
             )
 
         parts += ['', '---']
         return '\n'.join(parts)
 
-    def _concept_table(self, concepts_dict, show_changes=False, axes_as_links=False):
+    def _concept_table(self, concepts_dict, show_changes=False, axes_as_links=False, version_uri=None):
         if show_changes:
             rows = [
                 '| Concept ID | Display Name | Concept Class | Changed |',
@@ -404,7 +409,7 @@ class ChangelogMarkdownGenerator:
         for concept_id, info in concepts_dict.items():
             display = info.get('display_name') or ''
             concept_class = info.get('concept_class') or ''
-            link = self._concept_link(concept_id)
+            link = self._concept_link(concept_id, version_uri)
             if show_changes:
                 axes = self._changed_axes(
                     info,
@@ -564,32 +569,36 @@ class ChangelogMarkdownGenerator:
              within a slot (1 removed + 1 added) is treated as Updated.
 
         The first row per concept carries an HTML anchor so the Concepts "Changed"
-        column can deep-link to it.
+        column can deep-link to it. Each row's concept link is scoped to the
+        version it actually exists in (version2 for new/changed concepts,
+        version1 for removed ones).
         """
         from collections import defaultdict
 
         added_rows, updated_rows, removed_rows = [], [], []
         anchored = set()
+        v1_uri = self._v1_meta.get('uri', '')
+        v2_uri = self._v2_meta.get('uri', '')
 
-        def anchored_link(concept_id):
-            base = self._concept_link(concept_id)
+        def anchored_link(concept_id, version_uri):
+            base = self._concept_link(concept_id, version_uri)
             if concept_id in anchored:
                 return base
             anchored.add(concept_id)
             return f'<a id="{section}-{concept_id}"></a>{base}'
 
-        def row_tuple(cid, name, ntype, locale):
-            return (anchored_link(cid), name or '', ntype or '', locale or '')
+        def row_tuple(cid, name, ntype, locale, version_uri):
+            return (anchored_link(cid, version_uri), name or '', ntype or '', locale or '')
 
         # Added/Removed from new/removed concepts (all their names at this locale)
         for concept_id, info in (self.concepts.get('new') or {}).items():
             for n in info.get('names') or []:
                 if matches_locale(n):
-                    added_rows.append(row_tuple(concept_id, n.get('name'), n.get('type'), n.get('locale')))
+                    added_rows.append(row_tuple(concept_id, n.get('name'), n.get('type'), n.get('locale'), v2_uri))
         for concept_id, info in (self.concepts.get('removed') or {}).items():
             for n in info.get('names') or []:
                 if matches_locale(n):
-                    removed_rows.append(row_tuple(concept_id, n.get('name'), n.get('type'), n.get('locale')))
+                    removed_rows.append(row_tuple(concept_id, n.get('name'), n.get('type'), n.get('locale'), v1_uri))
 
         # Compare prev vs current names for changed concepts
         for key in ('changed_major', 'changed_minor'):
@@ -605,14 +614,14 @@ class ChangelogMarkdownGenerator:
                     if p and c:
                         if p.get('name') != c.get('name'):
                             updated_rows.append((
-                                anchored_link(concept_id),
+                                anchored_link(concept_id, v2_uri),
                                 p.get('name', ''), c.get('name', ''),
                                 c.get('type') or '', c.get('locale') or '',
                             ))
                     elif c:
-                        added_rows.append(row_tuple(concept_id, c.get('name'), c.get('type'), c.get('locale')))
+                        added_rows.append(row_tuple(concept_id, c.get('name'), c.get('type'), c.get('locale'), v2_uri))
                     else:
-                        removed_rows.append(row_tuple(concept_id, p.get('name'), p.get('type'), p.get('locale')))
+                        removed_rows.append(row_tuple(concept_id, p.get('name'), p.get('type'), p.get('locale'), v2_uri))
 
                 # Fallback for names without external_id
                 prev_no_eid = [n for n in prev_names if not n.get('external_id')]
@@ -635,15 +644,15 @@ class ChangelogMarkdownGenerator:
                     removed_texts = prev_texts - curr_texts
                     if len(added_texts) == 1 and len(removed_texts) == 1:
                         updated_rows.append((
-                            anchored_link(concept_id),
+                            anchored_link(concept_id, v2_uri),
                             next(iter(removed_texts)), next(iter(added_texts)),
                             ntype or '', nloc or '',
                         ))
                     else:
                         for text in added_texts:
-                            added_rows.append(row_tuple(concept_id, text, ntype, nloc))
+                            added_rows.append(row_tuple(concept_id, text, ntype, nloc, v2_uri))
                         for text in removed_texts:
-                            removed_rows.append(row_tuple(concept_id, text, ntype, nloc))
+                            removed_rows.append(row_tuple(concept_id, text, ntype, nloc, v2_uri))
 
         return added_rows, updated_rows, removed_rows
 
@@ -705,9 +714,11 @@ class ChangelogMarkdownGenerator:
         updated_rows = []
         removed_rows = []
         anchored = set()
+        v1_uri = self._v1_meta.get('uri', '')
+        v2_uri = self._v2_meta.get('uri', '')
 
-        def anchored_link(concept_id):
-            base = self._concept_link(concept_id)
+        def anchored_link(concept_id, version_uri):
+            base = self._concept_link(concept_id, version_uri)
             if concept_id not in anchored:
                 anchored.add(concept_id)
                 return f'<a id="descriptions-{concept_id}"></a>{base}'
@@ -716,14 +727,14 @@ class ChangelogMarkdownGenerator:
         for concept_id, info in (self.concepts.get('new') or {}).items():
             first = True
             for desc in info.get('descriptions') or []:
-                link = anchored_link(concept_id) if first else self._concept_link(concept_id)
+                link = anchored_link(concept_id, v2_uri) if first else self._concept_link(concept_id, v2_uri)
                 first = False
                 added_rows.append((link, desc.get('description', ''), desc.get('type', ''), desc.get('locale', '')))
 
         for concept_id, info in (self.concepts.get('removed') or {}).items():
             first = True
             for desc in info.get('descriptions') or []:
-                link = anchored_link(concept_id) if first else self._concept_link(concept_id)
+                link = anchored_link(concept_id, v1_uri) if first else self._concept_link(concept_id, v1_uri)
                 first = False
                 removed_rows.append((link, desc.get('description', ''), desc.get('type', ''), desc.get('locale', '')))
 
@@ -737,14 +748,14 @@ class ChangelogMarkdownGenerator:
                     prev_text = prev_map.get(key_tuple)
                     dtype = key_tuple[0] or ''
                     dloc = key_tuple[1] or ''
-                    link = anchored_link(concept_id)
+                    link = anchored_link(concept_id, v2_uri)
                     if prev_text is None:
                         added_rows.append((link, curr_text, dtype, dloc))
                     elif prev_text != curr_text:
                         updated_rows.append((link, prev_text, curr_text, dtype, dloc))
                 for key_tuple, prev_text in prev_map.items():
                     if key_tuple not in curr_map:
-                        link = anchored_link(concept_id)
+                        link = anchored_link(concept_id, v2_uri)
                         removed_rows.append((link, prev_text, key_tuple[0] or '', key_tuple[1] or ''))
 
         return added_rows, updated_rows, removed_rows
@@ -966,27 +977,30 @@ class ChangelogMarkdownGenerator:
             changed=len(changed_rows),
         )
 
+        v1_uri = self._v1_meta.get('uri', '')
+        v2_uri = self._v2_meta.get('uri', '')
+
         parts = ['## Mappings', '', f'*{highlight}*']
         if added:
             parts += ['', self._anchor('mappings-added'), '### Added', '']
-            parts += self._mappings_table(added)
+            parts += self._mappings_table(added, version_uri=v2_uri)
         if removed:
             parts += ['', self._anchor('mappings-removed'), '### Removed', '']
-            parts += self._mappings_table(removed)
+            parts += self._mappings_table(removed, version_uri=v1_uri)
         if changed_rows:
             parts += ['', self._anchor('mappings-updated'), '### Updated', '']
-            parts += self._mappings_updated_table(changed_rows)
+            parts += self._mappings_updated_table(changed_rows, version_uri=v2_uri)
 
         return '\n'.join(parts)
 
-    def _from_link_builder(self):
+    def _from_link_builder(self, version_uri=None):
         """Build a function that emits anchored from_concept links once per concept."""
         anchored = set()
 
         def builder(from_concept):
             if not from_concept:
                 return ''
-            base = self._concept_link(from_concept)
+            base = self._concept_link(from_concept, version_uri)
             if from_concept in anchored:
                 return base
             anchored.add(from_concept)
@@ -1029,12 +1043,12 @@ class ChangelogMarkdownGenerator:
         map_type = map_type or ''
         return f'[{self._escape(map_type)}] {target}' if map_type else target
 
-    def _mappings_table(self, mappings_dict):
+    def _mappings_table(self, mappings_dict, version_uri=None):
         rows = [
             '| From Concept | Mapping |',
             '|-------------|---------|',
         ]
-        make_link = self._from_link_builder()
+        make_link = self._from_link_builder(version_uri)
         for m in mappings_dict.values():
             rows.append(
                 f'| {make_link(m.get("from_concept"))} '
@@ -1042,13 +1056,13 @@ class ChangelogMarkdownGenerator:
             )
         return rows
 
-    def _mappings_updated_table(self, changed_rows):
+    def _mappings_updated_table(self, changed_rows, version_uri=None):
         """Before/after table for changed mappings using the inline mapping syntax."""
         rows = [
             '| From Concept | Previous Mapping | Updated Mapping |',
             '|-------------|------------------|-----------------|',
         ]
-        make_link = self._from_link_builder()
+        make_link = self._from_link_builder(version_uri)
         for from_concept, previous, updated in changed_rows:
             rows.append(f'| {make_link(from_concept)} | {previous} | {updated} |')
         return rows
@@ -1115,17 +1129,25 @@ class ChangelogMarkdownGenerator:
         except (ValueError, IndexError):
             return ''
 
-    def _concept_link(self, concept_id):
+    def _concept_link(self, concept_id, version_uri=None):
+        """
+        Link to a concept, scoped to the specific source version being diffed
+        (not HEAD) so the link keeps pointing at the diffed state as the
+        source continues to change. Defaults to version2 since that's where
+        most rows (added/changed/retired) live; callers pass version1 for
+        rows that only exist there (removed).
+        """
         if not concept_id:
             return ''
-        if self._source_prefix:
+        version_uri = version_uri if version_uri is not None else self._v2_meta.get('uri', '')
+        if version_uri:
             # Prefer the TermBrowser (WEB_URL, hash-routed) so readers land on a
             # browsable page; the API URL requires token auth in a browser.
             web_base = getattr(settings, 'WEB_URL', None)
             if web_base:
-                url = f'{web_base.rstrip("/")}/#{self._source_prefix}concepts/{concept_id}/'
+                url = f'{web_base.rstrip("/")}/#{version_uri}concepts/{concept_id}/'
             else:
-                url = f'{getattr(settings, "API_BASE_URL", "")}{self._source_prefix}concepts/{concept_id}/'
+                url = f'{getattr(settings, "API_BASE_URL", "")}{version_uri}concepts/{concept_id}/'
             return f'[#{concept_id}]({url})'
         return f'#{concept_id}'
 
