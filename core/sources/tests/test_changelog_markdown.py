@@ -154,14 +154,24 @@ class TestChangelogMarkdownGeneratorSummaryTable(SimpleTestCase):
     def test_concept_links_use_web_url_when_configured(self):
         data = _make_data(concepts={'new': {'c1': {'id': 'c1', 'display_name': 'Foo', 'concept_class': 'Drug'}}})
         md = ChangelogMarkdownGenerator(data).generate()
-        self.assertIn('[#c1](http://localhost:4000/#/orgs/CIEL/sources/CIEL/concepts/c1/)', md)
+        # New concepts only exist in version2 — link must be scoped to that
+        # specific version (not HEAD) so it doesn't rot as the source evolves.
+        self.assertIn('[#c1](http://localhost:4000/#/orgs/CIEL/sources/CIEL/v20260101/concepts/c1/)', md)
 
     @override_settings(WEB_URL=None)
     def test_concept_links_fall_back_to_api_url(self):
         data = _make_data(concepts={'new': {'c1': {'id': 'c1', 'display_name': 'Foo', 'concept_class': 'Drug'}}})
         md = ChangelogMarkdownGenerator(data).generate()
-        self.assertIn('/orgs/CIEL/sources/CIEL/concepts/c1/)', md)
+        self.assertIn('/orgs/CIEL/sources/CIEL/v20260101/concepts/c1/)', md)
         self.assertNotIn('/#/orgs/', md)
+
+    @override_settings(WEB_URL='http://localhost:4000')
+    def test_removed_concept_link_scoped_to_version1(self):
+        data = _make_data(concepts={'removed': {'c5': {'id': 'c5', 'display_name': 'Gone'}}})
+        md = ChangelogMarkdownGenerator(data).generate()
+        # Removed concepts don't exist in version2 — link must point at version1.
+        self.assertIn('/#/orgs/CIEL/sources/CIEL/v20250101/concepts/c5/', md)
+        self.assertNotIn('/#/orgs/CIEL/sources/CIEL/v20260101/concepts/c5/', md)
 
 
 
@@ -399,7 +409,7 @@ class TestChangelogMarkdownGeneratorConceptsSection(SimpleTestCase):
         })
         md = ChangelogMarkdownGenerator(data).generate()
         self.assertIn('[#42]', md)
-        self.assertIn('/orgs/CIEL/sources/CIEL/concepts/42/', md)
+        self.assertIn('/orgs/CIEL/sources/CIEL/v20260101/concepts/42/', md)
 
     def test_concepts_removed_section(self):
         data = _make_data(concepts={
@@ -566,6 +576,15 @@ class TestChangelogMarkdownGeneratorMappingsSection(SimpleTestCase):
         self.assertIn('| From Concept | Mapping |', md)
         # Target side rendered in the inline mapping syntax
         self.assertIn('[SAME-AS] http://snomed.info/sct:12345', md)
+
+    def test_removed_mapping_from_concept_link_scoped_to_version1(self):
+        data = _make_data(mappings={
+            'removed': {'m1': _make_mapping('m1', 'c1', 'x')},
+        })
+        md = ChangelogMarkdownGenerator(data).generate()
+        # A removed mapping's from_concept only exists in version1.
+        self.assertIn('/orgs/CIEL/sources/CIEL/v20250101/concepts/c1/', md)
+        self.assertNotIn('/orgs/CIEL/sources/CIEL/v20260101/concepts/c1/', md)
 
     def test_mappings_section_omitted_if_empty(self):
         data = _make_data()
