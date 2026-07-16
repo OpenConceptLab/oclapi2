@@ -1171,6 +1171,29 @@ class BaseModelTest(OCLTestCase):
             call([1, 2], parallel=True),
         ])
 
+    def test_batch_index_routes_append_source_version_partial_doc(self):
+        queryset, document = Mock(), Mock()
+        with patch.object(BaseModel, 'batch_index_source_version_append') as append_mock:
+            with patch.object(BaseModel, 'batch_index_partial') as partial_mock:
+                with patch.object(BaseModel, 'batch_index_full') as full_mock:
+                    BaseModel.batch_index(
+                        queryset, document,
+                        partial_doc={'_append_source_version': 'v1', 'is_in_latest_source_version': True}
+                    )
+        append_mock.assert_called_once_with(queryset, document, 'v1', True, False, True)
+        partial_mock.assert_not_called()
+        full_mock.assert_not_called()
+
+    def test_batch_index_routes_plain_partial_doc(self):
+        queryset, document = Mock(), Mock()
+        with patch.object(BaseModel, 'batch_index_source_version_append') as append_mock:
+            with patch.object(BaseModel, 'batch_index_partial') as partial_mock:
+                with patch.object(BaseModel, 'batch_index_full') as full_mock:
+                    BaseModel.batch_index(queryset, document, partial_doc={'is_in_latest_source_version': True})
+        partial_mock.assert_called_once_with(queryset, document, False, {'is_in_latest_source_version': True}, True)
+        append_mock.assert_not_called()
+        full_mock.assert_not_called()
+
     @override_settings(TEST_MODE=False)
     def test_batch_index_partial_streams_batches_without_parallel_bulk(self):
         # The document bulk helper stores index metadata on protected members.
@@ -1219,6 +1242,111 @@ class BaseModelTest(OCLTestCase):
             }
         ])
         self.assertEqual([call.kwargs for call in bulk_calls], [{'parallel': True}])
+
+    @override_settings(TEST_MODE=False)
+    def test_batch_index_source_version_append_streams_batches_without_parallel_bulk(self):
+        ids_queryset = MagicMock()
+
+        def get_batch(batch_slice):
+            if batch_slice == slice(0, 500, None):
+                return [10, 11]
+            return []
+
+        ids_queryset.__getitem__.side_effect = get_batch
+
+        queryset = Mock()
+        ordered_queryset = Mock()
+        ordered_queryset.values_list.return_value = ids_queryset
+        queryset.order_by.return_value = ordered_queryset
+
+        doc_instance = Mock()
+        doc_instance.django.auto_refresh = False
+        document = Mock(return_value=doc_instance)
+
+        BaseModel.batch_index_source_version_append(queryset, document, 'v1', True, False)
+
+        bulk_calls = doc_instance._bulk.call_args_list  # pylint: disable=protected-access
+        self.assertEqual(len(bulk_calls), 1)
+        actions = list(bulk_calls[0].args[0])
+        expected_script = {
+            'source': BaseModel._APPEND_SOURCE_VERSION_SCRIPT,  # pylint: disable=protected-access
+            'params': {'version': 'v1', 'is_in_latest_source_version': True}
+        }
+        self.assertEqual(actions, [
+            {
+                '_op_type': 'update',
+                '_index': doc_instance._index._name,  # pylint: disable=protected-access
+                '_id': 10,
+                'retry_on_conflict': 3,
+                'script': expected_script,
+            },
+            {
+                '_op_type': 'update',
+                '_index': doc_instance._index._name,  # pylint: disable=protected-access
+                '_id': 11,
+                'retry_on_conflict': 3,
+                'script': expected_script,
+            }
+        ])
+        for action in actions:
+            self.assertNotIn('doc_as_upsert', action)
+            self.assertNotIn('upsert', action)
+
+    @override_settings(TEST_MODE=False)
+    def test_batch_index_source_version_append_falls_back_to_full_index_for_missing_docs(self):
+        from elasticsearch.helpers import BulkIndexError
+
+        ids_queryset = MagicMock()
+        ids_queryset.__getitem__.side_effect = lambda s: [10, 11] if s == slice(0, 500, None) else []
+
+        queryset = Mock()
+        ordered_queryset = Mock()
+        ordered_queryset.values_list.return_value = ids_queryset
+        queryset.order_by.return_value = ordered_queryset
+        missing_queryset = Mock()
+        queryset.filter.return_value = missing_queryset
+
+        doc_instance = Mock()
+        doc_instance.django.auto_refresh = False
+        doc_instance._bulk.side_effect = BulkIndexError(  # pylint: disable=protected-access
+            '1 document(s) failed to index.',
+            [{'update': {'_id': 11, 'status': 404}}]
+        )
+        document = Mock(return_value=doc_instance)
+
+        with patch.object(BaseModel, 'batch_index_full') as batch_index_full_mock:
+            BaseModel.batch_index_source_version_append(queryset, document, 'v1', True, False)
+
+        queryset.filter.assert_called_once_with(id__in={11})
+        batch_index_full_mock.assert_called_once_with(
+            single_batch=False, queryset=missing_queryset, document=document, prefetch=[], select_related=[]
+        )
+
+    @override_settings(TEST_MODE=False)
+    def test_batch_index_source_version_append_reraises_real_errors(self):
+        from elasticsearch.helpers import BulkIndexError
+
+        ids_queryset = MagicMock()
+        ids_queryset.__getitem__.side_effect = lambda s: [10] if s == slice(0, 500, None) else []
+
+        queryset = Mock()
+        ordered_queryset = Mock()
+        ordered_queryset.values_list.return_value = ids_queryset
+        queryset.order_by.return_value = ordered_queryset
+
+        doc_instance = Mock()
+        doc_instance.django.auto_refresh = False
+        doc_instance._bulk.side_effect = BulkIndexError(  # pylint: disable=protected-access
+            '1 document(s) failed to index.',
+            [{'update': {'_id': 10, 'status': 500}}]
+        )
+        document = Mock(return_value=doc_instance)
+
+        with patch.object(BaseModel, 'batch_index_full') as batch_index_full_mock:
+            with self.assertRaises(BulkIndexError):
+                BaseModel.batch_index_source_version_append(queryset, document, 'v1', True, False)
+
+        batch_index_full_mock.assert_not_called()
 
 
 class TaskTest(OCLTestCase):

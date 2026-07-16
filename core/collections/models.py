@@ -23,6 +23,7 @@ from core.common.constants import (
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT,
     ES_REQUEST_TIMEOUT, ES_REQUEST_TIMEOUT_ASYNC, HEAD, ALL, EXCLUDE_WILDCARD_SEARCH_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM,
     SEARCH_MAP_CODES_PARAM, INCLUDE_SEARCH_META_PARAM, VERBOSE_PARAM)
+from core.common.es import ESScript
 from core.common.models import ConceptContainerModel, BaseResourceModel
 from core.common.search import CustomESSearch
 from core.common.tasks import seed_children_to_expansion, batch_index_resources, index_expansion_concepts, \
@@ -1264,18 +1265,6 @@ class Expansion(BaseResourceModel):
     def collection_kwargs(self):
         return to_parent_kwargs_from_uri(self.uri)
 
-    # Painless script: append each value to the list field only if not already present
-    _APPEND_COLLECTION_FIELDS_SCRIPT = """
-        for (entry in params.entrySet()) {
-            def key = entry.getKey();
-            def vals = entry.getValue();
-            if (ctx._source[key] == null) { ctx._source[key] = []; }
-            for (v in vals) {
-                if (!ctx._source[key].contains(v)) { ctx._source[key].add(v); }
-            }
-        }
-    """
-
     def batch_index(self, queryset, document, **kwargs):  # pylint: disable=arguments-differ
         """
         Override: append this expansion's 5 collection membership fields to each resource's ES doc.
@@ -1299,7 +1288,7 @@ class Expansion(BaseResourceModel):
                     '_id': rid,
                     'retry_on_conflict': 3,
                     'script': {
-                        'source': Expansion._APPEND_COLLECTION_FIELDS_SCRIPT,
+                        'source': ESScript.APPEND_COLLECTION_FIELDS_SCRIPT,
                         'params': collection_fields,
                     },
                 }

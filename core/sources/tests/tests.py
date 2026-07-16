@@ -1459,6 +1459,30 @@ class TasksTest(OCLTestCase):
         export_source_task.apply_async.assert_not_called()
         index_children_mock.assert_called_once_with(sync=False, user=source_v1.created_by)
 
+    @patch('core.sources.models.index_source_mappings')
+    @patch('core.sources.models.index_source_concepts')
+    @patch('core.common.tasks.export_source')
+    def test_seed_children_task_should_partially_index_new_unreleased_version(
+            self, export_source_task, index_source_concepts_task_mock, index_source_mappings_task_mock
+    ):
+        export_source_task.__name__ = 'export_source'
+        index_source_concepts_task_mock.__name__ = 'index_source_concepts'
+        index_source_mappings_task_mock.__name__ = 'index_source_mappings'
+        source = OrganizationSourceFactory()
+        ConceptFactory(parent=source)
+        MappingFactory(parent=source)
+
+        source_v1 = OrganizationSourceFactory(organization=source.organization, version='v1', mnemonic=source.mnemonic)
+
+        seed_children_to_new_version('source', source_v1.id, False)  # pylint: disable=no-value-for-parameter
+
+        index_source_concepts_task_mock.apply_async.assert_called_once_with(
+            (source_v1.id, {'_append_source_version': 'v1'}), queue='indexing', persist_args=True, task_id=ANY
+        )
+        index_source_mappings_task_mock.apply_async.assert_called_once_with(
+            (source_v1.id, {'_append_source_version': 'v1'}), queue='indexing', persist_args=True, task_id=ANY
+        )
+
     @patch('core.sources.models.Source.index_children')
     @patch('core.common.tasks.export_source')
     def test_seed_children_task_with_export(self, export_source_task, index_children_mock):
@@ -1508,9 +1532,11 @@ class TasksTest(OCLTestCase):
         export_source_task_mock.apply_async.assert_called_once_with(
             (source_v1.id,), queue='default', persist_args=True, task_id=ANY)
         index_source_concepts_task_mock.apply_async.assert_called_once_with(
-            (source_v1.id, None), queue='indexing', persist_args=True, task_id=ANY)
+            (source_v1.id, {'_append_source_version': 'v1', 'is_in_latest_source_version': True}),
+            queue='indexing', persist_args=True, task_id=ANY)
         index_source_mappings_task_mock.apply_async.assert_called_once_with(
-            (source_v1.id, None), queue='indexing', persist_args=True, task_id=ANY)
+            (source_v1.id, {'_append_source_version': 'v1', 'is_in_latest_source_version': True}),
+            queue='indexing', persist_args=True, task_id=ANY)
 
     @patch('core.common.tasks.export_source')
     @patch('core.sources.models.index_source_mappings')
@@ -1550,7 +1576,7 @@ class TasksTest(OCLTestCase):
                     queue='indexing', persist_args=True, task_id=ANY
                 ),
                 call(
-                    (source_v2.id, None),
+                    (source_v2.id, {'_append_source_version': 'v2', 'is_in_latest_source_version': True}),
                     queue='indexing', persist_args=True, task_id=ANY
                 )
             ]
@@ -1563,14 +1589,14 @@ class TasksTest(OCLTestCase):
                     queue='indexing', persist_args=True, task_id=ANY
                 ),
                 call(
-                    (source_v2.id, None),
+                    (source_v2.id, {'_append_source_version': 'v2', 'is_in_latest_source_version': True}),
                     queue='indexing', persist_args=True, task_id=ANY
                 )
             ]
         )
 
     @patch.object(Source, 'index_children_async', autospec=True)
-    def test_index_resources_for_self_as_latest_released_should_fully_index_new_version_on_create(
+    def test_index_resources_for_self_as_latest_released_should_partially_index_new_version_on_create(
             self, index_children_async_mock
     ):
         head = OrganizationSourceFactory()
@@ -1585,7 +1611,10 @@ class TasksTest(OCLTestCase):
             index_children_async_mock.mock_calls,
             [
                 call(source_v1, source_v2.created_by, {'is_in_latest_source_version': False}),
-                call(source_v2, source_v2.created_by, None)
+                call(
+                    source_v2, source_v2.created_by,
+                    {'_append_source_version': 'v2', 'is_in_latest_source_version': True}
+                )
             ]
         )
 

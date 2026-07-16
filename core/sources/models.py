@@ -438,9 +438,12 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             if prev_released_version:
                 prev_released_version.index_children_async(user, {'is_in_latest_source_version': False})
 
-            self.index_children_async(
-                user, {'is_in_latest_source_version': True} if only_update else None
-            )
+            if only_update:
+                self.index_children_async(user, {'is_in_latest_source_version': True})
+            else:
+                self.index_children_async(
+                    user, {'_append_source_version': self.version, 'is_in_latest_source_version': True}
+                )
 
     def index_resources_for_self_as_unreleased(self):
         """
@@ -489,7 +492,7 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             self.batch_index(self.concepts, ConceptDocument)
             self.batch_index(self.mappings, MappingDocument)
         else:
-            self.index_children_async(user)
+            self.index_children_async(user, {'_append_source_version': self.version})
 
     def index_children_async(self, user=None, partial_doc=None):
         user = user or self.updated_by

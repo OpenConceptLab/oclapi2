@@ -33,6 +33,7 @@ from .constants import (
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
     CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, OPENMRS_VALIDATION_SCHEMA, VALIDATION_SCHEMAS,
     DEFAULT_VALIDATION_SCHEMA, ES_REQUEST_TIMEOUT, UPDATED_BY_USERNAME_PARAM)
+from .es import ESScript
 from .exceptions import Http400
 from .fields import URIField
 from .mixins import SourceContainerMixin
@@ -208,9 +209,60 @@ class BaseModel(models.Model):
             queryset, document, single_batch=False, prefetch=None, select_related=None, partial_doc=None, parallel=True
     ):
         if partial_doc:
+            version = partial_doc.get('_append_source_version')
+            if version:
+                BaseModel.batch_index_source_version_append(
+                    queryset, document, version, partial_doc.get('is_in_latest_source_version'),
+                    single_batch, bool(parallel)
+                )
+                return
             BaseModel.batch_index_partial(queryset, document, single_batch, partial_doc, bool(parallel))
             return
         BaseModel.batch_index_full(single_batch, queryset, document, prefetch, select_related, bool(parallel))
+
+    @staticmethod
+    def batch_index_source_version_append(  # pylint: disable=too-many-arguments
+            queryset, document, version, is_in_latest_source_version=None, single_batch=False, parallel=True
+    ):
+        """
+        Partial-update: append `version` to each resource's `source_version` list (and optionally
+        set `is_in_latest_source_version`), without recomputing the rest of the document. Falls
+        back to a full re-index for any docs not yet present in ES.
+        """
+        if get(settings, 'TEST_MODE', False):
+            return
+        from elasticsearch.helpers import BulkIndexError  # noqa: PLC0415
+
+        index_name = document()._index._name  # pylint: disable=protected-access
+        params = {'version': version}
+        if is_in_latest_source_version is not None:
+            params['is_in_latest_source_version'] = is_in_latest_source_version
+
+        def get_actions(batch_ids):
+            for rid in batch_ids:
+                yield {
+                    '_op_type': 'update',
+                    '_index': index_name,
+                    '_id': rid,
+                    'retry_on_conflict': 3,
+                    'script': {'source': ESScript.APPEND_SOURCE_VERSION_SCRIPT, 'params': params},
+                }
+
+        try:
+            BaseModel.batch_index_partial_by_ids(queryset, document, get_actions, single_batch, parallel)
+        except BulkIndexError as err:
+            missing_ids = {
+                e['update']['_id'] for e in err.errors if e.get('update', {}).get('status') == 404
+            }
+            real_errors = [e for e in err.errors if e.get('update', {}).get('status') != 404]
+            if real_errors:
+                raise BulkIndexError(f'{len(real_errors)} document(s) failed to index.', real_errors) from err
+            if missing_ids:
+                # Docs not yet in ES -- full index so they appear with all fields
+                BaseModel.batch_index_full(
+                    single_batch=False, queryset=queryset.filter(id__in=missing_ids),
+                    document=document, prefetch=[], select_related=[]
+                )
 
     @staticmethod
     def batch_index_full(single_batch: bool, queryset, document, prefetch, select_related, parallel=True):  # pylint: disable=too-many-arguments
