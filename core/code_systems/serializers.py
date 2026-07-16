@@ -138,9 +138,10 @@ class CodeSystemConceptSerializer(ReadSerializerMixin, serializers.Serializer):
 
 
 class CodeSystemPropertySerializer(ReadSerializerMixin, serializers.Serializer):
+    """Represent CodeSystem property definitions from source metadata."""
     code = CharField()
-    uri = CharField()
-    description = CharField()
+    uri = CharField(required=False)
+    description = CharField(required=False)
     type = CharField()
 
 

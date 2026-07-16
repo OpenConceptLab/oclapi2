@@ -89,6 +89,18 @@ class CodeSystemTest(OCLTestCase):
         )
         self.assertEqual(resource['version'], 'v2')
 
+    def test_public_can_list_with_optional_property_metadata(self):
+        source = Source.objects.get(mnemonic=self.org_source.mnemonic, version='v2', organization=self.org)
+        source.properties = [{'code': 'source_property', 'type': 'string'}]
+        source.released = True
+        source.save()
+
+        response = self.client.get('/fhir/CodeSystem/?status=active')
+
+        self.assertEqual(response.status_code, 200)
+        resource = response.data['entry'][0]['resource']
+        self.assertIn({'code': 'source_property', 'type': 'string'}, resource['property'])
+
     def test_find_by_title(self):
         response = self.client.get('/fhir/CodeSystem/?title=source name')
 
