@@ -165,11 +165,11 @@ class ConceptDocument(Document):
 
     @staticmethod
     def prepare_locale(instance):
-        return compact(set(n.locale for n in instance.active_names.all()))
+        return compact(set(instance.active_names.values_list('locale', flat=True)))
 
     @staticmethod
     def prepare_source_version(instance):
-        return [s.version for s in instance.sources.all()]
+        return list(instance.sources.values_list('version', flat=True))
 
     @staticmethod
     def prepare_extras(instance):
@@ -198,15 +198,15 @@ class ConceptDocument(Document):
 
     @staticmethod
     def prepare_name_types(instance):
-        return compact(set(n.type for n in instance.active_names.all()))
+        return compact(set(instance.active_names.values_list('type', flat=True)))
 
     @staticmethod
     def prepare_description_types(instance):
-        return compact(set(d.type for d in instance.active_descriptions.all()))
+        return compact(set(instance.active_descriptions.values_list('type', flat=True)))
 
     @staticmethod
     def prepare_description(instance):
-        return '. '.join(compact(set(d.name for d in instance.active_descriptions.all())))
+        return '. '.join(compact(set(instance.active_descriptions.values_list('name', flat=True))))
 
     def prepare(self, instance):
         data = super().prepare(instance)
