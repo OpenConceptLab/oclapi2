@@ -619,9 +619,11 @@ class ChangelogMarkdownGenerator:
                                 c.get('type') or '', c.get('locale') or '',
                             ))
                     elif c:
-                        added_rows.append(row_tuple(concept_id, c.get('name'), c.get('type'), c.get('locale'), v2_uri))
+                        added_rows.append(
+                            row_tuple(concept_id, c.get('name'), c.get('type'), c.get('locale'), v2_uri))
                     else:
-                        removed_rows.append(row_tuple(concept_id, p.get('name'), p.get('type'), p.get('locale'), v2_uri))
+                        removed_rows.append(
+                            row_tuple(concept_id, p.get('name'), p.get('type'), p.get('locale'), v2_uri))
 
                 # Fallback for names without external_id
                 prev_no_eid = [n for n in prev_names if not n.get('external_id')]
