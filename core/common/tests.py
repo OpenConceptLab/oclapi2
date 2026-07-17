@@ -20,6 +20,7 @@ from rest_framework.test import APITestCase, APITransactionTestCase
 
 from core.collections.models import CollectionReference
 from core.common.constants import HEAD
+from core.common.es import ESScript
 from core.common.models import BaseModel
 from core.common.tasks import delete_s3_objects, bulk_import_parallel_inline, resources_report, calculate_checksums
 from core.common.throttling import (
@@ -1269,7 +1270,7 @@ class BaseModelTest(OCLTestCase):
         self.assertEqual(len(bulk_calls), 1)
         actions = list(bulk_calls[0].args[0])
         expected_script = {
-            'source': BaseModel._APPEND_SOURCE_VERSION_SCRIPT,  # pylint: disable=protected-access
+            'source': ESScript.APPEND_SOURCE_VERSION_SCRIPT,
             'params': {'version': 'v1', 'is_in_latest_source_version': True}
         }
         self.assertEqual(actions, [
@@ -1317,6 +1318,47 @@ class BaseModelTest(OCLTestCase):
         with patch.object(BaseModel, 'batch_index_full') as batch_index_full_mock:
             BaseModel.batch_index_source_version_append(queryset, document, 'v1', True, False)
 
+        queryset.filter.assert_called_once_with(id__in={11})
+        batch_index_full_mock.assert_called_once_with(
+            single_batch=False, queryset=missing_queryset, document=document, prefetch=[], select_related=[]
+        )
+
+    @override_settings(TEST_MODE=False)
+    def test_batch_index_source_version_append_continues_remaining_batches_after_bulk_error(self):
+        # A BulkIndexError (missing docs) on an earlier batch must not stop later batches
+        # from being attempted.
+        from elasticsearch.helpers import BulkIndexError
+
+        ids_queryset = MagicMock()
+
+        def get_batch(batch_slice):
+            if batch_slice == slice(0, 500, None):
+                return [10, 11]
+            if batch_slice == slice(500, 1000, None):
+                return [20]
+            return []
+
+        ids_queryset.__getitem__.side_effect = get_batch
+
+        queryset = Mock()
+        ordered_queryset = Mock()
+        ordered_queryset.values_list.return_value = ids_queryset
+        queryset.order_by.return_value = ordered_queryset
+        missing_queryset = Mock()
+        queryset.filter.return_value = missing_queryset
+
+        doc_instance = Mock()
+        doc_instance.django.auto_refresh = False
+        doc_instance._bulk.side_effect = [  # pylint: disable=protected-access
+            BulkIndexError('1 document(s) failed to index.', [{'update': {'_id': 11, 'status': 404}}]),
+            None,
+        ]
+        document = Mock(return_value=doc_instance)
+
+        with patch.object(BaseModel, 'batch_index_full') as batch_index_full_mock:
+            BaseModel.batch_index_source_version_append(queryset, document, 'v1', True, False)
+
+        self.assertEqual(doc_instance._bulk.call_count, 2)  # pylint: disable=protected-access
         queryset.filter.assert_called_once_with(id__in={11})
         batch_index_full_mock.assert_called_once_with(
             single_batch=False, queryset=missing_queryset, document=document, prefetch=[], select_related=[]

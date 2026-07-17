@@ -231,7 +231,6 @@ class BaseModel(models.Model):
         """
         if get(settings, 'TEST_MODE', False):
             return
-        from elasticsearch.helpers import BulkIndexError  # noqa: PLC0415
 
         index_name = document()._index._name  # pylint: disable=protected-access
         params = {'version': version}
@@ -248,21 +247,10 @@ class BaseModel(models.Model):
                     'script': {'source': ESScript.APPEND_SOURCE_VERSION_SCRIPT, 'params': params},
                 }
 
-        try:
-            BaseModel.batch_index_partial_by_ids(queryset, document, get_actions, single_batch, parallel)
-        except BulkIndexError as err:
-            missing_ids = {
-                e['update']['_id'] for e in err.errors if e.get('update', {}).get('status') == 404
-            }
-            real_errors = [e for e in err.errors if e.get('update', {}).get('status') != 404]
-            if real_errors:
-                raise BulkIndexError(f'{len(real_errors)} document(s) failed to index.', real_errors) from err
-            if missing_ids:
-                # Docs not yet in ES -- full index so they appear with all fields
-                BaseModel.batch_index_full(
-                    single_batch=False, queryset=queryset.filter(id__in=missing_ids),
-                    document=document, prefetch=[], select_related=[]
-                )
+        BaseModel.batch_index_partial_by_ids(
+            queryset, document, get_actions, single_batch, parallel,
+            on_bulk_error=lambda err: BaseModel.full_index_missing_docs_or_raise(err, queryset, document)
+        )
 
     @staticmethod
     def batch_index_full(single_batch: bool, queryset, document, prefetch, select_related, parallel=True):  # pylint: disable=too-many-arguments
@@ -289,19 +277,37 @@ class BaseModel(models.Model):
                 start += batch_size
 
     @staticmethod
-    def batch_index_partial_by_ids(queryset, document, get_actions, single_batch=False, parallel=True):
-        """Shared batching loop. get_actions(batch_ids) must yield ES action dicts."""
+    def batch_index_partial_by_ids(  # pylint: disable=too-many-arguments
+            queryset, document, get_actions, single_batch=False, parallel=True, on_bulk_error=None
+    ):
+        """
+        Shared batching loop. get_actions(batch_ids) must yield ES action dicts.
+
+        If `on_bulk_error` is given, a BulkIndexError raised while indexing one batch is
+        handled by it instead of propagating -- each batch is attempted independently, so
+        one bad batch can't stop the remaining batches from ever being tried.
+        """
         if get(settings, 'TEST_MODE', False):
             return
+        from elasticsearch.helpers import BulkIndexError  # noqa: PLC0415
 
         doc = document()
         kwargs = {}
         if doc.django.auto_refresh:
             kwargs['refresh'] = doc.django.auto_refresh
 
+        def index_batch(ids):
+            try:
+                doc._bulk(get_actions(ids), parallel=parallel, **kwargs)  # pylint: disable=protected-access
+            except BulkIndexError as err:
+                if on_bulk_error is None:
+                    BaseModel.full_index_missing_docs_or_raise(err, queryset, document)
+                else:
+                    on_bulk_error(err)
+
         if single_batch:
             ids = queryset.all().values_list('id', flat=True)
-            doc._bulk(get_actions(ids), parallel=parallel, **kwargs)  # pylint: disable=protected-access
+            index_batch(ids)
         else:
             batch_size = 500
             start = 0
@@ -310,8 +316,28 @@ class BaseModel(models.Model):
                 batch = list(id_qs[start:start + batch_size])
                 if not batch:
                     break
-                doc._bulk(get_actions(batch), parallel=parallel, **kwargs)  # pylint: disable=protected-access
+                index_batch(batch)
                 start += batch_size
+
+    @staticmethod
+    def full_index_missing_docs_or_raise(err, queryset, document, prefetch=None, select_related=None):
+        """
+        Handles a BulkIndexError from a single scripted/partial-update batch: re-raises if it
+        contains any non-404 (genuine) failures, otherwise full-indexes just the docs that were
+        missing (404) from ES so they get created with every field.
+        """
+        from elasticsearch.helpers import BulkIndexError  # noqa: PLC0415
+
+        missing_ids = {e['update']['_id'] for e in err.errors if e.get('update', {}).get('status') == 404}
+        real_errors = [e for e in err.errors if e.get('update', {}).get('status') != 404]
+        if real_errors:
+            raise BulkIndexError(f'{len(real_errors)} document(s) failed to index.', real_errors) from err
+        if missing_ids:
+            # Docs not yet in ES -- full index so they appear with all fields
+            BaseModel.batch_index_full(
+                single_batch=False, queryset=queryset.filter(id__in=missing_ids),
+                document=document, prefetch=prefetch or [], select_related=select_related or []
+            )
 
     @staticmethod
     def batch_index_partial(queryset, document, single_batch, partial_doc, parallel=True):
