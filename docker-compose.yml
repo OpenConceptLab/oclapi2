@@ -251,6 +251,7 @@ services:
       - FLOWER_PASSWORD=${FLOWER_PASSWORD-Root123}
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
+      - NO_LM=TRUE
     restart: "always"
     healthcheck:
       test: "curl --silent --fail -u $${FLOWER_USER:-root}:$${FLOWER_PASSWORD:-Root123} http://localhost:5555/metrics || exit 1"
