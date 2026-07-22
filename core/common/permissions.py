@@ -42,16 +42,29 @@ class HasOwnership(BasePermission):
         return False
 
 
-class CanViewConceptDictionary(HasPrivateAccess):
+def user_can_view_concept_dictionary(user, obj) -> bool:
+    """Shared visibility rule for concept-dictionary objects, usable without a DRF request."""
+    if obj.public_access in [ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW]:
+        return True
+    if user.is_staff:
+        return True
+    if user.is_authenticated:
+        if hasattr(obj, 'parent_id') and user == obj.parent:
+            return True
+        if user.organizations.filter(id=obj.id).exists():
+            return True
+        if hasattr(obj, 'parent_id') and user.organizations.filter(id=obj.parent_id).exists():
+            return True
+    return False
+
+
+class CanViewConceptDictionary(BasePermission):
     """
     The user can view this source
     """
 
     def has_object_permission(self, request, view, obj):
-        if obj.public_access in [ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW]:
-            return True
-
-        return super().has_object_permission(request, view, obj)
+        return user_can_view_concept_dictionary(request.user, obj)
 
 
 class CanEditConceptDictionary(HasPrivateAccess):

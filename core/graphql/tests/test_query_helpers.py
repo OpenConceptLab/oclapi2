@@ -11,7 +11,7 @@ from rest_framework.exceptions import AuthenticationFailed
 from strawberry.django.views import AsyncGraphQLView
 from strawberry.exceptions import GraphQLError
 
-from core.common.constants import HEAD
+from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, HEAD
 from core.common.tests import OCLTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import (
@@ -24,14 +24,14 @@ from core.graphql.queries import (
     _to_bool,
     _to_float,
     apply_slice,
-    build_base_queryset,
+    build_global_head_queryset,
+    build_source_version_queryset,
     build_datatype,
     build_global_mapping_prefetch,
     build_mapping_prefetch,
     concept_ids_from_es,
     concepts_for_ids,
     concepts_for_query,
-    fallback_db_search,
     format_datetime_for_api,
     has_next,
     normalize_pagination,
@@ -47,12 +47,18 @@ from core.graphql.queries import (
     serialize_names,
     with_concept_related,
 )
+from core.graphql.constants import (
+    AUTHENTICATION_FAILED,
+    FORBIDDEN,
+    build_expected_graphql_error,
+)
 from core.graphql.schema import schema
 from core.graphql.tests.conftest import bootstrap_super_user, create_user_with_token
 from core.graphql.views import AuthenticatedGraphQLView
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import OrganizationSourceFactory
+from core.users.tests.factories import UserProfileFactory
 
 
 class AuthenticatedGraphQLViewTests(OCLTestCase):
@@ -126,6 +132,15 @@ class AuthenticatedGraphQLViewTests(OCLTestCase):
                 context = async_to_sync(view.get_context)(valid_request)
             self.assertEqual(context.user, self.user)
             self.assertEqual(context.auth_status, 'valid')
+
+    def test_schema_process_errors_skips_expected_business_errors(self):
+        with patch('strawberry.schema.base.StrawberryLogger.error') as error_logger:
+            schema.process_errors([build_expected_graphql_error(AUTHENTICATION_FAILED)])
+        error_logger.assert_not_called()
+
+        with patch('strawberry.schema.base.StrawberryLogger.error') as error_logger:
+            schema.process_errors([GraphQLError('unexpected boom')])
+        error_logger.assert_called_once()
 
 
 class QueryHelperTests(OCLTestCase):
@@ -220,7 +235,7 @@ class QueryHelperTests(OCLTestCase):
         )
         with patch('core.graphql.queries.Source.get_version', return_value=self.source):
             success = async_to_sync(resolve_source_version)(
-                self.organization.mnemonic, self.source.mnemonic, None
+                self.organization.mnemonic, None, self.source.mnemonic, None
             )
         self.assertEqual(success, self.source)
 
@@ -228,15 +243,15 @@ class QueryHelperTests(OCLTestCase):
             'core.graphql.queries.Source.find_latest_released_version_by', return_value=fallback_only
         ):
             resolved = async_to_sync(resolve_source_version)(
-                self.organization.mnemonic, fallback_only.mnemonic, None
+                self.organization.mnemonic, None, fallback_only.mnemonic, None
             )
         self.assertEqual(resolved, fallback_only)
         with self.assertRaises(GraphQLError):
             async_to_sync(resolve_source_version)(
-                self.organization.mnemonic, 'missing-source', 'v-does-not-exist'
+                self.organization.mnemonic, None, 'missing-source', 'v-does-not-exist'
             )
 
-        base_qs = build_base_queryset(self.source)
+        base_qs = build_source_version_queryset(self.source)
         mapping_prefetch = build_mapping_prefetch(self.source)
         global_prefetch = build_global_mapping_prefetch()
         self.assertIsNotNone(mapping_prefetch)
@@ -252,12 +267,41 @@ class QueryHelperTests(OCLTestCase):
         related_qs = with_concept_related(base_qs, mapping_prefetch)
         self.assertGreaterEqual(related_qs.count(), 2)
 
+    def test_build_global_mapping_prefetch_filters_private_mappings(self):
+        private_mapping = MappingFactory(
+            parent=self.source,
+            from_concept=self.concept1,
+            to_concept=self.concept2,
+            public_access=ACCESS_TYPE_NONE,
+            created_by=self.audit_user,
+            updated_by=self.audit_user,
+        )
+        anonymous_qs = with_concept_related(
+            build_global_head_queryset(),
+            build_global_mapping_prefetch(AnonymousUser()),
+        ).filter(id=self.concept1.id)
+        anonymous_concept = list(anonymous_qs)[0]
+        self.assertTrue(all(mapping.public_access != ACCESS_TYPE_NONE for mapping in anonymous_concept.graphql_mappings))
+
+        member = UserProfileFactory(
+            username='graphql-mapping-member',
+            created_by=self.super_user,
+            updated_by=self.super_user,
+        )
+        self.organization.members.add(member)
+        member_qs = with_concept_related(
+            build_global_head_queryset(),
+            build_global_mapping_prefetch(member),
+        ).filter(id=self.concept1.id)
+        member_concept = list(member_qs)[0]
+        self.assertTrue(any(mapping.id == private_mapping.id for mapping in member_concept.graphql_mappings))
+
     def test_resolve_source_version_error_path_and_pagination_defaults(self):
         with patch('core.graphql.queries.Source.get_version', return_value=None), patch(
             'core.graphql.queries.Source.find_latest_released_version_by', return_value=None
         ):
             with self.assertRaises(GraphQLError):
-                async_to_sync(resolve_source_version)('ORG', 'SRC', None)
+                async_to_sync(resolve_source_version)('ORG', None, 'SRC', None)
 
         self.assertIsNone(normalize_pagination(None, None))
         self.assertFalse(has_next(10, None))
@@ -270,6 +314,9 @@ class QueryHelperTests(OCLTestCase):
         self.concept1.graphql_mappings = [self.mapping]
         serialized = serialize_concepts([self.concept1])[0]
         self.assertEqual(serialized.mappings[0].to_code, self.concept2.mnemonic)
+        self.assertEqual(serialized.mappings[0].to_concept_name, self.concept2.display_name)
+        self.assertEqual(serialized.mappings[0].sort_weight, self.mapping.sort_weight)
+        self.assertEqual(serialized.extras, self.concept1.extras)
         self.assertEqual(serialized.metadata.created_by, self.audit_user.username)
         self.assertEqual(serialized.description, 'FR description')
 
@@ -389,6 +436,9 @@ class QueryHelperTests(OCLTestCase):
             def params(self, **_kwargs):
                 return self
 
+            def extra(self, **_kwargs):
+                return self
+
             def execute(self):
                 return FakeResponse(self._items, self._total)
 
@@ -403,11 +453,49 @@ class QueryHelperTests(OCLTestCase):
         with patch('core.graphql.queries.ConceptDocument.search', side_effect=Exception('boom')):
             self.assertIsNone(concept_ids_from_es('text', self.source, None))
 
-    def test_fallback_and_concepts_queries(self):
-        base_qs = build_base_queryset(self.source)
-        self.assertEqual(fallback_db_search(base_qs, '   ').count(), 0)
-        self.assertIn(self.concept1.id, list(fallback_db_search(base_qs, 'UTIL').values_list('id', flat=True)))
+    def test_concept_ids_from_es_applies_global_visibility_filter(self):
+        class RecordingResponse:
+            def __init__(self):
+                self.hits = SimpleNamespace(total=SimpleNamespace(value=0))
 
+            def __iter__(self):
+                return iter([])
+
+        class RecordingSearch:
+            def __init__(self):
+                self.filters = []
+
+            def filter(self, *args, **kwargs):
+                self.filters.append((args, kwargs))
+                return self
+
+            def query(self, *_args, **_kwargs):
+                return self
+
+            def __getitem__(self, _key):
+                return self
+
+            def params(self, **_kwargs):
+                return self
+
+            def extra(self, **_kwargs):
+                return self
+
+            def execute(self):
+                return RecordingResponse()
+
+        anonymous_search = RecordingSearch()
+        with patch('core.graphql.queries.ConceptDocument.search', return_value=anonymous_search):
+            concept_ids_from_es('shared', None, None, user=AnonymousUser())
+        self.assertTrue(
+            any(
+                len(args) == 1 and not kwargs and 'public_can_view' in str(args[0])
+                for args, kwargs in anonymous_search.filters
+            )
+        )
+
+    def test_concepts_queries_behavior(self):
+        base_qs = build_source_version_queryset(self.source)
         mapping_prefetch = build_mapping_prefetch(self.source)
         with self.assertRaises(GraphQLError):
             async_to_sync(concepts_for_ids)(base_qs, [], normalize_pagination(1, 1), mapping_prefetch)
@@ -434,6 +522,17 @@ class QueryHelperTests(OCLTestCase):
             )
         self.assertGreaterEqual(total, 1)
 
+        with patch('core.graphql.queries.concept_ids_from_es', return_value=None):
+            global_concepts, _ = async_to_sync(concepts_for_query)(
+                build_global_head_queryset(),
+                'UTIL',
+                None,
+                normalize_pagination(1, 1),
+                build_global_mapping_prefetch(AnonymousUser()),
+                user=AnonymousUser(),
+            )
+        self.assertEqual(len(global_concepts), 1)
+
         with patch('core.graphql.queries.concept_ids_from_es', return_value=([], 2)):
             concepts, total = async_to_sync(concepts_for_query)(
                 base_qs, 'UTIL', self.source, None, mapping_prefetch
@@ -442,15 +541,16 @@ class QueryHelperTests(OCLTestCase):
         self.assertEqual(concepts, [])
 
     def test_query_concepts_auth_and_results(self):
-        info_none = SimpleNamespace(context=SimpleNamespace(auth_status='none'))
+        info_none = SimpleNamespace(context=SimpleNamespace(auth_status='none', user=AnonymousUser()))
         with self.assertRaises(GraphQLError):
             async_to_sync(Query().concepts)(info_none)
 
-        info_invalid = SimpleNamespace(context=SimpleNamespace(auth_status='invalid'))
-        with self.assertRaises(GraphQLError):
+        info_invalid = SimpleNamespace(context=SimpleNamespace(auth_status='invalid', user=AnonymousUser()))
+        with self.assertRaises(GraphQLError) as invalid:
             async_to_sync(Query().concepts)(info_invalid, query='test')
+        self.assertEqual(invalid.exception.extensions['code'], AUTHENTICATION_FAILED)
 
-        info_valid = SimpleNamespace(context=SimpleNamespace(auth_status='valid'))
+        info_valid = SimpleNamespace(context=SimpleNamespace(auth_status='valid', user=self.audit_user))
         with self.assertRaises(GraphQLError):
             async_to_sync(Query().concepts)(info_valid)
 
@@ -469,12 +569,8 @@ class QueryHelperTests(OCLTestCase):
         self.assertEqual(result_ids.limit, 1)
 
         with patch('core.graphql.queries.concept_ids_from_es', return_value=None):
-            result_query = async_to_sync(Query().concepts)(
-                info_valid,
-                query='UTIL',
-            )
-        self.assertGreaterEqual(result_query.total_count, 1)
-        self.assertFalse(result_query.has_next_page)
+            global_fallback = async_to_sync(Query().concepts)(info_valid, query='UTIL')
+        self.assertGreaterEqual(global_fallback.total_count, 1)
 
         with patch('core.graphql.queries.concept_ids_from_es', return_value=([], 2)), patch(
             'core.graphql.queries.resolve_source_version', return_value=self.source
@@ -483,7 +579,357 @@ class QueryHelperTests(OCLTestCase):
         self.assertEqual(result_es_empty.total_count, 2)
         self.assertEqual(result_es_empty.results, [])
 
-        with patch('core.graphql.queries.resolve_source_version', return_value=self.source):
-            result_global = async_to_sync(Query().concepts)(info_valid, query='UTIL')
+        with patch('core.graphql.queries.concept_ids_from_es', return_value=([self.concept1.id], 1)):
+            result_global = async_to_sync(Query().concepts)(
+                info_valid,
+                query='UTIL',
+            )
         self.assertIsNone(result_global.org)
         self.assertIsNone(result_global.source)
+
+    def test_query_concepts_enforces_repo_permissions_and_filters_global_results(self):
+        private_org = OrganizationFactory(
+            mnemonic='PRIVATE',
+            created_by=self.super_user,
+            updated_by=self.super_user,
+        )
+        private_source = OrganizationSourceFactory(
+            organization=private_org,
+            mnemonic='PRIVATE-SRC',
+            public_access=ACCESS_TYPE_NONE,
+            created_by=self.super_user,
+            updated_by=self.super_user,
+        )
+        private_concept = ConceptFactory(
+            parent=private_source,
+            mnemonic='PRIVATE-CONCEPT',
+            public_access=ACCESS_TYPE_NONE,
+            created_by=self.audit_user,
+            updated_by=self.audit_user,
+        )
+        ConceptNameFactory(
+            concept=private_concept,
+            name='Shared Visibility',
+            locale='en',
+            locale_preferred=True,
+        )
+
+        public_org = OrganizationFactory(
+            mnemonic='PUBLIC',
+            created_by=self.super_user,
+            updated_by=self.super_user,
+        )
+        public_source = OrganizationSourceFactory(
+            organization=public_org,
+            mnemonic='PUBLIC-SRC',
+            public_access=ACCESS_TYPE_VIEW,
+            created_by=self.super_user,
+            updated_by=self.super_user,
+        )
+        public_concept = ConceptFactory(
+            parent=public_source,
+            mnemonic='PUBLIC-CONCEPT',
+            public_access=ACCESS_TYPE_VIEW,
+            created_by=self.audit_user,
+            updated_by=self.audit_user,
+        )
+        ConceptNameFactory(
+            concept=public_concept,
+            name='Shared Visibility',
+            locale='en',
+            locale_preferred=True,
+        )
+
+        outsider = UserProfileFactory(
+            username='graphql-outsider',
+            created_by=self.super_user,
+            updated_by=self.super_user,
+        )
+        member = UserProfileFactory(
+            username='graphql-member',
+            created_by=self.super_user,
+            updated_by=self.super_user,
+        )
+        private_org.members.add(member)
+
+        anonymous_info = SimpleNamespace(context=SimpleNamespace(auth_status='none', user=AnonymousUser()))
+        outsider_info = SimpleNamespace(context=SimpleNamespace(auth_status='valid', user=outsider))
+        member_info = SimpleNamespace(context=SimpleNamespace(auth_status='valid', user=member))
+        invalid_info = SimpleNamespace(context=SimpleNamespace(auth_status='invalid', user=AnonymousUser()))
+
+        with self.assertRaises(GraphQLError) as forbidden:
+            async_to_sync(Query().concepts)(
+                outsider_info,
+                org=private_org.mnemonic,
+                source=private_source.mnemonic,
+                conceptIds=[private_concept.mnemonic],
+            )
+        self.assertEqual(str(forbidden.exception), 'Forbidden')
+        self.assertEqual(forbidden.exception.extensions['code'], FORBIDDEN)
+
+        with self.assertRaises(GraphQLError) as invalid_private:
+            async_to_sync(Query().concepts)(
+                invalid_info,
+                org=private_org.mnemonic,
+                source=private_source.mnemonic,
+                conceptIds=[private_concept.mnemonic],
+            )
+        self.assertEqual(str(invalid_private.exception), 'Authentication failure')
+        self.assertEqual(invalid_private.exception.extensions['code'], AUTHENTICATION_FAILED)
+
+        with self.assertRaises(GraphQLError) as invalid_public:
+            async_to_sync(Query().concepts)(
+                invalid_info,
+                org=public_org.mnemonic,
+                source=public_source.mnemonic,
+                conceptIds=[public_concept.mnemonic],
+            )
+        self.assertEqual(str(invalid_public.exception), 'Authentication failure')
+        self.assertEqual(invalid_public.exception.extensions['code'], AUTHENTICATION_FAILED)
+
+        public_repo_result = async_to_sync(Query().concepts)(
+            anonymous_info,
+            org=public_org.mnemonic,
+            source=public_source.mnemonic,
+            conceptIds=[public_concept.mnemonic],
+        )
+        self.assertEqual(public_repo_result.total_count, 1)
+        self.assertEqual(public_repo_result.results[0].concept_id, public_concept.mnemonic)
+
+        with patch(
+            'core.graphql.queries.concept_ids_from_es',
+            return_value=([public_concept.id], 1),
+        ):
+            anonymous_global = async_to_sync(Query().concepts)(anonymous_info, query='Shared Visibility')
+        self.assertEqual(
+            [concept.concept_id for concept in anonymous_global.results],
+            [public_concept.mnemonic],
+        )
+
+        with patch(
+            'core.graphql.queries.concept_ids_from_es',
+            return_value=([private_concept.id, public_concept.id], 2),
+        ):
+            member_global = async_to_sync(Query().concepts)(member_info, query='Shared Visibility')
+        self.assertEqual(
+            {concept.concept_id for concept in member_global.results},
+            {private_concept.mnemonic, public_concept.mnemonic},
+        )
+
+    # ------------------------------------------------------------------
+    # Regression tests for blockers caught in code review
+    # ------------------------------------------------------------------
+
+    def test_concept_ids_from_es_uses_resolved_version_not_client_label(self):
+        """B1 regression: when a client asks for an unreleased version and the resolver falls back
+        to ``find_latest_released_version_by``, the ES filter must follow the resolved Source.version,
+        not the original client label (which would produce zero hits)."""
+
+        from types import SimpleNamespace as NS
+
+        class RecordingResponse:
+            def __init__(self):
+                self.hits = NS(total=NS(value=0))
+
+            def __iter__(self):
+                return iter([])
+
+        class RecordingSearch:
+            def __init__(self):
+                self.filters = []
+
+            def filter(self, *args, **kwargs):
+                self.filters.append((args, kwargs))
+                return self
+
+            def query(self, *_args, **_kwargs):
+                return self
+
+            def __getitem__(self, _key):
+                return self
+
+            def params(self, **_kwargs):
+                return self
+
+            def extra(self, **_kwargs):
+                return self
+
+            def execute(self):
+                return RecordingResponse()
+
+        resolved_source = NS(
+            mnemonic='SRC',
+            version='v2.0',           # what the resolver actually returned
+            is_head=False,
+        )
+        recording = RecordingSearch()
+        with patch('core.graphql.queries.ConceptDocument.search', return_value=recording):
+            concept_ids_from_es('text', resolved_source, None)
+
+        # The source_version filter must use the *resolved* version label, not whatever the
+        # client originally typed in (the old code used `version_label or HEAD`).
+        version_filters = [
+            (args, kwargs) for args, kwargs in recording.filters
+            if args == ('term',) and kwargs.get('source_version') == 'v2.0'
+        ]
+        self.assertEqual(len(version_filters), 1)
+        # And it must NOT have applied the is_latest_version=True filter when the resolved
+        # version is a concrete (non-HEAD) release.
+        is_latest_filters = [
+            (args, kwargs) for args, kwargs in recording.filters
+            if kwargs.get('is_latest_version') is True
+        ]
+        self.assertEqual(is_latest_filters, [])
+
+    def test_concept_ids_from_es_uses_is_latest_for_head_source(self):
+        """B1 sibling: HEAD sources must continue to filter by is_latest_version=True."""
+        from types import SimpleNamespace as NS
+
+        class RecordingResponse:
+            def __init__(self):
+                self.hits = NS(total=NS(value=0))
+
+            def __iter__(self):
+                return iter([])
+
+        class RecordingSearch:
+            def __init__(self):
+                self.filters = []
+
+            def filter(self, *args, **kwargs):
+                self.filters.append((args, kwargs))
+                return self
+
+            def query(self, *_args, **_kwargs):
+                return self
+
+            def __getitem__(self, _key):
+                return self
+
+            def params(self, **_kwargs):
+                return self
+
+            def extra(self, **_kwargs):
+                return self
+
+            def execute(self):
+                return RecordingResponse()
+
+        head_source = NS(mnemonic='SRC', version=HEAD, is_head=True)
+        recording = RecordingSearch()
+        with patch('core.graphql.queries.ConceptDocument.search', return_value=recording):
+            concept_ids_from_es('text', head_source, None)
+
+        is_latest_filters = [
+            (args, kwargs) for args, kwargs in recording.filters
+            if kwargs.get('is_latest_version') is True
+        ]
+        self.assertEqual(len(is_latest_filters), 1)
+
+    def test_filter_global_queryset_fails_closed_without_apply_user_criteria(self):
+        """S1 regression: an authenticated non-staff user must not see ACCESS_TYPE_NONE rows when
+        the queryset model does not implement ``apply_user_criteria``."""
+        from core.graphql.permissions import filter_global_queryset
+
+        class FakeModel:
+            # Intentionally no apply_user_criteria
+            pass
+
+        class FakeQuerySet:
+            def __init__(self):
+                self.model = FakeModel
+                self.excluded = None
+
+            def exclude(self, **kwargs):
+                self.excluded = kwargs
+                return self
+
+        qs = FakeQuerySet()
+        non_staff_user = SimpleNamespace(is_anonymous=False, is_staff=False)
+        filter_global_queryset(qs, non_staff_user)
+        self.assertEqual(qs.excluded, {'public_access': ACCESS_TYPE_NONE})
+
+    def test_filter_global_queryset_uses_apply_user_criteria_when_available(self):
+        """S1 sibling: when the model exposes ``apply_user_criteria`` we delegate to it."""
+        from core.graphql.permissions import filter_global_queryset
+
+        sentinel = object()
+
+        class FakeModel:
+            @staticmethod
+            def apply_user_criteria(qs, user):  # pylint: disable=unused-argument
+                return sentinel
+
+        class FakeQuerySet:
+            model = FakeModel
+
+            def exclude(self, **_kwargs):  # pragma: no cover - must not be called
+                raise AssertionError('exclude must not be called when apply_user_criteria exists')
+
+        non_staff_user = SimpleNamespace(is_anonymous=False, is_staff=False)
+        self.assertIs(filter_global_queryset(FakeQuerySet(), non_staff_user), sentinel)
+
+    def test_filter_global_queryset_staff_sees_everything(self):
+        """S1 sibling: staff users bypass visibility filters entirely."""
+        from core.graphql.permissions import filter_global_queryset
+
+        class FakeQuerySet:
+            model = object  # never reached
+
+            def exclude(self, **_kwargs):  # pragma: no cover
+                raise AssertionError('staff path must not filter')
+
+        staff_user = SimpleNamespace(is_anonymous=False, is_staff=True)
+        qs = FakeQuerySet()
+        self.assertIs(filter_global_queryset(qs, staff_user), qs)
+
+    def test_validation_errors_carry_validation_error_code(self):
+        """All client-side validation failures must surface a stable VALIDATION_ERROR code so
+        clients can branch on it and the schema's process_errors can suppress server-error logs."""
+        from core.graphql.constants import VALIDATION_ERROR
+
+        info_valid = SimpleNamespace(context=SimpleNamespace(auth_status='valid', user=self.audit_user))
+
+        # 1. Neither conceptIds nor query
+        with self.assertRaises(GraphQLError) as missing_args:
+            async_to_sync(Query().concepts)(info_valid)
+        self.assertEqual(missing_args.exception.extensions['code'], VALIDATION_ERROR)
+
+        # 2. Both org and owner
+        with self.assertRaises(GraphQLError) as both_owners:
+            async_to_sync(Query().concepts)(
+                info_valid, org='X', owner='Y', source='S', query='q'
+            )
+        self.assertEqual(both_owners.exception.extensions['code'], VALIDATION_ERROR)
+
+        # 3. Source without org/owner
+        with self.assertRaises(GraphQLError) as orphan_source:
+            async_to_sync(Query().concepts)(info_valid, source='S', query='q')
+        self.assertEqual(orphan_source.exception.extensions['code'], VALIDATION_ERROR)
+
+        # 4. Pagination out of range
+        with self.assertRaises(GraphQLError) as bad_page:
+            async_to_sync(Query().concepts)(info_valid, query='q', page=0, limit=1)
+        self.assertEqual(bad_page.exception.extensions['code'], VALIDATION_ERROR)
+
+    def test_validation_errors_are_suppressed_from_server_error_log(self):
+        """VALIDATION_ERROR codes must be in EXPECTED_GRAPHQL_ERROR_CODES so schema.process_errors
+        does not log them as unexpected server errors."""
+        from core.graphql.constants import VALIDATION_ERROR, build_validation_error, EXPECTED_GRAPHQL_ERROR_CODES
+
+        self.assertIn(VALIDATION_ERROR, EXPECTED_GRAPHQL_ERROR_CODES)
+
+        with patch('strawberry.schema.base.StrawberryLogger.error') as error_logger:
+            schema.process_errors([build_validation_error('bad input')])
+        error_logger.assert_not_called()
+
+    def test_resolve_source_version_error_does_not_leak_owner(self):
+        """S7 regression: when the source is not found, the error must not differentiate between
+        a missing repo and a missing owner."""
+        with patch('core.graphql.queries.Source.get_version', return_value=None), patch(
+            'core.graphql.queries.Source.find_latest_released_version_by', return_value=None
+        ):
+            with self.assertRaises(GraphQLError) as missing:
+                async_to_sync(resolve_source_version)('ORG', None, 'SRC', None)
+        # Message must be the generic form — no "for org 'ORG'" suffix.
+        self.assertEqual(str(missing.exception), "Source 'SRC' with version 'HEAD' was not found.")
