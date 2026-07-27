@@ -211,13 +211,43 @@ class CustomESSearch:
     def apply_aggregation_score_stats(self):
         self._dsl_search.aggs.bucket("score", "stats", script="_score")
 
-    def to_queryset(self, keep_order=True, normalized_score=False, exact_count=True, txt=None, encoder_model=None):  # pylint:disable=too-many-locals,too-many-arguments
+    def __address_duplicates(self, hits):
+        duplicate_docs = []
+        traversed = {}
+        try:
+            for hit in hits:
+                data = hit.to_dict()
+                _id = get(hit, 'meta.id')
+                mnemonic = get(data, 'id')
+                if not mnemonic or not _id:
+                    continue
+                if mnemonic in traversed:
+                    duplicate_docs.append(hit)
+                    duplicate_docs.append(traversed[mnemonic])
+                else:
+                    traversed[mnemonic] = hit
+            if duplicate_docs:
+                ids = [get(d, 'meta.id') for d in duplicate_docs]
+                doc = duplicate_docs[0].__class__()
+                doc.update(doc.django.model.objects.filter(id__in=ids))
+                return True
+        except:  # pylint: disable=bare-except
+            return False
+        return False
+
+    def to_queryset(  # pylint:disable=too-many-locals,too-many-arguments
+            self, keep_order=True, normalized_score=False, exact_count=True, txt=None,
+            encoder_model=None, address_duplicates=False
+    ):
         """
         This method return a django queryset from the an elasticsearch result.
         It cost a query to the sql db.
         """
         encoder = bool(txt)
         s, hits, total = self.__get_response(exact_count, encoder)
+        if address_duplicates and self.__address_duplicates(hits):
+            s, hits, total = self.__get_response(exact_count, encoder)
+
         max_score = hits.max_score or 1
         cid = get_cid()
         start_time = time.time()
@@ -328,7 +358,7 @@ class CustomESSearch:
             # We only need the meta fields with the models ids
             s = self._dsl_search.source(
                 excludes=['_embeddings', '_synonyms_embeddings']
-            ) if load_fields else self._dsl_search.source(False)
+            ) if load_fields else self._dsl_search.source(fields=['id'])
             s = s.params(request_timeout=ES_REQUEST_TIMEOUT)
             if exact_count:
                 total = s.count()
