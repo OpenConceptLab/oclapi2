@@ -883,7 +883,12 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 results = results.filter('term', **{attr: value})
 
         sort_attrs = self._get_sort_attribute()
-        if self.is_concept_document() and (not sort_attrs or '_score' in get(sort_attrs, '0', {})):
+        if self.is_concept_document() and (
+                not sort_attrs or (
+                    '_score' in get(sort_attrs, '0', {}) and
+                    get(sort_attrs, '0._score.order') == 'desc'
+                )
+        ):
             search_str = self.get_search_string(lower=False)
             results = results.extra(
                 rescore={
