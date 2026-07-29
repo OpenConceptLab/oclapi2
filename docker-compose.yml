@@ -65,6 +65,7 @@ services:
       - ENABLE_THROTTLING
       - SERVICE_NAME=${SERVICE_NAME-oclapi2}
       - NO_LM=${NO_LM-FALSE}
+      - NO_ENCODER=${NO_ENCODER-FALSE}
       - DEFAULT_LEXICAL_VARIANTS_REPO
       - LEXICAL_VARIANTS_CACHE_TIMEOUT
     healthcheck:
@@ -101,6 +102,7 @@ services:
       - AWS_STORAGE_BUCKET_NAME
       - AWS_REGION_NAME
       - NO_LM=${NO_LM-TRUE}
+      - NO_ENCODER=${NO_ENCODER-TRUE}
     volumes:
       - upload-data:/code/uploads
   celery_beat:
@@ -122,6 +124,7 @@ services:
       - AWS_STORAGE_BUCKET_NAME
       - AWS_REGION_NAME
       - NO_LM=${NO_LM-TRUE}
+      - NO_ENCODER=${NO_ENCODER-TRUE}
   celery_indexing:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
     command: ["bash", "-c", "CELERY_WORKER_NAME=indexing ./start_celery_worker.sh -P prefork -Q indexing -c 2"]
@@ -143,6 +146,7 @@ services:
       - AWS_SECRET_ACCESS_KEY
       - AWS_STORAGE_BUCKET_NAME
       - AWS_REGION_NAME
+      - NO_ENCODER=${NO_ENCODER-TRUE}
   celery_concurrent:
     image: openconceptlab/oclapi2:${ENVIRONMENT-production}
     command: ["bash", "-c", "CELERY_WORKER_NAME=concurrent ./start_celery_worker.sh -P prefork -Q concurrent -c 2"]
@@ -165,6 +169,7 @@ services:
       - AWS_STORAGE_BUCKET_NAME
       - AWS_REGION_NAME
       - NO_LM=${NO_LM-TRUE}
+      - NO_ENCODER=${NO_ENCODER-TRUE}
     volumes:
       - upload-data:/code/uploads
   celery_bulk_import_0_1:
@@ -189,6 +194,7 @@ services:
       - AWS_STORAGE_BUCKET_NAME
       - AWS_REGION_NAME
       - NO_LM=${NO_LM-TRUE}
+      - NO_ENCODER=${NO_ENCODER-TRUE}
     volumes:
       - upload-data:/code/uploads
   celery_bulk_import_2_3:
@@ -213,6 +219,7 @@ services:
       - AWS_STORAGE_BUCKET_NAME
       - AWS_REGION_NAME
       - NO_LM=${NO_LM-TRUE}
+      - NO_ENCODER=${NO_ENCODER-TRUE}
     volumes:
       - upload-data:/code/uploads
   celery_bulk_import_root:
@@ -237,6 +244,7 @@ services:
       - AWS_STORAGE_BUCKET_NAME
       - AWS_REGION_NAME
       - NO_LM=${NO_LM-TRUE}
+      - NO_ENCODER=${NO_ENCODER-TRUE}
     volumes:
       - upload-data:/code/uploads
   flower:
@@ -252,6 +260,7 @@ services:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
       - NO_LM=TRUE
+      - NO_ENCODER=TRUE
     restart: "always"
     healthcheck:
       test: "curl --silent --fail -u $${FLOWER_USER:-root}:$${FLOWER_PASSWORD:-Root123} http://localhost:5555/metrics || exit 1"

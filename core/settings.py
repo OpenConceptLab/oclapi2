@@ -641,7 +641,9 @@ MINIO_SECRET_KEY = os.environ.get('MINIO_SECRET_KEY', '')
 MINIO_BUCKET_NAME = os.environ.get('MINIO_BUCKET_NAME', '')
 MINIO_SECURE = os.environ.get('MINIO_SECURE') == 'TRUE'
 
+# LM and Encoder settings
 NO_LM = os.environ.get('NO_LM') == 'TRUE'
+NO_ENCODER = os.environ.get('NO_ENCODER') == 'TRUE'
 RERANKER_CUSTOM_ENCODER_CACHE_SIZE = int(os.environ.get('RERANKER_CUSTOM_ENCODER_CACHE_SIZE', 1))
 RERANKER_CUSTOM_ENCODER_CACHE_TTL = int(os.environ.get('RERANKER_CUSTOM_ENCODER_CACHE_TTL', 60 * 5))
 RERANKER_SIGMOID_MODEL_PREFIXES = [
@@ -649,12 +651,16 @@ RERANKER_SIGMOID_MODEL_PREFIXES = [
     if value.strip()
 ]
 ENCODER_MODEL_NAME = None
+ENCODER = None
+LM_MODEL_NAME = None
+LM = None
 if ENV not in ['ci', 'demo'] and not NO_LM:
     LM_MODEL_NAME = 'all-MiniLM-L6-v2'
     LM = SentenceTransformer(LM_MODEL_NAME)
-    if ENV not in ['qa']:
+    if not NO_ENCODER:
         ENCODER_MODEL_NAME = "BAAI/bge-reranker-v2-m3"
         ENCODER = CrossEncoder(ENCODER_MODEL_NAME, device="cpu", max_length=128)
+
 
 ANALYTICS_API = os.environ.get('ANALYTICS_API', 'http://host.docker.internal:8002')
 if ANALYTICS_API:
