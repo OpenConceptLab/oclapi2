@@ -1702,6 +1702,7 @@ class Expansion(BaseResourceModel):
     def _get_resources_index_collection_fields(self):
         return {
             'expansion': [self.mnemonic],
+            'expansion_url': [self.uri],
             'collection_version': [self.collection_version_name],
             'collection': [self.collection_version_mnemonic],
             'collection_url': [self.collection_version_url],

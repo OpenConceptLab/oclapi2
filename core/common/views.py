@@ -439,11 +439,13 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         is_collection_specified = 'collection' in self.kwargs
         is_user_specified = 'user' in kwargs
         if is_collection_specified:
+            version = kwargs.get('version') or HEAD
             filters['collection'] = kwargs['collection']
-            filters['collection_owner_url'] = f'/users/{kwargs["user"]}/' if is_user_specified else \
-                f'/orgs/{kwargs["org"]}/'
+            collection_owner_url = f'/users/{kwargs["user"]}/' if is_user_specified else f'/orgs/{kwargs["org"]}/'
+            filters['collection_owner_url'] = collection_owner_url
             if 'expansion' in self.kwargs:
-                filters['expansion'] = self.kwargs.get('expansion')
+                filters['expansion_url'] = (f"{collection_owner_url}collections/{filters['collection']}/{version}/"
+                                            f"expansions/{self.kwargs['expansion']}/")
         else:
             if is_user_specified:
                 filters['ownerType'] = USER_OBJECT_TYPE
@@ -500,10 +502,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                     filters['collection_owner_url'] = f"/orgs/{owner}/"
                 if not is_version_specified or self.kwargs['version'] == HEAD:
                     filters['collection_version'] = HEAD
-                if 'expansion' in self.kwargs:
-                    filters['expansion'] = self.kwargs.get('expansion')
-                elif version:
-                    filters['expansion'] = get(version, 'expansion.mnemonic', 'NO_EXPANSION')
+                if 'expansion' not in self.kwargs and version:
+                    filters['expansion_url'] = get(version, 'expansion.uri', 'NO_EXPANSION')
                 filters['collection_url'] = f"{filters['collection_owner_url']}collections/{self.kwargs['collection']}/"
                 if is_version_specified and self.kwargs['version'] != HEAD:
                     filters['collection_url'] += f"{filters['collection_version'] or self.kwargs['version']}/"
@@ -556,7 +556,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             facets['conceptClass'] = normalized_facet_concept_class
         if len(facets.get('datatype', [])) == 0 and len(normalized_facet_datatype) > 0:
             facets['datatype'] = normalized_facet_datatype
-
 
         facets.pop('collection_owner_url', None)
         if is_global_scope:

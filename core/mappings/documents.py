@@ -38,6 +38,7 @@ class MappingDocument(Document):
     source_version = fields.ListField(fields.KeywordField())
     collection_version = fields.ListField(fields.KeywordField())
     expansion = fields.ListField(fields.KeywordField())
+    expansion_url = fields.ListField(fields.KeywordField())
     collection = fields.ListField(fields.KeywordField())
     collection_url = fields.ListField(fields.KeywordField())
     collection_owner_url = fields.ListField(fields.KeywordField())
@@ -112,6 +113,7 @@ class MappingDocument(Document):
         data = super().prepare(instance)
         expansions = list(instance.expansion_set.only('mnemonic', 'uri'))
         data['expansion'] = [e.mnemonic for e in expansions]
+        data['expansion_url'] = [e.uri for e in expansions]
         data['collection_version'] = list({e.collection_version_name for e in expansions})
         data['collection'] = list({e.collection_version_mnemonic for e in expansions})
         data['collection_url'] = list({e.collection_version_url for e in expansions})
