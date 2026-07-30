@@ -94,16 +94,25 @@ def append_only(expansion, queryset, index):
     from elasticsearch.helpers import bulk  # noqa: PLC0415
 
     params = expansion._get_resources_index_collection_fields()  # pylint: disable=protected-access
-    actions = [
-        {
-            '_op_type': 'update', '_index': index, '_id': resource_id, 'retry_on_conflict': 3,
-            'script': {'source': ESScript.APPEND_COLLECTION_FIELDS_SCRIPT, 'params': params},
-        }
-        for resource_id in queryset.values_list('id', flat=True)
-    ]
-    if actions:
-        bulk(connections.get_connection(), actions,
-             raise_on_error=False, raise_on_exception=False, refresh=True)
+    # Materialise ids, then stream actions. Expansions can hold 100k+ members, so building
+    # the full action list would balloon memory.
+    ids = list(queryset.values_list('id', flat=True))
+    if not ids:
+        return
+
+    def actions():
+        for resource_id in ids:
+            yield {
+                '_op_type': 'update', '_index': index, '_id': resource_id, 'retry_on_conflict': 3,
+                'script': {'source': ESScript.APPEND_COLLECTION_FIELDS_SCRIPT, 'params': params},
+            }
+
+    es = connections.get_connection()
+    bulk(es, actions(), chunk_size=2000,
+         raise_on_error=False, raise_on_exception=False, refresh=False)
+    # One refresh per expansion, not per bulk chunk -- the verify count that follows must
+    # see these writes, or it reports a false LEFT.
+    es.indices.refresh(index=index)
 
 
 def build_sets(months):
@@ -175,9 +184,18 @@ def run_set(name, queryset, args):
         queryset = queryset[:args.limit]
         log(f'  limited to {args.limit:,}')
 
+    # Materialise ids and close the query immediately. Do NOT use queryset.iterator():
+    # it holds a Postgres server-side named cursor open for the whole run, and a single
+    # long expansion (100k+ members) is enough for the connection to be recycled, which
+    # kills the cursor with InvalidCursorName partway through.
+    ids = list(queryset.values_list('id', flat=True))
+
     done = left = empty = seen = 0
     started = time.time()
-    for expansion in queryset.iterator(chunk_size=200):
+    for expansion_id in ids:
+        expansion = Expansion.objects.filter(id=expansion_id).first()
+        if expansion is None:
+            continue          # deleted while we were running
         seen += 1
         status, detail = do_expansion(expansion, args)
         if status == 'EMPTY':

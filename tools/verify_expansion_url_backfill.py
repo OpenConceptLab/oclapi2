@@ -65,9 +65,74 @@ def es_counts(es_host, index, field):
             return counts
 
 
+def gate(conn, es_host, index, table, column, limit, chunk=20000):
+    """The check that actually gates the query flip.
+
+    Drift (docs in the join table but absent from ES) is invisible under the OLD filter
+    too, so it is not a regression -- flipping changes nothing for those docs. The only
+    regression case is docs PRESENT in ES that lack expansion_url: they return today and
+    would stop returning after the flip.
+
+    So per expansion, compare: docs present in ES  vs  docs present WITH expansion_url.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            'SELECT e.id, e.uri FROM collection_expansions e '
+            f'WHERE EXISTS (SELECT 1 FROM {table} m WHERE m.expansion_id = e.id) '
+            'ORDER BY e.id' + (f' LIMIT {int(limit)}' if limit else '')
+        )
+        expansions = cur.fetchall()
+
+    print(f'gate: {len(expansions):,} expansion(s) with members in {index}\n')
+    blocking, clean, empty_in_es = [], 0, 0
+    for exp_id, uri in expansions:
+        with conn.cursor() as cur:
+            cur.execute(f'SELECT {column} FROM {table} WHERE expansion_id = %s', (exp_id,))
+            ids = [str(row[0]) for row in cur.fetchall()]
+
+        present = with_field = 0
+        for start in range(0, len(ids), chunk):
+            batch = ids[start:start + chunk]
+            present += _count(es_host, index, {'ids': {'values': batch}})
+            with_field += _count(es_host, index, {'bool': {'filter': [
+                {'ids': {'values': batch}}, {'term': {FIELD: uri}},
+            ]}})
+
+        if not present:
+            empty_in_es += 1          # pure drift -- flip-neutral
+        elif with_field < present:
+            blocking.append((exp_id, uri, present, with_field))
+            print(f'BLOCK  id={exp_id:<8} in_es={present:<8} with_field={with_field:<8} {uri}')
+        else:
+            clean += 1
+
+    print(
+        f'\n{clean:,} clean, {len(blocking):,} BLOCKING, '
+        f'{empty_in_es:,} absent from ES entirely (drift -- flip-neutral)'
+    )
+    if blocking:
+        print('BLOCKING expansions would lose results after the flip. Backfill them first.')
+    else:
+        print('No expansion loses results from the flip.')
+    return 1 if blocking else 0
+
+
+def _count(es_host, index, query):
+    resp = requests.post(
+        f'{es_host}/{index}/_count', json={'query': query}, timeout=120,
+        headers={'Content-Type': 'application/json'}
+    )
+    resp.raise_for_status()
+    return resp.json()['count']
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--resource', choices=sorted(RESOURCES), default='concepts')
+    parser.add_argument('--gate', action='store_true',
+                        help='check only what blocks the query flip: docs present in ES '
+                             'that lack expansion_url (ignores pure drift)')
+    parser.add_argument('--limit', type=int, default=0, help='gate: cap expansions checked')
     parser.add_argument('--field', default='expansion_url',
                         help='ES field path; use expansion_url.keyword against a text-mapped index')
     parser.add_argument('--es-host', default=os.environ.get('ES_HOST_URL', 'http://localhost:9200'))
@@ -84,6 +149,8 @@ def main():
         port=os.environ.get('DB_PORT', 5432),
     )
     try:
+        if args.gate:
+            return gate(conn, args.es_host, index, table, column, args.limit)
         expected = db_counts(conn, table, column)
     finally:
         conn.close()
