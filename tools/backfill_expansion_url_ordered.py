@@ -83,7 +83,7 @@ def assert_keyword_mapping():
         log(f'  mapping OK: {index}.{FIELD} = keyword')
 
 
-def append_only(expansion, queryset, index):
+def append_only(expansion, queryset, index, refresh=True):
     """Append this expansion's collection fields to docs ALREADY in ES.
 
     Same painless script batch_index uses, but without the
@@ -110,9 +110,12 @@ def append_only(expansion, queryset, index):
     es = connections.get_connection()
     bulk(es, actions(), chunk_size=2000,
          raise_on_error=False, raise_on_exception=False, refresh=False)
-    # One refresh per expansion, not per bulk chunk -- the verify count that follows must
-    # see these writes, or it reports a false LEFT.
-    es.indices.refresh(index=index)
+    if refresh:
+        # Forces visibility so the inline verify count can read these writes. On a
+        # multi-node cluster this is a synchronous fan-out across every shard copy and
+        # costs ~1s+, which at two per expansion dominates the whole run -- see
+        # --no-refresh, which drops it and verifies in one pass at the end instead.
+        es.indices.refresh(index=index)
 
 
 def build_sets(months):
@@ -138,9 +141,10 @@ def do_expansion(expansion, args):
     Returns (status, detail) where status is:
       EMPTY -- no concepts and no mappings, nothing to index (NOT the same as done)
       DONE  -- every resource with members has ES count >= Postgres count
+      WROTE -- --no-refresh: written but NOT verified here; use the gate script
       LEFT  -- at least one resource is short, or errored
     """
-    done, detail, had_work = True, [], False
+    done, detail, had_work, wrote_only = True, [], False, False
     for related, index, document, prefetch, select_related in RESOURCES:
         queryset = getattr(expansion, related)
         want = queryset.count()
@@ -154,7 +158,7 @@ def do_expansion(expansion, args):
         if not args.dry_run:
             try:
                 if args.skip_missing_docs:
-                    append_only(expansion, queryset, index)
+                    append_only(expansion, queryset, index, refresh=not args.no_refresh)
                 else:
                     expansion.batch_index(
                         queryset, document, prefetch=prefetch, select_related=select_related)
@@ -162,13 +166,22 @@ def do_expansion(expansion, args):
                 detail.append(f'{related} ERROR {exc.__class__.__name__}: {exc}')
                 done = False
                 continue
+        if args.no_refresh and not args.dry_run:
+            # Without a forced refresh the post-write count reads stale, so don't pretend
+            # to verify. Report what was written and let the gate script check coverage in
+            # one pass at the end.
+            wrote_only = True
+            detail.append(f'{related} wrote {want}')
+            continue
         got = before if args.dry_run else es_count(index, expansion.uri)
         detail.append(f'{related}={got}/{want}')
         if got < want:
             done = False
     if not had_work:
         return 'EMPTY', 'no concepts, no mappings'
-    return ('DONE' if done else 'LEFT'), ', '.join(detail)
+    if not done:
+        return 'LEFT', ', '.join(detail)
+    return ('WROTE' if wrote_only else 'DONE'), ', '.join(detail)
 
 
 def run_set(name, queryset, args):
@@ -190,7 +203,7 @@ def run_set(name, queryset, args):
     # kills the cursor with InvalidCursorName partway through.
     ids = list(queryset.values_list('id', flat=True))
 
-    done = left = empty = seen = 0
+    done = left = empty = wrote = seen = 0
     started = time.time()
     for expansion_id in ids:
         expansion = Expansion.objects.filter(id=expansion_id).first()
@@ -202,19 +215,24 @@ def run_set(name, queryset, args):
             empty += 1
         elif status == 'DONE':
             done += 1
+        elif status == 'WROTE':
+            wrote += 1
         else:
             left += 1
             log(f'  LEFT   id={expansion.id:<8} {detail}  {expansion.uri}')
         if seen % args.report_every == 0:
             rate = seen / max(time.time() - started, 0.001)
             log(
-                f'  ...{seen:,}/{picked:,}  done={done:,} left={left:,} empty={empty:,}  '
-                f'{rate:.1f}/s  eta {(picked - seen) / max(rate, 0.001) / 60:.0f}m'
+                f'  ...{seen:,}/{picked:,}  done={done:,} wrote={wrote:,} left={left:,} '
+                f'empty={empty:,}  {rate:.1f}/s  '
+                f'eta {(picked - seen) / max(rate, 0.001) / 60:.0f}m'
             )
 
     elapsed = time.time() - started
     log(f'  empty  : {empty:,}   (no members -- nothing to index)')
     log(f'  done   : {done:,}   (verified: ES count >= Postgres count)')
+    if wrote:
+        log(f'  wrote  : {wrote:,}   (--no-refresh: NOT verified here -- run the gate script)')
     log(f'  left   : {left:,}')
     log(f'  time   : {elapsed / 60:.1f}m ({elapsed:.1f}s)')
     return done, left, empty
@@ -232,6 +250,12 @@ def main():
                         help='only append to docs already in ES; do not full-index missing '
                              'ones (no embedding recompute). Docs absent from ES stay absent, '
                              'so those expansions report LEFT -- that is drift, not failure.')
+    parser.add_argument('--no-refresh', action='store_true',
+                        help='skip the forced per-expansion ES refresh AND the inline verify '
+                             'count. On a multi-node cluster the refresh is a synchronous '
+                             'fan-out costing ~1s+, two per expansion, which dominates the '
+                             'run. Expansions report WROTE instead of DONE -- verify coverage '
+                             'afterwards with the gate script. Requires --skip-missing-docs.')
     parser.add_argument('--limit', type=int, default=0, help='cap expansions per set')
     parser.add_argument('--report-every', type=int, default=200)
     parser.add_argument('--log-file', help='tee output to this file')
@@ -240,8 +264,12 @@ def main():
     if args.log_file:
         LOG = open(args.log_file, 'a', encoding='utf-8')  # pylint: disable=consider-using-with
 
+    if args.no_refresh and not args.skip_missing_docs:
+        sys.exit('--no-refresh requires --skip-missing-docs (it only affects the append path).')
+
     started = time.time()
-    log(f'=== expansion_url backfill{" [DRY RUN]" if args.dry_run else ""} '
+    log(f'=== expansion_url backfill{" [DRY RUN]" if args.dry_run else ""}'
+        f'{" [NO-REFRESH: verify with the gate script]" if args.no_refresh else ""} '
         f'at {timezone.now().isoformat()} ===')
     assert_keyword_mapping()
 
