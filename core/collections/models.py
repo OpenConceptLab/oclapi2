@@ -1303,11 +1303,11 @@ class Expansion(BaseResourceModel):
         parameters = ExpansionParameters(self.parameters, is_concept_queryset)
         return parameters.apply(queryset)
 
-    def index_concepts(self, concept_versioned_ids=None):
-        should_run = len(concept_versioned_ids) > 0 if concept_versioned_ids is not None else self.concepts.exists()
+    def index_concepts(self, concept_ids=None):
+        should_run = len(concept_ids) > 0 if concept_ids is not None else self.concepts.exists()
         if should_run:
             if get(settings, 'TEST_MODE', False):
-                index_expansion_concepts(self.id, self.concepts.count(), concept_versioned_ids)
+                index_expansion_concepts(self.id, self.concepts.count(), concept_ids)
             else:
                 task = None
                 try:
@@ -1316,17 +1316,17 @@ class Expansion(BaseResourceModel):
                         name=index_expansion_concepts.__name__
                     )
                     index_expansion_concepts.apply_async(
-                        (self.id, self.concepts.count(), concept_versioned_ids),
+                        (self.id, self.concepts.count(), concept_ids),
                         task_id=task.id, queue=task.queue, persist_args=True)
                 except AlreadyQueued:
                     if task:
                         task.delete()
 
-    def index_mappings(self, mapping_versioned_ids=None):
-        should_run = len(mapping_versioned_ids) > 0 if mapping_versioned_ids is not None else self.mappings.exists()
+    def index_mappings(self, mapping_ids=None):
+        should_run = len(mapping_ids) > 0 if mapping_ids is not None else self.mappings.exists()
         if should_run:
             if get(settings, 'TEST_MODE', False):
-                index_expansion_mappings(self.id, self.mappings.count(), mapping_versioned_ids)
+                index_expansion_mappings(self.id, self.mappings.count(), mapping_ids)
             else:
                 task = None
                 try:
@@ -1335,7 +1335,7 @@ class Expansion(BaseResourceModel):
                         name=index_expansion_mappings.__name__
                     )
                     index_expansion_mappings.apply_async(
-                        (self.id, self.mappings.count(), mapping_versioned_ids),
+                        (self.id, self.mappings.count(), mapping_ids),
                         task_id=task.id, queue=task.queue, persist_args=True)
                 except AlreadyQueued:
                     if task:
@@ -1523,10 +1523,10 @@ class Expansion(BaseResourceModel):
             concepts, mappings = get_ref_results(reference)
             concepts_updated = self.__include_resources(self.concepts, concepts, True)
             if index and concepts_updated is not False:
-                index_concepts = [*index_concepts, *concepts_updated.values_list('versioned_object_id', flat=True)]
+                index_concepts = [*index_concepts, *concepts_updated.values_list('id', flat=True)]
             mappings_updated = self.__include_resources(self.mappings, mappings, False)
             if index and mappings_updated is not False:
-                index_mappings = [*index_mappings, *mappings_updated.values_list('versioned_object_id', flat=True)]
+                index_mappings = [*index_mappings, *mappings_updated.values_list('id', flat=True)]
 
         for reference in exclude_refs:
             concepts, mappings = get_ref_results(reference)
@@ -1535,14 +1535,14 @@ class Expansion(BaseResourceModel):
             if index:
                 if concepts_updated is not False:
                     filters = {
-                        'versioned_object_id__in': list(concepts_updated.values_list('versioned_object_id', flat=True))}
+                        'id__in': list(concepts_updated.values_list('id', flat=True))}
                     if get(settings, 'TEST_MODE', False):
                         batch_index_resources('concept', filters)
                     else:
                         batch_index_resources.apply_async(('concept', filters), queue='indexing', permanent=False)
                 if mappings_updated is not False:
                     filters = {
-                        'versioned_object_id__in': list(mappings_updated.values_list('versioned_object_id', flat=True))}
+                        'id__in': list(mappings_updated.values_list('id', flat=True))}
                     if get(settings, 'TEST_MODE', False):
                         batch_index_resources('mapping', filters)
                     else:
