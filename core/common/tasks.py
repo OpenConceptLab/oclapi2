@@ -203,18 +203,12 @@ def __handle_pre_delete(instance):
         registry.delete_related(instance)
 
 
-@app.task(
-    ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
-    acks_late=True, reject_on_worker_lost=True
-)
+@app.task(ignore_result=True)
 def handle_save(app_name, model_name, instance_id):
     __handle_save(apps.get_model(app_name, model_name).objects.filter(id=instance_id).first())
 
 
-@app.task(
-    ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
-    acks_late=True, reject_on_worker_lost=True
-)
+@app.task(ignore_result=True)
 def handle_m2m_changed(app_name, model_name, instance_id, action):
     instance = apps.get_model(app_name, model_name).objects.filter(id=instance_id).first()
     if instance:
@@ -546,7 +540,7 @@ def delete_concept(concept_id):  # pragma: no cover
 
 
 @app.task(
-    ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
+    ignore_result=True, autoretry_for=(WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
     acks_late=True, reject_on_worker_lost=True
 )
 def batch_index_resources(resource, filters, update_indexed=False):
@@ -566,10 +560,7 @@ def batch_index_resources(resource, filters, update_indexed=False):
     return 1
 
 
-@app.task(
-    ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
-    acks_late=True, reject_on_worker_lost=True, base=QueueOnceCustomTask
-)
+@app.task(ignore_result=True, base=QueueOnceCustomTask)
 def index_expansion_concepts(expansion_id, count=None, concept_ids=None):  # pylint: disable=unused-argument
     from core.collections.models import Expansion
     expansion = Expansion.objects.filter(id=expansion_id).first()
@@ -587,10 +578,7 @@ def index_expansion_concepts(expansion_id, count=None, concept_ids=None):  # pyl
         )
 
 
-@app.task(
-    ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
-    acks_late=True, reject_on_worker_lost=True, base=QueueOnceCustomTask
-)
+@app.task(ignore_result=True, base=QueueOnceCustomTask)
 def index_expansion_mappings(expansion_id, count=None, mapping_ids=None):  # pylint: disable=unused-argument
     from core.collections.models import Expansion
     expansion = Expansion.objects.filter(id=expansion_id).first()
@@ -631,10 +619,7 @@ def make_hierarchy(concept_map):  # pragma: no cover
             logger.info('Could not find parent %s', parent_concept_uri)
 
 
-@app.task(
-    ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
-    acks_late=True, reject_on_worker_lost=True, base=QueueOnceCustomTask
-)
+@app.task(ignore_result=True, base=QueueOnceCustomTask)
 def index_source_concepts(
         source_id, partial_doc=None, single_batch=False, should_prefetch=True, should_select_related=True,
         parallel=True
@@ -664,10 +649,7 @@ def index_source_concepts(
                 source.concepts, ConceptDocument, prefetch=prefetch, select_related=select_related, parallel=parallel)
 
 
-@app.task(
-    ignore_result=True, autoretry_for=(Exception, WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
-    acks_late=True, reject_on_worker_lost=True, base=QueueOnceCustomTask
-)
+@app.task(ignore_result=True, base=QueueOnceCustomTask)
 def index_source_mappings(
         source_id, partial_doc=None, single_batch=False, should_prefetch=True, should_select_related=True, parallel=True
 ):
