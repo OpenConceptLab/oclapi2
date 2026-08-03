@@ -521,6 +521,8 @@ class CollectionReferencesView(
         if isinstance(result, Response):
             return result
         added_references_ids, errors = result
+        if get(errors, 'error') == 'Collection not found':  # async task, collection may be deleted
+            return Response(errors, status=status.HTTP_400_BAD_REQUEST)
 
         added_references = CollectionReference.objects.filter(
             id__in=added_references_ids) if added_references_ids else []
