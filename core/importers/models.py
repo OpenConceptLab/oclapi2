@@ -1119,6 +1119,16 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                 self.concept_hierarchy_map[child_uri] = parent_urls
 
     @staticmethod
+    def get_resource_id(resource):
+        """Normalized (lowercased string) "id" of an input line, '' when absent/blank/null.
+
+        Input lines are user supplied, so "id" can be missing, null or a non-string (e.g. a number coming from a
+        CSV/JSON conversion). A missing "id" is legitimate -- the mnemonic is then assigned by Concept.persist_new,
+        exactly like for mappings -- so chunking must pass those lines through instead of failing the whole import.
+        """
+        return str(get(resource, 'id', '') or '').lower()
+
+    @staticmethod
     def chunker_list(seq, size, is_child):  # pylint: disable=too-many-locals
         """
             1. returns n number of sequential chunks from l.
@@ -1130,7 +1140,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             part_type = get(seq, '0.type', '').lower()
             is_source_child = part_type in ['concept']
             if is_source_child:
-                sorted_seq = sorted(seq, key=lambda x: x['id'])
+                sorted_seq = sorted(seq, key=BulkImportParallelRunner.get_resource_id)
         quotient, remainder = divmod(len(sorted_seq), size)
         result = []
         for i in range(size):
@@ -1141,12 +1151,13 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                     result.append(current)
                 continue
             prev = get(result, '-1', None)
-            prev_last_id = get(prev, '-1.id', '').lower()
-            current_first_id = get(current, '0.id', '').lower()
+            prev_last_id = BulkImportParallelRunner.get_resource_id(get(prev, '-1', None))
+            current_first_id = BulkImportParallelRunner.get_resource_id(get(current, '0', None))
             shift = 0
-            if prev_last_id == current_first_id:
+            # id-less lines are not versions of one another, so they must not be pulled into a single chunk
+            if prev_last_id and prev_last_id == current_first_id:
                 for resource in current:
-                    if resource['id'].lower() == prev_last_id:
+                    if BulkImportParallelRunner.get_resource_id(resource) == prev_last_id:
                         shift += 1
                         result[-1].append(resource)
                     else:

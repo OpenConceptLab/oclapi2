@@ -18,7 +18,7 @@ from core.common.constants import OPENMRS_VALIDATION_SCHEMA, DEPRECATED_API_HEAD
 from core.common.tasks import post_import_update_resource_counts, bulk_import_parts_inline, bulk_import_inline, \
     bulk_import
 from core.common.tests import OCLAPITestCase, OCLTestCase
-from core.common.utils import decode_string
+from core.common.utils import decode_string, startswith_temp_version
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
 from core.importers.importer import ImporterSubtask, ImportTask, Importer, ResourceImporter
@@ -581,6 +581,73 @@ class BulkImportInlineTest(OCLTestCase):
             Concept.objects.filter(mnemonic=concept.mnemonic, is_latest_version=True, datatype='Rule').exists())
         batch_index_resources_mock.apply_async.assert_not_called()
 
+    def test_concept_import_without_id(self):
+        """An id-less concept line is left to Concept.persist_new (same as mappings) and must not fail the import."""
+        source = OrganizationSourceFactory(
+            organization=(OrganizationFactory(mnemonic='DemoOrg')), mnemonic='DemoSource', version='HEAD'
+        )
+
+        def concept_data(mnemonic):
+            data = {
+                "type": "Concept", "concept_class": "Root",
+                "datatype": "None", "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
+                "names": [{
+                    "name": "Food", "locale": "en", "locale_preferred": "True", "name_type": "Fully Specified"
+                }],
+                "descriptions": [],
+            }
+            if mnemonic is not None:
+                data['id'] = mnemonic
+            return data
+
+        good_line = concept_data('Food')
+        no_id_line = concept_data(None)
+        blank_id_line = concept_data('')
+        another_good_line = concept_data('Drink')
+
+        importer = BulkImportInline(
+            '\n'.join(json.dumps(data) for data in [good_line, no_id_line, blank_id_line, another_good_line]),
+            'ocladmin', True
+        )
+        importer.run()
+
+        self.assertEqual(importer.processed, 4)
+        self.assertEqual(importer.created, [good_line, no_id_line, blank_id_line, another_good_line])
+        self.assertEqual(importer.failed, [])
+        self.assertEqual(importer.invalid, [])
+
+        mnemonics = list(source.concepts_set.filter(id=F('versioned_object_id')).values_list('mnemonic', flat=True))
+        self.assertEqual(len(mnemonics), 4)
+        self.assertTrue({'Food', 'Drink'}.issubset(set(mnemonics)))
+        # the source assigns no mnemonics, so Concept.persist_new falls back to the concept's own id
+        for mnemonic in set(mnemonics) - {'Food', 'Drink'}:
+            self.assertTrue(mnemonic.isdigit())
+            self.assertFalse(startswith_temp_version(mnemonic))
+
+    def test_concept_import_without_id_is_allowed_for_auto_id_source(self):
+        """The same id-less line stays valid when the source assigns concept mnemonics itself."""
+        source = OrganizationSourceFactory(
+            organization=(OrganizationFactory(mnemonic='DemoOrg')), mnemonic='DemoSource', version='HEAD',
+            autoid_concept_mnemonic=AUTO_ID_SEQUENTIAL
+        )
+
+        data = {
+            "type": "Concept", "concept_class": "Root",
+            "datatype": "None", "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
+            "names": [{"name": "Food", "locale": "en", "locale_preferred": "True", "name_type": "Fully Specified"}],
+            "descriptions": [],
+        }
+
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 1)
+        self.assertEqual(importer.failed, [])
+        self.assertEqual(
+            list(source.concepts_set.filter(id=F('versioned_object_id')).values_list('mnemonic', flat=True)), ['1']
+        )
+
     def test_concept_import_permission_denied(self):
         self.assertFalse(Concept.objects.filter(mnemonic='Food').exists())
 
@@ -608,6 +675,70 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.created), 0)
         self.assertEqual(len(importer.updated), 0)
         self.assertEqual(importer.permission_denied, [data])
+
+    def test_mapping_import_without_id(self):
+        """Mapping lines carry no "id" in the common case -- the mnemonic is left to Mapping.persist_new.
+
+        This is the behaviour concept lines without an "id" follow too, and chunking must not get in the way of it.
+        """
+        source = OrganizationSourceFactory(
+            organization=(OrganizationFactory(mnemonic='DemoOrg')), mnemonic='DemoSource', version='HEAD'
+        )
+        ConceptFactory(parent=source, mnemonic='Vegetable')
+        ConceptFactory(parent=source, mnemonic='Corn')
+        ConceptFactory(parent=source, mnemonic='Food')
+
+        def mapping_data(map_type, to_concept):
+            return {
+                "type": "Mapping", "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
+                "from_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Vegetable/",
+                "to_concept_url": f"/orgs/DemoOrg/sources/DemoSource/concepts/{to_concept}/",
+                "map_type": map_type,
+            }
+
+        lines = [mapping_data('Has Child', 'Corn'), mapping_data('Same As', 'Food')]
+
+        importer = BulkImportInline('\n'.join(json.dumps(line) for line in lines), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 2)
+        self.assertEqual(importer.created, lines)
+        self.assertEqual(importer.failed, [])
+        self.assertEqual(importer.invalid, [])
+
+        mnemonics = list(
+            Mapping.objects.filter(parent=source, id=F('versioned_object_id')).values_list('mnemonic', flat=True))
+        self.assertEqual(len(mnemonics), 2)
+        # the source assigns no mnemonics, so Mapping.persist_new falls back to the mapping's own id
+        for mnemonic in mnemonics:
+            self.assertTrue(mnemonic.isdigit())
+            self.assertFalse(startswith_temp_version(mnemonic))
+
+    def test_mapping_import_without_id_for_auto_id_source(self):
+        source = OrganizationSourceFactory(
+            organization=(OrganizationFactory(mnemonic='DemoOrg')), mnemonic='DemoSource', version='HEAD',
+            autoid_mapping_mnemonic=AUTO_ID_SEQUENTIAL
+        )
+        ConceptFactory(parent=source, mnemonic='Vegetable')
+        ConceptFactory(parent=source, mnemonic='Corn')
+
+        data = {
+            "type": "Mapping", "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
+            "from_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Vegetable/",
+            "to_concept_url": "/orgs/DemoOrg/sources/DemoSource/concepts/Corn/",
+            "map_type": "Has Child",
+        }
+
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 1)
+        self.assertEqual(importer.failed, [])
+        self.assertEqual(
+            list(Mapping.objects.filter(parent=source, id=F('versioned_object_id')).values_list('mnemonic', flat=True)),
+            ['1']
+        )
 
     @patch('core.importers.models.batch_index_resources')
     def test_mapping_import(self, batch_index_resources_mock):  # pylint: disable=too-many-statements
@@ -1468,6 +1599,88 @@ class BulkImportParallelRunnerTest(OCLTestCase):
                 [
                     {"type": "Concept", "id": "C", "update_comment": "C.1"},
                 ]
+            ]
+        )
+
+    def test_chunker_list_with_missing_or_blank_concept_id(self):
+        """A concept line without a usable "id" must not blow up the whole chunking (and hence the whole import).
+
+        Such lines are still valid input for sources with auto-id assignment, and for every other source they are
+        rejected later, per line, by the resource importer -- so chunking only needs to keep them in the stream.
+        """
+        concepts = [
+            {"type": "Concept", "id": "B", "update_comment": "B.1"},
+            {"type": "Concept", "update_comment": "no-id"},
+            {"type": "Concept", "id": "A", "update_comment": "A.1"},
+            {"type": "Concept", "id": None, "update_comment": "null-id"},
+            {"type": "Concept", "id": "B", "update_comment": "B.2"},
+        ]
+
+        # id-less lines sort first, remaining lines keep the "same id in a single chunk" guarantee
+        self.assertEqual(
+            BulkImportParallelRunner.chunker_list(concepts, 1, True),
+            [
+                [
+                    {"type": "Concept", "update_comment": "no-id"},
+                    {"type": "Concept", "id": None, "update_comment": "null-id"},
+                    {"type": "Concept", "id": "A", "update_comment": "A.1"},
+                    {"type": "Concept", "id": "B", "update_comment": "B.1"},
+                    {"type": "Concept", "id": "B", "update_comment": "B.2"},
+                ],
+            ]
+        )
+
+        # id-less lines are not merged with each other, so they stay spread over the chunks
+        self.assertEqual(
+            BulkImportParallelRunner.chunker_list(concepts, 5, True),
+            [
+                [{"type": "Concept", "update_comment": "no-id"}],
+                [{"type": "Concept", "id": None, "update_comment": "null-id"}],
+                [{"type": "Concept", "id": "A", "update_comment": "A.1"}],
+                [
+                    {"type": "Concept", "id": "B", "update_comment": "B.1"},
+                    {"type": "Concept", "id": "B", "update_comment": "B.2"},
+                ],
+            ]
+        )
+
+        # no line is lost, whatever the number of chunks
+        for size in range(1, 8):
+            chunks_ = BulkImportParallelRunner.chunker_list(concepts, size, True)
+            self.assertEqual(
+                sorted(json.dumps(line, sort_keys=True) for chunk in chunks_ for line in chunk),
+                sorted(json.dumps(line, sort_keys=True) for line in concepts),
+                f'lines lost/duplicated for size={size}'
+            )
+
+    def test_chunker_list_for_mappings_without_id(self):
+        """Mapping chunks are never sorted/grouped by id, so id-less mapping lines (the common case) pass through."""
+        mappings = [
+            {"type": "Mapping", "map_type": "Has Child", "to_concept_code": "C"},
+            {"type": "Mapping", "map_type": "Same As", "to_concept_code": "A"},
+            {"type": "Mapping", "map_type": "Same As", "to_concept_code": "B"},
+        ]
+
+        self.assertEqual(
+            BulkImportParallelRunner.chunker_list(mappings, 2, True), [mappings[:2], mappings[2:]]
+        )
+
+    def test_chunker_list_with_non_string_concept_id(self):
+        concepts = [
+            {"type": "Concept", "id": 2, "update_comment": "2.1"},
+            {"type": "Concept", "id": "1", "update_comment": "1.1"},
+            {"type": "Concept", "id": 2, "update_comment": "2.2"},
+        ]
+
+        # both "2" versions end up in the same chunk even though the id is not a string
+        self.assertEqual(
+            BulkImportParallelRunner.chunker_list(concepts, 2, True),
+            [
+                [
+                    {"type": "Concept", "id": "1", "update_comment": "1.1"},
+                    {"type": "Concept", "id": 2, "update_comment": "2.1"},
+                    {"type": "Concept", "id": 2, "update_comment": "2.2"},
+                ],
             ]
         )
 
