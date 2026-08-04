@@ -1358,25 +1358,23 @@ class Expansion(BaseResourceModel):
 
     def delete_references(self, references):
         refs, _ = self.to_ref_list_separated(references)
-
-        any_ref_with_resources = False
+        concept_versioned_object_ids = []
+        mapping_versioned_object_ids = []
         for reference in refs:
-            concepts = reference.concepts
-            if concepts.exists():
-                any_ref_with_resources = True
-                resources_updated = list(concepts.values_list('versioned_object_id', flat=True))
-                filters = {'versioned_object_id__in': resources_updated}
-                self.concepts.set(self.concepts.exclude(**filters))
-                batch_index_resources.apply_async(('concept', filters), queue='indexing', permanent=False)
-            mappings = reference.mappings
-            if mappings.exists():
-                any_ref_with_resources = True
-                resources_updated = list(mappings.values_list('versioned_object_id', flat=True))
-                filters = {'versioned_object_id__in': resources_updated}
-                self.mappings.set(self.mappings.exclude(**filters))
-                batch_index_resources.apply_async(('mapping', filters), queue='indexing', permanent=False)
+            concept_versioned_object_ids.extend(list(reference.concepts.values_list('versioned_object_id', flat=True)))
+            mapping_versioned_object_ids.extend(list(reference.mappings.values_list('versioned_object_id', flat=True)))
 
-        if any_ref_with_resources:
+        def process(queryset, rel, ids):
+            if ids:
+                ids = compact(set(ids))
+                filters = {'versioned_object_id__in': ids}
+                queryset.set(queryset.exclude(**filters))
+                batch_index_resources.apply_async((rel, filters), queue='indexing', permanent=False)
+
+        process(self.concepts, 'concept', concept_versioned_object_ids)
+        process(self.mappings, 'mapping', mapping_versioned_object_ids)
+
+        if bool(concept_versioned_object_ids or mapping_versioned_object_ids):
             removed_reference_ids = [ref.id for ref in self.to_ref_list(references)]
             readd_task = readd_references_to_expansion_on_references_removal
             if get(settings, 'TEST_MODE', False):
