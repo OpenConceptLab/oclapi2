@@ -1386,20 +1386,29 @@ class Expansion(BaseResourceModel):
         concepts_filters = None
         mappings_filters = None
         if expressions == ALL:
-            if self.concepts.exists():
-                concepts_filters = {'id__in': list(self.concepts.values_list('id', flat=True))}
+            concept_ids = list(self.concepts.values_list('id', flat=True))
+            mapping_ids = list(self.mappings.values_list('id', flat=True))
+            if concept_ids:
+                concepts_filters = {'id__in': concept_ids}
                 self.concepts.clear()
-            if self.mappings.exists():
-                mappings_filters = {'id__in': list(self.mappings.values_list('id', flat=True))}
+            if mapping_ids:
+                mappings_filters = {'id__in': mapping_ids}
                 self.mappings.clear()
         else:
-            concepts_filters = mappings_filters = {'uri__in': expressions}
-            self.concepts.set(self.concepts.exclude(**concepts_filters))
-            self.mappings.set(self.mappings.exclude(**mappings_filters))
+            concept_expressions = [expression for expression in expressions if is_concept(expression)]
+            mapping_expressions = [expression for expression in expressions if is_mapping(expression)]
+            if concept_expressions:
+                concepts_filters = {'uri__in': concept_expressions}
+                self.concepts.set(self.concepts.exclude(**concepts_filters))
+            if mapping_expressions:
+                mappings_filters = {'uri__in': mapping_expressions}
+                self.mappings.set(self.mappings.exclude(**mappings_filters))
 
         if not get(settings, 'TEST_MODE', False):
-            batch_index_resources.apply_async(('concept', concepts_filters), queue='indexing', permanent=False)
-            batch_index_resources.apply_async(('mapping', mappings_filters), queue='indexing', permanent=False)
+            batch_index_resources.apply_async(
+                ('concept', concepts_filters), queue='indexing', permanent=False) if concepts_filters else None
+            batch_index_resources.apply_async(
+                ('mapping', mappings_filters), queue='indexing', permanent=False) if mappings_filters else None
 
     def add_references(  # pylint: disable=too-many-locals,too-many-statements,too-many-branches,too-many-arguments
             self, references, index=True, is_adding_all=False, attempt_reevaluate=True, force_reevaluate=False):
