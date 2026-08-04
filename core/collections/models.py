@@ -1405,10 +1405,12 @@ class Expansion(BaseResourceModel):
                 self.mappings.set(self.mappings.exclude(**mappings_filters))
 
         if not get(settings, 'TEST_MODE', False):
-            batch_index_resources.apply_async(
-                ('concept', concepts_filters), queue='indexing', permanent=False) if concepts_filters else None
-            batch_index_resources.apply_async(
-                ('mapping', mappings_filters), queue='indexing', permanent=False) if mappings_filters else None
+            if concepts_filters:
+                batch_index_resources.apply_async(
+                        ('concept', concepts_filters), queue='indexing', permanent=False)
+            if mappings_filters:
+                batch_index_resources.apply_async(
+                    ('mapping', mappings_filters), queue='indexing', permanent=False)
 
     def add_references(  # pylint: disable=too-many-locals,too-many-statements,too-many-branches,too-many-arguments
             self, references, index=True, is_adding_all=False, attempt_reevaluate=True, force_reevaluate=False):
