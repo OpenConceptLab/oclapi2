@@ -5,6 +5,7 @@ from json import JSONDecodeError
 
 from billiard.exceptions import WorkerLostError
 from celery import chord
+from celery.states import STARTED
 from celery.utils.log import get_task_logger
 from dateutil.relativedelta import relativedelta
 from django.apps import apps
@@ -28,6 +29,11 @@ from core.reports.models import ResourceUsageReport
 from core.tasks.models import QueueOnceCustomTask
 
 logger = get_task_logger(__name__)
+
+INDEXING_QUEUE = 'indexing'
+INDEXING_JOB_BATCH_SIZE = 5
+INDEXING_JOB_GRACE_PERIOD_MINUTES = 5  # let a freshly picked up job show up in the worker's active set
+INDEXING_JOB_INSPECT_TIMEOUT = 10
 
 
 @app.task(base=QueueOnceCustomTask)
@@ -874,6 +880,59 @@ def resolve_url_registry_entries(repo_id, repo_type):
 def expire_old_celery_tasks():
     from core.tasks.models import Task
     Task.objects.filter(updated_at__lt=timezone.now() - timezone.timedelta(days=7)).delete()
+
+
+def get_live_indexing_task_ids():
+    """
+    Task ids currently held by the indexing workers -- executing, prefetched or scheduled.
+    Returns None when no indexing worker answers, i.e. liveness could not be established at all.
+    """
+    inspector = app.control.inspect(timeout=INDEXING_JOB_INSPECT_TIMEOUT)
+    workers = [
+        worker for worker, queues in (inspector.active_queues() or {}).items()
+        if any(queue.get('name') == INDEXING_QUEUE for queue in queues or [])
+    ]
+    if not workers:  # answering active_queues is itself the proof of life
+        return None
+
+    inspector = app.control.inspect(destination=workers, timeout=INDEXING_JOB_INSPECT_TIMEOUT)
+    task_ids = set()
+    for reply in (inspector.active(), inspector.reserved(), inspector.scheduled()):
+        for tasks in (reply or {}).values():
+            for entry in tasks or []:
+                task_id = entry.get('id') or get(entry, 'request.id')  # scheduled nests under request
+                if task_id:
+                    task_ids.add(task_id)
+    return task_ids
+
+
+@app.task(ignore_result=True)
+def rerun_indexing_job():
+    """
+    Re-queues indexing jobs left in STARTED by a worker that died without reporting back (OOM kill,
+    hard restart). Liveness comes from the indexing workers themselves rather than from how long a
+    job has been running -- runtime says nothing about whether anyone still owns it.
+    """
+    from core.tasks.models import Task
+
+    live_task_ids = get_live_indexing_task_ids()
+    if live_task_ids is None:
+        #  Broker unreachable or indexing workers all down. Every running job would look stranded.
+        logger.warning('rerun_indexing_job: no indexing worker answered, skipping sweep')
+        return
+
+    stranded = Task.objects.filter(
+        Task.queue_criteria(INDEXING_QUEUE),
+        state=STARTED,
+        started_at__lt=timezone.now() - timezone.timedelta(minutes=INDEXING_JOB_GRACE_PERIOD_MINUTES)
+    ).exclude(id__in=live_task_ids).order_by('started_at')[:INDEXING_JOB_BATCH_SIZE]
+
+    for task in stranded:
+        try:
+            logger.info('rerun_indexing_job: re-queueing %s (%s) started at %s', task.id, task.name, task.started_at)
+            task.rerun(force=True)
+        except Exception as ex:  # pylint: disable=broad-except
+            logger.error('rerun_indexing_job: failed to re-queue %s: %s', task.id, ex)
 
 
 def generate_key(*args, **kwargs):

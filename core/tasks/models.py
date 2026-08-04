@@ -213,6 +213,14 @@ class Task(models.Model):
     def celery_result(self):
         return AsyncResult(self.id)
 
+    def clear_celery_once_lock(self, celery_result=None):
+        result = celery_result or self.celery_result
+        celery_once_key = get_bulk_import_celery_once_lock_key(result)
+        if celery_once_key:
+            celery_once = QueueOnce()
+            celery_once.name = result.name
+            celery_once.once_backend.clear_lock(celery_once_key)
+
     def revoke(self):
         result = self.celery_result
 
@@ -227,11 +235,7 @@ class Task(models.Model):
 
         app.control.revoke(self.id, terminate=True, signal='SIGKILL')
 
-        celery_once_key = get_bulk_import_celery_once_lock_key(result)
-        if celery_once_key:
-            celery_once = QueueOnce()
-            celery_once.name = result.name
-            celery_once.once_backend.clear_lock(celery_once_key)
+        self.clear_celery_once_lock(result)
         self.state = REVOKED
         self.save()
 
@@ -284,6 +288,48 @@ class Task(models.Model):
     @classmethod
     def find(cls, **kwargs):
         return cls.objects.filter(**kwargs).order_by('-created_at').first()
+
+    def rerun(self, force=False):
+        """
+        Re-queues this task under the same id. A task still held by a live worker must never be
+        re-queued, so STARTED/PENDING/RETRY are refused unless force=True -- pass force only after
+        establishing that no worker owns it (see core.common.tasks.rerun_stranded_tasks).
+        """
+        if not force and not self.is_finished and self.state != REVOKED:
+            raise ValueError('Task is not finished yet.')
+
+        celery_task = app.tasks.get(self.name)
+        if not celery_task:
+            raise ValueError(f'Task {self.name} is not registered.')
+
+        #  A worker that died mid-task never got to release its celery-once lock. Left in place,
+        #  apply_async would raise AlreadyQueued and QueueOnceCustomTask would delete this row.
+        self.clear_celery_once_lock()
+
+        #  Old children would otherwise keep writing into this row alongside the new run's children,
+        #  and be picked up as stranded in their own right.
+        for child in self.children_still_playing():
+            child.revoke()
+
+        args = self.args or ()
+        self.retry += 1
+        self.state = PENDING
+        self.result = None
+        self.summary = None
+        self.error_message = None
+        self.traceback = None
+        self.started_at = None
+        self.finished_at = None
+        self.children = []
+        self.save()
+
+        return celery_task.apply_async(
+            args=args,
+            kwargs=self.kwargs or {},
+            queue=self.queue_name,
+            task_id=self.id,
+            persist_args=True,
+        )
 
 
 class WorkerRequest(Request):

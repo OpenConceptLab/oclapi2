@@ -33,6 +33,10 @@ app.conf.CELERYBEAT_SCHEDULE = {
         'task': 'core.common.tasks.expire_old_celery_tasks',
         'schedule': crontab(0, 1),  # Run at 1 am
     },
+    'rerun-indexing-job': {
+        'task': 'core.common.tasks.rerun_indexing_job',
+        'schedule': timedelta(minutes=15),
+    },
 }
 app.config_from_object('django.conf:settings', namespace='CELERY')
 app.autodiscover_tasks(lambda: settings.INSTALLED_APPS)

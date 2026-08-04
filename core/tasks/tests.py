@@ -2,8 +2,11 @@ import unittest
 import uuid
 from unittest.mock import patch, Mock
 
+from celery.states import PENDING, STARTED, FAILURE
+from django.utils import timezone
 from rest_framework.test import APIClient
 
+from core.common.tasks import rerun_indexing_job
 from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.tasks.models import Task
 from core.tasks.utils import wait_until_task_complete
@@ -50,6 +53,207 @@ class TaskTest(OCLTestCase):
         self.assertIsNotNone(new_task.finished_at)
         self.assertEqual(new_task.result, 'Ok!')
         self.assertEqual(new_task.state, 'SUCCESS')
+
+    def test_rerun_needs_a_finished_task(self):
+        task = Task(id='task-id', name='core.common.tasks.delete_organization', state=STARTED)
+        task.save()
+
+        with self.assertRaises(ValueError) as ex:
+            task.rerun()
+
+        self.assertEqual(ex.exception.args[0], 'Task is not finished yet.')
+
+    def test_rerun_needs_a_registered_task(self):
+        task = Task(id='task-id', name='core.common.tasks.no_such_task', state=FAILURE)
+        task.save()
+
+        with self.assertRaises(ValueError) as ex:
+            task.rerun()
+
+        self.assertEqual(ex.exception.args[0], 'Task core.common.tasks.no_such_task is not registered.')
+
+    @patch('core.tasks.models.Task.clear_celery_once_lock')
+    @patch('core.tasks.models.app')
+    def test_rerun_resets_previous_run_and_requeues(self, app_mock, clear_lock_mock):
+        apply_async_mock = Mock(return_value='async-result')
+        app_mock.tasks.get = Mock(return_value=Mock(apply_async=apply_async_mock))
+        task = Task(
+            id='task-id', name='core.common.tasks.delete_organization', state=FAILURE, queue='default',
+            args=[1], kwargs={'foo': 'bar'}, retry=1, result='old-result', summary={'processed': 3},
+            error_message='boom', traceback='Traceback...', started_at=timezone.now(),
+            finished_at=timezone.now(), children=['child-id']
+        )
+        task.save()
+
+        self.assertEqual(task.rerun(), 'async-result')
+
+        clear_lock_mock.assert_called_once()
+        apply_async_mock.assert_called_once_with(
+            args=[1], kwargs={'foo': 'bar'}, queue='default', task_id='task-id', persist_args=True
+        )
+
+        task.refresh_from_db()
+        self.assertEqual(task.retry, 2)
+        self.assertEqual(task.state, PENDING)
+        self.assertIsNone(task.result)
+        self.assertIsNone(task.summary)
+        self.assertIsNone(task.error_message)
+        self.assertIsNone(task.traceback)
+        self.assertIsNone(task.started_at)
+        self.assertIsNone(task.finished_at)
+        self.assertEqual(task.children, [])
+
+    @patch('core.tasks.models.Task.clear_celery_once_lock')
+    @patch('core.tasks.models.app')
+    def test_rerun_forced_on_started_task(self, app_mock, clear_lock_mock):  # pylint: disable=unused-argument
+        app_mock.tasks.get = Mock(return_value=Mock(apply_async=Mock(return_value='async-result')))
+        task = Task(id='task-id', name='core.common.tasks.delete_organization', state=STARTED)
+        task.save()
+
+        self.assertEqual(task.rerun(force=True), 'async-result')
+
+        task.refresh_from_db()
+        self.assertEqual(task.state, PENDING)
+        self.assertEqual(task.retry, 1)
+
+
+class RerunIndexingJobTest(OCLTestCase):
+    def setUp(self):
+        super().setUp()
+        self.stranded = self.stranded_job('stranded-id', hours_ago=1)
+
+    @staticmethod
+    def stranded_job(task_id, hours_ago=1, queue='indexing'):
+        task = Task(
+            id=task_id, name='core.common.tasks.index_source_concepts', state=STARTED, queue=queue,
+            started_at=timezone.now() - timezone.timedelta(hours=hours_ago)
+        )
+        task.save()
+        return task
+
+    @staticmethod
+    def inspector_mock(active=None, reserved=None, scheduled=None, active_queues=None):
+        if active_queues is None:
+            active_queues = {'worker1': [{'name': 'indexing'}]}
+        return Mock(
+            active_queues=Mock(return_value=active_queues),
+            active=Mock(return_value=active or {}),
+            reserved=Mock(return_value=reserved or {}),
+            scheduled=Mock(return_value=scheduled or {}),
+        )
+
+    @patch('core.tasks.models.Task.rerun')
+    @patch('core.common.tasks.app')
+    def test_reruns_job_no_indexing_worker_holds(self, app_mock, rerun_mock):
+        app_mock.control.inspect = Mock(return_value=self.inspector_mock())
+
+        rerun_indexing_job()
+
+        rerun_mock.assert_called_once_with(force=True)
+
+    @patch('core.tasks.models.Task.rerun')
+    @patch('core.common.tasks.app')
+    def test_reruns_job_whose_queue_is_only_on_the_task_id(self, app_mock, rerun_mock):
+        app_mock.control.inspect = Mock(return_value=self.inspector_mock())
+        self.stranded.delete()
+        self.stranded_job('some-uuid-admin~indexing', hours_ago=2, queue='default')
+
+        rerun_indexing_job()
+
+        rerun_mock.assert_called_once_with(force=True)
+
+    @patch('core.tasks.models.Task.rerun')
+    @patch('core.common.tasks.app')
+    def test_ignores_jobs_on_other_queues(self, app_mock, rerun_mock):
+        app_mock.control.inspect = Mock(return_value=self.inspector_mock())
+        self.stranded.delete()
+        self.stranded_job('default-queue-id', hours_ago=2, queue='default')
+
+        rerun_indexing_job()
+
+        rerun_mock.assert_not_called()
+
+    @patch('core.tasks.models.Task.rerun')
+    @patch('core.common.tasks.app')
+    def test_skips_job_a_worker_is_executing(self, app_mock, rerun_mock):
+        app_mock.control.inspect = Mock(
+            return_value=self.inspector_mock(active={'worker1': [{'id': 'stranded-id'}]}))
+
+        rerun_indexing_job()
+
+        rerun_mock.assert_not_called()
+
+    @patch('core.tasks.models.Task.rerun')
+    @patch('core.common.tasks.app')
+    def test_skips_job_a_worker_has_prefetched(self, app_mock, rerun_mock):
+        app_mock.control.inspect = Mock(
+            return_value=self.inspector_mock(reserved={'worker1': [{'id': 'stranded-id'}]}))
+
+        rerun_indexing_job()
+
+        rerun_mock.assert_not_called()
+
+    @patch('core.tasks.models.Task.rerun')
+    @patch('core.common.tasks.app')
+    def test_skips_job_a_worker_has_scheduled(self, app_mock, rerun_mock):
+        app_mock.control.inspect = Mock(
+            return_value=self.inspector_mock(scheduled={'worker1': [{'request': {'id': 'stranded-id'}}]}))
+
+        rerun_indexing_job()
+
+        rerun_mock.assert_not_called()
+
+    @patch('core.tasks.models.Task.rerun')
+    @patch('core.common.tasks.app')
+    def test_skips_sweep_when_no_indexing_worker_answers(self, app_mock, rerun_mock):
+        app_mock.control.inspect = Mock(return_value=self.inspector_mock(active_queues={}))
+
+        rerun_indexing_job()
+
+        rerun_mock.assert_not_called()
+
+    @patch('core.tasks.models.Task.rerun')
+    @patch('core.common.tasks.app')
+    def test_skips_sweep_when_only_non_indexing_workers_answer(self, app_mock, rerun_mock):
+        app_mock.control.inspect = Mock(
+            return_value=self.inspector_mock(active_queues={'worker1': [{'name': 'default'}]}))
+
+        rerun_indexing_job()
+
+        rerun_mock.assert_not_called()
+
+    @patch('core.tasks.models.Task.rerun')
+    @patch('core.common.tasks.app')
+    def test_skips_job_within_grace_period(self, app_mock, rerun_mock):
+        app_mock.control.inspect = Mock(return_value=self.inspector_mock())
+        self.stranded.started_at = timezone.now()
+        self.stranded.save()
+
+        rerun_indexing_job()
+
+        rerun_mock.assert_not_called()
+
+    @patch('core.tasks.models.Task.rerun')
+    @patch('core.common.tasks.app')
+    def test_reruns_five_oldest_at_most(self, app_mock, rerun_mock):
+        app_mock.control.inspect = Mock(return_value=self.inspector_mock())
+        for i in range(10):
+            self.stranded_job(f'stranded-{i}', hours_ago=i + 2)
+
+        rerun_indexing_job()
+
+        self.assertEqual(rerun_mock.call_count, 5)
+
+    @patch('core.tasks.models.Task.rerun')
+    @patch('core.common.tasks.app')
+    def test_one_failure_does_not_stop_the_sweep(self, app_mock, rerun_mock):
+        app_mock.control.inspect = Mock(return_value=self.inspector_mock())
+        rerun_mock.side_effect = [ValueError('nope'), None]
+        self.stranded_job('stranded-id-2', hours_ago=2)
+
+        rerun_indexing_job()
+
+        self.assertEqual(rerun_mock.call_count, 2)
 
 
 class TaskAPITest(OCLAPITestCase):
