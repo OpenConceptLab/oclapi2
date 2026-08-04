@@ -57,7 +57,6 @@ from core.concepts.serializers import (
 from core.mappings.serializers import MappingListSerializer
 from core.sources.models import CloneError
 from core.tasks.models import Task
-from core.toggles.models import Toggle
 
 TRUTHY = get_truthy_values()
 FALSY = get_falsy_values()
