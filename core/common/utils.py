@@ -973,8 +973,7 @@ def clean_term(term):
 
 
 def get_embeddings(txt):
-    from core.toggles.models import Toggle
-    if not Toggle.get('SEMANTIC_SEARCH_TOGGLE') or settings.ENV == 'ci':
+    if settings.ENV == 'ci':
         return None
 
     model = settings.LM

@@ -950,8 +950,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         page = max(to_int(self.request.GET.get('page'), 1), 1)
         start = offset or (page - 1) * limit
         end = start + limit
-        is_semantic = self.request.query_params.get('semantic', None) in TRUTHY and Toggle.get(
-            'SEMANTIC_SEARCH_TOGGLE')
+        is_semantic = self.request.query_params.get('semantic', None) in TRUTHY
         best_match = self.request.query_params.get('bestMatch', None) in TRUTHY
         score_threshold = self.score_threshold_semantic_very_high if is_semantic else self.score_threshold
         repo_params = self.get_repo_params(is_semantic, target_repo_params, target_repo_url)
