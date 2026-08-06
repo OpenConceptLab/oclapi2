@@ -517,7 +517,7 @@ class CollectionReferencesView(
         data, cascade, transform = self.get_data()
         task_args = (self.request.user.id, data, collection.id, cascade, transform)
 
-        result = self.perform_task(add_references, task_args, queue='indexing')
+        result = self.perform_task(add_references, task_args, queue='default')
         if isinstance(result, Response):
             return result
         added_references_ids, errors = result

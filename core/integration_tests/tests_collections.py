@@ -723,7 +723,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
                 'task': ANY,
                 'state': 'PENDING',
                 'name': 'add_references',
-                'queue': 'indexing',
+                'queue': 'default',
                 'username': 'foobar'
             }
         )
@@ -734,10 +734,10 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         )
         self.assertEqual(
             add_references_mock.apply_async.call_args[1],
-            {'task_id': ANY, 'queue': 'indexing'}
+            {'task_id': ANY, 'queue': 'default'}
         )
         self.assertTrue(
-            '-foobar~indexing' in add_references_mock.apply_async.call_args[1]['task_id'],
+            '-foobar~default' in add_references_mock.apply_async.call_args[1]['task_id'],
         )
         self.assertEqual(
             len(add_references_mock.apply_async.call_args[1]['task_id']), 36 + 1 + 7 + 1 + 7
