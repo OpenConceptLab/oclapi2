@@ -714,7 +714,8 @@ class ReferenceImporter(BaseResourceImporter):
         return self.queryset
 
     def process(self):
-        collection = self.get_queryset().first()
+        queryset = self.get_queryset()
+        collection = queryset.first() if queryset is not None else None
 
         if collection:
             if collection.has_edit_access(self.user):
