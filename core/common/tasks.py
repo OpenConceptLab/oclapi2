@@ -559,9 +559,8 @@ def batch_index_resources(resource, filters, update_indexed=False):
 
         from core.concepts.models import Concept
         from core.mappings.models import Mapping
-        if model in [Concept, Mapping]:
-            if update_indexed:
-                queryset.update(_index=True)
+        if update_indexed and model in [Concept, Mapping]:
+            queryset.update(_index=True)
 
     return 1
 
