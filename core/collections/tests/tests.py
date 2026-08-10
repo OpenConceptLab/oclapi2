@@ -1,5 +1,5 @@
 from django.core.exceptions import ValidationError
-from mock import patch, Mock, PropertyMock
+from mock import patch, Mock
 from mock.mock import ANY
 
 from core.collections.documents import CollectionDocument
