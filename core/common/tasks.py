@@ -185,12 +185,7 @@ def add_references(  # pylint: disable=too-many-arguments,too-many-locals
             data, user, cascade, transform, True)
     finally:
         head.remove_processing(self.request.id)
-    if collection.expansion_uri:
-        for ref in added_references:
-            from core.concepts.documents import ConceptDocument
-            from core.mappings.documents import MappingDocument
-            collection.batch_index(ref.concepts, ConceptDocument)
-            collection.batch_index(ref.mappings, MappingDocument)
+
     if errors:
         logger.info('Errors while adding references....')
         logger.info(errors)
