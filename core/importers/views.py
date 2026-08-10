@@ -120,7 +120,7 @@ class ImportRetrieveDestroyMixin(BaseAPIView):
             ),
         }
     ))
-    def delete(request, _=None):  # pylint: disable=unused-argument
+    def delete(request, import_queue=None):  # pylint: disable=unused-argument
         task_id = request.data.get('task_id', None)
         if not task_id:
             return Response(status=status.HTTP_400_BAD_REQUEST)
