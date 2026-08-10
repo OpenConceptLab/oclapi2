@@ -383,18 +383,6 @@ class CollectionTest(OCLTestCase):
         collection.expansion.concepts.add(concept)
         self.assertEqual(collection.last_child_update, concept.updated_at)
 
-    @patch('core.collections.models.Collection.expansion', new_callable=PropertyMock)
-    @patch('core.collections.models.Collection.batch_index')
-    def test_index_children(self, batch_index_mock, expansion_mock):
-        expansion_mock.return_value = Mock(concepts='concepts-qs', mappings='mappings-qs')
-        collection = Collection(expansion_uri='foobar')
-
-        collection.index_children()
-
-        self.assertEqual(batch_index_mock.call_count, 2)
-        self.assertEqual(batch_index_mock.mock_calls[0].args, ('concepts-qs', ConceptDocument))
-        self.assertEqual(batch_index_mock.mock_calls[1].args, ('mappings-qs', MappingDocument))
-
     def test_get_cascaded_mapping_uris_from_concept_expressions(self):
         concept1 = ConceptFactory()
         concept2 = ConceptFactory(parent=concept1.parent)
@@ -1219,9 +1207,8 @@ class TasksTest(OCLTestCase):
             sorted([concept1.parent.uri, concept2.parent.uri, mapping2.parent.uri])
         )
 
-    @patch('core.collections.models.Collection.index_children')
     @patch('core.common.tasks.export_collection')
-    def test_seed_children_task(self, export_collection_task, index_children_mock):
+    def test_seed_children_task(self, export_collection_task):
         collection = OrganizationCollectionFactory()
         expansion = ExpansionFactory(collection_version=collection)
         collection.expansion_uri = expansion.uri
@@ -1256,7 +1243,6 @@ class TasksTest(OCLTestCase):
         self.assertEqual(expansion.concepts.count(), 1)
         self.assertEqual(expansion.mappings.count(), 1)
         export_collection_task.apply_async.assert_not_called()
-        index_children_mock.assert_not_called()
 
     @patch('core.collections.models.index_expansion_mappings')
     @patch('core.collections.models.index_expansion_concepts')
