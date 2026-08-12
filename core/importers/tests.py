@@ -3437,5 +3437,6 @@ class ImportContentParserTest(OCLTestCase):
         parser1.parse()
 
         self.assertEqual(parser1.content, parser.content)
+        self.assertEqual(len(parser.content), 48)
         requests_get_mock.assert_called_once_with(
             'https://file.zip', headers={'User-Agent': 'OCL'}, stream=True, timeout=30)
