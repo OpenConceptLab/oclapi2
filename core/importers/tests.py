@@ -3399,6 +3399,22 @@ class ImportContentParserTest(OCLTestCase):
         parser.parse()
 
         self.assertIsNotNone(parser.content)
+        self.assertEqual(len(parser.content), 48)
+        zipfile_mock.assert_called_once_with(file, 'r')
+
+    @patch('core.importers.input_parsers.ZipFile')
+    def test_parse_minified_zip_file(self, zipfile_mock):
+        file = open(
+            os.path.join(
+                os.path.dirname(__file__), '..', 'samples/DemoSource_v1.0.20230526120030.minified.zip'), 'r')
+        real_zipfile = ZipFile(file.name, 'r')
+        zipfile_mock.return_value = real_zipfile
+
+        parser = ImportContentParser(file=file)
+        parser.parse()
+
+        self.assertIsNotNone(parser.content)
+        self.assertEqual(len(parser.content), 48)
         zipfile_mock.assert_called_once_with(file, 'r')
 
     @patch('core.importers.input_parsers.ZipFile')

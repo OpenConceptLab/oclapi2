@@ -96,8 +96,10 @@ class ImportContentParser:
                 self.content = converter.result
 
     def is_ocl_source_version_export(self):
-        return isinstance(self.content, str) and self.content.startswith(
-            '{"type": "Source Version"') and '"concepts":' in self.content and '"mappings":' in self.content
+        return isinstance(self.content, str) and (
+            self.content.startswith('{"type": "Source Version"') or
+            self.content.startswith('{"type":"Source Version"')
+        ) and '"concepts":' in self.content and '"mappings":' in self.content
 
     def set_csv_content(self):
         try:
