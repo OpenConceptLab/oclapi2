@@ -659,6 +659,64 @@ class ConceptMapTest(OCLTestCase):
 
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    def test_translate_with_url(self):
+        self.putConceptMap()
+
+        response = self.client.get(
+            '/fhir/ConceptMap/$translate?'
+            f'url=http://localhost/url&system={self.org_source_B_v1.canonical_url}&code=concept_B_1',
+            HTTP_AUTHORIZATION='Token ' + self.user_token)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(
+            response.data,
+            {
+                'resourceType': 'Parameters',
+                'parameter': [
+                    OrderedDict([
+                        ('name', 'result'),
+                        ('valueBoolean', True)
+                    ]),
+                    OrderedDict([
+                        ('name', 'match'),
+                        (
+                            'part',
+                            [
+                                OrderedDict([
+                                    ('name', 'equivalence'),
+                                    ('valueCode', 'equivalent')
+                                ]),
+                                OrderedDict([
+                                    ('name', 'concept'),
+                                    ('valueCoding', OrderedDict([('system', '/some/url'), ('code', 'concept_1')]))
+                                ])
+                            ]
+                        )
+                    ])
+                ]
+            })
+
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    def test_translate_with_url_negative(self):
+        # system/code alone would match mapping_1 (owned by org_source), but the ConceptMap
+        # identified by 'url' has no such mapping, so no match should be returned.
+        self.putConceptMap()
+
+        response = self.client.get(
+            '/fhir/ConceptMap/$translate?'
+            f'url=http://unknown-concept-map/url&system={self.org_source_B_v1.canonical_url}&code=concept_B_1',
+            HTTP_AUTHORIZATION='Token ' + self.user_token)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertDictEqual(response.data, {
+            'resourceType': 'Parameters',
+            'parameter': [OrderedDict(
+                [('name', 'result'), ('valueBoolean', False)]
+            )]})
+
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_translate_with_target(self):
         self.putConceptMap()
 

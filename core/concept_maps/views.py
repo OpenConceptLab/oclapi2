@@ -105,7 +105,7 @@ class ConceptMapTranslateView(MappingListView):
         targetsystem = params.get('targetsystem')
         # TODO: implement 'source' and 'target'
         if url:
-            queryset = queryset.filter(canonical_url=url)
+            queryset = queryset.filter(parent__canonical_url=url)
             if not queryset:
                 return queryset
 
