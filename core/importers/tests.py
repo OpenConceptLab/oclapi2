@@ -346,6 +346,136 @@ class BulkImportInlineTest(OCLTestCase):
             sorted([concept.id, concept.get_latest_version().prev_version.id, concept.get_latest_version().id])
         )
 
+    def test_concept_import_with_nested_mapping_to_concept_code(self):
+        """A Concept line's nested mappings must survive the importer's field allowlist (ocl_issues#2683)."""
+        source = OrganizationSourceFactory(
+            organization=(OrganizationFactory(mnemonic='DemoOrg')), mnemonic='DemoSource', version='HEAD'
+        )
+        ConceptFactory(parent=source, mnemonic='Food')
+
+        data = {
+            "type": "Concept", "id": "Papaya", "concept_class": "Root",
+            "datatype": "None", "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
+            "names": [{"name": "Papaya", "locale": "en", "locale_preferred": "True", "name_type": "Fully Specified"}],
+            "descriptions": [],
+            "mappings": [{
+                "map_type": "Same As", "to_source_url": "/orgs/DemoOrg/sources/DemoSource/",
+                "to_concept_code": "Food"
+            }],
+        }
+
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 1)
+        self.assertEqual(importer.failed, [])
+        papaya = Concept.objects.filter(mnemonic='Papaya', id=F('versioned_object_id')).first()
+        self.assertIsNotNone(papaya)
+        mapping = Mapping.objects.filter(parent=source, id=F('versioned_object_id')).first()
+        self.assertIsNotNone(mapping)
+        self.assertEqual(mapping.map_type, 'Same As')
+        self.assertEqual(mapping.from_concept_id, papaya.id)
+        self.assertEqual(mapping.to_concept_code, 'Food')
+
+    def test_concept_import_with_nested_mapping_parent_concept_sentinel(self):
+        """An id-less concept line can self-map via to_concept: __parent_concept (ocl_issues#2683)."""
+        source = OrganizationSourceFactory(
+            organization=(OrganizationFactory(mnemonic='DemoOrg')), mnemonic='DemoSource', version='HEAD'
+        )
+
+        data = {
+            "type": "Concept", "concept_class": "Diagnosis",
+            "datatype": "N/A", "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
+            "names": [{
+                "name": "Nested mapping probe", "locale": "en", "locale_preferred": "True",
+                "name_type": "Fully Specified"
+            }],
+            "mappings": [{
+                "map_type": "Same As", "to_source_url": "/orgs/DemoOrg/sources/DemoSource/",
+                "to_concept": "__parent_concept"
+            }],
+        }
+
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 1)
+        self.assertEqual(importer.failed, [])
+        concept = source.concepts_set.filter(id=F('versioned_object_id')).first()
+        self.assertIsNotNone(concept)
+        mapping = Mapping.objects.filter(parent=source, id=F('versioned_object_id')).first()
+        self.assertIsNotNone(mapping)
+        self.assertEqual(mapping.map_type, 'Same As')
+        self.assertEqual(mapping.from_concept_id, concept.id)
+        self.assertEqual(mapping.to_concept_id, concept.id)
+
+    def test_concept_import_update_with_nested_mappings(self):
+        """Nested mappings must also apply when update_if_exists=true versions an existing concept."""
+        source = OrganizationSourceFactory(
+            organization=(OrganizationFactory(mnemonic='DemoOrg')), mnemonic='DemoSource', version='HEAD'
+        )
+        ConceptFactory(parent=source, mnemonic='Food')
+
+        data = {
+            "type": "Concept", "id": "Papaya", "concept_class": "Root",
+            "datatype": "None", "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
+            "names": [{"name": "Papaya", "locale": "en", "locale_preferred": "True", "name_type": "Fully Specified"}],
+            "descriptions": [],
+        }
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+        self.assertEqual(len(importer.created), 1)
+        self.assertEqual(Mapping.objects.filter(parent=source).count(), 0)
+
+        update_data = {
+            "type": "Concept", "id": "Papaya", "concept_class": "Root",
+            "datatype": "Rule", "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
+            "names": [{"name": "Papaya", "locale": "en", "locale_preferred": "True", "name_type": "Fully Specified"}],
+            "descriptions": [],
+            "mappings": [{
+                "map_type": "Same As", "to_source_url": "/orgs/DemoOrg/sources/DemoSource/",
+                "to_concept_code": "Food"
+            }],
+        }
+        importer = BulkImportInline(json.dumps(update_data), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.updated), 1)
+        self.assertEqual(importer.failed, [])
+        mapping = Mapping.objects.filter(parent=source, id=F('versioned_object_id')).first()
+        self.assertIsNotNone(mapping)
+        self.assertEqual(mapping.to_concept_code, 'Food')
+
+    def test_concept_import_with_failing_nested_mapping_is_not_silent(self):
+        """A nested mapping that fails validation must fail the concept line, not report a silent success."""
+        source = OrganizationSourceFactory(
+            organization=(OrganizationFactory(mnemonic='DemoOrg')), mnemonic='DemoSource', version='HEAD'
+        )
+        ConceptFactory(parent=source, mnemonic='Food')
+
+        data = {
+            "type": "Concept", "id": "Papaya", "concept_class": "Root",
+            "datatype": "None", "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
+            "names": [{"name": "Papaya", "locale": "en", "locale_preferred": "True", "name_type": "Fully Specified"}],
+            "descriptions": [],
+            "mappings": [{
+                "to_source_url": "/orgs/DemoOrg/sources/DemoSource/", "to_concept_code": "Food"
+            }],
+        }
+
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 0)
+        self.assertEqual(len(importer.failed), 1)
+        self.assertIn('mappings', importer.failed[0]['errors'])
+        self.assertFalse(Concept.objects.filter(mnemonic='Papaya').exists())
+        self.assertEqual(Mapping.objects.filter(parent=source).count(), 0)
+
     def test_concept_import_processes_hierarchy_for_inline_import(self):
         source = OrganizationSourceFactory(
             organization=OrganizationFactory(mnemonic='DemoOrg'), mnemonic='DemoSource', version='HEAD'

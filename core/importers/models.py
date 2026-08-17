@@ -419,7 +419,7 @@ class ConceptImporter(BaseResourceImporter):
     mandatory_fields = {"concept_class"}
     allowed_fields = [
         "id", "external_id", "concept_class", "datatype", "names", "descriptions", "retired", "extras",
-        "parent_concept_urls", 'update_comment', 'comment', 'retire_reason'
+        "parent_concept_urls", 'update_comment', 'comment', 'retire_reason', 'mappings'
     ]
 
     @staticmethod
@@ -451,6 +451,7 @@ class ConceptImporter(BaseResourceImporter):
     def parse(self):
         source = self.get_cached_parent_source()
         super().parse()
+        self.data['mappings_payload'] = self.data.pop('mappings', [])
         self.data['parent'] = source
         self.data['mnemonic'] = str(self.data.pop('id', ''))
         if not is_url_encoded_string(self.data['mnemonic']):
