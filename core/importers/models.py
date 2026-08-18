@@ -67,7 +67,7 @@ class BaseImporter:
             self.input_list = self.content
         else:
             for line in self.content.splitlines():
-                self.input_list.append(json.loads(line))
+                self.input_list.append(line if isinstance(line, dict) else json.loads(line))
 
     def set_user(self):
         self.user = UserProfile.objects.get(username=self.username)
@@ -1047,7 +1047,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self.concept_hierarchy_map = {}  # child_uri -> [parent_uris], built before input_list is cleared
         self.hierarchy_reconciliation_done = False
         if self.content:
-            self.input_list = self.content if isinstance(self.content, list) else self.content.splitlines()
+            self.populate_input_list()
             self.total = len(self.input_list)
         self.make_resource_distribution()
         self.make_parts()
@@ -1060,13 +1060,12 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
 
     def make_resource_distribution(self):
         for line in self.input_list:
-            data = line if isinstance(line, dict) else json.loads(line)
-            data_type = data.get('type', None)
+            data_type = line.get('type', None)
             if not data_type or data_type.lower() not in ['organization', 'source', 'collection']:
                 continue
             if data_type not in self.resource_distribution:
                 self.resource_distribution[data_type] = []
-            self.resource_distribution[data_type].append(data)
+            self.resource_distribution[data_type].append(line)
 
     def make_parts(self):
         prev_line = None
@@ -1082,8 +1081,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
 
         self.parts.append([])
 
-        for data in self.input_list:
-            line = data if isinstance(data, dict) else json.loads(data)
+        for line in self.input_list:
             data_type = line.get('type', '').lower()
             if not data_type:
                 raise ValidationError('"type" should be present in each line')
@@ -1102,8 +1100,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                 prev_line = line
 
     def collect_concept_hierarchy_map(self):
-        for data in self.input_list:
-            line = data if isinstance(data, dict) else json.loads(data)
+        for line in self.input_list:
             if line.get('type', '').lower() != 'concept':
                 continue
             parent_urls = line.get('parent_concept_urls') or []
