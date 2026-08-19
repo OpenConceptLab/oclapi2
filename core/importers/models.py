@@ -14,7 +14,7 @@ from pydash import compact, get
 from core.celery import app
 from core.collections.models import Collection
 from core.common import ERRBIT_LOGGER
-from core.common.constants import HEAD
+from core.common.constants import HEAD, ALL
 from core.common.tasks import bulk_import_parts_inline, delete_organization, batch_index_resources, \
     post_import_update_resource_counts, make_hierarchy
 from core.common.utils import drop_version, is_url_encoded_string, encode_string, to_parent_uri, chunks
@@ -751,7 +751,17 @@ class ReferenceImporter(BaseResourceImporter):
         collection = self.get_queryset().first()
         if collection:  # pylint: disable=too-many-nested-blocks
             if collection.has_edit_access(self.user):
-                expressions = self.get('data').get('expressions', [])
+                expressions = self.get('references', None) or self.get(
+                    'data', {}).get('expressions', [])
+                if expressions == [ALL]:
+                    expressions = ALL
+
+                if expressions == ALL:
+                    if not collection.references.exists():
+                        return NOT_FOUND
+                    collection.delete_references(ALL)
+                    return DELETED
+
                 cascade = self.get('__cascade', False)
                 transform = self.get('transform', False)
                 to_delete = []

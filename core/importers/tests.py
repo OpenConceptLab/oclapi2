@@ -1200,6 +1200,35 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(collection.references.count(), 2)
         batch_index_resources_mock.apply_async.assert_not_called()
 
+    @patch('core.collections.models.batch_index_resources', Mock())
+    @patch('core.importers.models.batch_index_resources')
+    def test_reference_import_with_delete_all(self, batch_index_resources_mock):
+        importer = BulkImportInline(
+            open(
+                os.path.join(
+                    os.path.dirname(__file__), '..', 'samples/sample_collection_references_with_delete_all.json'
+                ),
+                'r'
+            ).read(),
+            'ocladmin', True
+        )
+        importer.run()
+        self.assertEqual(importer.processed, 10)
+        self.assertEqual(len(importer.created), 8)
+        self.assertEqual(len(importer.deleted), 1)
+        self.assertEqual(len(importer.failed), 1)
+        self.assertEqual(len(importer.exists), 0)
+        self.assertEqual(len(importer.updated), 0)
+        self.assertEqual(len(importer.unchanged), 0)
+        self.assertEqual(len(importer.invalid), 0)
+        self.assertEqual(len(importer.others), 0)
+        collection = Collection.objects.filter(uri='/orgs/PEPFAR/collections/MER-R-MOH-Facility-FY19/').first()
+        self.assertEqual(collection.expansions.count(), 1)
+        self.assertEqual(collection.expansion.concepts.count(), 0)
+        self.assertEqual(collection.expansion.mappings.count(), 0)
+        self.assertEqual(collection.references.count(), 0)
+        batch_index_resources_mock.apply_async.assert_not_called()
+
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.importers.models.batch_index_resources')
