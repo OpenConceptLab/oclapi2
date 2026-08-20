@@ -1959,7 +1959,7 @@ class SourceMappingsIndexViewTest(OCLAPITestCase):
                 'name': 'index_source_mappings'
             })
         index_source_mappings_task_mock.apply_async.assert_called_once_with(
-            (100, None, False), queue='indexing', task_id=ANY)
+            (100, None, False, True, True, True), queue='indexing', task_id=ANY)
 
     @patch('core.sources.views.index_source_mappings')
     def test_post_202_single_batch(self, index_source_mappings_task_mock):
@@ -1985,7 +1985,7 @@ class SourceMappingsIndexViewTest(OCLAPITestCase):
                 'name': 'index_source_mappings'
             })
         index_source_mappings_task_mock.apply_async.assert_called_once_with(
-            (100, None, True), queue='indexing', task_id=ANY)
+            (100, None, True, True, True, True), queue='indexing', task_id=ANY)
 
 
 class SourceConceptsIndexViewTest(OCLAPITestCase):
