@@ -22,7 +22,6 @@ from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixi
     ConceptContainerExportMixin, ConceptContainerProcessingMixin
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
     CanViewConceptDictionaryVersion
-from core.common.serializers import TaskSerializer
 from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, \
     page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header, \
     canonical_url_param, all_versions_param
@@ -44,7 +43,7 @@ from core.sources.serializers import (
     SourceVersionSummaryDetailSerializer, SourceMinimalSerializer, SourceSummaryVerboseSerializer,
     SourceVersionSummaryVerboseSerializer, SourceSummaryFieldDistributionSerializer,
     SourceVersionSummaryFieldDistributionSerializer, SourceVersionMinimalSerializer)
-from core.tasks.mixins import TaskMixin
+from core.tasks.mixins import TaskMixin, IndexingTaskMixin
 from core.tasks.models import Task
 from core.tasks.serializers import TaskBriefSerializer
 
@@ -314,8 +313,9 @@ class SourceLatestVersionRetrieveUpdateView(SourceVersionBaseView, RetrieveAPIVi
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class SourceConceptsIndexView(SourceBaseView):
-    serializer_class = TaskSerializer
+class SourceIndexBaseView(SourceBaseView, IndexingTaskMixin):  # pylint: disable=abstract-method
+    serializer_class = TaskBriefSerializer
+    permission_classes = (IsAdminUser, )
 
     def get_queryset(self):
         return Source.get_base_queryset(compact_dict_by_values(self.get_filter_params()))
@@ -325,50 +325,29 @@ class SourceConceptsIndexView(SourceBaseView):
         self.check_object_permissions(self.request, instance)
         return instance
 
-    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        source = self.get_object()
-        single_batch = request.data.get('single_batch', None) in get_truthy_values()
-        parallel = request.data.get('parallel', True) in get_truthy_values() if 'parallel' in request.data else True
-        should_prefetch = request.data.get(
-            'should_prefetch', True) in get_truthy_values() if 'should_prefetch' in request.data else True
-        should_select_related = request.data.get(
-            'should_select_related', True) in get_truthy_values() if 'should_select_related' in request.data else True
-        task = Task.new(queue='indexing', user=request.user, name=index_source_concepts.__name__)
-        try:
-            index_source_concepts.apply_async(
-                (source.id, None, single_batch, should_prefetch, should_select_related, parallel),
-                queue=task.queue, task_id=task.id)
-        except AlreadyQueued:
-            if task:
-                task.delete()
-            return Response({'detail': 'Already Queued'}, status=status.HTTP_409_CONFLICT)
 
-        return Response(TaskBriefSerializer(task).data, status=status.HTTP_202_ACCEPTED)
+class SourceConceptsIndexView(SourceIndexBaseView):
+    def get_task_function(self):
+        return index_source_concepts
+
+    def get_task_args(self, instance):
+        request_data = self.request.data
+        single_batch = request_data.get('single_batch', None) in get_truthy_values()
+        parallel = request_data.get('parallel', True) in get_truthy_values() if 'parallel' in request_data else True
+        should_prefetch = request_data.get(
+            'should_prefetch', True) in get_truthy_values() if 'should_prefetch' in request_data else True
+        should_select_related = request_data.get(
+            'should_select_related', True) in get_truthy_values() if 'should_select_related' in request_data else True
+        return instance.id, None, single_batch, should_prefetch, should_select_related, parallel
 
 
-class SourceMappingsIndexView(SourceBaseView):
-    serializer_class = TaskSerializer
+class SourceMappingsIndexView(SourceIndexBaseView):
+    def get_task_function(self):
+        return index_source_mappings
 
-    def get_queryset(self):
-        return Source.get_base_queryset(compact_dict_by_values(self.get_filter_params()))
-
-    def get_object(self, queryset=None):
-        instance = get_object_or_404(self.get_queryset())
-        self.check_object_permissions(self.request, instance)
-        return instance
-
-    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        source = self.get_object()
-        single_batch = request.data.get('single_batch', None) in get_truthy_values()
-        task = Task.new(queue='indexing', user=request.user, name=index_source_mappings.__name__)
-        try:
-            index_source_mappings.apply_async((source.id, None, single_batch), queue=task.queue, task_id=task.id)
-        except AlreadyQueued:
-            if task:
-                task.delete()
-            return Response({'detail': 'Already Queued'}, status=status.HTTP_409_CONFLICT)
-
-        return Response(TaskBriefSerializer(task).data, status=status.HTTP_202_ACCEPTED)
+    def get_task_args(self, instance):
+        single_batch = self.request.data.get('single_batch', None) in get_truthy_values()
+        return instance.id, None, single_batch
 
 
 class SourceConceptsCloneView(SourceBaseView):

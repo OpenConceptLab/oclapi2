@@ -43,3 +43,30 @@ class TaskMixin:
                 return self.task_response(celery_task)
 
         return result
+
+
+class IndexingTaskMixin:
+    """
+    Schedules an indexing celery task and always responds immediately with
+    202 (task queued) or 409 (already queued) -- never waits for completion.
+    """
+    queue = 'indexing'
+
+    def get_task_function(self):
+        raise NotImplementedError
+
+    def get_task_args(self, instance):
+        raise NotImplementedError
+
+    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        instance = self.get_object()
+        task_func = self.get_task_function()
+        task = Task.new(queue=self.queue, user=request.user, name=task_func.__name__)
+        try:
+            task_func.apply_async(self.get_task_args(instance), task_id=task.id, queue=task.queue)
+        except AlreadyQueued:
+            if task:
+                task.delete()
+            return Response({'detail': 'Already Queued'}, status=status.HTTP_409_CONFLICT)
+
+        return Response(TaskBriefSerializer(task).data, status=status.HTTP_202_ACCEPTED)

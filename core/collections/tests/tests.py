@@ -3363,13 +3363,6 @@ class ExpansionConceptsIndexViewTest(OCLAPITestCase):
                 'name': 'index_expansion_concepts_task_mock',
                 'queue': 'indexing',
                 'username': 'ocladmin',
-                'created_at': ANY,
-                'started_at': None,
-                'finished_at': None,
-                'runtime': None,
-                'summary': None,
-                'children': [],
-                'message': None
             }
         )
         index_expansion_concepts_task_mock.apply_async.assert_called_once_with(
@@ -3402,13 +3395,6 @@ class ExpansionMappingsIndexViewTest(OCLAPITestCase):
                 'name': 'index_expansion_mappings_task_mock',
                 'queue': 'indexing',
                 'username': 'ocladmin',
-                'created_at': ANY,
-                'started_at': None,
-                'finished_at': None,
-                'runtime': None,
-                'summary': None,
-                'children': [],
-                'message': None
             }
         )
         index_expansion_mappings_task_mock.apply_async.assert_called_once_with(

@@ -68,9 +68,9 @@ from core.mappings.search import MappingFacetedSearch
 from core.repos.mixins import RepoExternalExportMixin
 from core.repos.serializers import RepoExternalExportSerializer
 from core.sources.mixins import SummaryMixin
-from core.tasks.mixins import TaskMixin
+from core.tasks.mixins import TaskMixin, IndexingTaskMixin
 from core.tasks.models import Task
-from core.tasks.serializers import TaskListSerializer
+from core.tasks.serializers import TaskBriefSerializer
 
 logger = logging.getLogger('oclapi')
 
@@ -988,24 +988,16 @@ class CollectionVersionExpansionMappingsView(CollectionVersionExpansionChildrenV
         return super().get_queryset().mappings.filter()
 
 
-class ExpansionResourcesIndexView(CollectionVersionExpansionBaseView):
-    serializer_class = TaskSerializer
+class ExpansionResourcesIndexView(CollectionVersionExpansionBaseView, IndexingTaskMixin):
+    serializer_class = TaskBriefSerializer
     permission_classes = (IsAdminUser, )
     resource = None
 
-    def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        expansion = self.get_object()
-        user = self.request.user
-        task_func = index_expansion_concepts if self.resource == 'concepts' else index_expansion_mappings
-        task = Task.new(queue='indexing', user=user, name=task_func.__name__)
-        try:
-            task_func.apply_async((expansion.id,), task_id=task.id, queue=task.queue)
-        except AlreadyQueued:
-            if task:
-                task.delete()
-            return Response({'detail': 'Already Queued'}, status=status.HTTP_409_CONFLICT)
+    def get_task_function(self):
+        return index_expansion_concepts if self.resource == 'concepts' else index_expansion_mappings
 
-        return Response(TaskListSerializer(task).data, status=status.HTTP_202_ACCEPTED)
+    def get_task_args(self, instance):
+        return (instance.id,)
 
 
 class ExpansionConceptsIndexView(ExpansionResourcesIndexView):
