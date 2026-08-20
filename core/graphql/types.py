@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Annotated, List, Optional, Union
 
 import strawberry
 
@@ -82,10 +82,10 @@ class TextDatatypeDetails:
     )
 
 
-DatatypeDetails = strawberry.union(
-    "DatatypeDetails",
-    (NumericDatatypeDetails, CodedDatatypeDetails, TextDatatypeDetails),
-)
+DatatypeDetails = Annotated[
+    Union[NumericDatatypeDetails, CodedDatatypeDetails, TextDatatypeDetails],
+    strawberry.union("DatatypeDetails"),
+]
 
 
 @strawberry.type

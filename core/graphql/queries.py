@@ -466,7 +466,7 @@ class Query:
     @strawberry.field(name="concepts")
     async def concepts(  # pylint: disable=too-many-arguments,too-many-locals
         self,
-        info,  # pylint: disable=unused-argument
+        info: strawberry.Info,
         org: Optional[str] = None,
         source: Optional[str] = None,
         version: Optional[str] = None,
