@@ -325,29 +325,25 @@ class SourceIndexBaseView(SourceBaseView, IndexingTaskMixin):  # pylint: disable
         self.check_object_permissions(self.request, instance)
         return instance
 
+    def get_task_args(self, instance):
+        data = self.request.data or {}
+        single_batch = data.get('single_batch', None) in get_truthy_values()
+        parallel = data.get('parallel', True) in get_truthy_values() if 'parallel' in data else True
+        should_prefetch = data.get(
+            'should_prefetch', True) in get_truthy_values() if 'should_prefetch' in data else True
+        should_select_related = data.get(
+            'should_select_related', True) in get_truthy_values() if 'should_select_related' in data else True
+        return instance.id, None, single_batch, should_prefetch, should_select_related, parallel
+
 
 class SourceConceptsIndexView(SourceIndexBaseView):
     def get_task_function(self):
         return index_source_concepts
 
-    def get_task_args(self, instance):
-        request_data = self.request.data
-        single_batch = request_data.get('single_batch', None) in get_truthy_values()
-        parallel = request_data.get('parallel', True) in get_truthy_values() if 'parallel' in request_data else True
-        should_prefetch = request_data.get(
-            'should_prefetch', True) in get_truthy_values() if 'should_prefetch' in request_data else True
-        should_select_related = request_data.get(
-            'should_select_related', True) in get_truthy_values() if 'should_select_related' in request_data else True
-        return instance.id, None, single_batch, should_prefetch, should_select_related, parallel
-
 
 class SourceMappingsIndexView(SourceIndexBaseView):
     def get_task_function(self):
         return index_source_mappings
-
-    def get_task_args(self, instance):
-        single_batch = self.request.data.get('single_batch', None) in get_truthy_values()
-        return instance.id, None, single_batch
 
 
 class SourceConceptsCloneView(SourceBaseView):
