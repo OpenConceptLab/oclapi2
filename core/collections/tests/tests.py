@@ -1,10 +1,12 @@
+from celery_once import AlreadyQueued
 from django.core.exceptions import ValidationError
+from django.test import override_settings
 from mock import patch, Mock
 from mock.mock import ANY
 
 from core.collections.documents import CollectionDocument
 from core.collections.models import CollectionReference, Collection, Expansion
-from core.collections.models import ExpansionParameters
+from core.collections.models import ExpansionParameters, ExpansionSystemParameter
 from core.collections.parsers import CollectionReferenceExpressionStringParser, \
     CollectionReferenceSourceAllExpressionParser, CollectionReferenceOldStyleToExpandedStructureParser, \
     CollectionReferenceParser
@@ -16,14 +18,17 @@ from core.common.tasks import add_references, seed_children_to_new_version
 from core.common.tasks import update_collection_active_concepts_count
 from core.common.tasks import update_collection_active_mappings_count
 from core.common.tests import OCLTestCase, OCLAPITestCase
+from core.common.utils import to_owner_uri, get_falsy_values
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from core.mappings.documents import MappingDocument
+from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
+from core.tasks.models import Task
 from core.users.models import UserProfile
 
 
@@ -575,6 +580,108 @@ class CollectionTest(OCLTestCase):
              }]
         )
 
+    def test_save_triggers_resolve_url_registry_entries_when_canonical_url_dirty(self):
+        from core.url_registry.models import URLRegistry  # pylint: disable=import-outside-toplevel
+        collection = OrganizationCollectionFactory(canonical_url='http://old.canonical.url')
+        URLRegistry.objects.create(url='http://foo-registry.com', repo=collection, is_active=True)
+
+        with patch('core.collections.models.resolve_url_registry_entries') as resolve_mock:
+            collection.canonical_url = 'http://new.canonical.url'
+            collection.save()
+
+        resolve_mock.apply_async.assert_called_once_with(
+            (collection.id, collection.resource_type), queue='default', permanent=False
+        )
+
+    def test_validate_openmrs_schema_no_concepts_resolved_returns_none(self):
+        collection = OrganizationCollectionFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA)
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+
+        reference = CollectionReference(expression='/concepts/', collection=collection, reference_type='concepts')
+
+        self.assertIsNone(collection.validate(reference))
+
+    def test_get_brief_serializer(self):
+        from core.collections.serializers import (  # pylint: disable=import-outside-toplevel
+            CollectionVersionMinimalSerializer, CollectionMinimalSerializer)
+        head_collection = OrganizationCollectionFactory()
+        version_collection = OrganizationCollectionFactory(
+            organization=head_collection.organization, mnemonic=head_collection.mnemonic, version='v1')
+
+        self.assertEqual(head_collection.get_brief_serializer(), CollectionMinimalSerializer)
+        self.assertEqual(version_collection.get_brief_serializer(), CollectionVersionMinimalSerializer)
+
+    def test_get_resource_facet_filters(self):
+        collection = OrganizationCollectionFactory(version='v1')
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        collection.expansion_uri = expansion.uri
+        collection.save()
+
+        filters = collection._get_resource_facet_filters()  # pylint: disable=protected-access
+
+        self.assertEqual(
+            filters,
+            {
+                'collection': collection.mnemonic,
+                'collection_owner_url': to_owner_uri(collection.uri),
+                'expansion': 'e1',
+                'retired': False,
+                'collection_version': 'v1',
+            }
+        )
+
+        filters = collection._get_resource_facet_filters({'retired': True})  # pylint: disable=protected-access
+        self.assertTrue(filters['retired'])
+
+    def test_get_tasks(self):
+        collection = OrganizationCollectionFactory(version='v1')
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+
+        self.assertIsNone(collection.get_export_task())
+        self.assertIsNone(collection.get_index_concepts_task())
+        self.assertIsNone(collection.get_index_mappings_task())
+        self.assertIsNone(collection.get_seed_new_version_task())
+        self.assertEqual(
+            collection.get_tasks(),
+            {
+                'seeded_concepts': None, 'seeded_mappings': None,
+                'indexed_concepts': None, 'indexed_mappings': None, 'exported': None,
+            }
+        )
+
+        export_task = Task.objects.create(
+            id='task-export', name='core.common.tasks.export_collection', args=[collection.id],
+            created_by=collection.created_by
+        )
+        index_concepts_task = Task.objects.create(
+            id='task-index-concepts', name='core.collections.models.index_expansion_concepts',
+            args=[expansion.id], created_by=collection.created_by
+        )
+        index_mappings_task = Task.objects.create(
+            id='task-index-mappings', name='core.collections.models.index_expansion_mappings',
+            args=[expansion.id], created_by=collection.created_by
+        )
+        seed_task = Task.objects.create(
+            id='task-seed', name='core.collections.models.seed_children_to_expansion',
+            args=[collection.id], created_by=collection.created_by
+        )
+
+        self.assertEqual(collection.get_export_task().id, export_task.id)
+        self.assertEqual(collection.get_index_concepts_task().id, index_concepts_task.id)
+        self.assertEqual(collection.get_index_mappings_task().id, index_mappings_task.id)
+        self.assertEqual(collection.get_seed_new_version_task().id, seed_task.id)
+
+        tasks = collection.get_tasks()
+        self.assertEqual(tasks['exported'].id, export_task.id)
+        self.assertEqual(tasks['indexed_concepts'].id, index_concepts_task.id)
+        self.assertEqual(tasks['indexed_mappings'].id, index_mappings_task.id)
+        self.assertEqual(tasks['seeded_concepts'].id, seed_task.id)
+        self.assertEqual(tasks['seeded_mappings'].id, seed_task.id)
+
 
 class CollectionReferenceTest(OCLTestCase):
     def test_uri(self):
@@ -1062,6 +1169,341 @@ class CollectionReferenceTest(OCLTestCase):
             reference.build_expression(), '/orgs/MyOrg/collections/Coll/concepts/?q=foo&name=foobar'
         )
 
+    def test_get_static_references_criteria(self):
+        collection = OrganizationCollectionFactory()
+        static_ref = CollectionReference(expression='/concepts/', collection=collection, resource_version='1')
+        static_ref.save()
+        non_static_ref = CollectionReference(expression='/concepts/other/', collection=collection)
+        non_static_ref.save()
+
+        matched_ids = list(
+            CollectionReference.objects.filter(
+                CollectionReference.get_static_references_criteria()
+            ).values_list('id', flat=True)
+        )
+
+        self.assertIn(static_ref.id, matched_ids)
+        self.assertNotIn(non_static_ref.id, matched_ids)
+
+    def test_parent(self):
+        collection = OrganizationCollectionFactory()
+        reference = CollectionReference(collection=collection)
+        self.assertEqual(reference.parent, collection)
+
+    def test_can_compute_against_other_system_version(self):
+        self.assertTrue(CollectionReference(system='http://sys.com').can_compute_against_other_system_version)
+        self.assertFalse(
+            CollectionReference(system='http://sys.com', version='v1').can_compute_against_other_system_version)
+        self.assertFalse(
+            CollectionReference(
+                system='http://sys.com', resource_version='1').can_compute_against_other_system_version)
+        self.assertTrue(CollectionReference().can_compute_against_other_system_version)
+
+    def test_can_compute_against_system_version(self):
+        source = OrganizationSourceFactory()
+        other_source = OrganizationSourceFactory()
+
+        reference = CollectionReference(system=source.uri, created_by=source.created_by)
+
+        self.assertTrue(reference.can_compute_against_system_version(source))
+        self.assertFalse(reference.can_compute_against_system_version(other_source))
+        self.assertFalse(reference.can_compute_against_system_version(None))
+
+        pinned_reference = CollectionReference(system=source.uri, version='v1', created_by=source.created_by)
+        self.assertFalse(pinned_reference.can_compute_against_system_version(source))
+
+    def test_get_concepts_applies_es_filter(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source, concept_class='Diagnosis')
+        other_concept = ConceptFactory(parent=source, concept_class='Procedure')
+        ConceptDocument().update([concept, other_concept])
+
+        reference = CollectionReference(
+            system=source.uri, created_by=source.created_by,
+            filter=[{'property': 'concept_class', 'value': 'Diagnosis', 'op': '='}]
+        )
+        concepts, mappings = reference.get_concepts()
+
+        self.assertEqual(list(concepts.values_list('id', flat=True)), [concept.id])
+        self.assertEqual(mappings.count(), 0)
+
+        no_match_reference = CollectionReference(
+            system=source.uri, created_by=source.created_by,
+            filter=[{'property': 'concept_class', 'value': 'NoSuchClass', 'op': '='}]
+        )
+        no_match_concepts, _ = no_match_reference.get_concepts()
+        self.assertEqual(no_match_concepts.count(), 0)
+
+    def test_get_concepts_applies_es_filter_with_case_switch_extras_and_unknown_property(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source, concept_class='Diagnosis', extras={'nested': 'val1'})
+        other_concept = ConceptFactory(parent=source, concept_class='Procedure')
+        ConceptDocument().update([concept, other_concept])
+
+        reference = CollectionReference(
+            system=source.uri, created_by=source.created_by, version='HEAD',
+            filter=[
+                {'property': 'conceptClass', 'value': 'Diagnosis', 'op': '='},
+                {'property': 'extras.nested', 'value': 'val1', 'op': '='},
+                {'property': 'nonsense_prop', 'value': 'x', 'op': '='},
+            ]
+        )
+        concepts, _mappings = reference.get_concepts()
+
+        self.assertEqual(list(concepts.values_list('id', flat=True)), [concept.id])
+
+    def test_get_concepts_applies_es_filter_with_q_property(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source)
+        ConceptDocument().update([concept])
+
+        reference = CollectionReference(
+            system=source.uri, created_by=source.created_by,
+            filter=[{'property': 'q', 'value': concept.mnemonic, 'op': '='}]
+        )
+
+        concepts, _mappings = reference.get_concepts()
+
+        self.assertIsNotNone(concepts)
+
+    def test_get_concepts_returns_empty_queryset_when_filters_return_none(self):
+        source = OrganizationSourceFactory()
+        ConceptFactory(parent=source)
+
+        reference = CollectionReference(
+            system=source.uri, created_by=source.created_by,
+            filter=[{'property': 'concept_class', 'value': 'Diagnosis', 'op': '='}]
+        )
+
+        with patch.object(CollectionReference, '_apply_filters', return_value=None):
+            concepts, mappings = reference.get_concepts()
+
+        self.assertEqual(concepts.count(), 0)
+        self.assertEqual(mappings.count(), 0)
+
+    def test_get_mappings_applies_es_filter(self):
+        source = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source)
+        concept2 = ConceptFactory(parent=source)
+        mapping = MappingFactory(
+            from_concept=concept1, to_concept=concept2, parent=source, map_type='SAME-AS')
+        other_mapping = MappingFactory(
+            from_concept=concept1, to_concept=concept2, parent=source, map_type='NARROWER-THAN')
+        MappingDocument().update([mapping, other_mapping])
+
+        reference = CollectionReference(
+            system=source.uri, created_by=source.created_by, reference_type='mappings',
+            filter=[{'property': 'map_type', 'value': 'SAME-AS', 'op': '='}]
+        )
+        mappings = reference.get_mappings()
+
+        self.assertEqual(list(mappings.values_list('id', flat=True)), [mapping.id])
+
+    def test_get_mappings_returns_empty_queryset_when_filters_return_none(self):
+        source = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source)
+        concept2 = ConceptFactory(parent=source)
+        MappingFactory(from_concept=concept1, to_concept=concept2, parent=source)
+
+        reference = CollectionReference(
+            system=source.uri, created_by=source.created_by, reference_type='mappings',
+            filter=[{'property': 'map_type', 'value': 'SAME-AS', 'op': '='}]
+        )
+
+        with patch.object(CollectionReference, '_apply_filters', return_value=None):
+            mappings = reference.get_mappings()
+
+        self.assertEqual(mappings.count(), 0)
+
+    def test_apply_transform_to_versioned_for_pinned_system(self):
+        source = OrganizationSourceFactory()
+        source_v1 = OrganizationSourceFactory(
+            organization=source.organization, mnemonic=source.mnemonic, version='v1', released=True)
+        concept = ConceptFactory(parent=source)
+        concept_latest = concept.get_latest_version()
+        concept_latest.sources.add(source_v1)
+
+        reference = CollectionReference(
+            system=f'{source.uri}|v1', created_by=source.created_by, transform='extensional'
+        )
+        concepts, _mappings = reference.get_concepts()
+
+        self.assertEqual(reference.version, 'HEAD')
+        self.assertEqual(concepts.count(), 1)
+        self.assertEqual(concepts.first().id, concept.versioned_object_id)
+
+    def test_apply_cascade_skips_already_traversed_concept_uri(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source)
+        Concept.create_new_version_for(concept.clone(), {}, concept.created_by)
+        concept_v1 = concept.get_latest_version()
+
+        reference = CollectionReference(
+            system=source.uri, created_by=source.created_by, cascade={'method': 'sourcemappings'})
+        concept_queryset = Concept.objects.filter(id__in=[concept.id, concept_v1.id])
+
+        concepts, _mappings = reference._apply_cascade(  # pylint: disable=protected-access
+            concept_queryset, Mapping.objects.none(), reference.resolve_system_version, []
+        )
+
+        self.assertTrue(concepts.filter(id=concept.id).exists())
+        self.assertTrue(concepts.filter(id=concept_v1.id).exists())
+
+    def test_get_repo_and_resource_version_static_transform_head(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source)
+        reference = CollectionReference(system=source.uri, created_by=source.created_by, transform='resourceVersions')
+
+        repo_version, resource_version = (
+            reference._CollectionReference__get_repo_and_resource_version(  # pylint: disable=protected-access
+                concept, True, False
+            )
+        )
+
+        self.assertEqual(repo_version, 'HEAD')
+        self.assertEqual(resource_version, concept.version)
+
+    def test_generate_references_extensional_transform_with_non_head_repo_version(self):
+        source = OrganizationSourceFactory()
+        # Not released, so an unpinned system reference still resolves to HEAD (avoids the
+        # should_transform_to_versioned() mutation of self.version inside get_concepts()).
+        source_v1 = OrganizationSourceFactory(
+            organization=source.organization, mnemonic=source.mnemonic, version='v1')
+        concept = ConceptFactory(parent=source)
+        concept.sources.add(source_v1)
+
+        reference = CollectionReference(
+            system=source.uri, code=concept.mnemonic, created_by=source.created_by,
+            cascade={'method': 'sourcetoconcepts'}, transform='extensional'
+        )
+
+        references = reference.generate_references()
+
+        concept_refs = [ref for ref in references if ref.reference_type == 'concepts']
+        self.assertEqual(len(concept_refs), 1)
+        self.assertEqual(concept_refs[0].version, 'v1')
+        self.assertIsNone(concept_refs[0].resource_version)
+
+    def test_get_concept_cascade_params_async_removes_max_results(self):
+        reference = CollectionReference(cascade={'method': 'sourcemappings', 'max_results': 100})
+        reference._async = True  # pylint: disable=protected-access
+
+        params = reference.get_concept_cascade_params()
+
+        self.assertIsNone(params['max_results'])
+
+    def test_has_param_in_filter(self):
+        reference = CollectionReference(filter=[{'property': 'excludeWildcard', 'value': 'false', 'op': '='}])
+        self.assertTrue(reference.has_param_in_filter('excludewildcard', get_falsy_values()))
+        self.assertFalse(reference.has_param_in_filter('excludefuzzy', get_falsy_values()))
+
+    def test_apply_search_wildcard_and_fuzzy(self):
+        reference = CollectionReference(
+            filter=[
+                {'property': 'excludeWildcard', 'value': 'false', 'op': '='},
+                {'property': 'excludeFuzzy', 'value': 'false', 'op': '='},
+                {'property': 'searchMapCodes', 'value': 'false', 'op': '='},
+            ]
+        )
+        search = ConceptDocument.search()
+
+        result = reference._apply_search(search, 'diabetes', ConceptDocument)  # pylint: disable=protected-access
+
+        self.assertIsNotNone(result)
+
+    def test_get_concepts_valueset_only_no_system(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.concepts.add(concept.get_latest_version())
+
+        reference = CollectionReference(valueset=[collection.uri], created_by=collection.created_by)
+        concepts, mappings = reference.get_concepts()
+
+        self.assertEqual(list(concepts.values_list('id', flat=True)), [concept.get_latest_version().id])
+        self.assertEqual(mappings.count(), 0)
+
+    def test_resolve_valueset_versions_with_unresolved_resolves_explicit_and_evaluated(self):
+        collection = OrganizationCollectionFactory()
+        valueset_collection = OrganizationCollectionFactory()
+        valueset_collection_v1 = OrganizationCollectionFactory(
+            organization=valueset_collection.organization, mnemonic=valueset_collection.mnemonic, version='v1')
+
+        reference = CollectionReference(
+            collection=collection,
+            valueset=[valueset_collection.uri, valueset_collection_v1.uri, None]
+        )
+
+        explicit, evaluated, unresolved = reference.resolve_valueset_versions_with_unresolved
+
+        self.assertEqual(unresolved, [])
+        self.assertEqual([version.id for version in evaluated], [valueset_collection.id])
+        self.assertEqual([version.id for version in explicit], [valueset_collection_v1.id])
+
+    def test_clean_builds_expression_when_none(self):
+        reference = CollectionReference(expression=None, reference_type='concepts')
+        reference.clean()
+        self.assertEqual(reference.expression, '/concepts/')
+
+    def test_filter_to_querystring_invalid_and_empty(self):
+        self.assertIsNone(CollectionReference(filter='not-a-list').filter_to_querystring())
+        self.assertIsNone(CollectionReference(filter=[]).filter_to_querystring())
+
+    def test_get_allowed_filter_properties(self):
+        concept_props = CollectionReference(reference_type='concepts').get_allowed_filter_properties()
+        self.assertIn('concept_class', concept_props)
+        self.assertIn('q', concept_props)
+
+        mapping_props = CollectionReference(reference_type='mappings').get_allowed_filter_properties()
+        self.assertIn('map_type', mapping_props)
+        self.assertIn('q', mapping_props)
+
+    def test_get_allowed_filter_properties_but_need_case_switch(self):
+        props = list(
+            CollectionReference(reference_type='concepts').get_allowed_filter_properties_but_need_case_switch())
+        self.assertIn('conceptClass', props)
+        self.assertIn('excludeWildcard', props)
+
+    def test_get_related_uris(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source)
+        reference = CollectionReference(system=source.uri, created_by=source.created_by, code=concept.mnemonic)
+
+        uris = reference.get_related_uris()
+
+        self.assertEqual(uris, [concept.uri])
+
+    def test_get_resolved_repo_versions_serialized_uses_valueset_cache(self):
+        collection = OrganizationCollectionFactory()
+        valueset_collection = OrganizationCollectionFactory()
+        first_reference = CollectionReference(
+            expression=f'{valueset_collection.uri}concepts/foo/', collection=collection,
+            valueset=[valueset_collection.uri]
+        )
+        second_reference = CollectionReference(
+            expression=f'{valueset_collection.uri}concepts/bar/', collection=collection,
+            valueset=[valueset_collection.uri]
+        )
+        valueset_version_cache = {}
+
+        with patch.object(
+                Collection, 'resolve_reference_expression', wraps=Collection.resolve_reference_expression) as mock:
+            first_reference.get_resolved_repo_versions_serialized(valueset_version_cache=valueset_version_cache)
+            second_reference.get_resolved_repo_versions_serialized(valueset_version_cache=valueset_version_cache)
+
+        self.assertEqual(mock.call_count, 1)
+
+    def test_apply_filters_returns_queryset_unchanged_when_no_filter(self):
+        reference = CollectionReference(filter=None)
+        queryset = Concept.objects.none()
+
+        result = reference._apply_filters(queryset, Concept)  # pylint: disable=protected-access
+
+        self.assertIs(result, queryset)
+
 
 class CollectionUtilsTest(OCLTestCase):
     def test_is_mapping(self):
@@ -1533,7 +1975,6 @@ class ExpansionTest(OCLTestCase):
         self.assertNotIn(source2_v1.url, diff)
 
     def test_batch_index(self):
-        from django.test import override_settings
         collection = OrganizationCollectionFactory(version='v1')
         expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
         concept1 = ConceptFactory()
@@ -1580,6 +2021,230 @@ class ExpansionTest(OCLTestCase):
         with patch.object(ConceptDocument, '_bulk') as bulk_mock:
             expansion.batch_index(Concept.objects.none(), ConceptDocument)
             bulk_mock.assert_not_called()
+
+    def test_parent(self):
+        collection = Collection(mnemonic='coll')
+        self.assertEqual(Expansion(collection_version=collection).parent, collection)
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.collections.models.index_expansion_concepts')
+    def test_index_concepts_not_test_mode(self, index_expansion_concepts_mock):
+        index_expansion_concepts_mock.__name__ = 'index_expansion_concepts'
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        concept = ConceptFactory()
+        expansion.concepts.add(concept)
+
+        expansion.index_concepts()
+
+        index_expansion_concepts_mock.apply_async.assert_called_once_with(
+            (expansion.id, 1, None), task_id=ANY, queue='indexing', persist_args=True)
+        self.assertTrue(Task.objects.filter(name='index_expansion_concepts').exists())
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.collections.models.index_expansion_concepts')
+    def test_index_concepts_not_test_mode_already_queued_deletes_task(self, index_expansion_concepts_mock):
+        index_expansion_concepts_mock.__name__ = 'index_expansion_concepts'
+        index_expansion_concepts_mock.apply_async.side_effect = AlreadyQueued(60)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        concept = ConceptFactory()
+        expansion.concepts.add(concept)
+
+        task_count_before = Task.objects.count()
+        expansion.index_concepts()
+
+        self.assertEqual(Task.objects.count(), task_count_before)
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.collections.models.index_expansion_mappings')
+    def test_index_mappings_not_test_mode(self, index_expansion_mappings_mock):
+        index_expansion_mappings_mock.__name__ = 'index_expansion_mappings'
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        concept1 = ConceptFactory()
+        concept2 = ConceptFactory(parent=concept1.parent)
+        mapping = MappingFactory(from_concept=concept1, to_concept=concept2, parent=concept1.parent)
+        expansion.mappings.add(mapping)
+
+        expansion.index_mappings()
+
+        index_expansion_mappings_mock.apply_async.assert_called_once_with(
+            (expansion.id, 1, None), task_id=ANY, queue='indexing', persist_args=True)
+        self.assertTrue(Task.objects.filter(name='index_expansion_mappings').exists())
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.collections.models.index_expansion_mappings')
+    def test_index_mappings_not_test_mode_already_queued_deletes_task(self, index_expansion_mappings_mock):
+        index_expansion_mappings_mock.__name__ = 'index_expansion_mappings'
+        index_expansion_mappings_mock.apply_async.side_effect = AlreadyQueued(60)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        concept1 = ConceptFactory()
+        concept2 = ConceptFactory(parent=concept1.parent)
+        mapping = MappingFactory(from_concept=concept1, to_concept=concept2, parent=concept1.parent)
+        expansion.mappings.add(mapping)
+
+        task_count_before = Task.objects.count()
+        expansion.index_mappings()
+
+        self.assertEqual(Task.objects.count(), task_count_before)
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
+    @patch('core.collections.models.batch_index_resources')
+    def test_delete_references_not_test_mode_queues_readd_task(self, batch_index_mock, readd_task_mock):
+        batch_index_mock.apply_async = Mock()
+        collection = OrganizationCollectionFactory()
+        concept1 = ConceptFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        expansion.concepts.set([concept1])
+        reference = CollectionReference(expression=concept1.uri, collection=collection)
+        reference.save()
+        reference.concepts.set([concept1])
+
+        expansion.delete_references(reference)
+
+        readd_task_mock.apply_async.assert_called_once_with(
+            (expansion.id, [reference.id]), queue='default', permanent=False)
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.collections.models.batch_index_resources')
+    def test_delete_expressions_not_test_mode_queues_batch_index(self, batch_index_mock):
+        collection = OrganizationCollectionFactory()
+        concept = ConceptFactory()
+        mapping = MappingFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        expansion.concepts.set([concept])
+        expansion.mappings.set([mapping])
+
+        expansion.delete_expressions([concept.url, mapping.url])
+
+        self.assertEqual(batch_index_mock.apply_async.call_count, 2)
+        batch_index_mock.apply_async.assert_any_call(
+            ('concept', {'uri__in': [concept.url]}), queue='indexing', permanent=False)
+        batch_index_mock.apply_async.assert_any_call(
+            ('mapping', {'uri__in': [mapping.url]}), queue='indexing', permanent=False)
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.collections.models.seed_children_to_expansion')
+    def test_persist_not_test_mode_queues_seed_children_task(self, seed_children_mock):
+        seed_children_mock.__name__ = 'seed_children_to_expansion'
+        collection = OrganizationCollectionFactory()
+
+        expansion = Expansion.persist(index=False, collection_version=collection)
+
+        seed_children_mock.apply_async.assert_called_once_with(
+            (expansion.id, False), queue='indexing', task_id=ANY, persist_args=True)
+
+    def test_get_resolved_repo_version_diff_skips_duplicate_url(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        source_head = OrganizationSourceFactory()
+        source_v1 = OrganizationSourceFactory(
+            mnemonic=source_head.mnemonic, organization=source_head.organization, version='v1', released=True)
+        source_v2 = OrganizationSourceFactory(
+            mnemonic=source_head.mnemonic, organization=source_head.organization, version='v2', released=True)
+        expansion.explicit_source_versions.add(source_v1)
+        expansion.evaluated_source_versions.add(source_v1)
+
+        diff = expansion.get_resolved_repo_version_diff_with_latest_updates()
+
+        self.assertEqual(diff, {source_v1.url: source_v2.url})
+
+    def test_filter_queryset_not_implemented(self):
+        with self.assertRaises(NotImplementedError):
+            ExpansionSystemParameter.filter_queryset(
+                Concept.objects.none(), Source.objects.none(), Collection.objects.none())
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.collections.models.batch_index_resources')
+    def test_add_references_excludes_via_queryset_with_include_system_versions(self, batch_index_mock):
+        source = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source)
+        concept2 = ConceptFactory(parent=source)
+        mapping = MappingFactory(from_concept=concept1, to_concept=concept2, parent=source)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        expansion.parameters = {'system-version': source.uri}
+        expansion.save()
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.concepts.add(concept1.get_latest_version())
+        expansion.mappings.add(mapping)
+
+        exclude_concept_ref = CollectionReference(
+            expression=concept1.uri, collection=collection, system=source.uri,
+            code=concept1.mnemonic, include=False
+        )
+        exclude_concept_ref.evaluate()
+        exclude_concept_ref.save()
+        exclude_mapping_ref = CollectionReference(
+            expression=mapping.uri, collection=collection, system=source.uri,
+            code=mapping.mnemonic, reference_type='mappings', include=False
+        )
+        exclude_mapping_ref.evaluate()
+        exclude_mapping_ref.save()
+
+        expansion.add_references(
+            collection.references.all(), index=True, is_adding_all=False, force_reevaluate=True
+        )
+
+        self.assertTrue(batch_index_mock.apply_async.called)
+        self.assertEqual(expansion.concepts.count(), 0)
+        self.assertEqual(expansion.mappings.count(), 0)
+
+    def test_add_references_excludes_in_test_mode(self):
+        source = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source)
+        concept2 = ConceptFactory(parent=source)
+        mapping = MappingFactory(from_concept=concept1, to_concept=concept2, parent=source)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.concepts.add(concept1.get_latest_version())
+        expansion.mappings.add(mapping)
+
+        exclude_concept_ref = CollectionReference(
+            expression=concept1.uri, collection=collection, system=source.uri,
+            code=concept1.mnemonic, include=False
+        )
+        exclude_concept_ref.evaluate()
+        exclude_concept_ref.save()
+        exclude_mapping_ref = CollectionReference(
+            expression=mapping.uri, collection=collection, system=source.uri,
+            code=mapping.mnemonic, reference_type='mappings', include=False
+        )
+        exclude_mapping_ref.evaluate()
+        exclude_mapping_ref.save()
+
+        expansion.add_references(
+            collection.references.all(), index=True, is_adding_all=False, force_reevaluate=True
+        )
+
+        self.assertEqual(expansion.concepts.count(), 0)
+        self.assertEqual(expansion.mappings.count(), 0)
+
+    def test_add_references_reference_without_system_resolves_none_system_version(self):
+        collection = OrganizationCollectionFactory()
+        valueset_collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+
+        reference = CollectionReference(
+            expression=valueset_collection.uri, collection=collection, valueset=[valueset_collection.uri]
+        )
+        reference.evaluate()
+        reference.save()
+
+        expansion.add_references(
+            collection.references.all(), index=False, is_adding_all=True, force_reevaluate=True
+        )
+
+        self.assertEqual(expansion.concepts.count(), 0)
+        self.assertEqual(expansion.mappings.count(), 0)
 
 
 class ExpansionParametersTest(OCLTestCase):
