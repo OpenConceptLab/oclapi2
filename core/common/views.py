@@ -316,6 +316,24 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             match_word_fields_map,
         ), fields
 
+    def get_declared_property_types(self):
+        return get(self, 'parent_resource.property_types') or {}
+
+    @staticmethod
+    def get_boolean_property_criterion(property_code, *values):
+        """
+        A boolean-declared property reaches Elasticsearch as boolean, long or text, depending on
+        what the concepts actually store in extras -- `false` may be indexed as `false` or as `0`.
+        Lenient match clauses let the literals that do not fit the field's type be skipped instead
+        of failing the whole query with a 400. See OpenConceptLab/ocl_issues#2692.
+        """
+        field = f"properties.{property_code}"
+        return Q(
+            'bool',
+            should=[Q('match', **{field: {'query': value, 'lenient': True}}) for value in values],
+            minimum_should_match=1
+        )
+
     def get_faceted_criterion(self, split=False, params=None, **kwargs):
         filters = self.get_faceted_filters(
             split=split,
@@ -342,7 +360,15 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 if not val:
                     new_attr = "properties." + property_code
                     return ~Q("exists", field=new_attr)
-                return Q('term', **{f"properties.{property_code}.keyword": val.strip('\"').strip('\'')})
+
+                clean_val = val.strip('\"').strip('\'')
+                if self.get_declared_property_types().get(property_code) == 'boolean':
+                    if clean_val in get_truthy_values():
+                        return self.get_boolean_property_criterion(property_code, 'true', '1')
+                    if clean_val in get_falsy_values():
+                        return self.get_boolean_property_criterion(property_code, 'false', '0')
+
+                return Q('term', **{f"properties.{property_code}.keyword": clean_val})
 
             return Q('term', **{attr: val.strip('\"').strip('\'')})
 

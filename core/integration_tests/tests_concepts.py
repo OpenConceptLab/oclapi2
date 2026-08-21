@@ -3053,6 +3053,117 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual([x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classA'], [])
 
 
+class ConceptPropertyFilterViewTest(OCLAPITestCase):
+    """
+    Property filtering must follow the type declared on the source. A property declared boolean
+    reaches Elasticsearch as `boolean` when extras hold `false` and as `long` when they hold `0`,
+    and neither has a `.keyword` sub-field -- see OpenConceptLab/ocl_issues#2692.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.patch_concept_es_mapping_for_ci()
+        self.source = OrganizationSourceFactory(mnemonic='PropSource')
+        self.source.properties = [
+            {'code': 'pt_bool', 'type': 'boolean'},
+            {'code': 'pt_intbool', 'type': 'boolean'},
+            {'code': 'pt_str', 'type': 'string'},
+        ]
+        self.source.filters = [
+            {'code': 'pt_bool', 'operator': '='},
+            {'code': 'pt_intbool', 'operator': '='},
+            {'code': 'pt_str', 'operator': '='},
+        ]
+        self.source.save()
+
+        self.false_concept = ConceptFactory(mnemonic='BoolFalse', parent=self.source, extras={'pt_bool': False})
+        self.true_concept = ConceptFactory(mnemonic='BoolTrue', parent=self.source, extras={'pt_bool': True})
+        self.zero_concept = ConceptFactory(mnemonic='IntZero', parent=self.source, extras={'pt_intbool': 0})
+        self.one_concept = ConceptFactory(mnemonic='IntOne', parent=self.source, extras={'pt_intbool': 1})
+        self.str_concept = ConceptFactory(mnemonic='StrFalse', parent=self.source, extras={'pt_str': 'false'})
+        self.bare_concept = ConceptFactory(mnemonic='NoProperty', parent=self.source, extras={})
+        for concept in (
+                self.false_concept, self.true_concept, self.zero_concept,
+                self.one_concept, self.str_concept, self.bare_concept
+        ):
+            self.source.concepts.add(concept.get_latest_version())
+        ConceptDocument().update(self.source.concepts_set.all())
+
+    def get_ids(self, query):
+        response = self.client.get(self.source.concepts_url + query)
+        self.assertEqual(response.status_code, 200)
+        return sorted(data['id'] for data in response.data)
+
+    def test_boolean_property_value_match(self):
+        self.assertEqual(self.get_ids('?properties__pt_bool=false'), ['BoolFalse'])
+        self.assertEqual(self.get_ids('?properties__pt_bool=0'), ['BoolFalse'])
+        self.assertEqual(self.get_ids('?properties__pt_bool=true'), ['BoolTrue'])
+        self.assertEqual(self.get_ids('?properties__pt_bool=1'), ['BoolTrue'])
+
+    def test_boolean_property_negation_includes_concepts_without_the_attribute(self):
+        self.assertEqual(
+            self.get_ids('?properties__pt_bool=!false'),
+            ['BoolTrue', 'IntOne', 'IntZero', 'NoProperty', 'StrFalse']
+        )
+
+    def test_boolean_property_empty_value_returns_concepts_without_the_attribute(self):
+        self.assertEqual(
+            self.get_ids('?properties__pt_bool='), ['IntOne', 'IntZero', 'NoProperty', 'StrFalse']
+        )
+
+    def test_boolean_property_unparseable_value_does_not_error(self):
+        self.assertEqual(self.get_ids('?properties__pt_bool=abc'), [])
+
+    def test_boolean_property_facet_buckets(self):
+        response = self.client.get(self.source.concepts_url + '?facetsOnly=true')
+
+        self.assertEqual(response.status_code, 200)
+        buckets = sorted(response.data['facets']['fields']['properties__pt_bool'], key=lambda bucket: bucket[0])
+        self.assertEqual([bucket[0] for bucket in buckets], ['false', 'true'])
+        self.assertTrue(all(bucket[1] >= 1 for bucket in buckets))
+
+    def test_integer_valued_boolean_property_value_match(self):
+        self.assertEqual(self.get_ids('?properties__pt_intbool=false'), ['IntZero'])
+        self.assertEqual(self.get_ids('?properties__pt_intbool=0'), ['IntZero'])
+        self.assertEqual(self.get_ids('?properties__pt_intbool=true'), ['IntOne'])
+        self.assertEqual(self.get_ids('?properties__pt_intbool=1'), ['IntOne'])
+
+    def test_integer_valued_boolean_property_negation(self):
+        self.assertEqual(
+            self.get_ids('?properties__pt_intbool=!false'),
+            ['BoolFalse', 'BoolTrue', 'IntOne', 'NoProperty', 'StrFalse']
+        )
+
+    def test_integer_valued_boolean_property_does_not_error(self):
+        """The declared type says boolean but the field is mapped long -- must degrade, not 400."""
+        response = self.client.get(self.source.concepts_url + '?properties__pt_intbool=abc')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, [])
+
+    def test_integer_valued_boolean_property_facet_buckets(self):
+        response = self.client.get(self.source.concepts_url + '?facetsOnly=true')
+
+        self.assertEqual(response.status_code, 200)
+        buckets = sorted(response.data['facets']['fields']['properties__pt_intbool'], key=lambda bucket: bucket[0])
+        self.assertEqual([bucket[0] for bucket in buckets], ['false', 'true'])
+        self.assertTrue(all(bucket[1] >= 1 for bucket in buckets))
+
+    def test_string_property_is_unchanged(self):
+        self.assertEqual(self.get_ids('?properties__pt_str=false'), ['StrFalse'])
+        self.assertEqual(
+            self.get_ids('?properties__pt_str=!false'),
+            ['BoolFalse', 'BoolTrue', 'IntOne', 'IntZero', 'NoProperty']
+        )
+
+        response = self.client.get(self.source.concepts_url + '?facetsOnly=true')
+
+        self.assertEqual(response.status_code, 200)
+        buckets = response.data['facets']['fields']['properties__pt_str']
+        self.assertEqual([bucket[0] for bucket in buckets], ['false'])
+        self.assertTrue(buckets[0][1] >= 1)
+
+
 class ConceptNameRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()

@@ -8,6 +8,21 @@ from core.common.utils import get_embeddings, is_canonical_uri
 from core.concepts.models import Concept
 
 
+class BooleanTermsFacet(TermsFacet):
+    """
+    Terms facet for a property the source declares as boolean. Such a property is mapped as
+    boolean or as long, depending on whether the concepts store `false` or `0` in extras: a
+    boolean field carries the readable form in key_as_string, which the default get_value
+    discards, and a long field only ever yields 0/1. Both are surfaced as 'false'/'true', the
+    values the filter accepts back. See OpenConceptLab/ocl_issues#2692.
+    """
+    BUCKET_KEYS = {0: 'false', 1: 'true'}
+
+    def get_value(self, bucket):
+        key = bucket['key']
+        return get(bucket, 'key_as_string') or self.BUCKET_KEYS.get(key, key)
+
+
 class ConceptFacetedSearch(CustomESFacetedSearch):
     index = 'concepts'
     doc_types = [Concept]
@@ -53,11 +68,15 @@ class ConceptFacetedSearch(CustomESFacetedSearch):
 
     @staticmethod
     def build_property_facets_from_source(parent):
-        return {
-            f"properties__{_filter['code']}": TermsFacet(field=f"properties.{_filter['code']}.keyword", size=FACET_SIZE)
-            for _filter in (get(parent, 'filters') or [])
-        }
-
+        property_types = get(parent, 'property_types') or {}
+        facets = {}
+        for _filter in (get(parent, 'filters') or []):
+            code = _filter['code']
+            if property_types.get(code) == 'boolean':
+                facets[f"properties__{code}"] = BooleanTermsFacet(field=f"properties.{code}", size=FACET_SIZE)
+            else:
+                facets[f"properties__{code}"] = TermsFacet(field=f"properties.{code}.keyword", size=FACET_SIZE)
+        return facets
 
 
 class ConceptFuzzySearch:  # pragma: no cover

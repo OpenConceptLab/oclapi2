@@ -282,6 +282,12 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         return get(self.meta, 'display.concept_summary_properties') or []
 
     @property
+    def property_types(self):
+        return {
+            prop['code']: prop.get('type') for prop in (self.properties or []) if prop.get('code')
+        }
+
+    @property
     def concept_filter_order(self):
         return get(self.meta, 'display.concept_filter_order') or []
 
