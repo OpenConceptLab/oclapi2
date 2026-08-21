@@ -1,14 +1,163 @@
 import json
 
 from django.core.files.uploadedfile import SimpleUploadedFile
-from mock import patch, ANY
+from django.db import IntegrityError
+from mock import patch, ANY, Mock
 from rest_framework.test import APIRequestFactory
 
-from core.common.tests import OCLAPITestCase
+from core.common.constants import PERSIST_NEW_ERROR_MESSAGE
+from core.common.tests import OCLAPITestCase, OCLTestCase
+from core.map_projects.models import MapProject
 from core.map_projects.views import AutomatchRunListView
 from core.map_projects.tests.factories import MapProjectFactory, AutomatchRunFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.users.tests.factories import UserProfileFactory
+
+
+class MapProjectModelTest(OCLTestCase):
+    def test_mnemonic(self):
+        self.assertEqual(MapProject(id=5).mnemonic, 5)
+
+    def test_matches_summary(self):
+        project = MapProject(matches=[
+            {'state': 'matched'}, {'state': 'matched'}, {'state': 'unmatched'}, {'no_state': 1}
+        ])
+        self.assertEqual(project.matches_summary, {'matched': 2, 'unmatched': 1})
+
+    def test_visible_columns(self):
+        project = MapProject(columns=[
+            {'label': 'no-hidden-key'},
+            {'label': 'visible', 'hidden': False},
+            {'label': 'hidden-column', 'hidden': True},
+            {'hidden': False},
+        ])
+        self.assertEqual(
+            project.visible_columns,
+            [{'label': 'no-hidden-key'}, {'label': 'visible', 'hidden': False}]
+        )
+
+    def test_summary(self):
+        project = MapProject(
+            matches=[{'state': 'matched'}, {'state': 'unmatched'}],
+            columns=[{'label': 'name', 'hidden': False}]
+        )
+        self.assertEqual(
+            project.summary,
+            {'matches': {'matched': 1, 'unmatched': 1}, 'columns': ['name']}
+        )
+
+    @patch('core.map_projects.models.get_export_service')
+    def test_file_url_with_input_file_name(self, get_export_service_mock):
+        export_service_mock = Mock()
+        export_service_mock.url_for.return_value = 'http://export.url/file.csv'
+        get_export_service_mock.return_value = export_service_mock
+
+        project = MapProjectFactory(input_file_name='file.csv')
+
+        self.assertEqual(project.file_url, 'http://export.url/file.csv')
+        export_service_mock.url_for.assert_called_once_with(project.file_path)
+
+    @patch('core.map_projects.models.get_export_service')
+    def test_update_input_file_success(self, get_export_service_mock):
+        export_service_mock = Mock()
+        export_service_mock.upload.return_value = 204
+        get_export_service_mock.return_value = export_service_mock
+
+        project = MapProjectFactory()
+        input_file = SimpleUploadedFile('new-input.csv', b'content', 'application/csv')
+
+        project.update_input_file(input_file)
+
+        self.assertEqual(project.input_file_name, 'new-input.csv')
+        project.refresh_from_db()
+        self.assertEqual(project.input_file_name, 'new-input.csv')
+
+    def test_persist_new_validation_error(self):
+        project = MapProject(name='', organization_id=None, user_id=None)
+        user = UserProfileFactory()
+
+        errors = MapProject.persist_new(project, user)
+
+        self.assertTrue(errors)
+        self.assertIsNone(project.id)
+
+    def test_persist_new_integrity_error(self):
+        org = OrganizationFactory()
+        user = UserProfileFactory()
+        project = MapProject(name='Some Project', organization=org)
+        project.full_clean = Mock()
+        project.save = Mock(side_effect=IntegrityError('duplicate'))
+
+        errors = MapProject.persist_new(project, user)
+
+        self.assertIn('__all__', errors)
+
+    def test_persist_new_no_errors_no_id_sets_non_field_error(self):
+        org = OrganizationFactory()
+        user = UserProfileFactory()
+        project = MapProject(name='Some Project', organization=org)
+        project.full_clean = Mock()
+        project.save = Mock()
+
+        errors = MapProject.persist_new(project, user)
+
+        self.assertEqual(errors, {'non_field_errors': PERSIST_NEW_ERROR_MESSAGE.format('MapProject')})
+
+    def test_persist_changes_validation_error(self):
+        project = MapProjectFactory()
+        user = UserProfileFactory()
+        project.name = ''
+
+        errors = MapProject.persist_changes(project, user)
+
+        self.assertTrue(errors)
+
+    def test_persist_changes_integrity_error(self):
+        project = MapProjectFactory()
+        user = UserProfileFactory()
+        project.full_clean = Mock()
+        project.save = Mock(side_effect=IntegrityError('duplicate'))
+
+        errors = MapProject.persist_changes(project, user)
+
+        self.assertIn('__all__', errors)
+
+    def test_format_json_invalid_json_kept_as_is(self):
+        data = {'matches': 'not-json{'}
+        MapProject.format_json(data, 'matches')
+        self.assertEqual(data['matches'], 'not-json{')
+
+    def test_clean_matches_parses_json_string(self):
+        project = MapProject(matches='["a", "b"]')
+        project.clean_matches()
+        self.assertEqual(project.matches, ['a', 'b'])
+
+    def test_clean_matches_leaves_non_json_serializable_as_is(self):
+        project = MapProject(matches=[{'state': 'matched'}])
+        project.clean_matches()
+        self.assertEqual(project.matches, [{'state': 'matched'}])
+
+    def test_clean_filters_removes_falsy_values(self):
+        project = MapProject(filters={'a': 'value', 'b': None, 'c': ''})
+        project.clean_filters()
+        self.assertEqual(project.filters, {'a': 'value'})
+
+    @patch('core.sources.models.Source.resolve_reference_expression')
+    def test_target_repo(self, resolve_reference_expression_mock):
+        repo_mock = Mock(id=1)
+        resolve_reference_expression_mock.return_value = (repo_mock, None)
+
+        project = MapProject(target_repo_url='/orgs/CIEL/sources/CIEL/')
+
+        self.assertEqual(project.target_repo, repo_mock)
+
+    def test_fields_mapped(self):
+        project = MapProject(columns=[
+            {'label': 'ID', 'hidden': False},
+            {'label': 'Property: foo', 'hidden': False},
+            {'label': 'Not Mapped', 'hidden': False},
+        ])
+        self.assertEqual(project.fields_mapped, ['ID', 'Property: foo'])
 
 
 class MapProjectAbstractViewTest(OCLAPITestCase):
