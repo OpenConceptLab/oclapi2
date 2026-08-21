@@ -2104,29 +2104,41 @@ class ConceptTest(OCLTestCase):
 
         self.assertEqual(list(result['concepts'].values_list('id', flat=True)), [concept.id])
 
-    @override_settings(TEST_MODE=False)
+    @patch('core.common.models.handle_m2m_changed')
+    @patch('core.common.models.handle_save')
+    @patch('core.common.models.update_source_active_concepts_count')
     @patch('core.concepts.models.update_mappings_concept')
-    def test_persist_new_queues_update_mappings_concept_task(self, update_mappings_concept_mock):
+    def test_persist_new_queues_update_mappings_concept_task(
+            self, update_mappings_concept_mock, update_active_concepts_count_mock, _handle_save_mock,
+            _handle_m2m_mock):
+        update_active_concepts_count_mock.__name__ = 'update_source_active_concepts_count'
         source = OrganizationSourceFactory(version=HEAD)
-        Concept.persist_new({
-            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'queued-c1', 'parent': source,
-            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
-        })
+        with patch('core.concepts.models.settings.TEST_MODE', False):
+            Concept.persist_new({
+                **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'queued-c1', 'parent': source,
+                'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
+            })
 
         update_mappings_concept_mock.apply_async.assert_called_once_with(
             (ANY,), queue='default', permanent=False)
 
-    @override_settings(TEST_MODE=False)
+    @patch('core.common.models.handle_m2m_changed')
+    @patch('core.common.models.handle_save')
+    @patch('core.common.models.update_source_active_concepts_count')
     @patch('core.concepts.models.process_hierarchy_for_new_concept')
     @patch('core.concepts.models.update_mappings_concept')
-    def test_persist_new_queues_process_hierarchy_task(self, _update_mappings_mock, process_hierarchy_mock):
+    def test_persist_new_queues_process_hierarchy_task(
+            self, _update_mappings_mock, process_hierarchy_mock, update_active_concepts_count_mock,
+            _handle_save_mock, _handle_m2m_mock):
+        update_active_concepts_count_mock.__name__ = 'update_source_active_concepts_count'
         source = OrganizationSourceFactory(version=HEAD)
         parent_concept = ConceptFactory(parent=source)
-        Concept.persist_new({
-            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'queued-c2', 'parent': source,
-            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
-            'parent_concept_urls': [parent_concept.uri],
-        })
+        with patch('core.concepts.models.settings.TEST_MODE', False):
+            Concept.persist_new({
+                **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'queued-c2', 'parent': source,
+                'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
+                'parent_concept_urls': [parent_concept.uri],
+            })
 
         process_hierarchy_mock.apply_async.assert_called_once()
 
