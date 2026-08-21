@@ -1,11 +1,14 @@
 import datetime
+import json
 import os
+import time
 import uuid
 from collections import OrderedDict
 from unittest.mock import patch, Mock, MagicMock, ANY
 
 import django
 import factory
+from celery_once import AlreadyQueued
 from colour_runner.django_runner import ColourRunnerMixin
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser, Group
@@ -13,16 +16,24 @@ from django.core.files.base import File
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.test.runner import DiscoverRunner
+from django.utils import timezone
 from mock.mock import call
+from requests import ConnectTimeout
 from requests.auth import HTTPBasicAuth
 from rest_framework.exceptions import ValidationError
 from rest_framework.test import APITestCase, APITransactionTestCase
 
 from core.collections.models import CollectionReference
+from core.collections.tests.factories import ExpansionFactory, OrganizationCollectionFactory
 from core.common.constants import HEAD
 from core.common.es import ESScript
 from core.common.models import BaseModel
-from core.common.tasks import delete_s3_objects, bulk_import_parallel_inline, resources_report, calculate_checksums
+from core.common.tasks import delete_s3_objects, bulk_import_parallel_inline, resources_report, calculate_checksums, \
+    delete_organization, delete_source, delete_collection, add_references, handle_m2m_changed, handle_pre_delete, \
+    populate_indexes, rebuild_indexes, bulk_import_subtask_empty, import_finisher, \
+    process_hierarchy_for_new_parent_concept_version, batch_index_resources, index_expansion_concepts, \
+    index_expansion_mappings, vacuum_and_analyze_db, resolve_url_registry_entries, expire_old_celery_tasks, \
+    generate_key, source_version_compare, bulk_import_new, bulk_import_subtask, bulk_import_queue
 from core.common.throttling import (
     CoreDayThrottle,
     CoreMinuteThrottle,
@@ -44,7 +55,8 @@ from core.common.utils import (
     set_current_user, get_current_user, set_request_url, get_request_url, nested_dict_values, chunks, api_get,
     split_list_by_condition, is_zip_file, get_date_range_label, get_prev_month, from_string_to_date, get_end_of_month,
     get_start_of_month, es_id_in, web_url, get_queue_task_names, get_resource_class_from_resource_uri, encode_string,
-    to_parent_kwargs_from_uri)
+    to_parent_kwargs_from_uri, reverse_resource, reverse_resource_version, write_export_file, queue_bulk_import,
+    get_bulk_import_celery_once_lock_key, generic_sort, get_embeddings)
 from core.concepts.models import Concept
 from core.orgs.models import Organization
 from core.sources.models import Source
@@ -1131,6 +1143,96 @@ class UtilsTest(OCLTestCase):
         self.assertEqual(to_parent_kwargs_from_uri(''), {})
         self.assertEqual(to_parent_kwargs_from_uri(None), {})
 
+    def test_to_parent_kwargs_from_uri_too_short(self):
+        self.assertEqual(to_parent_kwargs_from_uri('/orgs/CIEL/'), {})
+
+    def test_reverse_resource_non_source_collection_uses_head_property(self):
+        concept = ConceptFactory()
+        concept_v1 = ConceptFactory(
+            parent=concept.parent, mnemonic=concept.mnemonic, version='v1', versioned_object=concept
+        )
+        url = reverse_resource(concept_v1, concept_v1.view_name)
+        self.assertIsNotNone(url)
+
+    def test_reverse_resource_version_non_source_collection_uses_head_property(self):
+        concept = ConceptFactory()
+        concept_v1 = ConceptFactory(
+            parent=concept.parent, mnemonic=concept.mnemonic, version='v1', versioned_object=concept
+        )
+        url = reverse_resource_version(concept_v1, concept_v1.view_name)
+        self.assertIsNotNone(url)
+
+    @patch('core.common.utils.get_export_service')
+    def test_write_export_file_head_version(self, get_export_service_mock):
+        export_service_mock = Mock()
+        export_service_mock.upload_file.return_value = 200
+        export_service_mock.url_for.return_value = 'http://export.url/export.zip'
+        export_service_mock.delete_objects = Mock()
+        get_export_service_mock.return_value = export_service_mock
+
+        source = OrganizationSourceFactory()
+        ConceptFactory(parent=source)
+
+        with override_settings(TEST_MODE=False):
+            write_export_file(
+                source, 'source', 'core.sources.serializers.SourceVersionExportSerializer', Mock(), time.time()
+            )
+
+        export_service_mock.upload_file.assert_called_once()
+
+    @patch('core.common.utils.settings')
+    @patch('core.common.utils.requests.get')
+    def test_es_get_connect_timeout_on_all_hosts_returns_none(self, http_get_mock, settings_mock):
+        settings_mock.ES_USER = None
+        settings_mock.ES_PASSWORD = None
+        settings_mock.ES_HOSTS = 'es1:9200,es2:9200'
+        settings_mock.ES_SCHEME = 'http'
+        http_get_mock.side_effect = ConnectTimeout()
+
+        self.assertIsNone(es_get('some-url', timeout=1))
+        self.assertEqual(http_get_mock.call_count, 2)
+
+    @patch('core.common.tasks.bulk_import.apply_async')
+    def test_queue_bulk_import_not_inline(self, apply_async_mock):
+        task = queue_bulk_import('{}', 'default', 'ocladmin', False)
+        self.assertIsNotNone(task)
+        apply_async_mock.assert_called_once()
+
+    @patch('core.common.tasks.bulk_import.apply_async')
+    def test_queue_bulk_import_already_queued_deletes_task_and_raises(self, apply_async_mock):
+        apply_async_mock.side_effect = AlreadyQueued(10)
+        with self.assertRaises(AlreadyQueued):
+            queue_bulk_import('{}', 'default', 'ocladmin', False)
+
+    def test_get_bulk_import_celery_once_lock_key_no_args(self):
+        async_result = Mock(args=None)
+        self.assertIsNone(get_bulk_import_celery_once_lock_key(async_result))
+
+    def test_generic_sort(self):
+        self.assertEqual(generic_sort([3, 1, 2]), [1, 2, 3])
+        self.assertEqual(generic_sort(['b', 'a', {'x': 1}]), ['a', 'b', {'x': 1}])
+
+    @patch('core.common.utils.settings')
+    def test_get_embeddings_ci_env_returns_none(self, settings_mock):
+        settings_mock.ENV = 'ci'
+        self.assertIsNone(get_embeddings('some text'))
+
+    @patch('sentence_transformers.SentenceTransformer')
+    @patch('core.common.utils.settings')
+    def test_get_embeddings_loads_model_when_not_ci(self, settings_mock, sentence_transformer_mock):
+        settings_mock.ENV = 'production'
+        settings_mock.LM = None
+        settings_mock.LM_MODEL_NAME = 'some-model'
+        model_instance_mock = Mock()
+        model_instance_mock.encode.return_value = [0.1, 0.2]
+        sentence_transformer_mock.return_value = model_instance_mock
+
+        result = get_embeddings('some text')
+
+        sentence_transformer_mock.assert_called_once_with('some-model')
+        model_instance_mock.encode.assert_called_once_with('some text')
+        self.assertEqual(result, [0.1, 0.2])
+
 
 class BaseModelTest(OCLTestCase):
     def test_model_name(self):
@@ -1484,6 +1586,216 @@ class TaskTest(OCLTestCase):
         self.assertEqual(concept_prev_latest.checksums, {'smart': ANY, 'standard': ANY})
         self.assertEqual(concept_latest.checksums, {'smart': ANY, 'standard': ANY})
         self.assertEqual(concept.checksums, {'smart': ANY, 'standard': ANY})
+
+    def test_delete_organization_not_found(self):
+        self.assertIsNone(delete_organization(999999999))
+
+    @patch('core.orgs.models.Organization.delete')
+    def test_delete_organization_exception(self, delete_mock):
+        from core.orgs.tests.factories import OrganizationFactory
+        delete_mock.side_effect = Exception('boom')
+        org = OrganizationFactory()
+
+        self.assertIsNone(delete_organization(org.id))
+
+    def test_delete_source_not_found(self):
+        self.assertIsNone(delete_source(999999999))
+
+    @patch('core.sources.models.Source.delete')
+    def test_delete_source_exception(self, delete_mock):
+        delete_mock.side_effect = Exception('boom')
+        source = OrganizationSourceFactory()
+
+        self.assertFalse(delete_source(source.id))
+
+    def test_delete_collection_not_found(self):
+        self.assertIsNone(delete_collection(999999999))
+
+    @patch('core.collections.models.Collection.delete')
+    def test_delete_collection_exception(self, delete_mock):
+        delete_mock.side_effect = Exception('boom')
+        collection = OrganizationCollectionFactory()
+
+        self.assertFalse(delete_collection(collection.id))
+
+    def test_add_references_collection_not_found(self):
+        user = UserProfileFactory()
+
+        added_references, errors = add_references(  # pylint: disable=no-value-for-parameter
+            user.id, {'expressions': []}, 999999999, False, False
+        )
+
+        self.assertEqual(added_references, [])
+        self.assertEqual(errors, {'error': 'Collection not found'})
+
+    def test_handle_pre_delete_task(self):
+        concept = ConceptFactory()
+        handle_pre_delete('concepts', 'concept', concept.id)
+
+    def test_handle_m2m_changed_pre_remove(self):
+        concept = ConceptFactory()
+        handle_m2m_changed('concepts', 'concept', concept.id, 'pre_remove')
+
+    def test_handle_m2m_changed_unknown_action_noop(self):
+        concept = ConceptFactory()
+        handle_m2m_changed('concepts', 'concept', concept.id, 'unknown_action')
+
+    @patch('core.common.tasks.call_command')
+    def test_populate_indexes_with_app_names(self, call_command_mock):
+        populate_indexes(['concepts'])
+        call_command_mock.assert_called_once_with(
+            'search_index', '--populate', '-f', '--models', 'concepts', '--parallel')
+
+    @patch('core.common.tasks.call_command')
+    def test_populate_indexes_without_app_names(self, call_command_mock):
+        populate_indexes(None)
+        call_command_mock.assert_called_once_with('search_index', '--populate', '-f', '--parallel')
+
+    @patch('core.common.tasks.call_command')
+    def test_rebuild_indexes_with_app_names(self, call_command_mock):
+        rebuild_indexes(['concepts'])
+        call_command_mock.assert_called_once_with(
+            'search_index', '--rebuild', '-f', '--models', 'concepts', '--parallel')
+
+    @patch('core.importers.importer.Importer.run')
+    def test_bulk_import_new(self, run_mock):
+        run_mock.return_value = 'import-result'
+
+        result = bulk_import_new(  # pylint: disable=no-value-for-parameter
+            'some/path', 'ocladmin', 'Organization', 'org1', 'default'
+        )
+
+        self.assertEqual(result, 'import-result')
+        run_mock.assert_called_once()
+
+    @patch('core.importers.importer.ImporterSubtask.run')
+    def test_bulk_import_subtask(self, run_mock):
+        run_mock.return_value = 'import-result'
+
+        result = bulk_import_subtask('some/path', 'ocladmin', 'Organization', 'org1', 'concepts', ['f1.json'])
+
+        self.assertEqual(result, 'import-result')
+        run_mock.assert_called_once()
+
+    @patch('core.common.tasks.chord')
+    def test_bulk_import_queue(self, chord_mock):
+        chord_instance_mock = Mock()
+        chord_mock.return_value = chord_instance_mock
+        task_queue = [['task1'], ['task2']]
+
+        bulk_import_queue(task_queue)
+
+        chord_mock.assert_called_once_with(['task1'], ANY)
+        chord_instance_mock.apply_async.assert_called_once_with(queue='concurrent')
+
+    def test_bulk_import_subtask_empty(self):
+        self.assertEqual(bulk_import_subtask_empty(), [])
+
+    def test_import_finisher_no_task(self):
+        result = import_finisher('does-not-exist')
+        self.assertIn('time_finished', result)
+
+    def test_import_finisher_task_without_result(self):
+        from core.tasks.models import Task
+        task = Task.objects.create(id=str(uuid.uuid4()), name='some-task')
+
+        result = import_finisher(task.id)
+
+        self.assertIn('time_finished', result)
+
+    @patch('core.importers.importer.ImportTask.import_task_from_json')
+    def test_import_finisher_with_valid_import_task(self, import_task_from_json_mock):
+        from core.tasks.models import Task
+        import_task_mock = Mock()
+        import_task_mock.model_dump.return_value = {'final_summary': 'done'}
+        import_task_from_json_mock.return_value = import_task_mock
+        task = Task.objects.create(id=str(uuid.uuid4()), name='some-task', result=json.dumps({'foo': 'bar'}))
+
+        result = import_finisher(task.id)
+
+        self.assertEqual(result, {'final_summary': 'done'})
+
+    @patch('core.importers.importer.ImportTask.import_task_from_json')
+    def test_import_finisher_import_task_none_falls_back(self, import_task_from_json_mock):
+        from core.tasks.models import Task
+        import_task_from_json_mock.return_value = None
+        task = Task.objects.create(id=str(uuid.uuid4()), name='some-task', result=json.dumps({'foo': 'bar'}))
+
+        result = import_finisher(task.id)
+
+        self.assertIsNotNone(result)
+
+    def test_process_hierarchy_for_new_parent_concept_version(self):
+        parent_concept = ConceptFactory()
+        parent_v2 = ConceptFactory(
+            parent=parent_concept.parent, mnemonic=parent_concept.mnemonic, version='v2',
+            versioned_object=parent_concept
+        )
+        child_concept = ConceptFactory()
+        child_concept.parent_concepts.add(parent_concept)
+
+        process_hierarchy_for_new_parent_concept_version(parent_concept.id, parent_v2.id)
+
+        self.assertIn(parent_v2.id, list(child_concept.parent_concepts.values_list('id', flat=True)))
+
+    def test_batch_index_resources_with_string_filters_and_update_indexed(self):
+        concept = ConceptFactory()
+
+        result = batch_index_resources('concepts', json.dumps({'id': concept.id}), update_indexed=True)
+
+        self.assertEqual(result, 1)
+        concept.refresh_from_db()
+
+    def test_index_expansion_concepts_without_concept_ids(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+
+        index_expansion_concepts(expansion.id)
+
+    def test_index_expansion_mappings_without_mapping_ids(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+
+        index_expansion_mappings(expansion.id)
+
+    def test_vacuum_and_analyze_db(self):
+        vacuum_and_analyze_db()
+
+    def test_resolve_url_registry_entries(self):
+        source = OrganizationSourceFactory()
+        resolve_url_registry_entries(source.id, 'sources')
+
+    def test_resolve_url_registry_entries_unknown_repo_type(self):
+        resolve_url_registry_entries(999999999, 'unknown-type')
+
+    def test_expire_old_celery_tasks(self):
+        from core.tasks.models import Task
+        old_task = Task.objects.create(id=str(uuid.uuid4()), name='old-task')
+        Task.objects.filter(id=old_task.id).update(
+            updated_at=timezone.now() - datetime.timedelta(days=10))
+
+        expire_old_celery_tasks()
+
+        self.assertFalse(Task.objects.filter(id=old_task.id).exists())
+
+    def test_generate_key(self):
+        self.assertEqual(generate_key('a', 'b', x=1, y=2), "'a'|'b'|x=1|y=2")
+
+    @patch('core.common.tasks.cache')
+    def test_source_version_compare_cache_miss_then_set(self, cache_mock):
+        cache_mock.get.return_value = None
+        source1 = OrganizationSourceFactory()
+        source2 = OrganizationSourceFactory(
+            organization=source1.organization, mnemonic=source1.mnemonic, version='v1')
+
+        with override_settings(TEST_MODE=False):
+            result = source_version_compare(  # pylint: disable=no-value-for-parameter
+                source1.uri, source2.uri, False, 0
+            )
+
+        self.assertIsNotNone(result)
+        cache_mock.get.assert_called_once()
+        cache_mock.set.assert_called_once()
 
 
 class URIValidatorTest(OCLTestCase):
