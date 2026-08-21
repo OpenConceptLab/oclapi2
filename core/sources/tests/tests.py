@@ -1984,6 +1984,19 @@ class SourceCloneAPITest(OCLAPITestCase):
 
 
 class SourceValidationTest(OCLTestCase):
+    def test_property_types(self):
+        self.assertEqual(Source().property_types, {})
+        self.assertEqual(Source(properties=[]).property_types, {})
+        self.assertEqual(
+            Source(properties=[
+                {'code': 'is_clinical', 'type': 'boolean'},
+                {'code': 'height', 'type': 'integer'},
+                {'code': 'label'},
+                {'type': 'string'},
+            ]).property_types,
+            {'is_clinical': 'boolean', 'height': 'integer', 'label': None}
+        )
+
     def test_clean_properties_valid(self):
         source = Source(properties=[
             {'code': 'height', 'type': 'integer'},
