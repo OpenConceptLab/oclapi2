@@ -10,15 +10,14 @@ from unittest.mock import mock_open
 from zipfile import ZipFile
 
 import responses
-from ijson import JSONError
 from celery_once import AlreadyQueued
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db.models import F
-from django.test import override_settings
+from ijson import JSONError
 from mock import patch, Mock, ANY, PropertyMock, call
-from rest_framework.exceptions import ValidationError
 from ocldev.oclcsvtojsonconverter import OclStandardCsvToJsonConverter
+from rest_framework.exceptions import ValidationError
 
 from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
@@ -1614,7 +1613,9 @@ class ResourceImporterModelsTest(OCLTestCase):
         source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='PermOrgSrcVer'))
         user = UserProfileFactory()
         importer = SourceVersionImporter(
-            {'id': 'v1', 'source': source.mnemonic, 'owner_type': 'Organization', 'owner': source.organization.mnemonic},
+            {
+                'id': 'v1', 'source': source.mnemonic, 'owner_type': 'Organization',
+                'owner': source.organization.mnemonic},
             user
         )
         self.assertEqual(importer.run(), PERMISSION_DENIED)
