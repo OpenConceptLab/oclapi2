@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from django.contrib.auth.models import Group
+from django.http import Http404
 from mock import Mock, patch, ANY
 from rest_framework.authtoken.models import Token
 
@@ -459,3 +460,249 @@ class UserContentSummaryViewTest(OCLAPITestCase):
         self.assertEqual(response.data['collections_owned'], 1)
         self.assertGreaterEqual(response.data['concepts_created'], 1)
         self.assertGreaterEqual(response.data['mappings_created'], 1)
+
+
+class UserViewsAPITest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.admin = UserProfile.objects.get(username='ocladmin')
+        self.admin_token = self.admin.get_token()
+
+    def test_oidc_callback_get_throttles(self):
+        from core.users.views import OCLOIDCAuthenticationCallbackView
+        view = OCLOIDCAuthenticationCallbackView()
+        view.request = Mock(user=self.admin)
+        self.assertIsInstance(view.get_throttles(), list)
+
+    @patch('core.users.views.AuthService.is_sso_enabled')
+    def test_login_sso_enabled_400(self, is_sso_enabled_mock):
+        is_sso_enabled_mock.return_value = True
+
+        response = self.client.post('/users/login/', {'username': 'foo', 'password': 'bar'})
+
+        self.assertEqual(response.status_code, 400)
+
+    @patch('core.users.views.update_last_login')
+    def test_login_update_last_login_exception_is_swallowed(self, update_last_login_mock):
+        update_last_login_mock.side_effect = Exception('boom')
+        user = UserProfileFactory()
+        user.set_password('password')
+        user.save()
+
+        response = self.client.post('/users/login/', {'username': user.username, 'password': 'password'})
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_user_list_query_param_filters(self):
+        response = self.client.get(
+            '/users/?updatedSince=2020-01-01T00:00:00Z&updatedBy=ocladmin&lastLoginSince=2020-01-01T00:00:00Z'
+            '&lastLoginBefore=2030-01-01T00:00:00Z&dateJoinedSince=2020-01-01T00:00:00Z'
+            '&dateJoinedBefore=2030-01-01T00:00:00Z',
+            HTTP_AUTHORIZATION='Token ' + self.admin_token,
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_user_list_create_weak_password_returns_errors(self):
+        response = self.client.post(
+            '/users/', {'username': 'weakpassworduser', 'email': 'weakpassworduser@x.com', 'password': 'weak'},
+            HTTP_AUTHORIZATION='Token ' + self.admin_token,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('password', response.data)
+
+    @patch('core.users.views.AuthService.is_sso_enabled')
+    def test_signup_perform_create_sso_enabled_400(self, is_sso_enabled_mock):
+        is_sso_enabled_mock.return_value = True
+
+        response = self.client.post(
+            '/users/signup/', {'username': 'ssouser', 'email': 'ssouser@x.com', 'password': 'whatever'}
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_email_verification_get_object_not_found_returns_404(self):
+        from core.users.views import UserEmailVerificationView
+        view = UserEmailVerificationView()
+        view.get_object = Mock(return_value=None)
+
+        response = view.get(Mock(), verification_token='sometoken')
+
+        self.assertEqual(response.status_code, 404)
+
+    @patch('core.users.views.OpenIDAuthService.get_reset_password_redirect_url')
+    @patch('core.users.views.AuthService.is_sso_enabled')
+    def test_password_reset_get_sso_enabled_redirects(self, is_sso_enabled_mock, get_redirect_url_mock):
+        is_sso_enabled_mock.return_value = True
+        get_redirect_url_mock.return_value = 'http://reset-redirect.com'
+
+        response = self.client.get(
+            '/users/password/reset/?client_id=client-id&redirect_uri=http://post-reset-url'
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers['Location'], 'http://reset-redirect.com')
+
+    @patch('core.users.views.AuthService.is_sso_enabled')
+    def test_password_reset_get_sso_disabled_405(self, is_sso_enabled_mock):
+        is_sso_enabled_mock.return_value = False
+
+        response = self.client.get('/users/password/reset/')
+
+        self.assertEqual(response.status_code, 405)
+
+    @patch('core.users.views.AuthService.is_sso_enabled')
+    def test_password_reset_put_sso_enabled_400(self, is_sso_enabled_mock):
+        is_sso_enabled_mock.return_value = True
+
+        response = self.client.put(
+            '/users/password/reset/', {'token': 'sometoken', 'new_password': 'whatever'}, format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_password_reset_put_weak_password_400(self):
+        user = UserProfileFactory(verification_token='some-reset-token')
+
+        response = self.client.put(
+            '/users/password/reset/', {'token': 'some-reset-token', 'new_password': 'weak'}, format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('errors', response.data)
+        user.refresh_from_db()
+
+    @patch('core.services.auth.django.DjangoAuthService.update_password')
+    def test_password_reset_put_update_password_errors(self, update_password_mock):
+        update_password_mock.return_value = {'errors': ['some error']}
+        UserProfileFactory(verification_token='some-other-reset-token')
+
+        response = self.client.put(
+            '/users/password/reset/', {'token': 'some-other-reset-token', 'new_password': 'Newpassw0rd!'},
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_user_detail_summary_serializer(self):
+        user = UserProfileFactory(username='summaryserializeruser')
+
+        response = self.client.get(
+            '/users/summaryserializeruser/?summary=true', HTTP_AUTHORIZATION='Token ' + self.admin_token
+        )
+
+        self.assertEqual(response.status_code, 200)
+        user.refresh_from_db()
+
+    def test_user_detail_self_shortcut(self):
+        user = UserProfileFactory(username='selfshortcutuser')
+        token = user.get_token()
+
+        response = self.client.get('/user/', HTTP_AUTHORIZATION='Token ' + token)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['username'], 'selfshortcutuser')
+
+    def test_user_detail_include_verification_token_allow_any(self):
+        user = UserProfileFactory(username='verificationtokenuser')
+
+        response = self.client.get(f'/users/{user.username}/?includeVerificationToken=true')
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_user_detail_get_object_anonymous_self_raises_404(self):
+        from django.contrib.auth.models import AnonymousUser
+        from core.users.views import UserDetailView
+        view = UserDetailView()
+        view.kwargs = {'user_is_self': True}
+        view.request = Mock(user=AnonymousUser())
+
+        with self.assertRaises(Http404):
+            view.get_object()
+
+    def test_user_detail_update_other_user_permission_denied(self):
+        UserProfileFactory(username='targetuser')
+        other_user = UserProfileFactory(username='otherrequestinguser')
+        other_token = other_user.get_token()
+
+        response = self.client.put(
+            '/users/targetuser/', {'company': 'new-company'},
+            HTTP_AUTHORIZATION='Token ' + other_token, format='json'
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    @patch('core.users.models.UserProfile.delete')
+    def test_user_detail_hard_delete_exception_returns_400(self, delete_mock):
+        delete_mock.side_effect = Exception('boom')
+        user = UserProfileFactory(username='harddeleteuser')
+
+        response = self.client.delete(
+            f'/users/{user.username}/?hardDelete=true', HTTP_AUTHORIZATION='Token ' + self.admin_token
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    @patch('core.users.views.AuthService.is_sso_enabled')
+    def test_staff_toggle_sso_enabled_405(self, is_sso_enabled_mock):
+        is_sso_enabled_mock.return_value = True
+        user = UserProfileFactory(username='stafftoggleuser')
+
+        response = self.client.put(
+            f'/users/{user.username}/staff/', {}, HTTP_AUTHORIZATION='Token ' + self.admin_token, format='json'
+        )
+
+        self.assertEqual(response.status_code, 405)
+
+    def test_follower_followed_get_object_self(self):
+        from core.users.views import AbstractFollowerFollowedView
+        user = UserProfileFactory(username='followerselfuser')
+        view = AbstractFollowerFollowedView()
+        view.user_is_self = True
+        view.kwargs = {}
+        view.request = Mock(user=user, method='GET')
+
+        self.assertEqual(view.get_object(), user)
+
+    def test_follower_followed_get_object_not_found_404(self):
+        user = UserProfileFactory(username='followingviewer')
+        token = user.get_token()
+
+        response = self.client.get(
+            '/users/doesnotexistuser/following/', HTTP_AUTHORIZATION='Token ' + token
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_following_post_invalid_follow_uri_400(self):
+        follower = UserProfileFactory(username='followerinvaliduri')
+        token = follower.get_token()
+
+        response = self.client.post(
+            f'/users/{follower.username}/following/', {'follow': '/orgs/NoOrg/sources/NoSource/'},
+            HTTP_AUTHORIZATION='Token ' + token, format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_following_post_inactive_follow_404(self):
+        follower = UserProfileFactory(username='followerinactive')
+        token = follower.get_token()
+        source = OrganizationSourceFactory(is_active=False)
+
+        response = self.client.post(
+            f'/users/{follower.username}/following/', {'follow': source.uri},
+            HTTP_AUTHORIZATION='Token ' + token, format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_following_post_self_follow_400(self):
+        follower = UserProfileFactory(username='followerselffollow')
+        token = follower.get_token()
+
+        response = self.client.post(
+            f'/users/{follower.username}/following/', {'follow': follower.uri},
+            HTTP_AUTHORIZATION='Token ' + token, format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
