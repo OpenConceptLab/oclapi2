@@ -3,12 +3,14 @@ import uuid
 from unittest.mock import patch, Mock
 
 from celery.states import PENDING, STARTED, FAILURE
+from django import db
 from django.utils import timezone
 from rest_framework.test import APIClient
 
 from core.common.tasks import rerun_indexing_job
 from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.tasks.models import Task
+from core.tasks.signals import on_task_done
 from core.tasks.utils import wait_until_task_complete
 from core.users.models import UserProfile
 
@@ -294,3 +296,47 @@ class UtilsTest(unittest.TestCase):
         self.assertEqual(wait_until_task_complete('task-id', 1), 'task-result')
         self.assertEqual(async_mock.ready.call_count, 3)
         self.assertEqual(async_mock.get.call_count, 1)
+
+
+class SignalsTest(unittest.TestCase):
+    @patch('core.tasks.signals.db.connections')
+    def test_on_task_done_closes_unusable_connections(self, connections_mock):
+        conn = Mock()
+        connections_mock.all.return_value = [conn]
+
+        on_task_done()
+
+        conn.close_if_unusable_or_obsolete.assert_called_once()
+
+    @patch('core.tasks.signals.db.connections')
+    def test_on_task_done_ignores_interface_error(self, connections_mock):
+        conn = Mock()
+        conn.close_if_unusable_or_obsolete.side_effect = db.utils.InterfaceError('gone')
+        connections_mock.all.return_value = [conn]
+
+        on_task_done()  # should not raise
+
+    @patch('core.tasks.signals.db.connections')
+    def test_on_task_done_ignores_closed_database_error(self, connections_mock):
+        conn = Mock()
+        conn.close_if_unusable_or_obsolete.side_effect = db.DatabaseError('connection already closed')
+        connections_mock.all.return_value = [conn]
+
+        on_task_done()  # should not raise
+
+    @patch('core.tasks.signals.db.connections')
+    def test_on_task_done_ignores_not_connected_database_error(self, connections_mock):
+        conn = Mock()
+        conn.close_if_unusable_or_obsolete.side_effect = db.DatabaseError('server not connected')
+        connections_mock.all.return_value = [conn]
+
+        on_task_done()  # should not raise
+
+    @patch('core.tasks.signals.db.connections')
+    def test_on_task_done_reraises_other_database_error(self, connections_mock):
+        conn = Mock()
+        conn.close_if_unusable_or_obsolete.side_effect = db.DatabaseError('something else broke')
+        connections_mock.all.return_value = [conn]
+
+        with self.assertRaises(db.DatabaseError):
+            on_task_done()

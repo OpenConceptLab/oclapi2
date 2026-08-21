@@ -53,6 +53,7 @@ from core.graphql.views import AuthenticatedGraphQLView
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import OrganizationSourceFactory
+from core.users.tests.factories import UserProfileFactory
 
 
 class AuthenticatedGraphQLViewTests(OCLTestCase):
@@ -126,6 +127,35 @@ class AuthenticatedGraphQLViewTests(OCLTestCase):
                 context = async_to_sync(view.get_context)(valid_request)
             self.assertEqual(context.user, self.user)
             self.assertEqual(context.auth_status, 'valid')
+
+            no_group_user = UserProfileFactory()
+
+            # Authenticated via session but not in the graphql_api group
+            no_group_session_request = self.factory.post('/graphql/', data='{}', content_type='application/json')
+            no_group_session_request.user = no_group_user
+            context = async_to_sync(view.get_context)(no_group_session_request)
+            self.assertIsInstance(context.user, AnonymousUser)
+            self.assertEqual(context.auth_status, 'invalid')
+
+            # Auth header present but authenticate() returns nothing
+            empty_auth_request = self.factory.post(
+                '/graphql/', data='{}', content_type='application/json', HTTP_AUTHORIZATION='Token nothing'
+            )
+            with patch('core.graphql.views.OCLAuthentication.authenticate', return_value=None):
+                context = async_to_sync(view.get_context)(empty_auth_request)
+            self.assertIsInstance(context.user, AnonymousUser)
+            self.assertEqual(context.auth_status, 'invalid')
+
+            # Authenticated via header but the resolved user is not in the graphql_api group
+            no_group_token_request = self.factory.post(
+                '/graphql/', data='{}', content_type='application/json', HTTP_AUTHORIZATION='Token no-group'
+            )
+            with patch(
+                'core.graphql.views.OCLAuthentication.authenticate', return_value=(no_group_user, 'auth')
+            ):
+                context = async_to_sync(view.get_context)(no_group_token_request)
+            self.assertIsInstance(context.user, AnonymousUser)
+            self.assertEqual(context.auth_status, 'invalid')
 
 
 class QueryHelperTests(OCLTestCase):
