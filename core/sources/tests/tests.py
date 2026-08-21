@@ -1,4 +1,7 @@
+from types import SimpleNamespace
+
 import factory
+from celery_once import AlreadyQueued
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.test import override_settings
@@ -18,9 +21,11 @@ from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from core.mappings.documents import MappingDocument
+from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.services.storages.postgres import PostgresQL
+from core.sources.constants import AUTO_ID_SEQUENTIAL
 from core.sources.documents import SourceDocument
 from core.sources.models import Source, CloneError
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
@@ -1350,6 +1355,275 @@ class SourceTest(OCLTestCase):
         )
         self.assertEqual(source2.get_active_concepts().count(), 0)
         self.assertEqual(source2.get_active_mappings().count(), 0)
+
+    def test_mapping_mnemonic_next_returns_none_on_exception(self):
+        source = OrganizationSourceFactory(autoid_mapping_mnemonic=AUTO_ID_SEQUENTIAL)
+        with patch.object(Source, 'get_resource_next_attr_id', side_effect=Exception('boom')):
+            self.assertIsNone(source.mapping_mnemonic_next)
+
+    def test_get_first_or_head_returns_head_when_multiple_match(self):
+        source1 = OrganizationSourceFactory(canonical_url='https://dup.com', version=HEAD)
+        OrganizationSourceFactory(canonical_url='https://dup.com', version='v1')
+        result = Source.get_first_or_head('https://dup.com')
+        self.assertEqual(result.id, source1.id)
+
+    def test_get_first_or_head_single_match(self):
+        source = OrganizationSourceFactory(canonical_url='https://single.com')
+        result = Source.get_first_or_head('https://single.com')
+        self.assertEqual(result.id, source.id)
+
+    def test_clean_match_algorithms_invalid(self):
+        source = Source(match_algorithms=['bogus'])
+        with self.assertRaises(ValidationError):
+            source.clean_match_algorithms()
+
+    def test_concept_filter_default(self):
+        source = Source(meta={'display': {'default_filter': 'status'}})
+        self.assertEqual(source.concept_filter_default, 'status')
+
+    def test_clean_properties_not_a_dict(self):
+        source = Source(properties=['not-a-dict'])
+        with self.assertRaises(ValidationError):
+            source.clean_properties()
+
+    def test_clean_properties_invalid_uri_type(self):
+        source = Source(properties=[{'code': 'x', 'uri': 123}])
+        with self.assertRaises(ValidationError):
+            source.clean_properties()
+
+    def test_clean_properties_invalid_description_type(self):
+        source = Source(properties=[{'code': 'x', 'description': 123}])
+        with self.assertRaises(ValidationError):
+            source.clean_properties()
+
+    def test_clean_filters_not_a_dict(self):
+        source = Source(filters=['nope'])
+        with self.assertRaises(ValidationError):
+            source.clean_filters()
+
+    def test_clean_filters_invalid_description_type(self):
+        source = Source(filters=[{'code': 'x', 'operator': ['='], 'value': 'y', 'description': 123}])
+        with self.assertRaises(ValidationError):
+            source.clean_filters()
+
+    @patch('core.common.models.BaseModel.batch_index')
+    def test_seed_concepts_indexes_when_index_true(self, batch_index_mock):
+        head = OrganizationSourceFactory(version=HEAD)
+        ConceptFactory(parent=head)
+        v1 = OrganizationSourceFactory(organization=head.organization, mnemonic=head.mnemonic, version='v1')
+        v1.seed_concepts()
+        batch_index_mock.assert_called_once()
+
+    @patch('core.common.models.BaseModel.batch_index')
+    def test_seed_mappings_indexes_when_index_true(self, batch_index_mock):
+        head = OrganizationSourceFactory(version=HEAD)
+        MappingFactory(parent=head)
+        v1 = OrganizationSourceFactory(organization=head.organization, mnemonic=head.mnemonic, version='v1')
+        v1.seed_mappings()
+        batch_index_mock.assert_called_once()
+
+    @patch('core.sources.models.index_source_mappings')
+    def test_index_mappings_async_swallows_already_queued(self, mock_task):
+        mock_task.__name__ = 'index_source_mappings'
+        mock_task.apply_async.side_effect = AlreadyQueued('x')
+        source = OrganizationSourceFactory()
+        source.index_mappings_async(source.created_by)
+
+    @patch('core.sources.models.index_source_concepts')
+    def test_index_concepts_async_swallows_already_queued(self, mock_task):
+        mock_task.__name__ = 'index_source_concepts'
+        mock_task.apply_async.side_effect = AlreadyQueued('x')
+        source = OrganizationSourceFactory()
+        source.index_concepts_async(source.created_by)
+
+    def test_get_export_task(self):
+        source = OrganizationSourceFactory()
+        task = Task.new(queue='default', user=source.created_by, name='export_source', args=[source.id])
+        self.assertEqual(source.get_export_task().id, task.id)
+
+    def test_get_index_concepts_task(self):
+        source = OrganizationSourceFactory()
+        task = Task.new(queue='indexing', user=source.created_by, name='index_source_concepts', args=[source.id])
+        self.assertEqual(source.get_index_concepts_task().id, task.id)
+
+    def test_get_index_mappings_task(self):
+        source = OrganizationSourceFactory()
+        task = Task.new(queue='indexing', user=source.created_by, name='index_source_mappings', args=[source.id])
+        self.assertEqual(source.get_index_mappings_task().id, task.id)
+
+    @patch('core.sources.models.resolve_url_registry_entries')
+    def test_save_queues_resolve_url_registry_entries_when_canonical_url_changes(self, resolve_mock):
+        source = OrganizationSourceFactory(version=HEAD, canonical_url='https://old.com')
+        OrganizationURLRegistryFactory(organization=source.organization, repo=source, url='https://foo.bar.com')
+
+        source.canonical_url = 'https://new.com'
+        source.save()
+
+        resolve_mock.apply_async.assert_called_once_with(
+            (source.id, source.resource_type), queue='default', permanent=False)
+
+    @patch('core.sources.models.update_mappings_source')
+    def test_post_create_actions_queues_when_not_test_mode(self, update_mappings_source_mock):
+        source = OrganizationSourceFactory()
+        with patch('core.sources.models.settings.TEST_MODE', False):
+            source.post_create_actions()
+        update_mappings_source_mock.apply_async.assert_called_once_with(
+            (source.id,), queue='default', permanent=False)
+
+    def test_update_sequences_creates_and_updates_all_variants(self):
+        source = OrganizationSourceFactory(version=HEAD)
+
+        source.autoid_mapping_mnemonic = AUTO_ID_SEQUENTIAL
+        source.autoid_mapping_external_id = AUTO_ID_SEQUENTIAL
+        source.autoid_concept_external_id = AUTO_ID_SEQUENTIAL
+        source.save()
+
+        source.autoid_mapping_external_id_start_from = 50
+        source.autoid_concept_external_id_start_from = 50
+        source.save()
+
+    def test_clone_resources_skips_existing_equivalent_concept(self):
+        source = OrganizationSourceFactory(version=HEAD)
+        target = OrganizationSourceFactory(version=HEAD)
+        concept = ConceptFactory(
+            parent=source, names=[ConceptNameFactory.build(locale_preferred=True)])
+        cloned_concept = ConceptFactory(
+            parent=target, names=[ConceptNameFactory.build(locale_preferred=True)])
+        MappingFactory(from_concept=cloned_concept, to_concept=concept, parent=target, map_type='Same As')
+
+        added_concepts, _ = target.clone_resources(
+            concept.created_by, Concept.objects.filter(id=concept.id), Mapping.objects.none(),
+            equivalency_map_types='Same As')
+
+        self.assertEqual(added_concepts, [])
+
+    def test_clone_mappings_resolves_missing_concepts_by_mnemonic(self):
+        source = OrganizationSourceFactory(version=HEAD)
+        from_concept = ConceptFactory(
+            parent=source, names=[ConceptNameFactory.build(locale_preferred=True)])
+        to_concept = ConceptFactory(
+            parent=source, names=[ConceptNameFactory.build(locale_preferred=True)])
+        target = OrganizationSourceFactory(version=HEAD)
+        user = from_concept.created_by
+
+        cloned_from = from_concept.versioned_object.clone()
+        target.clone_concepts([cloned_from], user, False)
+        cloned_to = to_concept.versioned_object.clone()
+        target.clone_concepts([cloned_to], user, False)
+
+        unsaved_from = ConceptFactory.build(mnemonic=cloned_from.mnemonic)
+        unsaved_to = ConceptFactory.build(mnemonic=cloned_to.mnemonic)
+        mapping = MappingFactory.build(from_concept=unsaved_from, to_concept=unsaved_to, parent=target)
+
+        added = target.clone_mappings([mapping], user)
+
+        self.assertEqual(len(added), 1)
+
+    @patch('core.sources.models.Source.update_mappings_count')
+    def test_clone_mappings_updates_count_when_update_count_true(self, update_count_mock):
+        source = OrganizationSourceFactory(version=HEAD)
+        from_concept = ConceptFactory(
+            parent=source, names=[ConceptNameFactory.build(locale_preferred=True)])
+        to_concept = ConceptFactory(
+            parent=source, names=[ConceptNameFactory.build(locale_preferred=True)])
+        target = OrganizationSourceFactory(version=HEAD)
+        user = from_concept.created_by
+        cloned_from = from_concept.versioned_object.clone()
+        target.clone_concepts([cloned_from], user, False)
+        cloned_to = to_concept.versioned_object.clone()
+        target.clone_concepts([cloned_to], user, False)
+
+        mapping = MappingFactory.build(
+            from_concept=ConceptFactory.build(mnemonic=cloned_from.mnemonic),
+            to_concept=ConceptFactory.build(mnemonic=cloned_to.mnemonic), parent=target)
+
+        target.clone_mappings([mapping], user)
+
+        update_count_mock.assert_called_once()
+
+    @patch('core.sources.models.Source.update_concepts_count')
+    def test_clone_concepts_updates_count_when_update_count_true(self, update_count_mock):
+        source = OrganizationSourceFactory(version=HEAD)
+        target = OrganizationSourceFactory(version=HEAD)
+        concept = ConceptFactory(
+            parent=source, names=[ConceptNameFactory.build(locale_preferred=True)])
+        cloned = concept.versioned_object.clone()
+
+        target.clone_concepts([cloned], concept.created_by)
+
+        update_count_mock.assert_called_once()
+
+    def test_get_map_type_distribution(self):
+        source1 = OrganizationSourceFactory(version=HEAD)
+        source2 = OrganizationSourceFactory(version=HEAD)
+        c1 = ConceptFactory(parent=source1)
+        c2 = ConceptFactory(parent=source2)
+        MappingFactory(from_concept=c1, to_concept=c2, parent=source1, to_source=source2, map_type='Same As')
+        MappingFactory(from_concept=c1, to_concept=c2, parent=source2, from_source=source1, map_type='Same As')
+
+        to_dist = source1.get_to_source_map_type_distribution(source2)
+        self.assertEqual(to_dist['total'], 1)
+        self.assertEqual(to_dist['map_types'][0]['map_type'], 'Same As')
+
+        from_dist = source2.get_from_source_map_type_distribution(source1)
+        self.assertEqual(from_dist['total'], 1)
+
+    @patch('core.sources.models.Source.get_mapping_facets')
+    def test_get_to_sources_map_type_distribution_with_source_names_filter(self, get_mapping_facets_mock):
+        source1 = OrganizationSourceFactory(version=HEAD)
+        source2 = OrganizationSourceFactory(version=HEAD)
+        c1 = ConceptFactory(parent=source1)
+        c2 = ConceptFactory(parent=source2)
+        MappingFactory(from_concept=c1, to_concept=c2, parent=source1, to_source=source2, map_type='Same As')
+
+        get_mapping_facets_mock.side_effect = [
+            SimpleNamespace(mapType=[('Same As', 2)]),
+            SimpleNamespace(mapType=[('Same As', 1)]),
+        ]
+
+        distribution = source1.get_to_sources_map_type_distribution(source_names=[source2.mnemonic])
+
+        self.assertEqual(len(distribution), 1)
+        self.assertEqual(distribution[0]['distribution']['active'], 2)
+        self.assertEqual(distribution[0]['distribution']['retired'], 1)
+        self.assertEqual(distribution[0]['distribution']['total'], 3)
+
+    @patch('core.sources.models.Source.get_mapping_facets')
+    def test_get_from_sources_map_type_distribution_with_source_names_filter(self, get_mapping_facets_mock):
+        source1 = OrganizationSourceFactory(version=HEAD)
+        source2 = OrganizationSourceFactory(version=HEAD)
+        c1 = ConceptFactory(parent=source1)
+        c2 = ConceptFactory(parent=source2)
+        MappingFactory(from_concept=c1, to_concept=c2, parent=source2, from_source=source1, map_type='Same As')
+
+        get_mapping_facets_mock.side_effect = [
+            SimpleNamespace(mapType=[('Same As', 3)]),
+            SimpleNamespace(mapType=[]),
+        ]
+
+        distribution = source2.get_from_sources_map_type_distribution(source_names=[source1.mnemonic])
+
+        self.assertEqual(len(distribution), 1)
+        self.assertEqual(distribution[0]['distribution']['active'], 3)
+        self.assertEqual(distribution[0]['distribution']['retired'], 0)
+
+    def test_get_resource_facet_filters_non_head_uses_source_version(self):
+        source = OrganizationSourceFactory(version='v1')
+        filters = source._get_resource_facet_filters()  # pylint: disable=protected-access
+        self.assertEqual(filters['source_version'], 'v1')
+        self.assertNotIn('is_latest_version', filters)
+
+    def test_get_ordered_concept_facets_by_filter_order(self):
+        source = Source(meta={'display': {'concept_filter_order': ['status']}})
+        facets = {
+            'properties__status': [('active', 3)],
+            'properties__other': [('x', 1)],
+            'plainFacet': [('y', 2)],
+        }
+
+        ordered = source.get_ordered_concept_facets_by_filter_order(facets)
+
+        self.assertEqual(list(ordered.keys()), ['properties__status', 'properties__other', 'plainFacet'])
 
 
 class SourceCloneAPITest(OCLAPITestCase):
