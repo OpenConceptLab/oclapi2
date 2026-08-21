@@ -1599,7 +1599,8 @@ class ResourceImporterModelsTest(OCLTestCase):
         )
         self.assertEqual(importer.delete(), PERMISSION_DENIED)
 
-    def test_source_importer_delete_success(self):
+    @patch('core.common.models.delete_s3_objects')
+    def test_source_importer_delete_success(self, _delete_s3_objects_mock):
         source = OrganizationSourceFactory(
             organization=OrganizationFactory(mnemonic='DelOrgSrc'), mnemonic='DelSrc'
         )
@@ -1644,7 +1645,8 @@ class ResourceImporterModelsTest(OCLTestCase):
         )
         self.assertEqual(importer.delete(), NOT_FOUND)
 
-    def test_collection_importer_delete_success(self):
+    @patch('core.common.models.delete_s3_objects')
+    def test_collection_importer_delete_success(self, _delete_s3_objects_mock):
         collection = OrganizationCollectionFactory(
             organization=OrganizationFactory(mnemonic='DelOrgColl'), mnemonic='DelColl'
         )
@@ -3403,14 +3405,15 @@ class BulkImportViewTest(OCLAPITestCase):
         bulk_import_new_mock.apply_async = Mock(return_value=task_mock)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            with patch('core.settings.MEDIA_ROOT', tmp_dir):
-                uploaded_file = SimpleUploadedFile('data.json', b'{"resourceType": "CodeSystem"}')
-                response = self.client.post(
-                    '/importers/bulk-import/',
-                    {'import_type': 'npm', 'file': uploaded_file},
-                    HTTP_AUTHORIZATION='Token ' + self.token,
-                    format='multipart'
-                )
+            with patch('core.settings.DEBUG', True):
+                with patch('core.settings.MEDIA_ROOT', tmp_dir):
+                    uploaded_file = SimpleUploadedFile('data.json', b'{"resourceType": "CodeSystem"}')
+                    response = self.client.post(
+                        '/importers/bulk-import/',
+                        {'import_type': 'npm', 'file': uploaded_file},
+                        HTTP_AUTHORIZATION='Token ' + self.token,
+                        format='multipart'
+                    )
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.data['task'], 'task-id-data')
@@ -3915,11 +3918,19 @@ class ImporterTest(OCLTestCase):
 
         self.assertEqual(resources, {'CodeSystem': {'http://fetch/json': 2}, 'ValueSet': {'http://fetch/json': 2}})
 
+    @patch('core.importers.importer.AsyncResult')
+    @patch('core.importers.importer.result_from_tuple')
     @patch.object(Importer, 'schedule_tasks')
-    def test_run_local_path_with_tasks(self, schedule_tasks_mock):
+    def test_run_local_path_with_tasks(self, schedule_tasks_mock, result_from_tuple_mock, async_result_mock):
+        # ImportTask.model_dump() (called by run(), via the `json` computed field which doesn't
+        # exclude `summary`) evaluates both import_async_result (reconstructed via result_from_tuple)
+        # and, for each subtask id, AsyncResult(...).ready() -- both would hit a real celery result
+        # backend (redis) if not mocked, and CI doesn't run redis.
         task_result = Mock()
         task_result.as_tuple.return_value = (('the-id', None), None)
         schedule_tasks_mock.return_value = (task_result, ['sub-1'])
+        result_from_tuple_mock.return_value = Mock(ready=Mock(return_value=False))
+        async_result_mock.return_value = Mock(ready=Mock(return_value=False))
 
         path = ImporterTest.get_absolute_path('tests/fhir_resources_01.json')
         importer = Importer('task-1', path, 'root', 'users', 'root')
