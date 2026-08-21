@@ -1,30 +1,41 @@
+import io
 import json
 import os
+import tarfile
+import tempfile
+import time
 import uuid
 from json import JSONDecodeError
 from unittest.mock import mock_open
 from zipfile import ZipFile
 
 import responses
+from ijson import JSONError
 from celery_once import AlreadyQueued
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db.models import F
+from django.test import override_settings
 from mock import patch, Mock, ANY, PropertyMock, call
+from rest_framework.exceptions import ValidationError
 from ocldev.oclcsvtojsonconverter import OclStandardCsvToJsonConverter
 
 from core.collections.models import Collection
-from core.common.constants import OPENMRS_VALIDATION_SCHEMA, DEPRECATED_API_HEADER
+from core.collections.tests.factories import OrganizationCollectionFactory
+from core.common.constants import OPENMRS_VALIDATION_SCHEMA, DEPRECATED_API_HEADER, ACCESS_TYPE_NONE
 from core.common.tasks import post_import_update_resource_counts, bulk_import_parts_inline, bulk_import_inline, \
     bulk_import
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.common.utils import decode_string, startswith_temp_version
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
-from core.importers.importer import ImporterSubtask, ImportTask, Importer, ResourceImporter
+from core.importers.importer import ImporterSubtask, ImportTask, ImportTaskSummary, Importer, ResourceImporter
 from core.importers.input_parsers import ImportContentParser
-from core.importers.models import BulkImport, BulkImportInline, BulkImportParallelRunner
-from core.importers.views import csv_file_data_to_input_list
+from core.importers.models import BulkImport, BulkImportInline, BulkImportParallelRunner, \
+    CREATED, UPDATED, DELETED, PERMISSION_DENIED, UNCHANGED, FAILED, NOT_FOUND, \
+    BaseImporter, BaseResourceImporter, OrganizationImporter, SourceImporter, SourceVersionImporter, \
+    CollectionImporter, CollectionVersionImporter, ConceptImporter, MappingImporter, ReferenceImporter
+from core.importers.views import csv_file_data_to_input_list, ImportRetrieveDestroyMixin
 from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
@@ -1517,6 +1528,651 @@ class BulkImportInlineTest(OCLTestCase):
         batch_index_resources_mock.apply_async.assert_not_called()
 
 
+class ResourceImporterModelsTest(OCLTestCase):
+    def test_base_importer_run_not_implemented(self):
+        with self.assertRaises(NotImplementedError):
+            BaseImporter(content='{}', username='ocladmin', update_if_exists=False).run()
+
+    def test_base_importer_uses_explicit_user(self):
+        user = UserProfileFactory()
+        importer = BaseImporter(content='{}', username='ocladmin', update_if_exists=False, user=user)
+        self.assertEqual(importer.user, user)
+
+    def test_base_resource_importer_get_resource_type_not_implemented(self):
+        with self.assertRaises(NotImplementedError):
+            BaseResourceImporter.get_resource_type()
+
+    def test_base_resource_importer_process_not_implemented(self):
+        importer = BaseResourceImporter({'id': 'x'}, UserProfileFactory())
+        with self.assertRaises(NotImplementedError):
+            importer.process()
+
+    def test_base_resource_importer_exists_defaults_false(self):
+        importer = BaseResourceImporter({'id': 'x'}, UserProfileFactory())
+        self.assertFalse(importer.exists())
+
+    def test_base_resource_importer_get_owner_type_filter_user(self):
+        importer = OrganizationImporter({'owner_type': 'User'}, UserProfileFactory())
+        self.assertEqual(importer.get_owner_type_filter(), 'user__username')
+
+    def test_base_resource_importer_get_owner_user(self):
+        owner_user = UserProfileFactory()
+        importer = OrganizationImporter({'owner_type': 'User', 'owner': owner_user.username}, owner_user)
+        self.assertEqual(importer.get_owner(), owner_user)
+
+    def test_base_resource_importer_clean_invalid_returns_false(self):
+        importer = OrganizationImporter({}, UserProfileFactory())
+        self.assertFalse(importer.clean())
+
+    def test_organization_importer_delete_permission_denied(self):
+        org = OrganizationFactory(mnemonic='PermOrg')
+        user = UserProfileFactory()
+        importer = OrganizationImporter({'id': 'PermOrg'}, user)
+        self.assertEqual(importer.delete(), PERMISSION_DENIED)
+        self.assertTrue(Organization.objects.filter(mnemonic=org.mnemonic).exists())
+
+    def test_organization_importer_delete_not_found(self):
+        importer = OrganizationImporter({'id': 'DoesNotExist'}, UserProfileFactory())
+        self.assertEqual(importer.delete(), NOT_FOUND)
+
+    def test_source_importer_process_permission_denied(self):
+        org = OrganizationFactory(mnemonic='PermOrgSrc')
+        user = UserProfileFactory()
+        importer = SourceImporter(
+            {'id': 'perm-src', 'name': 'Perm Source', 'owner_type': 'Organization', 'owner': org.mnemonic}, user
+        )
+        result = importer.run()
+        self.assertEqual(result, PERMISSION_DENIED)
+
+    def test_source_importer_delete_not_found(self):
+        importer = SourceImporter(
+            {'id': 'no-such-source', 'owner_type': 'Organization', 'owner': 'NoSuchOrg'}, UserProfileFactory()
+        )
+        self.assertEqual(importer.delete(), NOT_FOUND)
+
+    def test_source_importer_delete_permission_denied(self):
+        source = OrganizationSourceFactory(
+            organization=OrganizationFactory(mnemonic='PermOrgSrcDel'), mnemonic='PermSrcDel'
+        )
+        user = UserProfileFactory()
+        importer = SourceImporter(
+            {'id': source.mnemonic, 'owner_type': 'Organization', 'owner': source.organization.mnemonic}, user
+        )
+        self.assertEqual(importer.delete(), PERMISSION_DENIED)
+
+    def test_source_importer_delete_success(self):
+        source = OrganizationSourceFactory(
+            organization=OrganizationFactory(mnemonic='DelOrgSrc'), mnemonic='DelSrc'
+        )
+        admin = UserProfile.objects.get(username='ocladmin')
+        importer = SourceImporter(
+            {'id': source.mnemonic, 'owner_type': 'Organization', 'owner': source.organization.mnemonic}, admin
+        )
+        self.assertEqual(importer.delete(), DELETED)
+
+    def test_source_version_importer_process_permission_denied(self):
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='PermOrgSrcVer'))
+        user = UserProfileFactory()
+        importer = SourceVersionImporter(
+            {'id': 'v1', 'source': source.mnemonic, 'owner_type': 'Organization', 'owner': source.organization.mnemonic},
+            user
+        )
+        self.assertEqual(importer.run(), PERMISSION_DENIED)
+
+    def test_collection_importer_process_permission_denied(self):
+        org = OrganizationFactory(mnemonic='PermOrgColl')
+        user = UserProfileFactory()
+        importer = CollectionImporter(
+            {'id': 'perm-coll', 'name': 'Perm Collection', 'owner_type': 'Organization', 'owner': org.mnemonic}, user
+        )
+        self.assertEqual(importer.run(), PERMISSION_DENIED)
+
+    def test_collection_importer_delete_permission_denied(self):
+        collection = OrganizationCollectionFactory(
+            organization=OrganizationFactory(mnemonic='PermOrgCollDel'), mnemonic='PermCollDel'
+        )
+        user = UserProfileFactory()
+        importer = CollectionImporter(
+            {'id': collection.mnemonic, 'owner_type': 'Organization', 'owner': collection.organization.mnemonic}, user
+        )
+        self.assertEqual(importer.delete(), PERMISSION_DENIED)
+
+    def test_collection_importer_delete_not_found(self):
+        importer = CollectionImporter(
+            {'id': 'no-such-collection', 'owner_type': 'Organization', 'owner': 'NoSuchOrg'}, UserProfileFactory()
+        )
+        self.assertEqual(importer.delete(), NOT_FOUND)
+
+    def test_collection_importer_delete_success(self):
+        collection = OrganizationCollectionFactory(
+            organization=OrganizationFactory(mnemonic='DelOrgColl'), mnemonic='DelColl'
+        )
+        admin = UserProfile.objects.get(username='ocladmin')
+        importer = CollectionImporter(
+            {'id': collection.mnemonic, 'owner_type': 'Organization', 'owner': collection.organization.mnemonic}, admin
+        )
+        self.assertEqual(importer.delete(), DELETED)
+
+    def test_collection_version_importer_process_permission_denied(self):
+        collection = OrganizationCollectionFactory(organization=OrganizationFactory(mnemonic='PermOrgCollVer'))
+        user = UserProfileFactory()
+        importer = CollectionVersionImporter(
+            {
+                'id': 'v1', 'collection': collection.mnemonic, 'owner_type': 'Organization',
+                'owner': collection.organization.mnemonic
+            },
+            user
+        )
+        self.assertEqual(importer.run(), PERMISSION_DENIED)
+
+    def test_concept_importer_clean_invalid_returns_false(self):
+        importer = ConceptImporter({}, UserProfileFactory(), False)
+        self.assertFalse(importer.clean())
+
+    def test_concept_importer_process_parent_not_found(self):
+        user = UserProfile.objects.get(username='ocladmin')
+        importer = ConceptImporter(
+            {
+                'id': 'orphan', 'concept_class': 'Misc', 'datatype': 'None', 'owner_type': 'Organization',
+                'owner': 'NoSuchOrg', 'source': 'NoSuchSource',
+                'names': [{'name': 'orphan', 'locale': 'en', 'locale_preferred': True, 'name_type': 'Fully Specified'}],
+            },
+            user, False
+        )
+        result = importer.run()
+        self.assertEqual(result, {'source': 'Not Found'})
+
+    def test_concept_importer_delete_invalid_returns_false(self):
+        importer = ConceptImporter({}, UserProfileFactory(), False)
+        self.assertFalse(importer.delete())
+
+    def test_concept_importer_delete_not_found(self):
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='ConceptDelOrg'))
+        admin = UserProfile.objects.get(username='ocladmin')
+        importer = ConceptImporter(
+            {
+                'id': 'missing-concept', 'concept_class': 'Misc', 'datatype': 'None',
+                'owner_type': 'Organization', 'owner': source.organization.mnemonic, 'source': source.mnemonic,
+            },
+            admin, False
+        )
+        self.assertEqual(importer.delete(), NOT_FOUND)
+
+    def test_concept_importer_delete_permission_denied(self):
+        source = OrganizationSourceFactory(
+            organization=OrganizationFactory(mnemonic='ConceptDelPermOrg'), public_access=ACCESS_TYPE_NONE)
+        concept = ConceptFactory(parent=source, mnemonic='ToDelete')
+        user = UserProfileFactory()
+        importer = ConceptImporter(
+            {
+                'id': concept.mnemonic, 'concept_class': concept.concept_class, 'datatype': concept.datatype,
+                'owner_type': 'Organization', 'owner': source.organization.mnemonic, 'source': source.mnemonic,
+            },
+            user, False
+        )
+        self.assertEqual(importer.delete(), PERMISSION_DENIED)
+
+    def test_concept_importer_process_with_update_comment_and_skip_hierarchy(self):
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='ConceptCommentOrg'))
+        admin = UserProfile.objects.get(username='ocladmin')
+        importer = ConceptImporter(
+            {
+                'id': 'commented', 'concept_class': 'Misc', 'datatype': 'None',
+                'owner_type': 'Organization', 'owner': source.organization.mnemonic, 'source': source.mnemonic,
+                'update_comment': 'initial import',
+                'names': [
+                    {'name': 'commented', 'locale': 'en', 'locale_preferred': True, 'name_type': 'Fully Specified'}],
+            },
+            admin, False, skip_hierarchy_tasks=True
+        )
+        result = importer.run()
+        self.assertEqual(result, CREATED)
+
+    def test_mapping_importer_clean_invalid_returns_false(self):
+        importer = MappingImporter({}, UserProfileFactory(), False)
+        self.assertFalse(importer.clean())
+
+    def test_mapping_importer_delete_invalid_returns_false(self):
+        importer = MappingImporter({}, UserProfileFactory(), False)
+        self.assertFalse(importer.delete())
+
+    def test_mapping_importer_process_permission_denied(self):
+        source = OrganizationSourceFactory(
+            organization=OrganizationFactory(mnemonic='MapPermOrg'), public_access=ACCESS_TYPE_NONE)
+        concept1 = ConceptFactory(parent=source, mnemonic='MapFrom')
+        concept2 = ConceptFactory(parent=source, mnemonic='MapTo')
+        user = UserProfileFactory()
+        importer = MappingImporter(
+            {
+                'map_type': 'Same As',
+                'from_concept_url': concept1.uri, 'to_concept_url': concept2.uri,
+                'owner_type': 'Organization', 'owner': source.organization.mnemonic, 'source': source.mnemonic,
+            },
+            user, False
+        )
+        self.assertEqual(importer.run(), PERMISSION_DENIED)
+
+    def test_mapping_importer_delete_not_found(self):
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='MapDelOrg'))
+        concept1 = ConceptFactory(parent=source, mnemonic='MapDelFrom')
+        concept2 = ConceptFactory(parent=source, mnemonic='MapDelTo')
+        admin = UserProfile.objects.get(username='ocladmin')
+        importer = MappingImporter(
+            {
+                'map_type': 'Same As',
+                'from_concept_url': concept1.uri, 'to_concept_url': concept2.uri,
+                'owner_type': 'Organization', 'owner': source.organization.mnemonic, 'source': source.mnemonic,
+            },
+            admin, False
+        )
+        self.assertEqual(importer.delete(), NOT_FOUND)
+
+    def test_mapping_importer_delete_permission_denied(self):
+        source = OrganizationSourceFactory(
+            organization=OrganizationFactory(mnemonic='MapDelPermOrg'), public_access=ACCESS_TYPE_NONE)
+        concept1 = ConceptFactory(parent=source, mnemonic='MapDelPermFrom')
+        concept2 = ConceptFactory(parent=source, mnemonic='MapDelPermTo')
+        MappingFactory(from_concept=concept1, to_concept=concept2, parent=source, map_type='Same As')
+        user = UserProfileFactory()
+        importer = MappingImporter(
+            {
+                'map_type': 'Same As',
+                'from_concept_url': concept1.uri, 'to_concept_url': concept2.uri,
+                'owner_type': 'Organization', 'owner': source.organization.mnemonic, 'source': source.mnemonic,
+            },
+            user, False
+        )
+        self.assertEqual(importer.delete(), PERMISSION_DENIED)
+
+    def test_mapping_importer_process_with_id_and_update_comment(self):
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='MapIdOrg'))
+        concept1 = ConceptFactory(parent=source, mnemonic='MapIdFrom')
+        concept2 = ConceptFactory(parent=source, mnemonic='MapIdTo')
+        admin = UserProfile.objects.get(username='ocladmin')
+        importer = MappingImporter(
+            {
+                'id': 'custom-mapping-id', 'map_type': 'Same As',
+                'from_concept_url': concept1.uri, 'to_concept_url': concept2.uri,
+                'to_source_url': source.url,
+                'owner_type': 'Organization', 'owner': source.organization.mnemonic, 'source': source.mnemonic,
+                'update_comment': 'initial mapping',
+            },
+            admin, False
+        )
+        result = importer.run()
+        self.assertEqual(result, CREATED)
+        self.assertTrue(Mapping.objects.filter(mnemonic='custom-mapping-id').exists())
+
+    def test_mapping_importer_process_with_concept_codes(self):
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='MapCodeOrg'))
+        concept1 = ConceptFactory(parent=source, mnemonic='CodeFrom')
+        concept2 = ConceptFactory(parent=source, mnemonic='CodeTo')
+        admin = UserProfile.objects.get(username='ocladmin')
+        importer = MappingImporter(
+            {
+                'map_type': 'Same As',
+                'from_concept_url': concept1.uri, 'from_concept_code': concept1.mnemonic,
+                'to_concept_code': concept2.mnemonic,
+                'owner_type': 'Organization', 'owner': source.organization.mnemonic, 'source': source.mnemonic,
+            },
+            admin, False
+        )
+        result = importer.run()
+        self.assertEqual(result, CREATED)
+
+    def test_mapping_importer_process_returns_unchanged_for_identical_resubmit(self):
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='MapUnchangedOrg'))
+        concept1 = ConceptFactory(parent=source, mnemonic='UnchangedFrom')
+        concept2 = ConceptFactory(parent=source, mnemonic='UnchangedTo')
+        admin = UserProfile.objects.get(username='ocladmin')
+        data = {
+            'map_type': 'Same As',
+            'from_concept_url': concept1.uri, 'to_concept_url': concept2.uri,
+            'owner_type': 'Organization', 'owner': source.organization.mnemonic, 'source': source.mnemonic,
+        }
+        MappingImporter(dict(data), admin, False).run()
+
+        importer = MappingImporter(dict(data), admin, True)
+        result = importer.run()
+
+        self.assertEqual(result, UNCHANGED)
+
+    def test_mapping_importer_process_picks_non_retired_when_multiple_match(self):
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='MapMultiOrg'))
+        concept1 = ConceptFactory(parent=source, mnemonic='MultiFrom')
+        concept2 = ConceptFactory(parent=source, mnemonic='MultiTo')
+        admin = UserProfile.objects.get(username='ocladmin')
+        MappingFactory(from_concept=concept1, to_concept=concept2, parent=source, map_type='Same As', retired=True)
+        MappingFactory(from_concept=concept1, to_concept=concept2, parent=source, map_type='Same As', retired=False)
+
+        importer = MappingImporter(
+            {
+                'map_type': 'Same As', 'from_concept_url': concept1.uri, 'to_concept_url': concept2.uri,
+                'owner_type': 'Organization', 'owner': source.organization.mnemonic, 'source': source.mnemonic,
+                'extras': {'note': 'updated'},
+            },
+            admin, True
+        )
+        result = importer.run()
+        self.assertIn(result, [CREATED, UPDATED, UNCHANGED])
+
+    def test_reference_importer_get_queryset_is_cached(self):
+        collection = OrganizationCollectionFactory(organization=OrganizationFactory(mnemonic='RefCacheOrg'))
+        importer = ReferenceImporter(
+            {
+                'data': {'expressions': []}, 'collection': collection.mnemonic, 'owner_type': 'Organization',
+                'owner': collection.organization.mnemonic
+            },
+            UserProfile.objects.get(username='ocladmin')
+        )
+        first = importer.get_queryset()
+        second = importer.get_queryset()
+        self.assertIs(first, second)
+
+    def test_reference_importer_process_permission_denied(self):
+        collection = OrganizationCollectionFactory(
+            organization=OrganizationFactory(mnemonic='RefPermOrg'), public_access=ACCESS_TYPE_NONE)
+        user = UserProfileFactory()
+        importer = ReferenceImporter(
+            {
+                'data': {'expressions': []}, 'collection': collection.mnemonic, 'owner_type': 'Organization',
+                'owner': collection.organization.mnemonic
+            },
+            user
+        )
+        self.assertEqual(importer.process(), PERMISSION_DENIED)
+
+    def test_reference_importer_process_not_found(self):
+        importer = ReferenceImporter(
+            {
+                'data': {'expressions': []}, 'collection': 'NoSuchCollection', 'owner_type': 'Organization',
+                'owner': 'NoSuchOrg'
+            },
+            UserProfile.objects.get(username='ocladmin')
+        )
+        self.assertEqual(importer.process(), NOT_FOUND)
+
+    def test_reference_importer_delete_not_found_no_collection(self):
+        importer = ReferenceImporter(
+            {'data': {}, 'collection': 'NoSuchCollection', 'owner_type': 'Organization', 'owner': 'NoSuchOrg'},
+            UserProfile.objects.get(username='ocladmin')
+        )
+        self.assertEqual(importer.delete(), NOT_FOUND)
+
+    def test_reference_importer_delete_permission_denied(self):
+        collection = OrganizationCollectionFactory(
+            organization=OrganizationFactory(mnemonic='RefDelPermOrg'), public_access=ACCESS_TYPE_NONE)
+        user = UserProfileFactory()
+        importer = ReferenceImporter(
+            {
+                'data': {}, 'collection': collection.mnemonic, 'owner_type': 'Organization',
+                'owner': collection.organization.mnemonic
+            },
+            user
+        )
+        self.assertEqual(importer.delete(), PERMISSION_DENIED)
+
+    def test_reference_importer_delete_all_not_found_when_no_references(self):
+        collection = OrganizationCollectionFactory(organization=OrganizationFactory(mnemonic='RefDelAllOrg'))
+        admin = UserProfile.objects.get(username='ocladmin')
+        importer = ReferenceImporter(
+            {
+                'data': {'expressions': ['*']}, 'collection': collection.mnemonic, 'owner_type': 'Organization',
+                'owner': collection.organization.mnemonic
+            },
+            admin
+        )
+        self.assertEqual(importer.delete(), NOT_FOUND)
+
+    def test_reference_importer_delete_with_cascade_and_transform_filters(self):
+        collection = OrganizationCollectionFactory(organization=OrganizationFactory(mnemonic='RefDelCascadeOrg'))
+        source = OrganizationSourceFactory(organization=collection.organization, mnemonic='RefDelCascadeSrc')
+        concept = ConceptFactory(parent=source, mnemonic='RefDelCascadeConcept')
+        admin = UserProfile.objects.get(username='ocladmin')
+
+        add_importer = ReferenceImporter(
+            {
+                'data': {'expressions': [concept.uri]}, 'collection': collection.mnemonic,
+                'owner_type': 'Organization', 'owner': collection.organization.mnemonic
+            },
+            admin
+        )
+        add_importer.process()
+
+        delete_importer = ReferenceImporter(
+            {
+                'data': {'expressions': [concept.uri]}, 'collection': collection.mnemonic,
+                'owner_type': 'Organization', 'owner': collection.organization.mnemonic,
+                '__cascade': 'sourcemappings', 'transform': 'resourceVersions',
+            },
+            admin
+        )
+        result = delete_importer.delete()
+        self.assertEqual(result, NOT_FOUND)  # reference has no cascade/transform, so filters exclude it
+
+    def test_handle_item_import_result_invalid(self):
+        importer = BulkImportInline('', 'ocladmin', False, input_list=[{'type': 'noop'}])
+        importer.handle_item_import_result(False, {'id': 'x'})
+        self.assertEqual(importer.invalid, [{'id': 'x'}])
+
+    def test_handle_item_import_result_failed(self):
+        importer = BulkImportInline('', 'ocladmin', False, input_list=[{'type': 'noop'}])
+        importer.handle_item_import_result(FAILED, {'id': 'x'})
+        self.assertEqual(importer.failed, [{'id': 'x'}])
+
+    def test_handle_item_import_result_unexpected(self):
+        importer = BulkImportInline('', 'ocladmin', False, input_list=[{'type': 'noop'}])
+        importer.handle_item_import_result('unexpected-value', {'id': 'x'})
+        self.assertEqual(importer.others, [{'id': 'x'}])
+
+    def test_run_appends_unknown_item_type(self):
+        data = {'no_type_field': True}
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', False)
+        importer.run()
+        self.assertEqual(importer.unknown, [{'no_type_field': True}])
+
+    @patch('core.importers.models.ERRBIT_LOGGER')
+    @patch.object(ConceptImporter, 'run', side_effect=Exception('concept boom'))
+    def test_run_logs_concept_import_exception(self, _run_mock, errbit_mock):
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='ExcConceptOrg'))
+        data = {
+            'type': 'Concept', 'id': 'Boom', 'concept_class': 'Misc', 'datatype': 'None',
+            'owner_type': 'Organization', 'owner': source.organization.mnemonic, 'source': source.mnemonic,
+            'names': [{'name': 'Boom', 'locale': 'en', 'locale_preferred': True, 'name_type': 'Fully Specified'}],
+        }
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', False)
+        importer.run()
+
+        self.assertEqual(len(importer.failed), 1)
+        errbit_mock.log.assert_called_once()
+
+    @patch('core.importers.models.batch_index_resources')
+    @patch('core.importers.models.ERRBIT_LOGGER')
+    @patch.object(MappingImporter, 'run', side_effect=Exception('mapping boom'))
+    def test_run_logs_mapping_import_exception(self, _run_mock, errbit_mock, batch_index_resources_mock):
+        batch_index_resources_mock.__name__ = 'batch_index_resources'
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='ExcMapOrg'))
+        concept1 = ConceptFactory(parent=source, mnemonic='ExcMapFrom')
+        concept2 = ConceptFactory(parent=source, mnemonic='ExcMapTo')
+        data = {
+            'type': 'Mapping', 'map_type': 'Same As',
+            'from_concept_url': concept1.uri, 'to_concept_url': concept2.uri,
+            'owner_type': 'Organization', 'owner': source.organization.mnemonic, 'source': source.mnemonic,
+        }
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', False)
+        importer.run()
+
+        self.assertEqual(len(importer.failed), 1)
+        errbit_mock.log.assert_called_once()
+
+    @patch('core.importers.models.batch_index_resources')
+    def test_mapping_import_indexes_resources(self, batch_index_resources_mock):
+        batch_index_resources_mock.__name__ = 'batch_index_resources'
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='MapIndexOrg'))
+        concept1 = ConceptFactory(parent=source, mnemonic='IndexFrom')
+        concept2 = ConceptFactory(parent=source, mnemonic='IndexTo')
+        data = {
+            'type': 'Mapping', 'map_type': 'Same As',
+            'from_concept_url': concept1.uri, 'to_concept_url': concept2.uri,
+            'owner_type': 'Organization', 'owner': source.organization.mnemonic, 'source': source.mnemonic,
+        }
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', False)
+        importer.index_resources = True
+        importer.run()
+
+        self.assertEqual(len(importer.created), 1)
+        batch_index_resources_mock.apply_async.assert_called_with(
+            ('mapping', {'id__in': ANY}, True), queue='indexing', permanent=False)
+
+    def test_organization_importer_process_creates_successfully(self):
+        admin = UserProfile.objects.get(username='ocladmin')
+        importer = OrganizationImporter({'id': 'NewOrgViaImporter', 'name': 'New Org'}, admin)
+        result = importer.run()
+        self.assertEqual(result, CREATED)
+        self.assertTrue(Organization.objects.filter(mnemonic='NewOrgViaImporter').exists())
+
+    def test_source_importer_delete_records_exception(self):
+        source = OrganizationSourceFactory(
+            organization=OrganizationFactory(mnemonic='SrcDelExcOrg'), mnemonic='SrcDelExc')
+        admin = UserProfile.objects.get(username='ocladmin')
+        importer = SourceImporter(
+            {'id': source.mnemonic, 'owner_type': 'Organization', 'owner': source.organization.mnemonic}, admin
+        )
+        with patch.object(Source, 'delete', side_effect=Exception('delete boom')):
+            result = importer.delete()
+        self.assertEqual(result, {'errors': ('delete boom',)})
+
+    def test_collection_importer_delete_records_exception(self):
+        collection = OrganizationCollectionFactory(
+            organization=OrganizationFactory(mnemonic='CollDelExcOrg'), mnemonic='CollDelExc'
+        )
+        admin = UserProfile.objects.get(username='ocladmin')
+        importer = CollectionImporter(
+            {'id': collection.mnemonic, 'owner_type': 'Organization', 'owner': collection.organization.mnemonic},
+            admin
+        )
+        with patch.object(Collection, 'delete', side_effect=Exception('delete boom')):
+            result = importer.delete()
+        self.assertEqual(result, {'errors': ('delete boom',)})
+
+    def test_concept_importer_delete_records_exception(self):
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='ConceptDelExcOrg'))
+        concept = ConceptFactory(parent=source, mnemonic='ConceptDelExc')
+        admin = UserProfile.objects.get(username='ocladmin')
+        importer = ConceptImporter(
+            {
+                'id': concept.mnemonic, 'concept_class': concept.concept_class, 'datatype': concept.datatype,
+                'owner_type': 'Organization', 'owner': source.organization.mnemonic, 'source': source.mnemonic,
+            },
+            admin, False
+        )
+        with patch.object(Concept, 'retire', side_effect=Exception('retire boom')):
+            result = importer.delete()
+        self.assertEqual(result, {'errors': ('retire boom',)})
+
+    def test_mapping_importer_delete_records_exception(self):
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='MapDelExcOrg'))
+        concept1 = ConceptFactory(parent=source, mnemonic='MapDelExcFrom')
+        concept2 = ConceptFactory(parent=source, mnemonic='MapDelExcTo')
+        MappingFactory(from_concept=concept1, to_concept=concept2, parent=source, map_type='Same As')
+        admin = UserProfile.objects.get(username='ocladmin')
+        importer = MappingImporter(
+            {
+                'map_type': 'Same As', 'from_concept_url': concept1.uri, 'to_concept_url': concept2.uri,
+                'owner_type': 'Organization', 'owner': source.organization.mnemonic, 'source': source.mnemonic,
+            },
+            admin, False
+        )
+        with patch.object(Mapping, 'retire', side_effect=Exception('retire boom')):
+            result = importer.delete()
+        self.assertEqual(result, {'errors': ('retire boom',)})
+
+    @patch('core.importers.models.Mapping.persist_new')
+    def test_mapping_importer_process_returns_errors_when_persist_fails(self, persist_new_mock):
+        persist_new_mock.return_value = Mock(id=None, errors={'to_concept_url': ['invalid']})
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='MapFailOrg'))
+        concept1 = ConceptFactory(parent=source, mnemonic='FailFrom')
+        concept2 = ConceptFactory(parent=source, mnemonic='FailTo')
+        admin = UserProfile.objects.get(username='ocladmin')
+        importer = MappingImporter(
+            {
+                'map_type': 'Same As', 'from_concept_url': concept1.uri, 'to_concept_url': concept2.uri,
+                'owner_type': 'Organization', 'owner': source.organization.mnemonic, 'source': source.mnemonic,
+            },
+            admin, False
+        )
+        result = importer.run()
+        self.assertEqual(result, {'to_concept_url': ['invalid']})
+
+    def test_mapping_importer_process_orders_by_id_when_all_matches_retired(self):
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='MapAllRetiredOrg'))
+        concept1 = ConceptFactory(parent=source, mnemonic='AllRetiredFrom')
+        concept2 = ConceptFactory(parent=source, mnemonic='AllRetiredTo')
+        admin = UserProfile.objects.get(username='ocladmin')
+        MappingFactory(from_concept=concept1, to_concept=concept2, parent=source, map_type='Same As', retired=True)
+        MappingFactory(from_concept=concept1, to_concept=concept2, parent=source, map_type='Same As', retired=True)
+
+        importer = MappingImporter(
+            {
+                'map_type': 'Same As', 'from_concept_url': concept1.uri, 'to_concept_url': concept2.uri,
+                'owner_type': 'Organization', 'owner': source.organization.mnemonic, 'source': source.mnemonic,
+            },
+            admin, True
+        )
+        result = importer.run()
+        self.assertIn(result, [CREATED, UPDATED, UNCHANGED])
+
+    def test_mapping_importer_parse_encodes_concept_codes_with_special_chars(self):
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='MapEncodeOrg2'))
+        importer = MappingImporter(
+            {
+                'map_type': 'Same As', 'from_concept_url': '/x/', 'from_concept_code': 'has/slash',
+                'to_concept_code': 'other/slash',
+                'owner_type': 'Organization', 'owner': source.organization.mnemonic, 'source': source.mnemonic,
+            },
+            UserProfile.objects.get(username='ocladmin'), False
+        )
+        with patch.object(MappingImporter, 'allowed_fields', MappingImporter.allowed_fields + ['from_concept_code']):
+            importer.parse()
+
+        self.assertNotIn('/', importer.data.get('from_concept_code', ''))
+        self.assertNotIn('/', importer.data.get('to_concept_code', ''))
+
+    def test_notify_progress_updates_task_summary(self):
+        admin = UserProfile.objects.get(username='ocladmin')
+        task = Task.objects.create(id='notify-task-id', name='test-task', created_by=admin)
+        importer = BulkImportInline('', 'ocladmin', False, input_list=[{'type': 'noop'}])
+        importer.self_task_id = task.id
+        importer.set_task()
+        importer.total = 5
+        importer.processed = 2
+
+        importer.notify_progress(force=True)
+
+        task.refresh_from_db()
+        self.assertEqual(task.summary['total'], 5)
+        self.assertEqual(task.summary['processed'], 2)
+
+    def test_notify_progress_throttled_when_recently_notified(self):
+        admin = UserProfile.objects.get(username='ocladmin')
+        task = Task.objects.create(id='notify-task-id-2', name='test-task-2', created_by=admin)
+        importer = BulkImportInline('', 'ocladmin', False, input_list=[{'type': 'noop'}])
+        importer.self_task_id = task.id
+        importer.set_task()
+        importer.last_progress_notified_at = time.time()
+
+        importer.notify_progress(force=False)
+
+        task.refresh_from_db()
+        self.assertIsNone(task.summary)
+
+    def test_organization_importer_process_returns_none_when_already_exists(self):
+        org = OrganizationFactory(mnemonic='AlreadyExistsOrg')
+        admin = UserProfile.objects.get(username='ocladmin')
+        importer = OrganizationImporter({'id': org.mnemonic, 'name': org.name}, admin)
+        self.assertIsNone(importer.process())
+
+
 class BulkImportParallelRunnerTest(OCLTestCase):
     def test_invalid_json(self):
         with self.assertRaises(JSONDecodeError) as ex:
@@ -2649,6 +3305,138 @@ class BulkImportViewTest(OCLAPITestCase):
         self.assertEqual(response.data, {'errors': ('foobar',)})
         celery_app_mock.control.revoke.assert_called_once_with(task_id, terminate=True, signal='SIGKILL')
 
+    @patch.object(Task, 'refresh_from_db', side_effect=AlreadyQueued('boom'))
+    @patch('core.importers.views.queue_bulk_import')
+    def test_post_409_with_existing_task_deletes_it(self, queue_bulk_import_mock, _refresh_mock):
+        task = Task.objects.create(id='to-delete-task', name='bulk_import_test', created_by=self.superuser)
+        queue_bulk_import_mock.return_value = task
+
+        response = self.client.post(
+            '/importers/bulk-import/?update_if_exists=true',
+            {'data': 'some-data'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(Task.objects.filter(id='to-delete-task').exists())
+
+    def test_import_retrieve_destroy_mixin_get_throttles(self):
+        view = ImportRetrieveDestroyMixin()
+        view.request = Mock(user=self.superuser)
+        throttles = view.get_throttles()
+        self.assertIsNotNone(throttles)
+
+    def test_get_user_not_found(self):
+        response = self.client.get(
+            '/importers/bulk-import/?username=nonexistent-user',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_forbidden_for_non_staff_different_user(self):
+        random_user = UserProfileFactory(username='notstaff')
+        other_user = UserProfileFactory(username='someoneelse')
+        response = self.client.get(
+            f'/importers/bulk-import/?username={other_user.username}',
+            HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
+            format='json'
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_delete_task_not_found(self):
+        response = self.client.delete(
+            '/importers/bulk-import/',
+            {'task_id': 'nonexistent-task-id'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_delete_task_forbidden(self):
+        random_user = UserProfileFactory(username='notowner')
+        task = Task.objects.create(id='someones-task', name='bulk_import_test', created_by=self.superuser)
+        response = self.client.delete(
+            '/importers/bulk-import/',
+            {'task_id': task.id},
+            HTTP_AUTHORIZATION='Token ' + random_user.get_token(),
+            format='json'
+        )
+        self.assertEqual(response.status_code, 403)
+
+    @patch.object(ImportContentParser, 'parse', side_effect=Exception('parse boom'))
+    def test_post_parallel_inline_parse_exception(self, _parse_mock):
+        response = self.client.post(
+            '/importers/bulk-import-parallel-inline/?update_if_exists=true',
+            {'data': 'some-data'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('Failed to parse input', response.data['exception'])
+
+    @patch('core.importers.views.bulk_import_new')
+    def test_post_import_type_with_file_url(self, bulk_import_new_mock):
+        bulk_import_new_mock.__name__ = 'bulk_import_new'
+        task_mock = Mock(id='task-id-url', state='PENDING')
+        bulk_import_new_mock.apply_async = Mock(return_value=task_mock)
+
+        response = self.client.post(
+            '/importers/bulk-import/',
+            {'import_type': 'npm', 'file_url': 'http://fetch/package.zip'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data['task'], 'task-id-url')
+        bulk_import_new_mock.apply_async.assert_called_once()
+        call_args = bulk_import_new_mock.apply_async.call_args[0][0]
+        self.assertEqual(call_args[0], 'http://fetch/package.zip')
+
+    @patch('core.importers.views.bulk_import_new')
+    def test_post_import_type_with_file_upload_debug_true(self, bulk_import_new_mock):
+        bulk_import_new_mock.__name__ = 'bulk_import_new'
+        task_mock = Mock(id='task-id-data', state='PENDING')
+        bulk_import_new_mock.apply_async = Mock(return_value=task_mock)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with patch('core.settings.MEDIA_ROOT', tmp_dir):
+                uploaded_file = SimpleUploadedFile('data.json', b'{"resourceType": "CodeSystem"}')
+                response = self.client.post(
+                    '/importers/bulk-import/',
+                    {'import_type': 'npm', 'file': uploaded_file},
+                    HTTP_AUTHORIZATION='Token ' + self.token,
+                    format='multipart'
+                )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data['task'], 'task-id-data')
+        call_args = bulk_import_new_mock.apply_async.call_args[0][0]
+        self.assertTrue(call_args[0].startswith(tmp_dir))
+
+    @patch('core.importers.views.bulk_import_new')
+    def test_post_import_type_with_data_text_debug_false(self, bulk_import_new_mock):
+        bulk_import_new_mock.__name__ = 'bulk_import_new'
+        task_mock = Mock(id='task-id-upload', state='PENDING')
+        bulk_import_new_mock.apply_async = Mock(return_value=task_mock)
+        upload_service_mock = Mock()
+
+        with patch('core.settings.DEBUG', False):
+            with patch('core.importers.views.get_export_service', return_value=upload_service_mock):
+                response = self.client.post(
+                    '/importers/bulk-import/',
+                    {'import_type': 'npm', 'data': '{"resourceType": "CodeSystem"}'},
+                    HTTP_AUTHORIZATION='Token ' + self.token,
+                    format='json'
+                )
+
+        self.assertEqual(response.status_code, 202)
+        upload_service_mock.upload.assert_called_once()
+        call_args = bulk_import_new_mock.apply_async.call_args[0][0]
+        self.assertTrue(call_args[0].startswith(Importer.IMPORT_CACHE))
+
 
 class TasksTest(OCLTestCase):
     @patch('core.sources.models.Source.update_mappings_count')
@@ -2733,6 +3521,10 @@ class ImportTaskTest(OCLTestCase):
         import_task = ImportTask.import_task_from_json(json_task)
         self.assertIsNotNone(import_task)
 
+    def test_import_task_from_json_without_import_task(self):
+        self.assertIsNone(ImportTask.import_task_from_json({}))
+        self.assertIsNone(ImportTask.import_task_from_json({'foo': 'bar'}))
+
     def test_revoke(self):
         import_task = ImportTask()
         mock = Mock()
@@ -2741,6 +3533,84 @@ class ImportTaskTest(OCLTestCase):
         import_task.revoke()
 
         mock.revoke.assert_called_once_with()
+
+    def test_revoke_with_subtasks(self):
+        import_task = ImportTask(subtask_ids=['sub-1', 'sub-2'])
+        import_task.import_async_result = Mock()
+
+        with patch('core.importers.importer.AsyncResult') as async_result_mock:
+            import_task.revoke()
+
+        self.assertEqual(async_result_mock.call_count, 2)
+        async_result_mock.assert_has_calls([call('sub-1'), call('sub-2')], any_order=True)
+        self.assertEqual(async_result_mock.return_value.revoke.call_count, 2)
+
+    def test_import_async_result_from_import_task_tuple(self):
+        import_task = ImportTask(import_task=(('task-id', None), None))
+        result = import_task.import_async_result
+        self.assertIsNotNone(result)
+        self.assertEqual(result.id, 'task-id')
+        self.assertIs(import_task.import_async_result, result)  # cached on second access
+
+    def test_time_finished_from_ready_import_async_result(self):
+        import_task = ImportTask()
+        import_task.import_async_result = Mock(
+            ready=Mock(return_value=True), result={'time_finished': 'sometime'}
+        )
+        self.assertEqual(import_task.time_finished, 'sometime')
+
+    def test_time_finished_setter(self):
+        import_task = ImportTask()
+        import_task.time_finished = 'explicit-value'
+        self.assertEqual(import_task.time_finished, 'explicit-value')
+
+    def test_summary_and_related_computed_fields(self):
+        import_task = ImportTask(subtask_ids=['t1', 't2', 't3', 't4', 't5', 't6', 't7'])
+        import_task.import_async_result = Mock(ready=Mock(return_value=False))
+
+        def make_child(ready, result):
+            return Mock(ready=Mock(return_value=ready), result=result)
+
+        children_by_id = {
+            't1': make_child(True, CREATED),
+            't2': make_child(True, UPDATED),
+            't3': make_child(True, DELETED),
+            't4': make_child(True, PERMISSION_DENIED),
+            't5': make_child(True, UNCHANGED),
+            't6': make_child(True, 'some failure'),
+            't7': make_child(False, None),
+        }
+
+        with patch('core.importers.importer.AsyncResult', side_effect=lambda tid: children_by_id[tid]):
+            summary = import_task.summary
+
+        self.assertEqual(summary.processed, 6)
+        self.assertEqual(summary.created, 1)
+        self.assertEqual(summary.updated, 1)
+        self.assertEqual(summary.deleted, 1)
+        self.assertEqual(summary.permission_denied, 1)
+        self.assertEqual(summary.unchanged, 1)
+        self.assertEqual(summary.failed, 1)
+        self.assertEqual(summary.failures, ['some failure'])
+
+        self.assertIsNotNone(import_task.json)
+        self.assertIsNotNone(import_task.report)
+        self.assertGreaterEqual(import_task.elapsed_seconds, 0)
+        self.assertIn('some failure', import_task.detailed_summary)
+
+    def test_summary_returns_initial_summary_when_no_import_async_result(self):
+        import_task = ImportTask(initial_summary=ImportTaskSummary(total=5))
+        self.assertEqual(import_task.summary.total, 5)
+        self.assertEqual(import_task.summary.processed, 0)
+
+    def test_summary_returns_final_summary_when_ready(self):
+        import_task = ImportTask()
+        import_task.import_async_result = Mock(
+            ready=Mock(return_value=True),
+            result={'final_summary': {'total': 9, 'processed': 9}}
+        )
+        self.assertEqual(import_task.summary.total, 9)
+        self.assertEqual(import_task.summary.processed, 9)
 
 
 class ImporterTest(OCLTestCase):
@@ -3044,6 +3914,169 @@ class ImporterTest(OCLTestCase):
 
         self.assertEqual(resources, {'CodeSystem': {'http://fetch/json': 2}, 'ValueSet': {'http://fetch/json': 2}})
 
+    @patch.object(Importer, 'schedule_tasks')
+    def test_run_local_path_with_tasks(self, schedule_tasks_mock):
+        task_result = Mock()
+        task_result.as_tuple.return_value = (('the-id', None), None)
+        schedule_tasks_mock.return_value = (task_result, ['sub-1'])
+
+        path = ImporterTest.get_absolute_path('tests/fhir_resources_01.json')
+        importer = Importer('task-1', path, 'root', 'users', 'root')
+
+        result = importer.run()
+
+        self.assertEqual(result['initial_summary']['total'], 4)
+        self.assertEqual(result['subtask_ids'], ['sub-1'])
+        schedule_tasks_mock.assert_called_once()
+
+    def test_run_local_path_without_tasks(self):
+        path = ImporterTest.get_absolute_path('tests/fhir_resources_01.json')
+        importer = Importer('task-2', path, 'root', 'users', 'root')
+
+        with patch.object(Importer, 'prepare_tasks', return_value=[]):
+            result = importer.run()
+
+        self.assertIsNotNone(result['time_finished'])
+        self.assertEqual(result['initial_summary']['total'], 0)
+
+    @responses.activate
+    def test_run_downloads_remote_path_when_debug(self):
+        path = ImporterTest.get_absolute_path('tests/fhir_resources_01.json')
+        with open(path, 'rb') as file:
+            content = file.read()
+        responses.add(
+            responses.GET, 'http://fetch/remote.json', body=content, status=200,
+            content_type='application/json', stream=True
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with patch('core.importers.importer.settings.DEBUG', True):
+                with patch('core.importers.importer.settings.MEDIA_ROOT', tmp_dir):
+                    importer = Importer('task-3', 'http://fetch/remote.json', 'root', 'users', 'root')
+                    with patch.object(Importer, 'prepare_tasks', return_value=[]):
+                        result = importer.run()
+                    downloaded_path = importer.path
+
+        self.assertIsNotNone(result['time_finished'])
+        self.assertTrue(downloaded_path.startswith(tmp_dir))
+
+    @responses.activate
+    def test_run_download_failure_when_debug(self):
+        responses.add(responses.GET, 'http://fetch/missing.json', body='not found', status=404)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with patch('core.importers.importer.settings.DEBUG', True):
+                with patch('core.importers.importer.settings.MEDIA_ROOT', tmp_dir):
+                    importer = Importer('task-3b', 'http://fetch/missing.json', 'root', 'users', 'root')
+                    with self.assertRaises(ImportError):
+                        importer.run()
+
+    @responses.activate
+    def test_run_uploads_remote_path_when_not_debug(self):
+        upload_service_mock = Mock()
+        upload_service_mock.exists.return_value = False
+        responses.add(
+            responses.GET, 'http://fetch/remote2.json', body=b'{}', status=200,
+            content_type='application/json', stream=True
+        )
+
+        with patch('core.importers.importer.settings.DEBUG', False):
+            with patch('core.importers.importer.get_export_service', return_value=upload_service_mock):
+                importer = Importer('task-4', 'http://fetch/remote2.json', 'root', 'users', 'root')
+                with patch.object(Importer, 'prepare_resources'):
+                    with patch.object(Importer, 'prepare_tasks', return_value=[]):
+                        result = importer.run()
+
+        self.assertIsNotNone(result['time_finished'])
+        upload_service_mock.upload.assert_called_once()
+
+    @responses.activate
+    def test_run_uploads_remote_path_failure_when_not_debug(self):
+        upload_service_mock = Mock()
+        upload_service_mock.exists.return_value = False
+        responses.add(responses.GET, 'http://fetch/missing2.json', body='not found', status=404)
+
+        with patch('core.importers.importer.settings.DEBUG', False):
+            with patch('core.importers.importer.get_export_service', return_value=upload_service_mock):
+                importer = Importer('task-4b', 'http://fetch/missing2.json', 'root', 'users', 'root')
+                with self.assertRaises(ImportError):
+                    importer.run()
+
+    def test_run_uses_import_cache_url_for(self):
+        upload_service_mock = Mock()
+        upload_service_mock.url_for.return_value = 'http://fetch/cached.json'
+
+        with patch('core.importers.importer.get_export_service', return_value=upload_service_mock):
+            importer = Importer('task-5', 'path', 'root', 'users', 'root')
+            with patch.object(Importer, 'is_npm_import', return_value=False):
+                with patch('core.importers.importer.requests.get') as requests_get_mock:
+                    requests_get_mock.return_value = Mock(
+                        ok=True, iter_content=Mock(return_value=iter([b'{}']))
+                    )
+                    importer.prepare_resources(
+                        importer.IMPORT_CACHE + 'foo.json', ['CodeSystem'], [], [], {}
+                    )
+
+        upload_service_mock.url_for.assert_called_once_with(importer.IMPORT_CACHE + 'foo.json')
+
+    def test_prepare_resources_npm_tar_without_package_json_ignores_key_error(self):
+        with tempfile.NamedTemporaryFile(suffix='.tgz', delete=False) as tmp_file:
+            with tarfile.open(fileobj=tmp_file, mode='w:gz') as tar:
+                data = json.dumps({'resourceType': 'CodeSystem', 'id': 'x'}).encode('utf-8')
+                info = tarfile.TarInfo(name='other/file.json')
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+            tmp_path = tmp_file.name
+
+        try:
+            importer = Importer('1', tmp_path, 'root', 'users', 'root', 'npm')
+            resources = {}
+            importer.prepare_resources(tmp_path, ['CodeSystem'], [], [], resources)
+        finally:
+            os.remove(tmp_path)
+
+        self.assertEqual(resources, {})
+
+    def test_calculate_batch_size_large_volume(self):
+        importer = Importer('1', 'path', 'root', 'users', 'root')
+        batch_size = importer.calculate_batch_size({'ValueSet': {'a': 60000}})
+        self.assertEqual(batch_size, 60)
+
+    def test_calculate_batch_size_small_volume(self):
+        importer = Importer('1', 'path', 'root', 'users', 'root')
+        batch_size = importer.calculate_batch_size({'ValueSet': {'a': 10}})
+        self.assertEqual(batch_size, Importer.MIN_BATCH_SIZE)
+
+    @patch('core.importers.importer.bulk_import_queue')
+    @patch('core.importers.importer.import_finisher')
+    @patch('core.importers.importer.bulk_import_subtask_empty')
+    @patch('core.importers.importer.bulk_import_subtask')
+    def test_schedule_tasks(self, subtask_mock, empty_mock, finisher_mock, queue_mock):
+        subtask_mock.si.return_value = Mock(set=Mock(return_value=Mock()))
+        empty_mock.si.return_value = Mock()
+        finisher_mock.si.return_value = Mock(set=Mock(return_value=Mock()))
+        queue_mock.si.return_value = Mock(apply_async=Mock())
+
+        importer = Importer('task-id', 'path', 'root', 'users', 'root')
+        tasks = [
+            [{'path': 'p', 'username': 'root', 'owner_type': 'users', 'owner': 'root',
+              'resource_type': 'ValueSet', 'files': []}],
+        ]
+
+        final_task, subtask_ids = importer.schedule_tasks(tasks)
+
+        self.assertEqual(len(subtask_ids), 1)
+        self.assertIsNotNone(final_task)
+        queue_mock.si.assert_called_once()
+        queue_mock.si.return_value.apply_async.assert_called_once_with(queue='concurrent')
+        empty_mock.si.assert_called_once()  # single-task group padded to avoid celery collapsing it
+
+    def test_categorize_resources_json_error(self):
+        importer = Importer('1', 'path', 'root', 'users', 'root')
+        with patch('core.importers.importer.ijson.parse', side_effect=JSONError('bad json')):
+            with self.assertRaises(JSONError):
+                importer.categorize_resources(io.BytesIO(b'garbage'), '/path', 'file.json', ['CodeSystem'], {})
+
 
 class ImporterSubtaskTest(OCLTestCase):
 
@@ -3261,6 +4294,170 @@ class ImporterSubtaskTest(OCLTestCase):
         self.assertEqual(results, ['Failed to GET http://fetch/npm/package, responded with 404',
                                    'Failed to GET http://fetch/npm/package, responded with 404'])
 
+    @responses.activate
+    def test_run_with_request_exception_and_missing_end_index_raises(self):
+        # Documents existing behaviour: the except-handler in run() does `results_count += count`
+        # where count is None when a file entry has no end_index, which raises TypeError.
+        path = 'http://fetch/npm/package4'
+        importer = ImporterSubtask(path, 'root', 'user', 'root', 'ValueSet', [
+            {'filepath': '/', 'start_index': 0},
+        ])
+        responses.add(
+            responses.GET, path, body='Not found', status=404, content_type='application/text', stream=True)
+
+        with self.assertRaises(TypeError):
+            importer.run()
+
+    @patch('core.importers.importer.get_export_service')
+    @patch.object(ResourceImporter, 'import_resource')
+    @responses.activate
+    def test_run_uses_import_cache_url_for(self, mocked_import_resource, get_export_service_mock):
+        mocked_import_resource.return_value = 1
+        upload_service_mock = Mock()
+        upload_service_mock.url_for.return_value = 'http://fetch/cached-subtask.json'
+        get_export_service_mock.return_value = upload_service_mock
+
+        path = Importer.IMPORT_CACHE + 'foo.json'
+        importer = ImporterSubtask(path, 'root', 'user', 'root', 'ValueSet', [
+            {'filepath': '/', 'start_index': 0, 'end_index': 1},
+        ])
+        with open(ImporterSubtaskTest.get_absolute_path('tests/fhir_resources_01.json'), 'rb') as file:
+            responses.add(
+                responses.GET, 'http://fetch/cached-subtask.json', body=file.read(), status=200,
+                content_type='application/json', stream=True)
+            importer.run()
+
+        upload_service_mock.url_for.assert_called_once_with(path)
+
+    @patch.object(ResourceImporter, 'import_resource')
+    @responses.activate
+    def test_run_zip_file(self, mocked_import_resource):
+        mocked_import_resource.return_value = 1
+        path = 'http://fetch/npm/package.zip'
+        importer = ImporterSubtask(path, 'root', 'user', 'root', 'ValueSet', [
+            {'filepath': 'package/ValueSet-fr-core-vs-location-type.json', 'start_index': 0, 'end_index': 1},
+        ])
+        with open(ImporterSubtaskTest.get_absolute_path('tests/hl7.fhir.fr.core-2.0.1.zip'), 'rb') as file:
+            responses.add(
+                responses.GET, path, body=file.read(), status=200, content_type='application/zip', stream=True)
+            results = importer.run()
+
+        self.assertEqual(results, [1])
+
+    @patch.object(ResourceImporter, 'import_resource')
+    @responses.activate
+    def test_run_zip_file_without_end_index(self, mocked_import_resource):
+        mocked_import_resource.return_value = 1
+        path = 'http://fetch/npm/package1b.zip'
+        importer = ImporterSubtask(path, 'root', 'user', 'root', 'ValueSet', [
+            {'filepath': 'package/ValueSet-fr-core-vs-location-type.json', 'start_index': 0},
+        ])
+        with open(ImporterSubtaskTest.get_absolute_path('tests/hl7.fhir.fr.core-2.0.1.zip'), 'rb') as file:
+            responses.add(
+                responses.GET, path, body=file.read(), status=200, content_type='application/zip', stream=True)
+            results = importer.run()
+
+        self.assertEqual(results, [1])
+
+    def test_import_files_records_exception_when_import_resource_raises(self):
+        importer = ImporterSubtask('local', 'root', 'user', 'root', 'ValueSet', [
+            {'filepath': 'f1', 'start_index': 0},
+        ])
+        results = []
+        with patch.object(ImporterSubtask, 'import_resource', side_effect=Exception('boom')):
+            importer.import_files(Mock(), results)
+
+        self.assertEqual(len(results), 1)
+        self.assertIn('Failed to process', results[0])
+
+    @responses.activate
+    def test_run_zip_file_missing_entry_records_exception(self):
+        path = 'http://fetch/npm/package2.zip'
+        importer = ImporterSubtask(path, 'root', 'user', 'root', 'ValueSet', [
+            {'filepath': 'package/does-not-exist.json', 'start_index': 0, 'end_index': 1},
+        ])
+        with open(ImporterSubtaskTest.get_absolute_path('tests/hl7.fhir.fr.core-2.0.1.zip'), 'rb') as file:
+            responses.add(
+                responses.GET, path, body=file.read(), status=200, content_type='application/zip', stream=True)
+            results = importer.run()
+
+        self.assertEqual(len(results), 1)
+        self.assertIn('Failed to process', results[0])
+
+    @responses.activate
+    def test_run_tar_file_missing_entry_records_exception(self):
+        path = 'http://fetch/npm/package3'
+        importer = ImporterSubtask(path, 'root', 'user', 'root', 'ValueSet', [
+            {'filepath': 'package/does-not-exist.json'},
+        ])
+        with open(ImporterSubtaskTest.get_absolute_path('tests/hl7.fhir.fr.core-2.0.1.tgz'), 'rb') as file:
+            responses.add(
+                responses.GET, path, body=file.read(), status=200,
+                content_type='application/tar+gzip', stream=True)
+            results = importer.run()
+
+        self.assertEqual(len(results), 1)
+        self.assertIn('Failed to process', results[0])
+
+    @patch.object(ResourceImporter, 'import_resource')
+    @responses.activate
+    def test_run_local_files_without_end_index(self, mocked_import_resource):
+        mocked_import_resource.return_value = 1
+        path = 'http://fetch/plain.json'
+        importer = ImporterSubtask(path, 'root', 'user', 'root', 'ValueSet', [
+            {'filepath': '/', 'start_index': 0},
+        ])
+        with open(ImporterSubtaskTest.get_absolute_path('tests/fhir_resources_01.json'), 'rb') as file:
+            responses.add(
+                responses.GET, path, body=file.read(), status=200, content_type='application/json', stream=True)
+            results = importer.run()
+
+        self.assertEqual(results, [1, 1])
+
+    @responses.activate
+    def test_run_move_to_start_index_no_matching_resource_type(self):
+        path = 'http://fetch/plain2.json'
+        importer = ImporterSubtask(path, 'root', 'user', 'root', 'NonExistentType', [
+            {'filepath': '/', 'start_index': 1, 'end_index': 2},
+        ])
+        with open(ImporterSubtaskTest.get_absolute_path('tests/fhir_resources_01.json'), 'rb') as file:
+            responses.add(
+                responses.GET, path, body=file.read(), status=200, content_type='application/json', stream=True)
+            results = importer.run()
+
+        self.assertEqual(results, [])
+
+    @responses.activate
+    def test_run_injects_owner_fields_for_source_resource_type(self):
+        path = 'http://fetch/source.json'
+        resource_json = json.dumps({'type': 'source', 'id': 'imported-src', 'name': 'Imported Source'})
+        importer = ImporterSubtask(path, 'ocladmin', 'Organization', 'OCL', 'source', [
+            {'filepath': '/', 'start_index': 0, 'end_index': 1},
+        ])
+        responses.add(
+            responses.GET, path, body=resource_json, status=200, content_type='application/json', stream=True)
+        importer.run()
+
+        source = Source.objects.filter(mnemonic='imported-src').first()
+        self.assertIsNotNone(source)
+        self.assertEqual(source.organization.mnemonic, 'OCL')
+
+    @patch.object(ResourceImporter, 'import_resource')
+    @responses.activate
+    def test_run_appends_error_message_when_result_not_int(self, mocked_import_resource):
+        mocked_import_resource.return_value = {'id': ['This field is required.']}
+        path = 'http://fetch/badresource.json'
+        resource_json = json.dumps({'resourceType': 'ValueSet', 'id': 'bad'})
+        importer = ImporterSubtask(path, 'root', 'user', 'root', 'ValueSet', [
+            {'filepath': '/', 'start_index': 0, 'end_index': 1},
+        ])
+        responses.add(
+            responses.GET, path, body=resource_json, status=200, content_type='application/json', stream=True)
+        results = importer.run()
+
+        self.assertEqual(len(results), 1)
+        self.assertIn("due to: {'id': ['This field is required.']}", results[0])
+
 
 class ResourceImporterTest(OCLAPITestCase):
 
@@ -3340,6 +4537,173 @@ class ResourceImporterTest(OCLAPITestCase):
 
         self.assertEqual(result, 1)
         self.assertNotIn('_skip_hierarchy_tasks', persist_new_mock.call_args.kwargs['data'])
+
+    def test_get_resource_types(self):
+        resource_types = ResourceImporter.get_resource_types()
+        self.assertIn('Source', resource_types)
+        self.assertIn('Concept', resource_types)
+        self.assertIn('Mapping', resource_types)
+
+    @patch.object(ResourceImporter, 'import_value_set')
+    def test_import_resource_dispatches_value_set(self, import_value_set_mock):
+        import_value_set_mock.return_value = CREATED
+        result = ResourceImporter().import_resource(
+            {'resourceType': 'ValueSet', 'url': 'http://x'}, 'ocladmin', 'orgs', 'OCL')
+        self.assertEqual(result, CREATED)
+        import_value_set_mock.assert_called_once_with(
+            'OCL', 'orgs', {'resourceType': 'ValueSet', 'url': 'http://x'}, 'ValueSet', 'http://x', 'ocladmin')
+
+    @patch.object(ResourceImporter, 'import_concept_map')
+    def test_import_resource_dispatches_concept_map(self, import_concept_map_mock):
+        import_concept_map_mock.return_value = CREATED
+        result = ResourceImporter().import_resource(
+            {'resourceType': 'ConceptMap', 'url': 'http://y'}, 'ocladmin', 'orgs', 'OCL')
+        self.assertEqual(result, CREATED)
+        import_concept_map_mock.assert_called_once_with(
+            'OCL', 'orgs', {'resourceType': 'ConceptMap', 'url': 'http://y'}, 'ConceptMap', 'http://y', 'ocladmin')
+
+    def test_import_resource_returns_none_for_unhandled_fhir_resource_type(self):
+        result = ResourceImporter().import_resource({'resourceType': 'Patient'}, 'ocladmin', 'orgs', 'OCL')
+        self.assertIsNone(result)
+
+    def test_import_resource_returns_none_when_no_importer_can_handle(self):
+        result = ResourceImporter().import_resource({'type': 'unknown-type'}, 'ocladmin', 'orgs', 'OCL')
+        self.assertIsNone(result)
+
+    def test_find_existing_source_org_owner_by_canonical_url(self):
+        source = OrganizationSourceFactory(canonical_url='http://find.me/org')
+        found = ResourceImporter.find_existing_source(source.organization.mnemonic, 'orgs', 'http://find.me/org')
+        self.assertIn(source, list(found))
+
+    def test_find_existing_source_user_owner_by_canonical_url(self):
+        user = UserProfileFactory()
+        source = OrganizationSourceFactory(organization=None, user=user, canonical_url='http://find.me/user')
+        found = ResourceImporter.find_existing_source(user.username, 'users', 'http://find.me/user')
+        self.assertIn(source, list(found))
+
+    def test_find_existing_source_raises_when_owner_not_found(self):
+        with self.assertRaises(ValidationError):
+            ResourceImporter.find_existing_source('missing-owner', 'orgs', 'http://x')
+
+    def test_find_existing_source_falls_back_to_uri_org_owner(self):
+        source = OrganizationSourceFactory()
+        found = ResourceImporter.find_existing_source(source.organization.mnemonic, 'orgs', source.uri)
+        self.assertIn(source, list(found))
+
+    def test_find_existing_source_falls_back_to_uri_user_owner(self):
+        user = UserProfileFactory()
+        source = OrganizationSourceFactory(organization=None, user=user)
+        found = ResourceImporter.find_existing_source(user.username, 'users', source.uri)
+        self.assertIn(source, list(found))
+
+    @patch('core.importers.importer.ConceptMapDetailSerializer')
+    def test_import_concept_map_creates_when_not_existing(self, serializer_cls_mock):
+        serializer_instance = Mock(is_valid=Mock(return_value=True), errors=None)
+        serializer_cls_mock.return_value = serializer_instance
+
+        result = ResourceImporter.import_concept_map(
+            'OCL', 'orgs', {'resourceType': 'ConceptMap', 'url': 'http://cm.new'}, 'ConceptMap',
+            'http://cm.new', 'ocladmin'
+        )
+
+        self.assertEqual(result, CREATED)
+        serializer_instance.save.assert_called_once()
+
+    @patch('core.importers.importer.ConceptMapDetailSerializer')
+    def test_import_concept_map_updates_when_existing(self, serializer_cls_mock):
+        source = OrganizationSourceFactory(canonical_url='http://cm.existing')
+        serializer_instance = Mock(is_valid=Mock(return_value=True), errors=None)
+        serializer_cls_mock.return_value = serializer_instance
+
+        result = ResourceImporter.import_concept_map(
+            source.organization.mnemonic, 'orgs', {'resourceType': 'ConceptMap'}, 'ConceptMap',
+            'http://cm.existing', 'ocladmin'
+        )
+
+        self.assertEqual(result, UPDATED)
+        serializer_cls_mock.assert_called_once_with(source, data={'resourceType': 'ConceptMap'}, context=ANY)
+
+    @patch('core.importers.importer.ConceptMapDetailSerializer')
+    def test_import_concept_map_returns_errors_when_invalid(self, serializer_cls_mock):
+        serializer_instance = Mock(is_valid=Mock(return_value=False), errors={'url': ['bad']})
+        serializer_cls_mock.return_value = serializer_instance
+
+        result = ResourceImporter.import_concept_map(
+            'OCL', 'orgs', {'resourceType': 'ConceptMap'}, 'ConceptMap', 'http://cm.err', 'ocladmin'
+        )
+
+        self.assertEqual(result, {'url': ['bad']})
+        serializer_instance.save.assert_not_called()
+
+    def test_import_value_set_raises_when_owner_not_found(self):
+        with self.assertRaises(ValidationError):
+            ResourceImporter.import_value_set('missing-owner', 'orgs', {}, 'ValueSet', 'http://x', 'ocladmin')
+
+    @patch('core.importers.importer.ValueSetDetailSerializer')
+    def test_import_value_set_user_owner_creates(self, serializer_cls_mock):
+        user = UserProfileFactory()
+        serializer_instance = Mock(is_valid=Mock(return_value=True), errors=None)
+        serializer_cls_mock.return_value = serializer_instance
+
+        result = ResourceImporter.import_value_set(
+            user.username, 'users', {'resourceType': 'ValueSet'}, 'ValueSet', 'http://newvs.user', 'ocladmin'
+        )
+
+        self.assertEqual(result, CREATED)
+
+    @patch('core.importers.importer.ValueSetDetailSerializer')
+    def test_import_value_set_updates_when_existing(self, serializer_cls_mock):
+        collection = OrganizationCollectionFactory(canonical_url='http://vs.existing')
+        serializer_instance = Mock(is_valid=Mock(return_value=True), errors=None)
+        serializer_cls_mock.return_value = serializer_instance
+
+        result = ResourceImporter.import_value_set(
+            collection.organization.mnemonic, 'orgs', {'resourceType': 'ValueSet'}, 'ValueSet',
+            'http://vs.existing', 'ocladmin'
+        )
+
+        self.assertEqual(result, UPDATED)
+        serializer_cls_mock.assert_called_once_with(collection, data={'resourceType': 'ValueSet'}, context=ANY)
+
+    @patch('core.importers.importer.ValueSetDetailSerializer')
+    def test_import_value_set_falls_back_to_uri_org_owner(self, serializer_cls_mock):
+        collection = OrganizationCollectionFactory()
+        serializer_instance = Mock(is_valid=Mock(return_value=True), errors=None)
+        serializer_cls_mock.return_value = serializer_instance
+
+        result = ResourceImporter.import_value_set(
+            collection.organization.mnemonic, 'orgs', {'resourceType': 'ValueSet'}, 'ValueSet',
+            collection.uri, 'ocladmin'
+        )
+
+        self.assertEqual(result, UPDATED)
+
+    @patch('core.importers.importer.ValueSetDetailSerializer')
+    def test_import_value_set_falls_back_to_uri_user_owner(self, serializer_cls_mock):
+        user = UserProfileFactory()
+        collection = OrganizationCollectionFactory(organization=None, user=user)
+        serializer_instance = Mock(is_valid=Mock(return_value=True), errors=None)
+        serializer_cls_mock.return_value = serializer_instance
+
+        result = ResourceImporter.import_value_set(
+            user.username, 'users', {'resourceType': 'ValueSet'}, 'ValueSet', collection.uri, 'ocladmin'
+        )
+
+        self.assertEqual(result, UPDATED)
+
+    @patch('core.importers.importer.CodeSystemDetailSerializer')
+    def test_import_code_system_updates_when_existing(self, serializer_cls_mock):
+        source = OrganizationSourceFactory(canonical_url='http://cs.existing')
+        serializer_instance = Mock(is_valid=Mock(return_value=True), errors=None)
+        serializer_cls_mock.return_value = serializer_instance
+
+        result = ResourceImporter.import_code_system(
+            source.organization.mnemonic, 'orgs', {'resourceType': 'CodeSystem'}, 'CodeSystem',
+            'http://cs.existing', 'ocladmin'
+        )
+
+        self.assertEqual(result, UPDATED)
+        serializer_cls_mock.assert_called_once_with(source, data={'resourceType': 'CodeSystem'}, context=ANY)
 
 
 class ImportContentParserTest(OCLTestCase):
@@ -3599,3 +4963,71 @@ class ImportContentParserTest(OCLTestCase):
         self.assertEqual(len(parser.content), 48)
         requests_get_mock.assert_called_once_with(
             'https://file.zip', headers={'User-Agent': 'OCL'}, stream=True, timeout=30)
+
+    @patch('requests.get')
+    def test_fetch_file_from_url_request_exception(self, requests_get_mock):
+        requests_get_mock.side_effect = Exception('boom')
+
+        parser = ImportContentParser(file_url='https://file.json')
+        parser.parse()
+
+        self.assertEqual(parser.errors, ['Failed to download file from https://file.json, Exception: boom.'])
+
+    @patch('requests.get')
+    def test_set_file_from_response_non_zip_sets_file_to_text(self, requests_get_mock):
+        requests_get_mock.return_value = Mock(ok=True, text='{"type": "foobar"}')
+
+        parser = ImportContentParser(file_url='https://file.json')
+        parser.set_content_type()
+        parser.set_file_from_response(parser.fetch_file_from_url())
+
+        self.assertEqual(parser.file, '{"type": "foobar"}')
+
+    @patch('requests.get')
+    def test_parse_file_url_failed_response(self, requests_get_mock):
+        requests_get_mock.return_value = Mock(ok=False, status_code=404)
+
+        parser = ImportContentParser(file_url='https://file.json')
+        parser.parse()
+
+        self.assertEqual(parser.errors, ['Failed to download file from https://file.json, Status: 404.'])
+
+    @patch('core.importers.input_parsers.OclStandardCsvToJsonConverter')
+    def test_parse_csv_file_processing_exception(self, converter_mock):
+        converter_mock.return_value.process.side_effect = Exception('bad csv')
+        file = open(os.path.join(os.path.dirname(__file__), '..', 'samples/ocl_csv_with_retired_concepts.csv'), 'r')
+
+        parser = ImportContentParser(file=file)
+        parser.parse()
+
+        self.assertEqual(parser.errors, ['Failed to process CSV file: bad csv.'])
+
+    def test_parse_zip_file_with_multiple_files_errors(self):
+        buffer = io.BytesIO()
+        with ZipFile(buffer, 'w') as zip_file:
+            zip_file.writestr('a.json', '{}')
+            zip_file.writestr('b.json', '{}')
+        buffer.seek(0)
+
+        parser = ImportContentParser(file=buffer)
+        parser.file_name = 'multi.zip'
+        parser.parse()
+
+        self.assertEqual(parser.errors, ['Zip file must contain exactly one file.'])
+
+    def test_parse_zip_file_with_single_csv_file(self):
+        csv_path = os.path.join(os.path.dirname(__file__), '..', 'samples/ocl_csv_with_retired_concepts.csv')
+        with open(csv_path, 'r') as csv_file:
+            csv_content = csv_file.read()
+
+        buffer = io.BytesIO()
+        with ZipFile(buffer, 'w') as zip_file:
+            zip_file.writestr('data.csv', csv_content)
+        buffer.seek(0)
+
+        parser = ImportContentParser(file=buffer)
+        parser.file_name = 'single.csv.zip'
+        parser.parse()
+
+        self.assertIsInstance(parser.content, list)
+        self.assertTrue(len(parser.content) > 0)
