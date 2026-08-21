@@ -1,19 +1,26 @@
 from celery_once import AlreadyQueued
 from django.core.exceptions import ValidationError
+from django.http import QueryDict
 from django.test import override_settings
 from mock import patch, Mock
 from mock.mock import ANY
+from rest_framework import status
+from rest_framework.response import Response
 
+from core.collections.constants import SOURCE_TO_CONCEPTS, TRANSFORM_TO_RESOURCE_VERSIONS
 from core.collections.documents import CollectionDocument
 from core.collections.models import CollectionReference, Collection, Expansion
 from core.collections.models import ExpansionParameters, ExpansionSystemParameter
 from core.collections.parsers import CollectionReferenceExpressionStringParser, \
     CollectionReferenceSourceAllExpressionParser, CollectionReferenceOldStyleToExpandedStructureParser, \
     CollectionReferenceParser
+from core.collections.serializers import CollectionVersionListSerializer, CollectionCreateSerializer, \
+    CollectionDetailSerializer, CollectionVersionDetailSerializer, CollectionReferenceSerializer, \
+    CollectionSummaryFieldDistributionSerializer
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory, UserCollectionFactory
 from core.collections.utils import is_mapping, is_concept, is_version_specified, \
     get_concept_by_expression
-from core.common.constants import OPENMRS_VALIDATION_SCHEMA
+from core.common.constants import OPENMRS_VALIDATION_SCHEMA, ACCESS_TYPE_NONE
 from core.common.tasks import add_references, seed_children_to_new_version
 from core.common.tasks import update_collection_active_concepts_count
 from core.common.tasks import update_collection_active_mappings_count
@@ -30,6 +37,7 @@ from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.tasks.models import Task
 from core.users.models import UserProfile
+from core.users.tests.factories import UserProfileFactory
 
 
 class CollectionTest(OCLTestCase):
@@ -1544,6 +1552,101 @@ class CollectionUtilsTest(OCLTestCase):
         self.assertEqual(get_concept_by_expression(concept_head.uri), concept_head)
         self.assertEqual(get_concept_by_expression(concept_v1.uri), concept_v1)
         self.assertIsNone(get_concept_by_expression('/foobar/'))
+
+
+class CollectionReferenceParserCascadeTest(OCLTestCase):
+    def test_to_objects_cascades_related_references_now(self):
+        source = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source)
+        concept2 = ConceptFactory(parent=source)
+        mapping = MappingFactory(parent=source, from_concept=concept1, to_concept=concept2, map_type='Same As')
+
+        collection = OrganizationCollectionFactory()
+        user = collection.created_by
+
+        references = Collection.parse_expressions(
+            {'expressions': [concept1.uri]}, user, cascade=SOURCE_TO_CONCEPTS, transform='extensional'
+        )
+
+        expressions = [reference.expression for reference in references]
+        self.assertIn(concept2.uri, expressions)
+        self.assertIn(mapping.uri, expressions)
+        self.assertTrue(len(references) > 1)
+
+
+class CollectionSerializersTest(OCLTestCase):
+    @staticmethod
+    def _request(query_string=''):
+        request = Mock()
+        request.query_params = QueryDict(query_string)
+        request.path = '/collections/'
+        return request
+
+    def test_get_external_exports(self):
+        collection = OrganizationCollectionFactory()
+        self.assertEqual(CollectionVersionListSerializer.get_external_exports(collection), [])
+
+    def test_prepare_object_supported_locales_as_comma_separated_string(self):
+        serializer = CollectionCreateSerializer()
+        collection = serializer.prepare_object(
+            {'mnemonic': 'coll-locales', 'name': 'Coll Locales', 'supported_locales': 'en,es,fr'})
+        self.assertEqual(collection.supported_locales, ['en', 'es', 'fr'])
+
+    def test_prepare_object_invalid_json_string_kept_as_is(self):
+        serializer = CollectionCreateSerializer()
+        collection = serializer.prepare_object(
+            {'mnemonic': 'coll-json', 'name': 'Coll Json', 'jurisdiction': 'not-json{'})
+        self.assertEqual(collection.jurisdiction, 'not-json{')
+
+    def test_update_invalid_expansion_url_skips_persist(self):
+        collection = OrganizationCollectionFactory()
+        collection.expansion_uri = f'{collection.uri}expansions/does-not-exist/'
+        collection.save()
+
+        serializer = CollectionDetailSerializer()
+        serializer._errors = {}  # pylint: disable=protected-access
+        result = serializer.update(collection, {})
+
+        self.assertIn('expansion_url', serializer._errors)  # pylint: disable=protected-access
+        self.assertIs(result, collection)
+
+    def test_create_serializer_validate_invalid_released_value(self):
+        serializer = CollectionCreateSerializer(data={
+            'id': 'coll-invalid-released', 'name': 'Coll Invalid Released', 'released': 'notabool'
+        })
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('released', serializer.errors)
+
+    def test_get_distribution(self):
+        collection = OrganizationCollectionFactory()
+        serializer = CollectionSummaryFieldDistributionSerializer(
+            context={'request': self._request('distribution=datatype,unknownField')})
+        self.assertEqual(serializer.get_distribution(collection), {'datatype': []})
+
+    def test_get_client_configs(self):
+        collection = OrganizationCollectionFactory()
+        serializer_included = CollectionDetailSerializer(
+            context={'request': self._request('includeClientConfigs=true')})
+        self.assertEqual(serializer_included.get_client_configs(collection), [])
+
+        serializer_excluded = CollectionDetailSerializer()
+        self.assertIsNone(serializer_excluded.get_client_configs(collection))
+
+    def test_get_states_included(self):
+        collection = OrganizationCollectionFactory()
+        serializer = CollectionVersionDetailSerializer(
+            context={'request': self._request('includeStates=true')})
+        self.assertEqual(serializer.get_states(collection), collection.states)
+
+    def test_get_tasks_included(self):
+        collection = OrganizationCollectionFactory()
+        serializer = CollectionVersionDetailSerializer(
+            context={'request': self._request('includeTasks=true')})
+        self.assertEqual(serializer.get_tasks(collection), collection.get_tasks_info())
+
+    def test_get_resolved_repo_versions_not_included(self):
+        serializer = CollectionReferenceSerializer()
+        self.assertIsNone(serializer.get_resolved_repo_versions(Mock()))
 
 
 class TasksTest(OCLTestCase):
@@ -4000,6 +4103,383 @@ class CollectionReferenceParserTest(OCLTestCase):
             reference.translation,
             'Include latest mapping "93" from http://hl7.org/fhir/CodeSystem/my-codeystem2'
         )
+
+
+class CollectionReferenceTranslatorTest(OCLTestCase):
+    def test_translate_cascade_as_dict_with_method(self):
+        reference = CollectionReference(
+            expression='/orgs/MyOrg/sources/MySource/concepts/c1/',
+            code='c1',
+            system='/orgs/MyOrg/sources/MySource/',
+            reference_type='concepts',
+            cascade={'method': SOURCE_TO_CONCEPTS}
+        )
+        self.assertEqual(
+            reference.translation,
+            'Include latest concept "c1" from MyOrg/MySource PLUS its mappings and their target concepts'
+        )
+
+    def test_translate_cascade_as_dict_without_method(self):
+        reference = CollectionReference(
+            expression='/orgs/MyOrg/sources/MySource/concepts/c1/',
+            code='c1',
+            system='/orgs/MyOrg/sources/MySource/',
+            reference_type='concepts',
+            cascade={'foo': 'bar'}
+        )
+        self.assertEqual(
+            reference.translation,
+            'Include latest concept "c1" from MyOrg/MySource'
+        )
+
+    def test_translate_is_static_transform(self):
+        reference = CollectionReference(
+            expression='/orgs/MyOrg/sources/MySource/concepts/c1/',
+            code='c1',
+            system='/orgs/MyOrg/sources/MySource/',
+            reference_type='concepts',
+            transform='resourceversions'
+        )
+        self.assertEqual(
+            reference.translation,
+            'Include latest latest version of concept "c1" from MyOrg/MySource'
+        )
+
+    def test_translate_filter_multiple_ampersand_joins(self):
+        reference = CollectionReference(
+            expression='/orgs/MyOrg/sources/MySource/concepts/',
+            system='/orgs/MyOrg/sources/MySource/',
+            reference_type='concepts',
+            filter=[
+                {'property': 'q', 'value': 'foo', 'op': '='},
+                {'property': 'exact_match', 'value': 'true', 'op': '='},
+                {'property': 'q', 'value': 'bar', 'op': '='},
+            ]
+        )
+        self.assertEqual(
+            reference.translation,
+            'Include latest concepts from MyOrg/MySource containing "foo" '
+            '& matching exactly with "true" & containing "bar"'
+        )
+
+
+class CollectionViewsAPITest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.admin = UserProfile.objects.get(username='ocladmin')
+        self.admin_token = self.admin.get_token()
+
+    def test_verify_scope_no_kwargs_non_get_raises_404(self):
+        response = self.client.post('/collections/', {}, format='json')
+        self.assertEqual(response.status_code, 404)
+
+    def test_verify_scope_no_owner_scope_raises_404(self):
+        response = self.client.get('/collections/some-collection/')
+        self.assertEqual(response.status_code, 404)
+
+    def test_collection_logo_view_get_permission(self):
+        collection = OrganizationCollectionFactory()
+        response = self.client.get(f'{collection.uri}logo/')
+        self.assertIn(response.status_code, [200, 400, 404, 405])
+
+    def test_get_object_updates_active_counts_when_not_test_mode(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        with override_settings(TEST_MODE=False):
+            response = self.client.get(
+                collection.uri, HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+            )
+        self.assertEqual(response.status_code, 200)
+
+    def test_delete_collection_failure(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        with patch('core.collections.views.delete_collection') as delete_collection_mock:
+            delete_collection_mock.return_value = False
+            response = self.client.delete(
+                collection.uri, HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+            )
+        self.assertEqual(response.status_code, 400)
+
+    def test_reference_destroy_with_expansion(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        expansion = ExpansionFactory(collection_version=collection, created_by=self.admin)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        concept = ConceptFactory()
+        reference = CollectionReference.objects.create(
+            collection=collection, expression=concept.uri, reference_type='concepts', created_by=self.admin
+        )
+
+        response = self.client.delete(
+            f'{collection.uri}references/{reference.id}/', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(CollectionReference.objects.filter(id=reference.id).exists())
+
+    def test_references_list_apply_filters(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        concept = ConceptFactory()
+        CollectionReference.objects.create(
+            collection=collection, expression=concept.uri, reference_type='concepts', created_by=self.admin,
+            version='v1', cascade={'method': 'sourcetoconcepts'}, transform=TRANSFORM_TO_RESOURCE_VERSIONS
+        )
+
+        param_sets = [
+            'empty=&repo_version=v1&versioning=unversioned&cascade=any&definition_type=intensional&'
+            'inclusion_type=include&verbose=true',
+            'versioning=repository&cascade=false&definition_type=extensional&inclusion_type=exclude',
+            'versioning=resource&cascade=SourceToConcepts&definition_type=false',
+            'cascade=sourcetoconcepts',
+        ]
+        for params in param_sets:
+            response = self.client.get(
+                f'{collection.uri}references/?{params}', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+            )
+            self.assertEqual(response.status_code, 200, params)
+
+    def test_destroy_references_cascades_mappings(self):
+        source = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source)
+        concept2 = ConceptFactory(parent=source)
+        MappingFactory(parent=source, from_concept=concept1, to_concept=concept2, map_type='Same As')
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        collection.add_expressions({'expressions': [concept1.uri]}, self.admin)
+
+        response = self.client.delete(
+            f'{collection.uri}references/?cascade=sourcemappings', {'expressions': [concept1.uri]},
+            format='json', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+
+        self.assertEqual(response.status_code, 204)
+
+    def test_add_references_cascade_and_transform(self):
+        source = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source)
+        concept2 = ConceptFactory(parent=source)
+        MappingFactory(parent=source, from_concept=concept1, to_concept=concept2, map_type='Same As')
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+
+        response = self.client.put(
+            f'{collection.uri}references/?cascade=sourcetoconcepts&transformReferences=extensional',
+            {'data': {'expressions': [concept1.uri]}}, format='json',
+            HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(len(response.data) >= 1)
+
+    def test_add_references_collection_not_found(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        with patch(
+                'core.tasks.mixins.TaskMixin.perform_task', return_value=([], {'error': 'Collection not found'})):
+            response = self.client.put(
+                f'{collection.uri}references/', {'data': {'expressions': ['/foo/']}}, format='json',
+                HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'error': 'Collection not found'})
+
+    def test_references_preview_verbose(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        concept = ConceptFactory()
+
+        response = self.client.post(
+            f'{collection.uri}references/preview/?verbose=true', {'data': {'expressions': [concept.uri]}},
+            format='json', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_version_references_list(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        concept = ConceptFactory()
+        CollectionReference.objects.create(
+            collection=collection, expression=concept.uri, reference_type='concepts', created_by=self.admin
+        )
+
+        response = self.client.get(
+            f'{collection.uri}HEAD/references/?verbose=true', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_collection_versions_brief(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        response = self.client.get(
+            f'{collection.uri}versions/?brief=true', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_create_version_duplicate_id_conflict(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        payload = {'id': 'v1', 'released': False}
+
+        first = self.client.post(
+            f'{collection.uri}versions/', payload, format='json', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(first.status_code, 201)
+
+        second = self.client.post(
+            f'{collection.uri}versions/', payload, format='json', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(second.status_code, 409)
+
+    def test_version_get_object_updates_active_counts_when_not_test_mode(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        version = OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v1',
+            created_by=self.admin, updated_by=self.admin
+        )
+        with override_settings(TEST_MODE=False):
+            response = self.client.get(
+                version.uri, HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+            )
+        self.assertEqual(response.status_code, 200)
+
+    def test_version_delete_failure(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        version = OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v1',
+            created_by=self.admin, updated_by=self.admin
+        )
+        with patch('core.collections.views.delete_collection') as delete_collection_mock:
+            delete_collection_mock.return_value = False
+            response = self.client.delete(
+                version.uri, HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+            )
+        self.assertEqual(response.status_code, 400)
+
+    def test_version_delete_already_queued(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        version = OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v1',
+            created_by=self.admin, updated_by=self.admin
+        )
+        with patch(
+                'core.tasks.mixins.TaskMixin.perform_task',
+                return_value=Response({'detail': 'Already Queued'}, status=status.HTTP_409_CONFLICT)):
+            response = self.client.delete(
+                version.uri, HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+            )
+        self.assertEqual(response.status_code, 409)
+
+    def test_expansions_list_verbose(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        response = self.client.get(
+            f'{collection.uri}expansions/?verbose=true', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_version_expansion_not_found(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        response = self.client.get(
+            f'{collection.uri}HEAD/expansions/does-not-exist/', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_expansion_re_evaluate_already_processing(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        expansion = ExpansionFactory(collection_version=collection, created_by=self.admin, is_processing=True)
+
+        response = self.client.post(
+            f'{collection.uri}HEAD/expansions/{expansion.mnemonic}/re-evaluate/', {},
+            HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+
+        self.assertEqual(response.status_code, 409)
+
+    def test_expansion_re_evaluate_starts_processing(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        expansion = ExpansionFactory(collection_version=collection, created_by=self.admin, is_processing=False)
+
+        with patch('core.collections.views.seed_children_to_expansion'):
+            response = self.client.post(
+                f'{collection.uri}HEAD/expansions/{expansion.mnemonic}/re-evaluate/', {},
+                HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+            )
+
+        self.assertEqual(response.status_code, 204)
+
+    def test_expansion_children_not_found(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        response = self.client.get(
+            f'{collection.uri}HEAD/expansions/does-not-exist/concepts/',
+            HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_collection_summary_distribution(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        response = self.client.get(
+            f'{collection.uri}summary/?verbose=true&distribution=datatype',
+            HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_collection_version_summary_distribution(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        version = OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v1',
+            created_by=self.admin, updated_by=self.admin
+        )
+        response = self.client.get(
+            f'{version.uri}summary/?verbose=true&distribution=datatype',
+            HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_get_filter_params_resolves_latest_version(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v1', released=True,
+            created_by=self.admin, updated_by=self.admin
+        )
+
+        response = self.client.get(
+            f'{collection.uri}latest/concepts/', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_collection_list_staff_sees_all(self):
+        OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        response = self.client.get('/collections/', HTTP_AUTHORIZATION=f"Token {self.admin_token}")
+        self.assertEqual(response.status_code, 200)
+
+    def test_collection_list_authenticated_non_staff_sees_own_private(self):
+        user = UserProfileFactory(username='collections-view-user')
+        OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin, public_access=ACCESS_TYPE_NONE)
+
+        response = self.client.get('/collections/', HTTP_AUTHORIZATION=f"Token {user.get_token()}")
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_version_update_records_released_event(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        version = OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v1', released=False,
+            created_by=self.admin, updated_by=self.admin
+        )
+
+        response = self.client.put(
+            version.uri, {'released': True}, format='json', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        version.refresh_from_db()
+        self.assertTrue(version.released)
+
+    def test_collection_latest_version_summary_distribution(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v1', released=True,
+            created_by=self.admin, updated_by=self.admin
+        )
+        response = self.client.get(
+            f'{collection.uri}latest/summary/?verbose=true&distribution=datatype',
+            HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 200)
 
 
 class ExpansionConceptsIndexViewTest(OCLAPITestCase):
