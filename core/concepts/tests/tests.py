@@ -4,7 +4,7 @@ from unittest.mock import ANY, Mock, patch
 import factory
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
-from django.http import QueryDict
+from django.http import Http404, QueryDict
 from django.test import override_settings
 from pydash import omit
 
@@ -12,7 +12,7 @@ from core.collections.models import CollectionReference
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import OPENMRS_VALIDATION_SCHEMA, HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, LATEST
 from core.common.search import Reranker
-from core.common.tests import OCLTestCase
+from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.concepts.constants import (
     OPENMRS_MUST_HAVE_EXACTLY_ONE_PREFERRED_NAME,
     OPENMRS_FULLY_SPECIFIED_NAME_UNIQUE_PER_SOURCE_LOCALE, OPENMRS_AT_LEAST_ONE_FULLY_SPECIFIED_NAME,
@@ -31,6 +31,334 @@ from core.concepts.validators import ValidatorSpecifier
 from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
 from core.sources.tests.factories import OrganizationSourceFactory
+from core.users.models import UserProfile
+from core.users.tests.factories import UserProfileFactory
+
+
+class ConceptViewsAPITest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.admin = UserProfile.objects.get(username='ocladmin')
+        self.admin_token = self.admin.get_token()
+        self.source = OrganizationSourceFactory(created_by=self.admin, updated_by=self.admin)
+
+    def test_list_checksums_brief(self):
+        response = self.client.get(
+            f'{self.source.uri}concepts/?brief=true&checksums=true',
+            HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_list_only_hierarchy_root(self):
+        response = self.client.get(
+            f'{self.source.uri}concepts/?onlyHierarchyRoot=true',
+            HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_list_only_parent_less(self):
+        response = self.client.get(
+            f'{self.source.uri}concepts/?onlyParentLess=true',
+            HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_list_non_head_source_version(self):
+        source_v1 = OrganizationSourceFactory(
+            organization=self.source.organization, mnemonic=self.source.mnemonic, version='v1',
+            created_by=self.admin, updated_by=self.admin
+        )
+        concept = ConceptFactory(parent=self.source)
+        concept.sources.add(source_v1)
+
+        response = self.client.get(
+            f'{source_v1.uri}concepts/', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_list_anonymous_excludes_private(self):
+        response = self.client.get('/concepts/')
+        self.assertEqual(response.status_code, 200)
+
+    def test_list_authenticated_non_staff_applies_user_criteria(self):
+        user = UserProfileFactory()
+        response = self.client.get('/concepts/', HTTP_AUTHORIZATION=f"Token {user.get_token()}")
+        self.assertEqual(response.status_code, 200)
+
+    def test_list_fuzzy_search_with_source_version(self):
+        response = self.client.get(
+            f'{self.source.uri}concepts/?fuzzy=true&q=test&source_version={self.source.uri}',
+            HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_post_list_data_404(self):
+        response = self.client.post(
+            f'{self.source.uri}concepts/', [], format='json', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_summary_view_collection_kwarg_405(self):
+        from core.concepts.views import ConceptSummaryView
+        view = ConceptSummaryView()
+        view.kwargs = {'collection': 'some-collection'}
+
+        response = view.get_object()
+
+        self.assertEqual(response.status_code, 405)
+
+    def test_summary_view_not_found_404(self):
+        response = self.client.get(
+            f'{self.source.uri}concepts/does-not-exist/summary/', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_collection_membership_not_found_404(self):
+        response = self.client.get(
+            f'{self.source.uri}concepts/does-not-exist/collection-versions/',
+            HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_update_version_specified_405(self):
+        source_v1 = OrganizationSourceFactory(
+            organization=self.source.organization, mnemonic=self.source.mnemonic, version='v1',
+            created_by=self.admin, updated_by=self.admin
+        )
+        concept = ConceptFactory(parent=self.source)
+        concept.sources.add(source_v1)
+
+        response = self.client.put(
+            f'{source_v1.uri}concepts/{concept.mnemonic}/', {}, format='json',
+            HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+
+        self.assertEqual(response.status_code, 405)
+
+    def test_update_parent_not_latest_400(self):
+        from core.concepts.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT
+        from core.concepts.views import ConceptRetrieveUpdateDestroyView
+
+        stale_parent = Mock()
+        stale_parent.head = Mock()
+        concept_mock = Mock(parent=stale_parent)
+        view = ConceptRetrieveUpdateDestroyView()
+        view.kwargs = {}
+        view.get_object = Mock(return_value=concept_mock)
+        view.request = Mock(data={})
+
+        response = view.update(view.request)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data, {'non_field_errors': PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_CONCEPT})
+
+    def test_db_hard_delete_not_found_404(self):
+        response = self.client.delete(
+            f'{self.source.uri}concepts/does-not-exist/?hardDelete=true&db=true',
+            HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_hard_delete_versioned_concept_not_found_404(self):
+        from core.concepts.views import ConceptRetrieveUpdateDestroyView
+        concept = ConceptFactory(parent=self.source)
+        view = ConceptRetrieveUpdateDestroyView()
+        view.request = Mock(user=self.admin)
+
+        with patch('core.concepts.views.Concept.objects.select_for_update') as select_for_update_mock:
+            select_for_update_mock.return_value.filter.return_value = []
+            with self.assertRaises(Http404):
+                view._hard_delete(view.request, concept)  # pylint: disable=protected-access
+
+    def test_cascade_uri_param_filters(self):
+        concept = ConceptFactory(parent=self.source)
+
+        response = self.client.get(
+            f'{self.source.uri}concepts/{concept.mnemonic}/cascade/?uri={self.source.uri}',
+            HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_cascade_not_found_404(self):
+        response = self.client.get(
+            f'{self.source.uri}concepts/does-not-exist/cascade/',
+            HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_children_not_found_404(self):
+        response = self.client.get(
+            f'{self.source.uri}concepts/does-not-exist/children/', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_parents_not_found_404(self):
+        response = self.client.get(
+            f'{self.source.uri}concepts/does-not-exist/parents/', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_reactivate_not_found_404(self):
+        response = self.client.put(
+            f'{self.source.uri}concepts/does-not-exist/reactivate/', {}, format='json',
+            HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_versions_not_found_404(self):
+        response = self.client.get(
+            f'{self.source.uri}concepts/does-not-exist/versions/', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_mappings_not_found_404(self):
+        response = self.client.get(
+            f'{self.source.uri}concepts/does-not-exist/mappings/', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_names_list_not_found_404(self):
+        response = self.client.get(
+            f'{self.source.uri}concepts/does-not-exist/names/', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_label_list_create_view_no_parent_list_attribute(self):
+        from core.concepts.views import ConceptLabelListCreateView
+        view = ConceptLabelListCreateView()
+        view.parent_list_attribute = None
+
+        self.assertIsNone(view.get_queryset())
+
+    def test_locale_retrieve_update_destroy_view_no_parent_list_attribute(self):
+        from core.concepts.views import ConceptLocaleRetrieveUpdateDestroyView
+        view = ConceptLocaleRetrieveUpdateDestroyView()
+        view.parent_list_attribute = None
+
+        self.assertIsNone(view.get_queryset())
+
+    def test_create_description(self):
+        concept = ConceptFactory(parent=self.source)
+        ConceptNameFactory(concept=concept)
+
+        response = self.client.post(
+            f'{self.source.uri}concepts/{concept.mnemonic}/descriptions/',
+            {'description': 'Some description', 'locale': 'en'}, format='json',
+            HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+    def test_create_description_errors_400(self):
+        concept = ConceptFactory(parent=self.source)
+
+        with patch('core.concepts.models.Concept.save_as_new_version') as save_mock:
+            save_mock.return_value = {'errors': ['some error']}
+            response = self.client.post(
+                f'{self.source.uri}concepts/{concept.mnemonic}/descriptions/',
+                {'description': 'Some description', 'locale': 'en'}, format='json',
+                HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+            )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_update_name_invalid_400(self):
+        concept = ConceptFactory(parent=self.source)
+        name = ConceptNameFactory(concept=concept)
+
+        response = self.client.put(
+            f'{self.source.uri}concepts/{concept.mnemonic}/names/{name.id}/', {'name': ''}, format='json',
+            HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    @patch('core.concepts.views.Reranker')
+    def test_rerank_concepts_success(self, reranker_mock):
+        from core.users.constants import MAPPER_APPROVED_GROUP
+        from django.contrib.auth.models import Group
+        reranker_instance_mock = Mock()
+        reranker_instance_mock.rerank.return_value = [{'id': 1}]
+        reranker_mock.return_value = reranker_instance_mock
+        user = UserProfileFactory()
+        user.groups.add(Group.objects.get_or_create(name=MAPPER_APPROVED_GROUP)[0])
+
+        response = self.client.post(
+            '/concepts/$rerank/', {'rows': [{'id': 1}], 'q': 'some text'}, format='json',
+            HTTP_AUTHORIZATION=f"Token {user.get_token()}"
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_rerank_concepts_waitlisted_403(self):
+        user = UserProfileFactory()
+
+        response = self.client.post(
+            '/concepts/$rerank/', {'rows': [{'id': 1}], 'q': 'some text'}, format='json',
+            HTTP_AUTHORIZATION=f"Token {user.get_token()}"
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_rerank_concepts_missing_rows_400(self):
+        from core.users.constants import MAPPER_APPROVED_GROUP
+        from django.contrib.auth.models import Group
+        user = UserProfileFactory()
+        user.groups.add(Group.objects.get_or_create(name=MAPPER_APPROVED_GROUP)[0])
+
+        response = self.client.post(
+            '/concepts/$rerank/', {'rows': [], 'q': 'some text'}, format='json',
+            HTTP_AUTHORIZATION=f"Token {user.get_token()}"
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_rerank_concepts_missing_query_400(self):
+        from core.users.constants import MAPPER_APPROVED_GROUP
+        from django.contrib.auth.models import Group
+        user = UserProfileFactory()
+        user.groups.add(Group.objects.get_or_create(name=MAPPER_APPROVED_GROUP)[0])
+
+        response = self.client.post(
+            '/concepts/$rerank/', {'rows': [{'id': 1}]}, format='json',
+            HTTP_AUTHORIZATION=f"Token {user.get_token()}"
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    @patch('core.concepts.views.Reranker')
+    def test_rerank_concepts_reranker_error_400(self, reranker_mock):
+        from core.users.constants import MAPPER_APPROVED_GROUP
+        from django.contrib.auth.models import Group
+        reranker_mock.side_effect = ValueError('bad model')
+        user = UserProfileFactory()
+        user.groups.add(Group.objects.get_or_create(name=MAPPER_APPROVED_GROUP)[0])
+
+        response = self.client.post(
+            '/concepts/$rerank/', {'rows': [{'id': 1}], 'q': 'some text'}, format='json',
+            HTTP_AUTHORIZATION=f"Token {user.get_token()}"
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    @patch('core.concepts.views.Reranker')
+    def test_rerank_concepts_unexpected_error_500(self, reranker_mock):
+        from core.users.constants import MAPPER_APPROVED_GROUP
+        from django.contrib.auth.models import Group
+        reranker_instance_mock = Mock()
+        reranker_instance_mock.rerank.side_effect = KeyError('boom')
+        reranker_mock.return_value = reranker_instance_mock
+        user = UserProfileFactory()
+        user.groups.add(Group.objects.get_or_create(name=MAPPER_APPROVED_GROUP)[0])
+
+        response = self.client.post(
+            '/concepts/$rerank/', {'rows': [{'id': 1}], 'q': 'some text'}, format='json',
+            HTTP_AUTHORIZATION=f"Token {user.get_token()}"
+        )
+
+        self.assertEqual(response.status_code, 500)
 
 
 class LocalizedTextTest(OCLTestCase):
