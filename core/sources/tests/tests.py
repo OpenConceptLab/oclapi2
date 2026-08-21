@@ -6,6 +6,8 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.test import override_settings
 from mock import patch, Mock, ANY, PropertyMock, call
+from rest_framework import status
+from rest_framework.response import Response
 
 from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
@@ -33,6 +35,319 @@ from core.tasks.models import Task
 from core.url_registry.factories import OrganizationURLRegistryFactory, GlobalURLRegistryFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
+
+
+class SourceViewsAPITest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.admin = UserProfile.objects.get(username='ocladmin')
+        self.admin_token = self.admin.get_token()
+
+    def test_verify_scope_no_kwargs_non_get_raises_404(self):
+        response = self.client.post('/sources/', {}, format='json')
+        self.assertEqual(response.status_code, 404)
+
+    def test_verify_scope_no_owner_scope_raises_404(self):
+        response = self.client.get('/sources/some-source/')
+        self.assertEqual(response.status_code, 404)
+
+    def test_logo_view_get_permission(self):
+        source = OrganizationSourceFactory(created_by=self.admin, updated_by=self.admin)
+        response = self.client.get(f'{source.uri}logo/')
+        self.assertIn(response.status_code, [200, 400, 404, 405])
+
+    @patch('core.common.tasks.update_source_active_mappings_count.apply_async')
+    @patch('core.common.tasks.update_source_active_concepts_count.apply_async')
+    def test_get_object_updates_active_counts_when_not_test_mode(
+            self, update_concepts_apply_async_mock, update_mappings_apply_async_mock):
+        source = OrganizationSourceFactory(created_by=self.admin, updated_by=self.admin)
+        with override_settings(TEST_MODE=False):
+            response = self.client.get(source.uri, HTTP_AUTHORIZATION=f"Token {self.admin_token}")
+        self.assertEqual(response.status_code, 200)
+        update_concepts_apply_async_mock.assert_called()
+        update_mappings_apply_async_mock.assert_called()
+
+    def test_delete_source_failure(self):
+        source = OrganizationSourceFactory(created_by=self.admin, updated_by=self.admin)
+        with patch('core.sources.views.delete_source') as delete_source_mock:
+            delete_source_mock.return_value = False
+            response = self.client.delete(source.uri, HTTP_AUTHORIZATION=f"Token {self.admin_token}")
+        self.assertEqual(response.status_code, 400)
+
+    def test_versions_list_brief(self):
+        source = OrganizationSourceFactory(created_by=self.admin, updated_by=self.admin)
+        response = self.client.get(
+            f'{source.uri}versions/?brief=true', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_versions_list_released_filter(self):
+        source = OrganizationSourceFactory(created_by=self.admin, updated_by=self.admin)
+        response = self.client.get(
+            f'{source.uri}versions/?released=true', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_latest_version_not_found_404(self):
+        source = OrganizationSourceFactory(created_by=self.admin, updated_by=self.admin)
+        response = self.client.get(
+            f'{source.uri}latest/', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    @patch('core.common.tasks.update_source_active_mappings_count.apply_async')
+    @patch('core.common.tasks.update_source_active_concepts_count.apply_async')
+    def test_version_get_object_updates_active_counts_when_not_test_mode(
+            self, update_concepts_apply_async_mock, update_mappings_apply_async_mock):
+        source = OrganizationSourceFactory(created_by=self.admin, updated_by=self.admin)
+        version = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1',
+            created_by=self.admin, updated_by=self.admin
+        )
+        with override_settings(TEST_MODE=False):
+            response = self.client.get(version.uri, HTTP_AUTHORIZATION=f"Token {self.admin_token}")
+        self.assertEqual(response.status_code, 200)
+        update_concepts_apply_async_mock.assert_called()
+        update_mappings_apply_async_mock.assert_called()
+
+    def test_version_update_sets_external_id_from_version_external_id(self):
+        source = OrganizationSourceFactory(created_by=self.admin, updated_by=self.admin)
+        version = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1',
+            created_by=self.admin, updated_by=self.admin
+        )
+        response = self.client.put(
+            version.uri, {'version_external_id': 'ext-1'}, format='json',
+            HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 200)
+        version.refresh_from_db()
+        self.assertEqual(version.external_id, 'ext-1')
+
+    def test_version_delete_validation_error(self):
+        source = OrganizationSourceFactory(created_by=self.admin, updated_by=self.admin)
+        version = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1',
+            created_by=self.admin, updated_by=self.admin
+        )
+        with patch('core.sources.models.Source.delete') as delete_mock:
+            delete_mock.side_effect = ValidationError({'__all__': ['cannot delete']})
+            response = self.client.delete(version.uri, HTTP_AUTHORIZATION=f"Token {self.admin_token}")
+        self.assertEqual(response.status_code, 400)
+
+    def test_properties_and_filters_list(self):
+        source = OrganizationSourceFactory(
+            created_by=self.admin, updated_by=self.admin, properties=[{'code': 'p1'}], filters=[{'code': 'f1'}]
+        )
+        response = self.client.get(
+            f'{source.uri}properties/', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, [{'code': 'p1'}])
+
+        response = self.client.get(
+            f'{source.uri}filters/', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, [{'code': 'f1'}])
+
+    def test_version_properties_and_filters_list(self):
+        source = OrganizationSourceFactory(created_by=self.admin, updated_by=self.admin)
+        version = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1',
+            properties=[{'code': 'p1'}], filters=[{'code': 'f1'}],
+            created_by=self.admin, updated_by=self.admin
+        )
+        response = self.client.get(
+            f'{version.uri}properties/', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, [{'code': 'p1'}])
+
+        response = self.client.get(
+            f'{version.uri}filters/', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, [{'code': 'f1'}])
+
+    def test_source_summary_distribution(self):
+        source = OrganizationSourceFactory(created_by=self.admin, updated_by=self.admin)
+        response = self.client.get(
+            f'{source.uri}summary/?verbose=true&distribution=datatype',
+            HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_source_version_summary_distribution(self):
+        source = OrganizationSourceFactory(created_by=self.admin, updated_by=self.admin)
+        version = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1',
+            created_by=self.admin, updated_by=self.admin
+        )
+        response = self.client.get(
+            f'{version.uri}summary/?verbose=true&distribution=datatype',
+            HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_source_latest_version_summary_distribution(self):
+        source = OrganizationSourceFactory(created_by=self.admin, updated_by=self.admin)
+        OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True,
+            created_by=self.admin, updated_by=self.admin
+        )
+        response = self.client.get(
+            f'{source.uri}latest/summary/?verbose=true&distribution=datatype',
+            HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_source_latest_version_summary_not_found_404(self):
+        source = OrganizationSourceFactory(created_by=self.admin, updated_by=self.admin)
+        response = self.client.get(
+            f'{source.uri}latest/summary/', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_versions_diff_auto_swaps_older_and_newer(self):
+        source = OrganizationSourceFactory(created_by=self.admin, updated_by=self.admin)
+        newer = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v-newer',
+            created_by=self.admin, updated_by=self.admin
+        )
+        older = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v-older',
+            created_by=self.admin, updated_by=self.admin
+        )
+        from django.utils import timezone
+        import datetime
+        Source.objects.filter(id=newer.id).update(created_at=timezone.now())
+        Source.objects.filter(id=older.id).update(created_at=timezone.now() - datetime.timedelta(days=1))
+
+        response = self.client.post(
+            '/sources/$compare/', {'version1': newer.uri, 'version2': older.uri}, format='json',
+            HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_versions_diff_invalid_verbosity_defaults_to_zero(self):
+        source = OrganizationSourceFactory(created_by=self.admin, updated_by=self.admin)
+        version = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1',
+            created_by=self.admin, updated_by=self.admin
+        )
+        response = self.client.post(
+            '/sources/$compare/?verbosity=not-a-number', {'version1': source.uri, 'version2': version.uri},
+            format='json', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_summary_put_permission_denied_without_edit_access(self):
+        source = OrganizationSourceFactory(
+            created_by=self.admin, updated_by=self.admin, public_access=ACCESS_TYPE_VIEW
+        )
+        user = UserProfileFactory()
+
+        response = self.client.put(
+            f'{source.uri}summary/', {}, format='json', HTTP_AUTHORIZATION=f"Token {user.get_token()}"
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_versions_diff_already_queued_response(self):
+        source = OrganizationSourceFactory(created_by=self.admin, updated_by=self.admin)
+        version = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1',
+            created_by=self.admin, updated_by=self.admin
+        )
+        with patch(
+                'core.tasks.mixins.TaskMixin.perform_task',
+                return_value=Response({'detail': 'Already Queued'}, status=status.HTTP_409_CONFLICT)):
+            response = self.client.post(
+                '/sources/$compare/', {'version1': source.uri, 'version2': version.uri}, format='json',
+                HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+            )
+        self.assertEqual(response.status_code, 409)
+
+
+class SourceSerializersTest(OCLTestCase):
+    @staticmethod
+    def _request(query_string=''):
+        from django.http import QueryDict
+        request = Mock()
+        request.query_params = QueryDict(query_string)
+        request.path = '/sources/'
+        return request
+
+    def test_source_list_get_summary(self):
+        from core.sources.serializers import SourceListSerializer
+        source = OrganizationSourceFactory()
+
+        serializer_included = SourceListSerializer(context={'request': self._request('includeSummary=true')})
+        self.assertIsNotNone(serializer_included.get_summary(source))
+
+        serializer_excluded = SourceListSerializer()
+        self.assertIsNone(serializer_excluded.get_summary(source))
+
+    def test_source_version_list_init_and_external_exports(self):
+        from core.sources.serializers import SourceVersionListSerializer
+        source = OrganizationSourceFactory()
+
+        serializer = SourceVersionListSerializer(context={'request': self._request('includeExternalExports=true')})
+        self.assertEqual(serializer.get_external_exports(source), [])
+
+    def test_prepare_object_supported_locales_as_comma_separated_string(self):
+        from core.sources.serializers import SourceCreateSerializer
+        serializer = SourceCreateSerializer()
+        source = serializer.prepare_object(
+            {'mnemonic': 'source-locales', 'name': 'Source Locales', 'supported_locales': 'en,es,fr'})
+        self.assertEqual(source.supported_locales, ['en', 'es', 'fr'])
+
+    def test_create_serializer_validate_invalid_released_value(self):
+        from core.sources.serializers import SourceCreateSerializer
+        serializer = SourceCreateSerializer(data={
+            'id': 'source-invalid-released', 'name': 'Source Invalid Released', 'released': 'notabool'
+        })
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('released', serializer.errors)
+
+    def test_get_client_configs(self):
+        from core.sources.serializers import SourceDetailSerializer
+        source = OrganizationSourceFactory()
+
+        serializer_included = SourceDetailSerializer(
+            context={'request': self._request('includeClientConfigs=true')})
+        self.assertEqual(serializer_included.get_client_configs(source), [])
+
+        serializer_excluded = SourceDetailSerializer()
+        self.assertIsNone(serializer_excluded.get_client_configs(source))
+
+    def test_get_hierarchy_root(self):
+        from core.sources.serializers import SourceDetailSerializer
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source)
+        source.hierarchy_root = concept
+
+        serializer_included = SourceDetailSerializer(
+            context={'request': self._request('includeHierarchyRoot=true')})
+        self.assertIsNotNone(serializer_included.get_hierarchy_root(source))
+
+        serializer_excluded = SourceDetailSerializer()
+        self.assertIsNone(serializer_excluded.get_hierarchy_root(source))
+
+    def test_version_get_states_included(self):
+        from core.sources.serializers import SourceVersionDetailSerializer
+        source = OrganizationSourceFactory()
+
+        serializer = SourceVersionDetailSerializer(context={'request': self._request('includeStates=true')})
+        self.assertEqual(serializer.get_states(source), source.states)
+
+    def test_version_get_tasks_included(self):
+        from core.sources.serializers import SourceVersionDetailSerializer
+        source = OrganizationSourceFactory()
+
+        serializer = SourceVersionDetailSerializer(context={'request': self._request('includeTasks=true')})
+        self.assertEqual(serializer.get_tasks(source), source.get_tasks_info())
 
 
 class SourceTest(OCLTestCase):
@@ -1624,6 +1939,19 @@ class SourceTest(OCLTestCase):
         ordered = source.get_ordered_concept_facets_by_filter_order(facets)
 
         self.assertEqual(list(ordered.keys()), ['properties__status', 'properties__other', 'plainFacet'])
+
+
+class SourceSignalsTest(OCLTestCase):
+    def test_propagate_parent_attributes_updates_mapping_public_access(self):
+        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_EDIT)
+        mapping = MappingFactory(parent=source, public_access=ACCESS_TYPE_EDIT)
+
+        source.public_access = ACCESS_TYPE_VIEW
+        source._should_update_public_access = True  # pylint: disable=protected-access
+        source.save()
+
+        mapping.refresh_from_db()
+        self.assertEqual(mapping.public_access, ACCESS_TYPE_VIEW)
 
 
 class SourceCloneAPITest(OCLAPITestCase):

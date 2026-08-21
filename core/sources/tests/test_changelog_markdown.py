@@ -892,3 +892,221 @@ class TestChangelogMarkdownGeneratorHelpers(SimpleTestCase):
         gen = ChangelogMarkdownGenerator.__new__(ChangelogMarkdownGenerator)
         self.assertEqual(gen._version_label('/orgs/CIEL/sources/CIEL/v20260101/'), 'v20260101')
         self.assertEqual(gen._version_label(''), 'Unknown')
+
+
+class TestChangelogMarkdownGeneratorDescriptionsSection(SimpleTestCase):
+    def test_descriptions_section_added_updated_removed(self):
+        data = _make_data(concepts={
+            'new': {
+                'c1': {
+                    'id': 'c1', 'display_name': 'New', 'names': [],
+                    'descriptions': [{'description': 'New desc', 'type': 'FULLY_SPECIFIED', 'locale': 'en'}],
+                }
+            },
+            'removed': {
+                'c2': {
+                    'id': 'c2', 'display_name': 'Removed', 'names': [],
+                    'descriptions': [{'description': 'Removed desc', 'type': 'FULLY_SPECIFIED', 'locale': 'en'}],
+                }
+            },
+            'changed_minor': {
+                'c3': {
+                    'id': 'c3', 'display_name': 'Updated', 'names': [],
+                    'descriptions': [
+                        {'description': 'Updated desc', 'type': 'FULLY_SPECIFIED', 'locale': 'en'},
+                        {'description': 'Brand new desc', 'type': 'INDEX_TERM', 'locale': 'en'},
+                    ],
+                    'prev_descriptions': [
+                        {'description': 'Old desc', 'type': 'FULLY_SPECIFIED', 'locale': 'en'},
+                        {'description': 'Gone desc', 'type': 'SHORT', 'locale': 'en'},
+                    ],
+                }
+            },
+        })
+        md = ChangelogMarkdownGenerator(data).generate()
+        self.assertIn('## Descriptions', md)
+        self.assertIn('### Added', md)
+        self.assertIn('New desc', md)
+        self.assertIn('Brand new desc', md)
+        self.assertIn('### Removed', md)
+        self.assertIn('Removed desc', md)
+        self.assertIn('Gone desc', md)
+        self.assertIn('### Updated', md)
+        self.assertIn('Updated desc', md)
+        self.assertIn('Old desc', md)
+
+
+class TestChangelogMarkdownGeneratorTranslationsUpdatedRemoved(SimpleTestCase):
+    def test_translations_updated_and_removed(self):
+        data = _make_data(concepts={
+            'removed': {
+                'c2': {
+                    'id': 'c2', 'display_name': 'Removed',
+                    'names': [
+                        {'name': 'Nome removido', 'type': 'FULLY_SPECIFIED', 'locale': 'pt', 'locale_preferred': True}
+                    ],
+                    'descriptions': [],
+                }
+            },
+            'changed_minor': {
+                'c3': {
+                    'id': 'c3', 'display_name': 'Updated',
+                    'names': [
+                        {'name': 'Nome atualizado', 'type': 'FULLY_SPECIFIED', 'locale': 'pt', 'locale_preferred': True}
+                    ],
+                    'prev_names': [
+                        {'name': 'Nome antigo', 'type': 'FULLY_SPECIFIED', 'locale': 'pt', 'locale_preferred': True}
+                    ],
+                    'descriptions': [],
+                }
+            },
+        })
+        md = ChangelogMarkdownGenerator(data).generate()
+        self.assertIn('## Translations', md)
+        self.assertIn('### Removed', md)
+        self.assertIn('Nome removido', md)
+        self.assertIn('### Updated', md)
+        self.assertIn('Nome antigo', md)
+        self.assertIn('Nome atualizado', md)
+
+
+class TestChangelogMarkdownGeneratorNamesEidAndFallback(SimpleTestCase):
+    def test_names_eid_added_removed_and_fallback_multi_change(self):
+        data = _make_data(concepts={
+            'changed_minor': {
+                'c1': {
+                    'id': 'c1', 'display_name': 'Changed',
+                    'names': [
+                        {
+                            'name': 'EID Added', 'type': 'FULLY_SPECIFIED', 'locale': 'en',
+                            'locale_preferred': True, 'external_id': 'eidA',
+                        },
+                        {'name': 'Unchanged', 'type': 'SHORT', 'locale': 'en', 'locale_preferred': False},
+                        {'name': 'New1', 'type': 'INDEX_TERM', 'locale': 'en', 'locale_preferred': False},
+                        {'name': 'New2', 'type': 'INDEX_TERM', 'locale': 'en', 'locale_preferred': False},
+                    ],
+                    'prev_names': [
+                        {
+                            'name': 'EID Removed', 'type': 'FULLY_SPECIFIED', 'locale': 'en',
+                            'locale_preferred': True, 'external_id': 'eidR',
+                        },
+                        {'name': 'Unchanged', 'type': 'SHORT', 'locale': 'en', 'locale_preferred': False},
+                        {'name': 'Old1', 'type': 'INDEX_TERM', 'locale': 'en', 'locale_preferred': False},
+                    ],
+                    'descriptions': [],
+                }
+            }
+        })
+        md = ChangelogMarkdownGenerator(data).generate()
+        self.assertIn('## Names', md)
+        self.assertIn('EID Added', md)
+        self.assertIn('EID Removed', md)
+        self.assertIn('New1', md)
+        self.assertIn('New2', md)
+        self.assertIn('Old1', md)
+        self.assertNotIn('Unchanged', md)
+
+
+class TestChangelogMarkdownGeneratorMappingsCollectionEdgeCases(SimpleTestCase):
+    def test_mapping_bucket_for_removed(self):
+        self.assertEqual(ChangelogMarkdownGenerator._mapping_bucket_for('removed'), 'removed')
+        self.assertEqual(ChangelogMarkdownGenerator._mapping_bucket_for('new'), 'added')
+        self.assertEqual(ChangelogMarkdownGenerator._mapping_bucket_for('changed_major'), 'changed')
+
+    def test_mapping_items_dict_input(self):
+        gen = ChangelogMarkdownGenerator.__new__(ChangelogMarkdownGenerator)
+        result = dict(gen._mapping_items({'m1': {'id': 'm1'}}))
+        self.assertEqual(result, {'m1': {'id': 'm1'}})
+
+    def test_non_dict_concepts_bucket_skipped(self):
+        data = _make_data(concepts={
+            'new': {'c1': {'id': 'c1', 'display_name': 'New concept'}},
+            'summary_count': 5,
+        })
+        md = ChangelogMarkdownGenerator(data).generate()
+        self.assertIn('New concept', md)
+
+    def test_embedded_mapping_merges_with_top_level_duplicate(self):
+        data = _make_data(
+            mappings={'new': {'m1': _make_mapping('m1', 'c1', 'x')}},
+            concepts={
+                'new': {
+                    'c1': {
+                        'id': 'c1', 'display_name': 'New concept',
+                        'mappings': {'new': [{'id': 'm1', 'to_concept': 'x', 'extra_field': 'embedded'}]},
+                    }
+                }
+            },
+        )
+        gen = ChangelogMarkdownGenerator(data)
+        added, _, _ = gen._mapping_collections()
+        self.assertEqual(added['m1'].get('extra_field'), 'embedded')
+
+    def test_has_mappings_true_without_concepts(self):
+        data = _make_data(mappings={'new': {'m1': _make_mapping('m1', 'c1', 'x')}})
+        gen = ChangelogMarkdownGenerator(data)
+        self.assertTrue(gen._has_mappings())
+
+    def test_from_link_builder_empty_from_concept(self):
+        gen = ChangelogMarkdownGenerator.__new__(ChangelogMarkdownGenerator)
+        builder = gen._from_link_builder()
+        self.assertEqual(builder(''), '')
+        self.assertEqual(builder(None), '')
+
+    def test_source_token_malformed_absolute_url(self):
+        gen = ChangelogMarkdownGenerator.__new__(ChangelogMarkdownGenerator)
+        gen._source_prefix = ''
+        self.assertEqual(gen._source_token('/orgs/CIEL/'), '/orgs/CIEL/')
+
+
+class TestChangelogMarkdownGeneratorMoreHelpers(SimpleTestCase):
+    def test_extract_source_prefix_malformed(self):
+        gen = ChangelogMarkdownGenerator.__new__(ChangelogMarkdownGenerator)
+        self.assertEqual(gen._extract_source_prefix('/orgs/CIEL/no-sources-here/'), '')
+
+    def test_concept_link_empty_id(self):
+        gen = ChangelogMarkdownGenerator.__new__(ChangelogMarkdownGenerator)
+        self.assertEqual(gen._concept_link(''), '')
+
+    def test_concept_link_no_version_uri(self):
+        gen = ChangelogMarkdownGenerator.__new__(ChangelogMarkdownGenerator)
+        gen._v2_meta = {}
+        self.assertEqual(gen._concept_link('c1'), '#c1')
+
+    def test_display_code_empty(self):
+        self.assertEqual(ChangelogMarkdownGenerator._display_code(''), '')
+        self.assertEqual(ChangelogMarkdownGenerator._display_code(None), '')
+
+    def test_changed_axes_as_links_without_concept_id(self):
+        gen = ChangelogMarkdownGenerator.__new__(ChangelogMarkdownGenerator)
+        gen.default_locale = 'en'
+        info = {
+            'names': [{'name': 'New', 'type': 'FULLY_SPECIFIED', 'locale': 'en'}],
+            'prev_names': [{'name': 'Old', 'type': 'FULLY_SPECIFIED', 'locale': 'en'}],
+        }
+        axes = gen._changed_axes(info, as_links=True, concept_id=None)
+        self.assertEqual(axes, ['[Names](#names)'])
+
+    def test_names_changed_external_id_set_difference(self):
+        data = _make_data(concepts={
+            'changed_major': {
+                'c1': {
+                    'id': 'c1', 'display_name': 'Changed',
+                    'names': [
+                        {
+                            'name': 'Name A', 'type': 'FULLY_SPECIFIED', 'locale': 'en',
+                            'locale_preferred': True, 'external_id': 'e1',
+                        },
+                    ],
+                    'prev_names': [
+                        {
+                            'name': 'Name B', 'type': 'FULLY_SPECIFIED', 'locale': 'en',
+                            'locale_preferred': True, 'external_id': 'e2',
+                        },
+                    ],
+                    'descriptions': [],
+                }
+            }
+        })
+        md = ChangelogMarkdownGenerator(data).generate()
+        self.assertIn('Names', md)
