@@ -2104,14 +2104,13 @@ class ConceptTest(OCLTestCase):
 
         self.assertEqual(list(result['concepts'].values_list('id', flat=True)), [concept.id])
 
+    @patch('core.common.models.ConceptContainerModel.update_concepts_count')
     @patch('core.common.models.handle_m2m_changed')
     @patch('core.common.models.handle_save')
-    @patch('core.common.models.update_source_active_concepts_count')
     @patch('core.concepts.models.update_mappings_concept')
     def test_persist_new_queues_update_mappings_concept_task(
-            self, update_mappings_concept_mock, update_active_concepts_count_mock, _handle_save_mock,
-            _handle_m2m_mock):
-        update_active_concepts_count_mock.__name__ = 'update_source_active_concepts_count'
+            self, update_mappings_concept_mock, _handle_save_mock, _handle_m2m_mock,
+            _update_concepts_count_mock):
         source = OrganizationSourceFactory(version=HEAD)
         with patch('core.concepts.models.settings.TEST_MODE', False):
             Concept.persist_new({
@@ -2122,15 +2121,14 @@ class ConceptTest(OCLTestCase):
         update_mappings_concept_mock.apply_async.assert_called_once_with(
             (ANY,), queue='default', permanent=False)
 
+    @patch('core.common.models.ConceptContainerModel.update_concepts_count')
     @patch('core.common.models.handle_m2m_changed')
     @patch('core.common.models.handle_save')
-    @patch('core.common.models.update_source_active_concepts_count')
     @patch('core.concepts.models.process_hierarchy_for_new_concept')
     @patch('core.concepts.models.update_mappings_concept')
     def test_persist_new_queues_process_hierarchy_task(
-            self, _update_mappings_mock, process_hierarchy_mock, update_active_concepts_count_mock,
-            _handle_save_mock, _handle_m2m_mock):
-        update_active_concepts_count_mock.__name__ = 'update_source_active_concepts_count'
+            self, _update_mappings_mock, process_hierarchy_mock, _handle_save_mock, _handle_m2m_mock,
+            _update_concepts_count_mock):
         source = OrganizationSourceFactory(version=HEAD)
         parent_concept = ConceptFactory(parent=source)
         with patch('core.concepts.models.settings.TEST_MODE', False):
