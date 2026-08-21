@@ -4182,13 +4182,18 @@ class CollectionViewsAPITest(OCLAPITestCase):
         response = self.client.get(f'{collection.uri}logo/')
         self.assertIn(response.status_code, [200, 400, 404, 405])
 
-    def test_get_object_updates_active_counts_when_not_test_mode(self):
+    @patch('core.common.tasks.update_collection_active_mappings_count.apply_async')
+    @patch('core.common.tasks.update_collection_active_concepts_count.apply_async')
+    def test_get_object_updates_active_counts_when_not_test_mode(
+            self, update_concepts_apply_async_mock, update_mappings_apply_async_mock):
         collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
         with override_settings(TEST_MODE=False):
             response = self.client.get(
                 collection.uri, HTTP_AUTHORIZATION=f"Token {self.admin_token}"
             )
         self.assertEqual(response.status_code, 200)
+        update_concepts_apply_async_mock.assert_called()
+        update_mappings_apply_async_mock.assert_called()
 
     def test_delete_collection_failure(self):
         collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
@@ -4324,7 +4329,10 @@ class CollectionViewsAPITest(OCLAPITestCase):
         )
         self.assertEqual(second.status_code, 409)
 
-    def test_version_get_object_updates_active_counts_when_not_test_mode(self):
+    @patch('core.common.tasks.update_collection_active_mappings_count.apply_async')
+    @patch('core.common.tasks.update_collection_active_concepts_count.apply_async')
+    def test_version_get_object_updates_active_counts_when_not_test_mode(
+            self, update_concepts_apply_async_mock, update_mappings_apply_async_mock):
         collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
         version = OrganizationCollectionFactory(
             mnemonic=collection.mnemonic, organization=collection.organization, version='v1',
@@ -4335,6 +4343,8 @@ class CollectionViewsAPITest(OCLAPITestCase):
                 version.uri, HTTP_AUTHORIZATION=f"Token {self.admin_token}"
             )
         self.assertEqual(response.status_code, 200)
+        update_concepts_apply_async_mock.assert_called()
+        update_mappings_apply_async_mock.assert_called()
 
     def test_version_delete_failure(self):
         collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
