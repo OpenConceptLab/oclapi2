@@ -2,12 +2,15 @@ import threading
 from unittest.mock import ANY, Mock, patch
 
 import factory
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError
+from django.http import QueryDict
 from django.test import override_settings
 from pydash import omit
 
 from core.collections.models import CollectionReference
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
-from core.common.constants import OPENMRS_VALIDATION_SCHEMA, HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW
+from core.common.constants import OPENMRS_VALIDATION_SCHEMA, HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, LATEST
 from core.common.search import Reranker
 from core.common.tests import OCLTestCase
 from core.concepts.constants import (
@@ -18,11 +21,14 @@ from core.concepts.constants import (
     OPENMRS_NO_MORE_THAN_ONE_SHORT_NAME_PER_LOCALE, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED,
     OPENMRS_CONCEPT_CLASS, OPENMRS_DATATYPE, OPENMRS_DESCRIPTION_TYPE, OPENMRS_NAME_LOCALE)
 from core.concepts.documents import ConceptDocument
-from core.concepts.models import Concept
+from core.concepts.models import AbstractLocalizedText, Concept
 from core.concepts.serializers import ConceptListSerializer, ConceptVersionListSerializer, ConceptDetailSerializer, \
-    ConceptVersionDetailSerializer, ConceptMinimalSerializer
+    ConceptVersionDetailSerializer, ConceptMinimalSerializer, ConceptCascadeMinimalSerializer, \
+    ConceptLocaleSerializer, ConceptDescriptionSerializer, ConceptLookupListSerializer, \
+    ConceptVersionExportSerializer, ConceptChildrenSerializer, ConceptParentsSerializer
 from core.concepts.tests.factories import ConceptNameFactory, ConceptFactory, ConceptDescriptionFactory
 from core.concepts.validators import ValidatorSpecifier
+from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
 from core.sources.tests.factories import OrganizationSourceFactory
 
@@ -35,6 +41,14 @@ class LocalizedTextTest(OCLTestCase):
             omit(saved_locale.__dict__, ['_state', 'id', 'created_at']),
             omit(cloned_locale.__dict__, ['_state', 'id', 'created_at'])
         )
+
+    def test_build_base_is_a_noop(self):
+        # AbstractLocalizedText._build is only reached when a concrete subclass fails to override it.
+        self.assertIsNone(AbstractLocalizedText._build({}))  # pylint: disable=protected-access
+
+    def test_is_fully_specified_after_clean(self):
+        self.assertTrue(ConceptNameFactory.build(type='Fully Specified').is_fully_specified_after_clean)
+        self.assertFalse(ConceptNameFactory.build(type=None).is_fully_specified_after_clean)
 
 
 class ConceptTest(OCLTestCase):
@@ -1845,6 +1859,522 @@ class ConceptTest(OCLTestCase):
                 concept.summary_properties,
                 []
             )
+
+    def test_get_resource_url_kwarg(self):
+        self.assertEqual(Concept.get_resource_url_kwarg(), 'concept')
+
+    def test_get_version_url_kwarg(self):
+        self.assertEqual(Concept.get_version_url_kwarg(), 'concept_version')
+
+    def test_get_brief_serializer(self):
+        self.assertEqual(Concept.get_brief_serializer(), ConceptMinimalSerializer)
+
+    def test_get_serializer_class_brief_cascade(self):
+        self.assertEqual(Concept.get_serializer_class(brief=True, cascade=True), ConceptCascadeMinimalSerializer)
+
+    def test_preferred_locale_returns_none_on_exception(self):
+        concept = ConceptFactory()
+        with patch.object(
+                Concept, '_Concept__get_parent_default_locale_name', side_effect=Exception('boom')):
+            self.assertIsNone(concept.preferred_locale)
+
+    def test_retired_descriptions(self):
+        concept = ConceptFactory(descriptions=[ConceptDescriptionFactory.build(retired=True)])
+        self.assertEqual(concept.retired_descriptions.count(), 1)
+
+    def test_saved_unsaved_descriptions_without_id(self):
+        concept = Concept()
+        concept.cloned_descriptions = [ConceptDescriptionFactory.build()]
+        self.assertEqual(len(concept.saved_unsaved_descriptions), 1)
+
+    def test_saved_unsaved_names_without_id(self):
+        concept = Concept()
+        concept.cloned_names = [ConceptNameFactory.build()]
+        self.assertEqual(len(concept.saved_unsaved_names), 1)
+
+    def test_get_base_queryset_latest_released_source(self):
+        source = OrganizationSourceFactory()
+        source_v1 = OrganizationSourceFactory(
+            organization=source.organization, mnemonic=source.mnemonic, version='v1', released=True)
+        concept = ConceptFactory(parent=source)
+        latest_concept_version = concept.get_latest_version()
+        latest_concept_version.sources.add(source_v1)
+
+        queryset = Concept.get_base_queryset({
+            'org': source.organization.mnemonic, 'source': source.mnemonic, 'version': LATEST
+        })
+
+        self.assertIn(latest_concept_version.id, queryset.values_list('id', flat=True))
+
+    def test_get_base_queryset_latest_released_not_found_returns_none(self):
+        queryset = Concept.get_base_queryset({
+            'org': 'NoSuchOrg', 'source': 'NoSuchSource', 'version': LATEST
+        })
+        self.assertEqual(queryset.count(), 0)
+
+    def test_get_base_queryset_latest_released_collection(self):
+        collection = OrganizationCollectionFactory()
+        collection_v1 = OrganizationCollectionFactory(
+            organization=collection.organization, mnemonic=collection.mnemonic, version='v1', released=True)
+        expansion = ExpansionFactory(collection_version=collection_v1)
+        concept = ConceptFactory()
+        expansion.concepts.add(concept)
+
+        queryset = Concept.get_base_queryset({
+            'org': collection.organization.mnemonic, 'collection': collection.mnemonic, 'version': LATEST
+        })
+
+        self.assertIn(concept.id, queryset.values_list('id', flat=True))
+
+    def test_create_mappings_handles_unexpected_exception(self):
+        concept = ConceptFactory()
+
+        results, any_with_errors = concept.create_mappings(['not-a-dict'])
+
+        self.assertTrue(any_with_errors)
+        self.assertIn('__all__', results[0]['errors'])
+
+    def test_create_mappings_appends_generic_error_when_creation_silently_fails(self):
+        concept = ConceptFactory()
+        fake_mapping = Mock(errors={}, id=None)
+        with patch.object(Concept, '_create_mapping_from_self', return_value=fake_mapping):
+            results, any_with_errors = concept.create_mappings([{'map_type': 'Same As'}])
+
+        self.assertTrue(any_with_errors)
+        self.assertEqual(results[0]['errors'], {'__all__': ['Something bad happened while creating the mapping.']})
+
+    def test_validate_mapping_create_from_self(self):
+        # _validate_mapping_create_from_self never sets `version` on the candidate Mapping,
+        # so full_clean() always raises -- there are no callers of this method anywhere.
+        source = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source)
+        concept2 = ConceptFactory(parent=source)
+
+        with self.assertRaises(ValidationError) as context:
+            concept1._validate_mapping_create_from_self(  # pylint: disable=protected-access
+                {'map_type': 'Same As', 'to_concept_url': concept2.uri}, concept1.created_by
+            )
+        self.assertIn('version', context.exception.message_dict)
+
+    def test_validate_mapping_create_from_self_with_parent_concept_sentinel(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source)
+
+        with self.assertRaises(ValidationError) as context:
+            concept._validate_mapping_create_from_self(  # pylint: disable=protected-access
+                {'map_type': 'Same As', 'to_concept': '__parent_concept'}, concept.created_by
+            )
+        self.assertIn('version', context.exception.message_dict)
+
+    def test_rollback_mapping_operations(self):
+        source = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source)
+        concept2 = ConceptFactory(parent=source)
+        mapping = MappingFactory(from_concept=concept1, to_concept=concept2, parent=source)
+
+        Concept._rollback_mapping_operations([  # pylint: disable=protected-access
+            {'__action': None, 'versioned_object_id': None},  # continue branch: no op_type/mapping_id
+            {'__action': 'create', 'versioned_object_id': mapping.versioned_object_id},
+        ])
+
+        self.assertFalse(Mapping.objects.filter(versioned_object_id=mapping.versioned_object_id).exists())
+
+    def test_rollback_latest_version_to_noop_without_prev(self):
+        concept = ConceptFactory()
+        self.assertIsNone(concept.rollback_latest_version_to(None))
+
+    def test_upsert_or_delete_mappings_mapping_not_found(self):
+        concept = ConceptFactory()
+
+        results, any_with_errors = concept.upsert_or_delete_mappings(
+            [{'id': 'no-such-mapping-id', 'action': '__delete'}], concept.created_by
+        )
+
+        self.assertTrue(any_with_errors)
+        self.assertIn('id', results[0]['errors'])
+
+    def test_upsert_or_delete_mappings_delete_missing_id_raises(self):
+        concept = ConceptFactory()
+
+        results, any_with_errors = concept.upsert_or_delete_mappings(
+            [{'action': '__delete'}], concept.created_by
+        )
+
+        self.assertTrue(any_with_errors)
+        self.assertIn('id', results[0]['errors'])
+
+    def test_upsert_or_delete_mappings_generic_exception(self):
+        concept = ConceptFactory()
+        source = OrganizationSourceFactory()
+        concept2 = ConceptFactory(parent=source)
+        mapping = MappingFactory(from_concept=concept, to_concept=concept2, parent=concept.parent)
+
+        with patch.object(Concept, 'find_direct_mapping', side_effect=Exception('boom')):
+            results, any_with_errors = concept.upsert_or_delete_mappings(
+                [{'id': mapping.mnemonic}], concept.created_by
+            )
+
+        self.assertTrue(any_with_errors)
+        self.assertEqual(results[0]['errors'], {'__all__': ['boom']})
+
+    def test_remove_mappings_just_created_ignores_integrity_error(self):
+        fake_instance = Mock(id=1)
+        fake_instance.delete = Mock(side_effect=IntegrityError('boom'))
+
+        Concept._remove_mappings_just_created(  # pylint: disable=protected-access
+            [{'instance': fake_instance}]
+        )
+
+        fake_instance.delete.assert_called_once()
+
+    def test_validate_locales_limit_raises_for_too_many_names(self):
+        with self.assertRaises(ValidationError):
+            Concept.validate_locales_limit([{'name': 'x'}] * 501, [])
+
+    def test_validate_locales_limit_raises_for_too_many_descriptions(self):
+        with self.assertRaises(ValidationError):
+            Concept.validate_locales_limit([], [{'name': 'x'}] * 501)
+
+    def test_get_unidirectional_mappings_for_collection(self):
+        source = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source)
+        concept2 = ConceptFactory(parent=source)
+        mapping = MappingFactory(from_concept=concept1, to_concept=concept2, parent=source)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        expansion.mappings.add(mapping)
+
+        results = concept1.get_unidirectional_mappings_for_collection(collection.uri)
+
+        self.assertIn(mapping.id, results.values_list('id', flat=True))
+
+    def test_get_indirect_mappings_for_collection(self):
+        source = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source)
+        concept2 = ConceptFactory(parent=source)
+        mapping = MappingFactory(from_concept=concept1, to_concept=concept2, parent=source)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        expansion.mappings.add(mapping)
+
+        results = concept2.get_indirect_mappings_for_collection(collection.uri)
+
+        self.assertIn(mapping.id, results.values_list('id', flat=True))
+
+    def test_get_hierarchy_concept_urls_versioned(self):
+        source = OrganizationSourceFactory()
+        parent_concept = ConceptFactory(parent=source)
+        child_concept = ConceptFactory(parent=source)
+        child_concept.parent_concepts.add(parent_concept)
+
+        urls = child_concept.get_hierarchy_concept_urls('parent_concepts', versioned=True)
+
+        self.assertEqual(urls, [])  # parent_concept's uri here is unversioned, so nothing qualifies
+
+    def test_has_children_via_versioned_object(self):
+        source = OrganizationSourceFactory()
+        parent_concept = ConceptFactory(parent=source)
+        child_concept = ConceptFactory(parent=source)
+        latest_parent = parent_concept.get_latest_version()
+        latest_child = child_concept.get_latest_version()
+        latest_child.parent_concepts.add(latest_parent)
+
+        self.assertTrue(latest_parent.versioned_object.has_children)
+
+    def test_cascade_returns_self_without_repo_version(self):
+        concept = ConceptFactory()
+        result = concept.cascade(repo_version=None)
+        self.assertEqual(list(result['concepts'].values_list('id', flat=True)), [concept.id])
+
+    def test_cascade_with_string_repo_version_no_match_returns_self(self):
+        concept = ConceptFactory()
+        result = concept.cascade(repo_version='no-such-version')
+        self.assertEqual(list(result['concepts'].values_list('id', flat=True)), [concept.id])
+
+    def test_cascade_as_hierarchy_with_string_repo_version_no_match(self):
+        concept = ConceptFactory()
+        result = concept.cascade_as_hierarchy(repo_version='no-such-version')
+        self.assertEqual(result, concept)
+
+    def test_cascaded_resources_reverse_for_collection_version_without_expansion(self):
+        collection = OrganizationCollectionFactory()
+        concept = ConceptFactory()
+
+        result = concept.cascaded_resources_reverse_for_collection_version(collection)
+
+        self.assertEqual(list(result['concepts'].values_list('id', flat=True)), [concept.id])
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.concepts.models.update_mappings_concept')
+    def test_persist_new_queues_update_mappings_concept_task(self, update_mappings_concept_mock):
+        source = OrganizationSourceFactory(version=HEAD)
+        Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'queued-c1', 'parent': source,
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
+        })
+
+        update_mappings_concept_mock.apply_async.assert_called_once_with(
+            (ANY,), queue='default', permanent=False)
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.concepts.models.process_hierarchy_for_new_concept')
+    @patch('core.concepts.models.update_mappings_concept')
+    def test_persist_new_queues_process_hierarchy_task(self, _update_mappings_mock, process_hierarchy_mock):
+        source = OrganizationSourceFactory(version=HEAD)
+        parent_concept = ConceptFactory(parent=source)
+        Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'queued-c2', 'parent': source,
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)],
+            'parent_concept_urls': [parent_concept.uri],
+        })
+
+        process_hierarchy_mock.apply_async.assert_called_once()
+
+    def test_persist_new_rolls_back_on_integrity_error(self):
+        source = OrganizationSourceFactory(version=HEAD)
+        with patch.object(Concept, 'full_clean', side_effect=IntegrityError('boom')):
+            concept = Concept.persist_new({
+                **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'ie-c1', 'parent': source,
+                'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
+            })
+
+        self.assertEqual(concept.errors, {'__all__': ('boom',)})
+        self.assertIsNone(concept.id)
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.concepts.models.process_hierarchy_for_new_parent_concept_version')
+    def test_process_prev_latest_version_hierarchy_queues_task(self, process_hierarchy_mock):
+        source = OrganizationSourceFactory(version=HEAD)
+        concept = ConceptFactory(parent=source)
+        prev_latest = concept.get_latest_version()
+
+        concept._process_prev_latest_version_hierarchy(prev_latest)  # pylint: disable=protected-access
+
+        process_hierarchy_mock.apply_async.assert_called_once_with(
+            (prev_latest.id, concept.id), queue='concurrent', permanent=False)
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.concepts.models.process_hierarchy_for_concept_version')
+    def test_process_latest_version_hierarchy_queues_task(self, process_hierarchy_mock):
+        source = OrganizationSourceFactory(version=HEAD)
+        concept = ConceptFactory(parent=source)
+
+        concept._process_latest_version_hierarchy(None)  # pylint: disable=protected-access
+
+        process_hierarchy_mock.apply_async.assert_called_once_with(
+            (concept.id, None, None, True), queue='concurrent', permanent=False)
+
+
+class ConceptSerializersTest(OCLTestCase):
+    @staticmethod
+    def build_context(query_string='', instance=None, view_kwargs=None):
+        request = Mock(query_params=QueryDict(query_string), instance=instance, path='/concepts/')
+        return {'request': request, 'view': Mock(kwargs=view_kwargs or {})}
+
+    @staticmethod
+    def create_reference(collection, concept):
+        reference = CollectionReference(expression=concept.uri, collection=collection)
+        reference.save()
+        reference.concepts.add(concept)
+        return reference
+
+    def test_concept_locale_serializer_get_locale_type_ignores_wrapper_type(self):
+        locale = ConceptNameFactory.build(type='Short')
+        result = ConceptLocaleSerializer.get_locale_type({'type': 'ConceptName'}, locale)
+        self.assertEqual(result, 'Short')
+
+    def test_concept_description_serializer_to_representation(self):
+        description = ConceptDescriptionFactory.build()
+        serializer = ConceptDescriptionSerializer(context=self.build_context())
+        ret = serializer.to_representation(description)
+        self.assertEqual(ret['type'], 'ConceptDescription')
+
+    def test_concept_detail_serializer_create_parent_version_defaults_true(self):
+        serializer = ConceptDetailSerializer(context=self.build_context())
+        self.assertTrue(serializer.create_parent_version)
+
+    def test_get_references_returns_none_without_collection_instance(self):
+        concept = ConceptFactory()
+        serializer = ConceptListSerializer(context=self.build_context(instance=None))
+        self.assertIsNone(serializer.get_references(concept))
+
+    def test_get_references_verbose(self):
+        collection = OrganizationCollectionFactory()
+        concept = ConceptFactory()
+        self.create_reference(collection, concept)
+        serializer = ConceptListSerializer(
+            context=self.build_context('includeReferences=true', instance=collection))
+        result = serializer.get_references(concept)
+        self.assertEqual(len(result), 1)
+
+    def test_get_references_non_verbose(self):
+        collection = OrganizationCollectionFactory()
+        concept = ConceptFactory()
+        reference = self.create_reference(collection, concept)
+        serializer = ConceptListSerializer(context=self.build_context(instance=collection))
+        result = serializer.get_references(concept)
+        self.assertEqual(result, [f"{collection.uri}references/{reference.id}/"])
+
+    def test_get_mappings_direct_with_map_types_and_target_repo_urls_filters(self):
+        source = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source)
+        concept2 = ConceptFactory(parent=source)
+        MappingFactory(from_concept=concept1, to_concept=concept2, parent=source, map_type='Same As')
+
+        serializer = ConceptListSerializer(context=self.build_context('includeMappings=true&mapTypes=Same As'))
+        result = serializer.get_mappings(concept1)
+        self.assertEqual(len(result), 1)
+
+        serializer = ConceptListSerializer(context=self.build_context(
+            'includeMappings=true&mapTypes=Different Type'))
+        result = serializer.get_mappings(concept1)
+        self.assertEqual(result, [])
+
+        serializer = ConceptListSerializer(context=self.build_context(
+            'includeMappings=true&targetRepoUrls=https://example.com/no-such-source/'))
+        result = serializer.get_mappings(concept1)
+        self.assertEqual(result, [])
+
+    def test_get_mappings_returns_empty_list_by_default(self):
+        concept = ConceptFactory()
+        serializer = ConceptListSerializer(context=self.build_context())
+        self.assertEqual(serializer.get_mappings(concept), [])
+
+    def test_get_child_concepts(self):
+        source = OrganizationSourceFactory()
+        parent_concept = ConceptFactory(parent=source)
+        child_concept = ConceptFactory(parent=source)
+        parent_concept.child_concepts.add(child_concept)
+
+        serializer = ConceptListSerializer(context=self.build_context('includeChildConcepts=true'))
+        self.assertEqual(len(serializer.get_child_concepts(parent_concept)), 1)
+
+        serializer = ConceptListSerializer(context=self.build_context())
+        self.assertIsNone(serializer.get_child_concepts(parent_concept))
+
+    def test_get_parent_concepts(self):
+        source = OrganizationSourceFactory()
+        parent_concept = ConceptFactory(parent=source)
+        child_concept = ConceptFactory(parent=source)
+        child_concept.parent_concepts.add(parent_concept)
+
+        serializer = ConceptListSerializer(context=self.build_context('includeParentConcepts=true'))
+        self.assertEqual(len(serializer.get_parent_concepts(child_concept)), 1)
+
+        serializer = ConceptListSerializer(context=self.build_context())
+        self.assertIsNone(serializer.get_parent_concepts(child_concept))
+
+    def test_get_hierarchy_path(self):
+        concept = ConceptFactory()
+
+        serializer = ConceptListSerializer(context=self.build_context('includeHierarchyPath=true'))
+        self.assertEqual(serializer.get_hierarchy_path(concept), concept.get_hierarchy_path())
+
+        serializer = ConceptListSerializer(context=self.build_context())
+        self.assertIsNone(serializer.get_hierarchy_path(concept))
+
+    def test_get_summary(self):
+        concept = ConceptFactory()
+
+        serializer = ConceptListSerializer(context=self.build_context('includeSummary=true'))
+        self.assertIsNotNone(serializer.get_summary(concept))
+
+        serializer = ConceptListSerializer(context=self.build_context())
+        self.assertIsNone(serializer.get_summary(concept))
+
+    def test_concept_lookup_list_serializer_verbose(self):
+        concept = ConceptFactory()
+        serializer = ConceptLookupListSerializer(concept, context=self.build_context('verbose=true'))
+        self.assertIn('display_name', serializer.data)
+        self.assertIn('locale', serializer.data)
+
+    def test_concept_lookup_list_serializer_non_verbose(self):
+        concept = ConceptFactory()
+        serializer = ConceptLookupListSerializer(concept, context=self.build_context())
+        self.assertNotIn('display_name', serializer.data)
+        self.assertNotIn('locale', serializer.data)
+
+    def test_concept_version_export_serializer_get_previous_version_url_fallback(self):
+        concept = ConceptFactory()
+        serializer = ConceptVersionExportSerializer(context={})
+        self.assertEqual(serializer.get_previous_version_url(concept), concept.prev_version_uri)
+
+    def test_concept_version_detail_serializer_get_references(self):
+        collection = OrganizationCollectionFactory()
+        concept = ConceptFactory()
+        reference = self.create_reference(collection, concept)
+
+        serializer = ConceptVersionDetailSerializer(context=self.build_context(
+            'includeReferences=true', instance=collection))
+        result = serializer.get_references(concept)
+        self.assertEqual(len(result), 1)
+
+        serializer = ConceptVersionDetailSerializer(context=self.build_context(instance=collection))
+        result = serializer.get_references(concept)
+        self.assertEqual(result, [f"{collection.uri}references/{reference.id}/"])
+
+        serializer = ConceptVersionDetailSerializer(context=self.build_context(instance=None))
+        self.assertIsNone(serializer.get_references(concept))
+
+    def test_concept_version_detail_serializer_get_mappings(self):
+        source = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=source)
+        concept2 = ConceptFactory(parent=source)
+        MappingFactory(from_concept=concept1, to_concept=concept2, parent=source)
+
+        serializer = ConceptVersionDetailSerializer(context=self.build_context('includeInverseMappings=true'))
+        self.assertEqual(len(serializer.get_mappings(concept2)), 1)
+
+        serializer = ConceptVersionDetailSerializer(context=self.build_context('includeMappings=true'))
+        self.assertEqual(len(serializer.get_mappings(concept1)), 1)
+
+    def test_concept_version_detail_serializer_get_child_concepts(self):
+        source = OrganizationSourceFactory()
+        parent_concept = ConceptFactory(parent=source)
+        child_concept = ConceptFactory(parent=source)
+        parent_concept.child_concepts.add(child_concept)
+
+        serializer = ConceptVersionDetailSerializer(context=self.build_context('includeChildConcepts=true'))
+        self.assertEqual(len(serializer.get_child_concepts(parent_concept)), 1)
+
+        serializer = ConceptVersionDetailSerializer(context=self.build_context())
+        self.assertIsNone(serializer.get_child_concepts(parent_concept))
+
+    def test_concept_version_detail_serializer_get_parent_concepts(self):
+        source = OrganizationSourceFactory()
+        parent_concept = ConceptFactory(parent=source)
+        child_concept = ConceptFactory(parent=source)
+        child_concept.parent_concepts.add(parent_concept)
+
+        serializer = ConceptVersionDetailSerializer(context=self.build_context('includeParentConcepts=true'))
+        self.assertEqual(len(serializer.get_parent_concepts(child_concept)), 1)
+
+        serializer = ConceptVersionDetailSerializer(context=self.build_context())
+        self.assertIsNone(serializer.get_parent_concepts(child_concept))
+
+    def test_concept_children_serializer_get_children(self):
+        source = OrganizationSourceFactory()
+        parent_concept = ConceptFactory(parent=source)
+        child_concept = ConceptFactory(parent=source)
+        parent_concept.child_concepts.add(child_concept)
+
+        serializer = ConceptChildrenSerializer(context=self.build_context('includeChildConcepts=true'))
+        self.assertEqual(serializer.get_children(parent_concept), parent_concept.child_concept_urls)
+
+        serializer = ConceptChildrenSerializer(context=self.build_context())
+        self.assertIsNone(serializer.get_children(parent_concept))
+
+    def test_concept_parents_serializer_get_parents(self):
+        source = OrganizationSourceFactory()
+        parent_concept = ConceptFactory(parent=source)
+        child_concept = ConceptFactory(parent=source)
+        child_concept.parent_concepts.add(parent_concept)
+
+        serializer = ConceptParentsSerializer(context=self.build_context('includeParentConcepts=true'))
+        self.assertEqual(serializer.get_parents(child_concept), child_concept.parent_concept_urls)
+
+        serializer = ConceptParentsSerializer(context=self.build_context())
+        self.assertIsNone(serializer.get_parents(child_concept))
 
 
 class OpenMRSConceptValidatorTest(OCLTestCase):
