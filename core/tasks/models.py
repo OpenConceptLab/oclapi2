@@ -50,10 +50,7 @@ class Task(models.Model):
             try:
                 return json.loads(self.result)
             except Exception:  # pylint: disable=broad-except
-                try:
-                    return json.loads(self.result)
-                except Exception:  # pylint: disable=broad-except
-                    return self.result
+                pass
         return self.result
 
     @property
