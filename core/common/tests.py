@@ -1274,6 +1274,61 @@ class BaseModelTest(OCLTestCase):
             call([1, 2], parallel=True),
         ])
 
+    @override_settings(TEST_MODE=False)
+    def test_batch_index_full_continues_remaining_batches_after_error(self):
+        # A failing batch must not abort the remaining batches -- see OpenConceptLab/ocl_issues#2694.
+        ordered_queryset = MagicMock()
+
+        def get_batch(batch_slice):
+            if batch_slice == slice(0, 500, None):
+                return [1, 2]
+            if batch_slice == slice(500, 1000, None):
+                return [3]
+            return []
+
+        ordered_queryset.__getitem__.side_effect = get_batch
+
+        queryset = Mock()
+        queryset.order_by.return_value = ordered_queryset
+        queryset.prefetch_related.return_value = queryset
+        queryset.select_related.return_value = queryset
+
+        doc_instance = Mock()
+        doc_instance.django.auto_refresh = False
+        doc_instance.update.side_effect = [Exception('mapping conflict'), None]
+        document = Mock(return_value=doc_instance)
+        document.__name__ = 'ConceptDocument'
+
+        with patch('core.common.models.ERRBIT_LOGGER') as errbit_mock:
+            BaseModel.batch_index_full(False, queryset, document, None, None)
+
+        self.assertEqual(doc_instance.update.call_args_list, [
+            call([1, 2], parallel=True),
+            call([3], parallel=True),
+        ])
+        errbit_mock.log.assert_called_once()
+
+    @override_settings(TEST_MODE=False)
+    def test_batch_index_full_with_no_failures_is_unchanged(self):
+        ordered_queryset = MagicMock()
+        ordered_queryset.__getitem__.side_effect = lambda s: [1, 2] if s == slice(0, 500, None) else []
+
+        queryset = Mock()
+        queryset.order_by.return_value = ordered_queryset
+        queryset.prefetch_related.return_value = queryset
+        queryset.select_related.return_value = queryset
+
+        doc_instance = Mock()
+        doc_instance.django.auto_refresh = False
+        document = Mock(return_value=doc_instance)
+        document.__name__ = 'ConceptDocument'
+
+        with patch('core.common.models.ERRBIT_LOGGER') as errbit_mock:
+            BaseModel.batch_index_full(False, queryset, document, None, None)
+
+        self.assertEqual(doc_instance.update.call_args_list, [call([1, 2], parallel=True)])
+        errbit_mock.log.assert_not_called()
+
     def test_batch_index_routes_append_source_version_partial_doc(self):
         queryset, document = Mock(), Mock()
         with patch.object(BaseModel, 'batch_index_source_version_append') as append_mock:

@@ -1,3 +1,5 @@
+import logging
+
 from celery.result import AsyncResult
 from celery_once import AlreadyQueued
 from django.conf import settings
@@ -42,6 +44,8 @@ from .tasks import handle_save, handle_m2m_changed, seed_children_to_new_version
 from ..toggles.models import Toggle
 
 TRUTHY = get_truthy_values()
+
+logger = logging.getLogger('oclapi')
 
 
 class BaseModel(models.Model):
@@ -266,15 +270,33 @@ class BaseModel(models.Model):
 
         if single_batch:
             doc.update(queryset.all(), parallel=parallel)
-        else:
-            batch_size = 500
-            start = 0
-            while True:
-                batch = list(queryset.order_by('-id')[start:start+batch_size])
-                if not batch:
-                    break
+            return
+
+        batch_size = 500
+        start = 0
+        failed_batches = []
+        while True:
+            batch = list(queryset.order_by('-id')[start:start+batch_size])
+            if not batch:
+                break
+            try:
                 doc.update(batch, parallel=parallel)
-                start += batch_size
+            except Exception as ex:  # pylint: disable=broad-except
+                # One bad batch must not stop the remaining batches from ever being tried --
+                # log it and keep going, same as batch_index_partial_by_ids.
+                logger.error(
+                    'batch_index_full failed for %s batch (start=%s, size=%s): %s',
+                    document.__name__, start, len(batch), ex.args
+                )
+                ERRBIT_LOGGER.log(ex)
+                failed_batches.append(start)
+            start += batch_size
+
+        if failed_batches:
+            logger.error(
+                'batch_index_full for %s finished with %s failed batch(es) out of %s (start indexes: %s)',
+                document.__name__, len(failed_batches), start // batch_size, failed_batches
+            )
 
     @staticmethod
     def batch_index_partial_by_ids(  # pylint: disable=too-many-arguments
