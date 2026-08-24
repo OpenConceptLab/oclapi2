@@ -67,13 +67,36 @@ class ConceptFacetedSearch(CustomESFacetedSearch):
         super().__init__(**kwargs)
 
     @staticmethod
-    def build_property_facets_from_source(parent):
+    def get_boolean_property_facet_field(code):
+        """
+        A boolean-declared property is mapped as `boolean` or `long` when extras hold a real
+        JSON boolean/int, and as `text` (with an auto `.keyword` sub-field) when extras hold the
+        literal string 'true'/'false'. Boolean and long fields have doc values and aggregate
+        directly on the bare field; text fields have fielddata disabled, so aggregating them
+        raises a 400 unless the `.keyword` sub-field is used instead. See
+        OpenConceptLab/ocl_issues#2699.
+        """
+        from elasticsearch_dsl.connections import connections  # pylint: disable=import-outside-toplevel
+        field = f"properties.{code}"
+        try:
+            mapping = connections.get_connection().indices.get_field_mapping(fields=field, index='concepts')
+        except Exception:  # pylint: disable=broad-except
+            return field
+        for index_mapping in mapping.values():
+            field_info = get(index_mapping, 'mappings').get(field, {}).get('mapping', {}).get(code, {})
+            if field_info.get('type') == 'text':
+                return f"{field}.keyword"
+        return field
+
+    @classmethod
+    def build_property_facets_from_source(cls, parent):
         property_types = get(parent, 'property_types') or {}
         facets = {}
         for _filter in (get(parent, 'filters') or []):
             code = _filter['code']
             if property_types.get(code) == 'boolean':
-                facets[f"properties__{code}"] = BooleanTermsFacet(field=f"properties.{code}", size=FACET_SIZE)
+                field = cls.get_boolean_property_facet_field(code)
+                facets[f"properties__{code}"] = BooleanTermsFacet(field=field, size=FACET_SIZE)
             else:
                 facets[f"properties__{code}"] = TermsFacet(field=f"properties.{code}.keyword", size=FACET_SIZE)
         return facets

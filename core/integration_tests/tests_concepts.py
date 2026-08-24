@@ -3067,11 +3067,13 @@ class ConceptPropertyFilterViewTest(OCLAPITestCase):
         self.source.properties = [
             {'code': 'pt_bool', 'type': 'boolean'},
             {'code': 'pt_intbool', 'type': 'boolean'},
+            {'code': 'pt_boolstr', 'type': 'boolean'},
             {'code': 'pt_str', 'type': 'string'},
         ]
         self.source.filters = [
             {'code': 'pt_bool', 'operator': '='},
             {'code': 'pt_intbool', 'operator': '='},
+            {'code': 'pt_boolstr', 'operator': '='},
             {'code': 'pt_str', 'operator': '='},
         ]
         self.source.save()
@@ -3080,11 +3082,16 @@ class ConceptPropertyFilterViewTest(OCLAPITestCase):
         self.true_concept = ConceptFactory(mnemonic='BoolTrue', parent=self.source, extras={'pt_bool': True})
         self.zero_concept = ConceptFactory(mnemonic='IntZero', parent=self.source, extras={'pt_intbool': 0})
         self.one_concept = ConceptFactory(mnemonic='IntOne', parent=self.source, extras={'pt_intbool': 1})
+        self.boolstr_false_concept = ConceptFactory(
+            mnemonic='BoolStrFalse', parent=self.source, extras={'pt_boolstr': 'false'})
+        self.boolstr_true_concept = ConceptFactory(
+            mnemonic='BoolStrTrue', parent=self.source, extras={'pt_boolstr': 'true'})
         self.str_concept = ConceptFactory(mnemonic='StrFalse', parent=self.source, extras={'pt_str': 'false'})
         self.bare_concept = ConceptFactory(mnemonic='NoProperty', parent=self.source, extras={})
         for concept in (
                 self.false_concept, self.true_concept, self.zero_concept,
-                self.one_concept, self.str_concept, self.bare_concept
+                self.one_concept, self.boolstr_false_concept, self.boolstr_true_concept,
+                self.str_concept, self.bare_concept
         ):
             self.source.concepts.add(concept.get_latest_version())
         ConceptDocument().update(self.source.concepts_set.all())
@@ -3103,12 +3110,13 @@ class ConceptPropertyFilterViewTest(OCLAPITestCase):
     def test_boolean_property_negation_includes_concepts_without_the_attribute(self):
         self.assertEqual(
             self.get_ids('?properties__pt_bool=!false'),
-            ['BoolTrue', 'IntOne', 'IntZero', 'NoProperty', 'StrFalse']
+            ['BoolStrFalse', 'BoolStrTrue', 'BoolTrue', 'IntOne', 'IntZero', 'NoProperty', 'StrFalse']
         )
 
     def test_boolean_property_empty_value_returns_concepts_without_the_attribute(self):
         self.assertEqual(
-            self.get_ids('?properties__pt_bool='), ['IntOne', 'IntZero', 'NoProperty', 'StrFalse']
+            self.get_ids('?properties__pt_bool='),
+            ['BoolStrFalse', 'BoolStrTrue', 'IntOne', 'IntZero', 'NoProperty', 'StrFalse']
         )
 
     def test_boolean_property_unparseable_value_does_not_error(self):
@@ -3131,7 +3139,7 @@ class ConceptPropertyFilterViewTest(OCLAPITestCase):
     def test_integer_valued_boolean_property_negation(self):
         self.assertEqual(
             self.get_ids('?properties__pt_intbool=!false'),
-            ['BoolFalse', 'BoolTrue', 'IntOne', 'NoProperty', 'StrFalse']
+            ['BoolFalse', 'BoolStrFalse', 'BoolStrTrue', 'BoolTrue', 'IntOne', 'NoProperty', 'StrFalse']
         )
 
     def test_integer_valued_boolean_property_does_not_error(self):
@@ -3153,7 +3161,7 @@ class ConceptPropertyFilterViewTest(OCLAPITestCase):
         self.assertEqual(self.get_ids('?properties__pt_str=false'), ['StrFalse'])
         self.assertEqual(
             self.get_ids('?properties__pt_str=!false'),
-            ['BoolFalse', 'BoolTrue', 'IntOne', 'IntZero', 'NoProperty']
+            ['BoolFalse', 'BoolStrFalse', 'BoolStrTrue', 'BoolTrue', 'IntOne', 'IntZero', 'NoProperty']
         )
 
         response = self.client.get(self.source.concepts_url + '?facetsOnly=true')
@@ -3162,6 +3170,36 @@ class ConceptPropertyFilterViewTest(OCLAPITestCase):
         buckets = response.data['facets']['fields']['properties__pt_str']
         self.assertEqual([bucket[0] for bucket in buckets], ['false'])
         self.assertTrue(buckets[0][1] >= 1)
+
+    def test_string_valued_boolean_property_value_match(self):
+        """
+        A boolean-declared property whose concepts store the literal string 'true'/'false'
+        (rather than a JSON boolean or 0/1) is mapped by Elasticsearch as `text`. See
+        OpenConceptLab/ocl_issues#2699.
+        """
+        self.assertEqual(self.get_ids('?properties__pt_boolstr=false'), ['BoolStrFalse'])
+        self.assertEqual(self.get_ids('?properties__pt_boolstr=0'), ['BoolStrFalse'])
+        self.assertEqual(self.get_ids('?properties__pt_boolstr=true'), ['BoolStrTrue'])
+        self.assertEqual(self.get_ids('?properties__pt_boolstr=1'), ['BoolStrTrue'])
+
+    def test_string_valued_boolean_property_negation(self):
+        self.assertEqual(
+            self.get_ids('?properties__pt_boolstr=!false'),
+            ['BoolFalse', 'BoolStrTrue', 'BoolTrue', 'IntOne', 'IntZero', 'NoProperty', 'StrFalse']
+        )
+
+    def test_string_valued_boolean_property_facet_buckets(self):
+        """
+        Regression test for OpenConceptLab/ocl_issues#2699: aggregating a boolean-declared
+        property mapped as `text` used to raise a 400 ('Fielddata is disabled on text fields')
+        because the facet aggregated the bare field instead of its `.keyword` sub-field.
+        """
+        response = self.client.get(self.source.concepts_url + '?facetsOnly=true')
+
+        self.assertEqual(response.status_code, 200)
+        buckets = sorted(response.data['facets']['fields']['properties__pt_boolstr'], key=lambda bucket: bucket[0])
+        self.assertEqual([bucket[0] for bucket in buckets], ['false', 'true'])
+        self.assertTrue(all(bucket[1] >= 1 for bucket in buckets))
 
 
 class ConceptNameRetrieveUpdateDestroyViewTest(OCLAPITestCase):
