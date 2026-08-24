@@ -1,11 +1,18 @@
+from itertools import chain
+
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
 
 from core.collections.models import Collection
-from core.common.constants import SUPER_ADMIN_USER_ID
-from core.common.utils import get_export_service
+from core.common.constants import SUPER_ADMIN_USER_ID, LIST_DEFAULT_LIMIT
+from core.common.utils import get_export_service, to_int
 from core.sources.models import Source
+
+
+class CountableRepoList(list):
+    def count(self):
+        return len(self)
 
 
 class Repository:
@@ -17,6 +24,33 @@ class Repository:
             repo = Collection.objects.filter(criteria).first()
 
         return repo
+
+    @classmethod
+    def get_base_querysets(cls, params, exclude_retired=True):
+        sources = Source.get_base_queryset(params.copy())
+        collections = Collection.get_base_queryset(params.copy())
+
+        if exclude_retired:
+            sources = sources.exclude(retired=True)
+            collections = collections.exclude(retired=True)
+
+        return sources, collections
+
+    @classmethod
+    def merge_querysets(cls, sources, collections, limit, page):
+        total_count = sources.count() + collections.count()
+
+        limit = to_int(limit, LIST_DEFAULT_LIMIT) or LIST_DEFAULT_LIMIT
+        if limit > 1000:
+            limit = LIST_DEFAULT_LIMIT
+        window = to_int(page, 1) * limit
+
+        windowed_sources = sources.order_by('-updated_at')[:window]
+        windowed_collections = collections.order_by('-updated_at')[:window]
+        merged = sorted(
+            chain(windowed_sources, windowed_collections), key=lambda repo: repo.updated_at, reverse=True
+        )
+        return CountableRepoList(merged), total_count
 
 
 class RepoExternalExport(models.Model):
