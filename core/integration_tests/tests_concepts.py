@@ -3087,11 +3087,13 @@ class ConceptPropertyFilterViewTest(OCLAPITestCase):
         self.boolstr_true_concept = ConceptFactory(
             mnemonic='BoolStrTrue', parent=self.source, extras={'pt_boolstr': 'true'})
         self.str_concept = ConceptFactory(mnemonic='StrFalse', parent=self.source, extras={'pt_str': 'false'})
+        self.str_prefix_concept = ConceptFactory(
+            mnemonic='StrPrefix', parent=self.source, extras={'pt_str': 'abcdef'})
         self.bare_concept = ConceptFactory(mnemonic='NoProperty', parent=self.source, extras={})
         for concept in (
                 self.false_concept, self.true_concept, self.zero_concept,
                 self.one_concept, self.boolstr_false_concept, self.boolstr_true_concept,
-                self.str_concept, self.bare_concept
+                self.str_concept, self.str_prefix_concept, self.bare_concept
         ):
             self.source.concepts.add(concept.get_latest_version())
         ConceptDocument().update(self.source.concepts_set.all())
@@ -3110,13 +3112,13 @@ class ConceptPropertyFilterViewTest(OCLAPITestCase):
     def test_boolean_property_negation_includes_concepts_without_the_attribute(self):
         self.assertEqual(
             self.get_ids('?properties__pt_bool=!false'),
-            ['BoolStrFalse', 'BoolStrTrue', 'BoolTrue', 'IntOne', 'IntZero', 'NoProperty', 'StrFalse']
+            ['BoolStrFalse', 'BoolStrTrue', 'BoolTrue', 'IntOne', 'IntZero', 'NoProperty', 'StrFalse', 'StrPrefix']
         )
 
     def test_boolean_property_empty_value_returns_concepts_without_the_attribute(self):
         self.assertEqual(
             self.get_ids('?properties__pt_bool='),
-            ['BoolStrFalse', 'BoolStrTrue', 'IntOne', 'IntZero', 'NoProperty', 'StrFalse']
+            ['BoolStrFalse', 'BoolStrTrue', 'IntOne', 'IntZero', 'NoProperty', 'StrFalse', 'StrPrefix']
         )
 
     def test_boolean_property_unparseable_value_does_not_error(self):
@@ -3139,7 +3141,7 @@ class ConceptPropertyFilterViewTest(OCLAPITestCase):
     def test_integer_valued_boolean_property_negation(self):
         self.assertEqual(
             self.get_ids('?properties__pt_intbool=!false'),
-            ['BoolFalse', 'BoolStrFalse', 'BoolStrTrue', 'BoolTrue', 'IntOne', 'NoProperty', 'StrFalse']
+            ['BoolFalse', 'BoolStrFalse', 'BoolStrTrue', 'BoolTrue', 'IntOne', 'NoProperty', 'StrFalse', 'StrPrefix']
         )
 
     def test_integer_valued_boolean_property_does_not_error(self):
@@ -3161,15 +3163,15 @@ class ConceptPropertyFilterViewTest(OCLAPITestCase):
         self.assertEqual(self.get_ids('?properties__pt_str=false'), ['StrFalse'])
         self.assertEqual(
             self.get_ids('?properties__pt_str=!false'),
-            ['BoolFalse', 'BoolStrFalse', 'BoolStrTrue', 'BoolTrue', 'IntOne', 'IntZero', 'NoProperty']
+            ['BoolFalse', 'BoolStrFalse', 'BoolStrTrue', 'BoolTrue', 'IntOne', 'IntZero', 'NoProperty', 'StrPrefix']
         )
 
         response = self.client.get(self.source.concepts_url + '?facetsOnly=true')
 
         self.assertEqual(response.status_code, 200)
-        buckets = response.data['facets']['fields']['properties__pt_str']
-        self.assertEqual([bucket[0] for bucket in buckets], ['false'])
-        self.assertTrue(buckets[0][1] >= 1)
+        buckets = sorted(response.data['facets']['fields']['properties__pt_str'], key=lambda bucket: bucket[0])
+        self.assertEqual([bucket[0] for bucket in buckets], ['abcdef', 'false'])
+        self.assertTrue(all(bucket[1] >= 1 for bucket in buckets))
 
     def test_string_valued_boolean_property_value_match(self):
         """
@@ -3185,7 +3187,7 @@ class ConceptPropertyFilterViewTest(OCLAPITestCase):
     def test_string_valued_boolean_property_negation(self):
         self.assertEqual(
             self.get_ids('?properties__pt_boolstr=!false'),
-            ['BoolFalse', 'BoolStrTrue', 'BoolTrue', 'IntOne', 'IntZero', 'NoProperty', 'StrFalse']
+            ['BoolFalse', 'BoolStrTrue', 'BoolTrue', 'IntOne', 'IntZero', 'NoProperty', 'StrFalse', 'StrPrefix']
         )
 
     def test_string_valued_boolean_property_facet_buckets(self):
@@ -3200,6 +3202,54 @@ class ConceptPropertyFilterViewTest(OCLAPITestCase):
         buckets = sorted(response.data['facets']['fields']['properties__pt_boolstr'], key=lambda bucket: bucket[0])
         self.assertEqual([bucket[0] for bucket in buckets], ['false', 'true'])
         self.assertTrue(all(bucket[1] >= 1 for bucket in buckets))
+
+    def test_property_prefix_filter_matches_same_field_as_exact_filter(self):
+        """
+        Regression test for OpenConceptLab/ocl_issues#2693: the prefix branch of the property
+        filter queried `properties.<code>` (elasticsearch-dsl expands `properties__<code>` to
+        that dotted path), while the exact-match branch queries `properties.<code>.keyword`.
+        A prefix filter on a property therefore hit the wrong field.
+        """
+        self.assertEqual(self.get_ids('?properties__pt_str=fals*'), ['StrFalse'])
+
+    def test_property_prefix_filter_ticket_example(self):
+        """
+        The literal scenario from ocl_issues#2693's acceptance criteria: a string property
+        valued 'abcdef', queried as `?properties__<code>=abc*`. A trailing '*' is now treated as
+        a glob-style "starts with" match (converted to a `.*` regex suffix internally, with the
+        rest of the value escaped) rather than passed straight through as a raw Elasticsearch
+        regexp -- otherwise `abc*` would mean "a, b, then zero-or-more c's" under regexp's
+        full-string-anchored semantics, and would never match 'abcdef'.
+        """
+        self.assertEqual(self.get_ids('?properties__pt_str=abc*'), ['StrPrefix'])
+
+    def test_property_prefix_filter_on_non_string_property_does_not_error(self):
+        """
+        Before the fix, a prefix filter on a non-string property raised a 400 ('regexp' query
+        against a boolean/long field) because it targeted the raw field instead of `.keyword`.
+        """
+        response = self.client.get(self.source.concepts_url + '?properties__pt_bool=true*')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, [])
+
+    def test_non_property_prefix_filter_uses_glob_semantics_too(self):
+        """
+        The trailing-'*' to '.*' conversion applies to every faceted field, not just properties:
+        `id` goes through the exact same regexp code path (via `additional_fields=['id', ...]`
+        in get_faceted_criterion) once Elasticsearch search is engaged, and was equally unable to
+        do a genuine "starts with" match before this fix (a raw regexp value of 'strpre*' does
+        not match 'strprefix' under Elasticsearch's full-string-anchored regexp semantics).
+
+        Two caveats, both out of scope for this fix and unrelated to the '*'-vs-'.*' bug:
+        - `retired=false` is added here only to force the ES search path -- a bare `?id=` filter
+          on a HEAD source's concept list doesn't reach get_faceted_criterion at all.
+        - `id` is an analyzed field indexed lowercase, and `regexp` queries are not run through
+          the field's analyzer, so the filter value must already be lowercase to match (hence
+          'strpre*', not 'StrPre*'). Properties don't have this problem since they filter against
+          the raw `.keyword` sub-field.
+        """
+        self.assertEqual(self.get_ids('?id=strpre*&retired=false'), ['StrPrefix'])
 
 
 class ConceptNameRetrieveUpdateDestroyViewTest(OCLAPITestCase):

@@ -1,4 +1,5 @@
 import base64
+import re
 from email.mime.image import MIMEImage
 
 import markdown
@@ -383,12 +384,12 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             not_query = val.startswith('!')
             vals = val.replace('!', '', 1).split(',')
             if prefix_query:
-                queries = [
-                    Q(
-                        'regexp',
-                        **{attr: {'value': _val.strip('\"').strip('\'')}}
-                    ) for _val in vals
-                ]
+                regexp_field = f"properties.{attr.split('properties__', 1)[1]}.keyword" \
+                    if attr.startswith('properties__') else attr
+                queries = []
+                for _val in vals:
+                    clean_val = _val.strip('\"').strip('\'').rstrip('*')
+                    queries.append(Q('regexp', **{regexp_field: {'value': f"{re.escape(clean_val)}.*"}}))
             else:
                 queries = [
                     get_query_criteria(attr, _val) for _val in vals
