@@ -262,11 +262,12 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         result = []
         if sort_fields:
             order_by = None if desc is None else self.__get_order_by(desc)
-            fields = sort_fields.lower().split(',')
-            for field in fields.copy():
-                field = field.strip()
-                is_desc = field.startswith('-')
-                field = field.replace('-', '', 1) if is_desc else field
+            fields = sort_fields.split(',')
+            for original_field in fields.copy():
+                original_field = original_field.strip()
+                is_desc = original_field.startswith('-')
+                original_field = original_field.replace('-', '', 1) if is_desc else original_field
+                field = original_field.lower()
                 order_details = order_by
                 if order_details is None:
                     order_details = self.__get_order_by(is_desc)
@@ -286,7 +287,14 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 if field in ['username', 'id'] and self.is_user_document():
                     current_result = {'_username': order_details}
                 if self.is_valid_sort(field):
-                    current_result = {field: order_details}
+                    sort_field = field
+                    if field.startswith('properties.'):
+                        # preserve the property code's original case -- it's a dynamic per-source
+                        # key, unlike the fixed lowercase 'properties.' prefix or other sort fields
+                        sort_field = original_field
+                        if not field.endswith('.keyword'):
+                            sort_field += '.keyword'
+                    current_result = {sort_field: order_details}
                 if current_result is not None:
                     result.append(current_result)
 

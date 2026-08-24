@@ -3069,12 +3069,14 @@ class ConceptPropertyFilterViewTest(OCLAPITestCase):
             {'code': 'pt_intbool', 'type': 'boolean'},
             {'code': 'pt_boolstr', 'type': 'boolean'},
             {'code': 'pt_str', 'type': 'string'},
+            {'code': 'PtMixedCase', 'type': 'string'},
         ]
         self.source.filters = [
             {'code': 'pt_bool', 'operator': '='},
             {'code': 'pt_intbool', 'operator': '='},
             {'code': 'pt_boolstr', 'operator': '='},
             {'code': 'pt_str', 'operator': '='},
+            {'code': 'PtMixedCase', 'operator': '='},
         ]
         self.source.save()
 
@@ -3089,11 +3091,16 @@ class ConceptPropertyFilterViewTest(OCLAPITestCase):
         self.str_concept = ConceptFactory(mnemonic='StrFalse', parent=self.source, extras={'pt_str': 'false'})
         self.str_prefix_concept = ConceptFactory(
             mnemonic='StrPrefix', parent=self.source, extras={'pt_str': 'abcdef'})
+        self.mixed_case_a_concept = ConceptFactory(
+            mnemonic='MixedA', parent=self.source, extras={'PtMixedCase': 'alpha'})
+        self.mixed_case_b_concept = ConceptFactory(
+            mnemonic='MixedB', parent=self.source, extras={'PtMixedCase': 'beta'})
         self.bare_concept = ConceptFactory(mnemonic='NoProperty', parent=self.source, extras={})
         for concept in (
                 self.false_concept, self.true_concept, self.zero_concept,
                 self.one_concept, self.boolstr_false_concept, self.boolstr_true_concept,
-                self.str_concept, self.str_prefix_concept, self.bare_concept
+                self.str_concept, self.str_prefix_concept,
+                self.mixed_case_a_concept, self.mixed_case_b_concept, self.bare_concept
         ):
             self.source.concepts.add(concept.get_latest_version())
         ConceptDocument().update(self.source.concepts_set.all())
@@ -3102,6 +3109,11 @@ class ConceptPropertyFilterViewTest(OCLAPITestCase):
         response = self.client.get(self.source.concepts_url + query)
         self.assertEqual(response.status_code, 200)
         return sorted(data['id'] for data in response.data)
+
+    def get_ordered_ids(self, query):
+        response = self.client.get(self.source.concepts_url + query)
+        self.assertEqual(response.status_code, 200)
+        return [data['id'] for data in response.data]
 
     def test_boolean_property_value_match(self):
         self.assertEqual(self.get_ids('?properties__pt_bool=false'), ['BoolFalse'])
@@ -3112,13 +3124,15 @@ class ConceptPropertyFilterViewTest(OCLAPITestCase):
     def test_boolean_property_negation_includes_concepts_without_the_attribute(self):
         self.assertEqual(
             self.get_ids('?properties__pt_bool=!false'),
-            ['BoolStrFalse', 'BoolStrTrue', 'BoolTrue', 'IntOne', 'IntZero', 'NoProperty', 'StrFalse', 'StrPrefix']
+            ['BoolStrFalse', 'BoolStrTrue', 'BoolTrue', 'IntOne', 'IntZero', 'MixedA', 'MixedB',
+             'NoProperty', 'StrFalse', 'StrPrefix']
         )
 
     def test_boolean_property_empty_value_returns_concepts_without_the_attribute(self):
         self.assertEqual(
             self.get_ids('?properties__pt_bool='),
-            ['BoolStrFalse', 'BoolStrTrue', 'IntOne', 'IntZero', 'NoProperty', 'StrFalse', 'StrPrefix']
+            ['BoolStrFalse', 'BoolStrTrue', 'IntOne', 'IntZero', 'MixedA', 'MixedB', 'NoProperty',
+             'StrFalse', 'StrPrefix']
         )
 
     def test_boolean_property_unparseable_value_does_not_error(self):
@@ -3141,7 +3155,8 @@ class ConceptPropertyFilterViewTest(OCLAPITestCase):
     def test_integer_valued_boolean_property_negation(self):
         self.assertEqual(
             self.get_ids('?properties__pt_intbool=!false'),
-            ['BoolFalse', 'BoolStrFalse', 'BoolStrTrue', 'BoolTrue', 'IntOne', 'NoProperty', 'StrFalse', 'StrPrefix']
+            ['BoolFalse', 'BoolStrFalse', 'BoolStrTrue', 'BoolTrue', 'IntOne', 'MixedA', 'MixedB',
+             'NoProperty', 'StrFalse', 'StrPrefix']
         )
 
     def test_integer_valued_boolean_property_does_not_error(self):
@@ -3163,7 +3178,8 @@ class ConceptPropertyFilterViewTest(OCLAPITestCase):
         self.assertEqual(self.get_ids('?properties__pt_str=false'), ['StrFalse'])
         self.assertEqual(
             self.get_ids('?properties__pt_str=!false'),
-            ['BoolFalse', 'BoolStrFalse', 'BoolStrTrue', 'BoolTrue', 'IntOne', 'IntZero', 'NoProperty', 'StrPrefix']
+            ['BoolFalse', 'BoolStrFalse', 'BoolStrTrue', 'BoolTrue', 'IntOne', 'IntZero', 'MixedA',
+             'MixedB', 'NoProperty', 'StrPrefix']
         )
 
         response = self.client.get(self.source.concepts_url + '?facetsOnly=true')
@@ -3187,7 +3203,8 @@ class ConceptPropertyFilterViewTest(OCLAPITestCase):
     def test_string_valued_boolean_property_negation(self):
         self.assertEqual(
             self.get_ids('?properties__pt_boolstr=!false'),
-            ['BoolFalse', 'BoolStrTrue', 'BoolTrue', 'IntOne', 'IntZero', 'NoProperty', 'StrFalse', 'StrPrefix']
+            ['BoolFalse', 'BoolStrTrue', 'BoolTrue', 'IntOne', 'IntZero', 'MixedA', 'MixedB',
+             'NoProperty', 'StrFalse', 'StrPrefix']
         )
 
     def test_string_valued_boolean_property_facet_buckets(self):
@@ -3250,6 +3267,52 @@ class ConceptPropertyFilterViewTest(OCLAPITestCase):
           the raw `.keyword` sub-field.
         """
         self.assertEqual(self.get_ids('?id=strpre*&retired=false'), ['StrPrefix'])
+
+    def test_sort_by_property_uses_keyword_field(self):
+        """
+        Regression test for OpenConceptLab/ocl_issues#2695: sorting by `properties.<code>` used
+        to return a 400 ('Fielddata is disabled on [properties.<code>]') because is_valid_sort
+        accepted any `properties.`-prefixed field and passed it straight to Elasticsearch,
+        without appending `.keyword` -- the only sortable variant, since a `properties.*` leaf
+        with no numeric/boolean value is mapped as `text`.
+        """
+        response = self.client.get(self.source.concepts_url + '?sort=properties.pt_str')
+        self.assertEqual(response.status_code, 200)
+
+        ordered = self.get_ordered_ids('?sort=properties.pt_str&limit=100')
+        relevant = [_id for _id in ordered if _id in ('StrFalse', 'StrPrefix')]
+        self.assertEqual(relevant, ['StrPrefix', 'StrFalse'])  # 'abcdef' < 'false'
+
+    def test_sort_by_property_explicit_keyword_is_unchanged(self):
+        response = self.client.get(self.source.concepts_url + '?sort=properties.pt_str.keyword')
+        self.assertEqual(response.status_code, 200)
+
+        ordered = self.get_ordered_ids('?sort=properties.pt_str.keyword&limit=100')
+        relevant = [_id for _id in ordered if _id in ('StrFalse', 'StrPrefix')]
+        self.assertEqual(relevant, ['StrPrefix', 'StrFalse'])
+
+    def test_sort_by_property_preserves_original_case(self):
+        """
+        The sort string used to be lowercased in full before use, so a mixed-case property code
+        like 'PtMixedCase' would be turned into 'properties.ptmixedcase' -- a field name that
+        doesn't exist, since Elasticsearch field names are case-sensitive and the actual indexed
+        field is 'properties.PtMixedCase'.
+        """
+        response = self.client.get(self.source.concepts_url + '?sort=properties.PtMixedCase')
+        self.assertEqual(response.status_code, 200)
+
+        ordered = self.get_ordered_ids('?sort=properties.PtMixedCase&limit=100')
+        relevant = [_id for _id in ordered if _id in ('MixedA', 'MixedB')]
+        self.assertEqual(relevant, ['MixedA', 'MixedB'])  # 'alpha' < 'beta'
+
+        ordered_desc = self.get_ordered_ids('?sort=-properties.PtMixedCase&limit=100')
+        relevant_desc = [_id for _id in ordered_desc if _id in ('MixedA', 'MixedB')]
+        self.assertEqual(relevant_desc, ['MixedB', 'MixedA'])
+
+    def test_sort_by_non_property_field_is_unchanged(self):
+        ordered = self.get_ordered_ids('?sort=id&limit=100')
+        relevant = [_id for _id in ordered if _id in ('BoolFalse', 'BoolTrue')]
+        self.assertEqual(relevant, ['BoolFalse', 'BoolTrue'])
 
 
 class ConceptNameRetrieveUpdateDestroyViewTest(OCLAPITestCase):
