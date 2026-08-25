@@ -1064,7 +1064,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def should_search_latest_repo(self):
         return self.is_source_child_document_model() and (
-                'version' not in self.kwargs and 'collection' not in self.kwargs
+                'version' not in self.kwargs and 'collection' not in self.kwargs and 'source' not in self.kwargs
         ) and self.is_latest_repo_search_header_present()
 
     def has_searchable_extras_fields(self):
