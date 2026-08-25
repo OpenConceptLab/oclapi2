@@ -7,6 +7,7 @@ from billiard.exceptions import WorkerLostError
 from celery import chord
 from celery.states import STARTED
 from celery.utils.log import get_task_logger
+from celery_once import AlreadyQueued
 from dateutil.relativedelta import relativedelta
 from django.apps import apps
 from django.conf import settings
@@ -417,7 +418,11 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
             if export:
                 from core.tasks.models import Task
                 task = Task.new(queue='default', username=instance.updated_by, name=export_task.__name__)
-                export_task.apply_async((obj_id,), queue=task.queue, task_id=task.id, persist_args=True)
+                try:
+                    export_task.apply_async((obj_id,), queue=task.queue, task_id=task.id, persist_args=True)
+                except AlreadyQueued:
+                    if task:
+                        task.delete()
         finally:
             instance.remove_processing(task_id)
 
