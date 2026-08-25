@@ -52,7 +52,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     pk_field = 'mnemonic'
     user_is_self = False
     is_searchable = False
-    is_only_searchable = False
     limit = LIST_DEFAULT_LIMIT
     default_filters = {}
     sort_asc_param = 'sortAsc'
@@ -1054,7 +1053,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             return True
         sort_field, _ = self.get_sort_and_desc()
         return (
-                self.is_only_searchable or
                 bool(self.get_search_string()) or
                 self.has_searchable_extras_fields() or
                 bool(self.get_faceted_filters()) or
