@@ -701,7 +701,7 @@ class CollectionVersionListView(CollectionVersionBaseView, CreateAPIView, ListWi
         return self.list(request, *args, **kwargs)
 
     def create(self, request, *args, **kwargs):
-        head_object = self.get_queryset().first()
+        head_object = self.get_queryset().first().head
         version = request.data.pop('id', None)
         payload = {
             "mnemonic": head_object.mnemonic, "id": head_object.mnemonic, "name": head_object.name, **request.data,

@@ -429,6 +429,78 @@ class SourceVersionListViewTest(OCLAPITestCase):
         self.assertEqual(response.data['version'], 'v1')
         self.assertEqual(self.source.versions.count(), 2)
 
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    def test_post_201_copies_properties_and_filters_from_head(self):
+        self.source.properties = [{'code': 'p1'}]
+        self.source.filters = [{'code': 'f1'}]
+        self.source.save()
+
+        response = self.client.post(
+            f'/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/versions/',
+            {
+                'id': 'v1',
+                'description': 'Version 1'
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['properties'], [{'code': 'p1'}])
+        self.assertEqual(response.data['filters'], [{'code': 'f1'}])
+
+        new_version = self.source.versions.get(version='v1')
+        self.assertEqual(new_version.properties, [{'code': 'p1'}])
+        self.assertEqual(new_version.filters, [{'code': 'f1'}])
+
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    def test_post_201_uses_head_properties_and_filters_when_older_version_exists(self):
+        # Regression for a prod bug where SourceVersionListView.create() resolved "head_object"
+        # via get_queryset().first() (ordered by -created_at, no version filter). That returns the
+        # most recently created *version* row rather than HEAD whenever an older version already
+        # exists (HEAD is always created first, so it always has the oldest created_at) -- so a new
+        # version silently copied a stale/older version's properties and filters instead of HEAD's.
+        OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v0'
+        )
+        properties = [
+            {
+                'code': 'is_clinical', 'type': 'boolean',
+                'description': 'false for strictly administrative concepts; absent means clinical'
+            },
+            {
+                'code': 'is_set', 'type': 'boolean',
+                'description': '1 when the concept is a set (integer, CIEL production convention)'
+            }
+        ]
+        filters = [
+            {'code': 'is_clinical', 'operator': ['=', 'exists'], 'value': 'true,false'},
+            {'code': 'is_set', 'operator': ['=', 'exists'], 'value': 'true,false'}
+        ]
+        self.source.properties = properties
+        self.source.filters = filters
+        self.source.save()
+
+        response = self.client.post(
+            f'/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/versions/',
+            {
+                'id': 'v1',
+                'description': 'Version 1'
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['properties'], properties)
+        self.assertEqual(response.data['filters'], filters)
+
+        new_version = self.source.versions.get(version='v1')
+        self.assertEqual(new_version.properties, properties)
+        self.assertEqual(new_version.filters, filters)
+
     def test_post_409(self):
         OrganizationSourceFactory(version='v1', organization=self.organization, mnemonic=self.source.mnemonic)
         with transaction.atomic():

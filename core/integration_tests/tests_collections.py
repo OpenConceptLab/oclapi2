@@ -3061,6 +3061,35 @@ class CollectionVersionListViewTest(OCLAPITestCase):
         self.assertEqual(expansion.concepts.count(), 1)
         self.assertEqual(expansion.mappings.count(), 0)
 
+    def test_post_201_uses_head_name_when_older_version_exists(self):
+        # Regression for the same class of bug fixed on SourceVersionListView.create(): resolving
+        # "head_object" via get_queryset().first() (ordered by -created_at, no version filter) would
+        # return the most recently created *version* row rather than HEAD whenever an older version
+        # already exists (HEAD is always created first, so it always has the oldest created_at).
+        # CollectionVersionListView already resolves via get_queryset().first().head, which should
+        # correctly fall back to the true HEAD object regardless of row ordering.
+        UserCollectionFactory(
+            mnemonic=self.collection.mnemonic, user=self.user, version='v0', name='stale-version-name'
+        )
+        self.collection.name = 'updated-head-name'
+        self.collection.save()
+
+        response = self.client.post(
+            self.collection.uri + 'versions/',
+            {
+                'id': 'v1',
+                'description': 'version1'
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['name'], 'updated-head-name')
+
+        new_version = self.collection.versions.get(version='v1')
+        self.assertEqual(new_version.name, 'updated-head-name')
+
     def test_post_201_autoexpand_false(self):
         response = self.client.post(
             self.collection.uri + 'versions/',
