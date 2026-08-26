@@ -741,7 +741,12 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         ).order_by('-created_at')
 
     def delete(self, using=None, keep_parents=False, force=False, sync=False):  # pylint: disable=arguments-differ
+        export_paths = self.get_export_paths_to_delete()
         if self.is_head:
+            other_versions = list(self.versions.exclude(id=self.id))
+            for other_version in other_versions:
+                other_version.clear_cache()
+                export_paths += other_version.get_export_paths_to_delete()
             self.versions.exclude(id=self.id).delete()
         elif self.is_latest_version:
             prev_version = self.prev_version
@@ -754,13 +759,21 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         self.delete_pins()
         self.delete_following()
 
-        export_path = self.get_version_export_path(suffix=None)
         super().delete(using=using, keep_parents=keep_parents)
-        if sync:
-            delete_s3_objects(export_path)
-        else:
-            delete_s3_objects.apply_async((export_path,), queue='default', permanent=False)
+        self.delete_export_paths(export_paths, sync)
         self.post_delete_actions()
+
+    def get_export_paths_to_delete(self):
+        return [self.get_version_export_path(suffix=None)] + list(
+            self.external_exports.values_list('file_path', flat=True))
+
+    @staticmethod
+    def delete_export_paths(export_paths, sync=False):
+        for export_path in export_paths:
+            if sync:
+                delete_s3_objects(export_path)
+            else:
+                delete_s3_objects.apply_async((export_path,), queue='default', permanent=False)
 
     def get_concepts_cache_keys(self):
         return self.__get_resources_cache_keys('concepts')
@@ -772,17 +785,23 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         return f'repo_cache:body:{self.uri}{resources}/', f'repo_cache:headers:{self.uri}{resources}/'
 
     def post_delete_actions(self):
-        return self.__clear_cache()
+        return self.clear_cache()
 
-    def __clear_cache(self):
+    def clear_cache(self):
+        concepts_cleared = self.clear_concepts_cache()
+        mappings_cleared = self.clear_mappings_cache()
+        return concepts_cleared, mappings_cleared
+
+    def clear_concepts_cache(self):
+        return self.__clear_resource_cache(*self.get_concepts_cache_keys())
+
+    def clear_mappings_cache(self):
+        return self.__clear_resource_cache(*self.get_mappings_cache_keys())
+
+    @staticmethod
+    def __clear_resource_cache(body_key, headers_key):
         try:
-            concepts_body_key, concepts_headers_key = self.get_concepts_cache_keys()
-            mappings_body_key, mappings_headers_key = self.get_mappings_cache_keys()
-            return cache.client.get_client().delete(*[
-                cache.make_key(key) for key in [
-                    concepts_body_key, mappings_body_key, concepts_headers_key, mappings_headers_key
-                ]
-            ])
+            return cache.client.get_client().delete(*[cache.make_key(key) for key in [body_key, headers_key]])
         except:  # pylint: disable=bare-except
             return False
 

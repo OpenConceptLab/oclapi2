@@ -2117,6 +2117,100 @@ class SourceConceptsIndexViewTest(OCLAPITestCase):
             (100, None, True, True, True, True), queue='indexing', task_id=ANY)
 
 
+class SourceVersionConceptsCacheViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.source = OrganizationSourceFactory()
+        self.source_version = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.source.organization, version='v1')
+
+    @patch('core.sources.models.Source.clear_concepts_cache')
+    def test_delete_204(self, clear_concepts_cache_mock):
+        user = UserProfileFactory(is_superuser=True, is_staff=True, username='soop')
+
+        response = self.client.delete(
+            self.source_version.url + 'concepts/cache/',
+            HTTP_AUTHORIZATION=f'Token {user.get_token()}'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        clear_concepts_cache_mock.assert_called_once()
+
+    @patch('core.sources.models.Source.clear_concepts_cache')
+    def test_delete_403_for_non_staff_user(self, clear_concepts_cache_mock):
+        user = UserProfileFactory(username='non-staff')
+
+        response = self.client.delete(
+            self.source_version.url + 'concepts/cache/',
+            HTTP_AUTHORIZATION=f'Token {user.get_token()}'
+        )
+
+        self.assertEqual(response.status_code, 403)
+        clear_concepts_cache_mock.assert_not_called()
+
+    def test_delete_401_for_anonymous_user(self):
+        response = self.client.delete(self.source_version.url + 'concepts/cache/')
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_delete_404_for_unknown_version(self):
+        user = UserProfileFactory(is_superuser=True, is_staff=True, username='soop')
+
+        response = self.client.delete(
+            self.source.url + 'unknown-version/concepts/cache/',
+            HTTP_AUTHORIZATION=f'Token {user.get_token()}'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+
+class SourceVersionMappingsCacheViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.source = OrganizationSourceFactory()
+        self.source_version = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.source.organization, version='v1')
+
+    @patch('core.sources.models.Source.clear_mappings_cache')
+    def test_delete_204(self, clear_mappings_cache_mock):
+        user = UserProfileFactory(is_superuser=True, is_staff=True, username='soop')
+
+        response = self.client.delete(
+            self.source_version.url + 'mappings/cache/',
+            HTTP_AUTHORIZATION=f'Token {user.get_token()}'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        clear_mappings_cache_mock.assert_called_once()
+
+    @patch('core.sources.models.Source.clear_mappings_cache')
+    def test_delete_403_for_non_staff_user(self, clear_mappings_cache_mock):
+        user = UserProfileFactory(username='non-staff')
+
+        response = self.client.delete(
+            self.source_version.url + 'mappings/cache/',
+            HTTP_AUTHORIZATION=f'Token {user.get_token()}'
+        )
+
+        self.assertEqual(response.status_code, 403)
+        clear_mappings_cache_mock.assert_not_called()
+
+    def test_delete_401_for_anonymous_user(self):
+        response = self.client.delete(self.source_version.url + 'mappings/cache/')
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_delete_404_for_unknown_version(self):
+        user = UserProfileFactory(is_superuser=True, is_staff=True, username='soop')
+
+        response = self.client.delete(
+            self.source.url + 'unknown-version/mappings/cache/',
+            HTTP_AUTHORIZATION=f'Token {user.get_token()}'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+
 class SourceVersionProcessingViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()

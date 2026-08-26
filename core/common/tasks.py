@@ -652,6 +652,7 @@ def index_source_concepts(
             logger.exception('Falling back to full concept reindex for source %s', source_id)
             source.batch_index(
                 source.concepts, ConceptDocument, prefetch=prefetch, select_related=select_related, parallel=parallel)
+        source.clear_concepts_cache()
 
 
 @app.task(ignore_result=True, base=QueueOnceCustomTask)
@@ -681,6 +682,7 @@ def index_source_mappings(
             logger.exception('Falling back to full mapping reindex for source %s', source_id)
             source.batch_index(
                 source.mappings, MappingDocument, prefetch=prefetch, select_related=select_related, parallel=parallel)
+        source.clear_mappings_cache()
 
 
 @app.task(base=QueueOnceCustomTask)

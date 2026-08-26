@@ -82,6 +82,42 @@ class CollectionTest(OCLTestCase):
     def test_is_versioned(self):
         self.assertTrue(Collection().is_versioned)
 
+    @patch('core.common.models.delete_s3_objects', Mock())
+    @patch('core.collections.models.Collection.clear_cache')
+    def test_delete_head_clears_cache_for_all_versions(self, clear_cache_mock):
+        head = OrganizationCollectionFactory()
+        OrganizationCollectionFactory(mnemonic=head.mnemonic, organization=head.organization, version='v1')
+        OrganizationCollectionFactory(mnemonic=head.mnemonic, organization=head.organization, version='v2')
+
+        head.delete(force=True)
+
+        # once for HEAD itself (post_delete_actions) and once each for v1 and v2
+        self.assertEqual(clear_cache_mock.call_count, 3)
+
+    @patch('core.common.models.delete_s3_objects')
+    def test_delete_head_clears_export_and_external_export_s3_objects_for_all_versions(
+            self, delete_s3_objects_mock
+    ):
+        from core.repos.models import RepoExternalExport
+        head = OrganizationCollectionFactory()
+        v1 = OrganizationCollectionFactory(mnemonic=head.mnemonic, organization=head.organization, version='v1')
+        v2 = OrganizationCollectionFactory(mnemonic=head.mnemonic, organization=head.organization, version='v2')
+        RepoExternalExport.objects.create(resource=v1, key='ext1', file_path='v1/external/report.zip')
+        RepoExternalExport.objects.create(resource=v2, key='ext2', file_path='v2/external/report.zip')
+
+        expected_paths = sorted([
+            head.get_version_export_path(suffix=None),
+            v1.get_version_export_path(suffix=None),
+            v2.get_version_export_path(suffix=None),
+            'v1/external/report.zip',
+            'v2/external/report.zip',
+        ])
+
+        head.delete(force=True, sync=True)
+
+        called_paths = sorted(call.args[0] for call in delete_s3_objects_mock.call_args_list)
+        self.assertEqual(called_paths, expected_paths)
+
     def test_add_expressions(self):
         collection = OrganizationCollectionFactory()
         expansion = ExpansionFactory(collection_version=collection)

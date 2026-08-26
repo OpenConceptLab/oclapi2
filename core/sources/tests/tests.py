@@ -406,6 +406,95 @@ class SourceTest(OCLTestCase):
         self.assertTrue(user_source_public_edit.has_edit_access(user_source_public_edit.parent))
         self.assertTrue(user_source_public_view.has_edit_access(user_source_public_view.parent))
 
+    @patch('core.common.models.cache')
+    def test_clear_concepts_cache(self, cache_mock):
+        source = OrganizationSourceFactory()
+        cache_mock.make_key.side_effect = lambda key: key
+
+        source.clear_concepts_cache()
+
+        cache_mock.client.get_client.return_value.delete.assert_called_once_with(*source.get_concepts_cache_keys())
+
+    @patch('core.common.models.cache')
+    def test_clear_mappings_cache(self, cache_mock):
+        source = OrganizationSourceFactory()
+        cache_mock.make_key.side_effect = lambda key: key
+
+        source.clear_mappings_cache()
+
+        cache_mock.client.get_client.return_value.delete.assert_called_once_with(*source.get_mappings_cache_keys())
+
+    @patch('core.sources.models.Source.clear_mappings_cache')
+    @patch('core.sources.models.Source.clear_concepts_cache')
+    def test_clear_cache(self, clear_concepts_cache_mock, clear_mappings_cache_mock):
+        source = OrganizationSourceFactory()
+
+        source.clear_cache()
+
+        clear_concepts_cache_mock.assert_called_once()
+        clear_mappings_cache_mock.assert_called_once()
+
+    @patch('core.common.models.delete_s3_objects', Mock())
+    @patch('core.sources.models.Source.clear_cache')
+    def test_delete_head_clears_cache_for_all_versions(self, clear_cache_mock):
+        head = OrganizationSourceFactory()
+        OrganizationSourceFactory(mnemonic=head.mnemonic, organization=head.organization, version='v1')
+        OrganizationSourceFactory(mnemonic=head.mnemonic, organization=head.organization, version='v2')
+
+        head.delete(force=True)
+
+        # once for HEAD itself (post_delete_actions) and once each for v1 and v2
+        self.assertEqual(clear_cache_mock.call_count, 3)
+
+    @patch('core.common.models.delete_s3_objects', Mock())
+    @patch('core.sources.models.Source.clear_cache')
+    def test_delete_non_head_version_clears_its_own_cache(self, clear_cache_mock):
+        head = OrganizationSourceFactory()
+        v1 = OrganizationSourceFactory(mnemonic=head.mnemonic, organization=head.organization, version='v1')
+
+        v1.delete(force=True)
+
+        clear_cache_mock.assert_called_once()
+
+    @patch('core.common.models.delete_s3_objects')
+    def test_delete_clears_export_and_external_export_s3_objects(self, delete_s3_objects_mock):
+        from core.repos.models import RepoExternalExport
+        head = OrganizationSourceFactory()
+        v1 = OrganizationSourceFactory(mnemonic=head.mnemonic, organization=head.organization, version='v1')
+        RepoExternalExport.objects.create(resource=v1, key='ext1', file_path='v1/external/report.zip')
+
+        expected_export_path = v1.get_version_export_path(suffix=None)
+
+        v1.delete(force=True, sync=True)
+
+        self.assertEqual(delete_s3_objects_mock.call_count, 2)
+        called_paths = sorted(call.args[0] for call in delete_s3_objects_mock.call_args_list)
+        self.assertEqual(called_paths, sorted([expected_export_path, 'v1/external/report.zip']))
+
+    @patch('core.common.models.delete_s3_objects')
+    def test_delete_head_clears_export_and_external_export_s3_objects_for_all_versions(
+            self, delete_s3_objects_mock
+    ):
+        from core.repos.models import RepoExternalExport
+        head = OrganizationSourceFactory()
+        v1 = OrganizationSourceFactory(mnemonic=head.mnemonic, organization=head.organization, version='v1')
+        v2 = OrganizationSourceFactory(mnemonic=head.mnemonic, organization=head.organization, version='v2')
+        RepoExternalExport.objects.create(resource=v1, key='ext1', file_path='v1/external/report.zip')
+        RepoExternalExport.objects.create(resource=v2, key='ext2', file_path='v2/external/report.zip')
+
+        expected_paths = sorted([
+            head.get_version_export_path(suffix=None),
+            v1.get_version_export_path(suffix=None),
+            v2.get_version_export_path(suffix=None),
+            'v1/external/report.zip',
+            'v2/external/report.zip',
+        ])
+
+        head.delete(force=True, sync=True)
+
+        called_paths = sorted(call.args[0] for call in delete_s3_objects_mock.call_args_list)
+        self.assertEqual(called_paths, expected_paths)
+
     def test_resource_version_type(self):
         self.assertEqual(Source().resource_version_type, 'Source Version')
 
@@ -2277,9 +2366,10 @@ class TasksTest(OCLTestCase):
         source.refresh_from_db()
         self.assertEqual(source.active_concepts, 1)
 
+    @patch('core.sources.models.Source.clear_mappings_cache')
     @patch('core.sources.models.Source.mappings')
     @patch('core.sources.models.Source.batch_index')
-    def test_index_source_mappings(self, batch_index_mock, source_mappings_mock):
+    def test_index_source_mappings(self, batch_index_mock, source_mappings_mock, clear_mappings_cache_mock):
         source = OrganizationSourceFactory()
         index_source_mappings(source.id)
         batch_index_mock.assert_called_once_with(
@@ -2289,10 +2379,12 @@ class TasksTest(OCLTestCase):
             single_batch=False,
             parallel=True
         )
+        clear_mappings_cache_mock.assert_called_once()
 
+    @patch('core.sources.models.Source.clear_concepts_cache')
     @patch('core.sources.models.Source.concepts')
     @patch('core.sources.models.Source.batch_index')
-    def test_index_source_concepts(self, batch_index_mock, source_concepts_mock):
+    def test_index_source_concepts(self, batch_index_mock, source_concepts_mock, clear_concepts_cache_mock):
         source = OrganizationSourceFactory()
         index_source_concepts(source.id)
         batch_index_mock.assert_called_once_with(
@@ -2302,11 +2394,13 @@ class TasksTest(OCLTestCase):
             single_batch=False,
             parallel=True
         )
+        clear_concepts_cache_mock.assert_called_once()
 
+    @patch('core.sources.models.Source.clear_concepts_cache')
     @patch('core.sources.models.Source.concepts')
     @patch('core.sources.models.Source.batch_index')
     def test_index_source_concepts_partial_update(
-            self, batch_index_mock, source_concepts_mock
+            self, batch_index_mock, source_concepts_mock, clear_concepts_cache_mock
     ):
         source = OrganizationSourceFactory()
         index_source_concepts(source.id, {'is_in_latest_source_version': False})
@@ -2316,12 +2410,14 @@ class TasksTest(OCLTestCase):
             single_batch=False,
             parallel=True
         )
+        clear_concepts_cache_mock.assert_called_once()
 
+    @patch('core.sources.models.Source.clear_concepts_cache')
     @patch('core.common.tasks.logger.exception')
     @patch('core.sources.models.Source.concepts')
     @patch('core.sources.models.Source.batch_index')
     def test_index_source_concepts_partial_update_failure_should_fallback_to_full_index(
-            self, batch_index_mock, source_concepts_mock, logger_exception_mock
+            self, batch_index_mock, source_concepts_mock, logger_exception_mock, clear_concepts_cache_mock
     ):
         source = OrganizationSourceFactory()
         batch_index_mock.side_effect = [Exception('boom'), None]
@@ -2348,11 +2444,13 @@ class TasksTest(OCLTestCase):
         logger_exception_mock.assert_called_once_with(
             'Falling back to full concept reindex for source %s', source.id
         )
+        clear_concepts_cache_mock.assert_called_once()
 
+    @patch('core.sources.models.Source.clear_mappings_cache')
     @patch('core.sources.models.Source.mappings')
     @patch('core.sources.models.Source.batch_index')
     def test_index_source_mappings_partial_update(
-            self, batch_index_mock, source_mappings_mock
+            self, batch_index_mock, source_mappings_mock, clear_mappings_cache_mock
     ):
         source = OrganizationSourceFactory()
         index_source_mappings(source.id, {'is_in_latest_source_version': False})
@@ -2362,12 +2460,14 @@ class TasksTest(OCLTestCase):
             single_batch=False,
             parallel=True
         )
+        clear_mappings_cache_mock.assert_called_once()
 
+    @patch('core.sources.models.Source.clear_mappings_cache')
     @patch('core.common.tasks.logger.exception')
     @patch('core.sources.models.Source.mappings')
     @patch('core.sources.models.Source.batch_index')
     def test_index_source_mappings_partial_update_failure_should_fallback_to_full_index(
-            self, batch_index_mock, source_mappings_mock, logger_exception_mock
+            self, batch_index_mock, source_mappings_mock, logger_exception_mock, clear_mappings_cache_mock
     ):
         source = OrganizationSourceFactory()
         batch_index_mock.side_effect = [Exception('boom'), None]
@@ -2394,6 +2494,7 @@ class TasksTest(OCLTestCase):
         logger_exception_mock.assert_called_once_with(
             'Falling back to full mapping reindex for source %s', source.id
         )
+        clear_mappings_cache_mock.assert_called_once()
 
     @patch('core.sources.models.Source.validate_child_concepts')
     def test_update_validation_schema_success(self, validate_child_concepts_mock):

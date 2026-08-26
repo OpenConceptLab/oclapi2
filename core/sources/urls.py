@@ -134,6 +134,16 @@ urlpatterns = [
         name='sourceversion-filters'
     ),
     path(
+        "<str:source>/<str:version>/concepts/cache/",
+        views.SourceVersionConceptsCacheView.as_view(),
+        name='sourceversion-concepts-cache'
+    ),
+    path(
+        "<str:source>/<str:version>/mappings/cache/",
+        views.SourceVersionMappingsCacheView.as_view(),
+        name='sourceversion-mappings-cache'
+    ),
+    path(
         "<str:source>/<str:version>/concepts/",
         include('core.concepts.urls')
     ),

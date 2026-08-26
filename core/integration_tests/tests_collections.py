@@ -444,8 +444,12 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(coll.versions.count(), 0)
         self.assertFalse(Collection.objects.filter(mnemonic='coll1').exists())
-        delete_s3_objects_mock.apply_async.assert_called_once_with(
+        self.assertEqual(delete_s3_objects_mock.apply_async.call_count, 2)
+        delete_s3_objects_mock.apply_async.assert_any_call(
             (f'orgs/{coll.organization.mnemonic}/{coll.organization.mnemonic}_coll1_vHEAD.',),
+            queue='default', permanent=False)
+        delete_s3_objects_mock.apply_async.assert_any_call(
+            (f'orgs/{coll.organization.mnemonic}/{coll.organization.mnemonic}_coll1_v1.',),
             queue='default', permanent=False)
 
     @patch('core.collections.views.delete_collection')

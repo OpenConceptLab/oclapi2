@@ -346,6 +346,35 @@ class SourceMappingsIndexView(SourceIndexBaseView):
         return index_source_mappings
 
 
+class SourceCacheBaseView(SourceVersionBaseView):  # pylint: disable=abstract-method
+    permission_classes = (IsAdminUser, )
+
+    def get_object(self, queryset=None):
+        instance = get_object_or_404(self.get_queryset())
+        self.check_object_permissions(self.request, instance)
+        return instance
+
+    def delete(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        self.clear_cache(self.get_object())
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @staticmethod
+    def clear_cache(instance):
+        raise NotImplementedError
+
+
+class SourceVersionConceptsCacheView(SourceCacheBaseView):
+    @staticmethod
+    def clear_cache(instance):
+        instance.clear_concepts_cache()
+
+
+class SourceVersionMappingsCacheView(SourceCacheBaseView):
+    @staticmethod
+    def clear_cache(instance):
+        instance.clear_mappings_cache()
+
+
 class SourceConceptsCloneView(SourceBaseView):
     serializer_class = BundleSerializer
     permission_classes = (CanEditConceptDictionary, )
