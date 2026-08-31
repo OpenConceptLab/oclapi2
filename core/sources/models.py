@@ -317,12 +317,13 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         if not self.properties:
             self.properties = []
             return
-        fields = {'code', 'uri', 'description', 'type'}
+        fields = {'code', 'uri', 'description', 'type', 'display'}
         allowed_types = {'code', 'Coding', 'string', 'integer', 'boolean', 'dateTime', 'decimal'}
         cleaned_properties = []
         # code: required string
         # uri: optional URI
         # description: optional string
+        # display: optional string
         # "type": required string code | Coding | string | integer | boolean | dateTime | decimal, defaults string
 
         for idx, prop in enumerate(self.properties or []):
@@ -337,6 +338,8 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
                 raise ValidationError({'properties': [f"'uri' must be a string if provided at index {idx}"]})
             if 'description' in prop and prop['description'] is not None and not isinstance(prop['description'], str):
                 raise ValidationError({'properties': [f"'description' must be a string if provided at index {idx}"]})
+            if 'display' in prop and prop['display'] is not None and not isinstance(prop['display'], str):
+                raise ValidationError({'properties': [f"'display' must be a string if provided at index {idx}"]})
             prop_type = prop.get('type', 'string')
             if not isinstance(prop_type, str) or prop_type not in allowed_types:
                 raise ValidationError({'properties': [f"'type' must be one of {allowed_types} at index {idx}"]})

@@ -1974,15 +1974,15 @@ class ConceptTest(OCLTestCase):
             self.assertEqual(
                 concept.properties,
                 [
-                    {'code': 'datatype', 'valueCode': 'N/A'},
-                    {'code': 'concept_class', 'valueCode': 'Diagnosis'}
+                    {'code': 'datatype', 'valueCode': 'N/A', 'display': 'datatype'},
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis', 'display': 'concept_class'},
                 ]
             )
             self.assertEqual(
                 concept.summary_properties,
                 [
-                    {'code': 'datatype', 'valueCode': 'N/A'},
-                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
+                    {'code': 'datatype', 'valueCode': 'N/A', 'display': 'datatype'},
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis', 'display': 'concept_class'},
                 ]
             )
             self.assertEqual(
@@ -2000,16 +2000,16 @@ class ConceptTest(OCLTestCase):
             self.assertEqual(
                 concept.properties,
                 [
-                    {'code': 'datatype', 'valueCode': 'N/A'},
-                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
-                    {'code': 'units', 'valueString': 'parts/microliter'}
+                    {'code': 'datatype', 'valueCode': 'N/A', 'display': 'datatype'},
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis', 'display': 'concept_class'},
+                    {'code': 'units', 'valueString': 'parts/microliter', 'display': 'units'}
                 ]
             )
             self.assertEqual(
                 concept.summary_properties,
                 [
-                    {'code': 'datatype', 'valueCode': 'N/A'},
-                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
+                    {'code': 'datatype', 'valueCode': 'N/A', 'display': 'datatype'},
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis', 'display': 'concept_class'},
                 ]
             )
             self.assertEqual(
@@ -2042,15 +2042,15 @@ class ConceptTest(OCLTestCase):
             self.assertEqual(
                 concept.properties,
                 [
-                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
-                    {'code': 'datatype', 'valueCode': 'N/A'},
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis', 'display': 'concept_class'},
+                    {'code': 'datatype', 'valueCode': 'N/A', 'display': 'datatype'},
                 ]
             )
             self.assertEqual(
                 concept.summary_properties,
                 [
-                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
-                    {'code': 'datatype', 'valueCode': 'N/A'},
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis', 'display': 'concept_class'},
+                    {'code': 'datatype', 'valueCode': 'N/A', 'display': 'datatype'},
                 ]
             )
         self.assertEqual(
@@ -2068,16 +2068,16 @@ class ConceptTest(OCLTestCase):
             self.assertEqual(
                 concept.properties,
                 [
-                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
-                    {'code': 'datatype', 'valueCode': 'N/A'},
-                    {'code': 'units', 'valueString': 'parts/microliter'}
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis', 'display': 'concept_class'},
+                    {'code': 'datatype', 'valueCode': 'N/A', 'display': 'datatype'},
+                    {'code': 'units', 'valueString': 'parts/microliter', 'display': 'units'}
                 ]
             )
             self.assertEqual(
                 concept.summary_properties,
                 [
-                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
-                    {'code': 'datatype', 'valueCode': 'N/A'},
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis', 'display': 'concept_class'},
+                    {'code': 'datatype', 'valueCode': 'N/A', 'display': 'datatype'},
                 ]
             )
             self.assertEqual(
@@ -2121,15 +2121,15 @@ class ConceptTest(OCLTestCase):
             self.assertEqual(
                 concept.properties,
                 [
-                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
-                    {'code': 'datatype', 'valueCode': 'N/A'}
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis', 'display': 'concept_class'},
+                    {'code': 'datatype', 'valueCode': 'N/A', 'display': 'datatype'}
                 ]
             )
             self.assertEqual(
                 concept.summary_properties,
                 [
-                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
-                    {'code': 'datatype', 'valueCode': 'N/A'},
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis', 'display': 'concept_class'},
+                    {'code': 'datatype', 'valueCode': 'N/A', 'display': 'datatype'},
                 ]
             )
         for concept in concept3s:
@@ -2140,16 +2140,16 @@ class ConceptTest(OCLTestCase):
             self.assertEqual(
                 concept.properties,
                 [
-                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
-                    {'code': 'datatype', 'valueCode': 'N/A'},
-                    {'code': 'units', 'valueString': 'parts/microliter'}
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis', 'display': 'concept_class'},
+                    {'code': 'datatype', 'valueCode': 'N/A', 'display': 'datatype'},
+                    {'code': 'units', 'valueString': 'parts/microliter', 'display': 'units'}
                 ]
             )
             self.assertEqual(
                 concept.summary_properties,
                 [
-                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
-                    {'code': 'datatype', 'valueCode': 'N/A'},
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis', 'display': 'concept_class'},
+                    {'code': 'datatype', 'valueCode': 'N/A', 'display': 'datatype'},
                 ]
             )
 
@@ -2162,8 +2162,8 @@ class ConceptTest(OCLTestCase):
             self.assertEqual(
                 concept.properties,
                 [
-                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
-                    {'code': 'datatype', 'valueCode': 'N/A'}
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis', 'display': 'concept_class'},
+                    {'code': 'datatype', 'valueCode': 'N/A', 'display': 'datatype'}
                 ]
             )
             self.assertEqual(
@@ -2178,15 +2178,98 @@ class ConceptTest(OCLTestCase):
             self.assertEqual(
                 concept.properties,
                 [
-                    {'code': 'concept_class', 'valueCode': 'Diagnosis'},
-                    {'code': 'datatype', 'valueCode': 'N/A'},
-                    {'code': 'units', 'valueString': 'parts/microliter'}
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis', 'display': 'concept_class'},
+                    {'code': 'datatype', 'valueCode': 'N/A', 'display': 'datatype'},
+                    {'code': 'units', 'valueString': 'parts/microliter', 'display': 'units'}
                 ]
             )
             self.assertEqual(
                 concept.summary_properties,
                 []
             )
+
+    def test_properties_with_display(self):  # pylint: disable=too-many-statements
+        source = OrganizationSourceFactory(properties=[], filters=[])
+        concept1 = ConceptFactory(parent=source, concept_class='Diagnosis', datatype='N/A')
+
+        concept1.refresh_from_db()
+
+        source.properties = [
+            {
+                "code": "concept_class",
+                "description": "Type of concept",
+                "type": "code",   # e.g. from /orgs/OCL/collections/Classes/
+            },
+            {
+                "code": "datatype",
+                "description": "Type of data captured for this concept",
+                "type": "code",   # e.g. from /orgs/OCL/collections/Datatypes/
+            },
+            {
+                "code": "units",
+                "description": "Units of measurement",
+                "type": "string",
+                "display": "UoM"
+            }
+        ]
+
+        source.meta = {
+            'display': {
+                'concept_summary_properties': ['datatype', 'concept_class', 'units'],
+            }
+        }
+        source.save()
+
+        concept2 = ConceptFactory(parent=source, concept_class='Diagnosis', datatype='N/A')
+        concept3 = ConceptFactory(
+            parent=source, concept_class='Diagnosis', datatype='N/A', extras={'foo': 'bar', 'units': 'parts/microliter'}
+        )
+
+        concept2_latest_version = concept2.get_latest_version()
+        concept3_latest_version = concept3.get_latest_version()
+
+        concept2s = [concept2, concept2_latest_version]
+        concept3s = [concept3, concept3_latest_version]
+
+        for concept in concept2s:
+            concept.refresh_from_db()
+            self.assertEqual(concept.extras, {})
+            self.assertEqual(
+                concept.properties,
+                [
+                    {'code': 'datatype', 'valueCode': 'N/A', 'display': 'datatype'},
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis', 'display': 'concept_class'}
+                ]
+            )
+            self.assertEqual(
+                concept.summary_properties,
+                [
+                    {'code': 'datatype', 'valueCode': 'N/A', 'display': 'datatype'},
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis', 'display': 'concept_class'},
+                ]
+            )
+        for concept in concept3s:
+            concept.refresh_from_db()
+            self.assertEqual(
+                concept.extras,
+                {'foo': 'bar', 'units': 'parts/microliter'})
+            self.assertEqual(
+                concept.properties,
+                [
+                    {'code': 'datatype', 'valueCode': 'N/A', 'display': 'datatype'},
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis', 'display': 'concept_class'},
+                    {'code': 'units', 'valueString': 'parts/microliter', 'display': 'UoM'}
+                ]
+            )
+            self.assertEqual(
+                concept.summary_properties,
+                [
+                    {'code': 'datatype', 'valueCode': 'N/A', 'display': 'datatype'},
+                    {'code': 'concept_class', 'valueCode': 'Diagnosis', 'display': 'concept_class'},
+                    {'code': 'units', 'valueString': 'parts/microliter', 'display': 'UoM'},
+                ]
+            )
+
 
     def test_get_resource_url_kwarg(self):
         self.assertEqual(Concept.get_resource_url_kwarg(), 'concept')

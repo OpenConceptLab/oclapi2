@@ -979,7 +979,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             if value == NOT_EXISTING_VALUE:
                 return False
             value_key = f"value{(prop.get('type') or '').title()}"
-            return {"code": prop["code"], value_key: value}
+            return {"code": prop["code"], value_key: value, 'display': prop.get('display', None) or prop['code']}
 
         for prop_code in summary_codes:
             _prop = next((definition for definition in definitions if definition['code'] == prop_code), None)

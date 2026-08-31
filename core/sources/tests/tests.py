@@ -2094,6 +2094,20 @@ class SourceValidationTest(OCLTestCase):
 
         source.clean_properties()
 
+        source = Source(properties=[
+            {'code': 'height', 'type': 'integer', 'display': 'Height in integer'},
+            {'code': 'weight', 'type': 'decimal', 'description': 'in kilograms'}
+        ])
+
+        source.clean_properties()
+
+        source = Source(properties=[
+            {'code': 'height', 'type': 'integer', 'display': 'Height in integer'},
+            {'code': 'weight', 'type': 'decimal', 'description': 'in kilograms', 'display': 'KGs'}
+        ])
+
+        source.clean_properties()
+
     def test_clean_properties_missing_code(self):
         source = Source(properties=[{'type': 'string'}])
         with self.assertRaises(ValidationError):
