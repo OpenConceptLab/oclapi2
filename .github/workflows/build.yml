@@ -119,6 +119,11 @@ jobs:
           DB_HOST: 0.0.0.0
           ES_HOST: 0.0.0.0
           ENVIRONMENT: ci
+          # Concept.properties dicts carry both a `value<Type>` key and a `display` key; ConceptDocument.prepare_properties
+          # picks between them via `list(set(prop.keys()) - {'code'})[0]`, whose result depends on Python's per-process
+          # string hash randomization. Pinning the seed makes that pick land on `value<Type>` deterministically instead
+          # of varying by CI run. See OpenConceptLab/ocl_issues#2708.
+          PYTHONHASHSEED: "2"
         run: |
           . venv/bin/activate
           COVERAGE_FILE=/tmp/.coverage coverage run --parallel-mode --source='core' manage.py test --parallel=1 -v 3 --keepdb
