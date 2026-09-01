@@ -2,7 +2,7 @@ from django_elasticsearch_dsl import Document, fields
 from django_elasticsearch_dsl.registries import registry
 from pydash import compact, get
 
-from core.common.utils import jsonify_safe, flatten_dict, get_embeddings, drop_version
+from core.common.utils import jsonify_safe, flatten_extras, get_embeddings, drop_version
 from core.concepts.models import Concept
 
 
@@ -179,7 +179,7 @@ class ConceptDocument(Document):
         if instance.extras:
             value = jsonify_safe(instance.extras)
             if isinstance(value, dict):
-                value = flatten_dict(value)
+                value = flatten_extras(value)
 
         return value or {}
 

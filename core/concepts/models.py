@@ -966,16 +966,23 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         summary_codes = summary or []
         NOT_EXISTING_VALUE = '____FAlse____'
 
-        def resolve_value(prop):
+        def resolve_extra(prop):
             code = prop["code"]
-            if code not in extras and code.lower() in {"concept_class", "class", "conceptclass", "datatype"}:
-                return self.datatype if code.lower() == "datatype" else self.concept_class
             return get(extras, code) if has(extras, code) else NOT_EXISTING_VALUE
+
+        def resolve_value(prop, extra):
+            code = prop["code"]
+            if extra == NOT_EXISTING_VALUE and code.lower() in {"concept_class", "class", "conceptclass", "datatype"}:
+                return self.datatype if code.lower() == "datatype" else self.concept_class
+            if isinstance(extra, dict) and 'value' in extra:
+                return extra['value']
+            return extra
 
         def build_property(prop):
             if not prop:
                 return False
-            value = resolve_value(prop)
+            extra = resolve_extra(prop)
+            value = resolve_value(prop, extra)
             if value == NOT_EXISTING_VALUE:
                 return False
             value_key = f"value{(prop.get('type') or '').title()}"

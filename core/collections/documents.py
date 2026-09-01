@@ -5,7 +5,7 @@ from django_elasticsearch_dsl.registries import registry
 from pydash import get
 
 from core.collections.models import Collection
-from core.common.utils import jsonify_safe, flatten_dict, format_url_for_search
+from core.common.utils import jsonify_safe, flatten_dict, flatten_extras, format_url_for_search
 
 
 @registry.register_document
@@ -120,7 +120,7 @@ class CollectionDocument(Document):
         if instance.extras:
             value = jsonify_safe(instance.extras)
             if isinstance(value, dict):
-                value = flatten_dict(value)
+                value = flatten_extras(value)
 
         if value:
             value = json.loads(json.dumps(value))

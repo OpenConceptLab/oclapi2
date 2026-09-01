@@ -713,6 +713,19 @@ def flatten_dict(dikt, parent_key='', sep='__'):
     return dict(items)
 
 
+def flatten_extras(dikt, sep='__'):
+    def resolve(_dikt):
+        resolved = {}
+        for key, val in _dikt.items():
+            if isinstance(val, MutableMapping):
+                resolved[key] = val['value'] if 'value' in val else resolve(val)
+            else:
+                resolved[key] = val
+        return resolved
+
+    return flatten_dict(resolve(dikt), sep=sep)
+
+
 def get_bulk_import_celery_once_lock_key(async_result):
     result_args = async_result.args
     if not result_args:

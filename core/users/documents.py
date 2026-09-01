@@ -3,7 +3,7 @@ import json
 from django_elasticsearch_dsl import Document, fields
 from django_elasticsearch_dsl.registries import registry
 
-from core.common.utils import jsonify_safe, flatten_dict
+from core.common.utils import jsonify_safe, flatten_extras
 from core.users.models import UserProfile
 
 
@@ -77,7 +77,7 @@ class UserProfileDocument(Document):
         if instance.extras:
             value = jsonify_safe(instance.extras)
             if isinstance(value, dict):
-                value = flatten_dict(value)
+                value = flatten_extras(value)
 
         if value:
             value = json.loads(json.dumps(value))

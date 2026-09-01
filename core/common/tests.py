@@ -51,7 +51,8 @@ from core.common.utils import (
     compact_dict_by_values, to_snake_case, flower_get,
     to_camel_case,
     drop_version, is_versioned_uri, separate_version, to_parent_uri, jsonify_safe, es_get,
-    get_resource_class_from_resource_name, flatten_dict, is_csv_file, is_url_encoded_string, to_parent_uri_from_kwargs,
+    get_resource_class_from_resource_name, flatten_dict, flatten_extras, is_csv_file, is_url_encoded_string,
+    to_parent_uri_from_kwargs,
     set_current_user, get_current_user, set_request_url, get_request_url, nested_dict_values, chunks, api_get,
     split_list_by_condition, is_zip_file, get_date_range_label, get_prev_month, from_string_to_date, get_end_of_month,
     get_start_of_month, es_id_in, web_url, get_queue_task_names, get_resource_class_from_resource_uri, encode_string,
@@ -824,6 +825,44 @@ class UtilsTest(OCLTestCase):
         #         'questionnaire_choice_value': 'LA27919-2',
         #     }
         # )
+
+    def test_flatten_extras(self):
+        self.assertEqual(flatten_extras({'foo': 'bar'}), {'foo': 'bar'})
+        self.assertEqual(flatten_extras({'foo': 1}), {'foo': '1'})
+        self.assertEqual(
+            flatten_extras({'foo': True, 'bar': {'tao': {'te': 'ching'}}}),
+            {'foo': 'True', 'bar__tao__te': 'ching'}
+        )
+        self.assertEqual(
+            flatten_extras(
+                {
+                    'is_clinical': False,
+                    'tao': {'te': 'ching'},
+                    'reference': {
+                        'display': 'Reference',
+                        'type': 'Default value type, can be replaced by property type in the definition',
+                        'value': 'The reference value to index here',
+                        'anything_else': 'my-precious-description-uuid'
+                    }
+                }
+            ),
+            {
+                'is_clinical': 'False',
+                'tao__te': 'ching',
+                'reference': 'The reference value to index here'
+            }
+        )
+        self.assertEqual(
+            flatten_extras(
+                {
+                    'reference': {
+                        'display': 'Reference',
+                        'value': {'code': 'foo', 'system': 'bar'}
+                    }
+                }
+            ),
+            {'reference__code': 'foo', 'reference__system': 'bar'}
+        )
 
     def test_is_csv_file(self):
         self.assertFalse(is_csv_file(name='foo/bar'))

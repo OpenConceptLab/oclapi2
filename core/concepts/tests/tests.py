@@ -2270,6 +2270,42 @@ class ConceptTest(OCLTestCase):
                 ]
             )
 
+    def test_properties_with_extras_reference_value(self):
+        source = OrganizationSourceFactory(
+            properties=[
+                {
+                    "code": "reference",
+                    "description": "A reference to something",
+                    "type": "string",
+                    "display": "Reference"
+                }
+            ],
+            filters=[]
+        )
+
+        concept_without_extra = ConceptFactory(parent=source)
+        concept_with_plain_extra = ConceptFactory(parent=source, extras={'reference': 'plain-value'})
+        concept_with_reference_extra = ConceptFactory(
+            parent=source,
+            extras={
+                'reference': {
+                    'display': 'Concept Reference Display',
+                    'type': 'Default value type, can be replaced by property type in the definition',
+                    'value': 'the-actual-value',
+                    'anything_else': 'my-precious-description-uuid'
+                }
+            }
+        )
+
+        self.assertEqual(concept_without_extra.properties, [])
+        self.assertEqual(
+            concept_with_plain_extra.properties,
+            [{'code': 'reference', 'valueString': 'plain-value', 'display': 'Reference'}]
+        )
+        self.assertEqual(
+            concept_with_reference_extra.properties,
+            [{'code': 'reference', 'valueString': 'the-actual-value', 'display': 'Reference'}]
+        )
 
     def test_get_resource_url_kwarg(self):
         self.assertEqual(Concept.get_resource_url_kwarg(), 'concept')
