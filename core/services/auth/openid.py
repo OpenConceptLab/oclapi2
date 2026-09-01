@@ -21,7 +21,7 @@ class OpenIDAuthService(AbstractAuthService):
     OIDP_ADMIN_TOKEN_URL = settings.OIDC_SERVER_INTERNAL_URL + '/realms/master/protocol/openid-connect/token'
 
     @staticmethod
-    def get_login_redirect_url(client_id, redirect_uri, state, nonce, code_challenge=None, code_challenge_method=None):
+    def get_login_redirect_url(client_id, redirect_uri, state, nonce, code_challenge=None, code_challenge_method=None):  # pylint: disable=line-too-long,too-many-arguments
         url = f"{settings.OIDC_OP_AUTHORIZATION_ENDPOINT}?" \
               f"response_type=code id_token&" \
               f"client_id={client_id}&" \
@@ -45,7 +45,7 @@ class OpenIDAuthService(AbstractAuthService):
         return url
 
     @staticmethod
-    def get_registration_redirect_url(client_id, redirect_uri, state, nonce, code_challenge=None, code_challenge_method=None):
+    def get_registration_redirect_url(client_id, redirect_uri, state, nonce, code_challenge=None, code_challenge_method=None):  # pylint: disable=line-too-long,too-many-arguments
         url = f"{settings.OIDC_OP_REGISTRATION_ENDPOINT}?" \
               f"response_type=code id_token&" \
               f"client_id={client_id}&" \
