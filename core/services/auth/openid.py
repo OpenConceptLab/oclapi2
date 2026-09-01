@@ -22,8 +22,12 @@ class OpenIDAuthService(AbstractAuthService):
 
     @staticmethod
     def get_login_redirect_url(client_id, redirect_uri, state, nonce, code_challenge=None, code_challenge_method=None):  # pylint: disable=line-too-long,too-many-arguments
+        # response_type=code only (no id_token): a pure code flow never puts the id_token in the
+        # callback URL/access logs. scope=openid is requested explicitly so the token-exchange
+        # response still includes id_token in its body, where the frontend now reads it from.
         url = f"{settings.OIDC_OP_AUTHORIZATION_ENDPOINT}?" \
-              f"response_type=code id_token&" \
+              f"response_type=code&" \
+              f"scope=openid profile email&" \
               f"client_id={client_id}&" \
               f"state={state}&" \
               f"nonce={nonce}&" \
@@ -46,8 +50,11 @@ class OpenIDAuthService(AbstractAuthService):
 
     @staticmethod
     def get_registration_redirect_url(client_id, redirect_uri, state, nonce, code_challenge=None, code_challenge_method=None):  # pylint: disable=line-too-long,too-many-arguments
+        # See get_login_redirect_url: pure code flow + explicit openid scope, id_token comes
+        # from the token-exchange response body instead of the callback URL.
         url = f"{settings.OIDC_OP_REGISTRATION_ENDPOINT}?" \
-              f"response_type=code id_token&" \
+              f"response_type=code&" \
+              f"scope=openid profile email&" \
               f"client_id={client_id}&" \
               f"state={state}&" \
               f"nonce={nonce}&" \

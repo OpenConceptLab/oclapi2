@@ -25,8 +25,8 @@ class OpenIDAuthServiceTest(OCLTestCase):
     def test_get_login_redirect_url(self):
         self.assertEqual(
             OpenIDAuthService.get_login_redirect_url('client-id', 'http://localhost:4000', 'state', 'nonce'),
-            '/realms/ocl/protocol/openid-connect/auth?response_type=code id_token&client_id=client-id&'
-            'state=state&nonce=nonce&redirect_uri=http://localhost:4000'
+            '/realms/ocl/protocol/openid-connect/auth?response_type=code&scope=openid profile email&'
+            'client_id=client-id&state=state&nonce=nonce&redirect_uri=http://localhost:4000'
         )
 
     def test_get_logout_redirect_url(self):
