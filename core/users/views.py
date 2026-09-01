@@ -60,13 +60,17 @@ class OIDCodeExchangeView(APIView):
         redirect_uri = request.data.get('redirect_uri', None)
         client_id = request.data.get('client_id', None)
         client_secret = request.data.get('client_secret', None)
-        if not code or not redirect_uri or not client_id or not client_secret:
+        code_verifier = request.data.get('code_verifier', None)
+        if not code or not redirect_uri or not client_id or not (client_secret or code_verifier):
             return Response(
-                {'error': 'code, redirect_uri, client_id and client_secret are mandatory to exchange for token'},
+                {
+                    'error': 'code, redirect_uri, client_id and either client_secret or code_verifier '
+                             'are mandatory to exchange for token'
+                },
                 status=status.HTTP_400_BAD_REQUEST
             )
         return Response(
-            OpenIDAuthService.exchange_code_for_token(code, redirect_uri, client_id, client_secret))
+            OpenIDAuthService.exchange_code_for_token(code, redirect_uri, client_id, client_secret, code_verifier))
 
 
 # This API is only to migrate users from Django to OID, requires OID admin credentials in payload
@@ -141,6 +145,8 @@ class TokenAuthenticationView(APIView):
                     request.query_params.get('redirect_uri'),
                     request.query_params.get('state'),
                     request.query_params.get('nonce'),
+                    request.query_params.get('code_challenge'),
+                    request.query_params.get('code_challenge_method'),
                 )
             )
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
@@ -301,6 +307,8 @@ class UserSignup(UserBaseView, mixins.CreateModelMixin):
                     request.query_params.get('redirect_uri'),
                     request.query_params.get('state'),
                     request.query_params.get('nonce'),
+                    request.query_params.get('code_challenge'),
+                    request.query_params.get('code_challenge_method'),
                 )
             )
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
@@ -361,6 +369,8 @@ class UserPasswordResetView(UserBaseView):
                 OpenIDAuthService.get_reset_password_redirect_url(
                     request.query_params.get('client_id'),
                     request.query_params.get('redirect_uri'),
+                    request.query_params.get('code_challenge'),
+                    request.query_params.get('code_challenge_method'),
                 )
             )
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)

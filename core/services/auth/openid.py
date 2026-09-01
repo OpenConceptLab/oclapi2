@@ -21,31 +21,40 @@ class OpenIDAuthService(AbstractAuthService):
     OIDP_ADMIN_TOKEN_URL = settings.OIDC_SERVER_INTERNAL_URL + '/realms/master/protocol/openid-connect/token'
 
     @staticmethod
-    def get_login_redirect_url(client_id, redirect_uri, state, nonce):
-        return f"{settings.OIDC_OP_AUTHORIZATION_ENDPOINT}?" \
-               f"response_type=code id_token&" \
-               f"client_id={client_id}&" \
-               f"state={state}&" \
-               f"nonce={nonce}&" \
-               f"redirect_uri={redirect_uri}"
+    def get_login_redirect_url(client_id, redirect_uri, state, nonce, code_challenge=None, code_challenge_method=None):
+        url = f"{settings.OIDC_OP_AUTHORIZATION_ENDPOINT}?" \
+              f"response_type=code id_token&" \
+              f"client_id={client_id}&" \
+              f"state={state}&" \
+              f"nonce={nonce}&" \
+              f"redirect_uri={redirect_uri}"
+        if code_challenge and code_challenge_method:
+            url += f"&code_challenge={code_challenge}&code_challenge_method={code_challenge_method}"
+        return url
 
     @staticmethod
-    def get_reset_password_redirect_url(client_id, redirect_uri):
-        return f"{settings.OIDC_OP_AUTHORIZATION_ENDPOINT}?" \
-               f"scope=openid&" \
-               f"kc_action=UPDATE_PASSWORD&" \
-               f"response_type=code&" \
-               f"client_id={client_id}&" \
-               f"redirect_uri={redirect_uri}"
+    def get_reset_password_redirect_url(client_id, redirect_uri, code_challenge=None, code_challenge_method=None):
+        url = f"{settings.OIDC_OP_AUTHORIZATION_ENDPOINT}?" \
+              f"scope=openid&" \
+              f"kc_action=UPDATE_PASSWORD&" \
+              f"response_type=code&" \
+              f"client_id={client_id}&" \
+              f"redirect_uri={redirect_uri}"
+        if code_challenge and code_challenge_method:
+            url += f"&code_challenge={code_challenge}&code_challenge_method={code_challenge_method}"
+        return url
 
     @staticmethod
-    def get_registration_redirect_url(client_id, redirect_uri, state, nonce):
-        return f"{settings.OIDC_OP_REGISTRATION_ENDPOINT}?" \
-               f"response_type=code id_token&" \
-               f"client_id={client_id}&" \
-               f"state={state}&" \
-               f"nonce={nonce}&" \
-               f"redirect_uri={redirect_uri}"
+    def get_registration_redirect_url(client_id, redirect_uri, state, nonce, code_challenge=None, code_challenge_method=None):
+        url = f"{settings.OIDC_OP_REGISTRATION_ENDPOINT}?" \
+              f"response_type=code id_token&" \
+              f"client_id={client_id}&" \
+              f"state={state}&" \
+              f"nonce={nonce}&" \
+              f"redirect_uri={redirect_uri}"
+        if code_challenge and code_challenge_method:
+            url += f"&code_challenge={code_challenge}&code_challenge_method={code_challenge_method}"
+        return url
 
     @staticmethod
     def get_logout_redirect_url(id_token_hint, redirect_uri):
@@ -102,17 +111,18 @@ class OpenIDAuthService(AbstractAuthService):
         return response.json().get('access_token')
 
     @staticmethod
-    def exchange_code_for_token(code, redirect_uri, client_id, client_secret):
-        response = requests.post(
-            settings.OIDC_OP_TOKEN_ENDPOINT,
-            data={
-                'grant_type': 'authorization_code',
-                'client_id': client_id,
-                'client_secret': client_secret,
-                'code': code,
-                'redirect_uri': redirect_uri
-            }
-        )
+    def exchange_code_for_token(code, redirect_uri, client_id, client_secret=None, code_verifier=None):
+        data = {
+            'grant_type': 'authorization_code',
+            'client_id': client_id,
+            'code': code,
+            'redirect_uri': redirect_uri
+        }
+        if client_secret:
+            data['client_secret'] = client_secret
+        if code_verifier:
+            data['code_verifier'] = code_verifier
+        response = requests.post(settings.OIDC_OP_TOKEN_ENDPOINT, data=data)
         return response.json()
 
     @staticmethod

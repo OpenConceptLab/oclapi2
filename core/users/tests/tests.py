@@ -319,7 +319,7 @@ class TokenAuthenticationViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.headers['Location'], 'http://login-redirect.com')
         get_login_url_mock.assert_called_once_with(
-            'client-id', 'http://post-login-url', 'state', 'nonce'
+            'client-id', 'http://post-login-url', 'state', 'nonce', None, None
         )
 
 

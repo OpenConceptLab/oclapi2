@@ -957,10 +957,30 @@ class OIDCodeExchangeViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, 'response')
         service_mock.exchange_code_for_token.assert_called_once_with(
-            'code', 'http://app.com', 'client-id', 'client-secret'
+            'code', 'http://app.com', 'client-id', 'client-secret', None
+        )
+
+    @patch('core.users.views.OpenIDAuthService')
+    def test_post_200_with_code_verifier(self, service_mock):
+        service_mock.exchange_code_for_token = Mock(return_value='response')
+        response = self.client.post(
+            '/users/oidc/code-exchange/',
+            {
+                'client_id': 'client-id', 'code_verifier': 'verifier',
+                'redirect_uri': 'http://app.com', 'code': 'code'
+            },
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, 'response')
+        service_mock.exchange_code_for_token.assert_called_once_with(
+            'code', 'http://app.com', 'client-id', None, 'verifier'
         )
 
     def test_post_400(self):
+        error_message = 'code, redirect_uri, client_id and either client_secret or code_verifier ' \
+                         'are mandatory to exchange for token'
         response = self.client.post(
             '/users/oidc/code-exchange/',
             {},
@@ -968,10 +988,7 @@ class OIDCodeExchangeViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(
-            response.data,
-            {'error': 'code, redirect_uri, client_id and client_secret are mandatory to exchange for token'}
-        )
+        self.assertEqual(response.data, {'error': error_message})
 
         response = self.client.post(
             '/users/oidc/code-exchange/',
@@ -980,10 +997,7 @@ class OIDCodeExchangeViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(
-            response.data,
-            {'error': 'code, redirect_uri, client_id and client_secret are mandatory to exchange for token'}
-        )
+        self.assertEqual(response.data, {'error': error_message})
 
         response = self.client.post(
             '/users/oidc/code-exchange/',
@@ -997,10 +1011,7 @@ class OIDCodeExchangeViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(
-            response.data,
-            {'error': 'code, redirect_uri, client_id and client_secret are mandatory to exchange for token'}
-        )
+        self.assertEqual(response.data, {'error': error_message})
 
 
 class TokenExchangeViewTest(OCLAPITestCase):
