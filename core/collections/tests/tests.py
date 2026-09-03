@@ -512,6 +512,7 @@ class CollectionTest(OCLTestCase):
             distribution,
             [{
                  'id': 'HEAD',
+                 'version': 'HEAD',
                  'version_url': source1.uri,
                  'type': 'Source Version',
                  'short_code': source1.mnemonic,
@@ -526,6 +527,7 @@ class CollectionTest(OCLTestCase):
                  }
              }, {
                  'id': 'v1',
+                 'version': 'v1',
                  'version_url': source2_v1.uri,
                  'type': 'Source Version',
                  'short_code': source2.mnemonic,
@@ -540,6 +542,7 @@ class CollectionTest(OCLTestCase):
                  }
              }, {
                 'id': 'HEAD',
+                'version': 'HEAD',
                 'version_url': source2.uri,
                 'type': 'Source Version',
                 'short_code': source2.mnemonic,
@@ -608,6 +611,7 @@ class CollectionTest(OCLTestCase):
             distribution,
             [{
                  'id': 'HEAD',
+                 'version': 'HEAD',
                  'version_url': collection.uri,
                  'type': 'Collection Version',
                  'short_code': collection.mnemonic,

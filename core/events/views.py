@@ -1,5 +1,8 @@
+from datetime import timedelta
+
 from django.conf import settings
 from django.http import Http404
+from django.utils import timezone
 from pydash import compact, get
 from rest_framework import status
 from rest_framework.permissions import AllowAny
@@ -7,6 +10,7 @@ from rest_framework.response import Response
 
 from core.common.mixins import ListWithHeadersMixin
 from core.common.permissions import HasOwnership
+from core.common.utils import to_int
 from core.common.views import BaseAPIView
 from core.events.models import Event
 from core.events.serializers import EventSerializer
@@ -77,7 +81,12 @@ class GuestEventsView(EventsView):
         user = UserProfile.objects.filter(username=settings.HIGHLIGHTED_EVENTS_FROM_USERNAME).first()
         events = Event.objects.none()
         if user:
-            following_queryset = user.following.exclude(following_type__model='userprofile')
-            events = Event.get_events_for_following(
-                following_queryset, False, event_type__in=Event.HIGHLIGHT_EVENT_TYPES)
+            events = Event.get_user_all_events(user, False).order_by('-created_at')
+            events = Event.objects.filter(
+                id__in=events.values_list('id', flat=True),
+                event_type__in=Event.HIGHLIGHT_EVENT_TYPES,
+                created_at__gte=timezone.now() - timedelta(days=180)
+            ).order_by('-created_at')
+            if not self.limit or to_int(self.limit, 100) > 10:
+                self.limit = 10
         return events

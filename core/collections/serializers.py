@@ -41,7 +41,7 @@ class CollectionVersionMinimalSerializer(ModelSerializer):
 
     class Meta:
         model = Collection
-        fields = ('id', 'version_url', 'type', 'short_code', 'released', 'autoexpand', 'description', 'name')
+        fields = ('id', 'version_url', 'type', 'short_code', 'released', 'autoexpand', 'description', 'name', 'version')
 
     @staticmethod
     def get_autoexpand(obj):
