@@ -1039,7 +1039,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         # used for caching repo versions concepts/mappings first page
         if self.is_repo_version_children_request() and not self.get_search_string() and not self.is_verbose():
             page = self.request.query_params.dict().get('page', '').strip()
-            sort = self.request.query_params.dict().get('sortDesc', '').strip()
+            sort_field, _ = self.get_sort_and_desc()
+            sort = (sort_field or '').strip()
             limit = self.request.query_params.dict().get('limit', '').strip()
             if limit:
                 limit = to_int(limit, 25)

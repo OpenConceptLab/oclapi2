@@ -1,6 +1,8 @@
 from unittest.mock import patch
 
 from celery.states import PENDING
+from django.core.cache import cache
+from django.test import override_settings
 from mock import ANY
 
 from core.bundles.models import Bundle
@@ -3051,6 +3053,117 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertTrue(class_b_facet[1] >= 1)
         self.assertFalse(class_b_facet[2])
         self.assertEqual([x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classA'], [])
+
+
+@override_settings(CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}})
+class ConceptListCacheTest(OCLAPITestCase):
+    """
+    Only a default (unsearched/unfiltered) listing of a non-HEAD repo version is cached -- a version is
+    frozen in time so anything is safe to cache, but caching is kept narrow on purpose (fast landing page,
+    bounded redis footprint). See ListWithHeadersMixin.__can_cache and
+    BaseAPIView.is_repo_version_children_request_without_any_search.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.patch_concept_es_mapping_for_ci()
+        self.source = OrganizationSourceFactory(mnemonic='MySource')
+        self.org = self.source.parent.mnemonic
+        self.source_v1 = OrganizationSourceFactory(
+            version='v1', mnemonic='MySource', organization=self.source.parent, released=True
+        )
+        self.concept = ConceptFactory(mnemonic='MyConcept1', parent=self.source)
+        self.source.concepts.add(self.concept.get_latest_version())
+        self.source_v1.concepts.add(self.concept.get_latest_version())
+        ConceptDocument().update(self.source.concepts_set.all())
+        cache.clear()
+
+    def test_head_version_concepts_are_not_cached(self):
+        body_key, headers_key = self.source.get_concepts_cache_keys()
+
+        response = self.client.get(f'/orgs/{self.org}/sources/MySource/HEAD/concepts/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertIsNone(cache.get(body_key))
+        self.assertIsNone(cache.get(headers_key))
+
+    def test_implicit_head_concepts_are_not_cached(self):
+        body_key, headers_key = self.source.get_concepts_cache_keys()
+
+        response = self.client.get(f'/orgs/{self.org}/sources/MySource/concepts/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertIsNone(cache.get(body_key))
+        self.assertIsNone(cache.get(headers_key))
+
+    def test_repo_version_concepts_are_cached(self):
+        body_key, headers_key = self.source_v1.get_concepts_cache_keys()
+        self.assertIsNone(cache.get(body_key))
+
+        response = self.client.get(f'/orgs/{self.org}/sources/MySource/v1/concepts/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(len(cache.get(body_key)), 1)
+        self.assertEqual(cache.get(body_key)[0]['id'], 'MyConcept1')
+        self.assertIsNotNone(cache.get(headers_key))
+
+    def test_repo_version_concepts_are_served_from_cache(self):
+        url = f'/orgs/{self.org}/sources/MySource/v1/concepts/'
+        body_key, _ = self.source_v1.get_concepts_cache_keys()
+
+        self.assertEqual(self.client.get(url).status_code, 200)
+
+        cache.set(body_key, [{'id': 'FromCache'}])
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, [{'id': 'FromCache'}])
+
+    def test_repo_version_concepts_facets_are_cached(self):
+        body_key, _ = self.source_v1.get_concepts_cache_keys()
+        facets_key = body_key + '?facetsOnly=true'
+
+        response = self.client.get(f'/orgs/{self.org}/sources/MySource/v1/concepts/?facetsOnly=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('facets', response.data)
+        self.assertEqual(cache.get(facets_key), response.data)
+        self.assertIsNone(cache.get(body_key))  # facets do not collide with the plain listing
+
+    def test_repo_version_concepts_facets_are_served_from_cache(self):
+        url = f'/orgs/{self.org}/sources/MySource/v1/concepts/?facetsOnly=true'
+        body_key, _ = self.source_v1.get_concepts_cache_keys()
+
+        self.assertEqual(self.client.get(url).status_code, 200)
+
+        cache.set(body_key + '?facetsOnly=true', {'facets': {'fields': {'fromCache': []}}})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, {'facets': {'fields': {'fromCache': []}}})
+
+    def test_head_version_concepts_facets_are_not_cached(self):
+        body_key, _ = self.source.get_concepts_cache_keys()
+
+        response = self.client.get(f'/orgs/{self.org}/sources/MySource/concepts/?facetsOnly=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('facets', response.data)
+        self.assertIsNone(cache.get(body_key + '?facetsOnly=true'))
+
+    def test_repo_version_concepts_with_search_are_not_cached(self):
+        body_key, headers_key = self.source_v1.get_concepts_cache_keys()
+
+        response = self.client.get(f'/orgs/{self.org}/sources/MySource/v1/concepts/?q=123')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+        self.assertIsNone(cache.get(body_key))
+        self.assertIsNone(cache.get(headers_key))
+        self.assertIsNone(cache.get(body_key + '?q=123'))
 
 
 class ConceptPropertyFilterViewTest(OCLAPITestCase):

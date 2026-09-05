@@ -161,7 +161,6 @@ class ListWithHeadersMixin(ListModelMixin):
         base_path = request.get_full_path()
         params = request.query_params.copy()
         params.pop('verbose', None)
-        params.pop('brief', None)
         query_string = urlencode(params, doseq=True)
         parent = self.parent_resource
 
@@ -174,7 +173,9 @@ class ListWithHeadersMixin(ListModelMixin):
         return key_body, cache.get(key_body) or None, key_headers, cache.get(key_headers) or None
 
     def __can_cache(self):
-        return (self.should_perform_es_search() and self.is_repo_version_children_request_without_any_search() and
+        # facets/search-stats are header driven and change the response shape, but are not part of the cache key
+        return (self.is_repo_version_children_request_without_any_search() and
+                not self.should_include_facets() and not self.should_include_search_stats() and
                 get(self, 'parent_resource.is_latest_version', False))
 
     def list(self, request, *args, **kwargs):  # pylint:disable=too-many-locals,too-many-branches,too-many-statements

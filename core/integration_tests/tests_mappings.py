@@ -1,9 +1,12 @@
+from django.core.cache import cache
+from django.test import override_settings
 from rest_framework.exceptions import ErrorDetail
 
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.tests import OCLAPITestCase
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from core.mappings.constants import SAME_AS
+from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
@@ -962,3 +965,113 @@ class MappingCollectionMembershipViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
+
+
+@override_settings(CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}})
+class MappingListCacheTest(OCLAPITestCase):
+    """
+    Only a default (unsearched/unfiltered) listing of a non-HEAD repo version is cached -- a version is
+    frozen in time so anything is safe to cache, but caching is kept narrow on purpose (fast landing page,
+    bounded redis footprint). See ListWithHeadersMixin.__can_cache and
+    BaseAPIView.is_repo_version_children_request_without_any_search.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.source = OrganizationSourceFactory(mnemonic='MapCacheSource')
+        self.org = self.source.parent.mnemonic
+        self.source_v1 = OrganizationSourceFactory(
+            version='v1', mnemonic='MapCacheSource', organization=self.source.parent, released=True
+        )
+        self.mapping = MappingFactory(mnemonic='MyMapping1', parent=self.source)
+        self.source.mappings.add(self.mapping.get_latest_version())
+        self.source_v1.mappings.add(self.mapping.get_latest_version())
+        MappingDocument().update(self.source.mappings_set.all())
+        cache.clear()
+
+    def test_head_version_mappings_are_not_cached(self):
+        body_key, headers_key = self.source.get_mappings_cache_keys()
+
+        response = self.client.get(f'/orgs/{self.org}/sources/MapCacheSource/HEAD/mappings/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertIsNone(cache.get(body_key))
+        self.assertIsNone(cache.get(headers_key))
+
+    def test_implicit_head_mappings_are_not_cached(self):
+        body_key, headers_key = self.source.get_mappings_cache_keys()
+
+        response = self.client.get(f'/orgs/{self.org}/sources/MapCacheSource/mappings/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertIsNone(cache.get(body_key))
+        self.assertIsNone(cache.get(headers_key))
+
+    def test_repo_version_mappings_are_cached(self):
+        body_key, headers_key = self.source_v1.get_mappings_cache_keys()
+        self.assertIsNone(cache.get(body_key))
+
+        response = self.client.get(f'/orgs/{self.org}/sources/MapCacheSource/v1/mappings/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(len(cache.get(body_key)), 1)
+        self.assertEqual(cache.get(body_key)[0]['id'], 'MyMapping1')
+        self.assertIsNotNone(cache.get(headers_key))
+
+    def test_repo_version_mappings_are_served_from_cache(self):
+        url = f'/orgs/{self.org}/sources/MapCacheSource/v1/mappings/'
+        body_key, _ = self.source_v1.get_mappings_cache_keys()
+
+        self.assertEqual(self.client.get(url).status_code, 200)
+
+        cache.set(body_key, [{'id': 'FromCache'}])
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, [{'id': 'FromCache'}])
+
+    def test_repo_version_mappings_facets_are_cached(self):
+        body_key, _ = self.source_v1.get_mappings_cache_keys()
+        facets_key = body_key + '?facetsOnly=true'
+
+        response = self.client.get(f'/orgs/{self.org}/sources/MapCacheSource/v1/mappings/?facetsOnly=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('facets', response.data)
+        self.assertEqual(cache.get(facets_key), response.data)
+        self.assertIsNone(cache.get(body_key))  # facets do not collide with the plain listing
+
+    def test_repo_version_mappings_facets_are_served_from_cache(self):
+        url = f'/orgs/{self.org}/sources/MapCacheSource/v1/mappings/?facetsOnly=true'
+        body_key, _ = self.source_v1.get_mappings_cache_keys()
+
+        self.assertEqual(self.client.get(url).status_code, 200)
+
+        cache.set(body_key + '?facetsOnly=true', {'facets': {'fields': {'fromCache': []}}})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, {'facets': {'fields': {'fromCache': []}}})
+
+    def test_head_version_mappings_facets_are_not_cached(self):
+        body_key, _ = self.source.get_mappings_cache_keys()
+
+        response = self.client.get(f'/orgs/{self.org}/sources/MapCacheSource/mappings/?facetsOnly=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('facets', response.data)
+        self.assertIsNone(cache.get(body_key + '?facetsOnly=true'))
+
+    def test_repo_version_mappings_with_search_are_not_cached(self):
+        body_key, headers_key = self.source_v1.get_mappings_cache_keys()
+
+        response = self.client.get(f'/orgs/{self.org}/sources/MapCacheSource/v1/mappings/?q=123')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+        self.assertIsNone(cache.get(body_key))
+        self.assertIsNone(cache.get(headers_key))
+        self.assertIsNone(cache.get(body_key + '?q=123'))
