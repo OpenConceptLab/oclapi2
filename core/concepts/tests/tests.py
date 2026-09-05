@@ -2307,6 +2307,21 @@ class ConceptTest(OCLTestCase):
             [{'code': 'reference', 'valueString': 'the-actual-value', 'display': 'Reference'}]
         )
 
+    def test_prepare_properties_indexes_value_not_display(self):
+        source = OrganizationSourceFactory(
+            properties=[
+                {'code': 'is_set', 'type': 'boolean', 'display': 'Is set'},
+                {'code': 'units', 'type': 'string', 'display': 'UoM'},
+            ],
+            filters=[{'code': 'is_set'}, {'code': 'units'}]
+        )
+        concept = ConceptFactory(parent=source, extras={'is_set': 1, 'units': 'parts/microliter'})
+
+        self.assertEqual(
+            ConceptDocument.prepare_properties(concept),
+            {'is_set': 1, 'units': 'parts/microliter'}
+        )
+
     def test_get_resource_url_kwarg(self):
         self.assertEqual(Concept.get_resource_url_kwarg(), 'concept')
 

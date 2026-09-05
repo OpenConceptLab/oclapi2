@@ -192,7 +192,7 @@ class ConceptDocument(Document):
         for _filter in filters:
             prop = next((prop for prop in properties if prop['code'] == _filter['code']), None)
             if prop:
-                value_key = list(set(prop.keys()) - {'code'})[0]
+                value_key = next((key for key in prop if key.startswith('value')), None)
                 value[_filter['code']] = prop.get(value_key, None)
 
         return value
