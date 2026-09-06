@@ -10,8 +10,11 @@ def propagate_parent_attributes(sender, instance=None, created=False, **kwargs):
     if created:
         instance.record_create_event()
     if not created and instance:
+        from core.concepts.documents import ConceptDocument
         if get(instance, '_should_update_is_active'):
             instance.concepts_set.exclude(is_active=instance.is_active).update(is_active=instance.is_active)
+            # Direct GraphQL hits use this flag without reloading the concept from the database.
+            instance.batch_index(instance.concepts_set, ConceptDocument, partial_doc={'is_active': instance.is_active})
             instance.mappings_set.exclude(is_active=instance.is_active).update(is_active=instance.is_active)
 
         if get(instance, '_should_update_public_access'):
@@ -21,9 +24,11 @@ def propagate_parent_attributes(sender, instance=None, created=False, **kwargs):
                 public_access=instance.public_access).update(public_access=instance.public_access)
 
             partial_doc = {'public_can_view': instance.public_can_view}
-            if updated_concepts:
-                from core.concepts.documents import ConceptDocument
-                instance.batch_index(instance.concepts_set, ConceptDocument, partial_doc=partial_doc)
+            if updated_concepts or instance.concepts_set.exists():
+                instance.batch_index(
+                    instance.concepts_set, ConceptDocument,
+                    partial_doc={**partial_doc, 'parent_public_can_view': instance.public_can_view},
+                )
             if updated_mappings:
                 from core.mappings.documents import MappingDocument
                 instance.batch_index(instance.mappings_set, MappingDocument, partial_doc=partial_doc)

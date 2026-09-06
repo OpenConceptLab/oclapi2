@@ -12,6 +12,12 @@ class ConceptDocument(Document):
         name = 'concepts'
         settings = {'number_of_shards': 1, 'number_of_replicas': 0}
 
+    # Preserve ORM semantics for direct GraphQL projections without changing REST search fields.
+    is_active = fields.BooleanField(attr='is_active')
+    parent_public_can_view = fields.BooleanField(attr='parent.public_can_view')
+    is_head = fields.BooleanField()
+    preferred_description = fields.TextField()
+
     id = fields.TextField(attr='mnemonic')
     id_lowercase = fields.KeywordField(attr='mnemonic', normalizer="lowercase")
     id_raw = fields.KeywordField(attr='mnemonic')
@@ -267,3 +273,14 @@ class ConceptDocument(Document):
                 else:
                     other_mapped_codes.append(to_concept_code)
         return same_as_mapped_codes, other_mapped_codes, verbose_info
+
+    @staticmethod
+    def prepare_is_head(instance):
+        """Match the versioned-object predicate used by Source.get_concepts_queryset."""
+        return instance.id == instance.versioned_object_id
+
+    @staticmethod
+    def prepare_preferred_description(instance):
+        """Store the same locale-selected description returned by GraphQL's ORM path."""
+        from core.graphql.serializers import resolve_description
+        return resolve_description(instance)

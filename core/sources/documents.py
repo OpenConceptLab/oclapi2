@@ -14,6 +14,11 @@ class SourceDocument(Document):
         name = 'sources'
         settings = {'number_of_shards': 1, 'number_of_replicas': 0}
 
+    # Additive projection fields; existing indexes require a source reindex.
+    description = fields.TextField(attr='description')
+    uri = fields.KeywordField(attr='uri')
+    is_active = fields.BooleanField(attr='is_active')
+
     locale = fields.ListField(fields.KeywordField())
     last_update = fields.DateField(attr='updated_at')
     updated_by = fields.KeywordField(attr='updated_by.username')

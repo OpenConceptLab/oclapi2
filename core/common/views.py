@@ -29,7 +29,7 @@ from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_
     CANONICAL_URL_REQUEST_PARAM, CHECKSUMS_PARAM, ACCESS_TYPE_NONE
 from core.common.exceptions import Http400
 from core.common.mixins import PathWalkerMixin
-from core.common.search import CustomESSearch
+from core.common.search import CustomESSearch, get_document_public_visibility_criteria
 from core.common.serializers import RootSerializer
 from core.common.swagger_parameters import all_resource_query_param
 from core.common.throttling import ThrottleUtil
@@ -704,7 +704,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             if self.document_model in [OrganizationDocument]:
                 criteria |= (Q('term', public_can_view=False) & Q('term', user=username))
             if self.is_concept_container_document_model() or self.is_source_child_document_model():
-                criteria |= (Q('term', public_can_view=False) & Q('term', created_by=username))
+                return get_document_public_visibility_criteria(user, include_creator_private_access=True)
 
         return criteria
 
