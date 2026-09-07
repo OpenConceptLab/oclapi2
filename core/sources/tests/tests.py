@@ -690,6 +690,31 @@ class SourceTest(OCLTestCase):
         self.assertEqual(version1.concepts.first(), source.concepts.filter(is_latest_version=True).first())
         self.assertEqual(version1.concepts_set.count(), 0)  # no direct child
 
+    def test_add_processing_does_not_duplicate_process_id(self):
+        source = OrganizationSourceFactory(version=HEAD)
+
+        source.add_processing('task-1')
+        source.add_processing('task-1')
+        source.add_processing('task-2')
+
+        self.assertEqual(source._background_process_ids, ['task-1', 'task-2'])  # pylint: disable=protected-access
+        source.refresh_from_db()
+        self.assertEqual(source._background_process_ids, ['task-1', 'task-2'])  # pylint: disable=protected-access
+
+    @override_settings(TEST_MODE=False, ES_SYNC=False)
+    @patch('core.common.models.seed_children_to_new_version.apply_async', Mock())
+    def test_persist_new_version_marks_processing_synchronously(self):
+        source = OrganizationSourceFactory(version=HEAD)
+        source_version = OrganizationSourceFactory.build(
+            version='v1', mnemonic=source.mnemonic, organization=source.organization,
+        )
+
+        Source.persist_new_version(source_version, source.created_by)
+
+        task = Task.objects.get(name='seed_children_to_new_version')
+        source_version.refresh_from_db()
+        self.assertEqual(source_version._background_process_ids, [task.id])  # pylint: disable=protected-access
+
     @override_settings(TEST_MODE=False)
     @patch('core.common.models.seed_children_to_new_version.apply_async')
     def test_persist_new_version_registers_seed_task_before_enqueue(self, apply_async):
@@ -962,14 +987,14 @@ class SourceTest(OCLTestCase):
         source.add_processing('123')
         self.assertEqual(source._background_process_ids, ['123'])  # pylint: disable=protected-access
 
-        source.add_processing('123')
-        self.assertEqual(source._background_process_ids, ['123', '123'])  # pylint: disable=protected-access
+        source.add_processing('123')  # already tracked, not appended again
+        self.assertEqual(source._background_process_ids, ['123'])  # pylint: disable=protected-access
 
         source.add_processing('abc')
-        self.assertEqual(source._background_process_ids, ['123', '123', 'abc'])  # pylint: disable=protected-access
+        self.assertEqual(source._background_process_ids, ['123', 'abc'])  # pylint: disable=protected-access
 
         source.refresh_from_db()
-        self.assertEqual(source._background_process_ids, ['123', '123', 'abc'])  # pylint: disable=protected-access
+        self.assertEqual(source._background_process_ids, ['123', 'abc'])  # pylint: disable=protected-access
 
     def test_hierarchy_root(self):
         source = OrganizationSourceFactory()

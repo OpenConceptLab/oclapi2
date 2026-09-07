@@ -945,6 +945,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                     args=task_args,
                 )
 
+                # Mark the version as processing before the response goes out
+                obj.add_processing(task.id)
+
                 def enqueue_seed_task():
                     """Queue snapshot seeding only after its repository version is committed."""
                     seed_children_to_new_version.apply_async(
@@ -1071,15 +1074,21 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         }
 
     def add_processing(self, process_id):
-        if self.id and process_id:
-            self.__class__.objects.filter(id=self.id).update(
+        if not process_id:
+            return
+        if self.id:
+            self.__class__.objects.filter(id=self.id).exclude(
+                _background_process_ids__contains=[process_id]
+            ).update(
                 _background_process_ids=CombinedExpression(
                     F('_background_process_ids'),
                     '||',
                     Value([process_id], ArrayField(models.CharField(max_length=255)))
                 )
             )
-        if process_id:
+        if process_id not in (self._background_process_ids or []):
+            if self._background_process_ids is None:
+                self._background_process_ids = []
             self._background_process_ids.append(process_id)
 
     def remove_processing(self, process_id):
