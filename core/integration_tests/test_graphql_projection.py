@@ -41,7 +41,7 @@ class GraphQLProjectionIntegrationTests(OCLTestCase):
             self.addCleanup(patcher.stop)
         self.source = OrganizationSourceFactory(mnemonic='CASE-Sensitive', name='Clinical dictionary')
         self.concept = ConceptFactory(parent=self.source, mnemonic='AbC', datatype='Numeric', concept_class='Diagnosis')
-        ConceptNameFactory(concept=self.concept, name='Hypertension', locale='en', locale_preferred=True)
+        ConceptNameFactory(concept=self.concept, name='Hypertension-test', locale='en', locale_preferred=True)
         ConceptDescriptionFactory(concept=self.concept, name='Preferred definition', locale='en', locale_preferred=True)
         self.index(self.source, SourceDocument)
         self.index(self.concept, ConceptDocument)
@@ -74,7 +74,7 @@ class GraphQLProjectionIntegrationTests(OCLTestCase):
         self.assertEqual(result.data['source']['uri'], self.source.uri)
         self.assertEqual(result.data['concepts']['totalCount'], 1)
         self.assertEqual(result.data['concepts']['results'], [{
-            'conceptId': 'AbC', 'display': 'Hypertension', 'description': 'Preferred definition',
+            'conceptId': 'AbC', 'display': 'Hypertension-test', 'description': 'Preferred definition',
             'datatype': {'name': 'Numeric'}, 'conceptClass': 'Diagnosis',
         }])
 
@@ -82,7 +82,7 @@ class GraphQLProjectionIntegrationTests(OCLTestCase):
         """Global counts omit historical versions and inactive/retired documents."""
         for fields in ({'retired': True}, {'is_active': False}):
             excluded = ConceptFactory(parent=self.source, **fields)
-            ConceptNameFactory(concept=excluded, name='Hypertension', locale='en', locale_preferred=True)
+            ConceptNameFactory(concept=excluded, name='Hypertension-test', locale='en', locale_preferred=True)
             self.index(excluded, ConceptDocument)
         self.index(self.concept.get_latest_version(), ConceptDocument)
         with self.assertNumQueries(0):
@@ -151,6 +151,6 @@ class GraphQLProjectionIntegrationTests(OCLTestCase):
         self.assertIsNone(result.errors)
         self.assertEqual(result.data['concepts']['totalCount'], 1)
         self.assertEqual(result.data['concepts']['results'][0]['id'], str(self.concept.id))
-        self.assertEqual(result.data['concepts']['results'][0]['names'], [{'name': 'Hypertension'}])
+        self.assertEqual(result.data['concepts']['results'][0]['names'], [{'name': 'Hypertension-test'}])
         self.assertTrue(queries.captured_queries)
         self.assertFalse(any('"concepts"."extras"' in query['sql'] for query in queries.captured_queries))

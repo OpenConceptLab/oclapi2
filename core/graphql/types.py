@@ -22,6 +22,14 @@ class ToSourceType:
 
 
 @strawberry.type
+class ExternalSourceType:
+    """GraphQL metadata for a source referenced by an outbound mapping."""
+
+    uri: Optional[str] = strawberry.field(description="URI identifying the target source.")
+    name: Optional[str] = strawberry.field(description="Human-readable name for the target source.")
+
+
+@strawberry.type
 class MappingType:
     map_type: str = strawberry.field(
         name="mapType",
@@ -196,7 +204,7 @@ class SourceType:
     map_types: List[str] = strawberry.field(
         description="Distinct map types used by active, non-retired mappings in this version.", default_factory=list,
     )
-    external_sources: List[ToSourceType] = strawberry.field(
+    external_sources: List[ExternalSourceType] = strawberry.field(
         description="Visible external target sources referenced by active, non-retired outbound mappings.",
         default_factory=list,
     )

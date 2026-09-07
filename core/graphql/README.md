@@ -21,7 +21,7 @@ query Dictionary($org: String!, $source: String!, $version: String) {
     classes
     datatypes
     mapTypes
-    externalSources { name url }
+    externalSources { name uri }
     summary { activeConcepts mappings }
   }
 }
@@ -66,7 +66,7 @@ The older hydrated text-search path retains its empty-index database fallback.
 
 Counts and distinct labels use active, non-retired records. `summary.mappings` counts active, non-retired mappings.
 `externalSources` is the deduplicated set of outbound target repositories, excluding the current source and linked
-private targets the caller cannot view. Unresolved external URLs are taken from visible mappings.
+private targets the caller cannot view. Unresolved external URIs are taken from visible mappings.
 
 Repository permission checks reuse the shared REST visibility rule directly, without fabricated requests.
 Both owner mnemonic and owner type scope index lookups. Global concepts also enforce parent repository visibility,

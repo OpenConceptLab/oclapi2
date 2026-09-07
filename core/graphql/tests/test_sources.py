@@ -54,7 +54,7 @@ class SourceQueryTests(OCLTestCase):
 
     def test_full_mvp_counts_unique_labels_and_targets(self):
         """Retired records and duplicate labels/targets do not inflate the MVP output."""
-        result = self.execute('name description canonicalUrl uri mapTypes externalSources { name url } '
+        result = self.execute('name description canonicalUrl uri mapTypes externalSources { name uri } '
                               'classes datatypes summary { activeConcepts mappings }')
         self.assertIsNone(result.errors)
         data = result.data['source']
@@ -62,7 +62,7 @@ class SourceQueryTests(OCLTestCase):
         self.assertEqual(data['classes'], ['Diagnosis', 'Test'])
         self.assertEqual(data['datatypes'], ['Numeric', 'Text'])
         self.assertEqual(data['mapTypes'], ['SAME-AS'])
-        self.assertEqual(data['externalSources'], [{'name': self.target.name, 'url': self.target.uri}])
+        self.assertEqual(data['externalSources'], [{'name': self.target.name, 'uri': self.target.uri}])
         self.assertEqual(data['canonicalUrl'], self.source.canonical_url)
         self.assertEqual(data['uri'], self.source.uri)
 
@@ -121,7 +121,7 @@ class SourceQueryTests(OCLTestCase):
         """A public mapping cannot expose metadata about a linked private target repository."""
         self.target.public_access = ACCESS_TYPE_NONE
         self.target.save()
-        result = self.execute('externalSources { name url }')
+        result = self.execute('externalSources { name uri }')
         self.assertIsNone(result.errors)
         self.assertEqual(result.data['source']['externalSources'], [])
 
@@ -146,7 +146,7 @@ class SourceQueryTests(OCLTestCase):
         MappingFactory(parent=self.source, from_concept=self.concept, to_concept=target_concept, to_source=None)
         self.target.public_access = ACCESS_TYPE_NONE
         self.target.save()
-        result = self.execute('externalSources { name url }')
+        result = self.execute('externalSources { name uri }')
         self.assertIsNone(result.errors)
         self.assertEqual(result.data['source']['externalSources'], [])
 

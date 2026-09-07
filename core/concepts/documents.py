@@ -17,6 +17,7 @@ class ConceptDocument(Document):
     parent_public_can_view = fields.BooleanField(attr='parent.public_can_view')
     is_head = fields.BooleanField()
     preferred_description = fields.TextField()
+    display_name = fields.TextField(attr='display_name')
 
     id = fields.TextField(attr='mnemonic')
     id_lowercase = fields.KeywordField(attr='mnemonic', normalizer="lowercase")

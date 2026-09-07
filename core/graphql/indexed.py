@@ -22,7 +22,7 @@ CONCEPT_INDEX_FIELDS = {
     'id': (),  # Elasticsearch's metadata ID is the OCL database primary key.
     'conceptId': ('id',),
     'externalId': ('external_id',),
-    'display': ('name',),
+    'display': ('display_name',),
     'description': ('preferred_description',),
     'conceptClass': ('concept_class',),
     'datatype.name': ('datatype',),
@@ -112,7 +112,7 @@ def serialize_indexed_concept(hit):
     datatype = getattr(hit, 'datatype', None)
     return ConceptType(
         id=str(hit.meta.id), concept_id=getattr(hit, 'id', ''),
-        external_id=getattr(hit, 'external_id', None), display=getattr(hit, 'name', None) or None,
+        external_id=getattr(hit, 'external_id', None), display=getattr(hit, 'display_name', None),
         description=getattr(hit, 'preferred_description', None), concept_class=getattr(hit, 'concept_class', None),
         datatype=DatatypeType(name=datatype, details=None) if datatype else None,
         names=[], mappings=[], metadata=None, extras={},

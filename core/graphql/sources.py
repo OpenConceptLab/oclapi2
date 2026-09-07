@@ -2,7 +2,7 @@
 
 from core.common.permissions import user_can_view_concept_dictionary
 
-from .types import SourceType, ToSourceType
+from .types import ExternalSourceType, SourceType
 
 SOURCE_INDEX_FIELDS = {
     '__typename': (),
@@ -61,8 +61,8 @@ def external_sources(mappings, instance, user):
                 continue
             if not user_can_view_concept_dictionary(user, target):
                 continue
-        url = mapping.to_source_url or (target.uri if target else None)
+        uri = mapping.to_source_url or (target.uri if target else None)
         name = target.name if target else mapping.to_source_name
-        if url or name:
-            result[(url or '', name or '')] = ToSourceType(url=url, name=name)
+        if uri or name:
+            result[(uri or '', name or '')] = ExternalSourceType(uri=uri, name=name)
     return [result[key] for key in sorted(result)]
