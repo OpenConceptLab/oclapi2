@@ -71,6 +71,11 @@ INCLUDE_INACTIVE = 'includeInactive'
 INCLUDE_SOURCE_VERSIONS = 'includeSourceVersions'
 INCLUDE_COLLECTION_VERSIONS = 'includeCollectionVersions'
 INCLUDE_RESOLVED_REPO_VERSIONS = 'includeResolvedRepoVersions'
+
+# Written onto a repo version's extras when its export finishes. It describes that one
+# export, so it must not travel to a new version created from HEAD.
+EXPORT_TIME_EXTRA = '__export_time'
+VERSION_UNCOPYABLE_EXTRAS = [EXPORT_TIME_EXTRA]
 MAPPING_LOOKUP_CONCEPTS = 'lookupConcepts'
 MAPPING_LOOKUP_FROM_CONCEPT = 'lookupFromConcept'
 MAPPING_LOOKUP_TO_CONCEPT = 'lookupToConcept'

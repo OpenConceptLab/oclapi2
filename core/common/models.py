@@ -26,6 +26,7 @@ from core.common.utils import reverse_resource, reverse_resource_version, parse_
     to_parent_uri, is_canonical_uri, get_export_service, from_string_to_date, get_truthy_values, \
     canonical_url_to_url_and_version, get_current_authorized_user, encode_string, decode_string
 from core.common.utils import to_owner_uri
+from core.common.constants import VERSION_UNCOPYABLE_EXTRAS
 from core.settings import DEFAULT_LOCALE
 from . import ERRBIT_LOGGER
 from .checksums import ChecksumModel
@@ -1064,7 +1065,10 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         self.text = head.text
         self.experimental = head.experimental
         self.custom_validation_schema = head.custom_validation_schema
-        self.extras = head.extras
+        self.extras = {
+            key: value for key, value in (head.extras or {}).items()
+            if key not in VERSION_UNCOPYABLE_EXTRAS
+        }
 
     def add_processing(self, process_id):
         if self.id and process_id:

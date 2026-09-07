@@ -651,6 +651,22 @@ class SourceTest(OCLTestCase):
 
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    def test_persist_new_version_does_not_copy_export_time_from_head(self):
+        source = OrganizationSourceFactory(version=HEAD, extras={'foo': 'bar', '__export_time': '693.04'})
+
+        version1 = OrganizationSourceFactory.build(
+            name='version1', version='v1', mnemonic=source.mnemonic, organization=source.organization
+        )
+        Source.persist_new_version(version1, source.created_by)
+
+        version1.refresh_from_db()
+        self.assertEqual(version1.extras, {'foo': 'bar'})
+
+        source.refresh_from_db()
+        self.assertEqual(source.extras, {'foo': 'bar', '__export_time': '693.04'})
+
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_persist_new_version(self):
         source = OrganizationSourceFactory(version=HEAD)
         concept = ConceptFactory(mnemonic='concept1', parent=source)

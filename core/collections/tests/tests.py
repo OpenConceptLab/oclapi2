@@ -730,6 +730,21 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(tasks['seeded_concepts'].id, seed_task.id)
         self.assertEqual(tasks['seeded_mappings'].id, seed_task.id)
 
+    def test_persist_new_version_does_not_copy_export_time_from_head(self):
+        collection = OrganizationCollectionFactory(
+            version='HEAD', extras={'foo': 'bar', '__export_time': '693.04'})
+
+        version1 = OrganizationCollectionFactory.build(
+            name='version1', version='v1', mnemonic=collection.mnemonic, organization=collection.organization
+        )
+        Collection.persist_new_version(version1, collection.created_by)
+
+        version1.refresh_from_db()
+        self.assertEqual(version1.extras, {'foo': 'bar'})
+
+        collection.refresh_from_db()
+        self.assertEqual(collection.extras, {'foo': 'bar', '__export_time': '693.04'})
+
 
 class CollectionReferenceTest(OCLTestCase):
     def test_uri(self):

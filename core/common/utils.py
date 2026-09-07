@@ -29,7 +29,7 @@ from requests.auth import HTTPBasicAuth
 from rest_framework.utils import encoders
 
 from core.common.constants import UPDATED_SINCE_PARAM, BULK_IMPORT_QUEUES_COUNT, CURRENT_USER, REQUEST_URL, \
-    TEMP_PREFIX, HEAD
+    TEMP_PREFIX, HEAD, EXPORT_TIME_EXTRA
 from core.settings import EXPORT_SERVICE
 
 
@@ -356,7 +356,7 @@ def write_export_file(
         end_time = str(round((time.time() - start_time) + 2, 2))
         out.write('], "export_time": ' + json.dumps(f"{end_time}secs", cls=encoders.JSONEncoder) + '}')
 
-    version.update_extras('__export_time', end_time)
+    version.update_extras(EXPORT_TIME_EXTRA, end_time)
 
     with zipfile.ZipFile('export.zip', 'w', zipfile.ZIP_DEFLATED) as _zip:
         _zip.write('export.json')
