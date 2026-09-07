@@ -612,8 +612,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         instance.cloned_names = compact(new_names)
         instance.cloned_descriptions = compact(new_descriptions)
 
-        if not parent_concept_uris and has_parent_concept_uris_attr:
-            parent_concept_uris = []
+        if has_parent_concept_uris_attr:
+            parent_concept_uris = parent_concept_uris or []
+        else:
+            parent_concept_uris = list(prev_latest.parent_concept_urls) if prev_latest else []
 
         errors = instance.save_as_new_version(
             user=user,

@@ -177,7 +177,10 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
             if not self.include_child_concept_urls:
                 self.fields.pop('child_concept_urls')
             if not self.include_parent_concept_urls:
-                self.fields.pop('parent_concept_urls')
+                if get(request, 'method') in ('POST', 'PUT', 'PATCH'):
+                    self.fields['parent_concept_urls'].write_only = True
+                else:
+                    self.fields.pop('parent_concept_urls')
             if not self.include_hierarchy_path:
                 self.fields.pop('hierarchy_path', None)
             if not self.include_extras and not is_verbose:

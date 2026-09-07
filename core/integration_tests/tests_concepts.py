@@ -1,7 +1,10 @@
 from unittest.mock import patch
 
+import factory
+
 from celery.states import PENDING
 from django.core.cache import cache
+from django.db.models import F
 from django.test import override_settings
 from mock import ANY
 
@@ -866,6 +869,188 @@ class ConceptRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(list(response.data.keys()), ['concept_class'])
+
+    # `parent_concept_urls` is only serialized on reads when asked for, so GETs below carry the
+    # query param. Writes must not need it - the payload alone has to drive the hierarchy.
+    PARENT_CONCEPT_URLS_PARAM = '?includeParentConceptURLs=true'
+
+    def _concept_with_parent(self, mnemonic='child'):
+        """Create a child concept under a parent the way the model supports it."""
+        parent_concept = ConceptFactory(
+            parent=self.source, names=[ConceptNameFactory.build(locale='en', locale_preferred=True)])
+        child_concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': mnemonic,
+            'parent': self.source,
+            'names': [ConceptNameFactory.build(locale='en', locale_preferred=True)],
+            'parent_concept_urls': [parent_concept.uri]
+        }, self.user)
+        self.assertEqual(child_concept.errors, {})
+        self.assertEqual(child_concept.parent_concept_urls, [parent_concept.uri])
+        return parent_concept, child_concept
+
+    def test_post_201_with_parent_concept_urls(self):
+        parent_concept = ConceptFactory(parent=self.source)
+        another_parent_concept = ConceptFactory(parent=self.source)
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/"
+        expected_parents = sorted([parent_concept.uri, another_parent_concept.uri])
+
+        response = self.client.post(
+            concepts_url,
+            {**self.concept_payload, 'parent_concept_urls': [parent_concept.uri, another_parent_concept.uri]},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertNotIn('parent_concept_urls', response.data)
+
+        concept = Concept.objects.filter(mnemonic='c1', id=F('versioned_object_id')).first()
+        self.assertEqual(sorted(concept.parent_concept_urls), expected_parents)
+        self.assertEqual(sorted(concept.get_latest_version().parent_concept_urls), expected_parents)
+
+        response = self.client.get(
+            concept.uri + self.PARENT_CONCEPT_URLS_PARAM,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(sorted(response.data['parent_concept_urls']), expected_parents)
+
+    def test_post_201_without_parent_concept_urls(self):
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/"
+
+        response = self.client.post(
+            concepts_url,
+            self.concept_payload,
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        concept = Concept.objects.filter(mnemonic='c1', id=F('versioned_object_id')).first()
+        self.assertEqual(concept.parent_concept_urls, [])
+
+    def test_put_200_with_parent_concept_urls(self):
+        _, concept = self._concept_with_parent()
+        new_parent_concept = ConceptFactory(parent=self.source)
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
+
+        response = self.client.put(
+            concepts_url,
+            {
+                **self.concept_payload,
+                'id': concept.mnemonic,
+                'update_comment': 'Updated parents',
+                'parent_concept_urls': [new_parent_concept.uri]
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+
+        concept.refresh_from_db()
+        self.assertEqual(concept.parent_concept_urls, [new_parent_concept.uri])
+        self.assertEqual(concept.get_latest_version().parent_concept_urls, [new_parent_concept.uri])
+
+    def test_put_200_removes_parent_concept_urls(self):
+        _, concept = self._concept_with_parent()
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
+
+        response = self.client.put(
+            concepts_url,
+            {
+                **self.concept_payload,
+                'id': concept.mnemonic,
+                'update_comment': 'Removed parents',
+                'parent_concept_urls': []
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+
+        concept.refresh_from_db()
+        self.assertEqual(concept.parent_concept_urls, [])
+        self.assertEqual(concept.get_latest_version().parent_concept_urls, [])
+
+    def test_put_200_keeps_parent_concept_urls_when_omitted(self):
+        parent_concept, concept = self._concept_with_parent()
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
+
+        response = self.client.put(
+            concepts_url,
+            {
+                **self.concept_payload,
+                'id': concept.mnemonic,
+                'datatype': 'None',
+                'update_comment': 'Updated datatype'
+            },
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+
+        concept.refresh_from_db()
+        self.assertEqual(concept.datatype, 'None')
+        self.assertEqual(concept.parent_concept_urls, [parent_concept.uri])
+        self.assertEqual(concept.get_latest_version().parent_concept_urls, [parent_concept.uri])
+
+    def test_patch_200_with_parent_concept_urls(self):
+        _, concept = self._concept_with_parent()
+        new_parent_concept = ConceptFactory(parent=self.source)
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
+
+        response = self.client.patch(
+            concepts_url,
+            {'parent_concept_urls': [new_parent_concept.uri], 'update_comment': 'Updated parents'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+
+        concept.refresh_from_db()
+        self.assertEqual(concept.parent_concept_urls, [new_parent_concept.uri])
+        self.assertEqual(concept.get_latest_version().parent_concept_urls, [new_parent_concept.uri])
+
+    def test_patch_200_removes_parent_concept_urls(self):
+        _, concept = self._concept_with_parent()
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
+
+        response = self.client.patch(
+            concepts_url,
+            {'parent_concept_urls': [], 'update_comment': 'Removed parents'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+
+        concept.refresh_from_db()
+        self.assertEqual(concept.parent_concept_urls, [])
+        self.assertEqual(concept.get_latest_version().parent_concept_urls, [])
+
+    def test_patch_200_keeps_parent_concept_urls_when_omitted(self):
+        parent_concept, concept = self._concept_with_parent()
+        concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/{concept.mnemonic}/"
+
+        response = self.client.patch(
+            concepts_url,
+            {'datatype': 'None', 'update_comment': 'Updated datatype'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+
+        concept.refresh_from_db()
+        self.assertEqual(concept.datatype, 'None')
+        self.assertEqual(concept.parent_concept_urls, [parent_concept.uri])
+        self.assertEqual(concept.get_latest_version().parent_concept_urls, [parent_concept.uri])
 
     def test_put_404(self):
         concepts_url = f"/orgs/{self.organization.mnemonic}/sources/{self.source.mnemonic}/concepts/foobar/"
