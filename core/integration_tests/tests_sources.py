@@ -100,6 +100,47 @@ class SourceListViewTest(OCLAPITestCase):
             }
         )
 
+    def test_get_200_with_latest_released_version(self):
+        source = OrganizationSourceFactory(organization=self.organization)
+        OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=self.organization, version='v1', released=True)
+        OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=self.organization, version='v2', released=False)
+
+        response = self.client.get(self.organization.sources_url, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertFalse('latest_released_version' in response.data[0])
+
+        response = self.client.get(
+            self.organization.sources_url + '?includeLatestReleasedVersion=true', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], source.mnemonic)
+        self.assertEqual(response.data[0]['latest_released_version'], 'v1')
+
+        response = self.client.get('/sources/?includeLatestReleasedVersion=true', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [data['latest_released_version'] for data in response.data if data['id'] == source.mnemonic],
+            ['v1']
+        )
+
+    def test_get_200_with_latest_released_version_none_when_never_released(self):
+        source = OrganizationSourceFactory(organization=self.organization)
+        OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=self.organization, version='v1', released=False)
+
+        response = self.client.get(
+            self.organization.sources_url + '?includeLatestReleasedVersion=true', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertIsNone(response.data[0]['latest_released_version'])
+
     def test_get_200_zip(self):
         response = self.client.get(
             self.organization.sources_url,

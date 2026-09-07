@@ -12,7 +12,7 @@ from core.client_configs.serializers import ClientConfigSerializer
 from core.collections.models import Collection, CollectionReference, Expansion
 from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, INCLUDE_SUMMARY, \
     INCLUDE_CLIENT_CONFIGS, INVALID_EXPANSION_URL, INCLUDE_STATES, INCLUDE_TASKS, INCLUDE_RESOLVED_REPO_VERSIONS, \
-    INCLUDE_EXTERNAL_EXPORTS
+    INCLUDE_EXTERNAL_EXPORTS, INCLUDE_LATEST_RELEASED_VERSION
 from core.common.serializers import AbstractRepoResourcesSerializer, AbstractResourceSerializer
 from core.common.utils import get_truthy_values
 from core.orgs.models import Organization
@@ -57,13 +57,14 @@ class CollectionListSerializer(AbstractResourceSerializer):
     id = CharField(source='mnemonic')
     summary = SerializerMethodField()
     checksums = SerializerMethodField()
+    latest_released_version = SerializerMethodField()
 
     class Meta:
         model = Collection
         fields = AbstractResourceSerializer.Meta.fields + (
             'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
             'collection_type', 'updated_at', 'canonical_url', 'autoexpand_head',
-            'summary', 'type', 'checksums'
+            'summary', 'type', 'checksums', 'latest_released_version'
         )
 
     def __init__(self, *args, **kwargs):
@@ -73,9 +74,12 @@ class CollectionListSerializer(AbstractResourceSerializer):
         if params:
             self.query_params = params if isinstance(params, dict) else params.dict()
         self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in TRUTHY
+        self.include_latest_released_version = self.query_params.get(INCLUDE_LATEST_RELEASED_VERSION) in TRUTHY
         try:
             if not self.include_summary:
                 self.fields.pop('summary', None)
+            if not self.include_latest_released_version:
+                self.fields.pop('latest_released_version', None)
         except:  # pylint: disable=bare-except
             pass
 
@@ -92,6 +96,11 @@ class CollectionListSerializer(AbstractResourceSerializer):
     @staticmethod
     def get_checksums(obj):
         return obj.get_all_checksums()
+
+    def get_latest_released_version(self, obj):
+        return get(obj.get_latest_released_version(), 'version') if (
+                self.include_latest_released_version and obj.is_head
+        ) else None
 
 
 class CollectionVersionListSerializer(ModelSerializer):

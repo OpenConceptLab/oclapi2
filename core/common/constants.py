@@ -75,6 +75,7 @@ INCLUDE_INACTIVE = 'includeInactive'
 INCLUDE_SOURCE_VERSIONS = 'includeSourceVersions'
 INCLUDE_COLLECTION_VERSIONS = 'includeCollectionVersions'
 INCLUDE_RESOLVED_REPO_VERSIONS = 'includeResolvedRepoVersions'
+INCLUDE_LATEST_RELEASED_VERSION = 'includeLatestReleasedVersion'
 
 # Written onto a repo version's extras when its export finishes. It describes that one
 # export, so it must not travel to a new version created from HEAD.

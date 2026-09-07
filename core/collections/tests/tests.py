@@ -16,7 +16,7 @@ from core.collections.parsers import CollectionReferenceExpressionStringParser, 
     CollectionReferenceParser
 from core.collections.serializers import CollectionVersionListSerializer, CollectionCreateSerializer, \
     CollectionDetailSerializer, CollectionVersionDetailSerializer, CollectionReferenceSerializer, \
-    CollectionSummaryFieldDistributionSerializer
+    CollectionSummaryFieldDistributionSerializer, CollectionListSerializer
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory, UserCollectionFactory
 from core.collections.utils import is_mapping, is_concept, is_version_specified, \
     get_concept_by_expression
@@ -1656,6 +1656,56 @@ class CollectionSerializersTest(OCLTestCase):
     def test_get_external_exports(self):
         collection = OrganizationCollectionFactory()
         self.assertEqual(CollectionVersionListSerializer.get_external_exports(collection), [])
+
+    def test_collection_list_get_latest_released_version(self):
+        collection = OrganizationCollectionFactory()
+        OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v1', released=True)
+
+        serializer_included = CollectionListSerializer(
+            context={'request': self._request('includeLatestReleasedVersion=true')})
+        self.assertEqual(serializer_included.get_latest_released_version(collection), 'v1')
+
+        serializer_excluded = CollectionListSerializer()
+        self.assertIsNone(serializer_excluded.get_latest_released_version(collection))
+
+    def test_collection_list_get_latest_released_version_returns_latest_of_many(self):
+        collection = OrganizationCollectionFactory()
+        OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v1', released=True)
+        OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v2', released=False)
+        OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v3', released=True)
+
+        serializer = CollectionListSerializer(
+            context={'request': self._request('includeLatestReleasedVersion=true')})
+        self.assertEqual(serializer.get_latest_released_version(collection), 'v3')
+
+    def test_collection_list_get_latest_released_version_none_for_non_head(self):
+        collection = OrganizationCollectionFactory()
+        version = OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v1', released=True)
+
+        serializer = CollectionListSerializer(
+            context={'request': self._request('includeLatestReleasedVersion=true')})
+        self.assertIsNone(serializer.get_latest_released_version(version))
+
+    def test_collection_list_get_latest_released_version_none_when_no_released_version(self):
+        collection = OrganizationCollectionFactory()
+        OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v1', released=False)
+
+        serializer = CollectionListSerializer(
+            context={'request': self._request('includeLatestReleasedVersion=true')})
+        self.assertIsNone(serializer.get_latest_released_version(collection))
+
+    def test_collection_list_latest_released_version_field_popped_unless_requested(self):
+        self.assertNotIn('latest_released_version', CollectionListSerializer().fields)
+        self.assertIn(
+            'latest_released_version',
+            CollectionListSerializer(context={'request': self._request('includeLatestReleasedVersion=true')}).fields
+        )
 
     def test_prepare_object_supported_locales_as_comma_separated_string(self):
         serializer = CollectionCreateSerializer()

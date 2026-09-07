@@ -10,7 +10,7 @@ from rest_framework.serializers import ModelSerializer, ValidationError
 from core.client_configs.serializers import ClientConfigSerializer
 from core.common.constants import DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, HEAD, \
     INCLUDE_SUMMARY, INCLUDE_CLIENT_CONFIGS, INCLUDE_HIERARCHY_ROOT, INCLUDE_STATES, INCLUDE_TASKS, \
-    INCLUDE_EXTERNAL_EXPORTS
+    INCLUDE_EXTERNAL_EXPORTS, INCLUDE_LATEST_RELEASED_VERSION
 from core.common.serializers import AbstractRepoResourcesSerializer, AbstractResourceSerializer
 from core.common.utils import get_truthy_values
 from core.orgs.models import Organization
@@ -50,12 +50,13 @@ class SourceListSerializer(AbstractResourceSerializer):
     id = CharField(source='mnemonic')
     summary = SerializerMethodField()
     checksums = SerializerMethodField()
+    latest_released_version = SerializerMethodField()
 
     class Meta:
         model = Source
         fields = AbstractResourceSerializer.Meta.fields + (
             'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
-            'source_type', 'updated_at', 'canonical_url', 'summary', 'type', 'checksums'
+            'source_type', 'updated_at', 'canonical_url', 'summary', 'type', 'checksums', 'latest_released_version'
         )
 
     def __init__(self, *args, **kwargs):
@@ -65,9 +66,12 @@ class SourceListSerializer(AbstractResourceSerializer):
         if params:
             self.query_params = params if isinstance(params, dict) else params.dict()
         self.include_summary = self.query_params.get(INCLUDE_SUMMARY) in TRUTHY
+        self.include_latest_released_version = self.query_params.get(INCLUDE_LATEST_RELEASED_VERSION) in TRUTHY
         try:
             if not self.include_summary:
                 self.fields.pop('summary', None)
+            if not self.include_latest_released_version:
+                self.fields.pop('latest_released_version', None)
         except:  # pylint: disable=bare-except
             pass
 
@@ -84,6 +88,11 @@ class SourceListSerializer(AbstractResourceSerializer):
     @staticmethod
     def get_checksums(obj):
         return obj.get_all_checksums()
+
+    def get_latest_released_version(self, obj):
+        return get(obj.get_latest_released_version(), 'version') if (
+                self.include_latest_released_version and obj.is_head
+        ) else None
 
 
 class SourceVersionListSerializer(ModelSerializer):

@@ -299,6 +299,63 @@ class ReposListViewDbFirstTest(OCLAPITestCase):
         self.assertEqual(response['num_found'], '0')  # pylint: disable=unsubscriptable-object
 
 
+class ReposListViewLatestReleasedVersionTest(OCLAPITestCase):
+    def test_org_repos_include_latest_released_version(self):
+        org = OrganizationFactory(mnemonic='lrv-org')
+        source = OrganizationSourceFactory(organization=org, mnemonic='lrv-source')
+        OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=org, version='v1', released=True)
+        OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=org, version='v2', released=False)
+        collection = OrganizationCollectionFactory(organization=org, mnemonic='lrv-collection')
+        OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=org, version='v1', released=True)
+        OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=org, version='v2', released=True)
+
+        response = self.client.get(org.uri + 'repos/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        for data in response.data:
+            self.assertFalse('latest_released_version' in data)
+
+        response = self.client.get(org.uri + 'repos/?includeLatestReleasedVersion=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {data['id']: data['latest_released_version'] for data in response.data},
+            {'lrv-source': 'v1', 'lrv-collection': 'v2'}
+        )
+
+    def test_org_repos_latest_released_version_none_when_never_released(self):
+        org = OrganizationFactory(mnemonic='lrv-unreleased-org')
+        source = OrganizationSourceFactory(organization=org, mnemonic='lrv-unreleased-source')
+        OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=org, version='v1', released=False)
+
+        response = self.client.get(org.uri + 'repos/?includeLatestReleasedVersion=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertIsNone(response.data[0]['latest_released_version'])
+
+    def test_user_repos_include_latest_released_version(self):
+        user = UserProfileFactory(username='lrv-user')
+        source = UserSourceFactory(user=user, mnemonic='lrv-user-source')
+        UserSourceFactory(mnemonic=source.mnemonic, user=user, version='v1', released=True)
+        collection = UserCollectionFactory(user=user, mnemonic='lrv-user-collection')
+        UserCollectionFactory(mnemonic=collection.mnemonic, user=user, version='v1', released=False)
+
+        response = self.client.get('/users/lrv-user/repos/?includeLatestReleasedVersion=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {data['id']: data['latest_released_version'] for data in response.data},
+            {'lrv-user-source': 'v1', 'lrv-user-collection': None}
+        )
+
+
 class OrganizationRepoListViewDbFirstTest(OCLAPITestCase):
     def test_member_org_repo_appears_without_es_indexing(self):
         user = UserProfileFactory(username='db-first-member')

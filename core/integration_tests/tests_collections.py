@@ -129,6 +129,47 @@ class CollectionListViewTest(OCLAPITestCase):
             }
         )
 
+    def test_get_200_with_latest_released_version(self):
+        coll = OrganizationCollectionFactory(mnemonic='coll1')
+        OrganizationCollectionFactory(
+            mnemonic=coll.mnemonic, organization=coll.organization, version='v1', released=True)
+        OrganizationCollectionFactory(
+            mnemonic=coll.mnemonic, organization=coll.organization, version='v2', released=False)
+
+        response = self.client.get(f'/orgs/{coll.parent.mnemonic}/collections/', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertFalse('latest_released_version' in response.data[0])
+
+        response = self.client.get(
+            f'/orgs/{coll.parent.mnemonic}/collections/?includeLatestReleasedVersion=true', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], 'coll1')
+        self.assertEqual(response.data[0]['latest_released_version'], 'v1')
+
+        response = self.client.get('/collections/?includeLatestReleasedVersion=true', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [data['latest_released_version'] for data in response.data if data['id'] == 'coll1'],
+            ['v1']
+        )
+
+    def test_get_200_with_latest_released_version_none_when_never_released(self):
+        coll = OrganizationCollectionFactory(mnemonic='coll1')
+        OrganizationCollectionFactory(
+            mnemonic=coll.mnemonic, organization=coll.organization, version='v1', released=False)
+
+        response = self.client.get(
+            f'/orgs/{coll.parent.mnemonic}/collections/?includeLatestReleasedVersion=true', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertIsNone(response.data[0]['latest_released_version'])
+
     def test_post_201(self):
         org = OrganizationFactory(mnemonic='org')
         user = UserProfileFactory(organizations=[org], username='user')

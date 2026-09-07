@@ -289,6 +289,62 @@ class SourceSerializersTest(OCLTestCase):
         serializer_excluded = SourceListSerializer()
         self.assertIsNone(serializer_excluded.get_summary(source))
 
+    def test_source_list_get_latest_released_version(self):
+        from core.sources.serializers import SourceListSerializer
+        source = OrganizationSourceFactory()
+        OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+
+        serializer_included = SourceListSerializer(
+            context={'request': self._request('includeLatestReleasedVersion=true')})
+        self.assertEqual(serializer_included.get_latest_released_version(source), 'v1')
+
+        serializer_excluded = SourceListSerializer()
+        self.assertIsNone(serializer_excluded.get_latest_released_version(source))
+
+    def test_source_list_get_latest_released_version_returns_latest_of_many(self):
+        from core.sources.serializers import SourceListSerializer
+        source = OrganizationSourceFactory()
+        OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+        OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v2', released=False)
+        OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v3', released=True)
+
+        serializer = SourceListSerializer(
+            context={'request': self._request('includeLatestReleasedVersion=true')})
+        self.assertEqual(serializer.get_latest_released_version(source), 'v3')
+
+    def test_source_list_get_latest_released_version_none_for_non_head(self):
+        from core.sources.serializers import SourceListSerializer
+        source = OrganizationSourceFactory()
+        version = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+
+        serializer = SourceListSerializer(
+            context={'request': self._request('includeLatestReleasedVersion=true')})
+        self.assertIsNone(serializer.get_latest_released_version(version))
+
+    def test_source_list_get_latest_released_version_none_when_no_released_version(self):
+        from core.sources.serializers import SourceListSerializer
+        source = OrganizationSourceFactory()
+        OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=False)
+
+        serializer = SourceListSerializer(
+            context={'request': self._request('includeLatestReleasedVersion=true')})
+        self.assertIsNone(serializer.get_latest_released_version(source))
+
+    def test_source_list_latest_released_version_field_popped_unless_requested(self):
+        from core.sources.serializers import SourceListSerializer
+        self.assertNotIn(
+            'latest_released_version', SourceListSerializer().fields)
+        self.assertIn(
+            'latest_released_version',
+            SourceListSerializer(context={'request': self._request('includeLatestReleasedVersion=true')}).fields
+        )
+
     def test_source_version_list_init_and_external_exports(self):
         from core.sources.serializers import SourceVersionListSerializer
         source = OrganizationSourceFactory()
