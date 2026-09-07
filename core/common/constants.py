@@ -5,8 +5,12 @@ TEMP = '--TEMP--'
 TEMP_PREFIX = f"{TEMP}-"
 
 
-NAMESPACE_PATTERN = r'[a-zA-Z0-9\-\.\_\@]+'
+NAMESPACE_CHARS = r'a-zA-Z0-9\-\.\_\@'
+NAMESPACE_PATTERN = r'[' + NAMESPACE_CHARS + r']+'
 NAMESPACE_REGEX = re.compile(r'^' + NAMESPACE_PATTERN + '$')
+# matches a single character that is not allowed in a mnemonic
+NAMESPACE_INVALID_CHAR_REGEX = re.compile(r'[^' + NAMESPACE_CHARS + r']')
+CONSECUTIVE_HYPHENS_REGEX = re.compile(r'-{2,}')
 
 ACCESS_TYPE_VIEW = 'View'
 ACCESS_TYPE_EDIT = 'Edit'

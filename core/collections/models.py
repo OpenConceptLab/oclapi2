@@ -22,7 +22,8 @@ from core.collections.utils import is_concept, is_mapping
 from core.common.constants import (
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT,
     ES_REQUEST_TIMEOUT, ES_REQUEST_TIMEOUT_ASYNC, HEAD, ALL, EXCLUDE_WILDCARD_SEARCH_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM,
-    SEARCH_MAP_CODES_PARAM, INCLUDE_SEARCH_META_PARAM, VERBOSE_PARAM)
+    SEARCH_MAP_CODES_PARAM, INCLUDE_SEARCH_META_PARAM, VERBOSE_PARAM, NAMESPACE_INVALID_CHAR_REGEX,
+    CONSECUTIVE_HYPHENS_REGEX)
 from core.common.es import ESScript
 from core.common.models import ConceptContainerModel, BaseResourceModel
 from core.common.search import CustomESSearch
@@ -1197,11 +1198,16 @@ class Expansion(BaseResourceModel):
     @property
     def auto_generated_mnemonic(self):
         version = self.collection_version_name or get(self, 'collection_version.version')
+        if version:  # version derived from the uri is url-encoded
+            version = decode_string(version, plus=False)
         return self.get_auto_expand_mnemonic(version)
 
     @staticmethod
     def get_auto_expand_mnemonic(version):
-        return f"autoexpand-{version}"
+        # a repo version may contain characters that are not valid in a mnemonic (e.g. 'v1 rc1'),
+        # replace them with a hyphen so that the auto generated mnemonic stays valid
+        mnemonic = NAMESPACE_INVALID_CHAR_REGEX.sub('-', f"autoexpand-{version}")
+        return CONSECUTIVE_HYPHENS_REGEX.sub('-', mnemonic)
 
     @staticmethod
     def get_resource_url_kwarg():

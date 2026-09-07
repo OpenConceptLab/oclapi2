@@ -746,6 +746,22 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection.extras, {'foo': 'bar', '__export_time': '693.04'})
 
 
+    def test_persist_new_version_with_invalid_mnemonic_chars_in_version(self):
+        collection = OrganizationCollectionFactory(version='HEAD', autoexpand_head=True, autoexpand=True)
+
+        version1 = OrganizationCollectionFactory.build(
+            name='version1', version='seemr Cv1', mnemonic=collection.mnemonic,
+            organization=collection.organization, autoexpand=True
+        )
+        errors = Collection.persist_new_version(version1, collection.created_by)
+
+        self.assertEqual(errors, {})
+        version1.refresh_from_db()
+        self.assertEqual(version1.expansions.count(), 1)
+        self.assertEqual(version1.expansion.mnemonic, 'autoexpand-seemr-Cv1')
+        self.assertTrue(version1.expansion.is_auto_generated)
+
+
 class CollectionReferenceTest(OCLTestCase):
     def test_uri(self):
         org = OrganizationFactory(mnemonic='MyOrg')
@@ -2032,6 +2048,34 @@ class ExpansionTest(OCLTestCase):
             Expansion(mnemonic='autoexpand-v2', collection_version=Collection(version='v2')).is_auto_generated)
         self.assertTrue(
             Expansion(mnemonic='autoexpand-HEAD', collection_version=Collection(version='HEAD')).is_auto_generated)
+
+    def test_get_auto_expand_mnemonic(self):
+        self.assertEqual(Expansion.get_auto_expand_mnemonic('HEAD'), 'autoexpand-HEAD')
+        self.assertEqual(Expansion.get_auto_expand_mnemonic('v1.0_beta@2'), 'autoexpand-v1.0_beta@2')
+        self.assertEqual(Expansion.get_auto_expand_mnemonic(None), 'autoexpand-None')
+        # characters not allowed in a mnemonic are replaced with a hyphen
+        self.assertEqual(Expansion.get_auto_expand_mnemonic('seemr Cv1'), 'autoexpand-seemr-Cv1')
+        self.assertEqual(Expansion.get_auto_expand_mnemonic('07/14/2020'), 'autoexpand-07-14-2020')
+        self.assertEqual(Expansion.get_auto_expand_mnemonic('d\u00eda'), 'autoexpand-d-a')
+        # consecutive hyphens are collapsed into one
+        self.assertEqual(Expansion.get_auto_expand_mnemonic('v1 (draft)'), 'autoexpand-v1-draft-')
+        self.assertEqual(Expansion.get_auto_expand_mnemonic('v1  rc1'), 'autoexpand-v1-rc1')
+        self.assertEqual(Expansion.get_auto_expand_mnemonic(' v1'), 'autoexpand-v1')
+        self.assertEqual(Expansion.get_auto_expand_mnemonic('v1--rc1'), 'autoexpand-v1-rc1')
+
+    def test_is_auto_generated_for_sanitized_version(self):
+        self.assertTrue(
+            Expansion(
+                mnemonic='autoexpand-seemr-Cv1', collection_version=Collection(version='seemr Cv1')
+            ).is_auto_generated
+        )
+        # version comes url-encoded when derived from the expansion's uri
+        self.assertTrue(
+            Expansion(
+                mnemonic='autoexpand-seemr-Cv1',
+                uri='/users/foo/collections/bar/seemr%20Cv1/expansions/autoexpand-seemr-Cv1/'
+            ).is_auto_generated
+        )
 
     def test_get_mappings_for_concept(self):
         concept1 = ConceptFactory()
