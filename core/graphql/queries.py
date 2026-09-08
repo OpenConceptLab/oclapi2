@@ -31,7 +31,6 @@ from .constants import build_validation_error
 from .permissions import (
     PermissionsMixin,
     apply_es_visibility_filter,
-    apply_es_parent_visibility_filter,
     resolve_owner,
     filter_parent_queryset,
 )
@@ -192,7 +191,6 @@ def concept_ids_from_es(  # pylint: disable=too-many-arguments
         else:
             search = search.filter('term', is_head=True)
             search = apply_es_visibility_filter(search, user or AnonymousUser())
-            search = apply_es_parent_visibility_filter(search, user or AnonymousUser())
         search = search.filter('term', retired=False).filter('term', is_active=True)
 
         search = search_text(search, trimmed)

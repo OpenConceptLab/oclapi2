@@ -24,7 +24,6 @@ def get_document_public_visibility_criteria(  # pylint: disable=too-many-argumen
     include_creator_private_access=False,
     include_owner_private_access=False,
     include_organization_memberships=False,
-    public_field='public_can_view',
 ):
     """Return a shared Elasticsearch visibility criterion for owner-scoped documents.
 
@@ -47,7 +46,7 @@ def get_document_public_visibility_criteria(  # pylint: disable=too-many-argumen
     Flags are independent OR-combined extensions. Staff bypass goes through
     ``apply_document_public_visibility_filter`` (this helper itself does not check staff).
     """
-    criteria = Q('term', **{public_field: True})
+    criteria = Q('term', public_can_view=True)
     if not getattr(user, 'is_authenticated', False):
         return criteria
 
@@ -71,7 +70,7 @@ def get_document_public_visibility_criteria(  # pylint: disable=too-many-argumen
     if private_criteria is None:
         return criteria
 
-    return criteria | (Q('term', **{public_field: False}) & private_criteria)
+    return criteria | (Q('term', public_can_view=False) & private_criteria)
 
 
 def apply_document_public_visibility_filter(  # pylint: disable=too-many-arguments
@@ -80,7 +79,6 @@ def apply_document_public_visibility_filter(  # pylint: disable=too-many-argumen
     include_creator_private_access=False,
     include_owner_private_access=False,
     include_organization_memberships=False,
-    public_field='public_can_view',
 ):
     """Apply a shared Elasticsearch visibility filter without changing staff searches."""
     if getattr(user, 'is_staff', False):
@@ -92,7 +90,6 @@ def apply_document_public_visibility_filter(  # pylint: disable=too-many-argumen
             include_creator_private_access=include_creator_private_access,
             include_owner_private_access=include_owner_private_access,
             include_organization_memberships=include_organization_memberships,
-            public_field=public_field,
         )
     )
 

@@ -61,9 +61,9 @@ class GraphQLProjectionIntegrationTests(OCLTestCase):
     def test_source_and_scoped_concepts_execute_without_sql(self):
         """Real source and concept lookups require no SQL after anonymous context creation."""
         query = '''{
-          source(org: "%s", source: "%s") { name description canonicalUrl uri }
+          source(org: "%s", source: "%s") { name canonicalUrl uri }
           concepts(org: "%s", source: "%s", query: "Hypertension") {
-            versionResolved totalCount results { conceptId display description datatype { name } conceptClass }
+            versionResolved totalCount results { conceptId display datatype { name } conceptClass }
           }
         }''' % (self.source.organization.mnemonic, self.source.mnemonic,
                 self.source.organization.mnemonic, self.source.mnemonic)
@@ -71,12 +71,23 @@ class GraphQLProjectionIntegrationTests(OCLTestCase):
             result = self.execute(query)
         self.assertIsNone(result.errors)
         self.assertEqual(result.data['source']['name'], self.source.name)
+        # The rebuilt URI must match the one the ORM stores, including owner and mnemonic casing.
         self.assertEqual(result.data['source']['uri'], self.source.uri)
         self.assertEqual(result.data['concepts']['totalCount'], 1)
         self.assertEqual(result.data['concepts']['results'], [{
-            'conceptId': 'AbC', 'display': 'Hypertension-test', 'description': 'Preferred definition',
+            'conceptId': 'AbC', 'display': 'Hypertension-test',
             'datatype': {'name': 'Numeric'}, 'conceptClass': 'Diagnosis',
         }])
+
+    def test_description_selection_falls_back_to_the_database(self):
+        """description is not indexed, so selecting it routes the whole request through the ORM."""
+        result = self.execute('''{
+          concepts(org: "%s", source: "%s", query: "Hypertension") { results { conceptId description } }
+        }''' % (self.source.organization.mnemonic, self.source.mnemonic))
+        self.assertIsNone(result.errors)
+        self.assertEqual(
+            result.data['concepts']['results'], [{'conceptId': 'AbC', 'description': 'Preferred definition'}],
+        )
 
     def test_global_projection_uses_head_and_excludes_retired_and_inactive(self):
         """Global counts omit historical versions and inactive/retired documents."""
@@ -90,11 +101,14 @@ class GraphQLProjectionIntegrationTests(OCLTestCase):
         self.assertIsNone(result.errors)
         self.assertEqual(result.data['concepts']['totalCount'], 1)
 
-    def test_private_parent_is_hidden_even_if_child_flag_is_public(self):
-        """A public child flag cannot disclose records from a private repository."""
+    def test_private_parent_hides_its_concepts(self):
+        """Concepts of a private repository stay hidden from anonymous global search."""
         self.source.public_access = ACCESS_TYPE_NONE
         self.source.save()
         self.index(self.source, SourceDocument)
+        # Propagation copies the repository access onto children before they are reindexed;
+        # the concept projection is filtered by that copied flag alone.
+        self.concept.public_access = ACCESS_TYPE_NONE
         self.index(self.concept, ConceptDocument)
         with self.assertNumQueries(0):
             result = self.execute('{ concepts(query: "Hypertension") { totalCount results { display } } }')

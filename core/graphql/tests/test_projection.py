@@ -10,6 +10,7 @@ from elasticsearch import ConnectionError as ESConnectionError
 from elasticsearch_dsl import Search
 from elasticsearch_dsl.response import Response
 
+from core.graphql.indexed import source_uri
 from core.graphql.schema import schema
 from core.graphql.selection import index_projection
 
@@ -33,33 +34,52 @@ class ProjectionTests(SimpleTestCase):
     def test_source_metadata_has_no_sql_and_projects_selected_fields(self):
         """Minimal source reads use one ES request with owner, version and visibility filters."""
         response = self.response('sources', [{
-            'name': 'CIEL', 'description': 'Clinical dictionary', 'canonical_url': 'https://ciel.org',
-            'uri': '/orgs/CIEL/sources/CIEL/', 'is_active': True, 'version': 'HEAD', 'mnemonic': 'CIEL',
+            'name': 'CIEL', 'canonical_url': 'https://ciel.org', 'is_active': True,
+            'version': 'HEAD', 'mnemonic': 'CIEL', 'owner': 'CIEL', 'owner_type': 'Organization',
         }])
         with patch('elasticsearch_dsl.Search.execute', autospec=True, return_value=response) as execute:
             result = self.execute('''{ source(org: "CIEL", source: "CIEL") {
-                name description canonicalUrl uri
+                name canonicalUrl uri
             } }''')
         self.assertIsNone(result.errors)
+        # The URI is rebuilt from ownership, mnemonic and version rather than read from the index.
         self.assertEqual(result.data['source']['uri'], '/orgs/CIEL/sources/CIEL/')
         body = execute.call_args.args[0].to_dict()
         self.assertEqual(set(body['_source']), {
-            'name', 'description', 'canonical_url', 'uri', 'is_active', 'version', 'mnemonic',
+            'name', 'canonical_url', 'is_active', 'version', 'mnemonic', 'owner', 'owner_type',
         })
         filters = str(body['query'])
         for expected in ('public_can_view', 'owner_type', 'Organization', 'ciel', 'HEAD'):
             self.assertIn(expected, filters)
 
+    def test_rebuilt_source_uri_matches_the_stored_encoding(self):
+        """The URI is not indexed, so its reconstruction must reproduce ORM percent-encoding."""
+        def hit(owner, owner_type, mnemonic, version):
+            return SimpleNamespace(owner=owner, owner_type=owner_type, mnemonic=mnemonic, version=version)
+
+        self.assertEqual(source_uri(hit('CIEL', 'Organization', 'CIEL', 'HEAD')), '/orgs/CIEL/sources/CIEL/')
+        self.assertEqual(source_uri(hit('jane', 'User', 'S1', 'HEAD')), '/users/jane/sources/S1/')
+        # Reserved characters in a version label are double-encoded, exactly as calculate_uri stores them.
+        self.assertEqual(
+            source_uri(hit('OpenMRS-OCL-Squad', 'Organization', 'Bridge-5', 'WHO-ICD11@2026-01')),
+            '/orgs/OpenMRS-OCL-Squad/sources/Bridge-5/WHO-ICD11%25402026-01/',
+        )
+        # An already-encoded label must not be encoded a second time.
+        self.assertEqual(
+            source_uri(hit('OCL', 'Organization', 'S1', 'v1%402026')),
+            '/orgs/OCL/sources/S1/v1%25402026/',
+        )
+
     def test_concept_fragments_aliases_and_directives_remain_sql_free(self):
         """Skipped heavy fields do not force ORM loading, including named fragments."""
         response = self.response('concepts', [{
             'id': '123', 'display_name': 'Hypertension-test', 'datatype': 'Numeric',
-            'concept_class': 'Diagnosis', 'preferred_description': 'Preferred definition',
+            'concept_class': 'Diagnosis',
         }])
         query = '''query($heavy: Boolean!, $light: Boolean!) {
           found: concepts(query: "hypertension") { totalCount results {
             ...Light
-            ... on ConceptType { description }
+            ... on ConceptType { externalId }
             names @include(if: $heavy) { name }
             mappings @skip(if: $light) { mapType }
           } }
@@ -71,11 +91,11 @@ class ProjectionTests(SimpleTestCase):
         self.assertIsNone(result.errors)
         self.assertEqual(result.data['found']['results'][0], {
             'code': '123', 'label': 'Hypertension-test', 'datatype': {'name': 'Numeric'},
-            'conceptClass': 'Diagnosis', 'description': 'Preferred definition',
+            'conceptClass': 'Diagnosis', 'externalId': None,
         })
         body = execute.call_args.args[0].to_dict()
         self.assertEqual(set(body['_source']), {
-            'id', 'display_name', 'datatype', 'concept_class', 'preferred_description',
+            'id', 'display_name', 'datatype', 'concept_class', 'external_id',
         })
         self.assertNotIn('extras', body['_source'])
         self.assertIn('is_head', str(body['query']))

@@ -4,12 +4,22 @@ from core.common.permissions import user_can_view_concept_dictionary
 
 from .types import ExternalSourceType, SourceType
 
-SOURCE_INDEX_FIELDS = {
-    '__typename': (),
+# GraphQL path to model attribute, used when the ORM serializes a source.
+SOURCE_FIELDS = {
     'name': ('name',),
     'description': ('description',),
     'canonicalUrl': ('canonical_url',),
     'uri': ('uri',),
+}
+
+# Payloads the source index can answer on its own. ``description`` is deliberately absent: it is
+# not stored in the index, so selecting it routes the whole request through the ORM. ``uri`` maps
+# to no stored field because it is rebuilt from ownership, mnemonic and version.
+SOURCE_INDEX_FIELDS = {
+    '__typename': (),
+    'name': ('name',),
+    'canonicalUrl': ('canonical_url',),
+    'uri': (),
 }
 
 
@@ -18,7 +28,7 @@ def serialize_source(instance, paths, user):
     result = SourceType(
         **{
             fields[0]: getattr(instance, fields[0])
-            for path, fields in SOURCE_INDEX_FIELDS.items() if path in paths and fields
+            for path, fields in SOURCE_FIELDS.items() if path in paths
         }
     )
     if paths & {'classes', 'datatypes', 'summary.activeConcepts'}:

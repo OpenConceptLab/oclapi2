@@ -3,14 +3,17 @@
 import logging
 from types import SimpleNamespace
 
+from django.urls import reverse
 from elasticsearch import ApiError, ConnectionError as ESConnectionError, TransportError
 from elasticsearch_dsl import Q
 
 from core.common.constants import HEAD
+from core.common.utils import encode_string, is_url_encoded_string
 from core.concepts.documents import ConceptDocument
 from core.sources.documents import SourceDocument
+from core.users.constants import USER_OBJECT_TYPE
 
-from .permissions import apply_es_parent_visibility_filter, apply_es_visibility_filter
+from .permissions import apply_es_visibility_filter
 from .selection import index_projection
 from .sources import SOURCE_INDEX_FIELDS
 from .types import ConceptType, DatatypeType, SourceType
@@ -23,7 +26,6 @@ CONCEPT_INDEX_FIELDS = {
     'conceptId': ('id',),
     'externalId': ('external_id',),
     'display': ('display_name',),
-    'description': ('preferred_description',),
     'conceptClass': ('concept_class',),
     'datatype.name': ('datatype',),
 }
@@ -49,7 +51,7 @@ def indexed_source(org, owner, source, version, user, paths):  # pylint: disable
     search = search.filter('term', owner=owner_value.lower()).filter('term', owner_type=owner_type)
     search = search.filter('term', version=version or HEAD)
     search = apply_es_visibility_filter(search, user)
-    search = search.source(sorted(set(fields) | {'is_active', 'version', 'mnemonic'}))[:1]
+    search = search.source(sorted(set(fields) | {'is_active', 'version', 'mnemonic', 'owner', 'owner_type'}))[:1]
     try:
         hits = list(search.execute())
     except (ApiError, TransportError, ESConnectionError) as exc:
@@ -58,10 +60,26 @@ def indexed_source(org, owner, source, version, user, paths):  # pylint: disable
     if not hits or not getattr(hits[0], 'is_active', False):
         return None
     hit = hits[0]
+    payload = SourceType(**{field: getattr(hit, field, None) for field in fields})
+    if 'uri' in paths:
+        payload.uri = source_uri(hit)
     return SimpleNamespace(
-        mnemonic=hit.mnemonic, version=hit.version, is_head=hit.version == HEAD,
-        payload=SourceType(**{field: getattr(hit, field, None) for field in fields}),
+        mnemonic=hit.mnemonic, version=hit.version, is_head=hit.version == HEAD, payload=payload,
     )
+
+
+def source_uri(hit):
+    """Rebuild the relative URI with the same URL machinery and version encoding the ORM stores.
+
+    Reversing the real routes keeps percent-encoding identical to ``calculate_uri`` for versions
+    that contain reserved characters, which a plain string join would silently get wrong.
+    """
+    owner_kwarg = 'user' if hit.owner_type == USER_OBJECT_TYPE else 'org'
+    kwargs = {owner_kwarg: hit.owner, 'source': hit.mnemonic}
+    if hit.version == HEAD:
+        return reverse('source-detail', kwargs=kwargs)
+    version = hit.version if is_url_encoded_string(hit.version) else encode_string(hit.version, safe=' ')
+    return reverse('source-version-detail', kwargs={**kwargs, 'version': version})
 
 
 # The planner supplies request scope and payload independently.
@@ -78,7 +96,6 @@ def indexed_concepts(paths, query, concept_ids, scope, pagination, owner, owner_
         search = search.filter('term', **({'is_head': True} if scope.is_head else {'source_version': scope.version}))
     else:
         search = apply_es_visibility_filter(search.filter('term', is_head=True), user)
-        search = apply_es_parent_visibility_filter(search, user)
     if concept_ids:
         # Script-free ordering preserves the requested mnemonic order, with deterministic ties.
         search = search.filter('terms', id_raw=concept_ids).sort('id_raw')
@@ -113,7 +130,7 @@ def serialize_indexed_concept(hit):
     return ConceptType(
         id=str(hit.meta.id), concept_id=getattr(hit, 'id', ''),
         external_id=getattr(hit, 'external_id', None), display=getattr(hit, 'display_name', None),
-        description=getattr(hit, 'preferred_description', None), concept_class=getattr(hit, 'concept_class', None),
+        description=None, concept_class=getattr(hit, 'concept_class', None),
         datatype=DatatypeType(name=datatype, details=None) if datatype else None,
         names=[], mappings=[], metadata=None, extras={},
     )

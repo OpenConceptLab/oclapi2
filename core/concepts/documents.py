@@ -14,9 +14,7 @@ class ConceptDocument(Document):
 
     # Preserve ORM semantics for direct GraphQL projections without changing REST search fields.
     is_active = fields.BooleanField(attr='is_active')
-    parent_public_can_view = fields.BooleanField(attr='parent.public_can_view')
     is_head = fields.BooleanField()
-    preferred_description = fields.TextField()
     display_name = fields.TextField(attr='display_name')
 
     id = fields.TextField(attr='mnemonic')
@@ -279,9 +277,3 @@ class ConceptDocument(Document):
     def prepare_is_head(instance):
         """Match the versioned-object predicate used by Source.get_concepts_queryset."""
         return instance.id == instance.versioned_object_id
-
-    @staticmethod
-    def prepare_preferred_description(instance):
-        """Store the same locale-selected description returned by GraphQL's ORM path."""
-        from core.graphql.serializers import resolve_description
-        return resolve_description(instance)

@@ -53,8 +53,9 @@ version only if HEAD is absent; explicit missing versions do not fall back.
 
 | Selected payload | Retrieval |
 | --- | --- |
-| Source `name`, `description`, `canonicalUrl`, `uri` | Source index projection, including source/version resolution |
-| Concept `id`, `conceptId`, `externalId`, `display`, `description`, `conceptClass`, `datatype { name }` | Concept index projection; no ORM concept hydration |
+| Source `name`, `canonicalUrl`, `uri` | Source index projection, including source/version resolution. `uri` is rebuilt from owner, owner type, mnemonic and version rather than stored |
+| Concept `id`, `conceptId`, `externalId`, `display`, `conceptClass`, `datatype { name }` | Concept index projection; no ORM concept hydration |
+| Source `description`, concept `description` | Not indexed; selecting either routes that request through the ORM |
 | Only concept counts/pagination metadata | Elasticsearch request with zero result hits |
 | Concept names, mappings, extras, audit metadata, datatype details | ORM hydration with selected concept columns and relations |
 | Source classes, datatypes, map types, external sources, summary | Existing version-scoped model querysets; only selected aggregates execute |
@@ -69,8 +70,9 @@ Counts and distinct labels use active, non-retired records. `summary.mappings` c
 private targets the caller cannot view. Unresolved external URIs are taken from visible mappings.
 
 Repository permission checks reuse the shared REST visibility rule directly, without fabricated requests.
-Both owner mnemonic and owner type scope index lookups. Global concepts also enforce parent repository visibility,
-and mapping hydration independently checks target visibility. HEAD uses the same versioned-object identity as
+Both owner mnemonic and owner type scope index lookups. Concept visibility relies on the indexed
+`public_can_view` flag that `core/sources/signals.py` already propagates from the parent repository, and
+mapping hydration independently checks target visibility. HEAD uses the same versioned-object identity as
 `Source.get_concepts_queryset()`, while releases use their membership lists.
 
 SQL-free data retrieval does not mean SQL-free authentication: session/token lookup and organization membership
@@ -80,9 +82,10 @@ existing REST index, indexed results reflect Elasticsearch refresh and indexing 
 ## Rollout
 
 No database migrations or new environment variables are introduced. Refresh the source and concept indexes
-before serving this GraphQL version: older concept documents lack the HEAD, activity, parent-permission and
-preferred-description projection fields. Source documents add description, URI and activity fields.
-Do not use incomplete indexes during the rollout; global projections filter on the new fields.
+before serving this GraphQL version: older concept documents lack the `is_active`, `is_head` and `display_name`
+projection fields, and older source documents lack `is_active`. Do not use incomplete indexes during the
+rollout; concept projections filter on `is_active` and `is_head`, so an unrefreshed index returns zero
+concepts without raising an error.
 
 Use the existing indexing procedure to apply the additive mappings and repopulate both models. For a deployment
 that recreates indexes, use its established rebuild procedure; do not rebuild live indexes without accounting for
@@ -92,7 +95,7 @@ REST search availability. A full population command for the existing application
 docker exec oclapi2-api-1 python manage.py search_index --populate --models sources.Source concepts.Concept -f --parallel
 ```
 
-Source permission/activity propagation also refreshes the corresponding concept projection flags. Existing
+Source permission/activity propagation refreshes the corresponding concept projection flags. Existing
 REST search relevance and excluded-word semantics are preserved; unrelated search refactors from PR #838 were
 not carried over. Its corrected permission sharing and documented Strawberry auth extension were retained.
 
@@ -106,7 +109,8 @@ docker exec oclapi2-api-1 pylint -j2 core/graphql core/common/permissions.py cor
 `core.integration_tests.test_graphql_projection` requires `settings.ES_ENABLED=True`. It creates uniquely named
 indexes and removes them after each test. Run it only against a test Elasticsearch service: shared fixture setup
 can also exercise normal indexing hooks. It covers real index preparation, zero SQL, owner isolation, HEAD/release
-selection, inactive/retired filtering, and private-parent visibility.
+selection, inactive/retired filtering, private-repository visibility, the rebuilt source URI, and the
+database fallback for `description`.
 
 For this worktree, verification used a copy at `/tmp/graphql-sources-20260906` inside the existing API container,
 the dedicated database `test_graphql_sources_20260906`, and a temporary Elasticsearch container. The running app's

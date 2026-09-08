@@ -169,15 +169,13 @@ class SourceQueryTests(OCLTestCase):
         })
 
     def test_parent_permission_changes_update_projection_fields(self):
-        """Source ACL propagation refreshes the indexed parent flag as well as the child flag."""
+        """Source ACL propagation refreshes the indexed child visibility flag."""
         self.source.public_access = ACCESS_TYPE_NONE
         self.source._should_update_public_access = True  # pylint: disable=protected-access
         with patch.object(type(self.source), 'batch_index') as index:
             self.source.save()
         concept_update = next(call for call in index.call_args_list if call.args[1].Index.name == 'concepts')
-        self.assertEqual(concept_update.kwargs['partial_doc'], {
-            'public_can_view': False, 'parent_public_can_view': False,
-        })
+        self.assertEqual(concept_update.kwargs['partial_doc'], {'public_can_view': False})
 
     def test_parent_deactivation_updates_indexed_concept_flag(self):
         """Deactivated parent repositories cannot leave active concept projections behind."""

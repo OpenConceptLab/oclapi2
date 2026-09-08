@@ -89,14 +89,6 @@ def apply_es_visibility_filter(search, user):
     )
 
 
-def apply_es_parent_visibility_filter(search, user):
-    """Also protect private parent repositories when a child has a public access flag."""
-    return apply_document_public_visibility_filter(
-        search, user, include_owner_private_access=True, include_organization_memberships=True,
-        public_field='parent_public_can_view',
-    )
-
-
 class PermissionsMixin:
     """Provide cached source resolution and shared permission helpers to resolvers."""
 
