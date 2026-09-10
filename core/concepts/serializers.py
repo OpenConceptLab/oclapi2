@@ -207,7 +207,8 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
         if collection:
             if self.include_verbose_references:
                 from core.collections.serializers import CollectionReferenceSerializer
-                return CollectionReferenceSerializer(obj.collection_references(collection), many=True).data
+                return CollectionReferenceSerializer(
+                    obj.collection_references(collection), many=True, context=self.context).data
             return obj.collection_references_uris(collection)
         return None
 
@@ -633,7 +634,8 @@ class ConceptVersionDetailSerializer(ModelSerializer):
         if collection:
             if self.include_verbose_references:
                 from core.collections.serializers import CollectionReferenceSerializer
-                return CollectionReferenceSerializer(obj.collection_references(collection), many=True).data
+                return CollectionReferenceSerializer(
+                    obj.collection_references(collection), many=True, context=self.context).data
             return obj.collection_references_uris(collection)
         return None
 
