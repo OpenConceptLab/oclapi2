@@ -21,11 +21,11 @@ from .types import (
     ConceptType,
     DatatypeDetails,
     DatatypeType,
+    ExternalSourceType,
     MappingType,
     MetadataType,
     NumericDatatypeDetails,
     TextDatatypeDetails,
-    ToSourceType,
 )
 
 
@@ -36,8 +36,8 @@ def serialize_mappings(concept: Concept) -> List[MappingType]:
         result.append(
             MappingType(
                 map_type=str(mapping.map_type),
-                to_source=ToSourceType(
-                    url=mapping.to_source_url,
+                to_source=ExternalSourceType(
+                    uri=mapping.to_source_url,
                     name=mapping.to_source_name,
                 ) if mapping.to_source_url or mapping.to_source_name else None,
                 to_code=mapping.get_to_concept_code(),

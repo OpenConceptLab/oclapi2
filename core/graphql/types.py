@@ -16,12 +16,6 @@ class ConceptNameType:
 
 
 @strawberry.type
-class ToSourceType:
-    url: Optional[str] = strawberry.field(description="URL pointing to the target source.")
-    name: Optional[str] = strawberry.field(description="Human-readable name for the target source.")
-
-
-@strawberry.type
 class ExternalSourceType:
     """GraphQL metadata for a source referenced by an outbound mapping."""
 
@@ -35,7 +29,7 @@ class MappingType:
         name="mapType",
         description="Mapping type (e.g. SAME-AS, NARROWER-THAN).",
     )
-    to_source: Optional[ToSourceType] = strawberry.field(
+    to_source: Optional[ExternalSourceType] = strawberry.field(
         name="toSource",
         description="Metadata about the source/collection the mapping points to.",
     )

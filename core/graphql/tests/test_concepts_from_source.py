@@ -141,7 +141,7 @@ class ConceptsFromSourceQueryTests(OCLTestCase):
              results {
                conceptId
                display
-               mappings { mapType toSource { url name } toCode toConceptName sortWeight comment }
+               mappings { mapType toSource { uri name } toCode toConceptName sortWeight comment }
                extras
              }
           }
