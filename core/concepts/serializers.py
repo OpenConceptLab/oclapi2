@@ -193,6 +193,8 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
                 self.fields.pop('references', None)
             if get(params, 'onlyParentLess') not in TRUTHY and get(params, 'onlyHierarchyRoot') not in TRUTHY:
                 self.fields.pop('has_children', None)
+            if 'collection' in self.view_kwargs:
+                self.fields.pop('latest_source_version', None)
         except:  # pylint: disable=bare-except
             pass
 
@@ -333,12 +335,15 @@ class ConceptVersionListSerializer(ConceptListSerializer):
         self.query_params = params.dict() if params else {}
         self.include_source_versions = self.query_params.get(INCLUDE_SOURCE_VERSIONS) in TRUTHY
         self.include_collection_versions = self.query_params.get(INCLUDE_COLLECTION_VERSIONS) in TRUTHY
+        self.view_kwargs = get(kwargs, 'context.view.kwargs', {})
 
         try:
             if not self.include_source_versions:
                 self.fields.pop('source_versions', None)
             if not self.include_collection_versions:
                 self.fields.pop('collection_versions', None)
+            if 'collection' in self.view_kwargs:
+                self.fields.pop('latest_source_version', None)
         except:  # pylint: disable=bare-except
             pass
 
@@ -612,6 +617,8 @@ class ConceptVersionDetailSerializer(ModelSerializer):
                 self.fields.pop('parent_concept_urls')
             if not get(request, 'instance'):
                 self.fields.pop('references', None)
+            if 'collection' in self.view_kwargs:
+                self.fields.pop('latest_source_version', None)
         except:  # pylint: disable=bare-except
             pass
 

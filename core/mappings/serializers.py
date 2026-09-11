@@ -36,6 +36,7 @@ class AbstractMappingSerializer(AbstractResourceSerializer):
         request = get(kwargs, 'context.request')
         params = get(request, 'query_params')
         self.query_params = params.dict() if params else {}
+        self.view_kwargs = get(kwargs, 'context.view.kwargs', {})
         self.include_from_source = self.query_params.get(MAPPING_LOOKUP_FROM_SOURCE) in TRUTHY
         self.include_to_source = self.query_params.get(MAPPING_LOOKUP_TO_SOURCE) in TRUTHY
         self.include_sources = self.query_params.get(MAPPING_LOOKUP_SOURCES) in TRUTHY
@@ -63,6 +64,8 @@ class AbstractMappingSerializer(AbstractResourceSerializer):
 
         if not get(request, 'instance'):
             self.fields.pop('references', None)
+        if 'collection' in self.view_kwargs:
+            self.fields.pop('latest_source_version', None)
 
         super().__init__(*args, **kwargs)
 
