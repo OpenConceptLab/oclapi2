@@ -12,10 +12,12 @@ class ConceptDocument(Document):
         name = 'concepts'
         settings = {'number_of_shards': 1, 'number_of_replicas': 0}
 
-    # Preserve ORM semantics for direct GraphQL projections without changing REST search fields.
+    # New fields for direct GraphQL projections; they mirror ORM semantics without altering the
+    # existing REST search fields. `display_name` is the raw preferred-locale name -- `name` and
+    # `_name` below are search-normalized ('-' -> '_' / lowercased) and can't be used for display.
     is_active = fields.BooleanField(attr='is_active')
-    is_head = fields.BooleanField()
-    display_name = fields.TextField(attr='display_name')
+    is_head = fields.BooleanField()  # resolves via the VersionedModel.is_head property
+    display_name = fields.TextField()  # populated in prepare(), reusing preferred_locale
 
     id = fields.TextField(attr='mnemonic')
     id_lowercase = fields.KeywordField(attr='mnemonic', normalizer="lowercase")
@@ -223,6 +225,7 @@ class ConceptDocument(Document):
 
         preferred_locale = instance.preferred_locale
         name = get(preferred_locale, 'name') or ''
+        data['display_name'] = name
         data['_name'] = name.lower()
         data['name'] = name.replace('-', '_')
         synonyms = [n for n in instance.active_names.all() if n.name and n.name != name]
@@ -272,8 +275,3 @@ class ConceptDocument(Document):
                 else:
                     other_mapped_codes.append(to_concept_code)
         return same_as_mapped_codes, other_mapped_codes, verbose_info
-
-    @staticmethod
-    def prepare_is_head(instance):
-        """Match the versioned-object predicate used by Source.get_concepts_queryset."""
-        return instance.id == instance.versioned_object_id
