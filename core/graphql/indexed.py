@@ -25,7 +25,7 @@ CONCEPT_INDEX_FIELDS = {
     'id': (),  # Elasticsearch's metadata ID is the OCL database primary key.
     'conceptId': ('id',),
     'externalId': ('external_id',),
-    'display': ('display_name',),
+    'display': ('name', '_name'),
     'conceptClass': ('concept_class',),
     'datatype.name': ('datatype',),
 }
@@ -124,12 +124,38 @@ def indexed_concepts(paths, query, concept_ids, scope, pagination, owner, owner_
     return [serialize_indexed_concept(hit) for hit in hits], total
 
 
+def restore_display_name(name, lower_name):
+    """Rebuild the concept display value from the two search-normalized name fields.
+
+    `ConceptDocument.prepare` stores the preferred-locale name twice: `name` keeps the original
+    casing but rewrites '-' as '_' (so hyphenated clinical terms stay a single token), while
+    `_name` keeps the original hyphens but is lowercased. Neither is the display value on its
+    own, so we take the casing from `name` and the hyphens from `_name`, position by position.
+
+    Only names actually containing an underscore need this. A term whose original text already
+    held an underscore is indistinguishable in `name` alone, but `_name` disambiguates it; the
+    naive fallback (every '_' back to '-') applies only when `_name` is missing or its length
+    diverges, which we accept as an unlikely, low-impact risk rather than indexing a third field.
+    """
+    if not name or '_' not in name:
+        return name
+    if not lower_name or len(lower_name) != len(name):
+        return name.replace('_', '-')
+    return ''.join(
+        '-' if char == '_' and lower_name[index] == '-' else char
+        for index, char in enumerate(name)
+    )
+
+
 def serialize_indexed_concept(hit):
     """Construct only index-backed values; unselected relationship fields stay unloaded."""
     datatype = getattr(hit, 'datatype', None)
+    # `_name` is read from the source dict: attribute access on a Hit reserves the '_' prefix.
+    source = hit.to_dict()
     return ConceptType(
         id=str(hit.meta.id), concept_id=getattr(hit, 'id', ''),
-        external_id=getattr(hit, 'external_id', None), display=getattr(hit, 'display_name', None),
+        external_id=getattr(hit, 'external_id', None),
+        display=restore_display_name(source.get('name'), source.get('_name')),
         description=None, concept_class=getattr(hit, 'concept_class', None),
         datatype=DatatypeType(name=datatype, details=None) if datatype else None,
         names=[], mappings=[], metadata=None, extras={},

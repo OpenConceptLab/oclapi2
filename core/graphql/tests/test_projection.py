@@ -73,8 +73,9 @@ class ProjectionTests(SimpleTestCase):
     def test_concept_fragments_aliases_and_directives_remain_sql_free(self):
         """Skipped heavy fields do not force ORM loading, including named fragments."""
         response = self.response('concepts', [{
-            'id': '123', 'display_name': 'Hypertension-test', 'datatype': 'Numeric',
-            'concept_class': 'Diagnosis',
+            # The index stores the search-normalized pair; `display` is rebuilt from them.
+            'id': '123', 'name': 'Hypertension_test', '_name': 'hypertension-test',
+            'datatype': 'Numeric', 'concept_class': 'Diagnosis',
         }])
         query = '''query($heavy: Boolean!, $light: Boolean!) {
           found: concepts(query: "hypertension") { totalCount results {
@@ -95,7 +96,7 @@ class ProjectionTests(SimpleTestCase):
         })
         body = execute.call_args.args[0].to_dict()
         self.assertEqual(set(body['_source']), {
-            'id', 'display_name', 'datatype', 'concept_class', 'external_id',
+            'id', 'name', '_name', 'datatype', 'concept_class', 'external_id',
         })
         self.assertNotIn('extras', body['_source'])
         self.assertIn('is_head', str(body['query']))
@@ -127,7 +128,7 @@ class ProjectionTests(SimpleTestCase):
               b: concepts(query: "b") { results { display } }
             }''')
         self.assertIsNone(result.errors)
-        self.assertEqual([call.args[0].to_dict()['_source'] for call in es.call_args_list], [['id'], ['display_name']])
+        self.assertEqual([call.args[0].to_dict()['_source'] for call in es.call_args_list], [['id'], ['_name', 'name']])
 
     def test_invalid_auth_stops_all_queries(self):
         """Schema-level auth failure precedes both source and concept data access."""
