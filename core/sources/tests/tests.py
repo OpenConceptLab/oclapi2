@@ -13,7 +13,8 @@ from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, \
     OPENMRS_VALIDATION_SCHEMA
-from core.common.tasks import index_source_mappings, index_source_concepts
+from core.common.tasks import index_source_mappings, index_source_concepts, get_concepts_to_index, \
+    update_concepts_locale_fields
 from core.common.tasks import seed_children_to_new_version
 from core.common.tasks import update_source_active_concepts_count
 from core.common.tasks import update_source_active_mappings_count
@@ -645,6 +646,81 @@ class SourceTest(OCLTestCase):
             errors = Source.persist_changes(source2, self.user, None, **kwargs)
         self.assertEqual(len(errors), 1)
         self.assertTrue('__all__' in errors)
+
+    @patch('core.sources.models.Source.index_concepts_async')
+    def test_persist_changes_reindexes_concepts_on_default_locale_change(self, index_concepts_async_mock):
+        source = OrganizationSourceFactory(default_locale='en', supported_locales=['en'])
+
+        source.default_locale = 'fr'
+        errors = Source.persist_changes(source, self.user, None)
+
+        self.assertEqual(errors, {})
+        index_concepts_async_mock.assert_called_once_with(source.updated_by, locales=['en', 'fr'])
+        self.assertEqual(Source.objects.get(id=source.id).default_locale, 'fr')
+
+    @patch('core.sources.models.Source.index_concepts_async')
+    def test_persist_changes_reindexes_concepts_on_supported_locales_change(self, index_concepts_async_mock):
+        source = OrganizationSourceFactory(default_locale='en', supported_locales=['fr'])
+
+        source.supported_locales = ['fr', 'es']
+        errors = Source.persist_changes(source, self.user, None)
+
+        self.assertEqual(errors, {})
+        index_concepts_async_mock.assert_called_once_with(
+            source.updated_by, locales=['es'], exclude_locale='en')
+        self.assertEqual(Source.objects.get(id=source.id).supported_locales, ['fr', 'es'])
+
+    @patch('core.sources.models.Source.index_concepts_async')
+    def test_persist_changes_does_not_reindex_concepts_on_supported_locales_reorder(
+            self, index_concepts_async_mock
+    ):
+        source = OrganizationSourceFactory(default_locale='en', supported_locales=['fr', 'es'])
+
+        source.supported_locales = ['es', 'fr']
+        errors = Source.persist_changes(source, self.user, None)
+
+        self.assertEqual(errors, {})
+        index_concepts_async_mock.assert_not_called()
+
+    @patch('core.sources.models.Source.index_concepts_async')
+    def test_persist_changes_does_not_reindex_concepts_on_unrelated_change(self, index_concepts_async_mock):
+        source = OrganizationSourceFactory(default_locale='en', supported_locales=['en'])
+
+        source.description = 'new description'
+        errors = Source.persist_changes(source, self.user, None)
+
+        self.assertEqual(errors, {})
+        index_concepts_async_mock.assert_not_called()
+
+    def test_get_concepts_reindex_filters(self):
+        source = OrganizationSourceFactory(default_locale='en', supported_locales=['fr'])
+
+        def filters(**changes):
+            updated = Source.objects.get(id=source.id)
+            for attr, value in changes.items():
+                setattr(updated, attr, value)
+            return updated.get_concepts_reindex_filters(source)
+
+        self.assertIsNone(filters())
+        self.assertIsNone(filters(description='changed'))
+        self.assertIsNone(filters(supported_locales=['fr']))
+        self.assertEqual(
+            filters(supported_locales=['fr', 'es']), {'locales': ['es'], 'exclude_locale': 'en'})
+        self.assertEqual(filters(supported_locales=['es']), {'locales': ['es', 'fr'], 'exclude_locale': 'en'})
+        self.assertEqual(filters(default_locale='es'), {'locales': ['en', 'es']})
+        self.assertEqual(
+            filters(default_locale='es', supported_locales=['de']), {'locales': ['de', 'en', 'es', 'fr']})
+        self.assertEqual(filters(match_algorithms=['llm']), {})
+
+    def test_get_concepts_reindex_filters_null_supported_locales(self):
+        source = OrganizationSourceFactory(default_locale='en', supported_locales=None)
+        updated = Source.objects.get(id=source.id)
+        updated.supported_locales = ['fr']
+
+        self.assertEqual(updated.get_concepts_reindex_filters(source), {'exclude_locale': 'en'})
+
+        updated.default_locale = 'es'
+        self.assertEqual(updated.get_concepts_reindex_filters(source), {})
 
     def test_source_version_create_positive(self):
         source = OrganizationSourceFactory()
@@ -2556,6 +2632,84 @@ class TasksTest(OCLTestCase):
             'Falling back to full concept reindex for source %s', source.id
         )
         clear_concepts_cache_mock.assert_called_once()
+
+    def test_get_concepts_to_index_without_narrowing(self):
+        source = OrganizationSourceFactory(default_locale='en')
+        concept = ConceptFactory(parent=source, mnemonic='c1')
+        ConceptNameFactory(concept=concept, locale='en')
+
+        self.assertEqual(
+            list(get_concepts_to_index(source).order_by('id')), list(source.concepts.order_by('id')))
+
+    def test_get_concepts_to_index_narrowed_to_affected_locales(self):
+        source = OrganizationSourceFactory(default_locale='en')
+
+        has_default_locale_name = ConceptFactory(parent=source, mnemonic='c1')
+        ConceptNameFactory(concept=has_default_locale_name, locale='en')
+        ConceptNameFactory(concept=has_default_locale_name, locale='fr')
+
+        falls_back_to_supported_locale = ConceptFactory(parent=source, mnemonic='c2')
+        ConceptNameFactory(concept=falls_back_to_supported_locale, locale='fr')
+
+        unrelated_locale = ConceptFactory(parent=source, mnemonic='c3')
+        ConceptNameFactory(concept=unrelated_locale, locale='es')
+
+        only_retired_name = ConceptFactory(parent=source, mnemonic='c4')
+        ConceptNameFactory(concept=only_retired_name, locale='fr', retired=True)
+
+        queryset = get_concepts_to_index(source, locales=['fr'], exclude_locale='en')
+
+        self.assertEqual(set(queryset.values_list('mnemonic', flat=True)), {'c2'})
+
+    @patch('core.sources.models.Source.clear_concepts_cache')
+    @patch('core.common.tasks.update_concepts_locale_fields')
+    @patch('core.sources.models.Source.batch_index')
+    def test_index_source_concepts_locale_change_updates_locale_fields_only(
+            self, batch_index_mock, update_locale_fields_mock, clear_concepts_cache_mock
+    ):
+        source = OrganizationSourceFactory(default_locale='en')
+
+        index_source_concepts(source.id, locales=['fr'], exclude_locale='en')
+
+        batch_index_mock.assert_not_called()
+        update_locale_fields_mock.assert_called_once_with(ANY, False, True)
+        clear_concepts_cache_mock.assert_called_once()
+
+    @patch('core.sources.models.Source.clear_concepts_cache')
+    @patch('core.common.tasks.update_concepts_locale_fields')
+    @patch('core.sources.models.Source.batch_index')
+    def test_index_source_concepts_locale_change_on_semantic_source_does_full_index(
+            self, batch_index_mock, update_locale_fields_mock, clear_concepts_cache_mock
+    ):
+        source = OrganizationSourceFactory(default_locale='en', match_algorithms=['llm'])
+
+        index_source_concepts(source.id, locales=['fr'], exclude_locale='en')
+
+        update_locale_fields_mock.assert_not_called()
+        batch_index_mock.assert_called_once()
+        clear_concepts_cache_mock.assert_called_once()
+
+    @patch('core.common.models.BaseModel.batch_index_partial_by_ids')
+    def test_update_concepts_locale_fields_builds_locale_only_partial_doc(self, batch_index_partial_mock):
+        source = OrganizationSourceFactory(default_locale='en', supported_locales=['fr'])
+        concept = ConceptFactory(parent=source)
+        ConceptNameFactory(concept=concept, name='Bonjour', locale='fr', locale_preferred=True)
+        ConceptNameFactory(concept=concept, name='Salut', locale='fr')
+        ConceptNameFactory(concept=concept, name='Retired', locale='fr', retired=True)
+
+        update_concepts_locale_fields(source.concepts)
+
+        get_actions = batch_index_partial_mock.call_args[0][2]
+        actions = list(get_actions([concept.id]))
+
+        self.assertEqual(len(actions), 1)
+        action = actions[0]
+        self.assertEqual(action['_op_type'], 'update')
+        self.assertEqual(action['_id'], concept.id)
+        self.assertEqual(action['doc']['name'], 'Bonjour')
+        self.assertEqual(action['doc']['_name'], 'bonjour')
+        self.assertEqual(action['doc']['synonyms'], ['Salut'])
+        self.assertEqual(action['doc']['_synonyms'], ['Salut'])
 
     @patch('core.sources.models.Source.clear_mappings_cache')
     @patch('core.sources.models.Source.mappings')

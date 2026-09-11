@@ -520,16 +520,46 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
         except AlreadyQueued:
             pass
 
-    def index_concepts_async(self, user, partial_doc=None):
+    def index_concepts_async(self, user, partial_doc=None, locales=None, exclude_locale=None):
         user = user or self.updated_by
 
         task = Task.new(queue='indexing', user=user, name=index_source_concepts.__name__)
+        narrowing = {key: value for key, value in {
+            'locales': locales, 'exclude_locale': exclude_locale}.items() if value}
+        celery_args = [(self.id, partial_doc)]
+        if narrowing:
+            celery_args.append(narrowing)
         try:
             index_source_concepts.apply_async(
-                (self.id, partial_doc), queue='indexing', persist_args=True, task_id=task.id
+                *celery_args, queue='indexing', persist_args=True, task_id=task.id
             )
         except AlreadyQueued:
             pass
+
+    def get_concepts_reindex_filters(self, original):
+        if bool(self.has_semantic_match_algorithm) != bool(original.has_semantic_match_algorithm):
+            return {}
+
+        old_supported, new_supported = original.supported_locales, self.supported_locales
+        default_changed = self.default_locale != original.default_locale
+        nullness_changed = (old_supported is None) != (new_supported is None)
+        entered_or_left = set(old_supported or []) ^ set(new_supported or [])
+
+        if not default_changed and not nullness_changed and not entered_or_left:
+            return None
+
+        filters = {}
+        if default_changed:
+            if not nullness_changed:
+                filters['locales'] = sorted(
+                    entered_or_left | set(compact([original.default_locale, self.default_locale])))
+        else:
+            if not nullness_changed:
+                filters['locales'] = sorted(entered_or_left)
+            if self.default_locale:
+                filters['exclude_locale'] = self.default_locale
+
+        return filters
 
     def get_export_task(self):
         return Task.find(name__iendswith='export_source', args__contains=[self.id])

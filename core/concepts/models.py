@@ -407,9 +407,15 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         return names
 
-    def __names_from_prefetched_object_cache(self, filters, order_by=None, order='desc'):  # pragma: no cover
+    def __names_from_prefetched_object_cache(self, filters, order_by=None, order='desc'):
         def is_eligible(name):
-            return all(get(name, key) == value for key, value in filters.items())
+            for key, value in filters.items():
+                if key.endswith('__in'):
+                    if get(name, key[:-len('__in')]) not in value:
+                        return False
+                elif get(name, key) != value:
+                    return False
+            return True
 
         names = list(filter(is_eligible, self.names.all()))
         if order_by:

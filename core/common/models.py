@@ -976,9 +976,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         is_source = cls.__name__ == 'Source'
         should_reindex_resources = is_source and obj.released != original_repo.released
-        should_reindex_concepts_only = (
-            is_source and obj.has_semantic_match_algorithm != original_repo.has_semantic_match_algorithm
-        )
+        concepts_reindex_filters = obj.get_concepts_reindex_filters(original_repo) if is_source else None
 
         obj._should_update_public_access = is_source and obj.public_access != original_repo.public_access  # pylint: disable=protected-access
         obj._should_update_is_active = is_source and obj.is_active != original_repo.is_active  # pylint: disable=protected-access
@@ -1010,8 +1008,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                     obj.index_resources_for_self_as_latest_released(only_update=True)
                 else:
                     obj.index_resources_for_self_as_unreleased()
-            elif should_reindex_concepts_only:
-                obj.index_concepts_async(obj.updated_by)
+            elif concepts_reindex_filters is not None:
+                obj.index_concepts_async(obj.updated_by, **concepts_reindex_filters)
 
         except IntegrityError as ex:
             errors.update({'__all__': ex.args})

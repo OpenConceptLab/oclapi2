@@ -16,10 +16,11 @@ from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage
 from django.core.management import call_command
 from django.core.paginator import Paginator
+from django.db.models import Exists, OuterRef
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django_elasticsearch_dsl.registries import registry
-from pydash import get
+from pydash import get, compact
 
 from core.celery import app
 from core.common import ERRBIT_LOGGER
@@ -625,9 +626,9 @@ def make_hierarchy(concept_map):  # pragma: no cover
 
 
 @app.task(ignore_result=True, base=QueueOnceCustomTask)
-def index_source_concepts(
+def index_source_concepts(  # pylint: disable=too-many-arguments
         source_id, partial_doc=None, single_batch=False, should_prefetch=True, should_select_related=True,
-        parallel=True
+        parallel=True, locales=None, exclude_locale=None
 ):
     """
     Index source concepts, or partially update existing ES documents when `partial_doc` is supplied.
@@ -640,19 +641,69 @@ def index_source_concepts(
         select_related = [
             'parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'
         ] if should_select_related else []
+        queryset = get_concepts_to_index(source, locales, exclude_locale)
+        if (locales or exclude_locale) and not partial_doc and not source.has_semantic_match_algorithm:
+            update_concepts_locale_fields(queryset, single_batch, parallel)
+            source.clear_concepts_cache()
+            return
         try:
             kwargs = {'partial_doc': partial_doc} if partial_doc else {
                 'prefetch': prefetch, 'select_related': select_related}
             kwargs['single_batch'] = single_batch
             kwargs['parallel'] = parallel
-            source.batch_index(source.concepts, ConceptDocument, **kwargs)
+            source.batch_index(queryset, ConceptDocument, **kwargs)
         except Exception:  # pragma: no cover
             if not partial_doc:
                 raise
             logger.exception('Falling back to full concept reindex for source %s', source_id)
             source.batch_index(
-                source.concepts, ConceptDocument, prefetch=prefetch, select_related=select_related, parallel=parallel)
+                queryset, ConceptDocument, prefetch=prefetch, select_related=select_related, parallel=parallel)
         source.clear_concepts_cache()
+
+
+def get_concepts_to_index(source, locales=None, exclude_locale=None):
+    from core.concepts.models import ConceptName
+    queryset = source.concepts
+
+    def named_in(**name_filters):
+        return Exists(ConceptName.objects.filter(concept_id=OuterRef('id'), retired=False, **name_filters))
+
+    if locales:
+        queryset = queryset.filter(named_in(locale__in=locales))
+    if exclude_locale:
+        queryset = queryset.filter(~named_in(locale=exclude_locale))
+
+    return queryset
+
+
+def update_concepts_locale_fields(queryset, single_batch=False, parallel=True):
+    from core.common.models import BaseModel
+    from core.concepts.documents import ConceptDocument
+    from core.concepts.models import Concept
+
+    index_name = ConceptDocument()._index._name  # pylint: disable=protected-access
+
+    def get_actions(batch_ids):
+        concepts = Concept.objects.filter(
+            id__in=batch_ids).select_related('parent').prefetch_related('names')
+        for concept in concepts:
+            name = concept.display_name or ''
+            synonyms = compact({
+                n.name for n in concept.names.all() if not n.retired and n.name and n.name != name})
+            yield {
+                '_op_type': 'update',
+                '_index': index_name,
+                '_id': concept.id,
+                'doc': {
+                    'name': name.replace('-', '_'),
+                    '_name': name.lower(),
+                    'synonyms': synonyms,
+                    '_synonyms': synonyms,
+                },
+            }
+
+    BaseModel.batch_index_partial_by_ids(
+        queryset, ConceptDocument, get_actions, single_batch=single_batch, parallel=parallel)
 
 
 @app.task(ignore_result=True, base=QueueOnceCustomTask)

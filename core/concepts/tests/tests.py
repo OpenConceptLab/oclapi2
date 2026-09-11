@@ -390,6 +390,20 @@ class ConceptTest(OCLTestCase):
     def test_is_versioned(self):
         self.assertTrue(Concept().is_versioned)
 
+    def test_display_name_is_same_with_prefetched_names(self):
+        source = OrganizationSourceFactory(default_locale='en', supported_locales=['fr'])
+        concept = ConceptFactory(parent=source)
+        ConceptNameFactory(concept=concept, name='Bonjour', locale='fr')
+        ConceptNameFactory(concept=concept, name='Hola', locale='es')
+
+        from_db = Concept.objects.get(id=concept.id)
+        prefetched = Concept.objects.filter(
+            id=concept.id).select_related('parent').prefetch_related('names')[0]
+
+        self.assertEqual(from_db.display_name, 'Bonjour')
+        self.assertEqual(prefetched.display_name, from_db.display_name)
+        self.assertEqual(prefetched.display_locale, from_db.display_locale)
+
     def test_display_name(self):
         source = OrganizationSourceFactory(default_locale='fr', supported_locales=['fr', 'ti'])
         concept = ConceptFactory(
