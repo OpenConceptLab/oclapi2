@@ -802,7 +802,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     @staticmethod
     def __clear_resource_cache(body_key, headers_key):
         try:
-            return cache.client.get_client().delete(*[cache.make_key(key) for key in [body_key, headers_key]])
+            return cache.delete_pattern(f'{body_key}*') + cache.delete_pattern(f'{headers_key}*')
         except:  # pylint: disable=bare-except
             return False
 

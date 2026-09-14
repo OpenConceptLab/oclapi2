@@ -466,20 +466,26 @@ class SourceTest(OCLTestCase):
     @patch('core.common.models.cache')
     def test_clear_concepts_cache(self, cache_mock):
         source = OrganizationSourceFactory()
-        cache_mock.make_key.side_effect = lambda key: key
+        cache_mock.delete_pattern.return_value = 0
+        body_key, headers_key = source.get_concepts_cache_keys()
 
         source.clear_concepts_cache()
 
-        cache_mock.client.get_client.return_value.delete.assert_called_once_with(*source.get_concepts_cache_keys())
+        cache_mock.delete_pattern.assert_has_calls(
+            [call(f'{body_key}*'), call(f'{headers_key}*')]
+        )
 
     @patch('core.common.models.cache')
     def test_clear_mappings_cache(self, cache_mock):
         source = OrganizationSourceFactory()
-        cache_mock.make_key.side_effect = lambda key: key
+        cache_mock.delete_pattern.return_value = 0
+        body_key, headers_key = source.get_mappings_cache_keys()
 
         source.clear_mappings_cache()
 
-        cache_mock.client.get_client.return_value.delete.assert_called_once_with(*source.get_mappings_cache_keys())
+        cache_mock.delete_pattern.assert_has_calls(
+            [call(f'{body_key}*'), call(f'{headers_key}*')]
+        )
 
     @patch('core.sources.models.Source.clear_mappings_cache')
     @patch('core.sources.models.Source.clear_concepts_cache')
