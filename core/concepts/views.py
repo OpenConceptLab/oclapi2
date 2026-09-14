@@ -209,9 +209,9 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
             queryset = queryset.filter(id=F('versioned_object_id'))
         if is_source_nested and self.request.query_params.get('onlyParentLess', False) in TRUTHY:
             queryset = queryset.filter(parent_concepts__isnull=True)
-
+        queryset = queryset.prefetch_related('names')
         if not self.is_brief():
-            queryset = queryset.prefetch_related('names', 'descriptions')
+            queryset = queryset.prefetch_related('descriptions')
 
         if not parent:
             user = self.request.user

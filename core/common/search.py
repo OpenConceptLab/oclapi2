@@ -237,7 +237,7 @@ class CustomESSearch:
 
     def to_queryset(  # pylint:disable=too-many-locals,too-many-arguments
             self, keep_order=True, normalized_score=False, exact_count=True, txt=None,
-            encoder_model=None, address_duplicates=False
+            encoder_model=None, address_duplicates=False, brief=False
     ):
         """
         This method return a django queryset from the an elasticsearch result.
@@ -282,6 +282,10 @@ class CustomESSearch:
                 qs = self._dsl_search._model.objects.filter(pk=pks[0])  # pylint: disable=protected-access
             else:
                 qs = self._dsl_search._model.objects.filter(pk__in=pks)  # pylint: disable=protected-access
+            if self.document and self.document.__name__ == 'ConceptDocument':
+                qs = qs.prefetch_related('names')
+                if not brief:
+                    qs = qs.prefetch_related('descriptions')
             if keep_order:
                 preserved_order = Case(
                     *[When(pk=pk, then=pos) for pos, pk in enumerate(pks)],
@@ -360,12 +364,12 @@ class CustomESSearch:
                 excludes=['_embeddings', '_synonyms_embeddings']
             ) if load_fields else self._dsl_search.source(fields=['id'])
             s = s.params(request_timeout=ES_REQUEST_TIMEOUT)
-            if exact_count:
-                total = s.count()
-            s = s.params(track_total_hits=False, request_cache=True)
+            s = s.params(track_total_hits=exact_count, request_cache=True)
             s = s.execute()
             hits = s.hits
             self.max_score = hits.max_score
+            if exact_count:
+                total = hits.total.value
             return s, hits, total
         return self._dsl_search, None, total
 

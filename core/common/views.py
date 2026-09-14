@@ -1000,7 +1000,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             es_search = CustomESSearch(search_results[start:end], self.document_model)
             es_search.to_queryset(
                 address_duplicates=self.is_source_child_document_model() and (
-                        'source' in self.kwargs or 'collection' in self.kwargs)
+                        'source' in self.kwargs or 'collection' in self.kwargs),
+                brief=self.is_brief()
             )
             self.total_count = es_search.total - offset
             return es_search.queryset, es_search.scores, es_search.max_score, es_search.highlights
