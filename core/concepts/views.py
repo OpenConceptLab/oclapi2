@@ -211,7 +211,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
             queryset = queryset.filter(parent_concepts__isnull=True)
         queryset = queryset.prefetch_related('names')
         if not self.is_brief():
-            queryset = queryset.prefetch_related('descriptions')
+            queryset = queryset.prefetch_related('descriptions').select_related('created_by', 'updated_by')
 
         if not parent:
             user = self.request.user

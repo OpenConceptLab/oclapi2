@@ -285,7 +285,10 @@ class CustomESSearch:
             if self.document and self.document.__name__ == 'ConceptDocument':
                 qs = qs.prefetch_related('names')
                 if not brief:
-                    qs = qs.prefetch_related('descriptions')
+                    qs = qs.prefetch_related('descriptions').select_related('created_by', 'updated_by')
+            elif self.document and self.document.__name__ == 'MappingDocument' and not brief:
+                qs = qs.select_related('from_concept', 'to_concept').prefetch_related(
+                    'from_concept__names', 'to_concept__names')
             if keep_order:
                 preserved_order = Case(
                     *[When(pk=pk, then=pos) for pos, pk in enumerate(pks)],

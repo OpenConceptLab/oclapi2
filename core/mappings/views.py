@@ -117,6 +117,9 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
                 queryset = Mapping.apply_user_criteria(queryset, user)
         if self.is_brief() and self.is_checksums():
             queryset = queryset.select_related('from_concept', 'to_concept')
+        elif not self.is_brief():
+            queryset = queryset.select_related('from_concept', 'to_concept').prefetch_related(
+                'from_concept__names', 'to_concept__names')
 
         return queryset
 
