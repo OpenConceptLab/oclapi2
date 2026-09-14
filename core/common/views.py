@@ -836,19 +836,24 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             return results
         exclude_fuzzy = self.request.query_params.get(EXCLUDE_FUZZY_SEARCH_PARAM) in TRUTHY
         exclude_wildcard = self.request.query_params.get(EXCLUDE_WILDCARD_SEARCH_PARAM) in TRUTHY
+        has_search_string = bool(self.get_search_string())
 
         extras_fields = self.get_extras_searchable_fields_from_query_params()
         extras_fields_exact = self.get_extras_exact_fields_from_query_params()
         extras_fields_exists = self.get_extras_fields_exists_from_query_params()
-        criterion, fields = self.get_exact_search_criterion()
 
-        if not exclude_wildcard:
-            wildcard_search_criterion, wildcard_search_fields = self.get_wildcard_search_criterion()
-            criterion |= wildcard_search_criterion
-            fields += wildcard_search_fields
-        if not exclude_fuzzy:
-            criterion |= self.get_fuzzy_search_criterion(boost_divide_by=10000, expansions=2)
-        results = results.query(criterion)
+        if has_search_string:
+            criterion, fields = self.get_exact_search_criterion()
+
+            if not exclude_wildcard:
+                wildcard_search_criterion, wildcard_search_fields = self.get_wildcard_search_criterion()
+                criterion |= wildcard_search_criterion
+                fields += wildcard_search_fields
+            if not exclude_fuzzy:
+                criterion |= self.get_fuzzy_search_criterion(boost_divide_by=10000, expansions=2)
+            results = results.query(criterion)
+        else:
+            fields = []
 
         must_not_have_criterion = self.get_mandatory_exclude_words_criteria()
         must_have_criterion = self.get_mandatory_words_criteria()
@@ -916,7 +921,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 results = results.filter('term', **{attr: value})
 
         sort_attrs = self._get_sort_attribute()
-        if self.is_concept_document() and (
+        if has_search_string and self.is_concept_document() and (
                 not sort_attrs or (
                     '_score' in get(sort_attrs, '0', {}) and
                     get(sort_attrs, '0._score.order') == 'desc'
