@@ -24,6 +24,7 @@ from core.common.constants import (
     ES_REQUEST_TIMEOUT, ES_REQUEST_TIMEOUT_ASYNC, HEAD, ALL, EXCLUDE_WILDCARD_SEARCH_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM,
     SEARCH_MAP_CODES_PARAM, INCLUDE_SEARCH_META_PARAM, VERBOSE_PARAM, NAMESPACE_INVALID_CHAR_REGEX,
     CONSECUTIVE_HYPHENS_REGEX)
+from core.common.checksums import VersionCompareMixin
 from core.common.es import ESScript
 from core.common.models import ConceptContainerModel, BaseResourceModel
 from core.common.search import CustomESSearch
@@ -42,7 +43,7 @@ TRUTHY = get_truthy_values()
 FALSEY = get_falsy_values()
 
 
-class Collection(DirtyFieldsMixin, ConceptContainerModel):
+class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     OBJECT_TYPE = COLLECTION_TYPE
     OBJECT_VERSION_TYPE = COLLECTION_VERSION_TYPE
 
@@ -393,6 +394,33 @@ class Collection(DirtyFieldsMixin, ConceptContainerModel):
     def get_mappings_queryset(self):
         expansion = self.expansion
         return expansion.mappings.filter() if expansion else Mapping.objects.none()
+
+    @staticmethod
+    def get_default_expansion_or_raise(version):
+        expansion = version.expansion
+        if not expansion:
+            raise ValidationError(f"Collection version '{version.uri}' has no default expansion to compare.")
+        return expansion
+
+    @staticmethod
+    def _with_version_meta_uris(result, version1, version2):
+        result['meta']['version1']['uri'] = version1.uri
+        result['meta']['version2']['uri'] = version2.uri
+        return result
+
+    @staticmethod
+    def compare(version1, version2, verbosity=0):
+        expansion1 = Collection.get_default_expansion_or_raise(version1)
+        expansion2 = Collection.get_default_expansion_or_raise(version2)
+        result = Expansion.compare(expansion1, expansion2, verbosity)
+        return Collection._with_version_meta_uris(result, version1, version2)
+
+    @staticmethod
+    def changelog(version1, version2, verbosity=0):
+        expansion1 = Collection.get_default_expansion_or_raise(version1)
+        expansion2 = Collection.get_default_expansion_or_raise(version2)
+        result = Expansion.changelog(expansion1, expansion2, verbosity)
+        return Collection._with_version_meta_uris(result, version1, version2)
 
     @property
     def references_distribution(self):
@@ -1165,7 +1193,7 @@ def default_expansion_parameters():
     }
 
 
-class Expansion(BaseResourceModel):
+class Expansion(VersionCompareMixin, BaseResourceModel):
     class Meta:
         db_table = 'collection_expansions'
         indexes = [
@@ -1228,6 +1256,12 @@ class Expansion(BaseResourceModel):
     @property
     def expansion(self):
         return self.mnemonic
+
+    def get_concepts_queryset(self):
+        return self.concepts.filter()
+
+    def get_mappings_queryset(self):
+        return self.mappings.filter()
 
     @property
     def active_concepts(self):

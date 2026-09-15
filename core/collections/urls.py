@@ -5,6 +5,10 @@ from . import views
 
 urlpatterns = [
     path('', views.CollectionListView.as_view(), name='collection-list'),
+    path('$compare/', views.CollectionVersionsComparisonView.as_view(), name='collection-version-$compare'),
+    path('$changelog/', views.CollectionVersionsChangelogView.as_view(), name='collection-version-$changelog'),
+    path('expansions/$compare/', views.ExpansionsComparisonView.as_view(), name='expansion-$compare'),
+    path('expansions/$changelog/', views.ExpansionsChangelogView.as_view(), name='expansion-$changelog'),
     path(
         "<str:collection>/",
         views.CollectionRetrieveUpdateDestroyView.as_view(),

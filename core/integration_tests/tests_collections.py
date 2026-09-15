@@ -4316,3 +4316,180 @@ class CollectionVersionExpansionResolvedRepoUpdatesViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+
+class CollectionVersionsComparisonViewTest(OCLAPITestCase):
+    def test_post_200(self):  # pylint: disable=too-many-locals
+        collection = OrganizationCollectionFactory()
+        collection_v1 = OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v1')
+        collection_v2 = OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v2')
+        expansion_v1 = ExpansionFactory(collection_version=collection_v1)
+        expansion_v2 = ExpansionFactory(collection_version=collection_v2)
+        collection_v1.expansion_uri = expansion_v1.uri
+        collection_v1.save()
+        collection_v2.expansion_uri = expansion_v2.uri
+        collection_v2.save()
+
+        concept1 = ConceptFactory(mnemonic='concept1')
+        concept2 = ConceptFactory(mnemonic='concept2')
+        concept2_v2 = ConceptFactory(
+            parent=concept2.parent, mnemonic=concept2.mnemonic, version='v2', concept_class='Foobar')
+        concept3 = ConceptFactory(mnemonic='concept3')
+
+        expansion_v1.concepts.add(concept1, concept2, concept3)
+        expansion_v2.concepts.add(concept1, concept2_v2)
+
+        for concept in Concept.objects.all():
+            concept.set_checksums()
+
+        token = collection.created_by.get_token()
+        response = self.client.post(
+            '/collections/$compare/?inline=true',
+            {
+                'version1': collection_v1.uri,
+                'version2': collection_v2.uri,
+                'verbosity': 2,
+            },
+            HTTP_AUTHORIZATION=f'Token {token}',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['meta']['version1']['uri'], collection_v1.uri)
+        self.assertEqual(response.data['meta']['version2']['uri'], collection_v2.uri)
+        self.assertEqual(response.data['meta']['version1']['concepts'], 3)
+        self.assertEqual(response.data['meta']['version2']['concepts'], 2)
+        self.assertEqual(response.data['concepts']['removed'], {'total': 1, 'mnemonic': ['concept3']})
+        self.assertEqual(response.data['concepts']['changed_major'], {'total': 1, 'mnemonic': ['concept2']})
+        self.assertEqual(response.data['concepts']['same_major'], 1)
+
+    def test_post_400_missing_default_expansion(self):
+        collection = OrganizationCollectionFactory()
+        collection_v1 = OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v1')
+        collection_v2 = OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v2')
+        # v1 has a default expansion set; v2 does not
+        expansion_v1 = ExpansionFactory(collection_version=collection_v1)
+        collection_v1.expansion_uri = expansion_v1.uri
+        collection_v1.save()
+
+        token = collection.created_by.get_token()
+        response = self.client.post(
+            '/collections/$compare/?inline=true',
+            {
+                'version1': collection_v1.uri,
+                'version2': collection_v2.uri,
+            },
+            HTTP_AUTHORIZATION=f'Token {token}',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+
+class CollectionVersionsChangelogViewTest(OCLAPITestCase):
+    def test_post_200(self):
+        collection = OrganizationCollectionFactory()
+        collection_v1 = OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v1')
+        collection_v2 = OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v2')
+        expansion_v1 = ExpansionFactory(collection_version=collection_v1)
+        expansion_v2 = ExpansionFactory(collection_version=collection_v2)
+        collection_v1.expansion_uri = expansion_v1.uri
+        collection_v1.save()
+        collection_v2.expansion_uri = expansion_v2.uri
+        collection_v2.save()
+
+        concept1 = ConceptFactory(mnemonic='concept1')
+        concept2 = ConceptFactory(mnemonic='concept2')
+
+        expansion_v1.concepts.add(concept1)
+        expansion_v2.concepts.add(concept1, concept2)
+
+        for concept in Concept.objects.all():
+            concept.set_checksums()
+
+        token = collection.created_by.get_token()
+        response = self.client.post(
+            '/collections/$changelog/?inline=true',
+            {
+                'version1': collection_v1.uri,
+                'version2': collection_v2.uri,
+                'verbosity': 1,
+            },
+            HTTP_AUTHORIZATION=f'Token {token}',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['meta']['version1']['uri'], collection_v1.uri)
+        self.assertEqual(response.data['meta']['version2']['uri'], collection_v2.uri)
+        self.assertEqual(list(response.data['concepts']['new'].keys()), [concept2.mnemonic])
+
+    def test_post_200_output_markdown(self):
+        collection = OrganizationCollectionFactory()
+        collection_v1 = OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v1')
+        collection_v2 = OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v2')
+        expansion_v1 = ExpansionFactory(collection_version=collection_v1)
+        expansion_v2 = ExpansionFactory(collection_version=collection_v2)
+        collection_v1.expansion_uri = expansion_v1.uri
+        collection_v1.save()
+        collection_v2.expansion_uri = expansion_v2.uri
+        collection_v2.save()
+
+        concept1 = ConceptFactory(mnemonic='concept1')
+        expansion_v2.concepts.add(concept1)
+        concept1.set_checksums()
+
+        token = collection.created_by.get_token()
+        response = self.client.post(
+            '/collections/$changelog/?inline=true&output=markdown',
+            {
+                'version1': collection_v1.uri,
+                'version2': collection_v2.uri,
+            },
+            HTTP_AUTHORIZATION=f'Token {token}',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('markdown', response.data)
+
+
+class ExpansionsComparisonViewTest(OCLAPITestCase):
+    def test_post_200(self):
+        collection = OrganizationCollectionFactory()
+        expansion1 = ExpansionFactory(collection_version=collection)
+        expansion2 = ExpansionFactory(collection_version=collection)
+
+        concept1 = ConceptFactory(mnemonic='concept1')
+        concept2 = ConceptFactory(mnemonic='concept2')
+
+        expansion1.concepts.add(concept1)
+        expansion2.concepts.add(concept1, concept2)
+
+        for concept in Concept.objects.all():
+            concept.set_checksums()
+
+        token = collection.created_by.get_token()
+        response = self.client.post(
+            '/collections/expansions/$compare/?inline=true',
+            {
+                'expansion1': expansion1.uri,
+                'expansion2': expansion2.uri,
+                'verbosity': 2,
+            },
+            HTTP_AUTHORIZATION=f'Token {token}',
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['meta']['version1']['uri'], expansion1.uri)
+        self.assertEqual(response.data['meta']['version2']['uri'], expansion2.uri)
+        self.assertEqual(response.data['concepts']['new'], {'total': 1, 'mnemonic': ['concept2']})

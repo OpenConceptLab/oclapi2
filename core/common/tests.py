@@ -25,6 +25,7 @@ from rest_framework.test import APITestCase, APITransactionTestCase
 
 from core.collections.models import CollectionReference
 from core.collections.tests.factories import ExpansionFactory, OrganizationCollectionFactory
+from core.common.checksums import VersionCompareMixin
 from core.common.constants import HEAD
 from core.common.es import ESScript
 from core.common.models import BaseModel
@@ -33,7 +34,8 @@ from core.common.tasks import delete_s3_objects, bulk_import_parallel_inline, re
     populate_indexes, rebuild_indexes, bulk_import_subtask_empty, import_finisher, \
     process_hierarchy_for_new_parent_concept_version, batch_index_resources, index_expansion_concepts, \
     index_expansion_mappings, vacuum_and_analyze_db, resolve_url_registry_entries, expire_old_celery_tasks, \
-    generate_key, source_version_compare, bulk_import_new, bulk_import_subtask, bulk_import_queue
+    source_version_compare, bulk_import_new, bulk_import_subtask, bulk_import_queue, \
+    collection_version_compare, expansion_compare
 from core.common.throttling import (
     CoreDayThrottle,
     CoreMinuteThrottle,
@@ -1872,10 +1874,12 @@ class TaskTest(OCLTestCase):
 
         self.assertFalse(Task.objects.filter(id=old_task.id).exists())
 
-    def test_generate_key(self):
-        self.assertEqual(generate_key('a', 'b', x=1, y=2), "'a'|'b'|x=1|y=2")
+    def test_generate_cache_key(self):
+        self.assertEqual(
+            VersionCompareMixin._generate_cache_key(  # pylint: disable=protected-access
+                'a', 'b', x=1, y=2), "'a'|'b'|x=1|y=2")
 
-    @patch('core.common.tasks.cache')
+    @patch('core.common.checksums.cache')
     def test_source_version_compare_cache_miss_then_set(self, cache_mock):
         cache_mock.get.return_value = None
         source1 = OrganizationSourceFactory()
@@ -1885,6 +1889,44 @@ class TaskTest(OCLTestCase):
         with override_settings(TEST_MODE=False):
             result = source_version_compare(  # pylint: disable=no-value-for-parameter
                 source1.uri, source2.uri, False, 0
+            )
+
+        self.assertIsNotNone(result)
+        cache_mock.get.assert_called_once()
+        cache_mock.set.assert_called_once()
+
+    @patch('core.common.checksums.cache')
+    def test_collection_version_compare_cache_miss_then_set(self, cache_mock):
+        cache_mock.get.return_value = None
+        collection1 = OrganizationCollectionFactory()
+        collection2 = OrganizationCollectionFactory(
+            organization=collection1.organization, mnemonic=collection1.mnemonic, version='v1')
+        expansion1 = ExpansionFactory(collection_version=collection1)
+        expansion2 = ExpansionFactory(collection_version=collection2)
+        collection1.expansion_uri = expansion1.uri
+        collection1.save()
+        collection2.expansion_uri = expansion2.uri
+        collection2.save()
+
+        with override_settings(TEST_MODE=False):
+            result = collection_version_compare(  # pylint: disable=no-value-for-parameter
+                collection1.uri, collection2.uri, False, 0
+            )
+
+        self.assertIsNotNone(result)
+        cache_mock.get.assert_called_once()
+        cache_mock.set.assert_called_once()
+
+    @patch('core.common.checksums.cache')
+    def test_expansion_compare_cache_miss_then_set(self, cache_mock):
+        cache_mock.get.return_value = None
+        collection = OrganizationCollectionFactory()
+        expansion1 = ExpansionFactory(collection_version=collection)
+        expansion2 = ExpansionFactory(collection_version=collection)
+
+        with override_settings(TEST_MODE=False):
+            result = expansion_compare(  # pylint: disable=no-value-for-parameter
+                expansion1.uri, expansion2.uri, False, 0
             )
 
         self.assertIsNotNone(result)

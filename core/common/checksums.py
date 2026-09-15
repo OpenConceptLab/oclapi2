@@ -1,4 +1,7 @@
+from typing import Any
+
 from django.conf import settings
+from django.core.cache import cache
 from django.db import models
 from ocldev.checksum import Checksum as ChecksumBase
 from pydash import get
@@ -572,3 +575,152 @@ class ChecksumChangelog:
             'concepts': concepts_result,
             'mappings': mappings_result,
         }
+
+
+class VersionCompareMixin:
+    CACHE_EXPIRY = 60 * 60 * 24 * 4  # 4 days
+    MD_FORMAT = 'markdown'
+    JSON_FORMAT = 'json'
+
+    @staticmethod
+    def compare(version1, version2, verbosity=0):
+        """
+        version1 is the older version
+        version2 is the newer version
+        """
+        concepts_diff = ChecksumDiff(
+            resources1=version1.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
+            resources2=version2.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
+            verbosity=verbosity,
+        )
+        mappings_diff = ChecksumDiff(
+            resources1=version1.get_mappings_queryset().only('mnemonic', 'checksums', 'retired'),
+            resources2=version2.get_mappings_queryset().only('mnemonic', 'checksums', 'retired'),
+            verbosity=verbosity,
+        )
+        concepts_diff.process()
+        mappings_diff.process()
+        return {
+            'meta': {
+                'version1': {
+                    'uri': version1.uri,
+                    'concepts': len(concepts_diff.resources1_set),
+                    'mappings': len(mappings_diff.resources1_set),
+                },
+                'version2': {
+                    'uri': version2.uri,
+                    'concepts': len(concepts_diff.resources2_set),
+                    'mappings': len(mappings_diff.resources2_set),
+                }
+            },
+            'concepts': concepts_diff.result,
+            'mappings': mappings_diff.result
+        }
+
+    @staticmethod
+    def changelog(version1, version2, verbosity=0):
+        """
+        version1 is the older version
+        version2 is the newer version
+
+        verbosity >= 4 enables full enrichment: concept_class, datatype, names[]
+        (with external_id), descriptions[], and prev_* fields for changed concepts
+        and mappings.
+        """
+        # Internal diff always runs at verbosity=3 to collect IDs of every category;
+        # per-resource enrichment is a concern of ChecksumChangelog (verbosity>=4).
+        concepts_diff = ChecksumDiff(
+            resources1=version1.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
+            resources2=version2.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
+            verbosity=3
+        )
+        mappings_diff = ChecksumDiff(
+            resources1=version1.get_mappings_queryset().only('mnemonic', 'checksums', 'retired'),
+            resources2=version2.get_mappings_queryset().only('mnemonic', 'checksums', 'retired'),
+            verbosity=3
+        )
+        concepts_diff.process()
+        mappings_diff.process()
+        log = ChecksumChangelog(concepts_diff, mappings_diff, verbosity=verbosity)
+        log.process()
+        result = {
+            'meta': {
+                'version1': {
+                    'uri': version1.uri,
+                    'concepts': len(concepts_diff.resources1_set),
+                    'mappings': len(mappings_diff.resources1_set),
+                },
+                'version2': {
+                    'uri': version2.uri,
+                    'concepts': len(concepts_diff.resources2_set),
+                    'mappings': len(mappings_diff.resources2_set),
+                }
+            },
+            **log.result
+        }
+        if verbosity > 0:
+            concepts_diff.set_concise_result()
+            mappings_diff.set_concise_result()
+            result['meta']['diff'] = {
+                'concepts': concepts_diff.result_concise,
+                'mappings': mappings_diff.result_concise,
+            }
+        return result
+
+    @classmethod
+    def run_diff(  # pylint: disable=too-many-arguments
+            cls, uri1, uri2, is_changelog, verbosity, ignore_cache=False, format_type=JSON_FORMAT):
+        ignore_cache = ignore_cache or get(settings, 'TEST_MODE', False)
+        cache_key = None
+
+        if not ignore_cache:
+            cache_key, result = cls._get_cache(uri1, uri2, is_changelog, verbosity, format_type)
+            if result:
+                return result
+
+        version1, version2 = cls._get_versions(uri1, uri2)
+
+        if is_changelog:
+            result = cls.changelog(version1, version2, verbosity)
+            if format_type == cls.MD_FORMAT:
+                from core.sources.changelog_markdown import ChangelogMarkdownGenerator
+                result[format_type] = ChangelogMarkdownGenerator(result).generate()
+        else:
+            result = cls.compare(version1, version2, verbosity)
+
+        if not ignore_cache and cache_key:
+            cache.set(cache_key, result, timeout=cls.CACHE_EXPIRY)
+
+        return result
+
+    @classmethod
+    def _get_versions(cls, uri1, uri2) -> tuple[Any, Any]:
+        version1 = cls.objects.filter(uri=uri1).first()
+        version2 = cls.objects.filter(uri=uri2).first()
+
+        if not version1:
+            raise ValueError(f"Version not found: {uri1}")
+        if not version2:
+            raise ValueError(f"Version not found: {uri2}")
+
+        return version1, version2
+
+    @classmethod
+    def _get_cache(cls, uri1, uri2, is_changelog, verbosity, format_type):  # pylint: disable=too-many-arguments
+        cache_key = cls._get_cache_key(uri1, uri2, is_changelog, verbosity, format_type)
+        return cache_key, cache.get(cache_key)
+
+    @classmethod
+    def _get_cache_key(  # pylint: disable=too-many-arguments
+            cls, uri1, uri2, is_changelog, verbosity, format_type):
+        cache_key_suffix = f'|format={format_type}' if format_type != cls.JSON_FORMAT else ''
+        cache_key_prefix = f'{cls.__name__.lower()}_version_compare'
+        cache_key = cls._generate_cache_key(
+            cache_key_prefix, uri1, uri2, is_changelog, verbosity) + cache_key_suffix
+        return cache_key
+
+    @staticmethod
+    def _generate_cache_key(*args, **kwargs):
+        key_parts = [repr(arg) for arg in args]
+        key_parts += [f"{k}={repr(v)}" for k, v in sorted(kwargs.items())]
+        return "|".join(key_parts)

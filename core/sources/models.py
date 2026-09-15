@@ -11,7 +11,7 @@ from django.db.models import UniqueConstraint, F, Max, Count
 from django.db.models.functions import Cast
 from pydash import get, compact
 
-from core.common.checksums import ChecksumChangelog
+from core.common.checksums import VersionCompareMixin
 from core.common.constants import HEAD
 from core.common.models import ConceptContainerModel
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings, \
@@ -31,7 +31,7 @@ class CloneError(Exception):
         self.errors = errors
 
 
-class Source(DirtyFieldsMixin, ConceptContainerModel):
+class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     DEFAULT_AUTO_ID_START_FROM = 1
     TOKEN_MATCH_ALGORITHM = 'es'
     SEMANTIC_MATCH_ALGORITHM = 'llm'
@@ -1050,93 +1050,6 @@ class Source(DirtyFieldsMixin, ConceptContainerModel):
             _filters['source_version'] = self.version
 
         return {**_filters, **(filters or {})}
-
-    @staticmethod
-    def compare(version1, version2, verbosity=0):
-        """
-        version1 is the older version
-        version2 is the newer version
-        """
-        from core.common.checksums import ChecksumDiff
-        concepts_diff = ChecksumDiff(
-            resources1=version1.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
-            resources2=version2.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
-            verbosity=verbosity,
-        )
-        mappings_diff = ChecksumDiff(
-            resources1=version1.get_mappings_queryset().only('mnemonic', 'checksums', 'retired'),
-            resources2=version2.get_mappings_queryset().only('mnemonic', 'checksums', 'retired'),
-            verbosity=verbosity,
-        )
-        concepts_diff.process()
-        mappings_diff.process()
-        return {
-            'meta': {
-                'version1': {
-                    'uri': version1.uri,
-                    'concepts': len(concepts_diff.resources1_set),
-                    'mappings': len(mappings_diff.resources1_set),
-                },
-                'version2': {
-                    'uri': version2.uri,
-                    'concepts': len(concepts_diff.resources2_set),
-                    'mappings': len(mappings_diff.resources2_set),
-                }
-            },
-            'concepts': concepts_diff.result,
-            'mappings': mappings_diff.result
-        }
-
-    @staticmethod
-    def changelog(version1, version2, verbosity=0):
-        """
-        version1 is the older version
-        version2 is the newer version
-
-        verbosity >= 4 enables full enrichment: concept_class, datatype, names[]
-        (with external_id), descriptions[], and prev_* fields for changed concepts
-        and mappings.
-        """
-        from core.common.checksums import ChecksumDiff
-        # Internal diff always runs at verbosity=3 to collect IDs of every category;
-        # per-resource enrichment is a concern of ChecksumChangelog (verbosity>=4).
-        concepts_diff = ChecksumDiff(
-            resources1=version1.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
-            resources2=version2.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
-            verbosity=3
-        )
-        mappings_diff = ChecksumDiff(
-            resources1=version1.get_mappings_queryset().only('mnemonic', 'checksums', 'retired'),
-            resources2=version2.get_mappings_queryset().only('mnemonic', 'checksums', 'retired'),
-            verbosity=3
-        )
-        concepts_diff.process()
-        mappings_diff.process()
-        log = ChecksumChangelog(concepts_diff, mappings_diff, verbosity=verbosity)
-        log.process()
-        result = {
-            'meta': {
-                'version1': {
-                    'uri': version1.uri,
-                    'concepts': len(concepts_diff.resources1_set),
-                    'mappings': len(mappings_diff.resources1_set),
-                },
-                'version2': {
-                    'uri': version2.uri,
-                    'concepts': len(concepts_diff.resources2_set),
-                    'mappings': len(mappings_diff.resources2_set),
-                }
-            },
-            **log.result
-        }
-        if verbosity > 0:
-            concepts_diff.set_concise_result()
-            mappings_diff.set_concise_result()
-            result['meta']['diff'] = {
-                'concepts': concepts_diff.result_concise,
-                'mappings': mappings_diff.result_concise,
-            }
-        return result
 
     def get_brief_serializer(self):
         from core.sources.serializers import SourceVersionMinimalSerializer, SourceMinimalSerializer

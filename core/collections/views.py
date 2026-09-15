@@ -54,7 +54,7 @@ from core.common.swagger_parameters import q_param, compress_header, page_param,
     include_facets_header, sort_asc_param, sort_desc_param, updated_since_param, include_retired_param, limit_param, \
     canonical_url_param, all_versions_param, include_summary_param
 from core.common.tasks import add_references, export_collection, delete_collection, index_expansion_concepts, \
-    index_expansion_mappings, seed_children_to_expansion
+    index_expansion_mappings, seed_children_to_expansion, collection_version_compare, expansion_compare
 from core.common.throttling import ThrottleUtil
 from core.common.utils import compact_dict_by_values, parse_boolean_query_param
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
@@ -1328,3 +1328,101 @@ class CollectionVersionExpansionProcessingView(CollectionVersionExpansionBaseVie
         expansion.clear_processing()
 
         return Response(status=status.HTTP_200_OK)
+
+
+class AbstractCollectionVersionsDiffView(BaseAPIView, TaskMixin):
+    permission_classes = (IsAuthenticated, CanViewConceptDictionaryVersion)
+    swagger_schema = None
+    changelog = False
+
+    def get_objects(self):
+        version1_uri = self.request.data.get('version1')
+        version2_uri = self.request.data.get('version2')
+        version1 = get_object_or_404(Collection.objects.filter(uri=version1_uri))
+        version2 = get_object_or_404(Collection.objects.filter(uri=version2_uri))
+        if version1.created_at and version2.created_at and version1.created_at > version2.created_at:
+            version1, version2 = version2, version1
+        self.check_object_permissions(self.request, version1)
+        self.check_object_permissions(self.request, version2)
+        if not version1.expansion or not version2.expansion:
+            raise Http400('Both collection versions must have a default expansion to compare.')
+        return version1, version2
+
+    def get_verbosity(self):
+        try:
+            return int(self.request.query_params.get('verbosity', 0) or self.request.data.get('verbosity', 0) or 0)
+        except:  # pylint: disable=bare-except
+            return 0
+
+    def get_format_type(self):
+        return self.request.query_params.get('output', 'json')
+
+    def post(self, _, **kwargs):  # pylint: disable=unused-argument
+        version1, version2 = self.get_objects()
+        ignore_cache = bool(version1.is_head or version2.is_head)
+        format_type = self.get_format_type() if self.changelog else 'json'
+        result = self.perform_task(
+            collection_version_compare,
+            (version1.uri, version2.uri, self.changelog, self.get_verbosity(), ignore_cache, format_type)
+        )
+
+        if isinstance(result, Response):
+            return result
+
+        return Response(result)
+
+
+class CollectionVersionsComparisonView(AbstractCollectionVersionsDiffView):
+    changelog = False
+
+
+class CollectionVersionsChangelogView(AbstractCollectionVersionsDiffView):
+    changelog = True
+
+
+class AbstractExpansionsDiffView(BaseAPIView, TaskMixin):
+    permission_classes = (IsAuthenticated, CanViewConceptDictionaryVersion)
+    swagger_schema = None
+    changelog = False
+
+    def get_objects(self):
+        expansion1_uri = self.request.data.get('expansion1')
+        expansion2_uri = self.request.data.get('expansion2')
+        expansion1 = get_object_or_404(Expansion.objects.filter(uri=expansion1_uri))
+        expansion2 = get_object_or_404(Expansion.objects.filter(uri=expansion2_uri))
+        if expansion1.created_at and expansion2.created_at and expansion1.created_at > expansion2.created_at:
+            expansion1, expansion2 = expansion2, expansion1
+        self.check_object_permissions(self.request, expansion1.collection_version)
+        self.check_object_permissions(self.request, expansion2.collection_version)
+        return expansion1, expansion2
+
+    def get_verbosity(self):
+        try:
+            return int(self.request.query_params.get('verbosity', 0) or self.request.data.get('verbosity', 0) or 0)
+        except:  # pylint: disable=bare-except
+            return 0
+
+    def get_format_type(self):
+        return self.request.query_params.get('output', 'json')
+
+    def post(self, _, **kwargs):  # pylint: disable=unused-argument
+        expansion1, expansion2 = self.get_objects()
+        ignore_cache = bool(expansion1.collection_version.is_head or expansion2.collection_version.is_head)
+        format_type = self.get_format_type() if self.changelog else 'json'
+        result = self.perform_task(
+            expansion_compare,
+            (expansion1.uri, expansion2.uri, self.changelog, self.get_verbosity(), ignore_cache, format_type)
+        )
+
+        if isinstance(result, Response):
+            return result
+
+        return Response(result)
+
+
+class ExpansionsComparisonView(AbstractExpansionsDiffView):
+    changelog = False
+
+
+class ExpansionsChangelogView(AbstractExpansionsDiffView):
+    changelog = True

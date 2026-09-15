@@ -11,7 +11,6 @@ from celery_once import AlreadyQueued
 from dateutil.relativedelta import relativedelta
 from django.apps import apps
 from django.conf import settings
-from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage
 from django.core.management import call_command
@@ -987,36 +986,21 @@ def rerun_indexing_job():
             logger.error('rerun_indexing_job: failed to re-queue %s: %s', task.id, ex)
 
 
-def generate_key(*args, **kwargs):
-    key_parts = [repr(arg) for arg in args]
-    key_parts += [f"{k}={repr(v)}" for k, v in sorted(kwargs.items())]
-    return "|".join(key_parts)
-
 @app.task(base=QueueOnceCustomTask)
 def source_version_compare(version1_uri, version2_uri, is_changelog, verbosity, ignore_cache=False, format_type='json'):
-    ignore_cache = ignore_cache or get(settings, 'TEST_MODE', False)
-    # Include format_type in the cache key only when it differs from the default
-    # to avoid invalidating existing cached JSON results.
-    cache_key_suffix = f'|format={format_type}' if format_type != 'json' else ''
-    if not ignore_cache:
-        cache_key = generate_key(
-            'source_version_compare', version1_uri, version2_uri, is_changelog, verbosity) + cache_key_suffix
-        result = cache.get(cache_key)
-        if result:
-            return result
-
     from core.sources.models import Source
-    version1 = Source.objects.get(uri=version1_uri)
-    version2 = Source.objects.get(uri=version2_uri)
+    return Source.run_diff(version1_uri, version2_uri, is_changelog, verbosity, ignore_cache, format_type)
 
-    if is_changelog:
-        result = Source.changelog(version1, version2, verbosity)
-        if format_type == 'markdown':
-            from core.sources.changelog_markdown import ChangelogMarkdownGenerator
-            result['markdown'] = ChangelogMarkdownGenerator(result).generate()
-    else:
-        result = Source.compare(version1, version2, verbosity)
 
-    if not ignore_cache:
-        cache.set(cache_key, result, timeout=60*60*24*4)
-    return result
+@app.task(base=QueueOnceCustomTask)
+def collection_version_compare(
+        version1_uri, version2_uri, is_changelog, verbosity, ignore_cache=False, format_type='json'):
+    from core.collections.models import Collection
+    return Collection.run_diff(version1_uri, version2_uri, is_changelog, verbosity, ignore_cache, format_type)
+
+
+@app.task(base=QueueOnceCustomTask)
+def expansion_compare(
+        expansion1_uri, expansion2_uri, is_changelog, verbosity, ignore_cache=False, format_type='json'):
+    from core.collections.models import Expansion
+    return Expansion.run_diff(expansion1_uri, expansion2_uri, is_changelog, verbosity, ignore_cache, format_type)
