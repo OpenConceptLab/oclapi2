@@ -2,7 +2,7 @@ Django==5.2.17
 psycopg2==2.9.11
 gunicorn==22.0.0 #production server
 whitenoise==6.5.0 #serving swagger static files
-djangorestframework==3.16.1
+djangorestframework==3.17.2
 pylint==3.3.8
 pydash==7.0.6
 django-cors-headers==4.9.0
