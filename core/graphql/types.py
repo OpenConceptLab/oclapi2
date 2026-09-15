@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Annotated, List, Optional, Union
 
 import strawberry
+from strawberry.scalars import JSON
 
 
 @strawberry.type
@@ -15,8 +16,10 @@ class ConceptNameType:
 
 
 @strawberry.type
-class ToSourceType:
-    url: Optional[str] = strawberry.field(description="URL pointing to the target source.")
+class ExternalSourceType:
+    """GraphQL metadata for a source referenced by an outbound mapping."""
+
+    uri: Optional[str] = strawberry.field(description="URI identifying the target source.")
     name: Optional[str] = strawberry.field(description="Human-readable name for the target source.")
 
 
@@ -26,13 +29,21 @@ class MappingType:
         name="mapType",
         description="Mapping type (e.g. SAME-AS, NARROWER-THAN).",
     )
-    to_source: Optional[ToSourceType] = strawberry.field(
+    to_source: Optional[ExternalSourceType] = strawberry.field(
         name="toSource",
         description="Metadata about the source/collection the mapping points to.",
     )
     to_code: Optional[str] = strawberry.field(
         name="toCode",
         description="Identifier of the target concept in the mapped source.",
+    )
+    to_concept_name: Optional[str] = strawberry.field(
+        name="toConceptName",
+        description="Display name of the target concept when available.",
+    )
+    sort_weight: Optional[float] = strawberry.field(
+        name="sortWeight",
+        description="Numeric weight used to order mappings within the same mapping type.",
     )
     comment: Optional[str] = strawberry.field(description="Optional notes attached to the mapping.")
 
@@ -130,7 +141,7 @@ class MetadataType:
 class ConceptType:
     id: strawberry.ID = strawberry.field(
         name="id",
-        description="CIEL concept identifier (mirrors the numeric ID used internally).",
+        description="OCL concept record identifier (the database primary key).",
     )
     external_id: Optional[str] = strawberry.field(
         name="externalId",
@@ -161,4 +172,43 @@ class ConceptType:
     )
     metadata: MetadataType = strawberry.field(
         description="Operational metadata such as status and audit fields."
+    )
+    extras: JSON = strawberry.field(description="Additional custom metadata attached to the concept.")
+
+
+@strawberry.type(description="Counts of active, non-retired records in the selected source version.")
+class SourceSummaryType:
+    """Minimal version-scoped repository summary."""
+
+    active_concepts: int = strawberry.field(description="Number of active, non-retired concepts.", default=0)
+    mappings: int = strawberry.field(description="Number of active, non-retired mappings.", default=0)
+
+
+@strawberry.type(description="Source metadata and statistics for one OCL repository version.")
+class SourceType:
+    """Selectable source metadata with explicitly requested aggregates."""
+
+    name: Optional[str] = strawberry.field(description="Human-readable source name.", default=None)
+    description: Optional[str] = strawberry.field(description="Source description.", default=None)
+    canonical_url: Optional[str] = strawberry.field(description="Canonical source URL.", default=None)
+    uri: Optional[str] = strawberry.field(
+        description="OCL relative URI, e.g. /orgs/CIEL/sources/CIEL/; includes the version for releases.",
+        default=None,
+    )
+    map_types: List[str] = strawberry.field(
+        description="Distinct map types used by active, non-retired mappings in this version.", default_factory=list,
+    )
+    external_sources: List[ExternalSourceType] = strawberry.field(
+        description="Visible external target sources referenced by active, non-retired outbound mappings.",
+        default_factory=list,
+    )
+    classes: List[str] = strawberry.field(
+        description="Distinct concept classes used by active, non-retired concepts in this version.",
+        default_factory=list,
+    )
+    datatypes: List[str] = strawberry.field(
+        description="Distinct datatypes used by active, non-retired concepts in this version.", default_factory=list,
+    )
+    summary: SourceSummaryType = strawberry.field(
+        description="Counts computed only for the selected summary fields.", default_factory=SourceSummaryType,
     )
