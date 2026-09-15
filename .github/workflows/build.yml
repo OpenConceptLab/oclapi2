@@ -24,11 +24,13 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: '3.12'
+        cache: 'pip'
     - run: pip install -r requirements.txt
     - run: pylint -j0 core/
 
   tests:
     name: Tests
+    needs: [pylint]
     runs-on: ubuntu-latest
     services:
         db:
@@ -169,6 +171,8 @@ jobs:
       with:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_PASSWORD }}
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
     - name: Build and push Docker image
       uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
       with:
@@ -176,6 +180,8 @@ jobs:
         push: true
         tags: openconceptlab/oclapi2:nightly, openconceptlab/oclapi2:${{ env.VERSION }}-${{env.GITHUB_SHA_SHORT}}
         build-args: SOURCE_COMMIT=${{env.GITHUB_SHA_SHORT}}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
 
   release:
     needs: [build]
