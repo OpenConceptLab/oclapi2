@@ -181,7 +181,7 @@ jobs:
         tags: openconceptlab/oclapi2:nightly, openconceptlab/oclapi2:${{ env.VERSION }}-${{env.GITHUB_SHA_SHORT}}
         build-args: SOURCE_COMMIT=${{env.GITHUB_SHA_SHORT}}
         cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-to: type=gha,mode=min
 
   release:
     needs: [build]
