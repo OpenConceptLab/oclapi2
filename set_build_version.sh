@@ -4,8 +4,7 @@ set -e
 
 CONFIG_FILE="core/__init__.py"
 
-SHA=${SOURCE_COMMIT:-'dev'}
-SHA=${SHA:0:8}
+SHA=$(./release_version.sh sha "${SOURCE_COMMIT:-}")
 
 echo "Setting build version to $SHA in $CONFIG_FILE"
 
