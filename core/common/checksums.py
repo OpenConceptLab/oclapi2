@@ -833,11 +833,13 @@ class VersionCompareMixin:
             and version2.last_child_update > changelog.updated_at
         )
 
+        computed_new_result = False
         if is_changelog:
             saved = None if is_stale else get(changelog, 'changelog')
             if not saved:
                 saved = cls.changelog(version1, version2, CHANGELOG_ENRICHMENT_VERBOSITY)
                 changelog.changelog = saved
+                computed_new_result = True
             result = saved
             if format_type == cls.MD_FORMAT:
                 result = {**saved, format_type: changelog.changelog_md}
@@ -846,9 +848,9 @@ class VersionCompareMixin:
             if not saved:
                 saved = cls.compare(version1, version2, DIFF_RESOURCE_IDS_VERBOSITY)
                 changelog.comparison = saved
+                computed_new_result = True
             result = saved
-
-        if changelog.is_dirty():
+        if computed_new_result:
             changelog.save()
 
         return result

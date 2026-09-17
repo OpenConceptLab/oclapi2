@@ -1,6 +1,5 @@
 from itertools import chain
 
-from dirtyfields import DirtyFieldsMixin
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
@@ -119,7 +118,7 @@ class RepoExternalExport(models.Model):
         return instance, is_create
 
 
-class VersionChangelog(DirtyFieldsMixin, models.Model):  # persisted changelog/comparison for a version pair
+class VersionChangelog(models.Model):
     JSON_FORMAT = 'json'
     MD_FORMAT = 'markdown'
 
@@ -170,10 +169,6 @@ class VersionChangelog(DirtyFieldsMixin, models.Model):  # persisted changelog/c
 
 
 class VersionChecksumMap(models.Model):  # persisted mnemonic->checksum map for one version
-    # No DirtyFieldsMixin here on purpose: for a JSONField holding hundreds of thousands of
-    # entries, its snapshot-on-load and is_dirty() comparison each cost real seconds -- more than
-    # rebuilding the map from scratch would. The caller already knows whether it changed anything
-    # (get_checksum_map only calls save() right after it just set a field), so no dirty-tracking is needed.
     class Meta:
         db_table = 'version_checksum_maps'
 
