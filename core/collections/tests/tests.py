@@ -1922,10 +1922,13 @@ class TasksTest(OCLTestCase):
 
     @patch('core.collections.models.index_expansion_mappings')
     @patch('core.collections.models.index_expansion_concepts')
+    @patch('core.common.tasks.collection_version_compare')
     @patch('core.common.tasks.export_collection')
     def test_seed_children_task_with_export(
-            self, export_collection_task, index_expansion_concepts_task, index_expansion_mappings_task):
+            self, export_collection_task, collection_version_compare_task, index_expansion_concepts_task,
+            index_expansion_mappings_task):
         export_collection_task.__name__ = 'export_collection'
+        collection_version_compare_task.__name__ = 'collection_version_compare'
         index_expansion_concepts_task.__name__ = 'index_expansion_concepts'
         index_expansion_mappings_task.__name__ = 'index_expansion_mappings'
         collection = OrganizationCollectionFactory()

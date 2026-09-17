@@ -2404,9 +2404,12 @@ class TasksTest(OCLTestCase):
         )
 
     @patch('core.sources.models.Source.index_children')
+    @patch('core.common.tasks.source_version_compare')
     @patch('core.common.tasks.export_source')
-    def test_seed_children_task_with_export(self, export_source_task, index_children_mock):
+    def test_seed_children_task_with_export(
+            self, export_source_task, source_version_compare_task, index_children_mock):
         export_source_task.__name__ = 'export_source'
+        source_version_compare_task.__name__ = 'source_version_compare'
         source = OrganizationSourceFactory()
         ConceptFactory(parent=source)
         MappingFactory(parent=source)
@@ -2424,15 +2427,18 @@ class TasksTest(OCLTestCase):
             (source_v1.id,), task_id=ANY, queue='default', persist_args=True)
         index_children_mock.assert_called_once()
 
+    @patch('core.common.tasks.source_version_compare')
     @patch('core.common.tasks.export_source')
     @patch('core.sources.models.index_source_mappings')
     @patch('core.sources.models.index_source_concepts')
     def test_seed_children_to_first_released_version_should_index_children(
-            self, index_source_concepts_task_mock, index_source_mappings_task_mock, export_source_task_mock
+            self, index_source_concepts_task_mock, index_source_mappings_task_mock, export_source_task_mock,
+            source_version_compare_task_mock
     ):
         export_source_task_mock.__name__ = 'export_source'
         index_source_concepts_task_mock.__name__ = 'index_source_concepts'
         index_source_mappings_task_mock.__name__ = 'index_source_mappings'
+        source_version_compare_task_mock.__name__ = 'source_version_compare'
 
         source = OrganizationSourceFactory()
         ConceptFactory(parent=source)
@@ -2458,15 +2464,18 @@ class TasksTest(OCLTestCase):
             (source_v1.id, {'_append_source_version': 'v1', 'is_in_latest_source_version': True}),
             queue='indexing', persist_args=True, task_id=ANY)
 
+    @patch('core.common.tasks.source_version_compare')
     @patch('core.common.tasks.export_source')
     @patch('core.sources.models.index_source_mappings')
     @patch('core.sources.models.index_source_concepts')
     def test_seed_children_to_new_second_released_version_should_index_children_of_new_and_prev_released_version(
-            self, index_source_concepts_task_mock, index_source_mappings_task_mock, export_source_task_mock
+            self, index_source_concepts_task_mock, index_source_mappings_task_mock, export_source_task_mock,
+            source_version_compare_task_mock
     ):
         export_source_task_mock.__name__ = 'export_source'
         index_source_concepts_task_mock.__name__ = 'index_source_concepts'
         index_source_mappings_task_mock.__name__ = 'index_source_mappings'
+        source_version_compare_task_mock.__name__ = 'source_version_compare'
 
         source = OrganizationSourceFactory()
         ConceptFactory(parent=source)

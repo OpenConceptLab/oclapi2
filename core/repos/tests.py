@@ -1,4 +1,5 @@
 import datetime
+from unittest.mock import patch
 
 from django.db import IntegrityError, transaction
 from django.test import override_settings
@@ -407,7 +408,8 @@ class VersionChangelogTest(OCLTestCase):
         with self.assertRaises(IntegrityError), transaction.atomic():
             VersionChangelog.objects.create(version1_url=source.url, version2_url=source.url)
 
-    def test_deleting_a_version_hard_deletes_its_changelogs(self):
+    @patch('core.common.models.delete_s3_objects')
+    def test_deleting_a_version_hard_deletes_its_changelogs(self, _delete_s3_objects_mock):
         source_v1 = OrganizationSourceFactory(version='v1')
         source_v2 = OrganizationSourceFactory(
             organization=source_v1.organization, mnemonic=source_v1.mnemonic, version='v2')
@@ -425,7 +427,8 @@ class VersionChangelogTest(OCLTestCase):
         self.assertFalse(VersionChangelog.objects.filter(id=changelog_2_3.id).exists())
         self.assertTrue(VersionChangelog.objects.filter(id=unrelated.id).exists())
 
-    def test_deleting_head_hard_deletes_all_changelogs_for_the_source(self):
+    @patch('core.common.models.delete_s3_objects')
+    def test_deleting_head_hard_deletes_all_changelogs_for_the_source(self, _delete_s3_objects_mock):
         head = OrganizationSourceFactory(version=HEAD)
         source_v1 = OrganizationSourceFactory(
             organization=head.organization, mnemonic=head.mnemonic, version='v1')
@@ -438,7 +441,8 @@ class VersionChangelogTest(OCLTestCase):
 
 
 class VersionChecksumMapTest(OCLTestCase):
-    def test_deleting_a_version_hard_deletes_its_checksum_map(self):
+    @patch('core.common.models.delete_s3_objects')
+    def test_deleting_a_version_hard_deletes_its_checksum_map(self, _delete_s3_objects_mock):
         source_v1 = OrganizationSourceFactory(version='v1')
         source_v2 = OrganizationSourceFactory(
             organization=source_v1.organization, mnemonic=source_v1.mnemonic, version='v2')
@@ -453,7 +457,8 @@ class VersionChecksumMapTest(OCLTestCase):
         self.assertFalse(VersionChecksumMap.objects.filter(id=checksum_map.id).exists())
         self.assertTrue(VersionChecksumMap.objects.filter(id=unrelated.id).exists())
 
-    def test_deleting_head_hard_deletes_checksum_maps_for_all_its_versions(self):
+    @patch('core.common.models.delete_s3_objects')
+    def test_deleting_head_hard_deletes_checksum_maps_for_all_its_versions(self, _delete_s3_objects_mock):
         head = OrganizationSourceFactory(version=HEAD)
         source_v1 = OrganizationSourceFactory(
             organization=head.organization, mnemonic=head.mnemonic, version='v1')
