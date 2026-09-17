@@ -2038,6 +2038,23 @@ class TaskTest(OCLTestCase):
         self.assertTrue(VersionChecksumMap.objects.filter(version_url=source1.url).exists())
         self.assertTrue(VersionChecksumMap.objects.filter(version_url=source2.url).exists())
 
+    def test_save_changelog_and_comparison_handles_mnemonic_with_dot(self):
+        """
+        Regression test: a mnemonic containing a literal '.' (e.g. an ICD-10 code like
+        'R63.6') used to raise `KeyError: Unable to resolve DB id for new:R63.6` because
+        db-id lookups used pydash's dotted-path get() (f'{identity}.id'), which misparses
+        any identity that itself contains a dot as a nested path instead of a literal key.
+        """
+        source1 = OrganizationSourceFactory()  # HEAD
+        source2 = OrganizationSourceFactory(
+            organization=source1.organization, mnemonic=source1.mnemonic, version='v1')
+        concept = ConceptFactory(parent=source1, mnemonic='R63.6')  # only on HEAD -- the newer side
+        concept.set_checksums()
+
+        changelog = Source.save_changelog_and_comparison(source1.uri, source2.uri)
+
+        self.assertIn('R63.6', changelog.changelog['concepts']['new'])
+
 
 class URIValidatorTest(OCLTestCase):
     validator = URIValidator()
