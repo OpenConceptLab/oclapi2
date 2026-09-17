@@ -998,7 +998,8 @@ def rerun_indexing_job():
 def source_version_compare(version1_uri, version2_uri, is_changelog, verbosity, format_type='json', save_both=False):
     from core.sources.models import Source
     if save_both:
-        return Source.save_changelog_and_comparison(version1_uri, version2_uri)
+        Source.save_changelog_and_comparison(version1_uri, version2_uri)
+        return 1
     return Source.run_diff(version1_uri, version2_uri, is_changelog, verbosity, format_type)
 
 
@@ -1007,7 +1008,8 @@ def collection_version_compare(
         version1_uri, version2_uri, is_changelog, verbosity, format_type='json', save_both=False):
     from core.collections.models import Collection
     if save_both:
-        return Collection.save_changelog_and_comparison(version1_uri, version2_uri)
+        Collection.save_changelog_and_comparison(version1_uri, version2_uri)
+        return 1
     return Collection.run_diff(version1_uri, version2_uri, is_changelog, verbosity, format_type)
 
 
