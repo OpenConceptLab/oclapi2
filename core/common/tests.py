@@ -1879,26 +1879,38 @@ class TaskTest(OCLTestCase):
             VersionCompareMixin._generate_cache_key(  # pylint: disable=protected-access
                 'a', 'b', x=1, y=2), "'a'|'b'|x=1|y=2")
 
-    @patch('core.common.checksums.cache')
-    def test_source_version_compare_cache_miss_then_set(self, cache_mock):
-        cache_mock.get.return_value = None
+    def test_source_version_compare_persists_comparison(self):
+        from core.repos.models import VersionChangelog
+        source1 = OrganizationSourceFactory()  # HEAD
+        source2 = OrganizationSourceFactory(
+            organization=source1.organization, mnemonic=source1.mnemonic, version='v1')
+
+        result = source_version_compare(  # pylint: disable=no-value-for-parameter
+            source1.uri, source2.uri, False, 0
+        )
+
+        self.assertIsNotNone(result)
+        # HEAD (source1) must always be treated as version2, regardless of call order.
+        changelog = VersionChangelog.objects.get(version1_url=source2.url, version2_url=source1.url)
+        self.assertEqual(changelog.comparison, result)
+        self.assertEqual(changelog.changelog, {})
+
+    def test_source_version_compare_uses_saved_result_without_recompute(self):
         source1 = OrganizationSourceFactory()
         source2 = OrganizationSourceFactory(
             organization=source1.organization, mnemonic=source1.mnemonic, version='v1')
 
-        with override_settings(TEST_MODE=False):
-            result = source_version_compare(  # pylint: disable=no-value-for-parameter
-                source1.uri, source2.uri, False, 0
-            )
+        source_version_compare(source1.uri, source2.uri, False, 0)  # pylint: disable=no-value-for-parameter
+
+        with patch.object(VersionCompareMixin, 'compare') as compare_mock:
+            result = source_version_compare(source1.uri, source2.uri, False, 0)  # pylint: disable=no-value-for-parameter
 
         self.assertIsNotNone(result)
-        cache_mock.get.assert_called_once()
-        cache_mock.set.assert_called_once()
+        compare_mock.assert_not_called()
 
-    @patch('core.common.checksums.cache')
-    def test_collection_version_compare_cache_miss_then_set(self, cache_mock):
-        cache_mock.get.return_value = None
-        collection1 = OrganizationCollectionFactory()
+    def test_collection_version_compare_persists_comparison(self):
+        from core.repos.models import VersionChangelog
+        collection1 = OrganizationCollectionFactory()  # HEAD
         collection2 = OrganizationCollectionFactory(
             organization=collection1.organization, mnemonic=collection1.mnemonic, version='v1')
         expansion1 = ExpansionFactory(collection_version=collection1)
@@ -1908,30 +1920,47 @@ class TaskTest(OCLTestCase):
         collection2.expansion_uri = expansion2.uri
         collection2.save()
 
-        with override_settings(TEST_MODE=False):
-            result = collection_version_compare(  # pylint: disable=no-value-for-parameter
-                collection1.uri, collection2.uri, False, 0
-            )
+        result = collection_version_compare(  # pylint: disable=no-value-for-parameter
+            collection1.uri, collection2.uri, False, 0
+        )
 
         self.assertIsNotNone(result)
-        cache_mock.get.assert_called_once()
-        cache_mock.set.assert_called_once()
+        changelog = VersionChangelog.objects.get(version1_url=collection2.url, version2_url=collection1.url)
+        self.assertEqual(changelog.comparison, result)
 
-    @patch('core.common.checksums.cache')
-    def test_expansion_compare_cache_miss_then_set(self, cache_mock):
-        cache_mock.get.return_value = None
+    def test_expansion_compare_does_not_persist(self):
+        from core.repos.models import VersionChangelog
         collection = OrganizationCollectionFactory()
         expansion1 = ExpansionFactory(collection_version=collection)
         expansion2 = ExpansionFactory(collection_version=collection)
 
-        with override_settings(TEST_MODE=False):
-            result = expansion_compare(  # pylint: disable=no-value-for-parameter
-                expansion1.uri, expansion2.uri, False, 0
-            )
+        result = expansion_compare(  # pylint: disable=no-value-for-parameter
+            expansion1.uri, expansion2.uri, False, 0
+        )
 
         self.assertIsNotNone(result)
-        cache_mock.get.assert_called_once()
-        cache_mock.set.assert_called_once()
+        self.assertFalse(
+            VersionChangelog.objects.filter(version1_url=expansion1.url, version2_url=expansion2.url).exists())
+        self.assertFalse(
+            VersionChangelog.objects.filter(version1_url=expansion2.url, version2_url=expansion1.url).exists())
+
+    def test_source_version_compare_recomputes_when_head_is_stale(self):
+        from core.repos.models import VersionChangelog
+        source1 = OrganizationSourceFactory()  # HEAD
+        source2 = OrganizationSourceFactory(
+            organization=source1.organization, mnemonic=source1.mnemonic, version='v1')
+
+        source_version_compare(source1.uri, source2.uri, False, 0)  # pylint: disable=no-value-for-parameter
+        changelog = VersionChangelog.objects.get(version1_url=source2.url, version2_url=source1.url)
+        VersionChangelog.objects.filter(id=changelog.id).update(
+            updated_at=source1.updated_at - datetime.timedelta(days=1))
+        source1.save()  # bumps source1.updated_at past the saved changelog's updated_at
+
+        with patch.object(VersionCompareMixin, 'compare', return_value={'fresh': True}) as compare_mock:
+            result = source_version_compare(source1.uri, source2.uri, False, 0)  # pylint: disable=no-value-for-parameter
+
+        compare_mock.assert_called_once()
+        self.assertEqual(result, {'fresh': True})
 
 
 class URIValidatorTest(OCLTestCase):

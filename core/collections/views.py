@@ -1340,7 +1340,7 @@ class AbstractCollectionVersionsDiffView(BaseAPIView, TaskMixin):
         version2_uri = self.request.data.get('version2')
         version1 = get_object_or_404(Collection.objects.filter(uri=version1_uri))
         version2 = get_object_or_404(Collection.objects.filter(uri=version2_uri))
-        if version1.created_at and version2.created_at and version1.created_at > version2.created_at:
+        if (version1.created_at > version2.created_at) or (version1.is_head and not version2.is_head):
             version1, version2 = version2, version1
         self.check_object_permissions(self.request, version1)
         self.check_object_permissions(self.request, version2)
@@ -1359,11 +1359,10 @@ class AbstractCollectionVersionsDiffView(BaseAPIView, TaskMixin):
 
     def post(self, _, **kwargs):  # pylint: disable=unused-argument
         version1, version2 = self.get_objects()
-        ignore_cache = bool(version1.is_head or version2.is_head)
         format_type = self.get_format_type() if self.changelog else 'json'
         result = self.perform_task(
             collection_version_compare,
-            (version1.uri, version2.uri, self.changelog, self.get_verbosity(), ignore_cache, format_type)
+            (version1.uri, version2.uri, self.changelog, self.get_verbosity(), format_type)
         )
 
         if isinstance(result, Response):
@@ -1390,7 +1389,7 @@ class AbstractExpansionsDiffView(BaseAPIView, TaskMixin):
         expansion2_uri = self.request.data.get('expansion2')
         expansion1 = get_object_or_404(Expansion.objects.filter(uri=expansion1_uri))
         expansion2 = get_object_or_404(Expansion.objects.filter(uri=expansion2_uri))
-        if expansion1.created_at and expansion2.created_at and expansion1.created_at > expansion2.created_at:
+        if expansion1.created_at > expansion2.created_at:
             expansion1, expansion2 = expansion2, expansion1
         self.check_object_permissions(self.request, expansion1.collection_version)
         self.check_object_permissions(self.request, expansion2.collection_version)
@@ -1407,11 +1406,10 @@ class AbstractExpansionsDiffView(BaseAPIView, TaskMixin):
 
     def post(self, _, **kwargs):  # pylint: disable=unused-argument
         expansion1, expansion2 = self.get_objects()
-        ignore_cache = bool(expansion1.collection_version.is_head or expansion2.collection_version.is_head)
         format_type = self.get_format_type() if self.changelog else 'json'
         result = self.perform_task(
             expansion_compare,
-            (expansion1.uri, expansion2.uri, self.changelog, self.get_verbosity(), ignore_cache, format_type)
+            (expansion1.uri, expansion2.uri, self.changelog, self.get_verbosity(), format_type)
         )
 
         if isinstance(result, Response):

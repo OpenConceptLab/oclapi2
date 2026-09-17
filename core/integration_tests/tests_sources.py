@@ -2612,6 +2612,10 @@ class SourceVersionsChangelogOutputViewTest(OCLAPITestCase):
         )
 
     def test_json_output_for_all_verbosity_levels(self):
+        # A persisted changelog is always computed and cached at the richest verbosity (matching
+        # what save_changelog_and_comparison already does for auto-triggered changelogs), so every
+        # request for the same pair gets that same fully-enriched payload regardless of the
+        # verbosity it actually asked for -- including the very first (cache-populating) request.
         data = self._build_changelog_output_fixture()
         token = data['source'].created_by.get_token()
 
@@ -2629,44 +2633,31 @@ class SourceVersionsChangelogOutputViewTest(OCLAPITestCase):
                 changed_concept = response.data['concepts']['changed_major']['concept-detailed']
                 changed_mapping = response.data['mappings']['changed_major']['mapping-detailed']
 
-                if verbosity >= 4:
-                    self.assertEqual(changed_concept['concept_class'], data['concept_v2'].concept_class)
-                    self.assertEqual(changed_concept['prev_concept_class'], data['concept_v1'].concept_class)
-                    self.assertEqual(changed_concept['datatype'], data['concept_v2'].datatype)
-                    self.assertEqual(changed_concept['prev_datatype'], data['concept_v1'].datatype)
-                    self.assertIn('Detailed name v2', [name['name'] for name in changed_concept['names']])
-                    self.assertIn('Nome detalhado', [name['name'] for name in changed_concept['names']])
-                    self.assertIn('Detailed name v1', [name['name'] for name in changed_concept['prev_names']])
-                    self.assertIn(
-                        'Detailed description v2',
-                        [description['description'] for description in changed_concept['descriptions']]
-                    )
-                    self.assertIn(
-                        'Detailed description v1',
-                        [description['description'] for description in changed_concept['prev_descriptions']]
-                    )
-                    self.assertEqual(changed_mapping['external_id'], data['mapping_v2'].external_id)
-                    self.assertEqual(changed_mapping['prev_to_concept'], data['mapping_v1'].to_concept.mnemonic)
-                    self.assertEqual(changed_mapping['to_concept'], data['mapping_v2'].to_concept.mnemonic)
-                    self.assertEqual(changed_mapping['prev_map_type'], data['mapping_v1'].map_type)
-                    self.assertEqual(changed_mapping['map_type'], data['mapping_v2'].map_type)
-                    retired_concept = response.data['concepts']['changed_retired']['concept-retired']
-                    self.assertEqual(retired_concept['concept_class'], data['concept_retired_v2'].concept_class)
-                    self.assertIn('Retired name v2', [name['name'] for name in retired_concept['names']])
-                    retired_mapping = response.data['mappings']['changed_retired']['mapping-retired']
-                    self.assertEqual(retired_mapping['external_id'], data['mapping_retired_v2'].external_id)
-                else:
-                    self.assertNotIn('concept_class', changed_concept)
-                    self.assertNotIn('prev_concept_class', changed_concept)
-                    self.assertNotIn('datatype', changed_concept)
-                    self.assertNotIn('prev_datatype', changed_concept)
-                    self.assertNotIn('names', changed_concept)
-                    self.assertNotIn('prev_names', changed_concept)
-                    self.assertNotIn('descriptions', changed_concept)
-                    self.assertNotIn('prev_descriptions', changed_concept)
-                    self.assertNotIn('external_id', changed_mapping)
-                    self.assertNotIn('prev_to_concept', changed_mapping)
-                    self.assertNotIn('prev_map_type', changed_mapping)
+                self.assertEqual(changed_concept['concept_class'], data['concept_v2'].concept_class)
+                self.assertEqual(changed_concept['prev_concept_class'], data['concept_v1'].concept_class)
+                self.assertEqual(changed_concept['datatype'], data['concept_v2'].datatype)
+                self.assertEqual(changed_concept['prev_datatype'], data['concept_v1'].datatype)
+                self.assertIn('Detailed name v2', [name['name'] for name in changed_concept['names']])
+                self.assertIn('Nome detalhado', [name['name'] for name in changed_concept['names']])
+                self.assertIn('Detailed name v1', [name['name'] for name in changed_concept['prev_names']])
+                self.assertIn(
+                    'Detailed description v2',
+                    [description['description'] for description in changed_concept['descriptions']]
+                )
+                self.assertIn(
+                    'Detailed description v1',
+                    [description['description'] for description in changed_concept['prev_descriptions']]
+                )
+                self.assertEqual(changed_mapping['external_id'], data['mapping_v2'].external_id)
+                self.assertEqual(changed_mapping['prev_to_concept'], data['mapping_v1'].to_concept.mnemonic)
+                self.assertEqual(changed_mapping['to_concept'], data['mapping_v2'].to_concept.mnemonic)
+                self.assertEqual(changed_mapping['prev_map_type'], data['mapping_v1'].map_type)
+                self.assertEqual(changed_mapping['map_type'], data['mapping_v2'].map_type)
+                retired_concept = response.data['concepts']['changed_retired']['concept-retired']
+                self.assertEqual(retired_concept['concept_class'], data['concept_retired_v2'].concept_class)
+                self.assertIn('Retired name v2', [name['name'] for name in retired_concept['names']])
+                retired_mapping = response.data['mappings']['changed_retired']['mapping-retired']
+                self.assertEqual(retired_mapping['external_id'], data['mapping_retired_v2'].external_id)
 
     def test_markdown_output_for_all_verbosity_levels(self):
         data = self._build_changelog_output_fixture()
@@ -2687,21 +2678,15 @@ class SourceVersionsChangelogOutputViewTest(OCLAPITestCase):
                 self.assertIn('# v2 Changelog', markdown_output)
                 self.assertIn('## Concepts', markdown_output)
                 self.assertIn('## Mappings', markdown_output)
-
-                if verbosity >= 4:
-                    self.assertNotIn('without enrichment', markdown_output)
-                    self.assertIn('## Names', markdown_output)
-                    self.assertIn('## Translations', markdown_output)
-                    self.assertIn('Detailed name v1', markdown_output)
-                    self.assertIn('Detailed name v2', markdown_output)
-                    self.assertIn('Nome detalhado', markdown_output)
-                    self.assertIn('| From Concept | Previous Mapping | Updated Mapping |', markdown_output)
-                    self.assertIn('mapping-target-v1', markdown_output)
-                    self.assertIn('mapping-target-v2', markdown_output)
-                else:
-                    self.assertIn('without enrichment', markdown_output)
-                    self.assertNotIn('## Names', markdown_output)
-                    self.assertNotIn('## Translations', markdown_output)
+                self.assertNotIn('without enrichment', markdown_output)
+                self.assertIn('## Names', markdown_output)
+                self.assertIn('## Translations', markdown_output)
+                self.assertIn('Detailed name v1', markdown_output)
+                self.assertIn('Detailed name v2', markdown_output)
+                self.assertIn('Nome detalhado', markdown_output)
+                self.assertIn('| From Concept | Previous Mapping | Updated Mapping |', markdown_output)
+                self.assertIn('mapping-target-v1', markdown_output)
+                self.assertIn('mapping-target-v2', markdown_output)
 
 
 class SourceVersionsComparisonViewTest(OCLAPITestCase):
@@ -2760,272 +2745,89 @@ class SourceVersionsComparisonViewTest(OCLAPITestCase):
             mapping.set_checksums()
 
         token = source.created_by.get_token()
-        response = self.client.post(
-            '/sources/$compare/?inline=true',
-            {
-                'version2': source_v2.uri,
-                'version1': source_v1.uri,
-                'verbosity': 3
-            },
-            HTTP_AUTHORIZATION=f'Token {token}',
-            format='json'
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.data,
-            {
-                'meta': {
-                    'version2': {
-                        'uri': source_v2.uri,
-                        'concepts': 4,  # active count
-                        'mappings': 4
-                    },
-                    'version1': {
-                        'uri': source_v1.uri,
-                        'concepts': 5,
-                        'mappings': 5
-                    }
+        # A persisted comparison is always computed and cached at its richest verbosity
+        # (DIFF_RESOURCE_IDS_VERBOSITY=2: IDs for changed/new/removed, but same_major/same_minor
+        # stay plain counts -- their mnemonic lists aren't exposed by $compare), so once the first
+        # request populates it, every later request for the same pair gets that same payload back
+        # regardless of the verbosity it actually asks for.
+        expected = {
+            'meta': {
+                'version2': {
+                    'uri': source_v2.uri,
+                    'concepts': 4,  # active count
+                    'mappings': 4
                 },
-                'concepts': {
-                    'new': {
-                        'total': 1,
-                        'mnemonic': ['concept6']
-                    },
-                    'removed': {
-                        'total': 1,
-                        'mnemonic': ['concept5']
-                    },
-                    'changed_total': 3,
-                    'changed_retired': {
-                        'total': 1,
-                        'mnemonic': ['concept3']
-                    },
-                    'changed_major': {
-                        'total': 1,
-                        'mnemonic': ['concept2']
-                    },
-                    'changed_minor': {
-                        'total': 1,
-                        'mnemonic': ['concept4']
-                    },
-                    'same_total': 1,
-                    'same_minor': 0,
-                    'same_major': {
-                        'total': 1,
-                        'mnemonic': ['concept1']
-                    }
-                },
-                'mappings': {
-                    'new': {
-                        'total': 1,
-                        'mnemonic': ['mapping6']
-                    },
-                    'removed': {
-                        'total': 1,
-                        'mnemonic': ['mapping5']
-                    },
-                    'changed_total': 3,
-                    'changed_retired': {
-                        'total': 1,
-                        'mnemonic': ['mapping3']
-                    },
-                    'changed_major': {
-                        'total': 1,
-                        'mnemonic': ['mapping2']
-                    },
-                    'changed_minor': {
-                        'total': 1,
-                        'mnemonic': ['mapping4']
-                    },
-                    'same_total': 1,
-                    'same_minor': 0,
-                    'same_major': {
-                        'total': 1,
-                        'mnemonic': ['mapping1']
-                    }
+                'version1': {
+                    'uri': source_v1.uri,
+                    'concepts': 5,
+                    'mappings': 5
                 }
-            }
-        )
-
-        response = self.client.post(
-            '/sources/$compare/?inline=true',
-            {
-                'version2': source_v2.uri,
-                'version1': source_v1.uri,
-                'verbosity': 2
             },
-            HTTP_AUTHORIZATION=f'Token {token}',
-            format='json'
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.data,
-            {
-                'meta': {
-                    'version2': {
-                        'uri': source_v2.uri,
-                        'concepts': 4,  # active count
-                        'mappings': 4
-                    },
-                    'version1': {
-                        'uri': source_v1.uri,
-                        'concepts': 5,
-                        'mappings': 5
-                    }
+            'concepts': {
+                'new': {
+                    'total': 1,
+                    'mnemonic': ['concept6']
                 },
-                'concepts': {
-                    'new': {
-                        'total': 1,
-                        'mnemonic': ['concept6']
-                    },
-                    'removed': {
-                        'total': 1,
-                        'mnemonic': ['concept5']
-                    },
-                    'changed_total': 3,
-                    'changed_retired': {
-                        'total': 1,
-                        'mnemonic': ['concept3']
-                    },
-                    'changed_major': {
-                        'total': 1,
-                        'mnemonic': ['concept2']
-                    },
-                    'changed_minor': {
-                        'total': 1,
-                        'mnemonic': ['concept4']
-                    },
-                    'same_total': 1,
-                    'same_minor': 0,
-                    'same_major': 1
+                'removed': {
+                    'total': 1,
+                    'mnemonic': ['concept5']
                 },
-                'mappings': {
-                    'new': {
-                        'total': 1,
-                        'mnemonic': ['mapping6']
-                    },
-                    'removed': {
-                        'total': 1,
-                        'mnemonic': ['mapping5']
-                    },
-                    'changed_total': 3,
-                    'changed_retired': {
-                        'total': 1,
-                        'mnemonic': ['mapping3']
-                    },
-                    'changed_major': {
-                        'total': 1,
-                        'mnemonic': ['mapping2']
-                    },
-                    'changed_minor': {
-                        'total': 1,
-                        'mnemonic': ['mapping4']
-                    },
-                    'same_total': 1,
-                    'same_minor': 0,
-                    'same_major': 1
-                }
-            }
-        )
-
-        response = self.client.post(
-            '/sources/$compare/?inline=true',
-            {
-                'version2': source_v2.uri,
-                'version1': source_v1.uri,
-                'verbosity': 1
+                'changed_total': 3,
+                'changed_retired': {
+                    'total': 1,
+                    'mnemonic': ['concept3']
+                },
+                'changed_major': {
+                    'total': 1,
+                    'mnemonic': ['concept2']
+                },
+                'changed_minor': {
+                    'total': 1,
+                    'mnemonic': ['concept4']
+                },
+                'same_total': 1,
+                'same_minor': 0,
+                'same_major': 1
             },
-            HTTP_AUTHORIZATION=f'Token {token}',
-            format='json'
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.data,
-            {
-                'meta': {
-                    'version2': {
-                        'uri': source_v2.uri,
-                        'concepts': 4,  # active count
-                        'mappings': 4
-                    },
-                    'version1': {
-                        'uri': source_v1.uri,
-                        'concepts': 5,
-                        'mappings': 5
-                    }
+            'mappings': {
+                'new': {
+                    'total': 1,
+                    'mnemonic': ['mapping6']
                 },
-                'concepts': {
-                    'new': 1,
-                    'removed': 1,
-                    'changed_total': 3,
-                    'changed_retired': 1,
-                    'changed_major': 1,
-                    'changed_minor': 1,
-                    'same_total': 1,
-                    'same_minor': 0,
-                    'same_major': 1
+                'removed': {
+                    'total': 1,
+                    'mnemonic': ['mapping5']
                 },
-                'mappings': {
-                    'new': 1,
-                    'removed': 1,
-                    'changed_total': 3,
-                    'changed_retired': 1,
-                    'changed_major': 1,
-                    'changed_minor': 1,
-                    'same_total': 1,
-                    'same_minor': 0,
-                    'same_major': 1
-                }
+                'changed_total': 3,
+                'changed_retired': {
+                    'total': 1,
+                    'mnemonic': ['mapping3']
+                },
+                'changed_major': {
+                    'total': 1,
+                    'mnemonic': ['mapping2']
+                },
+                'changed_minor': {
+                    'total': 1,
+                    'mnemonic': ['mapping4']
+                },
+                'same_total': 1,
+                'same_minor': 0,
+                'same_major': 1
             }
-        )
+        }
 
-        response = self.client.post(
-            '/sources/$compare/?inline=true',
-            {
-                'version2': source_v2.uri,
-                'version1': source_v1.uri,
-            },
-            HTTP_AUTHORIZATION=f'Token {token}',
-            format='json'
-        )
+        for verbosity in (3, 2, 1, None):
+            with self.subTest(verbosity=verbosity):
+                data = {'version2': source_v2.uri, 'version1': source_v1.uri}
+                if verbosity is not None:
+                    data['verbosity'] = verbosity
+                response = self.client.post(
+                    '/sources/$compare/?inline=true', data, HTTP_AUTHORIZATION=f'Token {token}', format='json'
+                )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.data,
-            {
-                'meta': {
-                    'version2': {
-                        'uri': source_v2.uri,
-                        'concepts': 4,  # active count
-                        'mappings': 4
-                    },
-                    'version1': {
-                        'uri': source_v1.uri,
-                        'concepts': 5,
-                        'mappings': 5
-                    }
-                },
-                'concepts': {
-                    'new': 1,
-                    'removed': 1,
-                    'changed_total': 3,
-                    'changed_retired': 1,
-                    'changed_major': 1,
-                    'changed_minor': 1,
-                },
-                'mappings': {
-                    'new': 1,
-                    'removed': 1,
-                    'changed_total': 3,
-                    'changed_retired': 1,
-                    'changed_major': 1,
-                    'changed_minor': 1,
-                }
-            }
-        )
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.data, expected)
 
 
 class SourceVersionsChangelogViewTest(OCLAPITestCase):
@@ -3110,6 +2912,8 @@ class SourceVersionsChangelogViewTest(OCLAPITestCase):
             format='json'
         )
 
+        # Changelog is always computed and cached at full enrichment (CHANGELOG_ENRICHMENT_VERBOSITY),
+        # regardless of the verbosity actually requested here (2) -- see run_diff.
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.data,
@@ -3148,31 +2952,59 @@ class SourceVersionsChangelogViewTest(OCLAPITestCase):
                     'new': {
                         'concept6': {
                             'id': 'concept6',
-                            'display_name': None
+                            'display_name': None,
+                            'concept_class': 'Diagnosis',
+                            'datatype': 'None',
+                            'names': [],
+                            'descriptions': []
                         }
                     },
                     'removed': {
                         'concept5': {
                             'id': 'concept5',
-                            'display_name': None
+                            'display_name': None,
+                            'concept_class': 'Diagnosis',
+                            'datatype': 'None',
+                            'names': [],
+                            'descriptions': []
                         }
                     },
                     'changed_retired': {
                         'concept3': {
                             'id': 'concept3',
-                            'display_name': None
+                            'display_name': None,
+                            'concept_class': 'Diagnosis',
+                            'datatype': 'None',
+                            'names': [],
+                            'descriptions': []
                         }
                     },
                     'changed_major': {
                         'concept2': {
                             'id': 'concept2',
-                            'display_name': None
+                            'display_name': None,
+                            'concept_class': concept2_v2.concept_class,
+                            'datatype': 'None',
+                            'names': [],
+                            'descriptions': [],
+                            'prev_concept_class': concept2.concept_class,
+                            'prev_datatype': 'None',
+                            'prev_names': [],
+                            'prev_descriptions': []
                         }
                     },
                     'changed_minor': {
                         'concept4': {
                             'id': 'concept4',
-                            'display_name': None
+                            'display_name': None,
+                            'concept_class': 'Diagnosis',
+                            'datatype': 'None',
+                            'names': [],
+                            'descriptions': [],
+                            'prev_concept_class': 'Diagnosis',
+                            'prev_datatype': 'None',
+                            'prev_names': [],
+                            'prev_descriptions': []
                         }
                     },
                     'changed_mappings_only': {
@@ -3187,8 +3019,11 @@ class SourceVersionsChangelogViewTest(OCLAPITestCase):
                                         'from_source': None,
                                         'to_concept': mapping7.to_concept.mnemonic,
                                         'to_source': None,
-                                        'map_type': 'SAME-AS'
-
+                                        'map_type': 'SAME-AS',
+                                        'external_id': None,
+                                        'prev_to_concept': mapping7.to_concept.mnemonic,
+                                        'prev_to_source': None,
+                                        'prev_map_type': mapping7.map_type
                                     }
                                 ]
                             }
@@ -3203,7 +3038,8 @@ class SourceVersionsChangelogViewTest(OCLAPITestCase):
                             'from_source': None,
                             'to_concept': mapping6.to_concept.mnemonic,
                             'to_source': None,
-                            'map_type': 'SAME-AS'
+                            'map_type': 'SAME-AS',
+                            'external_id': None
                         }
                     },
                     'removed': {
@@ -3213,7 +3049,8 @@ class SourceVersionsChangelogViewTest(OCLAPITestCase):
                             'from_source': None,
                             'to_concept': mapping5.to_concept.mnemonic,
                             'to_source': None,
-                            'map_type': 'SAME-AS'
+                            'map_type': 'SAME-AS',
+                            'external_id': None
                         }
                     },
                     'changed_retired': {
@@ -3223,7 +3060,8 @@ class SourceVersionsChangelogViewTest(OCLAPITestCase):
                             'from_source': None,
                             'to_concept': mapping3.to_concept.mnemonic,
                             'to_source': None,
-                            'map_type': 'SAME-AS'
+                            'map_type': 'SAME-AS',
+                            'external_id': None
                         }
                     },
                     'changed_major': {
@@ -3233,7 +3071,11 @@ class SourceVersionsChangelogViewTest(OCLAPITestCase):
                             'from_source': None,
                             'to_concept': mapping2.to_concept.mnemonic,
                             'to_source': None,
-                            'map_type': 'Foobar'
+                            'map_type': 'Foobar',
+                            'external_id': None,
+                            'prev_to_concept': mapping2.to_concept.mnemonic,
+                            'prev_to_source': None,
+                            'prev_map_type': mapping2.map_type
                         }
                     },
                     'changed_minor': {
@@ -3243,7 +3085,11 @@ class SourceVersionsChangelogViewTest(OCLAPITestCase):
                             'from_source': None,
                             'to_concept': mapping4.to_concept.mnemonic,
                             'to_source': None,
-                            'map_type': 'SAME-AS'
+                            'map_type': 'SAME-AS',
+                            'external_id': None,
+                            'prev_to_concept': mapping4.to_concept.mnemonic,
+                            'prev_to_source': None,
+                            'prev_map_type': mapping4.map_type
                         }
                     }
                 }

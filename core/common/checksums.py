@@ -1,7 +1,6 @@
-from typing import Any
+import time
 
 from django.conf import settings
-from django.core.cache import cache
 from django.db import models
 from ocldev.checksum import Checksum as ChecksumBase
 from pydash import get
@@ -142,10 +141,15 @@ class ChecksumDiff:
         self._retired = None
 
     def get_resources_map(self, resources):
-        return {
-            'active': self._get_resource_map(resources.filter(retired=False)),
-            'retired': self._get_resource_map(resources.filter(retired=True))
-        }
+        active = {}
+        retired = {}
+        for resource in resources:
+            target = retired if resource.retired else active
+            target[get(resource, self.identity)] = {
+                'checksums': self._get_resource_checksums(resource),
+                'id': resource.id
+            }
+        return {'active': active, 'retired': retired}
 
     @staticmethod
     def _get_resource_checksums(resource):
@@ -153,14 +157,6 @@ class ChecksumDiff:
         if not resource.checksums or not resource.has_all_checksums():
             return resource.get_checksums()
         return resource.checksums
-
-    def _get_resource_map(self, resources):
-        return {
-            get(resource, self.identity): {
-                'checksums': self._get_resource_checksums(resource),
-                'id': resource.id
-            } for resource in resources
-        }
 
     @property
     def resources1_map(self):
@@ -578,9 +574,9 @@ class ChecksumChangelog:
 
 
 class VersionCompareMixin:
-    CACHE_EXPIRY = 60 * 60 * 24 * 4  # 4 days
     MD_FORMAT = 'markdown'
     JSON_FORMAT = 'json'
+    PERSIST_CHANGELOG = True  # expansions are too dynamic/rebuilt-in-place to persist; see Expansion override
 
     @staticmethod
     def compare(version1, version2, verbosity=0):
@@ -600,6 +596,10 @@ class VersionCompareMixin:
         )
         concepts_diff.process()
         mappings_diff.process()
+        return VersionCompareMixin.get_compare_result(concepts_diff, mappings_diff, version1, version2)
+
+    @staticmethod
+    def get_compare_result(concepts_diff, mappings_diff, version1, version2):
         return {
             'meta': {
                 'version1': {
@@ -643,6 +643,13 @@ class VersionCompareMixin:
         mappings_diff.process()
         log = ChecksumChangelog(concepts_diff, mappings_diff, verbosity=verbosity)
         log.process()
+        result = VersionCompareMixin.get_changelog_result(concepts_diff, mappings_diff, version1,
+                                                          version2, log, verbosity)
+        return result
+
+    @staticmethod
+    def get_changelog_result(  # pylint: disable=too-many-arguments
+            concepts_diff, mappings_diff, version1, version2, log, verbosity):
         result = {
             'meta': {
                 'version1': {
@@ -668,33 +675,79 @@ class VersionCompareMixin:
         return result
 
     @classmethod
+    def save_changelog_and_comparison(cls, uri1, uri2):
+        from core.repos.models import VersionChangelog
+        version1, version2 = cls._get_versions(uri1, uri2)
+        changelog = VersionChangelog.find_or_build(version1, version2)
+        start_time = time.time()
+        version1_concepts = version1.get_concepts_queryset().only('mnemonic', 'checksums', 'retired')
+        version1_mappings = version1.get_mappings_queryset().only('mnemonic', 'checksums', 'retired')
+        version2_concepts = version2.get_concepts_queryset().only('mnemonic', 'checksums', 'retired')
+        version2_mappings = version2.get_mappings_queryset().only('mnemonic', 'checksums', 'retired')
+
+        concepts_diff = ChecksumDiff(
+            resources1=version1_concepts, resources2=version2_concepts, verbosity=SAME_RESOURCE_IDS_VERBOSITY)
+        mappings_diff = ChecksumDiff(
+            resources1=version1_mappings, resources2=version2_mappings, verbosity=SAME_RESOURCE_IDS_VERBOSITY)
+        concepts_diff.process()
+        mappings_diff.process()
+
+        log = ChecksumChangelog(concepts_diff, mappings_diff, verbosity=CHANGELOG_ENRICHMENT_VERBOSITY)
+        log.process()
+        changelog.changelog = VersionCompareMixin.get_changelog_result(
+            concepts_diff, mappings_diff, version1, version2, log, SAME_RESOURCE_IDS_VERBOSITY)
+        changelog.comparison = VersionCompareMixin.get_compare_result(
+            concepts_diff, mappings_diff, version1, version2)
+        changelog.extras = changelog.extras or {}
+        changelog.extras['elapsed_seconds'] = time.time() - start_time
+        changelog.save()
+        return changelog
+
+    @classmethod
     def run_diff(  # pylint: disable=too-many-arguments
-            cls, uri1, uri2, is_changelog, verbosity, ignore_cache=False, format_type=JSON_FORMAT):
-        ignore_cache = ignore_cache or get(settings, 'TEST_MODE', False)
-        cache_key = None
-
-        if not ignore_cache:
-            cache_key, result = cls._get_cache(uri1, uri2, is_changelog, verbosity, format_type)
-            if result:
-                return result
-
+            cls, uri1, uri2, is_changelog, verbosity, format_type=JSON_FORMAT):
         version1, version2 = cls._get_versions(uri1, uri2)
 
-        if is_changelog:
-            result = cls.changelog(version1, version2, verbosity)
-            if format_type == cls.MD_FORMAT:
-                from core.sources.changelog_markdown import ChangelogMarkdownGenerator
-                result[format_type] = ChangelogMarkdownGenerator(result).generate()
-        else:
-            result = cls.compare(version1, version2, verbosity)
+        if not cls.PERSIST_CHANGELOG:
+            if is_changelog:
+                result = cls.changelog(version1, version2, verbosity)
+                if format_type == cls.MD_FORMAT:
+                    from core.sources.changelog_markdown import ChangelogMarkdownGenerator
+                    result = ChangelogMarkdownGenerator(result).generate()
+                return result
+            return cls.compare(version1, version2, verbosity)
 
-        if not ignore_cache and cache_key:
-            cache.set(cache_key, result, timeout=cls.CACHE_EXPIRY)
+        from core.repos.models import VersionChangelog
+        changelog = VersionChangelog.find_or_build(version1, version2)
+        # HEAD is a moving target -- a previously saved changelog/comparison against HEAD is only
+        # trustworthy if nothing has changed in HEAD since it was saved.
+        is_stale = bool(
+            changelog.pk and version2.is_head and version2.updated_at and changelog.updated_at
+            and version2.updated_at > changelog.updated_at
+        )
+
+        if is_changelog:
+            saved = None if is_stale else get(changelog, 'changelog')
+            if not saved:
+                saved = cls.changelog(version1, version2, CHANGELOG_ENRICHMENT_VERBOSITY)
+                changelog.changelog = saved
+            result = saved
+            if format_type == cls.MD_FORMAT:
+                result = {**saved, format_type: changelog.changelog_md}
+        else:
+            saved = None if is_stale else get(changelog, 'comparison')
+            if not saved:
+                saved = cls.compare(version1, version2, DIFF_RESOURCE_IDS_VERBOSITY)
+                changelog.comparison = saved
+            result = saved
+
+        if changelog.is_dirty():
+            changelog.save()
 
         return result
 
     @classmethod
-    def _get_versions(cls, uri1, uri2) -> tuple[Any, Any]:
+    def _get_versions(cls, uri1, uri2):
         version1 = cls.objects.filter(uri=uri1).first()
         version2 = cls.objects.filter(uri=uri2).first()
 
@@ -703,21 +756,11 @@ class VersionCompareMixin:
         if not version2:
             raise ValueError(f"Version not found: {uri2}")
 
+        if (version1.created_at and version2.created_at and version1.created_at > version2.created_at) or (
+                version1.is_head and not version2.is_head):
+            version1, version2 = version2, version1
+
         return version1, version2
-
-    @classmethod
-    def _get_cache(cls, uri1, uri2, is_changelog, verbosity, format_type):  # pylint: disable=too-many-arguments
-        cache_key = cls._get_cache_key(uri1, uri2, is_changelog, verbosity, format_type)
-        return cache_key, cache.get(cache_key)
-
-    @classmethod
-    def _get_cache_key(  # pylint: disable=too-many-arguments
-            cls, uri1, uri2, is_changelog, verbosity, format_type):
-        cache_key_suffix = f'|format={format_type}' if format_type != cls.JSON_FORMAT else ''
-        cache_key_prefix = f'{cls.__name__.lower()}_version_compare'
-        cache_key = cls._generate_cache_key(
-            cache_key_prefix, uri1, uri2, is_changelog, verbosity) + cache_key_suffix
-        return cache_key
 
     @staticmethod
     def _generate_cache_key(*args, **kwargs):

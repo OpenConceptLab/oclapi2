@@ -686,7 +686,7 @@ class AbstractSourceVersionsDiffView(BaseAPIView, TaskMixin):
         version1 = get_object_or_404(Source.objects.filter(uri=version1_uri))
         version2 = get_object_or_404(Source.objects.filter(uri=version2_uri))
         # Auto-swap to ensure version1 is always the older release using created_at.
-        if version1.created_at and version2.created_at and version1.created_at > version2.created_at:
+        if (version1.created_at > version2.created_at) or (version1.is_head and not version2.is_head):
             version1, version2 = version2, version1
         self.check_object_permissions(self.request, version1)
         self.check_object_permissions(self.request, version2)
@@ -704,11 +704,10 @@ class AbstractSourceVersionsDiffView(BaseAPIView, TaskMixin):
 
     def post(self, _, **kwargs):  # pylint: disable=unused-argument
         version1, version2 = self.get_objects()
-        ignore_cache = bool(version1.is_head or version2.is_head)
         format_type = self.get_format_type() if self.changelog else 'json'
         result = self.perform_task(
             source_version_compare,
-            (version1.uri, version2.uri, self.changelog, self.get_verbosity(), ignore_cache, format_type)
+            (version1.uri, version2.uri, self.changelog, self.get_verbosity(), format_type)
         )
 
         if isinstance(result, Response):

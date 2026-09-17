@@ -743,11 +743,13 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     def delete(self, using=None, keep_parents=False, force=False, sync=False):  # pylint: disable=arguments-differ
         export_paths = self.get_export_paths_to_delete()
+        deleted_urls = [self.url]
         if self.is_head:
             other_versions = list(self.versions.exclude(id=self.id))
             for other_version in other_versions:
                 other_version.clear_cache()
                 export_paths += other_version.get_export_paths_to_delete()
+                deleted_urls.append(other_version.url)
             self.versions.exclude(id=self.id).delete()
         elif self.is_latest_version:
             prev_version = self.prev_version
@@ -759,10 +761,16 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         self.delete_pins()
         self.delete_following()
+        self.delete_version_changelogs(deleted_urls)
 
         super().delete(using=using, keep_parents=keep_parents)
         self.delete_export_paths(export_paths, sync)
         self.post_delete_actions()
+
+    @staticmethod
+    def delete_version_changelogs(urls):
+        from core.repos.models import VersionChangelog
+        VersionChangelog.objects.filter(Q(version1_url__in=urls) | Q(version2_url__in=urls)).delete()
 
     def get_export_paths_to_delete(self):
         return [self.get_version_export_path(suffix=None)] + list(
@@ -1455,6 +1463,16 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 _facets.append(_facet)
         return _facets
 
+    def get_changelog_task_by_name(self, name):
+        from core.tasks.models import Task
+        if not name:
+            return None
+        prev_version = self.prev_version
+        if not prev_version:
+            return None
+        return Task.find(
+            name__iendswith=name, args__0=prev_version.uri, args__1=self.uri)
+
     @property
     def states(self):
         return self.get_tasks_info('state')
@@ -1479,6 +1497,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         index_concepts_task = self.get_index_concepts_task()
         index_mappings_task = self.get_index_mappings_task()
         export_task = self.get_export_task()
+        changelog_task = self.get_changelog_task() if hasattr(self, 'get_changelog_task') else None
 
         return {
             'seeded_concepts': seed_task,
@@ -1486,6 +1505,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             'indexed_concepts': index_concepts_task,
             'indexed_mappings': index_mappings_task,
             'exported': export_task,
+            'changelog': changelog_task,
         }
 
     def upload_external_export(self, key, file, user, description=None):

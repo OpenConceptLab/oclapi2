@@ -19,12 +19,12 @@ from core.collections.constants import (
 from core.collections.parsers import CollectionReferenceParser
 from core.collections.translators import CollectionReferenceTranslator
 from core.collections.utils import is_concept, is_mapping
+from core.common.checksums import VersionCompareMixin
 from core.common.constants import (
     ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT,
     ES_REQUEST_TIMEOUT, ES_REQUEST_TIMEOUT_ASYNC, HEAD, ALL, EXCLUDE_WILDCARD_SEARCH_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM,
     SEARCH_MAP_CODES_PARAM, INCLUDE_SEARCH_META_PARAM, VERBOSE_PARAM, NAMESPACE_INVALID_CHAR_REGEX,
     CONSECUTIVE_HYPHENS_REGEX)
-from core.common.checksums import VersionCompareMixin
 from core.common.es import ESScript
 from core.common.models import ConceptContainerModel, BaseResourceModel
 from core.common.search import CustomESSearch
@@ -512,11 +512,15 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             task = Task.find(name__iendswith='seed_children_to_expansion', args__contains=[self.id])
         return task
 
+    def get_changelog_task(self):
+        return self.get_changelog_task_by_name('collection_version_compare')
+
     def get_tasks(self):
         seed_task = self.get_seed_new_version_task()
         index_concepts_task = self.get_index_concepts_task()
         index_mappings_task = self.get_index_mappings_task()
         export_task = self.get_export_task()
+        changelog_task = self.get_changelog_task()
 
         return {
             'seeded_concepts': seed_task,
@@ -524,6 +528,7 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             'indexed_concepts': index_concepts_task,
             'indexed_mappings': index_mappings_task,
             'exported': export_task,
+            'changelog': changelog_task,
         }
 
 
@@ -1194,6 +1199,9 @@ def default_expansion_parameters():
 
 
 class Expansion(VersionCompareMixin, BaseResourceModel):
+    # expansions are rebuilt in place and are too dynamic to be worth persisting a changelog for
+    PERSIST_CHANGELOG = False
+
     class Meta:
         db_table = 'collection_expansions'
         indexes = [
@@ -1218,6 +1226,10 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
     evaluated_source_versions = models.ManyToManyField(
         'sources.Source', related_name='expansions_evaluated_source_versions_set')
     unresolved_repo_versions = ArrayField(models.JSONField(), default=list, null=True, blank=True)
+
+    @property
+    def is_head(self):
+        return self.is_default
 
     @property
     def is_auto_generated(self):

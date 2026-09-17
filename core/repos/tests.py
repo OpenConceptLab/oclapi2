@@ -1,5 +1,6 @@
 import datetime
 
+from django.db import IntegrityError, transaction
 from django.test import override_settings
 from django.utils import timezone
 
@@ -9,7 +10,7 @@ from core.collections.tests.factories import OrganizationCollectionFactory, User
 from core.common.constants import HEAD
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.orgs.tests.factories import OrganizationFactory
-from core.repos.models import RepoExternalExport, Repository
+from core.repos.models import RepoExternalExport, Repository, VersionChangelog
 from core.sources.documents import SourceDocument
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
@@ -394,3 +395,43 @@ class OrganizationRepoListViewDbFirstTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, [])
+
+
+class VersionChangelogTest(OCLTestCase):
+    def test_version1_url_cannot_equal_version2_url(self):
+        source = OrganizationSourceFactory()
+
+        with self.assertRaises(ValueError):
+            VersionChangelog.find_or_build(source, source)
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            VersionChangelog.objects.create(version1_url=source.url, version2_url=source.url)
+
+    def test_deleting_a_version_hard_deletes_its_changelogs(self):
+        source_v1 = OrganizationSourceFactory(version='v1')
+        source_v2 = OrganizationSourceFactory(
+            organization=source_v1.organization, mnemonic=source_v1.mnemonic, version='v2')
+        source_v3 = OrganizationSourceFactory(
+            organization=source_v1.organization, mnemonic=source_v1.mnemonic, version='v3')
+
+        changelog_1_2 = VersionChangelog.objects.create(version1_url=source_v1.url, version2_url=source_v2.url)
+        changelog_2_3 = VersionChangelog.objects.create(version1_url=source_v2.url, version2_url=source_v3.url)
+        unrelated = VersionChangelog.objects.create(
+            version1_url=source_v1.url, version2_url='/some/other/unrelated/version/')
+
+        source_v2.delete()
+
+        self.assertFalse(VersionChangelog.objects.filter(id=changelog_1_2.id).exists())
+        self.assertFalse(VersionChangelog.objects.filter(id=changelog_2_3.id).exists())
+        self.assertTrue(VersionChangelog.objects.filter(id=unrelated.id).exists())
+
+    def test_deleting_head_hard_deletes_all_changelogs_for_the_source(self):
+        head = OrganizationSourceFactory(version=HEAD)
+        source_v1 = OrganizationSourceFactory(
+            organization=head.organization, mnemonic=head.mnemonic, version='v1')
+
+        changelog = VersionChangelog.objects.create(version1_url=source_v1.url, version2_url=head.url)
+
+        head.delete()
+
+        self.assertFalse(VersionChangelog.objects.filter(id=changelog.id).exists())

@@ -684,7 +684,9 @@ class CollectionTest(OCLTestCase):
         self.assertTrue(filters['retired'])
 
     def test_get_tasks(self):
-        collection = OrganizationCollectionFactory(version='v1')
+        collection_v0 = OrganizationCollectionFactory(version='v0')
+        collection = OrganizationCollectionFactory(
+            organization=collection_v0.organization, mnemonic=collection_v0.mnemonic, version='v1')
         expansion = ExpansionFactory(collection_version=collection)
         collection.expansion_uri = expansion.uri
         collection.save()
@@ -693,11 +695,13 @@ class CollectionTest(OCLTestCase):
         self.assertIsNone(collection.get_index_concepts_task())
         self.assertIsNone(collection.get_index_mappings_task())
         self.assertIsNone(collection.get_seed_new_version_task())
+        self.assertIsNone(collection.get_changelog_task())
         self.assertEqual(
             collection.get_tasks(),
             {
                 'seeded_concepts': None, 'seeded_mappings': None,
                 'indexed_concepts': None, 'indexed_mappings': None, 'exported': None,
+                'changelog': None,
             }
         )
 
@@ -717,11 +721,16 @@ class CollectionTest(OCLTestCase):
             id='task-seed', name='core.collections.models.seed_children_to_expansion',
             args=[collection.id], created_by=collection.created_by
         )
+        changelog_task = Task.objects.create(
+            id='task-changelog', name='core.common.tasks.collection_version_compare',
+            args=[collection_v0.uri, collection.uri, True, 4, 'json', True], created_by=collection.created_by
+        )
 
         self.assertEqual(collection.get_export_task().id, export_task.id)
         self.assertEqual(collection.get_index_concepts_task().id, index_concepts_task.id)
         self.assertEqual(collection.get_index_mappings_task().id, index_mappings_task.id)
         self.assertEqual(collection.get_seed_new_version_task().id, seed_task.id)
+        self.assertEqual(collection.get_changelog_task().id, changelog_task.id)
 
         tasks = collection.get_tasks()
         self.assertEqual(tasks['exported'].id, export_task.id)
@@ -729,6 +738,7 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(tasks['indexed_mappings'].id, index_mappings_task.id)
         self.assertEqual(tasks['seeded_concepts'].id, seed_task.id)
         self.assertEqual(tasks['seeded_mappings'].id, seed_task.id)
+        self.assertEqual(tasks['changelog'].id, changelog_task.id)
 
     def test_persist_new_version_does_not_copy_export_time_from_head(self):
         collection = OrganizationCollectionFactory(

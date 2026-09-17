@@ -573,6 +573,9 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     def get_seed_new_version_task(self):
         return Task.find(name__iendswith='seed_children_to_new_version', args__contains=['source', self.id])
 
+    def get_changelog_task(self):
+        return self.get_changelog_task_by_name('source_version_compare')
+
     def __get_resource_db_sequence_prefix(self):
         return self.uri.replace('/', '_').replace('-', '_').replace('.', '_').replace('@', '_')
 

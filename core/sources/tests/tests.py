@@ -2034,6 +2034,29 @@ class SourceTest(OCLTestCase):
         task = Task.new(queue='indexing', user=source.created_by, name='index_source_mappings', args=[source.id])
         self.assertEqual(source.get_index_mappings_task().id, task.id)
 
+    def test_get_changelog_task(self):
+        source_v1 = OrganizationSourceFactory(version='v1')
+        source_v2 = OrganizationSourceFactory(
+            organization=source_v1.organization, mnemonic=source_v1.mnemonic, version='v2')
+        # v2's changelog task is (v1, v2); an unrelated task that merely mentions v2's uri
+        # (e.g. some other version's changelog task where v2 is the OLDER side) must not match.
+        Task.new(
+            queue='default', user=source_v2.created_by, name='source_version_compare',
+            args=[source_v2.uri, 'http://example.com/some/other/version/'])
+        task = Task.new(
+            queue='default', user=source_v2.created_by, name='source_version_compare',
+            args=[source_v1.uri, source_v2.uri, True, 4, 'json', True])
+
+        self.assertEqual(source_v2.get_changelog_task().id, task.id)
+
+    def test_get_changelog_task_none_without_prev_version(self):
+        source = OrganizationSourceFactory()
+        Task.new(
+            queue='default', user=source.created_by, name='source_version_compare',
+            args=[source.uri, 'http://example.com/some/other/version/'])
+
+        self.assertIsNone(source.get_changelog_task())
+
     @patch('core.sources.models.resolve_url_registry_entries')
     def test_save_queues_resolve_url_registry_entries_when_canonical_url_changes(self, resolve_mock):
         source = OrganizationSourceFactory(version=HEAD, canonical_url='https://old.com')

@@ -27,7 +27,7 @@ from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_R
 from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service, \
     get_date_range_label
 from core.reports.models import ResourceUsageReport
-from core.tasks.models import QueueOnceCustomTask
+from core.tasks.models import QueueOnceCustomTask, Task
 
 logger = get_task_logger(__name__)
 
@@ -303,7 +303,6 @@ def bulk_import_subtask_empty():
 def import_finisher(task_id):
     """Persist final import results so that they can be retrieved instantly"""
     from core.importers.importer import ImportTask
-    from core.tasks.models import Task
     task = Task.objects.filter(id=task_id).first()
     if task:
         if task.result_all:
@@ -371,8 +370,9 @@ def send_user_reset_password_email(user_id):
 
 
 @app.task(bind=True)
-def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False):  # pylint: disable=too-many-arguments,too-many-locals,too-many-branches
+def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False):  # pylint: disable=too-many-arguments,too-many-locals,too-many-branches,too-many-statements
     export_task = None
+    changelog_task = None
     autoexpand = True
 
     is_source = resource == 'source'
@@ -383,8 +383,10 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
 
     if is_source:
         export_task = export_source
+        changelog_task = source_version_compare
     elif is_collection:
         export_task = export_collection
+        changelog_task = collection_version_compare
         autoexpand = instance.should_auto_expand
 
     if instance:  # pylint: disable=too-many-nested-blocks
@@ -416,13 +418,22 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                 instance.update_children_counts(sync)
 
             if export:
-                from core.tasks.models import Task
                 task = Task.new(queue='default', username=instance.updated_by, name=export_task.__name__)
                 try:
                     export_task.apply_async((obj_id,), queue=task.queue, task_id=task.id, persist_args=True)
                 except AlreadyQueued:
-                    if task:
-                        task.delete()
+                    task.delete()
+
+                prev_version = instance.prev_version
+                if prev_version:
+                    _task = Task.new(
+                        queue='default', username=instance.updated_by, name=changelog_task.__name__)
+                    try:
+                        changelog_task.apply_async(
+                            (prev_version.uri, instance.uri, True, 4, 'json', True),
+                            queue=_task.queue, task_id=_task.id, persist_args=True)
+                    except AlreadyQueued:
+                        _task.delete()
         finally:
             instance.remove_processing(task_id)
 
@@ -929,7 +940,6 @@ def resolve_url_registry_entries(repo_id, repo_type):
 
 @app.task(ignore_result=True)
 def expire_old_celery_tasks():
-    from core.tasks.models import Task
     Task.objects.filter(updated_at__lt=timezone.now() - timezone.timedelta(days=7)).delete()
 
 
@@ -964,8 +974,6 @@ def rerun_indexing_job():
     hard restart). Liveness comes from the indexing workers themselves rather than from how long a
     job has been running -- runtime says nothing about whether anyone still owns it.
     """
-    from core.tasks.models import Task
-
     live_task_ids = get_live_indexing_task_ids()
     if live_task_ids is None:
         #  Broker unreachable or indexing workers all down. Every running job would look stranded.
@@ -987,20 +995,23 @@ def rerun_indexing_job():
 
 
 @app.task(base=QueueOnceCustomTask)
-def source_version_compare(version1_uri, version2_uri, is_changelog, verbosity, ignore_cache=False, format_type='json'):
+def source_version_compare(version1_uri, version2_uri, is_changelog, verbosity, format_type='json', save_both=False):
     from core.sources.models import Source
-    return Source.run_diff(version1_uri, version2_uri, is_changelog, verbosity, ignore_cache, format_type)
+    if save_both:
+        return Source.save_changelog_and_comparison(version1_uri, version2_uri)
+    return Source.run_diff(version1_uri, version2_uri, is_changelog, verbosity, format_type)
 
 
 @app.task(base=QueueOnceCustomTask)
 def collection_version_compare(
-        version1_uri, version2_uri, is_changelog, verbosity, ignore_cache=False, format_type='json'):
+        version1_uri, version2_uri, is_changelog, verbosity, format_type='json', save_both=False):
     from core.collections.models import Collection
-    return Collection.run_diff(version1_uri, version2_uri, is_changelog, verbosity, ignore_cache, format_type)
+    if save_both:
+        return Collection.save_changelog_and_comparison(version1_uri, version2_uri)
+    return Collection.run_diff(version1_uri, version2_uri, is_changelog, verbosity, format_type)
 
 
 @app.task(base=QueueOnceCustomTask)
-def expansion_compare(
-        expansion1_uri, expansion2_uri, is_changelog, verbosity, ignore_cache=False, format_type='json'):
+def expansion_compare(expansion1_uri, expansion2_uri, is_changelog, verbosity, format_type='json'):
     from core.collections.models import Expansion
-    return Expansion.run_diff(expansion1_uri, expansion2_uri, is_changelog, verbosity, ignore_cache, format_type)
+    return Expansion.run_diff(expansion1_uri, expansion2_uri, is_changelog, verbosity, format_type)

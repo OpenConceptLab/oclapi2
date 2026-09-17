@@ -1,5 +1,6 @@
 from itertools import chain
 
+from dirtyfields import DirtyFieldsMixin
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
@@ -116,3 +117,53 @@ class RepoExternalExport(models.Model):
         instance.updated_by = user
         instance.save()
         return instance, is_create
+
+
+class VersionChangelog(DirtyFieldsMixin, models.Model):  # persisted changelog/comparison for a version pair
+    JSON_FORMAT = 'json'
+    MD_FORMAT = 'markdown'
+
+    class Meta:
+        db_table = 'version_changelogs'
+        unique_together = ('version1_url', 'version2_url')
+        constraints = [
+            models.CheckConstraint(
+                check=~models.Q(version1_url=models.F('version2_url')),
+                name='version_changelog_version1_url_ne_version2_url',
+            ),
+        ]
+
+    version1_url = models.TextField()
+    version2_url = models.TextField()
+    changelog = models.JSONField(default=dict)
+    comparison = models.JSONField(default=dict)
+    extras = models.JSONField(default=dict)
+
+    created_by = models.ForeignKey(
+        'users.UserProfile', default=SUPER_ADMIN_USER_ID, on_delete=models.SET_DEFAULT,
+        related_name='%(app_label)s_%(class)s_related_created_by',
+        related_query_name='%(app_label)s_%(class)ss_created_by',
+    )
+    updated_by = models.ForeignKey(
+        'users.UserProfile', default=SUPER_ADMIN_USER_ID, on_delete=models.SET_DEFAULT,
+        related_name='%(app_label)s_%(class)s_related_updated_by',
+        related_query_name='%(app_label)s_%(class)ss_updated_by',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def changelog_md(self):
+        from core.sources.changelog_markdown import ChangelogMarkdownGenerator
+        return ChangelogMarkdownGenerator(self.changelog).generate()
+
+    @classmethod
+    def find_or_build(cls, version1, version2):
+        if version1.url == version2.url:
+            raise ValueError('Cannot build a changelog between a version and itself.')
+        return cls.objects.filter(
+            version1_url=version1.url, version2_url=version2.url
+        ).first() or cls(
+            version1_url=version1.url, version2_url=version2.url,
+            created_by=version2.created_by, updated_by=version2.updated_by
+        )
