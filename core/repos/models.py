@@ -167,3 +167,41 @@ class VersionChangelog(DirtyFieldsMixin, models.Model):  # persisted changelog/c
             version1_url=version1.url, version2_url=version2.url,
             created_by=version2.created_by, updated_by=version2.updated_by
         )
+
+
+class VersionChecksumMap(models.Model):  # persisted mnemonic->checksum map for one version
+    # No DirtyFieldsMixin here on purpose: for a JSONField holding hundreds of thousands of
+    # entries, its snapshot-on-load and is_dirty() comparison each cost real seconds -- more than
+    # rebuilding the map from scratch would. The caller already knows whether it changed anything
+    # (get_checksum_map only calls save() right after it just set a field), so no dirty-tracking is needed.
+    class Meta:
+        db_table = 'version_checksum_maps'
+
+    version_url = models.TextField(unique=True)
+    concepts_map = models.JSONField(default=dict)  # {'active': {mnemonic: {checksums, id}}, 'retired': {...}}
+    mappings_map = models.JSONField(default=dict)
+    extras = models.JSONField(default=dict)
+
+    created_by = models.ForeignKey(
+        'users.UserProfile', default=SUPER_ADMIN_USER_ID, on_delete=models.SET_DEFAULT,
+        related_name='%(app_label)s_%(class)s_related_created_by',
+        related_query_name='%(app_label)s_%(class)ss_created_by',
+    )
+    updated_by = models.ForeignKey(
+        'users.UserProfile', default=SUPER_ADMIN_USER_ID, on_delete=models.SET_DEFAULT,
+        related_name='%(app_label)s_%(class)s_related_updated_by',
+        related_query_name='%(app_label)s_%(class)ss_updated_by',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @classmethod
+    def find_or_build(cls, version, only=None):
+        # only lets a caller that needs just one of concepts_map/mappings_map skip fetching and
+        # JSON-decoding the other one, which can be many times larger.
+        queryset = cls.objects.filter(version_url=version.url)
+        if only:
+            queryset = queryset.only(*only, 'updated_at')
+        return queryset.first() or cls(
+            version_url=version.url, created_by=version.created_by, updated_by=version.created_by
+        )

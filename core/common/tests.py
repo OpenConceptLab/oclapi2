@@ -23,9 +23,9 @@ from requests.auth import HTTPBasicAuth
 from rest_framework.exceptions import ValidationError
 from rest_framework.test import APITestCase, APITransactionTestCase
 
-from core.collections.models import CollectionReference
+from core.collections.models import CollectionReference, Expansion
 from core.collections.tests.factories import ExpansionFactory, OrganizationCollectionFactory
-from core.common.checksums import VersionCompareMixin
+from core.common.checksums import VersionCompareMixin, ChecksumDiff
 from core.common.constants import HEAD
 from core.common.es import ESScript
 from core.common.models import BaseModel
@@ -1962,6 +1962,82 @@ class TaskTest(OCLTestCase):
         compare_mock.assert_called_once()
         self.assertEqual(result, {'fresh': True})
 
+    def test_get_checksum_map_populates_and_reuses_cache(self):
+        from core.repos.models import VersionChecksumMap
+        source = OrganizationSourceFactory()
+        source_v1 = OrganizationSourceFactory(organization=source.organization, mnemonic=source.mnemonic, version='v1')
+        concept = ConceptFactory(parent=source, mnemonic='c1')
+        source_v1.concepts.add(concept)
+        concept.set_checksums()
+
+        self.assertFalse(VersionChecksumMap.objects.filter(version_url=source_v1.url).exists())
+        checksum_map = Source.get_checksum_map(source_v1, 'concepts')
+        cached = VersionChecksumMap.objects.get(version_url=source_v1.url)
+        self.assertEqual(checksum_map, cached.concepts_map)
+        self.assertEqual(set(checksum_map['active'].keys()), {'c1'})
+
+        with patch.object(ChecksumDiff, 'build_map') as build_map_mock:
+            reused = Source.get_checksum_map(source_v1, 'concepts')
+
+        build_map_mock.assert_not_called()
+        self.assertEqual(reused, checksum_map)
+
+    def test_get_checksum_map_head_becomes_stale_after_content_change(self):
+        from core.repos.models import VersionChecksumMap
+        head = OrganizationSourceFactory()
+        concept1 = ConceptFactory(parent=head, mnemonic='c1')
+        concept1.set_checksums()
+
+        initial_map = Source.get_checksum_map(head, 'concepts')
+        self.assertEqual(set(initial_map['active'].keys()), {'c1'})
+
+        cached = VersionChecksumMap.objects.get(version_url=head.url)
+        VersionChecksumMap.objects.filter(id=cached.id).update(
+            updated_at=timezone.now() - datetime.timedelta(days=1))
+
+        concept2 = ConceptFactory(parent=head, mnemonic='c2')
+        concept2.set_checksums()
+
+        refreshed_map = Source.get_checksum_map(head, 'concepts')
+        self.assertEqual(set(refreshed_map['active'].keys()), {'c1', 'c2'})
+
+    def test_get_checksum_map_non_head_never_considered_stale(self):
+        from core.repos.models import VersionChecksumMap
+        source = OrganizationSourceFactory()
+        source_v1 = OrganizationSourceFactory(organization=source.organization, mnemonic=source.mnemonic, version='v1')
+        concept = ConceptFactory(parent=source, mnemonic='c1')
+        source_v1.concepts.add(concept)
+        concept.set_checksums()
+
+        Source.get_checksum_map(source_v1, 'concepts')
+        cached = VersionChecksumMap.objects.get(version_url=source_v1.url)
+        VersionChecksumMap.objects.filter(id=cached.id).update(
+            updated_at=timezone.now() - datetime.timedelta(days=365))
+
+        with patch.object(ChecksumDiff, 'build_map') as build_map_mock:
+            Source.get_checksum_map(source_v1, 'concepts')
+
+        build_map_mock.assert_not_called()
+
+    def test_get_checksum_map_expansion_never_persists(self):
+        from core.repos.models import VersionChecksumMap
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+
+        Expansion.get_checksum_map(expansion, 'concepts')
+
+        self.assertFalse(VersionChecksumMap.objects.filter(version_url=expansion.url).exists())
+
+    def test_save_changelog_and_comparison_populates_checksum_maps_for_both_sides(self):
+        from core.repos.models import VersionChecksumMap
+        source1 = OrganizationSourceFactory()
+        source2 = OrganizationSourceFactory(organization=source1.organization, mnemonic=source1.mnemonic, version='v1')
+
+        Source.save_changelog_and_comparison(source2.uri, source1.uri)
+
+        self.assertTrue(VersionChecksumMap.objects.filter(version_url=source1.url).exists())
+        self.assertTrue(VersionChecksumMap.objects.filter(version_url=source2.url).exists())
+
 
 class URIValidatorTest(OCLTestCase):
     validator = URIValidator()
@@ -2124,6 +2200,25 @@ class ChecksumTest(OCLTestCase):
             ChecksumBase('mapping', mapping_data, 'smart').generate(),
             mapping1.checksums['smart']
         )
+
+    def test_diff_with_precomputed_maps_matches_queryset_driven(self):
+        concept1 = ConceptFactory(mnemonic='c1')
+        concept2 = ConceptFactory(mnemonic='c2')
+        concept3 = ConceptFactory(mnemonic='c3', retired=True)
+        for concept in (concept1, concept2, concept3):
+            concept.set_checksums()
+
+        queryset = Concept.objects.filter(id__in=[concept1.id, concept2.id, concept3.id])
+        via_queryset = ChecksumDiff(resources1=queryset, resources2=queryset, verbosity=3)
+        via_queryset.process()
+
+        precomputed_map = ChecksumDiff.build_map(queryset)
+        via_map = ChecksumDiff(resources1_map=precomputed_map, resources2_map=precomputed_map, verbosity=3)
+        via_map.process()
+
+        self.assertEqual(via_queryset.result, via_map.result)
+        self.assertIsNone(via_map.resources1)
+        self.assertIsNone(via_map.resources2)
 
 
 class ChecksumViewTest(OCLAPITestCase):

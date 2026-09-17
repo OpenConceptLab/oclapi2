@@ -119,9 +119,11 @@ class Checksum:
 
 
 class ChecksumDiff:
-    def __init__(self, resources1, resources2, identity='mnemonic', verbosity=0):  # pylint: disable=too-many-arguments
-        self.resources1 = resources1  # older version resources
-        self.resources2 = resources2  # newer version resources
+    def __init__(  # pylint: disable=too-many-arguments
+            self, resources1=None, resources2=None, resources1_map=None, resources2_map=None,
+            identity='mnemonic', verbosity=0):
+        self.resources1 = resources1  # older version resources (queryset; unused if resources1_map given)
+        self.resources2 = resources2  # newer version resources (queryset; unused if resources2_map given)
         self.identity = identity
         self.verbosity = verbosity
         self.same_standard = {}
@@ -130,23 +132,24 @@ class ChecksumDiff:
         self.changed_standard = {}
         self.result = {}
         self.result_concise = {}
-        self._resources1_map = None
-        self._resources1_map_retired = None
-        self._resources2_map = None
-        self._resources2_map_retired = None
+        self._resources1_map = get(resources1_map, 'active')
+        self._resources1_map_retired = get(resources1_map, 'retired')
+        self._resources2_map = get(resources2_map, 'active')
+        self._resources2_map_retired = get(resources2_map, 'retired')
         self._resources1_set = None
         self._resources1_set_retired = None
         self._resources2_set = None
         self._resources2_set_retired = None
         self._retired = None
 
-    def get_resources_map(self, resources):
+    @staticmethod
+    def build_map(resources, identity='mnemonic'):
         active = {}
         retired = {}
         for resource in resources:
             target = retired if resource.retired else active
-            target[get(resource, self.identity)] = {
-                'checksums': self._get_resource_checksums(resource),
+            target[get(resource, identity)] = {
+                'checksums': ChecksumDiff._get_resource_checksums(resource),
                 'id': resource.id
             }
         return {'active': active, 'retired': retired}
@@ -162,7 +165,7 @@ class ChecksumDiff:
     def resources1_map(self):
         if self._resources1_map is not None:
             return self._resources1_map
-        resources_map = self.get_resources_map(self.resources1)
+        resources_map = self.build_map(self.resources1, self.identity)
         self._resources1_map = resources_map['active']
         self._resources1_map_retired = resources_map['retired']
         return self._resources1_map
@@ -171,7 +174,7 @@ class ChecksumDiff:
     def resources1_map_retired(self):
         if self._resources1_map_retired is not None:
             return self._resources1_map_retired
-        resources_map = self.get_resources_map(self.resources1)
+        resources_map = self.build_map(self.resources1, self.identity)
         self._resources1_map = resources_map['active']
         self._resources1_map_retired = resources_map['retired']
         return self._resources1_map_retired
@@ -180,7 +183,7 @@ class ChecksumDiff:
     def resources2_map(self):
         if self._resources2_map is not None:
             return self._resources2_map
-        resources_map = self.get_resources_map(self.resources2)
+        resources_map = self.build_map(self.resources2, self.identity)
         self._resources2_map = resources_map['active']
         self._resources2_map_retired = resources_map['retired']
         return self._resources2_map
@@ -189,7 +192,7 @@ class ChecksumDiff:
     def resources2_map_retired(self):
         if self._resources2_map_retired is not None:
             return self._resources2_map_retired
-        resources_map = self.get_resources_map(self.resources2)
+        resources_map = self.build_map(self.resources2, self.identity)
         self._resources2_map = resources_map['active']
         self._resources2_map_retired = resources_map['retired']
         return self._resources2_map_retired
@@ -578,20 +581,40 @@ class VersionCompareMixin:
     JSON_FORMAT = 'json'
     PERSIST_CHANGELOG = True  # expansions are too dynamic/rebuilt-in-place to persist; see Expansion override
 
-    @staticmethod
-    def compare(version1, version2, verbosity=0):
+    @classmethod
+    def get_checksum_map(cls, version, resource):
+        queryset = getattr(version, f'get_{resource}_queryset')().only('mnemonic', 'checksums', 'retired')
+        if not cls.PERSIST_CHANGELOG:
+            return ChecksumDiff.build_map(queryset)
+
+        from core.repos.models import VersionChecksumMap
+        field = f'{resource}_map'
+        cached = VersionChecksumMap.find_or_build(version, only=[field])
+        is_stale = bool(
+            cached.pk and version.is_head and version.last_child_update and cached.updated_at
+            and version.last_child_update > cached.updated_at
+        )
+        existing = None if is_stale else getattr(cached, field)
+        if not existing:
+            existing = ChecksumDiff.build_map(queryset)
+            setattr(cached, field, existing)
+            cached.save()
+        return existing
+
+    @classmethod
+    def compare(cls, version1, version2, verbosity=0):
         """
         version1 is the older version
         version2 is the newer version
         """
         concepts_diff = ChecksumDiff(
-            resources1=version1.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
-            resources2=version2.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
+            resources1_map=cls.get_checksum_map(version1, 'concepts'),
+            resources2_map=cls.get_checksum_map(version2, 'concepts'),
             verbosity=verbosity,
         )
         mappings_diff = ChecksumDiff(
-            resources1=version1.get_mappings_queryset().only('mnemonic', 'checksums', 'retired'),
-            resources2=version2.get_mappings_queryset().only('mnemonic', 'checksums', 'retired'),
+            resources1_map=cls.get_checksum_map(version1, 'mappings'),
+            resources2_map=cls.get_checksum_map(version2, 'mappings'),
             verbosity=verbosity,
         )
         concepts_diff.process()
@@ -617,8 +640,8 @@ class VersionCompareMixin:
             'mappings': mappings_diff.result
         }
 
-    @staticmethod
-    def changelog(version1, version2, verbosity=0):
+    @classmethod
+    def changelog(cls, version1, version2, verbosity=0):
         """
         version1 is the older version
         version2 is the newer version
@@ -630,13 +653,13 @@ class VersionCompareMixin:
         # Internal diff always runs at verbosity=3 to collect IDs of every category;
         # per-resource enrichment is a concern of ChecksumChangelog (verbosity>=4).
         concepts_diff = ChecksumDiff(
-            resources1=version1.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
-            resources2=version2.get_concepts_queryset().only('mnemonic', 'checksums', 'retired'),
+            resources1_map=cls.get_checksum_map(version1, 'concepts'),
+            resources2_map=cls.get_checksum_map(version2, 'concepts'),
             verbosity=3
         )
         mappings_diff = ChecksumDiff(
-            resources1=version1.get_mappings_queryset().only('mnemonic', 'checksums', 'retired'),
-            resources2=version2.get_mappings_queryset().only('mnemonic', 'checksums', 'retired'),
+            resources1_map=cls.get_checksum_map(version1, 'mappings'),
+            resources2_map=cls.get_checksum_map(version2, 'mappings'),
             verbosity=3
         )
         concepts_diff.process()
@@ -680,15 +703,15 @@ class VersionCompareMixin:
         version1, version2 = cls._get_versions(uri1, uri2)
         changelog = VersionChangelog.find_or_build(version1, version2)
         start_time = time.time()
-        version1_concepts = version1.get_concepts_queryset().only('mnemonic', 'checksums', 'retired')
-        version1_mappings = version1.get_mappings_queryset().only('mnemonic', 'checksums', 'retired')
-        version2_concepts = version2.get_concepts_queryset().only('mnemonic', 'checksums', 'retired')
-        version2_mappings = version2.get_mappings_queryset().only('mnemonic', 'checksums', 'retired')
 
         concepts_diff = ChecksumDiff(
-            resources1=version1_concepts, resources2=version2_concepts, verbosity=SAME_RESOURCE_IDS_VERBOSITY)
+            resources1_map=cls.get_checksum_map(version1, 'concepts'),
+            resources2_map=cls.get_checksum_map(version2, 'concepts'),
+            verbosity=SAME_RESOURCE_IDS_VERBOSITY)
         mappings_diff = ChecksumDiff(
-            resources1=version1_mappings, resources2=version2_mappings, verbosity=SAME_RESOURCE_IDS_VERBOSITY)
+            resources1_map=cls.get_checksum_map(version1, 'mappings'),
+            resources2_map=cls.get_checksum_map(version2, 'mappings'),
+            verbosity=SAME_RESOURCE_IDS_VERBOSITY)
         concepts_diff.process()
         mappings_diff.process()
 
@@ -720,10 +743,11 @@ class VersionCompareMixin:
         from core.repos.models import VersionChangelog
         changelog = VersionChangelog.find_or_build(version1, version2)
         # HEAD is a moving target -- a previously saved changelog/comparison against HEAD is only
-        # trustworthy if nothing has changed in HEAD since it was saved.
+        # trustworthy if nothing has changed in HEAD since it was saved. last_child_update (not
+        # updated_at) is used because it only moves when concepts/mappings actually change.
         is_stale = bool(
-            changelog.pk and version2.is_head and version2.updated_at and changelog.updated_at
-            and version2.updated_at > changelog.updated_at
+            changelog.pk and version2.is_head and version2.last_child_update and changelog.updated_at
+            and version2.last_child_update > changelog.updated_at
         )
 
         if is_changelog:

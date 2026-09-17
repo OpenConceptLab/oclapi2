@@ -10,7 +10,7 @@ from core.collections.tests.factories import OrganizationCollectionFactory, User
 from core.common.constants import HEAD
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.orgs.tests.factories import OrganizationFactory
-from core.repos.models import RepoExternalExport, Repository, VersionChangelog
+from core.repos.models import RepoExternalExport, Repository, VersionChangelog, VersionChecksumMap
 from core.sources.documents import SourceDocument
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
@@ -435,3 +435,33 @@ class VersionChangelogTest(OCLTestCase):
         head.delete()
 
         self.assertFalse(VersionChangelog.objects.filter(id=changelog.id).exists())
+
+
+class VersionChecksumMapTest(OCLTestCase):
+    def test_deleting_a_version_hard_deletes_its_checksum_map(self):
+        source_v1 = OrganizationSourceFactory(version='v1')
+        source_v2 = OrganizationSourceFactory(
+            organization=source_v1.organization, mnemonic=source_v1.mnemonic, version='v2')
+        # A 3rd version keeps v2 from being "the only version", which delete() forbids removing.
+        OrganizationSourceFactory(organization=source_v1.organization, mnemonic=source_v1.mnemonic, version='v3')
+
+        checksum_map = VersionChecksumMap.objects.create(version_url=source_v2.url)
+        unrelated = VersionChecksumMap.objects.create(version_url=source_v1.url)
+
+        source_v2.delete()
+
+        self.assertFalse(VersionChecksumMap.objects.filter(id=checksum_map.id).exists())
+        self.assertTrue(VersionChecksumMap.objects.filter(id=unrelated.id).exists())
+
+    def test_deleting_head_hard_deletes_checksum_maps_for_all_its_versions(self):
+        head = OrganizationSourceFactory(version=HEAD)
+        source_v1 = OrganizationSourceFactory(
+            organization=head.organization, mnemonic=head.mnemonic, version='v1')
+
+        head_map = VersionChecksumMap.objects.create(version_url=head.url)
+        v1_map = VersionChecksumMap.objects.create(version_url=source_v1.url)
+
+        head.delete()
+
+        self.assertFalse(VersionChecksumMap.objects.filter(id=head_map.id).exists())
+        self.assertFalse(VersionChecksumMap.objects.filter(id=v1_map.id).exists())

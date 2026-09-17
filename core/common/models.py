@@ -762,6 +762,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         self.delete_pins()
         self.delete_following()
         self.delete_version_changelogs(deleted_urls)
+        self.delete_version_checksum_maps(deleted_urls)
 
         super().delete(using=using, keep_parents=keep_parents)
         self.delete_export_paths(export_paths, sync)
@@ -771,6 +772,11 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     def delete_version_changelogs(urls):
         from core.repos.models import VersionChangelog
         VersionChangelog.objects.filter(Q(version1_url__in=urls) | Q(version2_url__in=urls)).delete()
+
+    @staticmethod
+    def delete_version_checksum_maps(urls):
+        from core.repos.models import VersionChecksumMap
+        VersionChecksumMap.objects.filter(version_url__in=urls).delete()
 
     def get_export_paths_to_delete(self):
         return [self.get_version_export_path(suffix=None)] + list(
