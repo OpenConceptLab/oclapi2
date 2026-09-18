@@ -935,6 +935,23 @@ class TestChangelogMarkdownGeneratorDescriptionsSection(SimpleTestCase):
         self.assertIn('Updated desc', md)
         self.assertIn('Old desc', md)
 
+    def test_embedded_newline_in_description_escaped(self):
+        data = _make_data(concepts={
+            'new': {
+                'c1': {
+                    'id': 'c1', 'display_name': 'New', 'names': [],
+                    'descriptions': [
+                        {'description': 'Line one\nLine two', 'type': 'FULLY_SPECIFIED', 'locale': 'en'},
+                    ],
+                }
+            },
+        })
+        md = ChangelogMarkdownGenerator(data).generate()
+        self.assertIn('Line one Line two', md)
+        for line in md.split('\n'):
+            if 'Line one' in line:
+                self.assertIn('Line two', line)
+
 
 class TestChangelogMarkdownGeneratorTranslationsUpdatedRemoved(SimpleTestCase):
     def test_translations_updated_and_removed(self):

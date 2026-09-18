@@ -1163,10 +1163,12 @@ class ChangelogMarkdownGenerator:
 
     @staticmethod
     def _escape(text):
-        """Escape pipe characters so they don't break markdown tables."""
+        """Escape characters that would break a markdown table row: a pipe splits it into
+        an extra column, and a raw newline ends the row outright (a table cell can't span
+        multiple lines), which free-text fields like descriptions/names can contain."""
         if not text:
             return ''
-        return str(text).replace('|', '\\|')
+        return str(text).replace('|', '\\|').replace('\r\n', ' ').replace('\n', ' ').replace('\r', ' ')
 
     @staticmethod
     def _display_code(code):
