@@ -39,6 +39,10 @@ class ConceptsFromSourceQueryTests(OCLTestCase):
     maxDiff = None
 
     def setUp(self):
+        # This suite exercises ORM hydration/fallback; index projections have independent tests.
+        projection = mock.patch('core.graphql.queries.indexed_concepts', return_value=None)
+        projection.start()
+        self.addCleanup(projection.stop)
         self._old_async_flag = os.environ.get('DJANGO_ALLOW_ASYNC_UNSAFE')
         os.environ['DJANGO_ALLOW_ASYNC_UNSAFE'] = 'true'
         self.super_user = bootstrap_super_user()
@@ -82,6 +86,7 @@ class ConceptsFromSourceQueryTests(OCLTestCase):
             from_concept=self.concept1,
             to_concept=self.concept2,
             map_type='Same As',
+            sort_weight=1.5,
             comment='primary link',
             created_by=self.audit_user,
             updated_by=self.audit_user,
@@ -136,7 +141,8 @@ class ConceptsFromSourceQueryTests(OCLTestCase):
              results {
                conceptId
                display
-               mappings { mapType toSource { url name } toCode comment }
+               mappings { mapType toSource { uri name } toCode toConceptName sortWeight comment }
+               extras
              }
           }
         }
@@ -161,6 +167,9 @@ class ConceptsFromSourceQueryTests(OCLTestCase):
         self.assertEqual(len(payload['results']), 1)
         self.assertEqual(payload['results'][0]['conceptId'], self.concept1.mnemonic)
         self.assertEqual(payload['results'][0]['mappings'][0]['toCode'], self.concept2.mnemonic)
+        self.assertEqual(payload['results'][0]['mappings'][0]['toConceptName'], self.concept2.display_name)
+        self.assertEqual(payload['results'][0]['mappings'][0]['sortWeight'], self.mapping.sort_weight)
+        self.assertEqual(payload['results'][0]['extras'], self.concept1.extras)
 
     def test_concepts_include_metadata_fields(self):
         query = """
@@ -438,7 +447,9 @@ class ConceptsFromSourceQueryTests(OCLTestCase):
         self.assertEqual(payload['versionResolved'], self.release_version.version)
         self.assertEqual(payload['results'][0]['conceptId'], self.concept1.mnemonic)
 
-    def test_fetch_concepts_global_search(self):
+    @mock.patch('core.graphql.queries.concept_ids_from_es')
+    def test_fetch_concepts_global_search(self, mock_es):
+        mock_es.return_value = ([self.concept1.id], 1)
         query = """
         query GlobalConcepts($query: String!) {
           concepts(query: $query) {
