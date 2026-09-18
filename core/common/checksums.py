@@ -819,7 +819,7 @@ class VersionCompareMixin:
                 result = cls.changelog(version1, version2, verbosity)
                 if format_type == cls.MD_FORMAT:
                     from core.sources.changelog_markdown import ChangelogMarkdownGenerator
-                    result = ChangelogMarkdownGenerator(result).generate()
+                    result = {format_type: ChangelogMarkdownGenerator(result).generate()}
                 return result
             return cls.compare(version1, version2, verbosity)
 
@@ -842,7 +842,7 @@ class VersionCompareMixin:
                 computed_new_result = True
             result = saved
             if format_type == cls.MD_FORMAT:
-                result = {**saved, format_type: changelog.changelog_md}
+                result = {format_type: changelog.changelog_md}
         else:
             saved = None if is_stale else get(changelog, 'comparison')
             if not saved:
@@ -876,3 +876,27 @@ class VersionCompareMixin:
         key_parts = [repr(arg) for arg in args]
         key_parts += [f"{k}={repr(v)}" for k, v in sorted(kwargs.items())]
         return "|".join(key_parts)
+
+    @classmethod
+    def build_checksum_map(cls, url, limit=5, build_changelog=False):  # pragma: no cover
+        limit = limit or 5
+        source = cls.objects.get(uri=url, version='HEAD')
+        versions = list(source.versions.exclude(version='HEAD').order_by('-created_at')[:limit])
+        total = len(versions)
+        print(f'{url}: building checksum maps for {total} version(s)')
+        for index, version in enumerate(versions, start=1):
+            print(f'[{index}/{total}] {version.version}: building concepts map')
+            cls.get_checksum_map(version, 'concepts')
+            print(f'[{index}/{total}] {version.version}: building mappings map')
+            cls.get_checksum_map(version, 'mappings')
+            print(f'[{index}/{total}] {version.version}: done')
+        if build_changelog:
+            # oldest -> newest, so each pair's changelog reuses the checksum maps just built above
+            ordered = list(reversed(versions))
+            pairs = list(zip(ordered, ordered[1:]))
+            total_pairs = len(pairs)
+            print(f'{url}: building changelog for {total_pairs} consecutive version pair(s)')
+            for index, (version1, version2) in enumerate(pairs, start=1):
+                print(f'[{index}/{total_pairs}] {version1.version} -> {version2.version}: building changelog')
+                cls.save_changelog_and_comparison(version1.uri, version2.uri)
+                print(f'[{index}/{total_pairs}] {version1.version} -> {version2.version}: done')
