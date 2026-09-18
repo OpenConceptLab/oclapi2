@@ -2670,9 +2670,8 @@ class SourceVersionsChangelogOutputViewTest(OCLAPITestCase):
                 )
 
                 self.assertEqual(response.status_code, 200)
-                self.assertIn('markdown', response.data)
-                self.assertEqual(response.data['meta']['diff']['concepts']['changed_major'], 1)
-                self.assertEqual(response.data['meta']['diff']['mappings']['changed_major'], 1)
+                # markdown output returns ONLY the markdown -- no meta/concepts/mappings JSON.
+                self.assertEqual(set(response.data.keys()), {'markdown'})
 
                 markdown_output = response.data['markdown']
                 self.assertIn('# v2 Changelog', markdown_output)
