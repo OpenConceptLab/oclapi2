@@ -205,9 +205,9 @@ class HasMapProjectCapacity(BasePermission):
     def has_permission(self, request, view):
         user = request.user
         limit = user.get_capability_limit(MAPPER_PROJECTS_CAPABILITY_ID)
-        if limit is None:
+        if limit == 0:  # explicit grant only - None (unconfigured) is blocked, not uncapped
             return True
         used = user.map_projects_used
-        if used >= limit:
+        if limit is None or used >= limit:
             raise MapProjectCapacityExceeded(limit, used)
         return True

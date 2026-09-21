@@ -14,7 +14,7 @@ class Capability(models.Model):
 
 
 class GroupCapability(models.Model):
-    """This group's limit for a capability. Unlimited = no row here."""
+    """This group's limit for a capability. limit=0, or no row, = unlimited."""
     class Meta:
         db_table = 'group_capabilities'
         unique_together = ('group', 'capability')
@@ -25,7 +25,7 @@ class GroupCapability(models.Model):
 
 
 class UserCapabilityOverride(models.Model):
-    """Per-user override, wins over every GroupCapability the user's groups carry."""
+    """Per-user override, wins over every GroupCapability the user's groups carry. limit=0 = unlimited."""
     class Meta:
         db_table = 'user_capability_overrides'
         unique_together = ('user', 'capability')

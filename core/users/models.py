@@ -242,13 +242,34 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
         return Capability.objects.all()
 
     def get_capability_limit(self, capability_id):
-        """None means unlimited. Per-user override wins; else the highest of the user's groups' limits."""
+        """
+        Returns the configured limit as-is. 0 means unlimited.
+        Set explicitly via a per-user override or a group's own row.
+        There is no implicit-unlimited fallback:
+        None means this capability has no override and no group row for this user at
+        all, and callers must treat that as BLOCKED, not unlimited (see
+        check_and_consume_capability) - a new capability, or a new group that grants
+        Mapper access, must have its limit configured explicitly (even to 0) before
+        real usage is allowed against it. Silently failing open on missing
+        configuration was the previous behavior; don't reintroduce it here.
+
+        Staff and superusers are the deliberate exception.
+
+        Per-user override wins over every group; else the highest of the user's
+        groups' limits, where an explicit 0 from any one group wins outright (it
+        isn't just "the lowest number" - max() alone would let a capped group beat an
+        unlimited one).
+        """
+        if self.is_superuser or self.is_staff:
+            return 0
         override = self._get_capability_limit(capability_id)
         if override is not None:
             return override
         group_limits = self._get_group_capability_limit(capability_id)
         if not group_limits:
             return None
+        if 0 in group_limits:
+            return 0
         return max(group_limits)
 
     def _get_group_capability_limit(self, capability_id) -> list[Any]:
@@ -269,10 +290,13 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
         """
         Atomically checks this user's remaining `capability_id` quota and, if `units`
         fits, consumes it and logs a `UsageEvent`. Raises `CapabilityExceeded` (nothing
-        consumed, nothing logged) if it doesn't fit. Unlimited (no limit set anywhere
-        for this user) always succeeds; usage is still logged. `capability_id` must be
-        an id of a capability already seeded (Keycloak/fixtures) - a bad id fails with
-        an IntegrityError on insert rather than silently creating a Capability row.
+        consumed, nothing logged) if it doesn't fit. An explicit limit of 0 (only) means
+        unlimited and always succeeds; usage is still logged. A capability with no
+        override and no group row for this user at all (get_capability_limit() returns
+        None) is BLOCKED, not unlimited - see get_capability_limit's docstring.
+        `capability_id` must be an id of a capability already seeded (Keycloak/fixtures) -
+        a bad id fails with an IntegrityError on insert rather than silently creating a
+        Capability row.
         """
         from core.capabilities.constants import CAPABILITY_NAME_BY_ID
         from core.capabilities.exceptions import CapabilityExceeded
@@ -283,7 +307,7 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
             UsageCounter.objects.get_or_create(user=self, capability_id=capability_id)
             counter = self.usage_counters.select_for_update().get(capability_id=capability_id)
 
-            if limit is not None and counter.used + units > limit:
+            if limit is None or (limit and counter.used + units > limit):
                 raise CapabilityExceeded(
                     CAPABILITY_NAME_BY_ID.get(capability_id, capability_id), limit, counter.used, units)
 

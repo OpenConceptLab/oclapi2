@@ -215,9 +215,9 @@ class AutomatchRunListView(AutomatchRunBaseView, ListWithHeadersMixin):
         # is left.
         if not is_retry:
             rows_limit = request.user.get_capability_limit(MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID)
-            if rows_limit is not None:
+            if rows_limit != 0:  # explicit grant only - None (unconfigured) is blocked, not uncapped
                 rows_used = map_project.rows_used
-                if rows_used + intended_rows > rows_limit:
+                if rows_limit is None or rows_used + intended_rows > rows_limit:
                     return Response(
                         {
                             'detail': 'Preview row limit for this project reached.',
