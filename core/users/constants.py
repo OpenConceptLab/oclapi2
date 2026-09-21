@@ -39,3 +39,10 @@ AUTH_GROUPS = [
     CORE_USER_GROUP,
 ]
 INVALID_AUTH_GROUP_NAME = 'Invalid auth group.'
+
+PREVIEW_GROUP_NAME = 'preview'
+
+MAPPER_USE_PERMISSION = 'users.mapper_use'
+MAPPER_AI_ASSISTANT_PERMISSION = 'users.mapper_ai_assistant'
+MAPPER_CUSTOM_ALGORITHMS_PERMISSION = 'users.mapper_custom_algorithms'
+MAPPER_ORG_PROJECTS_PERMISSION = 'users.mapper_org_projects'

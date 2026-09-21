@@ -1,0 +1,44 @@
+- model: "capabilities.capability"
+  pk: 1
+  fields:
+    name: mapper.projects
+    description: Number of map projects a user may create
+- model: "capabilities.capability"
+  pk: 2
+  fields:
+    name: mapper.rows_per_project
+    description: Number of rows a single map project may declare
+- model: "capabilities.capability"
+  pk: 3
+  fields:
+    name: mapper.match_operations
+    description: Number of concept-match operations (rows x algorithms)
+- model: "capabilities.capability"
+  pk: 4
+  fields:
+    name: ai_assistant.calls
+    description: Number of Mapper AI Assistant invocations
+- model: "capabilities.groupcapability"
+  pk: 1
+  fields:
+    group: 16  # preview - core/fixtures/auth_groups.yaml
+    capability: 1  # mapper.projects
+    limit: 1
+- model: "capabilities.groupcapability"
+  pk: 2
+  fields:
+    group: 16  # preview - core/fixtures/auth_groups.yaml
+    capability: 2  # mapper.rows_per_project
+    limit: 25
+- model: "capabilities.groupcapability"
+  pk: 3
+  fields:
+    group: 16  # preview - core/fixtures/auth_groups.yaml
+    capability: 3  # mapper.match_operations
+    limit: 100
+- model: "capabilities.groupcapability"
+  pk: 4
+  fields:
+    group: 16  # preview - core/fixtures/auth_groups.yaml
+    capability: 4  # ai_assistant.calls
+    limit: 6

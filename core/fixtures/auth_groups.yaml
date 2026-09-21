@@ -58,3 +58,7 @@
   pk: 15
   fields:
     name: core_user
+- model: "auth.group"
+  pk: 16
+  fields:
+    name: preview

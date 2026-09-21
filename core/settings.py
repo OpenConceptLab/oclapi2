@@ -138,6 +138,7 @@ INSTALLED_APPS = [
     'core.url_registry',
     'core.events',
     'core.map_projects',
+    'core.capabilities',
     'core.graphql.apps.GraphqlConfig'
 ]
 REST_FRAMEWORK = {

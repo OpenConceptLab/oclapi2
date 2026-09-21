@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Any
 
 from dirtyfields import DirtyFieldsMixin
 from django.contrib.auth.models import AbstractUser, Group
@@ -7,7 +8,8 @@ from django.contrib.auth.password_validation import validate_password
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
+from django.db.models import F
 from rest_framework.authtoken.models import Token
 
 from core.common.mixins import SourceContainerMixin
@@ -251,6 +253,70 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
     @property
     def is_superadmin_group(self):
         return self.has_auth_group(SUPERADMIN_GROUP)
+
+    @property
+    def capabilities(self):
+        from core.capabilities.models import Capability
+        return Capability.objects.all()
+
+    def get_capability_limit(self, capability_id):
+        """None means unlimited. Per-user override wins; else the highest of the user's groups' limits."""
+        override = self._get_capability_limit(capability_id)
+        if override is not None:
+            return override
+        group_limits = self._get_group_capability_limit(capability_id)
+        if not group_limits:
+            return None
+        return max(group_limits)
+
+    def _get_group_capability_limit(self, capability_id) -> list[Any]:
+        from core.capabilities.models import GroupCapability
+        return list(GroupCapability.objects.filter(
+            group__in=self.groups.all(), capability_id=capability_id
+        ).values_list('limit', flat=True))
+
+    def _get_capability_limit(self, capability_id):
+        return self.capability_overrides.filter(capability_id=capability_id).values_list('limit', flat=True).first()
+
+    def get_capability_usage(self, capability_id):
+        return self.usage_counters.filter(capability_id=capability_id).values_list('used', flat=True).first() or 0
+
+    def check_and_consume_capability(  # pylint: disable=too-many-arguments
+            self, capability_id, units=1, action='', algorithm=None, map_project=None, run=None
+    ):
+        """
+        Atomically checks this user's remaining `capability_id` quota and, if `units`
+        fits, consumes it and logs a `UsageEvent`. Raises `CapabilityExceeded` (nothing
+        consumed, nothing logged) if it doesn't fit. Unlimited (no limit set anywhere
+        for this user) always succeeds; usage is still logged. `capability_id` must be
+        an id of a capability already seeded (Keycloak/fixtures) - a bad id fails with
+        an IntegrityError on insert rather than silently creating a Capability row.
+        """
+        from core.capabilities.constants import CAPABILITY_NAME_BY_ID
+        from core.capabilities.exceptions import CapabilityExceeded
+        from core.capabilities.models import UsageCounter
+        limit = self.get_capability_limit(capability_id)
+
+        with transaction.atomic():
+            UsageCounter.objects.get_or_create(user=self, capability_id=capability_id)
+            counter = self.usage_counters.select_for_update().get(capability_id=capability_id)
+
+            if limit is not None and counter.used + units > limit:
+                raise CapabilityExceeded(
+                    CAPABILITY_NAME_BY_ID.get(capability_id, capability_id), limit, counter.used, units)
+
+            UsageCounter.objects.filter(pk=counter.pk).update(used=F('used') + units)
+            self.usage_events.create(
+                capability_id=capability_id, units=units, action=action, algorithm=algorithm,
+                map_project=map_project, run=run
+            )
+
+    @property
+    def map_projects_used(self):
+        # By created_by, not the owner - counting by owner would let a preview user dodge the mapper.projects cap by
+        # creating a new organization per project (orgs are self-serve).
+        from core.map_projects.models import MapProject
+        return MapProject.objects.filter(created_by=self, is_active=True).count()
 
     @property
     def auth_headers(self):

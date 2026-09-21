@@ -269,6 +269,26 @@ class UserProfileTest(OCLTestCase):
         self.assertIsNotNone(user.verification_token)
         user.send_verification_email.assert_called_once()
 
+    def test_user_in_preview_group_has_mapper_permissions(self):
+        # Django never assigns the `preview` group itself - Keycloak grants it at
+        # signup and every login syncs it via the existing OIDC backend/set_groups().
+        # This only verifies the permission side once a user is a member.
+        from django.contrib.auth.models import Group
+        from core.users.constants import PREVIEW_GROUP_NAME, MAPPER_AI_ASSISTANT_PERMISSION, MAPPER_USE_PERMISSION
+
+        user = UserProfileFactory()
+        user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
+
+        self.assertTrue(user.has_perm(MAPPER_USE_PERMISSION))
+        self.assertTrue(user.has_perm(MAPPER_AI_ASSISTANT_PERMISSION))
+
+    def test_user_without_preview_group_has_no_mapper_permission(self):
+        from core.users.constants import MAPPER_USE_PERMISSION
+
+        user = UserProfileFactory()
+
+        self.assertFalse(user.has_perm(MAPPER_USE_PERMISSION))
+
 
 class TokenAuthenticationViewTest(OCLAPITestCase):
     def test_post(self):
@@ -601,6 +621,39 @@ class UserViewsAPITest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['username'], 'selfshortcutuser')
+
+    def test_user_detail_includes_capabilities_when_requested(self):
+        from django.contrib.auth.models import Group
+        from core.users.constants import PREVIEW_GROUP_NAME
+        user = UserProfileFactory()
+        user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
+
+        response = self.client.get(
+            '/user/?includeCapabilities=true', HTTP_AUTHORIZATION=f"Token {user.get_token()}"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('users.mapper_use', response.data['permissions'])
+        capabilities_by_name = {c['name']: c for c in response.data['capabilities']}
+        self.assertEqual(
+            capabilities_by_name['mapper.match_operations'],
+            {'name': 'mapper.match_operations', 'limit': 100, 'used': 0})
+        self.assertEqual(
+            capabilities_by_name['mapper.rows_per_project'],
+            {'name': 'mapper.rows_per_project', 'limit': 25, 'used': 0})
+        self.assertEqual(
+            capabilities_by_name['mapper.projects'], {'name': 'mapper.projects', 'limit': 1, 'used': 0})
+        self.assertEqual(
+            capabilities_by_name['ai_assistant.calls'], {'name': 'ai_assistant.calls', 'limit': 6, 'used': 0})
+
+    def test_user_detail_excludes_capabilities_by_default(self):
+        user = UserProfileFactory()
+
+        response = self.client.get('/user/', HTTP_AUTHORIZATION=f"Token {user.get_token()}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('capabilities', response.data)
+        self.assertNotIn('permissions', response.data)
 
     def test_user_detail_include_verification_token_allow_any(self):
         user = UserProfileFactory(username='verificationtokenuser')
