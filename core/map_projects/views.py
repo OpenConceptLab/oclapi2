@@ -4,8 +4,8 @@ from rest_framework.generics import RetrieveUpdateDestroyAPIView, RetrieveAPIVie
     RetrieveUpdateAPIView
 from rest_framework.response import Response
 
-from core.capabilities.constants import CAPABILITY_EXCEEDED_ERROR_CODE, MAPPER_ROWS_PER_PROJECT_CAPABILITY, \
-    MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID
+from core.capabilities.constants import CAPABILITY_EXCEEDED_ERROR_CODE, MAPPER_PROJECTS_CAPABILITY_ID, \
+    MAPPER_ROWS_PER_PROJECT_CAPABILITY, MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin
 from core.common.permissions import CanEditConceptDictionary, CanCreateOrgMapProjects, \
     CanUseCustomMapperAlgorithms, HasMapProjectParentOwnership, HasMapProjectCapacity
@@ -74,6 +74,10 @@ class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListW
         if serializer.is_valid():
             instance = serializer.save(force_insert=True)
             if serializer.is_valid():
+                # The permission class checks capacity before creation; record actual usage only after save succeeds.
+                request.user.check_and_consume_capability(
+                    MAPPER_PROJECTS_CAPABILITY_ID, action='create_map_project', map_project=instance
+                )
                 headers = self.get_success_headers(serializer.data)
                 serializer = self.get_serializer(instance)
                 return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)

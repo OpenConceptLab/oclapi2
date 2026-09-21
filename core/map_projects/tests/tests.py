@@ -206,6 +206,12 @@ class MapProjectListViewTest(MapProjectAbstractViewTest):
         self.assertIsNotNone(response.data['id'])
         self.assertEqual(self.org.map_projects.count(), 1)
         self.assertEqual(response.data.get('input_locales'), ['pt-BR'])
+        from core.capabilities.constants import MAPPER_PROJECTS_CAPABILITY_ID
+        from core.capabilities.models import UsageEvent
+        self.assertEqual(self.user.get_capability_usage(MAPPER_PROJECTS_CAPABILITY_ID), 1)
+        event = UsageEvent.objects.get(user=self.user, action='create_map_project')
+        self.assertEqual(event.capability_id, MAPPER_PROJECTS_CAPABILITY_ID)
+        self.assertEqual(event.map_project_id, response.data['id'])
         upload_mock.assert_called_once_with(
             key=f"map_projects/{response.data['id']}/input.csv", file_content=ANY)
 
