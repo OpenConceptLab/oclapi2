@@ -1,3 +1,4 @@
+import json
 import time
 
 from cid.locals import get_cid
@@ -25,6 +26,10 @@ from core.common.constants import (
     HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE, LIMIT_PARAM, LIST_DEFAULT_LIMIT)
 from core.common.exceptions import Http400, Http403, Http409
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
+from core.capabilities.constants import CAPABILITY_EXCEEDED_ERROR_CODE, MAPPER_MATCH_OPERATIONS_CAPABILITY, \
+    MAPPER_MATCH_OPERATIONS_CAPABILITY_ID
+from core.capabilities.exceptions import CapabilityExceeded
+from core.common.permissions import CanUseMapper
 from core.common.search import CustomESSearch, Reranker
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, sort_asc_param, verbose_param,
@@ -880,12 +885,48 @@ class ConceptsHierarchyAmendAdminView(APIView):  # pragma: no cover
         )
 
 
+def get_match_operations_attribution(request):
+    """
+    oclmap tags every $match call with an X-OCL-Event-Metadata header
+    (core/services/attribution.js) carrying, among other things, `algorithm_id`
+    and `map_project_id` - the same call has neither in its JSON body (map_config
+    describes matching logic, not which single algorithm this call belongs to,
+    and there's no project reference at all). oclapi2 doesn't otherwise parse
+    this header (it's only forwarded to analytics - see
+    AnalyticsEventEmitter.ALLOWED_REQUEST_HEADERS); this pulls just enough out
+    of it to enrich the mapper.match_operations UsageEvent audit row. Best
+    effort: a missing/malformed header never blocks the match, it only means
+    the UsageEvent stays algorithm=None/map_project=None.
+    """
+    raw = request.META.get('HTTP_X_OCL_EVENT_METADATA')
+    if not raw:
+        return None, None
+    try:
+        metadata = json.loads(raw)
+    except (TypeError, ValueError):
+        return None, None
+    if not isinstance(metadata, dict):
+        return None, None
+
+    algorithm_id = metadata.get('algorithm_id')
+    if algorithm_id is not None:
+        algorithm_id = str(algorithm_id)[:100]  # UsageEvent.algorithm is a CharField(max_length=100)
+
+    map_project = None
+    map_project_id = metadata.get('map_project_id')
+    if isinstance(map_project_id, (str, int)) and str(map_project_id).isdigit():
+        from core.map_projects.models import MapProject
+        map_project = MapProject.objects.filter(id=int(map_project_id)).first()
+
+    return algorithm_id, map_project
+
+
 class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
     default_limit = 1
     score_threshold = 0.9
     score_threshold_semantic_very_high = 0.9
     serializer_class = ConceptListSerializer
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, CanUseMapper)
     es_fields = Concept.es_fields
 
     def get_throttles(self):
@@ -1100,16 +1141,27 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         responses={
             200: 'List of matched results per input row',
             400: 'Missing required parameters (rows, target_repo_url/target_repo)',
-            403: 'User not approved for $match or on waitlist',
+            403: 'User does not have Mapper access',
         }
     )
     def post(self, request, **kwargs):  # pylint: disable=unused-argument
-        user = self.request.user
-        if user.is_mapper_waitlisted or not user.is_mapper_approved:
-            return Response(
-                {'detail': 'You are currently in waitlist for $match operation.'},
-                status=status.HTTP_403_FORBIDDEN
-            )
+        rows = request.data.get('rows')
+        if isinstance(rows, list) and rows:
+            algorithm_id, map_project = get_match_operations_attribution(request)
+            try:
+                request.user.check_and_consume_capability(
+                    MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, units=len(rows), action='match_concepts',
+                    algorithm=algorithm_id, map_project=map_project
+                )
+            except CapabilityExceeded as ex:
+                return Response(
+                    {
+                        'detail': 'Match operation limit reached.',
+                        'error_code': CAPABILITY_EXCEEDED_ERROR_CODE[MAPPER_MATCH_OPERATIONS_CAPABILITY],
+                        'limit': ex.limit, 'used': ex.used,
+                    },
+                    status=status.HTTP_403_FORBIDDEN
+                )
         results = self.filter_queryset()
         response = Response(results)
         # num_returned is picked up by the analytics middleware as
@@ -1124,16 +1176,10 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
 class RerankConceptsListView(BaseAPIView):
     is_searchable = False
     serializer_class = ConceptListSerializer
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, CanUseMapper)
 
     def post(self, request, **kwargs):  # pylint: disable=unused-argument,too-many-return-statements
         user = self.request.user
-        if user.is_mapper_waitlisted or not user.is_mapper_approved:
-            return Response(
-                {'detail': 'You are currently in waitlist for this operation.'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
         rows = self.request.data.get('rows', [])
         name_key = self.request.data.get('name_key', None) or 'display_name'
         text = self.request.data.get('q', None)

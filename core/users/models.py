@@ -16,8 +16,7 @@ from core.common.mixins import SourceContainerMixin
 from core.common.models import BaseModel, CommonLogoModel
 from core.common.tasks import send_user_verification_email, send_user_reset_password_email
 from core.common.utils import web_url
-from core.users.constants import AUTH_GROUPS, MAPPER_WAITLIST_GROUP, STAFF_GROUP, SUPERADMIN_GROUP, GUEST_GROUP, \
-    MAPPER_APPROVED_GROUP, CORE_USER_GROUP
+from core.users.constants import AUTH_GROUPS, STAFF_GROUP, SUPERADMIN_GROUP, GUEST_GROUP, CORE_USER_GROUP
 from .constants import USER_OBJECT_TYPE
 from ..common.checksums import ChecksumModel
 
@@ -230,29 +229,12 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
         return self.groups.filter(name=group_name).exists()
 
     @property
-    def is_mapper_waitlisted(self):
-        return self.has_auth_group(MAPPER_WAITLIST_GROUP)
-
-    @property
-    def is_mapper_approved(self):
-        return self.has_auth_group(MAPPER_APPROVED_GROUP)
-
-    @property
     def is_guest_group(self):
         return self.has_auth_group(GUEST_GROUP)
 
     @property
     def is_core_group(self):
-        """Return whether the user belongs to the elevated core auth group."""
         return self.has_auth_group(CORE_USER_GROUP)
-
-    @property
-    def is_staff_group(self):
-        return self.has_auth_group(STAFF_GROUP)
-
-    @property
-    def is_superadmin_group(self):
-        return self.has_auth_group(SUPERADMIN_GROUP)
 
     @property
     def capabilities(self):

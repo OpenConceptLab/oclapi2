@@ -268,6 +268,7 @@ class OCLAPITransactionTestCase(APITransactionTestCase, BaseTestCase):
     def setUpClass(cls):
         super().setUpClass()
         call_command("loaddata", "core/fixtures/base_entities.yaml")
+        call_command("loaddata", "core/fixtures/capabilities.yaml")
         call_command("loaddata", "core/fixtures/toggles.json")
         org = Organization.objects.get(id=1)
         org.members.add(1)
@@ -278,6 +279,7 @@ class OCLAPITestCase(APITestCase, BaseTestCase):
     def setUpClass(cls):
         super().setUpClass()
         call_command("loaddata", "core/fixtures/base_entities.yaml")
+        call_command("loaddata", "core/fixtures/capabilities.yaml")
         call_command("loaddata", "core/fixtures/toggles.json")
         org = Organization.objects.get(id=1)
         org.members.add(1)
@@ -293,6 +295,7 @@ class OCLTestCase(TestCase, BaseTestCase):
         super().setUpClass()
         call_command("loaddata", "core/fixtures/base_entities.yaml")
         call_command("loaddata", "core/fixtures/auth_groups.yaml")
+        call_command("loaddata", "core/fixtures/capabilities.yaml")
         call_command("loaddata", "core/fixtures/toggles.json")
 
     @staticmethod

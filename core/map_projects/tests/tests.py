@@ -1,5 +1,6 @@
 import json
 
+from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError
 from mock import patch, ANY, Mock
@@ -11,6 +12,7 @@ from core.map_projects.models import MapProject
 from core.map_projects.views import AutomatchRunListView
 from core.map_projects.tests.factories import MapProjectFactory, AutomatchRunFactory
 from core.orgs.tests.factories import OrganizationFactory
+from core.users.constants import PREVIEW_GROUP_NAME
 from core.users.tests.factories import UserProfileFactory
 
 
@@ -165,6 +167,7 @@ class MapProjectAbstractViewTest(OCLAPITestCase):
         super().setUp()
 
         self.user = UserProfileFactory()
+        self.user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
         self.org = OrganizationFactory(mnemonic='CIEL')
         self.org.members.add(self.user)
 
@@ -174,6 +177,11 @@ class MapProjectAbstractViewTest(OCLAPITestCase):
 class MapProjectListViewTest(MapProjectAbstractViewTest):
     @patch('core.services.storages.cloud.aws.S3.upload')
     def test_post(self, upload_mock):
+        # Org-owned projects are gated behind mapper.org_projects (core.capabilities R10) -
+        # this test is about org-project creation mechanics, not the preview gate.
+        from django.contrib.auth.models import Permission
+        self.user.user_permissions.add(Permission.objects.get(codename='mapper_org_projects'))
+
         data = {
             'name': 'Test Project',
             'file': self.file,
@@ -200,6 +208,45 @@ class MapProjectListViewTest(MapProjectAbstractViewTest):
         self.assertEqual(response.data.get('input_locales'), ['pt-BR'])
         upload_mock.assert_called_once_with(
             key=f"map_projects/{response.data['id']}/input.csv", file_content=ANY)
+
+    def test_post_org_project_denied_without_permission(self):
+        response = self.client.post(
+            '/orgs/CIEL/map-projects/',
+            data={'name': 'Test Project', 'columns': json.dumps([])},
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['error_code'], 'mapper_org_projects_denied')
+        self.assertEqual(self.org.map_projects.count(), 0)
+
+    @patch('core.services.storages.cloud.aws.S3.upload')
+    def test_post_custom_algorithm_denied_without_permission(self, _upload_mock):
+        response = self.client.post(
+            f'/users/{self.user.username}/map-projects/',
+            data={
+                'name': 'Test Project',
+                'file': self.file,
+                'columns': json.dumps([]),
+                'algorithms': json.dumps([{'type': 'custom', 'url': 'https://example.com/match'}]),
+            },
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['error_code'], 'mapper_custom_algorithms_denied')
+
+    def test_post_project_limit_reached(self):
+        from core.map_projects.tests.factories import MapProjectFactory
+        MapProjectFactory(organization=None, user=self.user, created_by=self.user)
+
+        response = self.client.post(
+            f'/users/{self.user.username}/map-projects/',
+            data={'name': 'One Too Many', 'columns': json.dumps([])},
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['error_code'], 'mapper_projects_limit_reached')
+        self.assertEqual(response.data['limit'], 1)
+        self.assertEqual(response.data['used'], 1)
 
     def test_get(self):
         response = self.client.get(
@@ -251,6 +298,8 @@ class MapProjectListViewTest(MapProjectAbstractViewTest):
 class MapProjectViewTest(MapProjectAbstractViewTest):
     def setUp(self):
         super().setUp()
+        from django.contrib.auth.models import Permission
+        self.user.user_permissions.add(Permission.objects.get(codename='mapper_org_projects'))
         self.project = MapProjectFactory(organization=self.org, name="Project 1")
         self.project.save()
         self.assertEqual(self.org.map_projects.count(), 1)
@@ -358,6 +407,14 @@ class AutomatchRunListViewTest(MapProjectAbstractViewTest):
         self.url = f'/orgs/CIEL/map-projects/{self.project.id}/auto-match-runs/'
 
     def test_post_creates_run(self):
+        # 200 rows exceeds the preview row-per-project cap by design (core.capabilities) -
+        # this test is about AutomatchRun creation mechanics, not preview limits, so grant
+        # headroom. match_operations isn't metered here (see MetadataToConceptsListView).
+        from core.capabilities.constants import MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID
+        from core.capabilities.models import UserCapabilityOverride
+        UserCapabilityOverride.objects.create(
+            user=self.user, capability_id=MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID, limit=1000)
+
         response = self.client.post(
             self.url,
             data={
@@ -418,6 +475,52 @@ class AutomatchRunListViewTest(MapProjectAbstractViewTest):
             HTTP_AUTHORIZATION='Token ' + self.user.get_token())
         self.assertEqual(response.status_code, 400)
         self.assertIn('trigger_source', response.data)
+
+    def test_post_rows_per_project_limit_reached(self):
+        response = self.client.post(
+            self.url,
+            data={'intended_rows': 26, 'trigger_source': 'ui-auto-match', 'config_snapshot': {}},
+            format='json', HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['error_code'], 'mapper_rows_per_project_limit_reached')
+        self.assertEqual(response.data['limit'], 25)
+        self.assertEqual(response.data['used'], 0)
+        self.assertEqual(self.project.auto_match_runs.count(), 0)
+
+    def test_post_rows_per_project_accumulates_across_top_level_runs(self):
+        response1 = self.client.post(
+            self.url,
+            data={'intended_rows': 20, 'trigger_source': 'ui-auto-match', 'config_snapshot': {}},
+            format='json', HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+        )
+        self.assertEqual(response1.status_code, 201)
+
+        response2 = self.client.post(
+            self.url,
+            data={'intended_rows': 10, 'trigger_source': 'ui-auto-match', 'config_snapshot': {}},
+            format='json', HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+        )
+        self.assertEqual(response2.status_code, 403)
+        self.assertEqual(response2.data['error_code'], 'mapper_rows_per_project_limit_reached')
+        self.assertEqual(response2.data['used'], 20)
+
+    def test_post_retry_skips_rows_per_project_check(self):
+        parent = AutomatchRunFactory(
+            map_project=self.project, intended_rows=25, completed_rows=15,
+            failed_rows=10, completion_status='partial')
+
+        response = self.client.post(
+            self.url,
+            data={
+                'intended_rows': 10, 'trigger_source': 'ui-rerun-row', 'parent_run': parent.id,
+                'config_snapshot': {'algorithms': ['ocl-search']},
+            },
+            format='json', HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+        )
+        # 25 top-level rows already "used" would normally block any further
+        # non-retry run, but a retry is exempt from the rows_per_project check.
+        self.assertEqual(response.status_code, 201)
 
     def test_post_rerun_links_parent_and_leaves_parent_immutable(self):
         # A failed-row re-run is a NEW run pointing at the parent; the parent's

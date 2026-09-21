@@ -4,8 +4,11 @@ from rest_framework.generics import RetrieveUpdateDestroyAPIView, RetrieveAPIVie
     RetrieveUpdateAPIView
 from rest_framework.response import Response
 
+from core.capabilities.constants import CAPABILITY_EXCEEDED_ERROR_CODE, MAPPER_ROWS_PER_PROJECT_CAPABILITY, \
+    MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin
-from core.common.permissions import HasOwnership, CanEditConceptDictionary
+from core.common.permissions import CanEditConceptDictionary, CanCreateOrgMapProjects, \
+    CanUseCustomMapperAlgorithms, HasMapProjectParentOwnership, HasMapProjectCapacity
 from core.common.views import BaseAPIView
 from core.map_projects.models import MapProject, AutomatchRun
 from core.map_projects.serializers import MapProjectCreateUpdateSerializer, \
@@ -19,6 +22,27 @@ class MapProjectBaseView(BaseAPIView):
     queryset = MapProject.objects.filter(is_active=True)
     permission_classes = (CanEditConceptDictionary,)
     serializer_class = MapProjectListSerializer
+
+    def get_permissions(self):
+        method = self.request.method
+        if method == 'POST' and isinstance(self, ConceptDictionaryCreateMixin):
+            # Map project creation: no MapProject object exists yet to run
+            # CanEditConceptDictionary's object-level check against, so ownership
+            # is checked on the URL-scoped parent (org/user) instead.
+            permission_classes = (
+                HasMapProjectParentOwnership, CanCreateOrgMapProjects, HasMapProjectCapacity,
+                CanUseCustomMapperAlgorithms,
+            )
+        elif method in ('PUT', 'PATCH'):
+            permission_classes = (CanEditConceptDictionary, CanCreateOrgMapProjects, CanUseCustomMapperAlgorithms)
+        elif method == 'DELETE':
+            # A user who couldn't create an org-owned project shouldn't be able to
+            # delete one either; CanEditConceptDictionary still gates on the
+            # project itself via get_object()/check_object_permissions.
+            permission_classes = (CanEditConceptDictionary, CanCreateOrgMapProjects)
+        else:
+            permission_classes = self.permission_classes
+        return [permission() for permission in permission_classes]
 
 
 class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListWithHeadersMixin):
@@ -45,9 +69,7 @@ class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListW
     def create(self, request, **kwargs):  # pylint: disable=unused-argument
         if not self.parent_resource:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
-        permission = HasOwnership()
-        if not permission.has_object_permission(request, self, self.parent_resource):
-            return Response(status=status.HTTP_403_FORBIDDEN)
+
         serializer = self.get_serializer(data=MapProject.format_request_data(request.data, self.parent_resource))
         if serializer.is_valid():
             instance = serializer.save(force_insert=True)
@@ -178,6 +200,33 @@ class AutomatchRunListView(AutomatchRunBaseView, ListWithHeadersMixin):
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+
+        map_project = self.get_map_project()
+        intended_rows = serializer.validated_data['intended_rows']
+        is_retry = bool(serializer.validated_data.get('parent_run'))
+
+        # mapper.match_operations is metered per row-algorithm pair at $match
+        # time (MetadataToConceptsListView.post()), not here - a run's actual
+        # $match calls (one per algorithm per row-batch, fired as the run
+        # executes) already account for every unit this run will use. Consuming
+        # it again at run creation double-counted the whole run. rows_per_project
+        # is project-scoped and genuinely belongs here: it caps how large a run
+        # can even be declared, independent of how much match-operations quota
+        # is left.
+        if not is_retry:
+            rows_limit = request.user.get_capability_limit(MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID)
+            if rows_limit is not None:
+                rows_used = map_project.rows_used
+                if rows_used + intended_rows > rows_limit:
+                    return Response(
+                        {
+                            'detail': 'Preview row limit for this project reached.',
+                            'error_code': CAPABILITY_EXCEEDED_ERROR_CODE[MAPPER_ROWS_PER_PROJECT_CAPABILITY],
+                            'limit': rows_limit, 'used': rows_used,
+                        },
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+
         run = serializer.save(
             map_project=self.get_map_project(),
             started_by=request.user,

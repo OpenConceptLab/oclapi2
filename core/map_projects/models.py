@@ -5,6 +5,7 @@ from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models, IntegrityError
+from django.db.models import Sum
 from pydash import get
 
 from core.common.constants import PERSIST_NEW_ERROR_MESSAGE
@@ -93,6 +94,16 @@ class MapProject(BaseModel):
             'columns': [col.get('label') for col in self.visible_columns],
         }
 
+    @property
+    def rows_used(self):
+        """
+        `mapper.rows_per_project` is project-scoped, not user-scoped, and is already
+        fully derivable from AutomatchRun - no separate counter needed. Retries
+        (parent_run set) re-attempt already-declared rows, so only top-level runs
+        count toward the project's declared size.
+        """
+        return self.auto_match_runs.filter(parent_run__isnull=True).aggregate(total=Sum('intended_rows'))['total'] or 0
+
     def calculate_uri(self):
         return self.parent.uri + "map-projects/" + str((self.id or generate_temp_version())) + "/"
 
@@ -165,7 +176,7 @@ class MapProject(BaseModel):
 
     def delete(self, using=None, keep_parents=False):
         file_path = self.file_path
-        result =  super().delete(using=using, keep_parents=keep_parents)
+        result = super().delete(using=using, keep_parents=keep_parents)
         self._delete_uploaded_file(file_path)
         return result
 
