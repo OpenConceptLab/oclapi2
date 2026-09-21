@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.generics import RetrieveUpdateDestroyAPIView, RetrieveAPIView, CreateAPIView, \
@@ -6,6 +7,7 @@ from rest_framework.response import Response
 
 from core.capabilities.constants import CAPABILITY_EXCEEDED_ERROR_CODE, MAPPER_PROJECTS_CAPABILITY_ID, \
     MAPPER_ROWS_PER_PROJECT_CAPABILITY, MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID
+from core.capabilities.exceptions import CapabilityExceeded
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin
 from core.common.permissions import CanEditConceptDictionary, CanCreateOrgMapProjects, \
     CanUseCustomMapperAlgorithms, HasMapProjectParentOwnership, HasMapProjectCapacity
@@ -255,14 +257,13 @@ class AutomatchRunView(AutomatchRunBaseView, RetrieveUpdateAPIView):
     Addressed by run id at the top level, e.g. ``/auto-match-runs/<run>/``; the
     Mapper UI PATCHes progress/completion here without threading the owner path.
     """
-    # Updates are PATCH-only (the run-start snapshot is immutable, so a whole-object
-    # PUT has no meaning here). get_object is fully overridden below for project-scoped
-    # authz, so lookup_field/pk_field are unused.
-    http_method_names = ['get', 'patch', 'head', 'options']
+    # Updates only touch lifecycle fields. get_object is fully overridden below for
+    # project-scoped authz, so lookup_field/pk_field are unused.
+    http_method_names = ['get', 'patch', 'put', 'head', 'options']
     lookup_url_kwarg = 'run'
 
     def get_serializer_class(self):
-        if self.request.method == 'PATCH':
+        if self.request.method in ('PATCH', 'PUT'):
             return AutomatchRunUpdateSerializer
         return AutomatchRunDetailSerializer
 
@@ -275,6 +276,35 @@ class AutomatchRunView(AutomatchRunBaseView, RetrieveUpdateAPIView):
         # ownership there (ocl_online#105 OQ2). The run id is not a boundary.
         self.check_object_permissions(self.request, run.map_project)
         return run
+
+    def update(self, request, *args, **kwargs):
+        """Persist lifecycle progress and meter newly completed rows."""
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+
+        completed_rows = serializer.validated_data.get('completed_rows')
+        completed_rows_delta = max((completed_rows or 0) - instance.completed_rows, 0)
+        try:
+            with transaction.atomic():
+                self.perform_update(serializer)
+                if completed_rows_delta:
+                    request.user.check_and_consume_capability(
+                        MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID, units=completed_rows_delta,
+                        action='complete_automatch_rows', map_project=instance.map_project, run=instance
+                    )
+        except CapabilityExceeded as ex:
+            return Response(
+                {
+                    'detail': 'Preview row limit for this project reached.',
+                    'error_code': CAPABILITY_EXCEEDED_ERROR_CODE[MAPPER_ROWS_PER_PROJECT_CAPABILITY],
+                    'limit': ex.limit, 'used': ex.used,
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        return Response(serializer.data)
 
     def perform_update(self, serializer):
         serializer.save(updated_by=self.request.user)
