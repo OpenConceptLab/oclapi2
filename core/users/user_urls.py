@@ -1,5 +1,6 @@
 from django.urls import path, include
 
+from core.capabilities.views import UserCapabilityOverrideListView, UserCapabilityOverrideDetailView
 from core.orgs import views as orgs_views
 from core.repos.views import OrganizationRepoListView
 from core.url_registry.views import OrganizationURLRegistryListView
@@ -50,6 +51,18 @@ urlpatterns = [
         views.UserExtraRetrieveUpdateDestroyView.as_view(),
         extra_kwargs,
         name='user-extra'
+    ),
+    path(
+        'capabilities/overrides/',
+        UserCapabilityOverrideListView.as_view(),
+        extra_kwargs,
+        name='user-self-capability-override-list'
+    ),
+    path(
+        'capabilities/overrides/<str:capability>/',
+        UserCapabilityOverrideDetailView.as_view(),
+        extra_kwargs,
+        name='user-self-capability-override-detail'
     ),
     path('sources/', include('core.sources.urls'), extra_kwargs),
     path('collections/', include('core.collections.urls'), extra_kwargs),

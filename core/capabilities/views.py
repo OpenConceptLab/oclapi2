@@ -1,11 +1,16 @@
+from django.http import Http404
 from rest_framework import status
+from rest_framework.generics import RetrieveUpdateDestroyAPIView, get_object_or_404
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.capabilities.constants import CAPABILITY_EXCEEDED_ERROR_CODE, CAPABILITY_ID_BY_NAME
 from core.capabilities.exceptions import CapabilityExceeded
-from core.capabilities.models import UsageCounter
+from core.capabilities.models import UsageCounter, UserCapabilityOverride
+from core.capabilities.serializers import UserCapabilityOverrideSerializer
+from core.common.mixins import ListWithHeadersMixin
+from core.common.views import BaseAPIView
 
 
 class CapabilityBaseView(APIView):
@@ -106,3 +111,65 @@ class CapabilityRefundView(CapabilityBaseView):
             },
             status=status.HTTP_200_OK
         )
+
+
+class UserCapabilityOverrideBaseView(BaseAPIView):
+    permission_classes = (IsAdminUser,)
+    serializer_class = UserCapabilityOverrideSerializer
+    is_searchable = False
+    default_qs_sort_attr = 'capability__name'
+
+    def get_user(self):
+        # drf_yasg instantiates the view with no real URL kwargs to introspect the
+        # serializer for /swagger/ - self.kwargs.get('user') is None then, so the
+        # real lookup below would 404 on every schema build.
+        if getattr(self, 'swagger_fake_view', False):
+            return None
+        if self.kwargs.get('user_is_self'):
+            return self.request.user
+
+        from core.users.models import UserProfile
+        return get_object_or_404(UserProfile.objects.filter(username=self.kwargs.get('user')))
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['user'] = self.get_user()
+        return context
+
+    def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return UserCapabilityOverride.objects.none()
+        return self.get_user().capability_overrides
+
+
+class UserCapabilityOverrideListView(UserCapabilityOverrideBaseView, ListWithHeadersMixin):
+    def get_queryset(self):
+        return super().get_queryset().select_related('capability').all()
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
+
+
+class UserCapabilityOverrideDetailView(UserCapabilityOverrideBaseView, RetrieveUpdateDestroyAPIView):
+    def get_capability_id(self):
+        capability_id = CAPABILITY_ID_BY_NAME.get(self.kwargs['capability'])
+        if capability_id is None:
+            raise Http404()
+        return capability_id
+
+    def get_object(self, queryset=None):  # pylint: disable=arguments-differ
+        return get_object_or_404(
+            self.get_queryset().filter(capability_id=self.get_capability_id()).select_related('capability'))
+
+    def update(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        obj, _created = UserCapabilityOverride.objects.update_or_create(
+            user=self.get_user(), capability_id=self.get_capability_id(),
+            defaults={'limit': serializer.validated_data['limit']}
+        )
+        return Response(self.get_serializer(obj).data)
+
+    def destroy(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        self.get_object().delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

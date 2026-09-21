@@ -1,5 +1,6 @@
 from django.urls import include, path
 
+from core.capabilities.views import UserCapabilityOverrideListView, UserCapabilityOverrideDetailView
 from core.orgs import views as org_views
 from core.tasks import views as task_views
 from . import views
@@ -44,6 +45,12 @@ urlpatterns = [
         '<str:user>/orgs/map-projects/',
         OrganizationMapProjectListView.as_view(), name='userprofile-organization-map-project-list',),
     path("<str:user>/extras/<str:extra>/", views.UserExtraRetrieveUpdateDestroyView.as_view(), name='user-extra'),
+    path(
+        '<str:user>/capabilities/overrides/',
+        UserCapabilityOverrideListView.as_view(), name='user-capability-override-list'),
+    path(
+        '<str:user>/capabilities/overrides/<str:capability>/',
+        UserCapabilityOverrideDetailView.as_view(), name='user-capability-override-detail'),
     path('<str:user>/repos/', include('core.repos.urls')),
     path('<str:user>/url-registry/', include('core.url_registry.urls')),
     path('<str:user>/sources/', include('core.sources.urls')),
