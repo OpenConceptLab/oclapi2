@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError
 from django.db.models import F, Q
+from django.db.models.functions import Upper
 from pydash import get, compact, has
 
 from core.common.checksums import ChecksumModel
@@ -165,6 +166,11 @@ class ConceptName(AbstractLocalizedText):
                           name='preferred_locale',
                           fields=['concept', 'locale_preferred', 'locale', '-created_at'],
                           condition=Q(locale_preferred=True, retired=False)
+                      ),
+                      models.Index(
+                          Upper('name'), 'locale',
+                          name='concept_nam_upper_locale_idx',
+                          condition=Q(retired=False)
                       ),
                   ]
 
