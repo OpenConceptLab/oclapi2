@@ -10,7 +10,7 @@ class Capability(models.Model):
     description = models.TextField(blank=True, default='')
 
     def __str__(self):
-        return self.name
+        return str(self.name or self.__class__.__name__)
 
 
 class GroupCapability(models.Model):

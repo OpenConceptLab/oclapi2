@@ -235,7 +235,6 @@ class MapProjectListViewTest(MapProjectAbstractViewTest):
         self.assertEqual(response.data['error_code'], 'mapper_custom_algorithms_denied')
 
     def test_post_project_limit_reached(self):
-        from core.map_projects.tests.factories import MapProjectFactory
         MapProjectFactory(organization=None, user=self.user, created_by=self.user)
 
         response = self.client.post(

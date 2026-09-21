@@ -11,7 +11,8 @@ from core.common.tasks import send_user_verification_email, send_user_reset_pass
 from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.orgs.models import Organization
 from core.sources.tests.factories import OrganizationSourceFactory
-from core.users.constants import USER_OBJECT_TYPE, OCL_SERVERS_GROUP
+from core.users.constants import USER_OBJECT_TYPE, OCL_SERVERS_GROUP, PREVIEW_GROUP_NAME, MAPPER_USE_PERMISSION, \
+    MAPPER_AI_ASSISTANT_PERMISSION
 from core.users.documents import UserProfileDocument
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
@@ -273,8 +274,6 @@ class UserProfileTest(OCLTestCase):
         # Django never assigns the `preview` group itself - Keycloak grants it at
         # signup and every login syncs it via the existing OIDC backend/set_groups().
         # This only verifies the permission side once a user is a member.
-        from django.contrib.auth.models import Group
-        from core.users.constants import PREVIEW_GROUP_NAME, MAPPER_AI_ASSISTANT_PERMISSION, MAPPER_USE_PERMISSION
 
         user = UserProfileFactory()
         user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
@@ -283,8 +282,6 @@ class UserProfileTest(OCLTestCase):
         self.assertTrue(user.has_perm(MAPPER_AI_ASSISTANT_PERMISSION))
 
     def test_user_without_preview_group_has_no_mapper_permission(self):
-        from core.users.constants import MAPPER_USE_PERMISSION
-
         user = UserProfileFactory()
 
         self.assertFalse(user.has_perm(MAPPER_USE_PERMISSION))
@@ -623,8 +620,6 @@ class UserViewsAPITest(OCLAPITestCase):
         self.assertEqual(response.data['username'], 'selfshortcutuser')
 
     def test_user_detail_includes_capabilities_when_requested(self):
-        from django.contrib.auth.models import Group
-        from core.users.constants import PREVIEW_GROUP_NAME
         user = UserProfileFactory()
         user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
 
