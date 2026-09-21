@@ -1,4 +1,6 @@
 from django.core.exceptions import ValidationError
+from django.db.models import Value
+from django.db.models.functions import MD5, Upper
 from pydash import get
 
 from core.common.constants import LOOKUP_CONCEPT_CLASSES
@@ -111,6 +113,8 @@ class OpenMRSConceptValidator(BaseConceptValidator):
             type__in=(*LOCALES_SHORT, *LOCALES_SEARCH_INDEX_TERM, '', None)
         ).exclude(
             type__isnull=True
+        ).alias(
+            name_upper_md5=MD5(Upper('name'))
         ).filter(
             concept__parent=self.repo,
             concept__is_active=True,
@@ -118,6 +122,7 @@ class OpenMRSConceptValidator(BaseConceptValidator):
             concept__is_latest_version=True,
             locale=name.locale,
             name__iexact=name.name,
+            name_upper_md5=MD5(Upper(Value(name.name))),
             retired=False,
             **filters
         ).exists()
