@@ -268,8 +268,13 @@ class OCLAPITransactionTestCase(APITransactionTestCase, BaseTestCase):
     def setUpClass(cls):
         super().setUpClass()
         call_command("loaddata", "core/fixtures/base_entities.yaml")
+        call_command("loaddata", "core/fixtures/auth_groups.yaml")
         call_command("loaddata", "core/fixtures/capabilities.yaml")
         call_command("loaddata", "core/fixtures/toggles.json")
+        # GroupCapability rows (the preview group's default caps) aren't in the fixture -
+        # see core/fixtures/capabilities.yaml - so they need this same non-destructive seed
+        # pre_startup.sh runs in real environments.
+        call_command("seed_group_capabilities")
         org = Organization.objects.get(id=1)
         org.members.add(1)
 
@@ -279,8 +284,10 @@ class OCLAPITestCase(APITestCase, BaseTestCase):
     def setUpClass(cls):
         super().setUpClass()
         call_command("loaddata", "core/fixtures/base_entities.yaml")
+        call_command("loaddata", "core/fixtures/auth_groups.yaml")
         call_command("loaddata", "core/fixtures/capabilities.yaml")
         call_command("loaddata", "core/fixtures/toggles.json")
+        call_command("seed_group_capabilities")
         org = Organization.objects.get(id=1)
         org.members.add(1)
 
@@ -297,6 +304,7 @@ class OCLTestCase(TestCase, BaseTestCase):
         call_command("loaddata", "core/fixtures/auth_groups.yaml")
         call_command("loaddata", "core/fixtures/capabilities.yaml")
         call_command("loaddata", "core/fixtures/toggles.json")
+        call_command("seed_group_capabilities")
 
     @staticmethod
     def factory_to_params(factory_klass, **kwargs):

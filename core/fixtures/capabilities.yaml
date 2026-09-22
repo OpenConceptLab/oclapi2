@@ -18,27 +18,10 @@
   fields:
     name: ai_assistant.calls
     description: Number of Mapper AI Assistant invocations
-- model: "capabilities.groupcapability"
-  pk: 1
-  fields:
-    group: 16  # preview - core/fixtures/auth_groups.yaml
-    capability: 1  # mapper.projects
-    limit: 1
-- model: "capabilities.groupcapability"
-  pk: 2
-  fields:
-    group: 16  # preview - core/fixtures/auth_groups.yaml
-    capability: 2  # mapper.rows_per_project
-    limit: 25
-- model: "capabilities.groupcapability"
-  pk: 3
-  fields:
-    group: 16  # preview - core/fixtures/auth_groups.yaml
-    capability: 3  # mapper.match_operations
-    limit: 100
-- model: "capabilities.groupcapability"
-  pk: 4
-  fields:
-    group: 16  # preview - core/fixtures/auth_groups.yaml
-    capability: 4  # ai_assistant.calls
-    limit: 6
+# The preview group's starting GroupCapability limits are NOT defined here: this file is
+# reloaded by `loaddata core/fixtures/*` on every container start (pre_startup.sh), and a
+# fixture row always overwrites the DB - which would silently revert any runtime tuning of
+# the preview group's own caps (e.g. via the Django admin) back to these starting values on
+# the next restart. They're seeded once, non-destructively, by `manage.py
+# seed_group_capabilities` (core/capabilities/management/commands/seed_group_capabilities.py),
+# which pre_startup.sh also runs.

@@ -5,7 +5,9 @@ from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from core.capabilities.constants import CAPABILITY_EXCEEDED_ERROR_CODE, CAPABILITY_ID_BY_NAME
+from core.capabilities.constants import (
+    CAPABILITY_EXCEEDED_ERROR_CODE, CAPABILITY_ID_BY_NAME, CAPABILITY_NOT_ENTITLED_ERROR_CODE,
+)
 from core.capabilities.exceptions import CapabilityExceeded
 from core.capabilities.models import UsageCounter, UserCapabilityOverride
 from core.capabilities.serializers import UserCapabilityOverrideSerializer
@@ -31,6 +33,42 @@ class CapabilityBaseView(APIView):
             return None, Response(status=status.HTTP_404_NOT_FOUND)
         return capability_id, None
 
+    def get_positive_int_units(self, default=1):
+        """
+        Returns (units, error_response). `units` is untrusted client input - without this,
+        a negative value passes straight through to the F('used') + units update
+        (check_and_consume_capability / UsageCounter.refund), letting a caller refund their
+        own quota (CapabilityConsumeView) or silently charge instead of refund
+        (CapabilityRefundView); a non-numeric value raises an uncaught ValueError => 500.
+        """
+        raw = self.request.data.get('units', default)
+        try:
+            units = int(raw)
+        except (TypeError, ValueError):
+            return None, Response({'detail': '"units" must be an integer.'}, status=status.HTTP_400_BAD_REQUEST)
+        if units < 1:
+            return None, Response({'detail': '"units" must be a positive integer.'}, status=status.HTTP_400_BAD_REQUEST)
+        return units, None
+
+    def get_owned_map_project_and_run(self):
+        from core.map_projects.models import AutomatchRun, MapProject
+
+        request = self.request
+        map_project = None
+        map_project_id = request.data.get('map_project', None)
+        if isinstance(map_project_id, (str, int)) and str(map_project_id).isdigit():
+            map_project = MapProject.objects.filter(id=int(map_project_id), created_by=request.user).first()
+
+        run = None
+        run_id = request.data.get('run', None)
+        if isinstance(run_id, (str, int)) and str(run_id).isdigit():
+            run_qs = AutomatchRun.objects.filter(id=int(run_id))
+            run_qs = run_qs.filter(map_project=map_project) if map_project else run_qs.filter(
+                map_project__created_by=request.user)
+            run = run_qs.first()
+
+        return map_project, run
+
 
 class CapabilityConsumeView(CapabilityBaseView):
     """
@@ -45,18 +83,26 @@ class CapabilityConsumeView(CapabilityBaseView):
         capability_id, error_response = self.get_object_id()
         if error_response:
             return error_response
-        units = int(request.data.get('units', 1))
+        units, error_response = self.get_positive_int_units()
+        if error_response:
+            return error_response
+        map_project, run = self.get_owned_map_project_and_run()
 
         try:
             request.user.check_and_consume_capability(
                 capability_id, units=units,
                 action=request.data.get('action', ''), algorithm=request.data.get('algorithm'),
+                map_project=map_project, run=run,
             )
         except CapabilityExceeded as ex:
+            not_entitled = ex.limit is None
             return Response(
                 {
-                    'detail': f'{capability_name} limit reached.',
-                    'error_code': CAPABILITY_EXCEEDED_ERROR_CODE.get(capability_name, 'capability_limit_reached'),
+                    'detail': f'You do not have access to {capability_name}.' if not_entitled else
+                    f'{capability_name} limit reached.',
+                    'error_code': CAPABILITY_NOT_ENTITLED_ERROR_CODE.get(capability_name, 'capability_not_entitled')
+                    if not_entitled else
+                    CAPABILITY_EXCEEDED_ERROR_CODE.get(capability_name, 'capability_limit_reached'),
                     'limit': ex.limit, 'used': ex.used,
                 },
                 status=status.HTTP_403_FORBIDDEN
@@ -98,7 +144,9 @@ class CapabilityRefundView(CapabilityBaseView):
         capability_id, error_response = self.get_object_id()
         if error_response:
             return error_response
-        units = int(request.data.get('units', 1))
+        units, error_response = self.get_positive_int_units()
+        if error_response:
+            return error_response
 
         UsageCounter.refund(user, capability_id, units=units)
 

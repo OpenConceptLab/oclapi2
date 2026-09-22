@@ -282,6 +282,13 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
         return self.capability_overrides.filter(capability_id=capability_id).values_list('limit', flat=True).first()
 
     def get_capability_usage(self, capability_id):
+        from core.capabilities.constants import MAPPER_PROJECTS_CAPABILITY_ID
+        if capability_id == MAPPER_PROJECTS_CAPABILITY_ID:
+            # mapper.projects is enforced against the live count (HasMapProjectCapacity),
+            # not the monotonic UsageCounter - report the same number here, or a user who
+            # deletes their one project sees "used" stay at the old total while creation
+            # (correctly) succeeds again.
+            return self.map_projects_used
         return self.usage_counters.filter(capability_id=capability_id).values_list('used', flat=True).first() or 0
 
     def check_and_consume_capability(  # pylint: disable=too-many-arguments
@@ -294,6 +301,8 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
         unlimited and always succeeds; usage is still logged. A capability with no
         override and no group row for this user at all (get_capability_limit() returns
         None) is BLOCKED, not unlimited - see get_capability_limit's docstring.
+        kill switch = remove the GroupCapability row, which resolves to None = blocked
+        (0 is NOT the kill switch - it means unlimited).
         `capability_id` must be an id of a capability already seeded (Keycloak/fixtures) -
         a bad id fails with an IntegrityError on insert rather than silently creating a
         Capability row.
@@ -316,6 +325,47 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
                 capability_id=capability_id, units=units, action=action, algorithm=algorithm,
                 map_project=map_project, run=run
             )
+
+    def log_capability_usage(  # pylint: disable=too-many-arguments
+            self, capability_id, units=1, action='', algorithm=None, map_project=None, run=None
+    ):
+        """
+        Records usage for a capability whose limit is enforced elsewhere against a live,
+        already-scoped count (e.g. mapper.rows_per_project against MapProject.rows_used)
+        rather than this running counter - so, unlike check_and_consume_capability, this
+        never raises CapabilityExceeded. Still bumps UsageCounter (get_capability_usage
+        reports it for this capability - see the /user/?includeCapabilities=true listing)
+        and always logs a UsageEvent.
+
+        Don't use this for a capability whose get_capability_usage() override already
+        bypasses UsageCounter (mapper.projects, via map_projects_used) - incrementing a
+        counter nothing ever reads, with no matching decrement on delete, is just a
+        second, silently-wrong "used" figure sitting next to the real one. Use
+        log_capability_event for those.
+        """
+        from core.capabilities.models import UsageCounter
+        with transaction.atomic():
+            UsageCounter.objects.get_or_create(user=self, capability_id=capability_id)
+            UsageCounter.objects.filter(user=self, capability_id=capability_id).update(used=F('used') + units)
+            self.usage_events.create(
+                capability_id=capability_id, units=units, action=action, algorithm=algorithm,
+                map_project=map_project, run=run
+            )
+
+    def log_capability_event(  # pylint: disable=too-many-arguments
+            self, capability_id, units=1, action='', algorithm=None, map_project=None, run=None
+    ):
+        """
+        Attribution-only logging for a capability whose "used" is entirely derived from
+        live domain state (mapper.projects -> map_projects_used) - see
+        get_capability_usage(). Writes only a UsageEvent audit row; UsageCounter is never
+        touched, so there's nothing to keep in sync (no refund-on-delete needed) and
+        nothing to drift.
+        """
+        self.usage_events.create(
+            capability_id=capability_id, units=units, action=action, algorithm=algorithm,
+            map_project=map_project, run=run
+        )
 
     @property
     def map_projects_used(self):

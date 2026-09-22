@@ -1,3 +1,37 @@
+# The 4 Mapper-gating Django permissions (ocl_issues#2780/#2782). Listed before the
+# groups below in this same file (not a separate fixture) so loaddata creates them
+# first - the preview group's `permissions` field references them by natural key,
+# which needs the row to already exist at the moment that group entry is deserialized.
+# pk is pinned so re-running `loaddata core/fixtures/*` on every container start
+# (pre_startup.sh) updates these same rows instead of inserting duplicates on the
+# unique (content_type, codename) constraint - same reasoning as the group pks below,
+# but starting well above them: auth_permission already had 252 rows (max id 252,
+# confirmed against the dev database) and keeps growing as new models are added, unlike
+# auth_group which this app fully owns.
+- model: "auth.permission"
+  pk: 1001
+  fields:
+    codename: mapper_use
+    name: Can use the Mapper ($match/$rerank) and manage own map projects
+    content_type: [users, userprofile]
+- model: "auth.permission"
+  pk: 1002
+  fields:
+    codename: mapper_ai_assistant
+    name: Can invoke the Mapper AI Assistant ($invoke)
+    content_type: [users, userprofile]
+- model: "auth.permission"
+  pk: 1003
+  fields:
+    codename: mapper_custom_algorithms
+    name: Can use externally hosted/custom match algorithms
+    content_type: [users, userprofile]
+- model: "auth.permission"
+  pk: 1004
+  fields:
+    codename: mapper_org_projects
+    name: Can create or use organization-owned map projects
+    content_type: [users, userprofile]
 - model: "auth.group"
   pk: 1
   fields:
@@ -62,3 +96,6 @@
   pk: 16
   fields:
     name: preview
+    permissions:
+      - [mapper_use, users, userprofile]
+      - [mapper_ai_assistant, users, userprofile]

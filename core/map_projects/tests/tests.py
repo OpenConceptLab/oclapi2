@@ -215,6 +215,29 @@ class MapProjectListViewTest(MapProjectAbstractViewTest):
         upload_mock.assert_called_once_with(
             key=f"map_projects/{response.data['id']}/input.csv", file_content=ANY)
 
+    @patch('core.services.storages.cloud.aws.S3.upload')
+    def test_post_via_current_user_shortcut(self, _upload_mock):
+        # Regression for the /user/ self-shortcut route (core/users/user_urls.py,
+        # user_is_self=True): set_parent_resource() used to read self.user_is_self,
+        # which BaseAPIView.initialize() only sets AFTER check_permissions() has
+        # already run (see core/common/views.py:initial) - so at permission-check
+        # time it was always the class default False, parent_resource resolved to
+        # None, and HasMapProjectParentOwnership rejected every request through this
+        # route with a 403. The other tests here all go through the explicit
+        # /users/<username>/map-projects/ route, which oclmap itself uses (so they
+        # never caught this), but /user/map-projects/ is still a published route.
+        response = self.client.post(
+            '/user/map-projects/',
+            data={
+                'name': 'Test Project',
+                'file': self.file,
+                'columns': json.dumps([{'label': 'name', 'hidden': False, 'dataKey': 'name', 'original': 'name'}]),
+            },
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(self.user.map_projects.count(), 1)
+
     def test_post_org_project_denied_without_permission(self):
         response = self.client.post(
             '/orgs/CIEL/map-projects/',
@@ -360,6 +383,37 @@ class MapProjectViewTest(MapProjectAbstractViewTest):
         self.assertEqual(response.data['input_locales'], ['en'])
         upload_mock.assert_called_once_with(
             key=f"map_projects/{response.data['id']}/input.csv", file_content=ANY)
+
+    @patch('core.common.tasks.delete_s3_objects.apply_async')
+    def test_delete_existing_org_project_without_org_projects_permission(self, _delete_s3_objects_mock):
+        # mapper_org_projects gates CREATING a new org-owned project, not modifying one
+        # that already exists - no group grants it yet, so requiring it here would make
+        # every pre-existing org-owned project undeletable for every non-superuser.
+        from django.contrib.auth.models import Permission
+        self.user.user_permissions.remove(Permission.objects.get(codename='mapper_org_projects'))
+
+        response = self.client.delete(
+            f'/orgs/CIEL/map-projects/{self.project.id}/',
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+        )
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(self.org.map_projects.count(), 0)
+
+    @patch('core.services.storages.cloud.aws.S3.upload')
+    def test_put_existing_org_project_without_org_projects_permission(self, _upload_mock):
+        from django.contrib.auth.models import Permission
+        self.user.user_permissions.remove(Permission.objects.get(codename='mapper_org_projects'))
+
+        response = self.client.put(
+            f'/orgs/CIEL/map-projects/{self.project.id}/',
+            data={
+                'name': 'Renamed', 'file': self.file,
+                'columns': json.dumps([{'label': 'name', 'hidden': False, 'dataKey': 'name', 'original': 'name'}]),
+            },
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['name'], 'Renamed')
 
 
 class MapProjectConfigurationsViewTest(MapProjectAbstractViewTest):
@@ -682,21 +736,25 @@ class AutomatchRunViewTest(MapProjectAbstractViewTest):
         self.run.refresh_from_db()
         self.assertEqual(self.run.completed_rows, 0)  # the rejected PATCH changed nothing
 
-    def test_put_consumes_completed_row_delta(self):
-        from core.capabilities.constants import MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID
-
+    def test_put_not_allowed(self):
+        # Updates are PATCH-only - the run-start snapshot is immutable, so a whole-object
+        # PUT has no meaning here (see AutomatchRunView.http_method_names).
         response = self.client.put(
             self.url, data={'completed_rows': 12, 'failed_rows': 1}, format='json',
             HTTP_AUTHORIZATION='Token ' + self.user.get_token())
-        self.assertEqual(response.status_code, 200)
-        self.run.refresh_from_db()
-        self.assertEqual(self.run.completed_rows, 12)
-        self.assertEqual(self.run.failed_rows, 1)
-        self.assertEqual(self.user.get_capability_usage(MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID), 12)
+        self.assertEqual(response.status_code, 405)
 
-    def test_patch_rows_per_project_limit_reached_rolls_back_progress(self):
+    def test_patch_progress_not_reblocked_by_a_later_lowered_override(self):
+        # mapper.rows_per_project is enforced once, at run creation, against the
+        # project-scoped, live MapProject.rows_used (AutomatchRunListView.post) - a run's
+        # declared rows are already "approved" against the cap that was in effect then.
+        # Lowering the override afterwards must not retroactively block completing that
+        # already-approved run - which is exactly what the old per-user, never-reset
+        # UsageCounter re-check on every PATCH used to do, permanently locking a user out
+        # of progress on ALL their projects (including brand new ones with zero rows) once
+        # their lifetime total crossed the new, lower limit.
         from core.capabilities.constants import MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID
-        from core.capabilities.models import UserCapabilityOverride
+        from core.capabilities.models import UsageEvent, UserCapabilityOverride
 
         UserCapabilityOverride.objects.filter(
             user=self.user, capability_id=MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID).update(limit=10)
@@ -705,14 +763,14 @@ class AutomatchRunViewTest(MapProjectAbstractViewTest):
             self.url, data={'completed_rows': 11, 'failed_rows': 2}, format='json',
             HTTP_AUTHORIZATION='Token ' + self.user.get_token())
 
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(response.data['error_code'], 'mapper_rows_per_project_limit_reached')
-        self.assertEqual(response.data['limit'], 10)
-        self.assertEqual(response.data['used'], 0)
+        self.assertEqual(response.status_code, 200)
         self.run.refresh_from_db()
-        self.assertEqual(self.run.completed_rows, 0)
-        self.assertEqual(self.run.failed_rows, 0)
-        self.assertEqual(self.user.get_capability_usage(MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID), 0)
+        self.assertEqual(self.run.completed_rows, 11)
+        self.assertEqual(self.run.failed_rows, 2)
+        # Still logged for reporting/attribution, just never gated.
+        self.assertEqual(self.user.get_capability_usage(MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID), 11)
+        event = UsageEvent.objects.get(user=self.user, action='complete_automatch_rows')
+        self.assertEqual(event.units, 11)
 
     def test_get_404_for_missing_run(self):
         response = self.client.get(

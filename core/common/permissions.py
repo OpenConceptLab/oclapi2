@@ -4,8 +4,7 @@ from core.capabilities.constants import MAPPER_PROJECTS_CAPABILITY_ID
 from core.capabilities.exceptions import MapProjectCapacityExceeded
 from core.common.constants import ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW
 from core.users.constants import (
-    MAPPER_AI_ASSISTANT_PERMISSION, MAPPER_CUSTOM_ALGORITHMS_PERMISSION, MAPPER_ORG_PROJECTS_PERMISSION,
-    MAPPER_USE_PERMISSION,
+    MAPPER_CUSTOM_ALGORITHMS_PERMISSION, MAPPER_ORG_PROJECTS_PERMISSION, MAPPER_USE_PERMISSION,
 )
 
 
@@ -117,7 +116,11 @@ class HasMapperCapability(BasePermission):
 
     def has_permission(self, request, view):
         user = request.user
-        if user and user.is_authenticated and user.has_perm(self.capability_name):
+        # is_staff is exempted the same way get_capability_limit() exempts it from every
+        # numeric cap ("the deliberate exception") - otherwise a staff account gets
+        # unlimited quota at the meter but a 403 at this gate, unable to reach the
+        # endpoint it has budget for.
+        if user and user.is_authenticated and (user.is_staff or user.has_perm(self.capability_name)):
             return True
         self.message = {'detail': self.denied_message, 'error_code': self.error_code}
         return False
@@ -125,12 +128,6 @@ class HasMapperCapability(BasePermission):
 
 class CanUseMapper(HasMapperCapability):
     capability_name = MAPPER_USE_PERMISSION
-
-
-class CanUseMapperAIAssistant(HasMapperCapability):
-    capability_name = MAPPER_AI_ASSISTANT_PERMISSION
-    error_code = 'mapper_ai_assistant_denied'
-    denied_message = 'The AI Assistant is not available for your account.'
 
 
 class CanUseCustomMapperAlgorithms(HasMapperCapability):
@@ -205,7 +202,10 @@ class HasMapProjectCapacity(BasePermission):
     def has_permission(self, request, view):
         user = request.user
         limit = user.get_capability_limit(MAPPER_PROJECTS_CAPABILITY_ID)
-        if limit == 0:  # explicit grant only - None (unconfigured) is blocked, not uncapped
+        # explicit grant only - None (unconfigured) is blocked, not uncapped.
+        # kill switch = remove the GroupCapability row, which resolves to None = blocked.
+        # (0 is NOT the kill switch - it means unlimited; see get_capability_limit's docstring.)
+        if limit == 0:
             return True
         used = user.map_projects_used
         if limit is None or used >= limit:

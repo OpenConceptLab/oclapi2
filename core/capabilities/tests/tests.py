@@ -1,6 +1,6 @@
 from django.contrib.auth.models import Group
 
-from core.capabilities.constants import MAPPER_PROJECTS_CAPABILITY_ID
+from core.capabilities.constants import MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, MAPPER_PROJECTS_CAPABILITY_ID
 from core.capabilities.exceptions import CapabilityExceeded
 from core.capabilities.models import GroupCapability, UserCapabilityOverride
 from core.common.tests import OCLAPITestCase
@@ -216,15 +216,19 @@ class CheckAndConsumeCapabilityZeroLimitTest(OCLAPITestCase):
 
     def test_zero_override_never_raises_regardless_of_usage(self):
         user = UserProfileFactory()
-        user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))  # mapper.projects limit=1
+        # mapper.match_operations (not mapper.projects): get_capability_usage() special-cases
+        # mapper.projects to report the live map_projects_used count (see UserProfile.
+        # get_capability_usage), which stays 0 here since no MapProject rows are created -
+        # this test is about the UsageCounter ledger the other capabilities still use.
+        user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))  # mapper.match_operations limit=100
         UserCapabilityOverride.objects.create(
-            user=user, capability_id=MAPPER_PROJECTS_CAPABILITY_ID, limit=0)
+            user=user, capability_id=MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, limit=0)
 
-        # would exceed the preview group's real limit of 1 many times over
-        for _ in range(10):
-            user.check_and_consume_capability(MAPPER_PROJECTS_CAPABILITY_ID)
+        # would exceed the preview group's real limit of 100 many times over
+        for _ in range(150):
+            user.check_and_consume_capability(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID)
 
-        self.assertEqual(user.get_capability_usage(MAPPER_PROJECTS_CAPABILITY_ID), 10)
+        self.assertEqual(user.get_capability_usage(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID), 150)
 
 
 class UnconfiguredCapabilityIsBlockedTest(OCLAPITestCase):
@@ -244,15 +248,18 @@ class UnconfiguredCapabilityIsBlockedTest(OCLAPITestCase):
         self.assertEqual(user.get_capability_usage(MAPPER_PROJECTS_CAPABILITY_ID), 0)
 
     def test_staff_are_unconditionally_unlimited_even_with_no_config(self):
+        # mapper.match_operations (not mapper.projects): get_capability_usage() special-cases
+        # mapper.projects to report the live map_projects_used count, which this doesn't
+        # exercise - see UserProfile.get_capability_usage.
         user = UserProfileFactory(is_staff=True)  # no groups, no override at all
 
-        self.assertEqual(user.get_capability_limit(MAPPER_PROJECTS_CAPABILITY_ID), 0)
-        user.check_and_consume_capability(MAPPER_PROJECTS_CAPABILITY_ID)
-        self.assertEqual(user.get_capability_usage(MAPPER_PROJECTS_CAPABILITY_ID), 1)
+        self.assertEqual(user.get_capability_limit(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID), 0)
+        user.check_and_consume_capability(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID)
+        self.assertEqual(user.get_capability_usage(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID), 1)
 
     def test_superusers_are_unconditionally_unlimited_even_with_no_config(self):
         user = UserProfileFactory(is_superuser=True)  # no groups, no override at all
 
-        self.assertEqual(user.get_capability_limit(MAPPER_PROJECTS_CAPABILITY_ID), 0)
-        user.check_and_consume_capability(MAPPER_PROJECTS_CAPABILITY_ID)
-        self.assertEqual(user.get_capability_usage(MAPPER_PROJECTS_CAPABILITY_ID), 1)
+        self.assertEqual(user.get_capability_limit(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID), 0)
+        user.check_and_consume_capability(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID)
+        self.assertEqual(user.get_capability_usage(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID), 1)

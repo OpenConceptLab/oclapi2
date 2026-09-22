@@ -434,7 +434,12 @@ class ConceptDictionaryCreateMixin(ConceptDictionaryMixin):
         from core.users.models import UserProfile
         org = self.kwargs.get('org', None)
         user = self.kwargs.get('user', None)
-        if not user and self.user_is_self:
+        # self.user_is_self isn't set yet when this runs from a permission class
+        # (BaseAPIView.initial() sets it from self.kwargs['user_is_self'] only after
+        # check_permissions() has already run) - read the raw kwarg too so the
+        # /user/<sub-resource>/ shortcut routes resolve their parent at permission-check
+        # time, not just from create().
+        if not user and (self.user_is_self or self.kwargs.get('user_is_self')):
             user = self.request.user.username
         parent_resource = None
         if org:

@@ -26,8 +26,8 @@ from core.common.constants import (
     HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE, LIMIT_PARAM, LIST_DEFAULT_LIMIT)
 from core.common.exceptions import Http400, Http403, Http409
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
-from core.capabilities.constants import CAPABILITY_EXCEEDED_ERROR_CODE, MAPPER_MATCH_OPERATIONS_CAPABILITY, \
-    MAPPER_MATCH_OPERATIONS_CAPABILITY_ID
+from core.capabilities.constants import CAPABILITY_EXCEEDED_ERROR_CODE, CAPABILITY_NOT_ENTITLED_ERROR_CODE, \
+    MAPPER_MATCH_OPERATIONS_CAPABILITY, MAPPER_MATCH_OPERATIONS_CAPABILITY_ID
 from core.capabilities.exceptions import CapabilityExceeded
 from core.common.permissions import CanUseMapper
 from core.common.search import CustomESSearch, Reranker
@@ -916,7 +916,11 @@ def get_match_operations_attribution(request):
     map_project_id = metadata.get('map_project_id')
     if isinstance(map_project_id, (str, int)) and str(map_project_id).isdigit():
         from core.map_projects.models import MapProject
-        map_project = MapProject.objects.filter(id=int(map_project_id)).first()
+        # Scoped to request.user: the id is client-supplied (this header), so without
+        # this a caller could attribute their UsageEvent to a project they don't own,
+        # corrupting per-project attribution even though usage still charges the right
+        # user's quota.
+        map_project = MapProject.objects.filter(id=int(map_project_id), created_by=request.user).first()
 
     return algorithm_id, map_project
 
@@ -1146,6 +1150,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
     )
     def post(self, request, **kwargs):  # pylint: disable=unused-argument
         rows = request.data.get('rows')
+        consumed_units = 0
         if isinstance(rows, list) and rows:
             algorithm_id, map_project = get_match_operations_attribution(request)
             try:
@@ -1153,16 +1158,31 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
                     MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, units=len(rows), action='match_concepts',
                     algorithm=algorithm_id, map_project=map_project
                 )
+                consumed_units = len(rows)
             except CapabilityExceeded as ex:
+                not_entitled = ex.limit is None
                 return Response(
                     {
-                        'detail': 'Match operation limit reached.',
-                        'error_code': CAPABILITY_EXCEEDED_ERROR_CODE[MAPPER_MATCH_OPERATIONS_CAPABILITY],
+                        'detail': 'You do not have Mapper match access.' if not_entitled else
+                        'Match operation limit reached.',
+                        'error_code': CAPABILITY_NOT_ENTITLED_ERROR_CODE[MAPPER_MATCH_OPERATIONS_CAPABILITY]
+                        if not_entitled else CAPABILITY_EXCEEDED_ERROR_CODE[MAPPER_MATCH_OPERATIONS_CAPABILITY],
                         'limit': ex.limit, 'used': ex.used,
                     },
                     status=status.HTTP_403_FORBIDDEN
                 )
-        results = self.filter_queryset()
+        # Consumption happens before the search so an over-quota caller is rejected
+        # without paying for an ES query it was never going to get results from. If the
+        # search itself then fails, that's not a successful match - refund the units so
+        # a flaky ES call doesn't silently burn an unrecoverable chunk of a capped,
+        # never-reset allowance.
+        try:
+            results = self.filter_queryset()
+        except Exception:
+            if consumed_units:
+                from core.capabilities.models import UsageCounter
+                UsageCounter.refund(request.user, MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, units=consumed_units)
+            raise
         response = Response(results)
         # num_returned is picked up by the analytics middleware as
         # APITransaction.item_count (see ocl_online#73).

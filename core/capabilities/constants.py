@@ -22,3 +22,16 @@ CAPABILITY_EXCEEDED_ERROR_CODE = {
     MAPPER_MATCH_OPERATIONS_CAPABILITY: 'mapper_match_operations_limit_reached',
     AI_ASSISTANT_CALLS_CAPABILITY: 'ai_assistant_calls_limit_reached',
 }
+
+# A limit of None means no override and no group row for this user at all - they were
+# never entitled to begin with, which is a different condition from having used up a
+# real, configured allowance (CAPABILITY_EXCEEDED_ERROR_CODE above). Without this
+# distinction every non-superuser with no capability configured (the default state for
+# everyone until they're granted one) is told they've "reached their limit" for
+# something they were never given any of.
+CAPABILITY_NOT_ENTITLED_ERROR_CODE = {
+    MAPPER_PROJECTS_CAPABILITY: 'mapper_projects_not_entitled',
+    MAPPER_ROWS_PER_PROJECT_CAPABILITY: 'mapper_rows_per_project_not_entitled',
+    MAPPER_MATCH_OPERATIONS_CAPABILITY: 'mapper_match_operations_not_entitled',
+    AI_ASSISTANT_CALLS_CAPABILITY: 'ai_assistant_calls_not_entitled',
+}
