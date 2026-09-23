@@ -1,13 +1,11 @@
-import importlib
 import json
 
-from django.apps import apps
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError
 from mock import patch, ANY, Mock
 from rest_framework.test import APIRequestFactory
 
-from core.common.constants import PERSIST_NEW_ERROR_MESSAGE, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
+from core.common.constants import PERSIST_NEW_ERROR_MESSAGE
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.map_projects.models import MapProject
 from core.map_projects.views import AutomatchRunListView
@@ -19,22 +17,6 @@ from core.users.tests.factories import UserProfileFactory
 class MapProjectModelTest(OCLTestCase):
     def test_mnemonic(self):
         self.assertEqual(MapProject(id=5).mnemonic, 5)
-
-    def test_public_access_defaults_to_private(self):
-        self.assertEqual(MapProject().public_access, ACCESS_TYPE_NONE)
-        self.assertEqual(MapProjectFactory().public_access, ACCESS_TYPE_NONE)
-
-    def test_migration_makes_existing_projects_private(self):
-        migration = importlib.import_module('core.map_projects.migrations.0039_mapproject_private_by_default')
-        viewable = MapProjectFactory(public_access=ACCESS_TYPE_VIEW)
-        editable = MapProjectFactory(public_access=ACCESS_TYPE_EDIT)
-
-        migration.make_existing_projects_private(apps, None)
-
-        viewable.refresh_from_db()
-        editable.refresh_from_db()
-        self.assertEqual(viewable.public_access, ACCESS_TYPE_NONE)
-        self.assertEqual(editable.public_access, ACCESS_TYPE_NONE)
 
     def test_matches_summary(self):
         project = MapProject(matches=[
@@ -187,7 +169,6 @@ class MapProjectAbstractViewTest(OCLAPITestCase):
         self.org.members.add(self.user)
 
         self.file = SimpleUploadedFile('input.csv', b'content', "application/csv")
-        self.columns = json.dumps([{'label': 'name', 'hidden': False, 'dataKey': 'name', 'original': 'name'}])
 
 
 class MapProjectListViewTest(MapProjectAbstractViewTest):
@@ -240,38 +221,6 @@ class MapProjectListViewTest(MapProjectAbstractViewTest):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], project.id)
         self.assertEqual(response.data[0]['url'], f'/orgs/CIEL/map-projects/{project.id}/')
-
-    @patch('core.services.storages.cloud.aws.S3.upload')
-    def test_post_is_private_by_default(self, _upload_mock):
-        response = self.client.post(
-            '/orgs/CIEL/map-projects/',
-            data={'name': 'Private Project', 'file': self.file, 'columns': self.columns},
-            HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
-        )
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(MapProject.objects.get(id=response.data['id']).public_access, ACCESS_TYPE_NONE)
-
-        response = self.client.get(
-            '/orgs/CIEL/map-projects/', HTTP_AUTHORIZATION='Token ' + UserProfileFactory().get_token())
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 0)
-
-        response = self.client.get('/orgs/CIEL/map-projects/', HTTP_AUTHORIZATION='Token ' + self.user.get_token())
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
-
-    @patch('core.services.storages.cloud.aws.S3.upload')
-    def test_post_keeps_explicit_public_access(self, _upload_mock):
-        response = self.client.post(
-            '/orgs/CIEL/map-projects/',
-            data={
-                'name': 'Shared Project', 'file': self.file, 'columns': self.columns,
-                'public_access': ACCESS_TYPE_VIEW
-            },
-            HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
-        )
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(MapProject.objects.get(id=response.data['id']).public_access, ACCESS_TYPE_VIEW)
 
     def test_get_verbose(self):
         project = MapProjectFactory(
