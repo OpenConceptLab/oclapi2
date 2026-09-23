@@ -8,7 +8,7 @@ from django.db import transaction
 GROUPS_CONFIG_ENV = 'OCL_GROUPS_CONFIG'
 
 # Plan groups are deployment config: {"groups": {"<name>": {"permissions": [...], "capabilities": {...}}}}
-# Seed-only - creates what's missing, never overwrites existing DB values.
+# Seed-only - creates missing groups/limits and adds missing permissions; never overwrites or removes.
 
 
 def seed_groups(config, stdout=None):
@@ -26,14 +26,14 @@ def seed_group(group_name, group_config, warn):
 
     from core.capabilities.models import Capability, GroupCapability
 
-    group, created = Group.objects.get_or_create(name=group_name)
-    if created:
-        codenames = group_config.get('permissions') or []
-        permissions = list(Permission.objects.filter(codename__in=codenames, content_type__app_label='users'))
-        missing = set(codenames) - {permission.codename for permission in permissions}
-        if missing:
-            warn(f'{group_name}: unknown permissions skipped: {sorted(missing)}')
-        group.permissions.add(*permissions)
+    group, _ = Group.objects.get_or_create(name=group_name)
+    # add-only: listed permissions are (re)granted, ones already on the group are never removed
+    codenames = group_config.get('permissions') or []
+    permissions = list(Permission.objects.filter(codename__in=codenames, content_type__app_label='users'))
+    missing = set(codenames) - {permission.codename for permission in permissions}
+    if missing:
+        warn(f'{group_name}: unknown permissions skipped: {sorted(missing)}')
+    group.permissions.add(*permissions)
 
     for capability_name, limit in (group_config.get('capabilities') or {}).items():
         capability = Capability.objects.filter(name=capability_name).first()

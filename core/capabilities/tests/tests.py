@@ -310,7 +310,7 @@ class SeedGroupCapabilitiesTest(OCLAPITestCase):
         self.assertEqual(self.codenames('pro'), {'mapper_use', 'mapper_custom_algorithms'})
         self.assertEqual(self.limits('pro'), {'mapper.projects': 20, 'mapper.match_operations': 0})
 
-    def test_existing_db_values_win_on_reseed(self):
+    def test_reseed_keeps_limits_and_adds_missing_permissions(self):
         self.seed(self.CONFIG)
         self.seed({
             'groups': {
@@ -321,9 +321,17 @@ class SeedGroupCapabilitiesTest(OCLAPITestCase):
             }
         })
 
-        self.assertEqual(self.codenames('pro'), {'mapper_use', 'mapper_custom_algorithms'})
+        self.assertEqual(self.codenames('pro'), {'mapper_use', 'mapper_custom_algorithms', 'mapper_ai_assistant'})
         self.assertEqual(
             self.limits('pro'), {'mapper.projects': 20, 'mapper.match_operations': 0, 'ai_assistant.calls': 50})
+
+    def test_grants_permissions_to_existing_group(self):
+        self.assertFalse(self.codenames('core_user'))
+
+        self.seed({'groups': {'core_user': {'permissions': ['mapper_use'], 'capabilities': {'mapper.projects': 0}}}})
+
+        self.assertEqual(self.codenames('core_user'), {'mapper_use'})
+        self.assertEqual(self.limits('core_user'), {'mapper.projects': 0})
 
     def test_unknown_permission_and_capability_are_skipped(self):
         out = self.seed({
