@@ -201,6 +201,54 @@ class MapProjectListViewTest(MapProjectAbstractViewTest):
         upload_mock.assert_called_once_with(
             key=f"map_projects/{response.data['id']}/input.csv", file_content=ANY)
 
+    @patch('core.services.storages.cloud.aws.S3.upload')
+    def test_post_ignores_organization_id_in_body(self, _upload_mock):
+        other_org = OrganizationFactory()
+        response = self.client.post(
+            f'/users/{self.user.username}/map-projects/',
+            data={
+                'name': 'My Project', 'file': self.file, 'organization_id': other_org.id,
+                'columns': json.dumps([{'label': 'name', 'hidden': False, 'dataKey': 'name', 'original': 'name'}]),
+            },
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 201)
+        project = MapProject.objects.get(id=response.data['id'])
+        self.assertEqual(project.user_id, self.user.id)
+        self.assertIsNone(project.organization_id)
+        self.assertEqual(other_org.map_projects.count(), 0)
+
+    @patch('core.services.storages.cloud.aws.S3.upload')
+    def test_post_to_org_ignores_owner_ids_in_body(self, _upload_mock):
+        response = self.client.post(
+            '/orgs/CIEL/map-projects/',
+            data={
+                'name': 'Org Project', 'file': self.file,
+                'organization_id': OrganizationFactory().id, 'user_id': UserProfileFactory().id,
+                'columns': json.dumps([{'label': 'name', 'hidden': False, 'dataKey': 'name', 'original': 'name'}]),
+            },
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 201)
+        project = MapProject.objects.get(id=response.data['id'])
+        self.assertEqual(project.organization_id, self.org.id)
+        self.assertIsNone(project.user_id)
+
+    def test_post_to_org_by_non_member_403(self):
+        response = self.client.post(
+            '/orgs/CIEL/map-projects/',
+            data={
+                'name': 'Not My Org', 'file': self.file,
+                'columns': json.dumps([{'label': 'name', 'hidden': False, 'dataKey': 'name', 'original': 'name'}]),
+            },
+            HTTP_AUTHORIZATION='Token ' + UserProfileFactory().get_token(),
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.org.map_projects.count(), 0)
+
     def test_get(self):
         response = self.client.get(
             '/orgs/CIEL/map-projects/',
@@ -306,6 +354,23 @@ class MapProjectViewTest(MapProjectAbstractViewTest):
         self.assertEqual(response.data['input_locales'], ['en'])
         upload_mock.assert_called_once_with(
             key=f"map_projects/{response.data['id']}/input.csv", file_content=ANY)
+
+    @patch('core.services.storages.cloud.aws.S3.upload')
+    def test_put_ignores_owner_ids_in_body(self, _upload_mock):
+        response = self.client.put(
+            f'/orgs/CIEL/map-projects/{self.project.id}/',
+            data={
+                'name': 'Renamed Project', 'file': self.file,
+                'organization_id': OrganizationFactory().id, 'user_id': UserProfileFactory().id,
+            },
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.name, 'Renamed Project')
+        self.assertEqual(self.project.organization_id, self.org.id)
+        self.assertIsNone(self.project.user_id)
 
 
 class MapProjectConfigurationsViewTest(MapProjectAbstractViewTest):
