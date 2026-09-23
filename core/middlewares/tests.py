@@ -69,7 +69,7 @@ class RequireAuthenticationMiddlewareTest(SimpleTestCase):
             json.loads(response.content),
             {
                 'detail': 'Authentication required. Anonymous API access is disabled.',
-                'upgrade_url': 'https://app.openconceptlab.org/pricing',
+                'upgrade_url': 'https://openconceptlab.org/pricing',
             }
         )
 
