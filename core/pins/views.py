@@ -7,10 +7,12 @@ from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 
 from core.common.constants import MAX_PINS_ALLOWED, INCLUDE_CREATOR_PINS
+from core.common.permissions import CanViewConceptDictionary
 from core.common.utils import get_truthy_values
 from core.common.views import BaseAPIView
 from core.orgs.models import Organization
 from core.pins.models import Pin
+from core.pins.permissions import CanEditPins
 from core.pins.serializers import PinSerializer, PinUpdateSerializer
 from core.users.models import UserProfile
 
@@ -20,7 +22,7 @@ TRUTHY = get_truthy_values()
 
 class PinBaseView(BaseAPIView):
     serializer_class = PinSerializer
-    permission_classes = (IsAuthenticatedOrReadOnly,)
+    permission_classes = (IsAuthenticatedOrReadOnly, CanEditPins)
 
     def filter_queryset(self, queryset=None):
         return queryset
@@ -68,18 +70,25 @@ class PinListView(PinBaseView, ListAPIView):
         parent = self.get_parent()
         if not parent:
             return Response(status=status.HTTP_404_NOT_FOUND)
+        self.check_object_permissions(request, parent)
         if parent.pins.count() >= MAX_PINS_ALLOWED:
             return Response(
                 {'error': [f"Can only keep max {MAX_PINS_ALLOWED} items pinned"]},
                 status=status.HTTP_404_NOT_FOUND
             )
 
+        # The pin always belongs to the user or org in the URL.
+        data = {key: value for key, value in request.data.items() if key not in ['user_id', 'organization_id']}
         serializer = self.get_serializer(
             data={
-                **request.data, self.get_parent_type() + '_id': parent.id, 'created_by_id': self.request.user.id
+                **data, self.get_parent_type() + '_id': parent.id, 'created_by_id': self.request.user.id
             }
         )
         if serializer.is_valid():
+            resource = Pin.get_resource(
+                serializer.validated_data['resource_type'], serializer.validated_data['resource_id'])
+            if resource and not CanViewConceptDictionary().has_object_permission(request, self, resource):
+                self.permission_denied(request)
             serializer.save()
             if not serializer.errors:
                 return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -88,7 +97,7 @@ class PinListView(PinBaseView, ListAPIView):
 
 class PinRetrieveUpdateDestroyView(PinBaseView, RetrieveUpdateDestroyAPIView):
     def get_serializer_class(self):
-        if self.request.method == 'PUT':
+        if self.request.method in ['PUT', 'PATCH']:
             return PinUpdateSerializer
 
         return PinSerializer
@@ -98,4 +107,6 @@ class PinRetrieveUpdateDestroyView(PinBaseView, RetrieveUpdateDestroyAPIView):
         return queryset.filter(id=self.kwargs.get('pin_id'))
 
     def get_object(self, queryset=None):
-        return get_object_or_404(self.get_queryset())
+        pin = get_object_or_404(self.get_queryset())
+        self.check_object_permissions(self.request, pin.parent)
+        return pin

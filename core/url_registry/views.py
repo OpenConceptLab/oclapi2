@@ -13,12 +13,13 @@ from core.common.views import BaseAPIView
 from core.repos.serializers import RepoListSerializer
 from core.url_registry.documents import URLRegistryDocument
 from core.url_registry.models import URLRegistry
+from core.url_registry.permissions import CanEditURLRegistryEntry
 from core.url_registry.search import URLRegistryFacetedSearch
 from core.url_registry.serializers import URLRegistryDetailSerializer
 
 
 class URLRegistryBaseView(BaseAPIView):
-    permission_classes = (IsAuthenticatedOrReadOnly,)
+    permission_classes = (IsAuthenticatedOrReadOnly, CanEditURLRegistryEntry)
     serializer_class = URLRegistryDetailSerializer
     queryset = URLRegistry.objects.filter(is_active=True)
     parent_resource = None
@@ -75,6 +76,8 @@ class URLRegistriesView(URLRegistryBaseView, ListWithHeadersMixin, CreateAPIView
 
     def create(self, request, *args, **kwargs):
         self.set_parent_resource()
+        if not CanEditURLRegistryEntry.can_edit_entries_of(request, self, self.parent_resource):
+            self.permission_denied(request)
         return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):

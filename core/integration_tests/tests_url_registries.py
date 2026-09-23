@@ -4,12 +4,13 @@ from core.common.tests import OCLAPITestCase
 from core.orgs.tests.factories import OrganizationFactory
 from core.url_registry.factories import GlobalURLRegistryFactory, OrganizationURLRegistryFactory, UserURLRegistryFactory
 from core.url_registry.models import URLRegistry
+from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
 
 class URLRegistriesViewTest(OCLAPITestCase):
     def test_post_global_registry(self):
-        user = UserProfileFactory()
+        user = UserProfile.objects.get(username='ocladmin')
         response = self.client.post(
             '/url-registry/',
             {

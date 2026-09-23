@@ -25,7 +25,8 @@ class HasPrivateAccess(BasePermission):
 
 class HasOwnership(BasePermission):
     """
-    The request is authenticated, and the user is a member of the referenced organization
+    The user is staff, or the referenced user, or a member of the referenced organization.
+    Any other object is refused to everyone but staff.
     """
     def has_object_permission(self, request, view, obj):
         user = request.user
@@ -38,7 +39,6 @@ class HasOwnership(BasePermission):
                 return obj == user
             if isinstance(obj, Organization):
                 return obj.is_member(user)
-            return True
         return False
 
 

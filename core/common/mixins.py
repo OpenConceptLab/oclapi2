@@ -10,7 +10,7 @@ from django.core.paginator import Paginator
 from django.db import transaction, models
 from django.db.models import Q, F, QuerySet
 from django.http import HttpResponseForbidden, Http404
-from django.shortcuts import get_object_or_404, redirect
+from django.shortcuts import redirect
 from django.urls import resolve, Resolver404
 from django.utils.functional import cached_property
 from ocldev.checksum import Checksum
@@ -25,7 +25,7 @@ from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     SEARCH_STATS_ONLY, INCLUDE_SEARCH_STATS, UPDATED_BY_USERNAME_PARAM, CHECKSUM_STANDARD_HEADER, \
     CHECKSUM_SMART_HEADER, SEARCH_LATEST_REPO_VERSION, SAME_STANDARD_CHECKSUM_ERROR, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
-    CanViewConceptDictionaryVersion
+    CanViewConceptDictionaryVersion, CanEditConceptDictionary
 from .checksums import ChecksumModel
 from .exceptions import Http403
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
@@ -1097,14 +1097,17 @@ class ConceptContainerExportMixin:
 
 
 class ConceptContainerProcessingMixin:
+    """
+    Reading a repo version's processing flag needs view access to it. Clearing the flag needs staff or edit access.
+
+    List this mixin before the base view in the class bases, or APIView.get_permissions takes precedence over this
+    one. BaseAPIView.get_object loads the version and checks these permissions.
+    """
     def get_permissions(self):
         if self.request.method == 'POST':
-            return [HasOwnership(), IsAuthenticated()]
+            return [CanEditConceptDictionary(), ]
 
         return [CanViewConceptDictionary(), ]
-
-    def get_object(self, queryset=None):  # pylint: disable=unused-argument
-        return get_object_or_404(self.get_queryset())
 
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         version = self.get_object()

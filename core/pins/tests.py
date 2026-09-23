@@ -224,8 +224,8 @@ class PinListViewTest(OCLAPITestCase):
 
     def test_post_201(self):
         source = OrganizationSourceFactory()
-        user = UserProfileFactory()
         org = OrganizationFactory()
+        user = UserProfileFactory(organizations=[org])
         token = user.get_token()
 
         response = self.client.post(
@@ -282,8 +282,8 @@ class PinListViewTest(OCLAPITestCase):
 
 class PinRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def setUp(self):
-        self.user = UserProfileFactory()
         self.org = OrganizationFactory()
+        self.user = UserProfileFactory(organizations=[self.org])
         self.token = self.user.get_token()
         self.source = OrganizationSourceFactory()
         self.user_pin = self.user.pins.create(resource=self.source)

@@ -47,7 +47,7 @@ from core.common.mixins import (
     ConceptContainerProcessingMixin)
 from core.common.permissions import (
     CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject,
-    CanViewConceptDictionaryVersion, HasOwnership
+    CanViewConceptDictionaryVersion
 )
 from core.common.serializers import TaskSerializer
 from core.common.swagger_parameters import q_param, compress_header, page_param, verbose_param, \
@@ -288,7 +288,7 @@ class CollectionReferenceView(CollectionBaseView, RetrieveAPIView, DestroyAPIVie
 
     def get_permissions(self):
         if self.request.method == 'DELETE':
-            return [IsAuthenticated(), CanViewConceptDictionary()]
+            return [IsAuthenticated(), CanEditConceptDictionary()]
 
         return [CanViewConceptDictionary()]
 
@@ -303,7 +303,7 @@ class CollectionReferenceView(CollectionBaseView, RetrieveAPIView, DestroyAPIVie
 
         self.check_object_permissions(self.request, collection)
 
-        reference = CollectionReference.objects.filter(id=self.kwargs.get('reference')).first()
+        reference = collection.references.filter(id=self.kwargs.get('reference')).first()
         if not reference:
             raise Http404()
 
@@ -328,7 +328,7 @@ class CollectionReferenceAbstractResourcesView(CollectionBaseView, ListWithHeade
 
         self.check_object_permissions(self.request, collection)
 
-        reference = CollectionReference.objects.filter(id=self.kwargs.get('reference')).first()
+        reference = collection.references.filter(id=self.kwargs.get('reference')).first()
         if not reference:
             raise Http404()
 
@@ -674,6 +674,7 @@ class CollectionVersionReferencesView(CollectionVersionBaseView, ListWithHeaders
         object_version = self.get_queryset().first()
         if not object_version:
             raise Http404()
+        self.check_object_permissions(request, object_version)
         references = object_version.references.filter(expression__icontains=search_query)
         references = self.apply_filters(references)
         self.object_list = references if sort == 'ASC' else list(reversed(references))
@@ -684,6 +685,19 @@ class CollectionVersionListView(CollectionVersionBaseView, CreateAPIView, ListWi
     released_filter = None
     processing_filter = None
     default_qs_sort_attr = '-created_at'
+
+    def get_permissions(self):
+        """Listing versions needs view access to the collection. Creating one needs staff, the owner or a member."""
+        if self.request.method in ['GET', 'HEAD']:
+            return [CanViewConceptDictionary(), ]
+
+        return [IsAuthenticated(), HasAccessToVersionedObject()]
+
+    def get_head(self):
+        head = get(self.get_queryset().first(), 'head')
+        if head:
+            self.check_object_permissions(self.request, head)
+        return head
 
     def get_serializer_class(self):
         if self.request.method in ['GET', 'HEAD'] and self.is_verbose():
@@ -696,12 +710,15 @@ class CollectionVersionListView(CollectionVersionBaseView, CreateAPIView, ListWi
         return CollectionVersionListSerializer
 
     def get(self, request, *args, **kwargs):
+        self.get_head()
         self.released_filter = parse_boolean_query_param(request, RELEASED_PARAM, self.released_filter)
         self.processing_filter = parse_boolean_query_param(request, PROCESSING_PARAM, self.processing_filter)
         return self.list(request, *args, **kwargs)
 
     def create(self, request, *args, **kwargs):
-        head_object = self.get_queryset().first().head
+        head_object = self.get_head()
+        if not head_object:
+            raise Http404()
         version = request.data.pop('id', None)
         payload = {
             "mnemonic": head_object.mnemonic, "id": head_object.mnemonic, "name": head_object.name, **request.data,
@@ -735,7 +752,12 @@ class CollectionVersionListView(CollectionVersionBaseView, CreateAPIView, ListWi
 
 class CollectionLatestVersionRetrieveUpdateView(CollectionVersionBaseView, RetrieveAPIView, UpdateAPIView):
     serializer_class = CollectionVersionDetailSerializer
-    permission_classes = (CanViewConceptDictionaryVersion,)
+
+    def get_permissions(self):
+        if self.request.method in ['GET', 'HEAD']:
+            return [CanViewConceptDictionaryVersion(), ]
+
+        return [IsAuthenticated(), HasAccessToVersionedObject()]
 
     def get_object(self, queryset=None):
         obj = self.get_queryset().first()
@@ -1150,8 +1172,17 @@ class CollectionVersionMappingRetrieveView(CollectionVersionResourceRetrieveView
 
 
 class CollectionExtrasBaseView(CollectionBaseView):
+    def get_permissions(self):
+        """Reads need view access to the collection. Writes need staff or edit access."""
+        if self.request.method in ['GET', 'HEAD']:
+            return [CanViewConceptDictionary(), ]
+
+        return [IsAuthenticated(), CanEditConceptDictionary()]
+
     def get_object(self, queryset=None):
-        return get_object_or_404(self.get_queryset(), version=HEAD)
+        instance = get_object_or_404(self.get_queryset(), version=HEAD)
+        self.check_object_permissions(self.request, instance)
+        return instance
 
 
 class CollectionExtrasView(CollectionExtrasBaseView, ListAPIView):
@@ -1166,6 +1197,7 @@ class CollectionVersionExtrasView(CollectionBaseView, ListAPIView):
 
     def list(self, request, *args, **kwargs):
         instance = get_object_or_404(self.get_queryset(), version=self.kwargs['version'])
+        self.check_object_permissions(request, instance)
         return Response(get(instance, 'extras', {}))
 
 
@@ -1174,7 +1206,7 @@ class CollectionExtraRetrieveUpdateDestroyView(CollectionExtrasBaseView,
     serializer_class = CollectionDetailSerializer
 
 
-class CollectionVersionProcessingView(CollectionBaseView, ConceptContainerProcessingMixin):
+class CollectionVersionProcessingView(ConceptContainerProcessingMixin, CollectionBaseView):
     serializer_class = CollectionVersionDetailSerializer
     resource = 'collection'
 
@@ -1251,7 +1283,6 @@ class CollectionClientConfigsView(CollectionBaseView, ResourceClientConfigsView)
     lookup_field = 'collection'
     model = Collection
     queryset = Collection.objects.filter(is_active=True, version=HEAD)
-    permission_classes = (CanViewConceptDictionary, )
 
 
 class ReferenceExpressionResolveView(APIView):
@@ -1312,8 +1343,9 @@ class ReferenceExpressionResolveView(APIView):
 
 class CollectionVersionExpansionProcessingView(CollectionVersionExpansionBaseView):
     def get_permissions(self):
+        """Checked against the collection version. Clearing the flag needs staff or edit access to it."""
         if self.request.method == 'POST':
-            return [HasOwnership(), IsAuthenticated()]
+            return [CanEditConceptDictionary(), ]
 
         return [CanViewConceptDictionary(), ]
 

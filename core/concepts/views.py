@@ -13,7 +13,7 @@ from rest_framework import status
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, ListCreateAPIView, RetrieveUpdateDestroyAPIView, \
     UpdateAPIView, ListAPIView
 from rest_framework.mixins import CreateModelMixin
-from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAdminUser, AllowAny, IsAuthenticated
+from rest_framework.permissions import IsAdminUser, AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -253,6 +253,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         self.set_parent_resource()
         if not self.parent_resource or isinstance(request.data, list):
             raise Http404()
+        self.check_object_permissions(request, self.parent_resource)
         concept_id = get(request.data, 'id') or generate_temp_version()
         data = {**request.data, 'parent_id': self.parent_resource.id, 'id': concept_id, 'name': concept_id}
         data['mappings_payload'] = data.pop('mappings', [])
@@ -745,8 +746,14 @@ class ConceptLabelListCreateView(ConceptBaseView, ListWithHeadersMixin, ListCrea
 class ConceptLocaleRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDestroyAPIView):
     model = ConceptName
     parent_list_attribute = None
-    permission_classes = (IsAuthenticatedOrReadOnly,)
     default_qs_sort_attr = '-created_at'
+
+    def get_permissions(self):
+        """Checked against the concept's source: view access to read, staff or edit access to change."""
+        if self.request.method in ['GET', 'HEAD']:
+            return [CanViewParentDictionary()]
+
+        return [CanEditParentDictionary()]
 
     def get_queryset(self):
         if not self.parent_list_attribute:
