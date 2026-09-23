@@ -4,7 +4,7 @@ from pydash import get
 from rest_framework import serializers
 from rest_framework.fields import CharField, DateTimeField, IntegerField, FileField
 
-from core.common.constants import DEFAULT_ACCESS_TYPE, INCLUDE_SUMMARY, INCLUDE_LOGS
+from core.common.constants import ACCESS_TYPE_NONE, INCLUDE_SUMMARY, INCLUDE_LOGS
 from core.common.utils import get_truthy_values
 from core.map_projects.models import MapProject, AutomatchRun
 
@@ -52,7 +52,7 @@ class MapProjectCreateUpdateSerializer(serializers.ModelSerializer):
 
     def prepare_object(self, validated_data, instance=None, file=None):
         instance = instance or MapProject()
-        instance.public_access = validated_data.get('public_access', instance.public_access or DEFAULT_ACCESS_TYPE)
+        instance.public_access = validated_data.get('public_access', instance.public_access or ACCESS_TYPE_NONE)
         matches = validated_data.get('matches', False)
         if matches is not False:
             instance.matches = matches
