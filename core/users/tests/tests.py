@@ -8,10 +8,10 @@ from rest_framework.authtoken.models import Token
 from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.constants import ACCESS_TYPE_NONE, HEAD, OCL_ORG_ID
 from core.common.tasks import send_user_verification_email, send_user_reset_password_email
-from core.common.tests import OCLTestCase, OCLAPITestCase
+from core.common.tests import OCLTestCase, OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.orgs.models import Organization
 from core.sources.tests.factories import OrganizationSourceFactory
-from core.users.constants import USER_OBJECT_TYPE, OCL_SERVERS_GROUP, PREVIEW_GROUP_NAME, MAPPER_USE_PERMISSION, \
+from core.users.constants import USER_OBJECT_TYPE, OCL_SERVERS_GROUP, MAPPER_USE_PERMISSION, \
     MAPPER_AI_ASSISTANT_PERMISSION
 from core.users.documents import UserProfileDocument
 from core.users.models import UserProfile
@@ -238,10 +238,6 @@ class UserProfileTest(OCLTestCase):
         user.groups.add(Group.objects.get(name=OCL_SERVERS_GROUP))
 
         self.assertEqual(user.auth_groups.count(), 1)
-
-    def test_is_valid_auth_group(self):
-        self.assertFalse(UserProfile.is_valid_auth_group('foobar'))
-        self.assertTrue(UserProfile.is_valid_auth_group(OCL_SERVERS_GROUP))
 
     def test_deactivate(self):
         user = UserProfileFactory(is_active=True, deactivated_at=None, verified=True)
@@ -599,6 +595,19 @@ class UserViewsAPITest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+
+    def test_put_auth_groups_accepts_any_existing_group(self):
+        user = UserProfileFactory()
+
+        response = self.client.put(
+            f'/users/{user.username}/?includeAuthGroups=true',
+            {'auth_groups': [PREVIEW_GROUP_NAME, OCL_SERVERS_GROUP, 'no-such-group']},
+            HTTP_AUTHORIZATION='Token ' + self.admin.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(sorted(user.auth_groups), sorted([OCL_SERVERS_GROUP, PREVIEW_GROUP_NAME]))
 
     def test_user_detail_summary_serializer(self):
         user = UserProfileFactory(username='summaryserializeruser')

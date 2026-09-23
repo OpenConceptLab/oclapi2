@@ -14,7 +14,7 @@ from core.collections.models import CollectionReference
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import OPENMRS_VALIDATION_SCHEMA, HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, LATEST
 from core.common.search import Reranker
-from core.common.tests import OCLTestCase, OCLAPITestCase
+from core.common.tests import OCLTestCase, OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.concepts.constants import (
     OPENMRS_MUST_HAVE_EXACTLY_ONE_PREFERRED_NAME,
     OPENMRS_FULLY_SPECIFIED_NAME_UNIQUE_PER_SOURCE_LOCALE, OPENMRS_AT_LEAST_ONE_FULLY_SPECIFIED_NAME,
@@ -33,7 +33,6 @@ from core.concepts.validators import ValidatorSpecifier
 from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
 from core.sources.tests.factories import OrganizationSourceFactory
-from core.users.constants import PREVIEW_GROUP_NAME
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 

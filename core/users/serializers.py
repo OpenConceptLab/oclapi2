@@ -12,7 +12,6 @@ from rest_framework.validators import UniqueValidator
 
 from core.common.constants import NAMESPACE_REGEX, INCLUDE_SUBSCRIBED_ORGS, INCLUDE_VERIFICATION_TOKEN, \
     INCLUDE_AUTH_GROUPS, INCLUDE_PINS, INCLUDE_FOLLOWERS, INCLUDE_FOLLOWING, INCLUDE_CAPABILITIES
-from core.users.constants import INVALID_AUTH_GROUP_NAME
 from .models import UserProfile, Follow
 from ..common.serializers import AbstractResourceSerializer
 from ..common.utils import get_truthy_values
@@ -271,14 +270,7 @@ class UserDetailSerializer(AbstractResourceSerializer):
         if not AuthService.is_sso_enabled():
             auth_groups = validated_data.get('auth_groups', None)
             if isinstance(auth_groups, list):
-                if len(auth_groups) == 0:
-                    instance.groups.set([])
-                else:
-                    if instance.is_valid_auth_group(*auth_groups):
-                        instance.groups.set(Group.objects.filter(name__in=auth_groups))
-                    else:
-                        self._errors.update({'auth_groups': [INVALID_AUTH_GROUP_NAME]})
-                        return instance
+                instance.groups.set(Group.objects.filter(name__in=auth_groups))
 
         instance.save()
         if instance.id:

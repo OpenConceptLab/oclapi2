@@ -1,42 +1,96 @@
-from django.core.management import BaseCommand
+import json
+import os
 
-from core.capabilities.constants import (
-    AI_ASSISTANT_CALLS_CAPABILITY, MAPPER_MATCH_OPERATIONS_CAPABILITY, MAPPER_PROJECTS_CAPABILITY,
-    MAPPER_ROWS_PER_PROJECT_CAPABILITY,
-)
-from core.users.constants import PREVIEW_GROUP_NAME
+import yaml
+from django.core.management import BaseCommand, CommandError
+from django.db import transaction
 
-# The preview group's starting caps (ocl_issues#2762/#2782). Seeded here via
-# get_or_create rather than core/fixtures/capabilities.yaml: pre_startup.sh runs
-# `loaddata core/fixtures/*` on every container start, and a loaddata fixture always
-# overwrites these rows - so an admin's runtime cap tuning (via UserCapabilityOverride
-# or the Django admin) would silently revert on the next restart. get_or_create here
-# only sets these defaults the first time a (group, capability) pair has no row yet;
-# it never touches one that already exists.
-DEFAULT_PREVIEW_LIMITS = {
-    MAPPER_PROJECTS_CAPABILITY: 1,
-    MAPPER_ROWS_PER_PROJECT_CAPABILITY: 25,
-    MAPPER_MATCH_OPERATIONS_CAPABILITY: 100,
-    AI_ASSISTANT_CALLS_CAPABILITY: 6,
-}
+GROUPS_CONFIG_ENV = 'OCL_GROUPS_CONFIG'
+
+# Plan groups are deployment config: {"groups": {"<name>": {"permissions": [...], "capabilities": {...}}}}
+# Seed-only - creates what's missing, never overwrites existing DB values.
+
+
+def seed_groups(config, stdout=None):
+    def warn(msg):
+        if stdout:
+            stdout.write(f'WARNING: {msg}')
+
+    for group_name, group_config in validate_config(config).items():
+        with transaction.atomic():
+            seed_group(group_name, group_config or {}, warn)
+
+
+def seed_group(group_name, group_config, warn):
+    from django.contrib.auth.models import Group, Permission
+
+    from core.capabilities.models import Capability, GroupCapability
+
+    group, created = Group.objects.get_or_create(name=group_name)
+    if created:
+        codenames = group_config.get('permissions') or []
+        permissions = list(Permission.objects.filter(codename__in=codenames, content_type__app_label='users'))
+        missing = set(codenames) - {permission.codename for permission in permissions}
+        if missing:
+            warn(f'{group_name}: unknown permissions skipped: {sorted(missing)}')
+        group.permissions.add(*permissions)
+
+    for capability_name, limit in (group_config.get('capabilities') or {}).items():
+        capability = Capability.objects.filter(name=capability_name).first()
+        if not capability:
+            warn(f'{group_name}: unknown capability skipped: {capability_name}')
+            continue
+        GroupCapability.objects.get_or_create(group=group, capability=capability, defaults={'limit': limit})
+
+
+def validate_config(config):
+    if not isinstance(config, dict) or not isinstance(config.get('groups'), dict):
+        raise CommandError('groups config must be an object with a "groups" mapping')
+    for group_name, group_config in config['groups'].items():
+        if group_config is None:
+            continue
+        if not isinstance(group_config, dict):
+            raise CommandError(f'{group_name}: config must be a mapping')
+        permissions = group_config.get('permissions')
+        if permissions is not None and not isinstance(permissions, list):
+            raise CommandError(f'{group_name}: permissions must be a list')
+        capabilities = group_config.get('capabilities')
+        if capabilities is not None and (
+                not isinstance(capabilities, dict) or
+                not all(isinstance(limit, int) and not isinstance(limit, bool) for limit in capabilities.values())
+        ):
+            raise CommandError(f'{group_name}: capabilities must map names to integer limits')
+    return config['groups']
 
 
 class Command(BaseCommand):
-    help = 'seed the preview group\'s default capability limits, without overwriting any that already exist'
+    help = f'seed groups, their permissions and capability limits from {GROUPS_CONFIG_ENV} or --file, ' \
+           'without overwriting any that already exist'
+
+    def add_arguments(self, parser):
+        parser.add_argument('--file', help='path to a yaml/json groups config (instead of the env var)')
 
     def handle(self, *args, **options):
-        from django.contrib.auth.models import Group
-
-        from core.capabilities.models import Capability, GroupCapability
-
-        preview_group = Group.objects.filter(name=PREVIEW_GROUP_NAME).first()
-        if not preview_group:
+        config = self.load_config(options.get('file'))
+        if config is None:
+            self.stdout.write(f'No groups config ({GROUPS_CONFIG_ENV} not set), nothing to seed')
             return
+        seed_groups(config, self.stdout)
+        self.stdout.write(f'Seeded groups: {", ".join(config["groups"].keys())}')
 
-        for capability_name, limit in DEFAULT_PREVIEW_LIMITS.items():
-            capability = Capability.objects.filter(name=capability_name).first()
-            if not capability:
-                continue
-            GroupCapability.objects.get_or_create(
-                group=preview_group, capability=capability, defaults={'limit': limit}
-            )
+    @staticmethod
+    def load_config(file_path):
+        if file_path:
+            try:
+                with open(file_path, encoding='utf-8') as file:
+                    return yaml.safe_load(file)  # yaml is a superset of json
+            except (OSError, yaml.YAMLError) as ex:
+                raise CommandError(f'Could not read groups config file {file_path}: {ex}') from ex
+
+        raw = os.environ.get(GROUPS_CONFIG_ENV)
+        if not raw:
+            return None
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as ex:
+            raise CommandError(f'{GROUPS_CONFIG_ENV} is not valid JSON: {ex}') from ex

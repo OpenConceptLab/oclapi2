@@ -1,10 +1,14 @@
+import json
+from io import StringIO
+from unittest.mock import patch
+
 from django.contrib.auth.models import Group
+from django.core.management import call_command, CommandError
 
 from core.capabilities.constants import MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, MAPPER_PROJECTS_CAPABILITY_ID
 from core.capabilities.exceptions import CapabilityExceeded
 from core.capabilities.models import GroupCapability, UserCapabilityOverride
-from core.common.tests import OCLAPITestCase
-from core.users.constants import PREVIEW_GROUP_NAME
+from core.common.tests import OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.users.tests.factories import UserProfileFactory
 
 
@@ -263,3 +267,81 @@ class UnconfiguredCapabilityIsBlockedTest(OCLAPITestCase):
         self.assertEqual(user.get_capability_limit(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID), 0)
         user.check_and_consume_capability(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID)
         self.assertEqual(user.get_capability_usage(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID), 1)
+
+
+class SeedGroupCapabilitiesTest(OCLAPITestCase):
+    CONFIG = {
+        'groups': {
+            'pro': {
+                'permissions': ['mapper_use', 'mapper_custom_algorithms'],
+                'capabilities': {'mapper.projects': 20, 'mapper.match_operations': 0},
+            }
+        }
+    }
+
+    @staticmethod
+    def seed(config):
+        out = StringIO()
+        with patch.dict('os.environ', {'OCL_GROUPS_CONFIG': json.dumps(config)}):
+            call_command('seed_group_capabilities', stdout=out)
+        return out.getvalue()
+
+    @staticmethod
+    def limits(group_name):
+        return dict(GroupCapability.objects.filter(group__name=group_name).values_list('capability__name', 'limit'))
+
+    @staticmethod
+    def codenames(group_name):
+        return set(Group.objects.get(name=group_name).permissions.values_list('codename', flat=True))
+
+    def test_no_config_is_a_noop(self):
+        group_count = Group.objects.count()
+        out = StringIO()
+        with patch.dict('os.environ', {}, clear=False) as env:
+            env.pop('OCL_GROUPS_CONFIG', None)
+            call_command('seed_group_capabilities', stdout=out)
+
+        self.assertEqual(Group.objects.count(), group_count)
+        self.assertIn('nothing to seed', out.getvalue())
+
+    def test_creates_group_with_permissions_and_limits(self):
+        self.seed(self.CONFIG)
+
+        self.assertEqual(self.codenames('pro'), {'mapper_use', 'mapper_custom_algorithms'})
+        self.assertEqual(self.limits('pro'), {'mapper.projects': 20, 'mapper.match_operations': 0})
+
+    def test_existing_db_values_win_on_reseed(self):
+        self.seed(self.CONFIG)
+        self.seed({
+            'groups': {
+                'pro': {
+                    'permissions': ['mapper_use', 'mapper_ai_assistant'],
+                    'capabilities': {'mapper.projects': 99, 'ai_assistant.calls': 50},
+                }
+            }
+        })
+
+        self.assertEqual(self.codenames('pro'), {'mapper_use', 'mapper_custom_algorithms'})
+        self.assertEqual(
+            self.limits('pro'), {'mapper.projects': 20, 'mapper.match_operations': 0, 'ai_assistant.calls': 50})
+
+    def test_unknown_permission_and_capability_are_skipped(self):
+        out = self.seed({
+            'groups': {'pro': {'permissions': ['mapper_use', 'bogus'], 'capabilities': {'bogus.cap': 1}}}
+        })
+
+        self.assertEqual(self.codenames('pro'), {'mapper_use'})
+        self.assertEqual(self.limits('pro'), {})
+        self.assertIn('bogus', out)
+        self.assertIn('bogus.cap', out)
+
+    def test_invalid_config_raises(self):
+        with patch.dict('os.environ', {'OCL_GROUPS_CONFIG': '{not json'}):
+            with self.assertRaises(CommandError):
+                call_command('seed_group_capabilities', stdout=StringIO())
+
+        with self.assertRaises(CommandError):
+            self.seed({'groups': {'pro': {'capabilities': {'mapper.projects': 'ten'}}}})
+
+        with self.assertRaises(CommandError):
+            self.seed({'pro': {}})

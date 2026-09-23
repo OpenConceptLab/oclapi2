@@ -7,12 +7,11 @@ from mock import patch, ANY, Mock
 from rest_framework.test import APIRequestFactory
 
 from core.common.constants import PERSIST_NEW_ERROR_MESSAGE
-from core.common.tests import OCLAPITestCase, OCLTestCase
+from core.common.tests import OCLAPITestCase, OCLTestCase, PREVIEW_GROUP_NAME
 from core.map_projects.models import MapProject
 from core.map_projects.views import AutomatchRunListView
 from core.map_projects.tests.factories import MapProjectFactory, AutomatchRunFactory
 from core.orgs.tests.factories import OrganizationFactory
-from core.users.constants import PREVIEW_GROUP_NAME
 from core.users.tests.factories import UserProfileFactory
 
 

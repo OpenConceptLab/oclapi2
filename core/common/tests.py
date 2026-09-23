@@ -78,6 +78,9 @@ from ..mappings.serializers import MappingDetailSerializer
 from ..mappings.tests.factories import MappingFactory
 from ..sources.tests.factories import OrganizationSourceFactory
 
+PREVIEW_GROUP_NAME = 'preview'
+TEST_GROUPS_CONFIG_FILE = 'core/capabilities/tests/groups.test.yaml'
+
 
 class CustomTestRunner(ColourRunnerMixin, DiscoverRunner):
     pass
@@ -271,10 +274,7 @@ class OCLAPITransactionTestCase(APITransactionTestCase, BaseTestCase):
         call_command("loaddata", "core/fixtures/auth_groups.yaml")
         call_command("loaddata", "core/fixtures/capabilities.yaml")
         call_command("loaddata", "core/fixtures/toggles.json")
-        # GroupCapability rows (the preview group's default caps) aren't in the fixture -
-        # see core/fixtures/capabilities.yaml - so they need this same non-destructive seed
-        # pre_startup.sh runs in real environments.
-        call_command("seed_group_capabilities")
+        call_command("seed_group_capabilities", file=TEST_GROUPS_CONFIG_FILE)
         org = Organization.objects.get(id=1)
         org.members.add(1)
 
@@ -287,7 +287,7 @@ class OCLAPITestCase(APITestCase, BaseTestCase):
         call_command("loaddata", "core/fixtures/auth_groups.yaml")
         call_command("loaddata", "core/fixtures/capabilities.yaml")
         call_command("loaddata", "core/fixtures/toggles.json")
-        call_command("seed_group_capabilities")
+        call_command("seed_group_capabilities", file=TEST_GROUPS_CONFIG_FILE)
         org = Organization.objects.get(id=1)
         org.members.add(1)
 
@@ -304,7 +304,7 @@ class OCLTestCase(TestCase, BaseTestCase):
         call_command("loaddata", "core/fixtures/auth_groups.yaml")
         call_command("loaddata", "core/fixtures/capabilities.yaml")
         call_command("loaddata", "core/fixtures/toggles.json")
-        call_command("seed_group_capabilities")
+        call_command("seed_group_capabilities", file=TEST_GROUPS_CONFIG_FILE)
 
     @staticmethod
     def factory_to_params(factory_klass, **kwargs):

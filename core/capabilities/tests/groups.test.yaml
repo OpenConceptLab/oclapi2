@@ -1,0 +1,8 @@
+groups:
+  preview:
+    permissions: [mapper_use, mapper_ai_assistant]
+    capabilities:
+      mapper.projects: 1
+      mapper.rows_per_project: 25
+      mapper.match_operations: 100
+      ai_assistant.calls: 6
