@@ -4,13 +4,13 @@
 #
 # Version format: RELEASE.MAJOR.MINOR[-channel], e.g. "3.0.0-alpha".
 # RELEASE and MAJOR (the first two numbers) and the channel label are set by
-# hand by editing VERSION_FILE. MINOR (the third number) plus the trailing
-# short commit sha are computed and bumped automatically by `publish`.
+# hand by editing VERSION_FILE. MINOR (the third number) is bumped
+# automatically by `publish`.
 #
 # Usage:
 #   ./release_version.sh sha [raw-sha]     print an 8-char short sha (raw-sha, else $GITHUB_SHA, else git HEAD, else "dev")
 #   ./release_version.sh current           print the version currently in VERSION_FILE
-#   ./release_version.sh full-version      print "<current>-<sha>"
+#   ./release_version.sh full-version      print "<current>-<sha>" for build artifacts
 #   ./release_version.sh publish           create a published GitHub Release with a changelog for the current
 #                                           version, then bump MINOR in VERSION_FILE and push the bump commit
 set -euo pipefail
@@ -29,7 +29,7 @@ cmd_sha() {
 }
 
 cmd_current() {
-  grep -m1 "$VERSION_KEY" "$VERSION_FILE" \
+  grep -m1 -E "^[[:space:]]*[\"']?${VERSION_KEY}[\"']?[[:space:]]*[:=]" "$VERSION_FILE" \
     | sed -E "s/.*[\"']([0-9]+\.[0-9]+\.[0-9]+[^\"']*)[\"'].*/\1/"
 }
 
@@ -60,24 +60,30 @@ is_prerelease() {
 
 write_version() {
   local new_version="$1"
-  sed -i -E "0,/${VERSION_KEY}/ s/([\"'])[0-9]+\.[0-9]+\.[0-9]+[^\"']*([\"'])/\1${new_version}\2/" "$VERSION_FILE"
+  sed -i -E "/^[[:space:]]*[\"']?${VERSION_KEY}[\"']?[[:space:]]*[:=]/ s/([\"'])[0-9]+\.[0-9]+\.[0-9]+[^\"']*([\"'])/\1${new_version}\2/" "$VERSION_FILE"
 }
 
 cmd_publish() {
-  local current_version sha tag prev_tag changelog new_version default_branch prerelease_args=()
+  local current_version sha tag prev_tag changelog new_version default_branch
+  local commit_count changelog_limit=50 pushed=false prerelease_args=()
 
   current_version="$(cmd_current)"
   sha="$(cmd_sha "${GITHUB_SHA:-}")"
-  tag="${current_version}-${sha}"
+  tag="${current_version}"
 
   git fetch --tags --quiet || true
   prev_tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
   if [ -n "$prev_tag" ]; then
     changelog="$(git log "${prev_tag}..HEAD" --pretty=format:'- %s (%h)')"
   else
-    changelog="$(git log --pretty=format:'- %s (%h)')"
+    changelog="$(git log -n "$changelog_limit" --pretty=format:'- %s (%h)')"
+    commit_count="$(git rev-list --count HEAD 2>/dev/null || echo 0)"
+    if [ "$commit_count" -gt "$changelog_limit" ]; then
+      changelog="${changelog}"$'\n\n'"Showing the latest ${changelog_limit} commits because this repository has no previous release tag."
+    fi
   fi
   [ -n "$changelog" ] || changelog="No changes recorded."
+  changelog="Source commit: ${sha}"$'\n\n'"${changelog}"
 
   is_prerelease "$current_version" && prerelease_args=(--prerelease)
 
@@ -91,7 +97,7 @@ cmd_publish() {
   new_version="$(next_version "$current_version")"
   echo "Bumping version: ${current_version} -> ${new_version}"
 
-  default_branch="${GITHUB_REF_NAME:-main}"
+  default_branch="${GITHUB_REF_NAME:-master}"
   git config user.email "github-actions[bot]@users.noreply.github.com"
   git config user.name "github-actions[bot]"
   git fetch origin "$default_branch" --quiet
@@ -103,12 +109,21 @@ cmd_publish() {
 
   for attempt in 1 2 3; do
     if git push origin "$default_branch"; then
+      pushed=true
       break
     fi
     echo "Push rejected, rebasing and retrying (${attempt})..."
     git fetch origin "$default_branch" --quiet
-    git rebase "origin/${default_branch}"
+    if ! git rebase "origin/${default_branch}"; then
+      git rebase --abort || true
+      echo "Failed to rebase version bump onto origin/${default_branch}" >&2
+      exit 1
+    fi
   done
+  if [ "$pushed" != true ]; then
+    echo "Failed to push version bump after 3 attempts" >&2
+    exit 1
+  fi
 }
 
 case "${1:-}" in
