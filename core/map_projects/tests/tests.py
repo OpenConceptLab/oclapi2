@@ -1,5 +1,6 @@
 import json
 
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError
 from mock import patch, ANY, Mock
@@ -121,6 +122,17 @@ class MapProjectModelTest(OCLTestCase):
         errors = MapProject.persist_changes(project, user)
 
         self.assertIn('__all__', errors)
+
+    def test_persist_changes_without_input_file_keeps_input_file_name(self):
+        project = MapProjectFactory(input_file_name='input.csv')
+        project.name = 'Renamed'
+
+        errors = MapProject.persist_changes(project, UserProfileFactory())
+
+        self.assertEqual(errors, {})
+        project.refresh_from_db()
+        self.assertEqual(project.name, 'Renamed')
+        self.assertEqual(project.input_file_name, 'input.csv')
 
     def test_format_json_invalid_json_kept_as_is(self):
         data = {'matches': 'not-json{'}
@@ -306,6 +318,34 @@ class MapProjectViewTest(MapProjectAbstractViewTest):
         self.assertEqual(response.data['input_locales'], ['en'])
         upload_mock.assert_called_once_with(
             key=f"map_projects/{response.data['id']}/input.csv", file_content=ANY)
+
+    def test_put_without_file(self):
+        response = self.client.put(
+            f'/orgs/CIEL/map-projects/{self.project.id}/',
+            {'name': 'Renamed Project'},
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['name'], 'Renamed Project')
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.name, 'Renamed Project')
+        self.assertEqual(self.project.input_file_name, 'input.csv')
+
+    @patch('core.map_projects.models.MapProject.full_clean', side_effect=ValidationError({'name': ['Invalid name.']}))
+    def test_put_400_when_changes_fail_validation(self, _full_clean_mock):
+        response = self.client.put(
+            f'/orgs/CIEL/map-projects/{self.project.id}/',
+            {'name': 'Renamed Project'},
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'name': ['Invalid name.']})
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.name, 'Project 1')
 
 
 class MapProjectConfigurationsViewTest(MapProjectAbstractViewTest):

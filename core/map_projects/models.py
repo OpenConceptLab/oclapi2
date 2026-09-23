@@ -150,7 +150,8 @@ class MapProject(BaseModel):
         errors = {}
         try:
             input_file = kwargs.pop('input_file', None)
-            instance.input_file_name = input_file.name if input_file else None
+            if input_file:  # without a new file, keep the stored one
+                instance.input_file_name = input_file.name
             instance.updated_by = user
             instance.full_clean()
             instance.save(**kwargs)
