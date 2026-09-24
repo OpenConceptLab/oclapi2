@@ -177,7 +177,8 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
         return self.organizations.filter(id=organization_id).exists()
 
     def __create_token(self):
-        return Token.objects.create(user=self)
+        token, _ = Token.objects.get_or_create(user=self)
+        return token
 
     def __delete_token(self):
         return Token.objects.filter(user=self).delete()
