@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.db.models import Count
 from django.http import Http404
 from drf_yasg.utils import swagger_auto_schema
@@ -19,7 +20,7 @@ from core.common.throttling import ThrottleUtil
 from core.common.utils import parse_updated_since_param, get_truthy_values
 from core.common.views import BaseAPIView, BaseLogoView
 from core.map_projects.views import MapProjectListView
-from core.orgs.constants import NO_MEMBERS
+from core.orgs.constants import NO_MEMBERS, CANNOT_REMOVE_ONLY_MEMBER
 from core.orgs.documents import OrganizationDocument
 from core.orgs.models import Organization
 from core.orgs.serializers import OrganizationDetailSerializer, OrganizationListSerializer, \
@@ -238,10 +239,19 @@ class OrganizationMemberView(generics.GenericAPIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     def delete(self, request, **kwargs):  # pylint: disable=unused-argument
+        """Removes the user from the org, unless they are its only member: every org keeps at least one."""
         if not request.user.is_staff and not self.user_in_org:
             return Response(status=status.HTTP_403_FORBIDDEN)
+        if not self.organization or not self.userprofile:
+            return Response(status=status.HTTP_404_NOT_FOUND)
 
-        self.userprofile.organizations.remove(self.organization)
+        with transaction.atomic():
+            # Locks the org so that concurrent removals can't each see another member and leave it with none.
+            Organization.objects.select_for_update().get(id=self.organization.id)
+            if self.organization.is_only_member(self.userprofile):
+                return Response({'detail': CANNOT_REMOVE_ONLY_MEMBER}, status=status.HTTP_409_CONFLICT)
+            self.userprofile.organizations.remove(self.organization)
+
         # ES Index
         self.organization.save()
         self.userprofile.save()

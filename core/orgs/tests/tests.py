@@ -56,6 +56,20 @@ class OrganizationTest(OCLTestCase):
 
         self.assertEqual(org.members.count(), 0)
 
+    def test_is_only_member(self):
+        creator = UserProfileFactory()
+        other = UserProfileFactory()
+        org = OrganizationFactory(created_by=creator, updated_by=creator)
+
+        self.assertTrue(org.is_only_member(creator))
+        self.assertFalse(org.is_only_member(other))
+        self.assertFalse(org.is_only_member(None))
+
+        org.members.add(other)
+
+        self.assertFalse(org.is_only_member(creator))
+        self.assertFalse(org.is_only_member(other))
+
     def test_create_organization_negative__no_name(self):
         with self.assertRaises(ValidationError):
             org = Organization(mnemonic='org1')
