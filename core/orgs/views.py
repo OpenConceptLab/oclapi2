@@ -129,12 +129,28 @@ class OrganizationBaseView(BaseAPIView, RetrieveAPIView, DestroyAPIView):
 class OrganizationLogoView(OrganizationBaseView, BaseLogoView):
     serializer_class = OrganizationDetailSerializer
 
+    def delete(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        """Removes the logo only; the org itself stays."""
+        org = self.get_object()
+        org.logo_path = None
+        org.updated_by = request.user
+        org.save()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class OrganizationOverviewView(OrganizationBaseView, RetrieveAPIView, UpdateAPIView):
     serializer_class = OrganizationOverviewSerializer
 
     def get_queryset(self):
         return super().get_queryset().filter(mnemonic=self.kwargs['org'])
+
+    def delete(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        """Removes the overview only; the org itself stays."""
+        org = self.get_object()
+        org.overview = {}
+        org.updated_by = request.user
+        org.save()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixins.CreateModelMixin, TaskMixin):

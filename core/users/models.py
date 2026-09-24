@@ -433,7 +433,7 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
     def set_groups(self, groups, verify=True, _save=True):
         if not verify or sorted(self.groups.values_list('name', flat=True)) != sorted(groups):
             self.groups.set(Group.objects.filter(name__in=groups))
-            self.is_staff = self.has_auth_group(STAFF_GROUP)
             self.is_superuser = self.has_auth_group(SUPERADMIN_GROUP)
+            self.is_staff = self.is_superuser or self.has_auth_group(STAFF_GROUP)  # a superuser is always staff
             if _save:
                 self.save()

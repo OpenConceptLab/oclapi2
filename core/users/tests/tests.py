@@ -12,7 +12,7 @@ from core.common.tests import OCLTestCase, OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.orgs.models import Organization
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.constants import USER_OBJECT_TYPE, OCL_SERVERS_GROUP, MAPPER_USE_PERMISSION, \
-    MAPPER_AI_ASSISTANT_PERMISSION, MAPPER_SCISPACY_PERMISSION
+    MAPPER_AI_ASSISTANT_PERMISSION, MAPPER_SCISPACY_PERMISSION, STAFF_GROUP, SUPERADMIN_GROUP
 from core.users.documents import UserProfileDocument
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
@@ -276,6 +276,26 @@ class UserProfileTest(OCLTestCase):
 
         self.assertTrue(user.has_perm(MAPPER_USE_PERMISSION))
         self.assertTrue(user.has_perm(MAPPER_AI_ASSISTANT_PERMISSION))
+
+    def test_set_groups_makes_superuser_staff(self):
+        user = UserProfileFactory(is_staff=False, is_superuser=False)
+        Group.objects.get_or_create(name=SUPERADMIN_GROUP)
+        Group.objects.get_or_create(name=STAFF_GROUP)
+
+        user.set_groups([SUPERADMIN_GROUP])
+        user.refresh_from_db()
+        self.assertTrue(user.is_superuser)
+        self.assertTrue(user.is_staff)
+
+        user.set_groups([STAFF_GROUP])
+        user.refresh_from_db()
+        self.assertFalse(user.is_superuser)
+        self.assertTrue(user.is_staff)
+
+        user.set_groups([])
+        user.refresh_from_db()
+        self.assertFalse(user.is_superuser)
+        self.assertFalse(user.is_staff)
 
     def test_user_without_preview_group_has_no_mapper_permission(self):
         user = UserProfileFactory()
