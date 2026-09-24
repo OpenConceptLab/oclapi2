@@ -12,6 +12,7 @@ from core.capabilities.exceptions import CapabilityExceeded
 from core.capabilities.models import UsageCounter, UserCapabilityOverride
 from core.capabilities.serializers import UserCapabilityOverrideSerializer
 from core.common.mixins import ListWithHeadersMixin
+from core.common.utils import parse_id
 from core.common.views import BaseAPIView
 
 
@@ -50,27 +51,18 @@ class CapabilityBaseView(APIView):
             return None, Response({'detail': '"units" must be a positive integer.'}, status=status.HTTP_400_BAD_REQUEST)
         return units, None
 
-    @staticmethod
-    def parse_id(value):
-        # Plain ASCII digits within bigint range only: '²'.isdigit() is True but int('²') raises (a 500).
-        if isinstance(value, int) and not isinstance(value, bool):
-            value = str(value)
-        if isinstance(value, str) and value.isascii() and value.isdigit() and len(value) <= 18:
-            return int(value)
-        return None
-
     def get_owned_map_project_and_run(self):
         from core.map_projects.models import AutomatchRun, MapProject
 
         request = self.request
         map_project = None
-        map_project_id = self.parse_id(request.data.get('map_project', None))
+        map_project_id = parse_id(request.data.get('map_project', None))
         if map_project_id is not None:
             # .only('id'): these rows only feed the UsageEvent FKs
             map_project = MapProject.objects.filter(id=int(map_project_id), created_by=request.user).only('id').first()
 
         run = None
-        run_id = self.parse_id(request.data.get('run', None))
+        run_id = parse_id(request.data.get('run', None))
         if run_id is not None:
             run_qs = AutomatchRun.objects.filter(id=int(run_id))
             run_qs = run_qs.filter(map_project=map_project) if map_project else run_qs.filter(

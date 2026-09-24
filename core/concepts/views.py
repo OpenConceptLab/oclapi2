@@ -43,7 +43,7 @@ from core.common.swagger_parameters import (
 from core.common.tasks import delete_concept, make_hierarchy
 from core.common.throttling import ThrottleUtil
 from core.common.utils import (to_parent_uri_from_kwargs, generate_temp_version, get_truthy_values, to_int,
-                               drop_version, get_falsy_values)
+                               drop_version, get_falsy_values, parse_id)
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
 from core.concepts.constants import (
@@ -913,14 +913,14 @@ def get_match_operations_attribution(request):
         algorithm_id = str(algorithm_id)[:100]  # UsageEvent.algorithm is a CharField(max_length=100)
 
     map_project = None
-    map_project_id = metadata.get('map_project_id')
-    if isinstance(map_project_id, (str, int)) and str(map_project_id).isdigit():
+    map_project_id = parse_id(metadata.get('map_project_id'))
+    if map_project_id is not None:
         from core.map_projects.models import MapProject
         # Scoped to request.user: the id is client-supplied (this header), so without
         # this a caller could attribute their UsageEvent to a project they don't own,
         # corrupting per-project attribution even though usage still charges the right
         # user's quota.
-        map_project = MapProject.objects.filter(id=int(map_project_id), created_by=request.user).first()
+        map_project = MapProject.objects.filter(id=int(map_project_id), created_by=request.user).only('id').first()
 
     return algorithm_id, map_project
 
