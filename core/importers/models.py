@@ -1268,11 +1268,13 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                 ).select_related('parent')
                 if concept.parent.has_edit_access(user)
             )
+            viewable_parent_uris = set(Concept.get_viewable_parent_uris(
+                list({uri for uris in self.concept_hierarchy_map.values() for uri in uris}), user))
             inverted = {}
             for child_uri, parent_uris in self.concept_hierarchy_map.items():
                 if child_uri not in accessible_uris:
                     continue
-                for parent_uri in parent_uris:
+                for parent_uri in [uri for uri in parent_uris if uri in viewable_parent_uris]:
                     if parent_uri not in inverted:
                         inverted[parent_uri] = []
                     inverted[parent_uri].append(child_uri)

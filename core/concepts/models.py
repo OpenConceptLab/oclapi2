@@ -625,7 +625,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         instance.cloned_descriptions = compact(new_descriptions)
 
         if has_parent_concept_uris_attr:
-            parent_concept_uris = parent_concept_uris or []
+            parent_concept_uris = cls.get_viewable_parent_uris(
+                parent_concept_uris or [], user, prev_latest.parent_concept_urls if prev_latest else [])
         else:
             parent_concept_uris = list(prev_latest.parent_concept_urls) if prev_latest else []
 
@@ -649,10 +650,26 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         return errors
 
+    @staticmethod
+    def get_viewable_parent_uris(uris, user, linked_uris=None):
+        """Only parents in repos the user can view can be linked. Parents already linked are kept."""
+        linked_uris = set(linked_uris or [])
+        new_uris = [uri for uri in uris if uri not in linked_uris]
+        viewable_uris = set()
+        can_view_source = {}
+        for concept in Concept.objects.filter(uri__in=new_uris).select_related('parent') if new_uris else []:
+            if concept.parent_id not in can_view_source:
+                can_view_source[concept.parent_id] = concept.parent.has_view_access(user)
+            if can_view_source[concept.parent_id]:
+                viewable_uris.add(concept.uri)
+        return [uri for uri in uris if uri in linked_uris or uri in viewable_uris]
+
     def set_parent_concepts_from_uris(self, create_parent_version=True):
         parent_concepts = get(self, '_parent_concepts', [])
         if create_parent_version:
             for parent in parent_concepts:
+                if not parent.parent.has_edit_access(self.created_by):
+                    continue
                 current_latest_version = parent.get_latest_version()
                 parent_clone = parent.clone()
                 Concept.create_new_version_for(
@@ -766,7 +783,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         field_data = {k: v for k, v in data.items() if k not in related_fields}
         url_params = {k: v for k, v in data.items() if k in related_fields}
         candidate = Mapping(**field_data, created_by=user, updated_by=user)
-        candidate.populate_fields_from_relations(url_params)
+        candidate.populate_fields_from_relations(url_params, user=user)
         candidate.full_clean()
 
     @staticmethod
@@ -1066,6 +1083,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         names = data.pop('names', []) or []
         descriptions = data.pop('descriptions', []) or []
         parent_concept_uris = data.pop('parent_concept_urls', None)
+        if parent_concept_uris:
+            parent_concept_uris = cls.get_viewable_parent_uris(parent_concept_uris, user)
         skip_hierarchy_tasks = data.pop('_skip_hierarchy_tasks', False)
         mappings_payload = data.pop('mappings_payload', None) or data.pop('mappings', None) or []
         mappings_result = []
