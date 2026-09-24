@@ -11,8 +11,7 @@ from rest_framework.serializers import ModelSerializer
 from rest_framework.validators import UniqueValidator
 
 from core.common.constants import NAMESPACE_REGEX, INCLUDE_SUBSCRIBED_ORGS, INCLUDE_VERIFICATION_TOKEN, \
-    INCLUDE_AUTH_GROUPS, INCLUDE_PINS, INCLUDE_FOLLOWERS, INCLUDE_FOLLOWING
-from core.users.constants import INVALID_AUTH_GROUP_NAME
+    INCLUDE_AUTH_GROUPS, INCLUDE_PINS, INCLUDE_FOLLOWERS, INCLUDE_FOLLOWING, INCLUDE_CAPABILITIES
 from .models import UserProfile, Follow
 from ..common.serializers import AbstractResourceSerializer
 from ..common.utils import get_truthy_values
@@ -180,6 +179,8 @@ class UserDetailSerializer(AbstractResourceSerializer):
     extras = serializers.JSONField(required=False, allow_null=True)
     subscribed_orgs = serializers.SerializerMethodField()
     auth_groups = serializers.ListField(required=False, allow_null=True, allow_empty=True)
+    permissions = serializers.SerializerMethodField()
+    capabilities = serializers.SerializerMethodField()
     deactivated_at = serializers.DateTimeField(read_only=True)
     pins = serializers.SerializerMethodField()
     followers = FollowerSerializer(many=True, read_only=True)
@@ -192,7 +193,8 @@ class UserDetailSerializer(AbstractResourceSerializer):
             'public_collections', 'public_sources', 'created_on', 'updated_on', 'created_by', 'updated_by',
             'url', 'organizations_url', 'extras', 'sources_url', 'collections_url', 'website', 'last_login',
             'logo_url', 'subscribed_orgs', 'is_superuser', 'is_staff', 'first_name', 'last_name', 'verified',
-            'verification_token', 'date_joined', 'auth_groups', 'status', 'deactivated_at',
+            'verification_token', 'date_joined', 'auth_groups', 'permissions', 'capabilities', 'status',
+            'deactivated_at',
             'sources', 'collections', 'owned_orgs', 'bookmarks', 'pins', 'bio', 'followers', 'following'
         )
 
@@ -202,6 +204,7 @@ class UserDetailSerializer(AbstractResourceSerializer):
         self.include_subscribed_orgs = self.query_params.get(INCLUDE_SUBSCRIBED_ORGS) in TRUTHY
         self.include_verification_token = self.query_params.get(INCLUDE_VERIFICATION_TOKEN) in TRUTHY
         self.include_auth_groups = self.query_params.get(INCLUDE_AUTH_GROUPS) in TRUTHY
+        self.include_capabilities = self.query_params.get(INCLUDE_CAPABILITIES) in TRUTHY
         self.include_pins = self.query_params.get(INCLUDE_PINS) in TRUTHY
         self.include_followers = self.query_params.get(INCLUDE_FOLLOWERS) in TRUTHY
         self.include_following = self.query_params.get(INCLUDE_FOLLOWING) in TRUTHY
@@ -212,6 +215,9 @@ class UserDetailSerializer(AbstractResourceSerializer):
             self.fields.pop('verification_token')
         if not self.include_auth_groups:
             self.fields.pop('auth_groups')
+        if not self.include_capabilities:
+            self.fields.pop('permissions')
+            self.fields.pop('capabilities')
         if not self.include_pins:
             self.fields.pop('pins')
         if not self.include_followers:
@@ -227,6 +233,17 @@ class UserDetailSerializer(AbstractResourceSerializer):
             return OrganizationListSerializer(obj.organizations.all(), many=True).data
 
         return None
+
+    def get_permissions(self, obj):
+        if self.include_capabilities:
+            return sorted(obj.get_all_permissions())
+        return None
+
+    def get_capabilities(self, obj):
+        if not self.include_capabilities:
+            return None
+        from core.capabilities.serializers import CapabilitySerializer
+        return CapabilitySerializer(obj.capabilities, many=True, context={'user': obj}).data
 
     def get_pins(self, obj):
         if self.include_pins:
@@ -250,17 +267,12 @@ class UserDetailSerializer(AbstractResourceSerializer):
         instance.updated_by = request_user
 
         from core.services.auth.core import AuthService
-        if not AuthService.is_sso_enabled():
+        # Standalone only (under SSO, Keycloak owns membership via set_groups), and admin-only: a group carries
+        # permissions and capability limits, so letting users pick their own groups lets them pick their own limits.
+        if not AuthService.is_sso_enabled() and request_user.is_staff:
             auth_groups = validated_data.get('auth_groups', None)
             if isinstance(auth_groups, list):
-                if len(auth_groups) == 0:
-                    instance.groups.set([])
-                else:
-                    if instance.is_valid_auth_group(*auth_groups):
-                        instance.groups.set(Group.objects.filter(name__in=auth_groups))
-                    else:
-                        self._errors.update({'auth_groups': [INVALID_AUTH_GROUP_NAME]})
-                        return instance
+                instance.groups.set(Group.objects.filter(name__in=auth_groups))
 
         instance.save()
         if instance.id:

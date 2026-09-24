@@ -1,7 +1,9 @@
+import json
 import threading
 from unittest.mock import ANY, Mock, patch
 
 import factory
+from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.http import Http404, QueryDict
@@ -12,7 +14,7 @@ from core.collections.models import CollectionReference
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import OPENMRS_VALIDATION_SCHEMA, HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, LATEST
 from core.common.search import Reranker
-from core.common.tests import OCLTestCase, OCLAPITestCase
+from core.common.tests import OCLTestCase, OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.concepts.constants import (
     OPENMRS_MUST_HAVE_EXACTLY_ONE_PREFERRED_NAME,
     OPENMRS_FULLY_SPECIFIED_NAME_UNIQUE_PER_SOURCE_LOCALE, OPENMRS_AT_LEAST_ONE_FULLY_SPECIFIED_NAME,
@@ -277,13 +279,11 @@ class ConceptViewsAPITest(OCLAPITestCase):
 
     @patch('core.concepts.views.Reranker')
     def test_rerank_concepts_success(self, reranker_mock):
-        from core.users.constants import MAPPER_APPROVED_GROUP
-        from django.contrib.auth.models import Group
         reranker_instance_mock = Mock()
         reranker_instance_mock.rerank.return_value = [{'id': 1}]
         reranker_mock.return_value = reranker_instance_mock
         user = UserProfileFactory()
-        user.groups.add(Group.objects.get_or_create(name=MAPPER_APPROVED_GROUP)[0])
+        user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
 
         response = self.client.post(
             '/concepts/$rerank/', {'rows': [{'id': 1}], 'q': 'some text'}, format='json',
@@ -292,8 +292,9 @@ class ConceptViewsAPITest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
 
-    def test_rerank_concepts_waitlisted_403(self):
+    def test_rerank_concepts_access_denied_403(self):
         user = UserProfileFactory()
+        user.groups.clear()
 
         response = self.client.post(
             '/concepts/$rerank/', {'rows': [{'id': 1}], 'q': 'some text'}, format='json',
@@ -301,12 +302,11 @@ class ConceptViewsAPITest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['error_code'], 'mapper_access_denied')
 
     def test_rerank_concepts_missing_rows_400(self):
-        from core.users.constants import MAPPER_APPROVED_GROUP
-        from django.contrib.auth.models import Group
         user = UserProfileFactory()
-        user.groups.add(Group.objects.get_or_create(name=MAPPER_APPROVED_GROUP)[0])
+        user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
 
         response = self.client.post(
             '/concepts/$rerank/', {'rows': [], 'q': 'some text'}, format='json',
@@ -316,10 +316,8 @@ class ConceptViewsAPITest(OCLAPITestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_rerank_concepts_missing_query_400(self):
-        from core.users.constants import MAPPER_APPROVED_GROUP
-        from django.contrib.auth.models import Group
         user = UserProfileFactory()
-        user.groups.add(Group.objects.get_or_create(name=MAPPER_APPROVED_GROUP)[0])
+        user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
 
         response = self.client.post(
             '/concepts/$rerank/', {'rows': [{'id': 1}]}, format='json',
@@ -330,11 +328,9 @@ class ConceptViewsAPITest(OCLAPITestCase):
 
     @patch('core.concepts.views.Reranker')
     def test_rerank_concepts_reranker_error_400(self, reranker_mock):
-        from core.users.constants import MAPPER_APPROVED_GROUP
-        from django.contrib.auth.models import Group
         reranker_mock.side_effect = ValueError('bad model')
         user = UserProfileFactory()
-        user.groups.add(Group.objects.get_or_create(name=MAPPER_APPROVED_GROUP)[0])
+        user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
 
         response = self.client.post(
             '/concepts/$rerank/', {'rows': [{'id': 1}], 'q': 'some text'}, format='json',
@@ -345,13 +341,11 @@ class ConceptViewsAPITest(OCLAPITestCase):
 
     @patch('core.concepts.views.Reranker')
     def test_rerank_concepts_unexpected_error_500(self, reranker_mock):
-        from core.users.constants import MAPPER_APPROVED_GROUP
-        from django.contrib.auth.models import Group
         reranker_instance_mock = Mock()
         reranker_instance_mock.rerank.side_effect = KeyError('boom')
         reranker_mock.return_value = reranker_instance_mock
         user = UserProfileFactory()
-        user.groups.add(Group.objects.get_or_create(name=MAPPER_APPROVED_GROUP)[0])
+        user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
 
         response = self.client.post(
             '/concepts/$rerank/', {'rows': [{'id': 1}], 'q': 'some text'}, format='json',
@@ -359,6 +353,82 @@ class ConceptViewsAPITest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 500)
+
+    def test_match_concepts_access_denied_403(self):
+        user = UserProfileFactory()
+        user.groups.clear()
+
+        response = self.client.post(
+            '/concepts/$match/', {'rows': [{'id': 1}], 'target_repo_url': '/orgs/org/sources/src/'},
+            format='json', HTTP_AUTHORIZATION=f"Token {user.get_token()}"
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['error_code'], 'mapper_access_denied')
+
+    @patch('core.concepts.views.MetadataToConceptsListView.filter_queryset', return_value=[])
+    def test_match_concepts_consumption_attributed_from_event_metadata(self, _filter_queryset_mock):
+        from core.capabilities.models import UsageEvent
+        from core.map_projects.tests.factories import MapProjectFactory
+        from core.orgs.tests.factories import OrganizationFactory
+        user = UserProfileFactory()
+        user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
+        org = OrganizationFactory()
+        project = MapProjectFactory(organization=org, created_by=user)
+
+        response = self.client.post(
+            '/concepts/$match/',
+            {'rows': [{'id': 1}], 'target_repo_url': '/orgs/org/sources/src/'},
+            format='json', HTTP_AUTHORIZATION=f"Token {user.get_token()}",
+            HTTP_X_OCL_EVENT_METADATA=json.dumps({'algorithm_id': 'ocl-semantic', 'map_project_id': str(project.id)}),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        event = UsageEvent.objects.get(user=user, action='match_concepts')
+        self.assertEqual(event.algorithm, 'ocl-semantic')
+        self.assertEqual(event.map_project_id, project.id)
+
+    @patch('core.concepts.views.MetadataToConceptsListView.filter_queryset', return_value=[])
+    def test_match_concepts_ignores_map_project_id_the_user_does_not_own(self, _filter_queryset_mock):
+        # A client-supplied map_project_id from this header must not let a caller
+        # attribute usage to (or pollute the audit trail of) a project it doesn't own -
+        # usage still charges the right user's quota, it just stays unattributed.
+        from core.capabilities.models import UsageEvent
+        from core.map_projects.tests.factories import MapProjectFactory
+        from core.orgs.tests.factories import OrganizationFactory
+        user = UserProfileFactory()
+        user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
+        other_user = UserProfileFactory()
+        org = OrganizationFactory()
+        someone_elses_project = MapProjectFactory(organization=org, created_by=other_user)
+
+        response = self.client.post(
+            '/concepts/$match/',
+            {'rows': [{'id': 1}], 'target_repo_url': '/orgs/org/sources/src/'},
+            format='json', HTTP_AUTHORIZATION=f"Token {user.get_token()}",
+            HTTP_X_OCL_EVENT_METADATA=json.dumps(
+                {'algorithm_id': 'ocl-semantic', 'map_project_id': str(someone_elses_project.id)}),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        event = UsageEvent.objects.get(user=user, action='match_concepts')
+        self.assertIsNone(event.map_project_id)
+
+    @patch('core.concepts.views.MetadataToConceptsListView.filter_queryset', return_value=[])
+    def test_match_concepts_consumption_without_event_metadata_leaves_attribution_null(self, _filter_queryset_mock):
+        from core.capabilities.models import UsageEvent
+        user = UserProfileFactory()
+        user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
+
+        response = self.client.post(
+            '/concepts/$match/', {'rows': [{'id': 1}], 'target_repo_url': '/orgs/org/sources/src/'},
+            format='json', HTTP_AUTHORIZATION=f"Token {user.get_token()}"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        event = UsageEvent.objects.get(user=user, action='match_concepts')
+        self.assertIsNone(event.algorithm)
+        self.assertIsNone(event.map_project_id)
 
 
 class LocalizedTextTest(OCLTestCase):

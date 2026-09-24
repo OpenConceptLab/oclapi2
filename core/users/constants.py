@@ -10,8 +10,8 @@ OCL_FHIR_SERVERS_GROUP = 'ocl_fhir_servers'
 HAPI_FHIR_SERVERS_GROUP = 'hapi_fhir_servers'
 OPERATIONS_PANEL_GROUP = 'operations_panel'
 MAPPER_AI_ASSISTANT_GROUP = 'mapper_ai_assistant'
-MAPPER_WAITLIST_GROUP = 'mapper-waitlist'
-MAPPER_APPROVED_GROUP = 'mapper-approved'
+MAPPER_WAITLIST_GROUP = 'mapper-waitlist'  # obsolete no effect
+MAPPER_APPROVED_GROUP = 'mapper-approved'  # obsolete no effect
 EARLY_ACCESS_NGO_GROUP = 'early_access_ngo'
 GUEST_GROUP = 'guest_user'
 STANDARD_GROUP = 'standard_user'
@@ -20,22 +20,8 @@ STAFF_GROUP = 'staff_user'
 SUPERADMIN_GROUP = 'superadmin_user'
 GRAPHQL_API_GROUP = 'graphql_api'
 CORE_USER_GROUP = 'core_user'
-AUTH_GROUPS = [
-    OCL_SERVERS_GROUP,
-    OCL_FHIR_SERVERS_GROUP,
-    HAPI_FHIR_SERVERS_GROUP,
-    OPERATIONS_PANEL_GROUP,
-    MAPPER_AI_ASSISTANT_GROUP,
-    MAPPER_WAITLIST_GROUP,
-    MAPPER_APPROVED_GROUP,
-    EARLY_ACCESS_NGO_GROUP,
-    GUEST_GROUP,
-    STANDARD_GROUP,
-    STAFF_GROUP,
-    PREMIUM_GROUP,
-    STAFF_GROUP,
-    SUPERADMIN_GROUP,
-    GRAPHQL_API_GROUP,
-    CORE_USER_GROUP,
-]
-INVALID_AUTH_GROUP_NAME = 'Invalid auth group.'
+
+MAPPER_USE_PERMISSION = 'users.mapper_use'
+MAPPER_AI_ASSISTANT_PERMISSION = 'users.mapper_ai_assistant'
+MAPPER_CUSTOM_ALGORITHMS_PERMISSION = 'users.mapper_custom_algorithms'
+MAPPER_ORG_PROJECTS_PERMISSION = 'users.mapper_org_projects'

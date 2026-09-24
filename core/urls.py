@@ -117,6 +117,7 @@ urlpatterns = [
     ),
     path('manage/bulkimport/', BulkImportView.as_view(), name='bulk_import_urls'),
     path('toggles/', include('core.toggles.urls'), name='toggles'),
+    path('capabilities/', include('core.capabilities.urls'), name='capabilities'),
 ]
 
 if ENV == 'development':

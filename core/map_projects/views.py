@@ -1,11 +1,16 @@
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.generics import RetrieveUpdateDestroyAPIView, RetrieveAPIView, CreateAPIView, \
     RetrieveUpdateAPIView
 from rest_framework.response import Response
 
+from core.capabilities.constants import CAPABILITY_EXCEEDED_ERROR_CODE, CAPABILITY_NOT_ENTITLED_ERROR_CODE, \
+    MAPPER_PROJECTS_CAPABILITY_ID, MAPPER_ROWS_PER_PROJECT_CAPABILITY, MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID
+from core.capabilities.exceptions import MapProjectCapacityExceeded
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin
-from core.common.permissions import HasOwnership, CanEditConceptDictionary
+from core.common.permissions import CanEditConceptDictionary, CanCreateOrgMapProjects, \
+    CanUseCustomMapperAlgorithms, HasMapProjectParentOwnership, HasMapProjectCapacity
 from core.common.views import BaseAPIView
 from core.map_projects.models import MapProject, AutomatchRun
 from core.map_projects.serializers import MapProjectCreateUpdateSerializer, \
@@ -19,6 +24,33 @@ class MapProjectBaseView(BaseAPIView):
     queryset = MapProject.objects.filter(is_active=True)
     permission_classes = (CanEditConceptDictionary,)
     serializer_class = MapProjectListSerializer
+
+    def get_permissions(self):
+        method = self.request.method
+        if method == 'POST' and isinstance(self, ConceptDictionaryCreateMixin):
+            # Map project creation: no MapProject object exists yet to run
+            # CanEditConceptDictionary's object-level check against, so ownership
+            # is checked on the URL-scoped parent (org/user) instead.
+            permission_classes = (
+                HasMapProjectParentOwnership, CanCreateOrgMapProjects, HasMapProjectCapacity,
+                CanUseCustomMapperAlgorithms,
+            )
+        elif method in ('PUT', 'PATCH'):
+            # CanCreateOrgMapProjects is deliberately NOT applied here: it gates
+            # creating a new org-owned project, not editing one that already exists.
+            # Applying it here would make every pre-existing org-owned project
+            # read-only for non-preview users, since no group grants mapper_org_projects
+            # yet - ownership is still enforced via CanEditConceptDictionary.
+            permission_classes = (CanEditConceptDictionary, CanUseCustomMapperAlgorithms)
+        elif method == 'DELETE':
+            # Same reasoning as PUT/PATCH above: deleting an existing org-owned project
+            # isn't "creating" one, so it shouldn't require mapper_org_projects either.
+            # CanEditConceptDictionary still gates on the project itself via
+            # get_object()/check_object_permissions.
+            permission_classes = (CanEditConceptDictionary,)
+        else:
+            permission_classes = self.permission_classes
+        return [permission() for permission in permission_classes]
 
 
 class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListWithHeadersMixin):
@@ -45,17 +77,50 @@ class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListW
     def create(self, request, **kwargs):  # pylint: disable=unused-argument
         if not self.parent_resource:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
-        permission = HasOwnership()
-        if not permission.has_object_permission(request, self, self.parent_resource):
-            return Response(status=status.HTTP_403_FORBIDDEN)
-        serializer = self.get_serializer(data=MapProject.format_request_data(request.data, self.parent_resource))
-        if serializer.is_valid():
+
+        data = MapProject.format_request_data(request.data, self.parent_resource)
+        # Ownership comes only from the URL parent: a body organization_id posted to a user route would re-parent
+        # the project past HasMapProjectParentOwnership and CanCreateOrgMapProjects (OpenConceptLab/ocl_issues#2804).
+        parent_key = self.parent_resource.resource_type.lower() + '_id'
+        for key in ('organization_id', 'user_id'):
+            if key != parent_key:
+                data.pop(key, None)
+        serializer = self.get_serializer(data=data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            # HasMapProjectCapacity already checked capacity, but that read happens
+            # outside any lock, so two concurrent creates from the same user can both
+            # pass it before either commits (TOCTOU). Locking the user row here
+            # serializes creates from the same user; re-check capacity under the lock
+            # before persisting.
+            locked_user = type(request.user).objects.select_for_update().get(pk=request.user.pk)
+            limit = locked_user.get_capability_limit(MAPPER_PROJECTS_CAPABILITY_ID)
+            if limit != 0:
+                used = locked_user.map_projects_used
+                if limit is None or used >= limit:
+                    raise MapProjectCapacityExceeded(limit, used)
+
             instance = serializer.save(force_insert=True)
-            if serializer.is_valid():
-                headers = self.get_success_headers(serializer.data)
-                serializer = self.get_serializer(instance)
-                return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            if not instance.pk:
+                # MapProjectCreateUpdateSerializer.create() calls MapProject.persist_new(),
+                # which catches ValidationError/IntegrityError from full_clean()/save() itself
+                # and reports them via self._errors instead of raising - so a validation
+                # failure there (e.g. a missing input_file_name) returns an unsaved instance
+                # rather than raising. Without this check that unsaved instance would reach
+                # log_capability_event() below and crash on the UsageEvent.map_project FK.
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            # mapper.projects is enforced against the live map_projects_used count (see
+            # get_capability_usage()), not a monotonic counter - deleting a project
+            # correctly frees the slot. This only records the event for attribution.
+            request.user.log_capability_event(
+                MAPPER_PROJECTS_CAPABILITY_ID, action='create_map_project', map_project=instance
+            )
+
+        headers = self.get_success_headers(serializer.data)
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
 
 class MapProjectView(MapProjectBaseView, RetrieveUpdateDestroyAPIView):
@@ -180,6 +245,33 @@ class AutomatchRunListView(AutomatchRunBaseView, ListWithHeadersMixin):
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+
+        intended_rows = serializer.validated_data['intended_rows']
+        is_retry = bool(serializer.validated_data.get('parent_run'))
+
+        # mapper.match_operations is metered per row-algorithm pair at $match
+        # time (MetadataToConceptsListView.post()), not here - a run's actual
+        # $match calls (one per algorithm per row-batch, fired as the run
+        # executes) already account for every unit this run will use. Consuming
+        # it again at run creation double-counted the whole run.
+        # mapper.rows_per_project is a cap on project size, not a quota: each run
+        # is checked on its own, so re-running Auto Match costs match quota only.
+        # 0 = unlimited, -1 = blocked, None = not entitled (blocked).
+        if not is_retry:
+            rows_limit = request.user.get_capability_limit(MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID)
+            if rows_limit != 0 and (rows_limit is None or intended_rows > rows_limit):
+                not_entitled = rows_limit is None or rows_limit < 0  # -1 = blocked: "not available", no -1 count
+                return Response(
+                    {
+                        'detail': 'You do not have a configured row allowance for this project.'
+                        if not_entitled else 'This run is larger than the preview row limit for a project.',
+                        'error_code': CAPABILITY_NOT_ENTITLED_ERROR_CODE[MAPPER_ROWS_PER_PROJECT_CAPABILITY]
+                        if not_entitled else CAPABILITY_EXCEEDED_ERROR_CODE[MAPPER_ROWS_PER_PROJECT_CAPABILITY],
+                        'limit': None if not_entitled else rows_limit, 'requested': intended_rows,
+                    },
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
         run = serializer.save(
             map_project=self.get_map_project(),
             started_by=request.user,
@@ -224,6 +316,16 @@ class AutomatchRunView(AutomatchRunBaseView, RetrieveUpdateAPIView):
         # ownership there (ocl_online#105 OQ2). The run id is not a boundary.
         self.check_object_permissions(self.request, run.map_project)
         return run
+
+    def update(self, request, *args, **kwargs):
+        """Persist lifecycle progress. mapper.rows_per_project is a cap, so completed rows aren't metered."""
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+
+        return Response(serializer.data)
 
     def perform_update(self, serializer):
         serializer.save(updated_by=self.request.user)

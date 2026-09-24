@@ -944,6 +944,15 @@ def to_int(value, default_value):
         return default_value
 
 
+def parse_id(value):
+    # Plain ASCII digits within bigint range only: '²'.isdigit() is True but int('²') raises (a 500).
+    if isinstance(value, int) and not isinstance(value, bool):
+        value = str(value)
+    if isinstance(value, str) and value.isascii() and value.isdigit() and len(value) <= 18:
+        return int(value)
+    return None
+
+
 def generic_sort(_list):
     def compare(item):
         if isinstance(item, (int, float, str, bool)):

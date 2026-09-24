@@ -22,6 +22,9 @@ python manage.py migrate
 echo "Importing base entities"
 python manage.py loaddata core/fixtures/*
 
+echo "Seeding default group capability limits"
+python manage.py seed_group_capabilities
+
 echo "Setting up superuser"
 python manage.py setup_superuser
 
