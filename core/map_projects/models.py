@@ -7,7 +7,7 @@ from django.core.exceptions import ValidationError
 from django.db import models, IntegrityError
 from pydash import get
 
-from core.common.constants import PERSIST_NEW_ERROR_MESSAGE
+from core.common.constants import PERSIST_NEW_ERROR_MESSAGE, ACCESS_TYPE_CHOICES, ACCESS_TYPE_NONE
 from core.common.models import BaseModel
 from core.common.utils import get_export_service, generate_temp_version
 
@@ -23,6 +23,10 @@ class MapProject(BaseModel):
 
     name = models.TextField()
     description = models.TextField(null=True, blank=True)
+    # Private unless shared explicitly: only the owner, members of the owning org and staff can see a project.
+    public_access = models.CharField(
+        max_length=16, choices=ACCESS_TYPE_CHOICES, default=ACCESS_TYPE_NONE, blank=True
+    )
     organization = models.ForeignKey(
         'orgs.Organization', on_delete=models.CASCADE, null=True, blank=True, related_name='map_projects')
     user = models.ForeignKey(
