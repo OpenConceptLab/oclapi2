@@ -202,6 +202,9 @@ class MapProject(BaseModel):
         cls.format_json(new_data, 'lookup_config')
         cls.format_json(new_data, 'input_locales')
 
+        # The owner comes only from the URL (parent_resource), never from the request body.
+        new_data.pop('organization_id', None)
+        new_data.pop('user_id', None)
         if parent_resource:
             new_data[parent_resource.resource_type.lower() + '_id'] = parent_resource.id
 
