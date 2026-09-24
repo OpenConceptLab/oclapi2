@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from django.contrib.auth.models import Group
+from django.contrib.auth.models import Group, Permission
 from django.http import Http404
 from mock import Mock, patch, ANY
 from rest_framework.authtoken.models import Token
@@ -12,7 +12,7 @@ from core.common.tests import OCLTestCase, OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.orgs.models import Organization
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.constants import USER_OBJECT_TYPE, OCL_SERVERS_GROUP, MAPPER_USE_PERMISSION, \
-    MAPPER_AI_ASSISTANT_PERMISSION
+    MAPPER_AI_ASSISTANT_PERMISSION, MAPPER_SCISPACY_PERMISSION
 from core.users.documents import UserProfileDocument
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
@@ -645,6 +645,7 @@ class UserViewsAPITest(OCLAPITestCase):
     def test_user_detail_includes_capabilities_when_requested(self):
         user = UserProfileFactory()
         user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
+        user.user_permissions.add(Permission.objects.get(codename='mapper_scispacy'))
 
         response = self.client.get(
             '/user/?includeCapabilities=true', HTTP_AUTHORIZATION=f"Token {user.get_token()}"
@@ -652,6 +653,7 @@ class UserViewsAPITest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('users.mapper_use', response.data['permissions'])
+        self.assertIn(MAPPER_SCISPACY_PERMISSION, response.data['permissions'])
         capabilities_by_name = {c['name']: c for c in response.data['capabilities']}
         self.assertEqual(
             capabilities_by_name['mapper.match_operations'],
@@ -666,6 +668,7 @@ class UserViewsAPITest(OCLAPITestCase):
 
     def test_user_detail_excludes_capabilities_by_default(self):
         user = UserProfileFactory()
+        user.user_permissions.add(Permission.objects.get(codename='mapper_scispacy'))
 
         response = self.client.get('/user/', HTTP_AUTHORIZATION=f"Token {user.get_token()}")
 

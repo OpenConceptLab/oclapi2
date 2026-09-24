@@ -338,7 +338,7 @@ class SeedGroupCapabilitiesTest(OCLAPITestCase):
     CONFIG = {
         'groups': {
             'pro': {
-                'permissions': ['mapper_use', 'mapper_custom_algorithms'],
+                'permissions': ['mapper_use', 'mapper_custom_algorithms', 'mapper_scispacy'],
                 'capabilities': {'mapper.projects': 20, 'mapper.match_operations': 0},
             }
         }
@@ -372,7 +372,7 @@ class SeedGroupCapabilitiesTest(OCLAPITestCase):
     def test_creates_group_with_permissions_and_limits(self):
         self.seed(self.CONFIG)
 
-        self.assertEqual(self.codenames('pro'), {'mapper_use', 'mapper_custom_algorithms'})
+        self.assertEqual(self.codenames('pro'), {'mapper_use', 'mapper_custom_algorithms', 'mapper_scispacy'})
         self.assertEqual(self.limits('pro'), {'mapper.projects': 20, 'mapper.match_operations': 0})
 
     def test_reseed_syncs_permissions_and_limits(self):

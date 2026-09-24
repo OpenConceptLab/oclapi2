@@ -1,4 +1,4 @@
-# The 4 Mapper-gating Django permissions (ocl_issues#2780/#2782). Plan groups granting
+# The Mapper-gating Django permissions (ocl_issues#2780/#2782/#2766). Plan groups granting
 # them are seeded by `manage.py seed_group_capabilities` from deployment config.
 # pk is pinned so re-running `loaddata core/fixtures/*` on every container start
 # (pre_startup.sh) updates these same rows instead of inserting duplicates on the
@@ -29,6 +29,12 @@
   fields:
     codename: mapper_org_projects
     name: Can create or use organization-owned map projects
+    content_type: [users, userprofile]
+- model: "auth.permission"
+  pk: 1005
+  fields:
+    codename: mapper_scispacy
+    name: Can use ScispaCy-LOINC Mapper matching
     content_type: [users, userprofile]
 - model: "auth.group"
   pk: 1
