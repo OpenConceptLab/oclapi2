@@ -237,7 +237,6 @@ class AutomatchRunListView(AutomatchRunBaseView, ListWithHeadersMixin):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        map_project = self.get_map_project()
         intended_rows = serializer.validated_data['intended_rows']
         is_retry = bool(serializer.validated_data.get('parent_run'))
 
@@ -245,29 +244,24 @@ class AutomatchRunListView(AutomatchRunBaseView, ListWithHeadersMixin):
         # time (MetadataToConceptsListView.post()), not here - a run's actual
         # $match calls (one per algorithm per row-batch, fired as the run
         # executes) already account for every unit this run will use. Consuming
-        # it again at run creation double-counted the whole run. rows_per_project
-        # is project-scoped and genuinely belongs here: it caps how large a run
-        # can even be declared, independent of how much match-operations quota
-        # is left.
+        # it again at run creation double-counted the whole run.
+        # mapper.rows_per_project is a cap on project size, not a quota: each run
+        # is checked on its own, so re-running Auto Match costs match quota only.
+        # 0 = unlimited, -1 = blocked, None = not entitled (blocked).
         if not is_retry:
             rows_limit = request.user.get_capability_limit(MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID)
-            if rows_limit != 0:  # explicit grant only - None (unconfigured) is blocked, not uncapped
-                rows_used = map_project.rows_used
-                if rows_limit is None or rows_used + intended_rows > rows_limit:
-                    # rows_limit is None means no override/group row at all - never
-                    # entitled - which is a different condition from having a real,
-                    # configured allowance that's used up.
-                    not_entitled = rows_limit is None
-                    return Response(
-                        {
-                            'detail': 'You do not have a configured row allowance for this project.'
-                            if not_entitled else 'Preview row limit for this project reached.',
-                            'error_code': CAPABILITY_NOT_ENTITLED_ERROR_CODE[MAPPER_ROWS_PER_PROJECT_CAPABILITY]
-                            if not_entitled else CAPABILITY_EXCEEDED_ERROR_CODE[MAPPER_ROWS_PER_PROJECT_CAPABILITY],
-                            'limit': rows_limit, 'used': rows_used,
-                        },
-                        status=status.HTTP_403_FORBIDDEN
-                    )
+            if rows_limit != 0 and (rows_limit is None or intended_rows > rows_limit):
+                not_entitled = rows_limit is None or rows_limit < 0  # -1 = blocked: "not available", no -1 count
+                return Response(
+                    {
+                        'detail': 'You do not have a configured row allowance for this project.'
+                        if not_entitled else 'This run is larger than the preview row limit for a project.',
+                        'error_code': CAPABILITY_NOT_ENTITLED_ERROR_CODE[MAPPER_ROWS_PER_PROJECT_CAPABILITY]
+                        if not_entitled else CAPABILITY_EXCEEDED_ERROR_CODE[MAPPER_ROWS_PER_PROJECT_CAPABILITY],
+                        'limit': None if not_entitled else rows_limit, 'requested': intended_rows,
+                    },
+                    status=status.HTTP_403_FORBIDDEN
+                )
 
         run = serializer.save(
             map_project=self.get_map_project(),
