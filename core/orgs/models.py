@@ -63,6 +63,10 @@ class Organization(BaseResourceModel, SourceContainerMixin, ChecksumModel):
     def is_member(self, user_profile):
         return user_profile and self.members.filter(id=user_profile.id).exists()
 
+    def is_only_member(self, user_profile):
+        """True if `user_profile` is the org's only member. Every org keeps at least one member."""
+        return bool(self.is_member(user_profile)) and not self.members.exclude(id=user_profile.id).exists()
+
     @staticmethod
     def get_url_kwarg():
         return 'org'

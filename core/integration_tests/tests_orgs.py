@@ -1,11 +1,16 @@
+import threading
+import time
+
+from django.db import connection
 from mock import patch
 from mock.mock import Mock, ANY
 from rest_framework.exceptions import ErrorDetail
+from rest_framework.test import APIClient
 
 from core.collections.documents import CollectionDocument
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
-from core.common.tests import OCLAPITestCase
+from core.common.tests import OCLAPITestCase, OCLAPITransactionTestCase
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.documents import SourceDocument
@@ -448,6 +453,87 @@ class OrganizationMemberViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 204)
         self.assertFalse(self.org.is_member(self.user))
+
+    def test_delete_409_only_member(self):
+        creator = UserProfileFactory()
+        org = OrganizationFactory(created_by=creator, updated_by=creator)
+
+        response = self.client.delete(
+            f'/orgs/{org.mnemonic}/members/{creator.username}/',
+            HTTP_AUTHORIZATION='Token ' + creator.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data, {'detail': 'Cannot remove the only member of an organization.'})
+        self.assertTrue(org.is_member(creator))
+
+    def test_delete_409_only_member_by_staff(self):
+        creator = UserProfileFactory()
+        org = OrganizationFactory(created_by=creator, updated_by=creator)
+        staff = UserProfileFactory(is_staff=True)
+
+        response = self.client.delete(
+            f'/orgs/{org.mnemonic}/members/{creator.username}/',
+            HTTP_AUTHORIZATION='Token ' + staff.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(org.is_member(creator))
+
+    def test_delete_404(self):
+        response = self.client.delete(
+            f'/orgs/{self.org.mnemonic}/members/foobar/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+
+
+class OrganizationMemberRemovalConcurrencyTest(OCLAPITransactionTestCase):
+    """Runs two removals at once, on separate connections, to check that every org keeps a member."""
+
+    def test_two_members_removing_each_other_at_once_leave_one_member(self):
+        alice = UserProfileFactory(username='alice')
+        bob = UserProfileFactory(username='bob')
+        org = OrganizationFactory(mnemonic='race-org', created_by=alice, updated_by=alice)
+        org.members.add(bob)
+        tokens = {'alice': alice.get_token(), 'bob': bob.get_token()}
+        is_only_member = Organization.is_only_member
+
+        def slow_is_only_member(organization, user_profile):
+            result = is_only_member(organization, user_profile)
+            time.sleep(0.5)  # widens the gap between the check and the removal
+            return result
+
+        barrier = threading.Barrier(2)
+        statuses = {}
+
+        def remove(actor, target):
+            try:
+                client = APIClient()
+                barrier.wait()
+                response = client.delete(
+                    f'/orgs/race-org/members/{target}/', HTTP_AUTHORIZATION='Token ' + tokens[actor])
+                statuses[actor] = response.status_code
+            finally:
+                connection.close()
+
+        with patch.object(Organization, 'is_only_member', slow_is_only_member):
+            threads = [
+                threading.Thread(target=remove, args=('alice', 'bob')),
+                threading.Thread(target=remove, args=('bob', 'alice')),
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+        self.assertEqual(sorted(statuses.values()), [204, 409])
+        self.assertEqual(org.members.count(), 1)
 
 
 class OrganizationExtrasViewTest(OCLAPITestCase):
