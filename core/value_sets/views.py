@@ -2,6 +2,7 @@ import logging
 
 from django.core.exceptions import ValidationError
 from rest_framework import status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
 from core.bundles.serializers import FHIRBundleSerializer
@@ -51,6 +52,29 @@ class ValueSetListView(CollectionListView):
 
 
 class ValueSetValidateCodeView(CodeSystemValidateCodeView):
+    INVALID_RESULT = {'parameter': [{'name': 'result', 'valueBoolean': False}]}
+
+    def get_value_sets(self):
+        value_sets = []
+        url = self.get_parameters().get('url')
+        if url:
+            value_sets.append(Collection.objects.filter(
+                canonical_url=url, is_latest_version=True).exclude(version=HEAD).first())
+        collection = self.kwargs.get('collection')
+        if collection:
+            owner_filters = {'organization__mnemonic': self.kwargs['org']} if 'org' in self.kwargs else {
+                'user__username': self.kwargs.get('user')}
+            value_sets.append(Collection.get_version(collection, self.kwargs.get('version', HEAD), owner_filters))
+        return [value_set for value_set in value_sets if value_set]
+
+    def get_object(self, queryset=None):
+        """A value set the requester can't view gives the same answer as a code that isn't in it."""
+        if any(not value_set.has_view_access(self.request.user) for value_set in self.get_value_sets()):
+            return self.INVALID_RESULT
+        try:
+            return super().get_object(queryset)
+        except PermissionDenied:
+            return self.INVALID_RESULT
 
     def get_queryset(self):
         queryset = super(ConceptRetrieveUpdateDestroyView, self).get_queryset()

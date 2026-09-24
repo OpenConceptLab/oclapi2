@@ -7,6 +7,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import F
 from django.http import Http404
+from django.views.decorators.cache import cache_page
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get, compact
@@ -101,7 +102,28 @@ class ConceptBaseView(SourceChildCommonBaseView):
         self.kwargs['parent_resource'] = self.parent_resource = parent_resource
 
 
-# this is a cached view (expiry 24 hours)
+def cache_public_source_lookup(view_func):
+    """Caches lookups of public sources only: a cached response is served to anyone,
+    without the view's access check."""
+    cached_view_func = cache_page(timeout=60 * 60 * 24, key_prefix='cache_lookup')(view_func)
+
+    def wrapper(request, *args, **kwargs):
+        from core.sources.models import Source
+        owner_filters = None
+        if 'org' in kwargs:
+            owner_filters = {'organization__mnemonic': kwargs['org']}
+        elif 'user' in kwargs:
+            owner_filters = {'user__username': kwargs['user']}
+        source = Source.get_version(kwargs['source'], HEAD, owner_filters) if owner_filters and kwargs.get(
+            'source') else None
+        if source and source.public_can_view:
+            return cached_view_func(request, *args, **kwargs)
+        return view_func(request, *args, **kwargs)
+
+    return wrapper
+
+
+# this is a cached view for public sources (expiry 24 hours)
 # used for TermBrowser forms lookup values -- map-types/locales/datatypes/etc
 class ConceptLookupValuesView(ListAPIView, BaseAPIView):  # pragma: no cover
     serializer_class = ConceptLookupListSerializer
@@ -122,7 +144,7 @@ class ConceptLookupValuesView(ListAPIView, BaseAPIView):  # pragma: no cover
 
     def get_queryset(self):
         self.set_parent_resource()
-        if self.parent_resource:
+        if self.parent_resource and self.parent_resource.has_view_access(self.request.user):
             queryset = self.parent_resource.concepts_set.filter(id=F('versioned_object_id'))
             if self.is_verbose():
                 queryset = queryset.prefetch_related('names')

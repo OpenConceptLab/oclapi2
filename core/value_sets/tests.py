@@ -2,12 +2,14 @@ from mock.mock import patch, Mock
 
 from core.collections.models import CollectionReference, Collection
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
+from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLAPITestCase
 from core.concepts.documents import ConceptDocument
 from core.concepts.tests.factories import ConceptFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
+from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 from core.value_sets.serializers import ValueSetDetailSerializer
 
@@ -548,6 +550,36 @@ class ValueSetTest(OCLAPITestCase):
         resource = response.data
         self.assertEqual(resource['parameter'][0]['name'], 'result')
         self.assertEqual(resource['parameter'][0]['valueBoolean'], False)
+
+    def test_validate_code_private_value_set_only_for_members_and_staff(self):
+        self.collection.add_references([
+            CollectionReference(
+                expression=self.concept_1.uri, collection=self.collection, code=self.concept_1.mnemonic,
+                system=self.concept_1.parent.uri, version='v2'
+            ),
+        ])
+        self.collection_v1.seed_references()
+        Collection.objects.filter(mnemonic='c1', organization=self.org).update(public_access=ACCESS_TYPE_NONE)
+        member = UserProfileFactory()
+        self.org.members.add(member)
+        admin = UserProfile.objects.get(username='ocladmin')
+        query = f'system=http://some/url&systemVersion={self.org_source_v2.version}&code={self.concept_1.mnemonic}'
+        urls = [
+            f'/orgs/{self.org.mnemonic}/ValueSet/{self.collection.mnemonic}/$validate-code/?{query}',
+            f'/fhir/ValueSet/$validate-code/?url=http://c1.com&{query}',
+        ]
+
+        for url in urls:
+            for headers, expected in [
+                    ({}, False),
+                    ({'HTTP_AUTHORIZATION': 'Token ' + self.user_token}, False),
+                    ({'HTTP_AUTHORIZATION': 'Token ' + member.get_token()}, True),
+                    ({'HTTP_AUTHORIZATION': 'Token ' + admin.get_token()}, True),
+            ]:
+                response = self.client.get(url, **headers)
+
+                self.assertEqual(response.status_code, 200, url)
+                self.assertEqual(response.data['parameter'][0]['valueBoolean'], expected, (url, headers))
 
     def test_expand(self):
         self.client.post(

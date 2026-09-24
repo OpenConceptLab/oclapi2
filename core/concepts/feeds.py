@@ -16,7 +16,8 @@ class ConceptFeed(Feed, FeedFilterMixin):
 
     def get_object(self, request, *args, **kwargs):
         concept = Concept.get_base_queryset(kwargs).first()
-        if not concept:
+        # feeds are served without authentication, so only concepts of public sources have one
+        if not concept or not concept.parent.public_can_view:
             raise Http404()
 
         self.source = concept.parent
