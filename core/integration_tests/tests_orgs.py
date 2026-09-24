@@ -233,6 +233,20 @@ class OrganizationDetailViewTest(OCLAPITestCase):
         self.assertEqual(response.data['id'], self.org.mnemonic)
         self.assertEqual(response.data['name'], 'Wayne Corporation')
 
+    def test_put_200_by_staff_does_not_add_member(self):
+        staff = UserProfileFactory(is_staff=True)
+        response = self.client.put(
+            f'/orgs/{self.org.mnemonic}/',
+            {'name': 'Wayne Corporation'},
+            HTTP_AUTHORIZATION='Token ' + staff.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.updated_by, staff)
+        self.assertFalse(self.org.is_member(staff))
+
     def test_delete_403(self):
         stranger = UserProfileFactory()
         response = self.client.delete(
@@ -407,6 +421,34 @@ class OrganizationMemberViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.user.organizations.count(), 0)
 
+    def test_delete_204_creator(self):
+        creator = UserProfileFactory()
+        org = OrganizationFactory(created_by=creator, updated_by=creator)
+        member = UserProfileFactory(organizations=[org])
+
+        response = self.client.delete(
+            f'/orgs/{org.mnemonic}/members/{creator.username}/',
+            HTTP_AUTHORIZATION='Token ' + member.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(org.is_member(creator))
+
+    def test_delete_204_last_editor(self):
+        self.org.updated_by = self.user
+        self.org.save()
+        member = UserProfileFactory(organizations=[self.org])
+
+        response = self.client.delete(
+            f'/orgs/{self.org.mnemonic}/members/{self.user.username}/',
+            HTTP_AUTHORIZATION='Token ' + member.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(self.org.is_member(self.user))
+
 
 class OrganizationExtrasViewTest(OCLAPITestCase):
     def test_get_200(self):
@@ -578,6 +620,20 @@ class OrganizationOverviewViewTest(OCLAPITestCase):
         self.assertEqual(response.data['overview'], {'foo': 'bar'})
         self.org.refresh_from_db()
         self.assertEqual(self.org.overview, {'foo': 'bar'})
+
+    def test_put_200_by_staff_does_not_add_member(self):
+        staff = UserProfileFactory(is_staff=True)
+        response = self.client.put(
+            f'/orgs/{self.org.mnemonic}/overview/',
+            {'overview': {'foo': 'bar'}},
+            HTTP_AUTHORIZATION='Token ' + staff.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.updated_by, staff)
+        self.assertFalse(self.org.is_member(staff))
 
 
 class OrganizationSourceListViewTest(OCLAPITestCase):

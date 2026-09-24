@@ -48,8 +48,13 @@ class OrganizationTest(OCLTestCase):
         org.updated_by = updater
         org.save()
 
-        self.assertEqual(org.members.count(), 2)
-        self.assertEqual(sorted(list(org.members.values_list('username', flat=True))), sorted(['creator', 'updater']))
+        self.assertEqual(org.members.count(), 1)
+        self.assertEqual(list(org.members.values_list('username', flat=True)), ['creator'])
+
+        org.members.remove(creator)
+        org.save()
+
+        self.assertEqual(org.members.count(), 0)
 
     def test_create_organization_negative__no_name(self):
         with self.assertRaises(ValidationError):
