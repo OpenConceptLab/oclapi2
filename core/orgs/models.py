@@ -76,12 +76,15 @@ class Organization(BaseResourceModel, SourceContainerMixin, ChecksumModel):
         return cls.objects.filter(public_access__in=[ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT])
 
     def save(self, *args, force_insert=False, force_update=False, using=None, update_fields=None):
+        """
+        The creator becomes a member when the org is created. Later saves leave the members alone, so editing
+        an org doesn't make the editor a member and removing a member sticks.
+        """
+        is_new = not self.id
         super().save(*args, force_insert=force_insert, force_update=force_update, using=using,
                      update_fields=update_fields)
-        if self.id:
+        if is_new:
             self.members.add(self.created_by)
-            if self.updated_by_id:
-                self.members.add(self.updated_by)
 
     def delete(self, using=None, keep_parents=False, sync=False):   # pylint: disable=arguments-differ
         with transaction.atomic():
