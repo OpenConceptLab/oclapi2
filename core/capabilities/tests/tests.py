@@ -5,7 +5,10 @@ from unittest.mock import patch
 from django.contrib.auth.models import Group
 from django.core.management import call_command, CommandError
 
-from core.capabilities.constants import MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, MAPPER_PROJECTS_CAPABILITY_ID
+from core.capabilities.constants import (
+    AI_ASSISTANT_CALLS_CAPABILITY_ID, AI_ASSISTANT_CHANGE_COMMENTS_CAPABILITY_ID,
+    MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, MAPPER_PROJECTS_CAPABILITY_ID,
+)
 from core.capabilities.exceptions import CapabilityExceeded
 from core.capabilities.models import GroupCapability, UsageEvent, UserCapabilityOverride
 from core.common.tests import OCLAPITestCase, PREVIEW_GROUP_NAME
@@ -332,6 +335,36 @@ class CapabilityConsumeViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.data['error_code'], 'mapper_match_operations_not_entitled')
         self.assertIsNone(response.data['limit'])
+
+
+class AIAssistantChangeCommentsCapabilityTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = UserProfileFactory()
+        self.user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
+
+    def consume(self):
+        return self.client.post(
+            '/capabilities/consume/', data={'capability': 'ai_assistant.change_comments'}, format='json',
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+
+    def test_has_its_own_allowance(self):
+        response = self.consume()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['limit'], 100)
+        self.assertEqual(response.data['used'], 1)
+        self.assertEqual(self.user.get_capability_usage(AI_ASSISTANT_CALLS_CAPABILITY_ID), 0)
+
+    def test_limit_reached_reports_its_own_code(self):
+        UserCapabilityOverride.objects.create(
+            user=self.user, capability_id=AI_ASSISTANT_CHANGE_COMMENTS_CAPABILITY_ID, limit=1)
+        self.assertEqual(self.consume().status_code, 200)
+
+        response = self.consume()
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['error_code'], 'ai_assistant_change_comments_limit_reached')
 
 
 class SeedGroupCapabilitiesTest(OCLAPITestCase):
