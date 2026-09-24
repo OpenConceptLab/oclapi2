@@ -665,6 +665,9 @@ class UserViewsAPITest(OCLAPITestCase):
             capabilities_by_name['mapper.projects'], {'name': 'mapper.projects', 'limit': 1, 'used': 0})
         self.assertEqual(
             capabilities_by_name['ai_assistant.calls'], {'name': 'ai_assistant.calls', 'limit': 6, 'used': 0})
+        self.assertEqual(
+            capabilities_by_name['ai_assistant.change_comments'],
+            {'name': 'ai_assistant.change_comments', 'limit': 100, 'used': 0})
 
     def test_user_detail_excludes_capabilities_by_default(self):
         user = UserProfileFactory()

@@ -6,5 +6,6 @@ groups:
       mapper.rows_per_project: 25
       mapper.match_operations: 100
       ai_assistant.calls: 6
+      ai_assistant.change_comments: 100
   early_access:
     permissions: [mapper_use, mapper_ai_assistant, mapper_scispacy]

@@ -18,3 +18,8 @@
   fields:
     name: ai_assistant.calls
     description: Number of Mapper AI Assistant invocations
+- model: "capabilities.capability"
+  pk: 5
+  fields:
+    name: ai_assistant.change_comments
+    description: Number of AI-generated concept change comments (TermBrowser)
