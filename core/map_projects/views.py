@@ -309,30 +309,12 @@ class AutomatchRunView(AutomatchRunBaseView, RetrieveUpdateAPIView):
         return run
 
     def update(self, request, *args, **kwargs):
-        """Persist lifecycle progress and meter newly completed rows."""
+        """Persist lifecycle progress. mapper.rows_per_project is a cap, so completed rows aren't metered."""
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
-
-        completed_rows = serializer.validated_data.get('completed_rows')
-        completed_rows_delta = max((completed_rows or 0) - instance.completed_rows, 0)
-        with transaction.atomic():
-            self.perform_update(serializer)
-            if completed_rows_delta:
-                # mapper.rows_per_project is already enforced, project-scoped and live,
-                # against MapProject.rows_used at run creation (AutomatchRunListView.post)
-                # - a run can't be declared past the cap in the first place, so completing
-                # its already-approved rows needs no second gate here. Using
-                # check_and_consume_capability here (a per-user, never-reset counter)
-                # previously meant a user with multiple projects could get permanently
-                # locked out of progress on ALL of them once their lifetime total crossed
-                # the limit, even on a brand new project with zero rows. This only logs
-                # the event for attribution/reporting.
-                request.user.log_capability_usage(
-                    MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID, units=completed_rows_delta,
-                    action='complete_automatch_rows', map_project=instance.map_project, run=instance
-                )
+        self.perform_update(serializer)
 
         return Response(serializer.data)
 

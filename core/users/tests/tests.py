@@ -644,7 +644,7 @@ class UserViewsAPITest(OCLAPITestCase):
             {'name': 'mapper.match_operations', 'limit': 100, 'used': 0})
         self.assertEqual(
             capabilities_by_name['mapper.rows_per_project'],
-            {'name': 'mapper.rows_per_project', 'limit': 25, 'used': 0})
+            {'name': 'mapper.rows_per_project', 'limit': 25, 'used': None})
         self.assertEqual(
             capabilities_by_name['mapper.projects'], {'name': 'mapper.projects', 'limit': 1, 'used': 0})
         self.assertEqual(

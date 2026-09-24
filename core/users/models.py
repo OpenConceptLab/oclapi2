@@ -278,7 +278,10 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
         return self.capability_overrides.filter(capability_id=capability_id).values_list('limit', flat=True).first()
 
     def get_capability_usage(self, capability_id):
-        from core.capabilities.constants import MAPPER_PROJECTS_CAPABILITY_ID
+        from core.capabilities.constants import MAPPER_PROJECTS_CAPABILITY_ID, MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID
+        if capability_id == MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID:
+            # A per-project cap has no per-user usage; clients show the cap itself.
+            return None
         if capability_id == MAPPER_PROJECTS_CAPABILITY_ID:
             # mapper.projects is enforced against the live count (HasMapProjectCapacity),
             # not the monotonic UsageCounter - report the same number here, or a user who
@@ -317,32 +320,6 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
                     CAPABILITY_NAME_BY_ID.get(capability_id, capability_id), limit, counter.used, units)
 
             UsageCounter.objects.filter(pk=counter.pk).update(used=F('used') + units)
-            self.usage_events.create(
-                capability_id=capability_id, units=units, action=action, algorithm=algorithm,
-                map_project=map_project, run=run
-            )
-
-    def log_capability_usage(  # pylint: disable=too-many-arguments
-            self, capability_id, units=1, action='', algorithm=None, map_project=None, run=None
-    ):
-        """
-        Records usage for a capability whose limit is enforced elsewhere against a live,
-        already-scoped count (e.g. mapper.rows_per_project against MapProject.rows_used)
-        rather than this running counter - so, unlike check_and_consume_capability, this
-        never raises CapabilityExceeded. Still bumps UsageCounter (get_capability_usage
-        reports it for this capability - see the /user/?includeCapabilities=true listing)
-        and always logs a UsageEvent.
-
-        Don't use this for a capability whose get_capability_usage() override already
-        bypasses UsageCounter (mapper.projects, via map_projects_used) - incrementing a
-        counter nothing ever reads, with no matching decrement on delete, is just a
-        second, silently-wrong "used" figure sitting next to the real one. Use
-        log_capability_event for those.
-        """
-        from core.capabilities.models import UsageCounter
-        with transaction.atomic():
-            UsageCounter.objects.get_or_create(user=self, capability_id=capability_id)
-            UsageCounter.objects.filter(user=self, capability_id=capability_id).update(used=F('used') + units)
             self.usage_events.create(
                 capability_id=capability_id, units=units, action=action, algorithm=algorithm,
                 map_project=map_project, run=run

@@ -543,10 +543,10 @@ class AutomatchRunListViewTest(MapProjectAbstractViewTest):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.data['error_code'], 'mapper_rows_per_project_limit_reached')
         self.assertEqual(response.data['limit'], 25)
-        self.assertEqual(response.data['used'], 0)
+        self.assertEqual(response.data['requested'], 26)
         self.assertEqual(self.project.auto_match_runs.count(), 0)
 
-    def test_post_rows_per_project_accumulates_across_top_level_runs(self):
+    def test_post_rows_per_project_checks_each_run_alone(self):
         response1 = self.client.post(
             self.url,
             data={'intended_rows': 20, 'trigger_source': 'ui-auto-match', 'config_snapshot': {}},
@@ -559,9 +559,8 @@ class AutomatchRunListViewTest(MapProjectAbstractViewTest):
             data={'intended_rows': 10, 'trigger_source': 'ui-auto-match', 'config_snapshot': {}},
             format='json', HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
         )
-        self.assertEqual(response2.status_code, 403)
-        self.assertEqual(response2.data['error_code'], 'mapper_rows_per_project_limit_reached')
-        self.assertEqual(response2.data['used'], 20)
+        self.assertEqual(response2.status_code, 201)
+        self.assertEqual(self.project.auto_match_runs.count(), 2)
 
     def test_post_retry_skips_rows_per_project_check(self):
         parent = AutomatchRunFactory(
@@ -666,7 +665,7 @@ class AutomatchRunViewTest(MapProjectAbstractViewTest):
 
     def test_patch_progress(self):
         from core.capabilities.constants import MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID
-        from core.capabilities.models import UsageEvent
+        from core.capabilities.models import UsageCounter, UsageEvent
 
         response = self.client.patch(
             self.url, data={'completed_rows': 150, 'failed_rows': 5}, format='json',
@@ -677,18 +676,11 @@ class AutomatchRunViewTest(MapProjectAbstractViewTest):
         self.assertEqual(self.run.failed_rows, 5)
         self.assertEqual(self.run.completion_status, 'running')
         self.assertIsNone(self.run.completed_at)
-        self.assertEqual(self.user.get_capability_usage(MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID), 150)
-        event = UsageEvent.objects.get(user=self.user, action='complete_automatch_rows')
-        self.assertEqual(event.capability_id, MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID)
-        self.assertEqual(event.units, 150)
-        self.assertEqual(event.map_project_id, self.project.id)
-        self.assertEqual(event.run_id, self.run.id)
-
-        response = self.client.patch(
-            self.url, data={'completed_rows': 150, 'failed_rows': 6}, format='json',
-            HTTP_AUTHORIZATION='Token ' + self.user.get_token())
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.user.get_capability_usage(MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID), 150)
+        # A cap isn't metered: no per-user counter, no usage event.
+        self.assertIsNone(self.user.get_capability_usage(MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID))
+        self.assertFalse(UsageCounter.objects.filter(
+            user=self.user, capability_id=MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID).exists())
+        self.assertFalse(UsageEvent.objects.filter(user=self.user, action='complete_automatch_rows').exists())
 
     def test_patch_completion_stamps_completed_at(self):
         response = self.client.patch(
@@ -753,7 +745,7 @@ class AutomatchRunViewTest(MapProjectAbstractViewTest):
         # of progress on ALL their projects (including brand new ones with zero rows) once
         # their lifetime total crossed the new, lower limit.
         from core.capabilities.constants import MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID
-        from core.capabilities.models import UsageEvent, UserCapabilityOverride
+        from core.capabilities.models import UserCapabilityOverride
 
         UserCapabilityOverride.objects.filter(
             user=self.user, capability_id=MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID).update(limit=10)
@@ -766,10 +758,6 @@ class AutomatchRunViewTest(MapProjectAbstractViewTest):
         self.run.refresh_from_db()
         self.assertEqual(self.run.completed_rows, 11)
         self.assertEqual(self.run.failed_rows, 2)
-        # Still logged for reporting/attribution, just never gated.
-        self.assertEqual(self.user.get_capability_usage(MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID), 11)
-        event = UsageEvent.objects.get(user=self.user, action='complete_automatch_rows')
-        self.assertEqual(event.units, 11)
 
     def test_get_404_for_missing_run(self):
         response = self.client.get(
