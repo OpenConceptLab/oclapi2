@@ -466,7 +466,18 @@ class UserListViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['username'], 'ocladmin')
+        self.assertNotIn('email', response.data[0])
+        self.assertNotIn('is_staff', response.data[0])
+
+        response = self.client.get(
+            '/users/?verbose=true',
+            HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data[0]['email'], self.superuser.email)
+        self.assertTrue(response.data[0]['is_staff'])
 
         response = self.client.get(
             '/users/?q=ocl',
@@ -483,6 +494,39 @@ class UserListViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
+
+    def test_get_staff_flag_filters_only_for_staff(self):
+        regular_user = UserProfileFactory(username='regularsearchuser')
+        UserProfileDocument().update([regular_user])
+
+        for filter_param in ['isSuperuser=true', 'isStaff=true', 'isAdmin=true']:
+            response = self.client.get(
+                f'/users/?{filter_param}', HTTP_AUTHORIZATION='Token ' + regular_user.get_token(), format='json')
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                sorted(user['username'] for user in response.data), ['ocladmin', 'regularsearchuser'])
+
+        for filter_param in ['isSuperuser=true', 'isStaff=true']:
+            response = self.client.get(
+                f'/users/?{filter_param}', HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
+                format='json')
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual([user['username'] for user in response.data], ['ocladmin'])
+
+    @patch('core.common.mixins.ListWithHeadersMixin.get_csv')
+    def test_get_csv_is_not_exported(self, get_csv_mock):
+        for query in ['csv=true', 'csv=1&q=ocl']:
+            response = self.client.get(
+                f'/users/?{query}',
+                HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
+                format='json'
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data[0]['username'], 'ocladmin')
+        get_csv_mock.assert_not_called()
 
     def test_get_200_with_inactive_user(self):
         inactive_user = UserProfileFactory(is_active=False, username='inactive')

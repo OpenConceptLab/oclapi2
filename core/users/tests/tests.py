@@ -676,12 +676,48 @@ class UserViewsAPITest(OCLAPITestCase):
         self.assertNotIn('capabilities', response.data)
         self.assertNotIn('permissions', response.data)
 
-    def test_user_detail_include_verification_token_allow_any(self):
-        user = UserProfileFactory(username='verificationtokenuser')
+    def test_user_detail_never_returns_verification_token(self):
+        user = UserProfileFactory(username='verificationtokenuser', verification_token='secret-token')
 
         response = self.client.get(f'/users/{user.username}/?includeVerificationToken=true')
 
+        self.assertEqual(response.status_code, 401)
+
+        for token in [user.get_token(), self.admin_token]:
+            response = self.client.get(
+                f'/users/{user.username}/?includeVerificationToken=true', HTTP_AUTHORIZATION='Token ' + token)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertNotIn('verification_token', response.data)
+            self.assertNotIn('secret-token', str(response.data))
+
+    def test_user_detail_private_fields_only_for_self_and_staff(self):
+        user = UserProfileFactory(username='privatefieldsuser', email='private@example.com')
+        other_user = UserProfileFactory(username='privatefieldsother')
+        private_fields = ['email', 'last_login', 'is_staff', 'is_superuser']
+
+        response = self.client.get(
+            f'/users/{user.username}/', HTTP_AUTHORIZATION='Token ' + other_user.get_token())
+
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['username'], user.username)
+        for field in private_fields:
+            self.assertNotIn(field, response.data)
+
+        response = self.client.get(
+            f'/users/{user.username}/?summary=true', HTTP_AUTHORIZATION='Token ' + other_user.get_token())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('is_staff', response.data)
+        self.assertNotIn('is_superuser', response.data)
+
+        for token in [user.get_token(), self.admin_token]:
+            response = self.client.get(f'/users/{user.username}/', HTTP_AUTHORIZATION='Token ' + token)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data['email'], 'private@example.com')
+            for field in private_fields:
+                self.assertIn(field, response.data)
 
     def test_user_detail_get_object_anonymous_self_raises_404(self):
         from django.contrib.auth.models import AnonymousUser
