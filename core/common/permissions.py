@@ -49,16 +49,30 @@ class HasOwnership(BasePermission):
         return False
 
 
-class CanViewConceptDictionary(HasPrivateAccess):
+def user_can_view_concept_dictionary(user, obj) -> bool:
+    """Share repository visibility without mixing user, organization and repository primary keys."""
+    if obj.public_access in [ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW]:
+        return True
+    if user.is_staff:
+        return True
+    if user.is_authenticated:
+        if getattr(obj, 'user_id', None) == user.id:
+            return True
+        organization_id = getattr(obj, 'organization_id', None)
+        if getattr(obj, 'resource_type', None) == 'Organization':
+            organization_id = obj.id
+        if organization_id and user.organizations.filter(id=organization_id).exists():
+            return True
+    return False
+
+
+class CanViewConceptDictionary(BasePermission):
     """
     The user can view this source
     """
 
     def has_object_permission(self, request, view, obj):
-        if obj.public_access in [ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW]:
-            return True
-
-        return super().has_object_permission(request, view, obj)
+        return user_can_view_concept_dictionary(request.user, obj)
 
 
 class CanEditConceptDictionary(HasPrivateAccess):

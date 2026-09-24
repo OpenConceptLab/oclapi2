@@ -12,6 +12,10 @@ class ConceptDocument(Document):
         name = 'concepts'
         settings = {'number_of_shards': 1, 'number_of_replicas': 0}
 
+    
+    is_active = fields.BooleanField(attr='is_active')
+    is_head = fields.BooleanField()  # resolves via the VersionedModel.is_head property
+
     id = fields.TextField(attr='mnemonic')
     id_lowercase = fields.KeywordField(attr='mnemonic', normalizer="lowercase")
     id_raw = fields.KeywordField(attr='mnemonic')
