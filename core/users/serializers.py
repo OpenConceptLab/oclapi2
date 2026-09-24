@@ -10,13 +10,32 @@ from rest_framework.fields import IntegerField
 from rest_framework.serializers import ModelSerializer
 from rest_framework.validators import UniqueValidator
 
-from core.common.constants import NAMESPACE_REGEX, INCLUDE_SUBSCRIBED_ORGS, INCLUDE_VERIFICATION_TOKEN, \
-    INCLUDE_AUTH_GROUPS, INCLUDE_PINS, INCLUDE_FOLLOWERS, INCLUDE_FOLLOWING, INCLUDE_CAPABILITIES
+from core.common.constants import NAMESPACE_REGEX, INCLUDE_SUBSCRIBED_ORGS, INCLUDE_AUTH_GROUPS, \
+    INCLUDE_PINS, INCLUDE_FOLLOWERS, INCLUDE_FOLLOWING, INCLUDE_CAPABILITIES
 from .models import UserProfile, Follow
 from ..common.serializers import AbstractResourceSerializer
 from ..common.utils import get_truthy_values
 
 TRUTHY = get_truthy_values()
+PRIVATE_USER_FIELDS = ('email', 'last_login', 'is_staff', 'is_superuser')
+
+
+def can_view_private_user_fields(request, user):
+    requesting_user = get(request, 'user')
+    return bool(
+        requesting_user and requesting_user.is_authenticated and
+        (requesting_user.is_staff or requesting_user.id == user.id)
+    )
+
+
+class PrivateUserFieldsMixin:
+    """Email and account flags are only for the user themselves and staff."""
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if not can_view_private_user_fields(get(self, 'context.request'), instance):
+            for field in PRIVATE_USER_FIELDS:
+                data.pop(field, None)
+        return data
 
 
 class UserListSerializer(AbstractResourceSerializer):
@@ -29,7 +48,7 @@ class UserListSerializer(AbstractResourceSerializer):
         )
 
 
-class UserSummarySerializer(serializers.ModelSerializer):
+class UserSummarySerializer(PrivateUserFieldsMixin, serializers.ModelSerializer):
     sources = IntegerField(source='public_sources')
     collections = IntegerField(source='public_collections')
     organizations = IntegerField(source='orgs_count')
@@ -154,7 +173,7 @@ class FollowingSerializer(AbstractFollowerSerializer):
         return following.get_brief_serializer()(following).data
 
 
-class UserDetailSerializer(AbstractResourceSerializer):
+class UserDetailSerializer(PrivateUserFieldsMixin, AbstractResourceSerializer):
     type = serializers.CharField(source='resource_type', read_only=True)
     uuid = serializers.CharField(source='id', read_only=True)
     username = serializers.CharField(required=False)
@@ -193,7 +212,7 @@ class UserDetailSerializer(AbstractResourceSerializer):
             'public_collections', 'public_sources', 'created_on', 'updated_on', 'created_by', 'updated_by',
             'url', 'organizations_url', 'extras', 'sources_url', 'collections_url', 'website', 'last_login',
             'logo_url', 'subscribed_orgs', 'is_superuser', 'is_staff', 'first_name', 'last_name', 'verified',
-            'verification_token', 'date_joined', 'auth_groups', 'permissions', 'capabilities', 'status',
+            'date_joined', 'auth_groups', 'permissions', 'capabilities', 'status',
             'deactivated_at',
             'sources', 'collections', 'owned_orgs', 'bookmarks', 'pins', 'bio', 'followers', 'following'
         )
@@ -202,7 +221,6 @@ class UserDetailSerializer(AbstractResourceSerializer):
         params = get(kwargs, 'context.request.query_params')
         self.query_params = params.dict() if params else {}
         self.include_subscribed_orgs = self.query_params.get(INCLUDE_SUBSCRIBED_ORGS) in TRUTHY
-        self.include_verification_token = self.query_params.get(INCLUDE_VERIFICATION_TOKEN) in TRUTHY
         self.include_auth_groups = self.query_params.get(INCLUDE_AUTH_GROUPS) in TRUTHY
         self.include_capabilities = self.query_params.get(INCLUDE_CAPABILITIES) in TRUTHY
         self.include_pins = self.query_params.get(INCLUDE_PINS) in TRUTHY
@@ -211,8 +229,6 @@ class UserDetailSerializer(AbstractResourceSerializer):
 
         if not self.include_subscribed_orgs:
             self.fields.pop('subscribed_orgs')
-        if not self.include_verification_token:
-            self.fields.pop('verification_token')
         if not self.include_auth_groups:
             self.fields.pop('auth_groups')
         if not self.include_capabilities:

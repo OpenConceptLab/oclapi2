@@ -143,6 +143,7 @@ class CustomPaginator:
 
 
 class ListWithHeadersMixin(ListModelMixin):
+    allow_csv_export = True
     default_filters = {}
     object_list = None
     _max_score = None
@@ -185,7 +186,7 @@ class ListWithHeadersMixin(ListModelMixin):
         headers = {}
         sorted_list = []
         query_params = request.query_params.dict()
-        is_csv = query_params.get('csv', False)
+        is_csv = self.allow_csv_export and query_params.get('csv', False)
 
         if not is_csv and request.method == 'GET' and self.__can_cache():
             cache_key_body, data, cache_key_headers, headers = self.__get_cached_data_if_any(request)

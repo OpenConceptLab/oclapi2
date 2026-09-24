@@ -312,6 +312,22 @@ class OrganizationUserListViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['username'], 'ocladmin')
 
+    def test_get_verbose_hides_private_fields_from_others(self):
+        response = self.client.get('/orgs/OCL/members/?verbose=true', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data[0]['username'], 'ocladmin')
+        self.assertNotIn('email', response.data[0])
+        self.assertNotIn('is_superuser', response.data[0])
+
+    @patch('core.common.mixins.ListWithHeadersMixin.get_csv')
+    def test_get_csv_is_not_exported(self, get_csv_mock):
+        response = self.client.get('/orgs/OCL/members/?csv=true', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data[0]['username'], 'ocladmin')
+        get_csv_mock.assert_not_called()
+
     def test_get_404(self):
         response = self.client.get(
             '/orgs/OCL1/members/',
