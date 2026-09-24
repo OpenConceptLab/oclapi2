@@ -1121,20 +1121,23 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
 
     @staticmethod
     def get_repo_params(is_semantic, target_repo_params, target_repo_url, user=None):
-        """Target repos the user can't view are reported as unresolvable."""
-        repo = ConceptFuzzySearch.get_target_repo(target_repo_url)
-        if not repo or not repo.has_view_access(user):
-            raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')
-        if target_repo_params:
+        """The repo from target_repo_url, else the one described by target_repo.
+        Target repos the user can't view are reported as unresolvable."""
+        repo = ConceptFuzzySearch.get_target_repo(target_repo_url) if target_repo_url else None
+        if repo:
+            if not repo.has_view_access(user):
+                raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')
+            repo_params = ConceptFuzzySearch.get_repo_params(repo)
+        elif target_repo_params:
             repos = MetadataToConceptsListView.get_target_repos_from_params(target_repo_params)
             if not repos.exists() or not all(target_repo.has_view_access(user) for target_repo in repos):
                 raise Http400(f'Unable to resolve "target_repo": "{target_repo_params}"')
-        if is_semantic:
-            if repo and not repo.has_semantic_match_algorithm:
-                raise Http400('This repo version does not support semantic search')
-        repo_params = target_repo_params or ConceptFuzzySearch.get_repo_params(repo)
-        if not repo_params:
+            repo = repos.first()
+            repo_params = target_repo_params
+        else:
             raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')
+        if is_semantic and not repo.has_semantic_match_algorithm:
+            raise Http400('This repo version does not support semantic search')
         return repo_params
 
     @swagger_auto_schema(

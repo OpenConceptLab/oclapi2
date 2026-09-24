@@ -66,7 +66,9 @@ class MatchAccessTest(SearchResolutionAccessBaseTest):
         self.assertEqual(additional_filter_criterion, get_visible_repo_criteria(self.outsider))
 
     def match(self, user, target_repo_url, target_repo=None):
-        data = {'rows': [{'name': 'foo'}], 'target_repo_url': target_repo_url}
+        data = {'rows': [{'name': 'foo'}]}
+        if target_repo_url:
+            data['target_repo_url'] = target_repo_url
         if target_repo:
             data['target_repo'] = target_repo
         return self.client.post(
@@ -80,17 +82,25 @@ class MatchAccessTest(SearchResolutionAccessBaseTest):
         for user in [self.outsider, self.member]:
             user.user_permissions.add(mapper_use)
 
-        response = self.match(self.outsider, self.private_source.uri)
-        self.assertEqual(response.status_code, 400)
+        for target_repo_url, target_repo in [
+                (self.private_source.uri, None), (None, private_target_repo),
+                ('/orgs/NoSuchOrg/sources/NoSuchSource/', private_target_repo)]:
+            response = self.match(self.outsider, target_repo_url, target_repo)
+            self.assertEqual(response.status_code, 400, (target_repo_url, target_repo))
 
-        response = self.match(self.outsider, public_source.uri, private_target_repo)
-        self.assertEqual(response.status_code, 400)
+        # a resolved target_repo_url is what gets searched; target_repo is then ignored
+        with patch.object(ConceptFuzzySearch, 'search', side_effect=StopSearch) as search_mock:
+            with self.assertRaises(StopSearch):
+                self.match(self.outsider, public_source.uri, private_target_repo)
+        self.assertEqual(search_mock.call_args[0][2]['source'], 'PublicMatchSource')
 
         for user in [self.member, self.admin]:
-            with patch.object(ConceptFuzzySearch, 'search', side_effect=StopSearch) as search_mock:
-                with self.assertRaises(StopSearch):
-                    self.match(user, self.private_source.uri, private_target_repo)
-            self.assertEqual(search_mock.call_args[0][2], private_target_repo)
+            for target_repo_url, target_repo in [
+                    (self.private_source.uri, None), (None, private_target_repo)]:
+                with patch.object(ConceptFuzzySearch, 'search', side_effect=StopSearch) as search_mock:
+                    with self.assertRaises(StopSearch):
+                        self.match(user, target_repo_url, target_repo)
+                self.assertEqual(search_mock.call_args[0][2], private_target_repo)
 
 
 class ResolveReferenceAccessTest(SearchResolutionAccessBaseTest):
