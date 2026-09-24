@@ -80,6 +80,8 @@ class MapProjectView(MapProjectBaseView, RetrieveUpdateDestroyAPIView):
         )
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
+        if not serializer.is_valid():  # persist_changes reports model validation errors on the serializer
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         return Response(serializer.data)
 
 
