@@ -7,18 +7,21 @@ from core.users.constants import MAPPER_AI_ASSISTANT_GROUP
 class HasPrivateAccess(BasePermission):
     """
     Current user is authenticated as a staff user, or is designated as the referenced object's owner,
-    or belongs to an organization that is designated as the referenced object's owner.
+    or belongs to an organization that is designated as the referenced object's owner,
+    or belongs to the referenced organization itself.
     """
     def has_object_permission(self, request, view, obj):
         user = request.user
         if user.is_staff:
             return True
         if user.is_authenticated:
+            from core.orgs.models import Organization
             if hasattr(obj, 'parent_id') and user == obj.parent:
                 return True
-            if user.organizations.filter(id=obj.id).exists():
+            if isinstance(obj, Organization) and user.organizations.filter(id=obj.id).exists():
                 return True
-            if hasattr(obj, 'parent_id') and user.organizations.filter(id=obj.parent_id).exists():
+            organization_id = getattr(obj, 'organization_id', None)
+            if organization_id and user.organizations.filter(id=organization_id).exists():
                 return True
         return False
 
@@ -82,8 +85,8 @@ class HasAccessToVersionedObject(BasePermission):
         is_requesting_user_parent = is_user_parent and request.user.id == versioned_object.parent_id
 
         return is_requesting_user_parent or (
-                request.user.is_authenticated and request.user.organizations.filter(
-                    id=versioned_object.parent_id).exists()
+                request.user.is_authenticated and bool(versioned_object.organization_id) and
+                request.user.organizations.filter(id=versioned_object.organization_id).exists()
         )
 
 
