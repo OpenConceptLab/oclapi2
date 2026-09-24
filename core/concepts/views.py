@@ -1117,7 +1117,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
             owner_criteria = DjangoQ(organization__mnemonic=owner) | DjangoQ(user__username=owner)
         return Source.objects.filter(
             owner_criteria, mnemonic=target_repo_params.get('source'),
-            version=target_repo_params.get('source_version') or HEAD)
+            version=target_repo_params.get('source_version') or target_repo_params.get('version') or HEAD)
 
     @staticmethod
     def get_repo_params(is_semantic, target_repo_params, target_repo_url, user=None):
@@ -1127,7 +1127,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
             raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')
         if target_repo_params:
             repos = MetadataToConceptsListView.get_target_repos_from_params(target_repo_params)
-            if not repos or not all(target_repo.has_view_access(user) for target_repo in repos):
+            if not repos.exists() or not all(target_repo.has_view_access(user) for target_repo in repos):
                 raise Http400(f'Unable to resolve "target_repo": "{target_repo_params}"')
         if is_semantic:
             if repo and not repo.has_semantic_match_algorithm:
