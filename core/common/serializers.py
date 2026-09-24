@@ -141,6 +141,20 @@ class IdentifierSerializer(ReadSerializerMixin, Serializer):
         return IdentifierSerializer.parse_identifier(ident)
 
     @staticmethod
+    def get_checked_owner(context, ident):
+        """New repos go under the owner the request is for (URL or import owner), never one named only in the
+        payload. An accession ID naming a different owner is refused."""
+        owner = get(context, 'owner') or get(context, 'view.parent_resource')
+        if not owner:
+            raise ValidationError('Cannot find the owner to create this resource under.')
+        is_org = ident['owner_type'].lower() in ['orgs', 'organization']
+        if is_org != isinstance(owner, Organization) or ident['owner_id'] != owner.mnemonic:
+            raise ValidationError(
+                f"Accession ID owner '{ident['owner_type']}/{ident['owner_id']}' does not match "
+                f"the requested owner '{owner.uri}'.")
+        return owner
+
+    @staticmethod
     def validate_identifier(value):
         accession_id = IdentifierSerializer.find_ocl_identifier(value)
         if accession_id:

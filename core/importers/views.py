@@ -28,7 +28,7 @@ from core.common.swagger_parameters import update_if_exists_param, task_param, r
 from core.common.utils import queue_bulk_import, is_csv_file, get_truthy_values, get_queue_task_names, \
     get_export_service
 from core.importers.constants import ALREADY_QUEUED, INVALID_UPDATE_IF_EXISTS, NO_CONTENT_TO_IMPORT
-from core.importers.importer import Importer
+from core.importers.importer import Importer, ResourceImporter
 from core.importers.input_parsers import ImportContentParser
 from core.tasks.models import Task
 from core.tasks.serializers import TaskDetailSerializer, TaskListSerializer
@@ -192,6 +192,15 @@ class ImportView(BulkImportParallelInlineView, ImportRetrieveDestroyMixin):
     )
     def post(self, request, import_queue=None):
         if 'import_type' in request.data:
+            owner_type = request.data.get('owner_type', 'user')
+            owner = request.data.get('owner', self.request.user.username)
+            owner_object = ResourceImporter.get_owner(owner_type, owner)
+            if not owner_object:
+                return Response({'exception': f'Cannot find owner of type {owner_type} and id {owner}'},
+                                status=status.HTTP_404_NOT_FOUND)
+            if not ResourceImporter.can_edit_owner(owner_object, self.request.user):
+                return Response(status=status.HTTP_403_FORBIDDEN)
+
             file_url = get(request.data, 'file_url')  # importing as url to a file
             if not file_url:
                 data = get(request.data, 'data')  # importing by posting as text
@@ -220,8 +229,7 @@ class ImportView(BulkImportParallelInlineView, ImportRetrieveDestroyMixin):
 
             task = get_queue_task_names(import_queue, self.request.user.username)
             new_task = bulk_import_new.apply_async(
-                (file_url, self.request.user.username,
-                 request.data.get('owner_type', 'user'), request.data.get('owner', self.request.user.username),
+                (file_url, self.request.user.username, owner_type, owner,
                  request.data.get('import_type', 'npm')), task_id=task.id, queue=task.queue)
             return Response({
                 'task': new_task.id,

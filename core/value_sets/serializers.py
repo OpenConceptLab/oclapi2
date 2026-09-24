@@ -11,9 +11,7 @@ from core.collections.serializers import CollectionCreateOrUpdateSerializer
 from core.common.constants import HEAD
 from core.common.fhir_helpers import delete_empty_fields
 from core.common.serializers import StatusField, IdentifierSerializer, ReadSerializerMixin
-from core.orgs.models import Organization
 from core.parameters.serializers import ParametersSerializer
-from core.users.models import UserProfile
 from core.value_sets.constants import RESOURCE_TYPE
 
 logger = logging.getLogger('oclapi')
@@ -172,8 +170,7 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
         collection.version = HEAD
         collection.collection_type = 'ValueSet'
 
-        parent_klass = Organization if ident['owner_type'].lower() in ['orgs', 'organization'] else UserProfile
-        collection.set_parent(parent_klass.objects.filter(**{parent_klass.mnemonic_attr: ident['owner_id']}).first())
+        collection.set_parent(IdentifierSerializer.get_checked_owner(self.context, ident))
 
         user = self.context['request'].user
         errors = Collection.persist_new(collection, user)
