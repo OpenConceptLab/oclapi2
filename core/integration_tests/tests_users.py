@@ -8,6 +8,7 @@ from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, ACCESS_TYP
 from core.common.tests import OCLAPITestCase
 from core.orgs.documents import OrganizationDocument
 from core.orgs.tests.factories import OrganizationFactory
+from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.constants import VERIFY_EMAIL_MESSAGE, VERIFICATION_TOKEN_MISMATCH
 from core.users.documents import UserProfileDocument
 from core.users.models import UserProfile
@@ -1232,6 +1233,29 @@ class UserFollowingListViewTest(OCLAPITestCase):
         self.assertEqual(org_followed.followers.first().follower, follower)
         self.assertEqual(follower.following.count(), 2)
         self.assertEqual(follower.following.last().following, org_followed)
+
+    def test_post_private_object_only_if_viewable(self):
+        private_org = OrganizationFactory(mnemonic='private-followed', public_access=ACCESS_TYPE_NONE)
+        private_source = OrganizationSourceFactory(organization=private_org, public_access=ACCESS_TYPE_NONE)
+        member = UserProfileFactory(username='private-member')
+        private_org.members.add(member)
+        outsider = UserProfileFactory(username='private-outsider')
+
+        for uri in [private_org.uri, private_source.uri]:
+            response = self.client.post(
+                f'/users/{outsider.username}/following/', {'follow': uri},
+                HTTP_AUTHORIZATION='Token ' + outsider.get_token())
+
+            self.assertEqual(response.status_code, 400)
+        self.assertEqual(outsider.following.count(), 0)
+
+        for uri in [private_org.uri, private_source.uri]:
+            response = self.client.post(
+                f'/users/{member.username}/following/', {'follow': uri},
+                HTTP_AUTHORIZATION='Token ' + member.get_token())
+
+            self.assertEqual(response.status_code, 204)
+        self.assertEqual(member.following.count(), 2)
 
 
 class UserFollowingViewTest(OCLAPITestCase):

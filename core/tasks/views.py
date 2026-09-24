@@ -1,3 +1,4 @@
+from django.http import Http404
 from drf_yasg.utils import swagger_auto_schema
 from pydash import compact
 from rest_framework import status
@@ -59,6 +60,8 @@ class TaskView(AbstractTaskView, DestroyAPIView):
     def get_object(self, queryset=None):
         queryset = self.get_queryset()
         obj = get_object_or_404(queryset, **{self.lookup_field: self.kwargs[self.lookup_url_kwarg]})
+        if not obj.has_access(self.request.user):
+            raise Http404()
         self.check_object_permissions(self.request, obj)
         return obj
 

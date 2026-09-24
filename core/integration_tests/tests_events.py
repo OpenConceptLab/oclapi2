@@ -204,9 +204,9 @@ class UserEventsViewTest(OCLAPITestCase):
         # 4. Bruce's follow of Gotham Gazette Crime Deptt
         # 5. Bruce's follow of Gotham Gazette
         # 6. Joker's event of following Bruce
-        # 7. OCL's event of creation of Gotham Gazette Crime Deptt
-        # 8. OCL's event of creation of Gotham Gazette
-        self.assertEqual(len(response.data), 8)
+        # 7. OCL's event of creation of Gotham Gazette
+        # Not the private creation of Gotham Gazette Crime Deptt: Bruce can't view that repo
+        self.assertEqual(len(response.data), 7)
         self.assertEqual(response.data[0]['object']['url'], mario.url)
         self.assertEqual(response.data[0]['referenced_object']['url'], gotham_gazette.url)
         self.assertEqual(response.data[1]['object']['url'], penguin.url)
@@ -220,9 +220,20 @@ class UserEventsViewTest(OCLAPITestCase):
         self.assertEqual(response.data[5]['object']['url'], joker.url)
         self.assertEqual(response.data[5]['referenced_object']['url'], bruce.url)
         self.assertEqual(response.data[6]['object']['url'], '/users/ocladmin/')
-        self.assertEqual(response.data[6]['referenced_object']['url'], gotham_gazette_crime_repo.url)
-        self.assertEqual(response.data[7]['object']['url'], '/users/ocladmin/')
-        self.assertEqual(response.data[7]['referenced_object']['url'], gotham_gazette.url)
+        self.assertEqual(response.data[6]['referenced_object']['url'], gotham_gazette.url)
+
+        mario.follow(gotham_gazette_crime_repo)
+        response = self.client.get(
+            '/users/mario/events/?scopes=following',
+            HTTP_AUTHORIZATION=f'Token {mario.get_token()}'
+        )
+        self.assertEqual(response.status_code, 200)
+        # Mario is a member of Gotham Gazette, so its private repo's events are shown
+        created_urls = [
+            event['referenced_object']['url'] for event in response.data
+            if event['object']['url'] == '/users/ocladmin/'
+        ]
+        self.assertIn(gotham_gazette_crime_repo.url, created_urls)
 
     def test_get_orgs_events(self):  # pylint:disable=too-many-statements,too-many-locals
         alfred = UserProfileFactory(username='alfred', first_name='Alfred', last_name='Pennyworth')

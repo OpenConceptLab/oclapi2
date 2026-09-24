@@ -40,7 +40,8 @@ class Event(models.Model):
         queryset = cls.objects.none()
         for following in following_queryset:
             events = following.following.events.filter(**event_kwargs)
-            if not private:
+            # private events only for objects the follower can still view
+            if not private or not following.follower.can_view(following.following):
                 events = events.filter(public=True)
             queryset = queryset.union(events)
         return queryset

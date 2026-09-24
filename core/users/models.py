@@ -395,6 +395,18 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
     def is_member_of_org(self, org_mnemonic):
         return self.organizations.filter(mnemonic=org_mnemonic).exists()
 
+    def can_view(self, obj):
+        """Whether this user can view a user, an org, a repo or content inside a repo."""
+        from core.orgs.models import Organization
+        if self.is_staff or isinstance(obj, UserProfile):
+            return True
+        if isinstance(obj, Organization):
+            return obj.public_can_view or obj.is_member(self)
+        repo = obj if hasattr(obj, 'has_view_access') else (
+            getattr(obj, 'collection_version', None) or getattr(obj, 'collection', None) or
+            getattr(obj, 'parent', None))
+        return bool(repo and hasattr(repo, 'has_view_access') and repo.has_view_access(self))
+
     def follow(self, following):
         self.following.create(following_id=following.id, following_type=ContentType.objects.get_for_model(following))
 

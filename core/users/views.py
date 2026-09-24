@@ -606,7 +606,7 @@ class AbstractFollowerFollowedView(UserBaseView):
         if not klass:
             raise Http400('Invalid follow uri')
         follow = klass.objects.filter(uri=follow).first()
-        if not follow:
+        if not follow or not self.request.user.can_view(follow):
             raise Http400('Invalid follow uri')
         if not follow.is_active:
             raise Http404('Follow instance is not active')

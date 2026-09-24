@@ -635,7 +635,24 @@ class TaskAPITest(OCLAPITestCase):
         response = self.client.delete(
             f'/tasks/{task.id}/', HTTP_AUTHORIZATION='Token ' + random_user.get_token())
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_single_task_only_for_owner_and_staff(self):
+        owner = UserProfileFactory()
+        task = Task(id='owned-task-id', name='x', state=SUCCESS, result='{"a": 1}', created_by=owner)
+        task.save()
+
+        outsider_token = UserProfileFactory().get_token()
+        response = self.client.get(
+            f'/tasks/{task.id}/?verbose=true&result=all', HTTP_AUTHORIZATION='Token ' + outsider_token)
+
+        self.assertEqual(response.status_code, 404)
+
+        for token in [owner.get_token(), self.token]:
+            response = self.client.get(f'/tasks/{task.id}/', HTTP_AUTHORIZATION='Token ' + token)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data['id'], task.id)
 
     def test_delete_task_already_finished(self):
         task = Task(id='finished-task-id', name='x', state=SUCCESS, created_by=self.user)
