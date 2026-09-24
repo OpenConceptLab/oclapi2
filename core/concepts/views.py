@@ -5,7 +5,7 @@ from cid.locals import get_cid
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Q as DjangoQ
 from django.http import Http404
 from django.views.decorators.cache import cache_page
 from drf_yasg import openapi
@@ -1027,7 +1027,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         is_semantic = self.request.query_params.get('semantic', None) in TRUTHY
         best_match = self.request.query_params.get('bestMatch', None) in TRUTHY
         score_threshold = self.score_threshold_semantic_very_high if is_semantic else self.score_threshold
-        repo_params = self.get_repo_params(is_semantic, target_repo_params, target_repo_url)
+        repo_params = self.get_repo_params(is_semantic, target_repo_params, target_repo_url, self.request.user)
         locale_filter = filters.pop('locale', None) if is_semantic else get(filters, 'locale', None)
         faceted_criterion = self.get_faceted_criterion(False, filters, minimum_should_match=1) if filters else None
         visible_repo_criteria = get_visible_repo_criteria(self.request.user)
@@ -1127,10 +1127,30 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         concept._match_type = match_type  # pylint:disable=protected-access
 
     @staticmethod
-    def get_repo_params(is_semantic, target_repo_params, target_repo_url):
+    def get_target_repos_from_params(target_repo_params):
+        from core.sources.models import Source
+        owner = target_repo_params.get('owner')
+        owner_type = (target_repo_params.get('owner_type') or '').lower()
+        if owner_type in ['organization', 'orgs', 'org']:
+            owner_criteria = DjangoQ(organization__mnemonic=owner)
+        elif owner_type in ['user', 'userprofile', 'users']:
+            owner_criteria = DjangoQ(user__username=owner)
+        else:
+            owner_criteria = DjangoQ(organization__mnemonic=owner) | DjangoQ(user__username=owner)
+        return Source.objects.filter(
+            owner_criteria, mnemonic=target_repo_params.get('source'),
+            version=target_repo_params.get('source_version') or HEAD)
+
+    @staticmethod
+    def get_repo_params(is_semantic, target_repo_params, target_repo_url, user=None):
+        """Target repos the user can't view are reported as unresolvable."""
         repo = ConceptFuzzySearch.get_target_repo(target_repo_url)
-        if not repo:
+        if not repo or not repo.has_view_access(user):
             raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')
+        if target_repo_params:
+            repos = MetadataToConceptsListView.get_target_repos_from_params(target_repo_params)
+            if not repos or not all(target_repo.has_view_access(user) for target_repo in repos):
+                raise Http400(f'Unable to resolve "target_repo": "{target_repo_params}"')
         if is_semantic:
             if repo and not repo.has_semantic_match_algorithm:
                 raise Http400('This repo version does not support semantic search')

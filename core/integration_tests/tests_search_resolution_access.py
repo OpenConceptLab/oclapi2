@@ -65,6 +65,33 @@ class MatchAccessTest(SearchResolutionAccessBaseTest):
         additional_filter_criterion = search_mock.call_args[0][8]
         self.assertEqual(additional_filter_criterion, get_visible_repo_criteria(self.outsider))
 
+    def match(self, user, target_repo_url, target_repo=None):
+        data = {'rows': [{'name': 'foo'}], 'target_repo_url': target_repo_url}
+        if target_repo:
+            data['target_repo'] = target_repo
+        return self.client.post(
+            '/concepts/$match/', data, HTTP_AUTHORIZATION='Token ' + user.get_token(), format='json')
+
+    def test_match_target_repo_needs_view_access(self):
+        mapper_use = Permission.objects.get(codename='mapper_use')
+        public_source = OrganizationSourceFactory(mnemonic='PublicMatchSource')
+        private_target_repo = {
+            'owner': 'ResolveOrg', 'owner_type': 'Organization', 'source': 'ResolveSource', 'source_version': 'HEAD'}
+        for user in [self.outsider, self.member]:
+            user.user_permissions.add(mapper_use)
+
+        response = self.match(self.outsider, self.private_source.uri)
+        self.assertEqual(response.status_code, 400)
+
+        response = self.match(self.outsider, public_source.uri, private_target_repo)
+        self.assertEqual(response.status_code, 400)
+
+        for user in [self.member, self.admin]:
+            with patch.object(ConceptFuzzySearch, 'search', side_effect=StopSearch) as search_mock:
+                with self.assertRaises(StopSearch):
+                    self.match(user, self.private_source.uri, private_target_repo)
+            self.assertEqual(search_mock.call_args[0][2], private_target_repo)
+
 
 class ResolveReferenceAccessTest(SearchResolutionAccessBaseTest):
     def resolve(self, user):
