@@ -50,22 +50,32 @@ class CapabilityBaseView(APIView):
             return None, Response({'detail': '"units" must be a positive integer.'}, status=status.HTTP_400_BAD_REQUEST)
         return units, None
 
+    @staticmethod
+    def parse_id(value):
+        # Plain ASCII digits within bigint range only: '²'.isdigit() is True but int('²') raises (a 500).
+        if isinstance(value, int) and not isinstance(value, bool):
+            value = str(value)
+        if isinstance(value, str) and value.isascii() and value.isdigit() and len(value) <= 18:
+            return int(value)
+        return None
+
     def get_owned_map_project_and_run(self):
         from core.map_projects.models import AutomatchRun, MapProject
 
         request = self.request
         map_project = None
-        map_project_id = request.data.get('map_project', None)
-        if isinstance(map_project_id, (str, int)) and str(map_project_id).isdigit():
-            map_project = MapProject.objects.filter(id=int(map_project_id), created_by=request.user).first()
+        map_project_id = self.parse_id(request.data.get('map_project', None))
+        if map_project_id is not None:
+            # .only('id'): these rows only feed the UsageEvent FKs
+            map_project = MapProject.objects.filter(id=int(map_project_id), created_by=request.user).only('id').first()
 
         run = None
-        run_id = request.data.get('run', None)
-        if isinstance(run_id, (str, int)) and str(run_id).isdigit():
+        run_id = self.parse_id(request.data.get('run', None))
+        if run_id is not None:
             run_qs = AutomatchRun.objects.filter(id=int(run_id))
             run_qs = run_qs.filter(map_project=map_project) if map_project else run_qs.filter(
                 map_project__created_by=request.user)
-            run = run_qs.first()
+            run = run_qs.only('id').first()
 
         return map_project, run
 
