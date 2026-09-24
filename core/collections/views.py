@@ -1307,7 +1307,9 @@ class ReferenceExpressionResolveView(APIView):
                     'resolution_url': instance.resolution_url,
                     'url_registry_entry': get(registry_entry, 'relative_uri')
                 }
-                if instance.id:
+                if instance.id and not instance.has_view_access(self.request.user):
+                    result['resolved'] = False  # a repo the requester can't view is reported as unresolved
+                elif instance.id:
                     is_collection = isinstance(instance, Collection)
                     from core.sources.serializers import SourceListSerializer, SourceVersionListSerializer
                     if instance.is_head:

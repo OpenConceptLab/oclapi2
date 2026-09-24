@@ -17,6 +17,20 @@ from core.common.constants import ES_REQUEST_TIMEOUT
 from core.common.utils import is_url_encoded_string
 
 
+def get_visible_repo_criteria(user):
+    """ES filter for concepts/mappings in repos the user can view: public ones, their own and their orgs'.
+    None for staff, who can view everything."""
+    if get(user, 'is_staff'):
+        return None
+    should = [Q('term', public_can_view=True)]
+    if get(user, 'is_authenticated'):
+        should.append(Q('bool', must=[Q('term', owner_type='User'), Q('term', owner=user.username.lower())]))
+        org_mnemonics = [mnemonic.lower() for mnemonic in user.organizations.values_list('mnemonic', flat=True)]
+        if org_mnemonics:
+            should.append(Q('bool', must=[Q('term', owner_type='Organization'), Q('terms', owner=org_mnemonics)]))
+    return Q('bool', should=should, minimum_should_match=1)
+
+
 class CustomESFacetedSearch(FacetedSearch):
     def __init__(self, query=None, filters=None, sort=(), _search=None):  # pylint: disable=dangerous-default-value
         self._search = _search

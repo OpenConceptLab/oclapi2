@@ -120,7 +120,7 @@ class URLRegistryLookupView(URLRegistryBaseView):
 
         repo, entry = URLRegistry.lookup(url, self.parent_resource)
 
-        if repo and repo.id:
+        if repo and repo.id and repo.has_view_access(request.user):
             return Response(RepoListSerializer(repo, context={'request': request, 'url_registry_entry': entry}).data)
 
         if entry:

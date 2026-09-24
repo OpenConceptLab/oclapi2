@@ -10,6 +10,7 @@ from django.http import Http404
 from django.views.decorators.cache import cache_page
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
+from elasticsearch_dsl import Q
 from pydash import get, compact
 from rest_framework import status
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, ListCreateAPIView, RetrieveUpdateDestroyAPIView, \
@@ -31,7 +32,7 @@ from core.capabilities.constants import CAPABILITY_EXCEEDED_ERROR_CODE, CAPABILI
     MAPPER_MATCH_OPERATIONS_CAPABILITY, MAPPER_MATCH_OPERATIONS_CAPABILITY_ID
 from core.capabilities.exceptions import CapabilityExceeded
 from core.common.permissions import CanUseMapper
-from core.common.search import CustomESSearch, Reranker
+from core.common.search import CustomESSearch, Reranker, get_visible_repo_criteria
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, sort_asc_param, verbose_param,
     include_facets_header, updated_since_param, include_inverse_mappings_param, include_retired_param,
@@ -1029,6 +1030,10 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         repo_params = self.get_repo_params(is_semantic, target_repo_params, target_repo_url)
         locale_filter = filters.pop('locale', None) if is_semantic else get(filters, 'locale', None)
         faceted_criterion = self.get_faceted_criterion(False, filters, minimum_should_match=1) if filters else None
+        visible_repo_criteria = get_visible_repo_criteria(self.request.user)
+        if visible_repo_criteria:
+            faceted_criterion = Q(
+                'bool', must=[visible_repo_criteria, faceted_criterion]) if faceted_criterion else visible_repo_criteria
         apply_for_name_locale = locale_filter and isinstance(locale_filter, str) and len(locale_filter.split(',')) == 1
         encoder_model = self.request.GET.get('encoder_model', None)
         reranker = self.request.GET.get('reranker', None) in TRUTHY
