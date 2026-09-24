@@ -88,16 +88,19 @@ class CapabilityConsumeView(CapabilityBaseView):
         units, error_response = self.get_positive_int_units()
         if error_response:
             return error_response
+        idempotency_key, error_response = self.get_idempotency_key()
+        if error_response:
+            return error_response
         map_project, run = self.get_owned_map_project_and_run()
 
         try:
-            request.user.check_and_consume_capability(
+            event, already_consumed = request.user.check_and_consume_capability(
                 capability_id, units=units,
                 action=request.data.get('action', ''), algorithm=request.data.get('algorithm'),
-                map_project=map_project, run=run,
+                map_project=map_project, run=run, idempotency_key=idempotency_key,
             )
         except CapabilityExceeded as ex:
-            not_entitled = ex.limit is None
+            not_entitled = ex.not_entitled
             return Response(
                 {
                     'detail': f'You do not have access to {capability_name}.' if not_entitled else
@@ -105,7 +108,7 @@ class CapabilityConsumeView(CapabilityBaseView):
                     'error_code': CAPABILITY_NOT_ENTITLED_ERROR_CODE.get(capability_name, 'capability_not_entitled')
                     if not_entitled else
                     CAPABILITY_EXCEEDED_ERROR_CODE.get(capability_name, 'capability_limit_reached'),
-                    'limit': ex.limit, 'used': ex.used,
+                    'limit': None if not_entitled else ex.limit, 'used': ex.used,
                 },
                 status=status.HTTP_403_FORBIDDEN
             )
@@ -115,9 +118,24 @@ class CapabilityConsumeView(CapabilityBaseView):
                 'capability': capability_name,
                 'limit': request.user.get_capability_limit(capability_id),
                 'used': request.user.get_capability_usage(capability_id),
+                'usage_event_id': event.id,
+                'units': event.units,
+                'already_consumed': already_consumed,
             },
             status=status.HTTP_200_OK
         )
+
+    def get_idempotency_key(self):
+        """Returns (idempotency_key, error_response); the key is optional."""
+        key = self.request.data.get('idempotency_key')
+        if key is None or key == '':
+            return None, None
+        if not isinstance(key, str) or len(key) > 255:
+            return None, Response(
+                {'detail': '"idempotency_key" must be a string of at most 255 characters.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return key, None
 
 
 class CapabilityRefundView(CapabilityBaseView):

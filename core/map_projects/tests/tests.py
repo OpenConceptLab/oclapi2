@@ -237,6 +237,40 @@ class MapProjectListViewTest(MapProjectAbstractViewTest):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(self.user.map_projects.count(), 1)
 
+    @patch('core.services.storages.cloud.aws.S3.upload')
+    def test_post_to_user_route_ignores_body_organization_id(self, _upload_mock):
+        other_org = OrganizationFactory()
+        response = self.client.post(
+            f'/users/{self.user.username}/map-projects/',
+            data={
+                'name': 'Test Project', 'file': self.file, 'organization_id': other_org.id,
+                'columns': json.dumps([{'label': 'name', 'hidden': False, 'dataKey': 'name', 'original': 'name'}]),
+            },
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(self.user.map_projects.count(), 1)
+        self.assertIsNone(self.user.map_projects.first().organization_id)
+        self.assertEqual(other_org.map_projects.count(), 0)
+
+    @patch('core.services.storages.cloud.aws.S3.upload')
+    def test_post_to_org_route_ignores_body_user_id(self, _upload_mock):
+        from django.contrib.auth.models import Permission
+        self.user.user_permissions.add(Permission.objects.get(codename='mapper_org_projects'))
+        other_user = UserProfileFactory()
+        response = self.client.post(
+            '/orgs/CIEL/map-projects/',
+            data={
+                'name': 'Test Project', 'file': self.file, 'user_id': other_user.id,
+                'columns': json.dumps([{'label': 'name', 'hidden': False, 'dataKey': 'name', 'original': 'name'}]),
+            },
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+        )
+        self.assertEqual(response.status_code, 201)
+        project = self.org.map_projects.get()
+        self.assertIsNone(project.user_id)
+        self.assertEqual(other_user.map_projects.count(), 0)
+
     def test_post_org_project_denied_without_permission(self):
         response = self.client.post(
             '/orgs/CIEL/map-projects/',

@@ -609,6 +609,20 @@ class UserViewsAPITest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(sorted(user.auth_groups), sorted([OCL_SERVERS_GROUP, PREVIEW_GROUP_NAME]))
 
+    def test_non_staff_self_put_ignores_auth_groups(self):
+        user = UserProfileFactory()
+        user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
+
+        response = self.client.put(
+            '/user/?includeAuthGroups=true',
+            {'auth_groups': ['core_user', OCL_SERVERS_GROUP]},
+            HTTP_AUTHORIZATION='Token ' + user.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(user.auth_groups), [PREVIEW_GROUP_NAME])
+
     def test_user_detail_summary_serializer(self):
         user = UserProfileFactory(username='summaryserializeruser')
 

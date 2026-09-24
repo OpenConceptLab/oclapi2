@@ -78,7 +78,14 @@ class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListW
         if not self.parent_resource:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
-        serializer = self.get_serializer(data=MapProject.format_request_data(request.data, self.parent_resource))
+        data = MapProject.format_request_data(request.data, self.parent_resource)
+        # Ownership comes only from the URL parent: a body organization_id posted to a user route would re-parent
+        # the project past HasMapProjectParentOwnership and CanCreateOrgMapProjects (OpenConceptLab/ocl_issues#2804).
+        parent_key = self.parent_resource.resource_type.lower() + '_id'
+        for key in ('organization_id', 'user_id'):
+            if key != parent_key:
+                data.pop(key, None)
+        serializer = self.get_serializer(data=data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 

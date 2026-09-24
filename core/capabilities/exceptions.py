@@ -25,6 +25,11 @@ class CapabilityExceeded(APIException):
         self.requested = requested
         self.detail = f'{capability_name}: {used}+{requested} > {limit}'
 
+    @property
+    def not_entitled(self):
+        # None = no row anywhere, -1 = blocked: both are "not available", never a count
+        return self.limit is None or self.limit < 0
+
 
 class MapProjectCapacityExceeded(APIException):
     """
@@ -42,11 +47,12 @@ class MapProjectCapacityExceeded(APIException):
     def __init__(self, limit, used):  # pylint: disable=super-init-not-called
         # limit is None means no override and no group row for this user at all - they
         # were never entitled, as opposed to having used up a real configured allowance.
-        not_entitled = limit is None
+        # -1 = blocked (the kill switch): also "not available", never reported as a count.
+        not_entitled = limit is None or limit < 0
         self.detail = {
             'detail': 'You do not have access to create map projects.' if not_entitled else
             'Map project limit reached.',
             'error_code': CAPABILITY_NOT_ENTITLED_ERROR_CODE[MAPPER_PROJECTS_CAPABILITY] if not_entitled else
             CAPABILITY_EXCEEDED_ERROR_CODE[MAPPER_PROJECTS_CAPABILITY],
-            'limit': limit, 'used': used,
+            'limit': None if not_entitled else limit, 'used': used,
         }

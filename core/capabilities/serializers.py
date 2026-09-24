@@ -15,4 +15,4 @@ class CapabilitySerializer(serializers.Serializer):  # pylint: disable=abstract-
 
 class UserCapabilityOverrideSerializer(serializers.Serializer):  # pylint: disable=abstract-method
     capability = CapabilitySerializer(read_only=True)
-    limit = serializers.IntegerField(min_value=0)
+    limit = serializers.IntegerField(min_value=-1)  # 0 = unlimited, -1 = blocked, N > 0 = the limit

@@ -291,7 +291,8 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
         return self.usage_counters.filter(capability_id=capability_id).values_list('used', flat=True).first() or 0
 
     def check_and_consume_capability(  # pylint: disable=too-many-arguments
-            self, capability_id, units=1, action='', algorithm=None, map_project=None, run=None
+            self, capability_id, units=1, action='', algorithm=None, map_project=None, run=None,
+            idempotency_key=None
     ):
         """
         Atomically checks this user's remaining `capability_id` quota and, if `units`
@@ -300,11 +301,14 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
         unlimited and always succeeds; usage is still logged. A capability with no
         override and no group row for this user at all (get_capability_limit() returns
         None) is BLOCKED, not unlimited - see get_capability_limit's docstring.
-        kill switch = remove the GroupCapability row, which resolves to None = blocked
+        kill switch = set the limit to -1 in groups.yaml (a deleted GroupCapability row is
+        recreated on restart); -1 on a per-user override blocks just that user.
         (0 is NOT the kill switch - it means unlimited).
         `capability_id` must be an id of a capability already seeded (Keycloak/fixtures) -
         a bad id fails with an IntegrityError on insert rather than silently creating a
         Capability row.
+        With an `idempotency_key` already consumed, charges nothing and returns that event,
+        even past the limit. Returns (usage_event, already_consumed).
         """
         from core.capabilities.constants import CAPABILITY_NAME_BY_ID
         from core.capabilities.exceptions import CapabilityExceeded
@@ -315,15 +319,22 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
             UsageCounter.objects.get_or_create(user=self, capability_id=capability_id)
             counter = self.usage_counters.select_for_update().get(capability_id=capability_id)
 
+            # under the counter lock and before the limit check, so a retry after the last unit still succeeds
+            if idempotency_key:
+                event = self.usage_events.filter(capability_id=capability_id, idempotency_key=idempotency_key).first()
+                if event:
+                    return event, True
+
             if limit is None or (limit and counter.used + units > limit):
                 raise CapabilityExceeded(
                     CAPABILITY_NAME_BY_ID.get(capability_id, capability_id), limit, counter.used, units)
 
             UsageCounter.objects.filter(pk=counter.pk).update(used=F('used') + units)
-            self.usage_events.create(
+            event = self.usage_events.create(
                 capability_id=capability_id, units=units, action=action, algorithm=algorithm,
-                map_project=map_project, run=run
+                map_project=map_project, run=run, idempotency_key=idempotency_key or None
             )
+            return event, False
 
     def log_capability_event(  # pylint: disable=too-many-arguments
             self, capability_id, units=1, action='', algorithm=None, map_project=None, run=None

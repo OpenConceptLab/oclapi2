@@ -8,7 +8,9 @@ from django.db import transaction
 GROUPS_CONFIG_ENV = 'OCL_GROUPS_CONFIG'
 
 # Plan groups are deployment config: {"groups": {"<name>": {"permissions": [...], "capabilities": {...}}}}
-# Seed-only - creates missing groups/limits and adds missing permissions; never overwrites or removes.
+# Sync - the config is the source of truth for every group it declares: users.* permissions are set exactly,
+# declared limits are upserted and undeclared ones deleted. Groups it doesn't declare are left alone.
+# Limits: 0 = unlimited, -1 = blocked (the kill switch), N > 0 = the limit; no row = not entitled (blocked).
 
 
 def seed_groups(config, stdout=None):
@@ -27,20 +29,24 @@ def seed_group(group_name, group_config, warn):
     from core.capabilities.models import Capability, GroupCapability
 
     group, _ = Group.objects.get_or_create(name=group_name)
-    # add-only: listed permissions are (re)granted, ones already on the group are never removed
+    # sync: the group's users.* permissions become exactly the listed ones; other apps' permissions are left alone
     codenames = group_config.get('permissions') or []
     permissions = list(Permission.objects.filter(codename__in=codenames, content_type__app_label='users'))
     missing = set(codenames) - {permission.codename for permission in permissions}
     if missing:
         warn(f'{group_name}: unknown permissions skipped: {sorted(missing)}')
-    group.permissions.add(*permissions)
+    group.permissions.set([*group.permissions.exclude(content_type__app_label='users'), *permissions])
 
+    # sync: declared limits are upserted and undeclared ones deleted (no row = not entitled)
+    declared_ids = []
     for capability_name, limit in (group_config.get('capabilities') or {}).items():
         capability = Capability.objects.filter(name=capability_name).first()
         if not capability:
             warn(f'{group_name}: unknown capability skipped: {capability_name}')
             continue
-        GroupCapability.objects.get_or_create(group=group, capability=capability, defaults={'limit': limit})
+        GroupCapability.objects.update_or_create(group=group, capability=capability, defaults={'limit': limit})
+        declared_ids.append(capability.id)
+    GroupCapability.objects.filter(group=group).exclude(capability_id__in=declared_ids).delete()
 
 
 def validate_config(config):
@@ -64,8 +70,8 @@ def validate_config(config):
 
 
 class Command(BaseCommand):
-    help = f'seed groups, their permissions and capability limits from {GROUPS_CONFIG_ENV} or --file, ' \
-           'without overwriting any that already exist'
+    help = f'sync groups, their users.* permissions and capability limits from {GROUPS_CONFIG_ENV} or --file; ' \
+           'the config is the source of truth for every group it declares'
 
     def add_arguments(self, parser):
         parser.add_argument('--file', help='path to a yaml/json groups config (instead of the env var)')

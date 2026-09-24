@@ -203,7 +203,7 @@ class HasMapProjectCapacity(BasePermission):
         user = request.user
         limit = user.get_capability_limit(MAPPER_PROJECTS_CAPABILITY_ID)
         # explicit grant only - None (unconfigured) is blocked, not uncapped.
-        # kill switch = remove the GroupCapability row, which resolves to None = blocked.
+        # kill switch = set the limit to -1 in groups.yaml (a deleted row is recreated on restart).
         # (0 is NOT the kill switch - it means unlimited; see get_capability_limit's docstring.)
         if limit == 0:
             return True

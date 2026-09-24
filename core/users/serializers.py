@@ -267,7 +267,9 @@ class UserDetailSerializer(AbstractResourceSerializer):
         instance.updated_by = request_user
 
         from core.services.auth.core import AuthService
-        if not AuthService.is_sso_enabled():
+        # Standalone only (under SSO, Keycloak owns membership via set_groups), and admin-only: a group carries
+        # permissions and capability limits, so letting users pick their own groups lets them pick their own limits.
+        if not AuthService.is_sso_enabled() and request_user.is_staff:
             auth_groups = validated_data.get('auth_groups', None)
             if isinstance(auth_groups, list):
                 instance.groups.set(Group.objects.filter(name__in=auth_groups))

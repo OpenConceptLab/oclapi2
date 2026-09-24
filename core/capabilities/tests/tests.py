@@ -7,7 +7,7 @@ from django.core.management import call_command, CommandError
 
 from core.capabilities.constants import MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, MAPPER_PROJECTS_CAPABILITY_ID
 from core.capabilities.exceptions import CapabilityExceeded
-from core.capabilities.models import GroupCapability, UserCapabilityOverride
+from core.capabilities.models import GroupCapability, UsageEvent, UserCapabilityOverride
 from core.common.tests import OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.users.tests.factories import UserProfileFactory
 
@@ -93,10 +93,20 @@ class UserCapabilityOverrideViewTest(OCLAPITestCase):
 
     def test_put_rejects_negative_limit(self):
         response = self.client.put(
-            self.url + 'mapper.projects/', data={'limit': -1}, format='json',
+            self.url + 'mapper.projects/', data={'limit': -2}, format='json',
             HTTP_AUTHORIZATION='Token ' + self.staff.get_token())
         self.assertEqual(response.status_code, 400)
         self.assertIn('limit', response.data)
+
+    def test_put_minus_one_blocks_the_user(self):
+        response = self.client.put(
+            self.url + 'mapper.match_operations/', data={'limit': -1}, format='json',
+            HTTP_AUTHORIZATION='Token ' + self.staff.get_token())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.target.get_capability_limit(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID), -1)
+        with self.assertRaises(CapabilityExceeded) as ctx:
+            self.target.check_and_consume_capability(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID)
+        self.assertTrue(ctx.exception.not_entitled)
 
     def test_list_reflects_created_overrides(self):
         self.client.put(
@@ -269,6 +279,61 @@ class UnconfiguredCapabilityIsBlockedTest(OCLAPITestCase):
         self.assertEqual(user.get_capability_usage(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID), 1)
 
 
+class CapabilityConsumeViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = UserProfileFactory()
+        UserCapabilityOverride.objects.create(
+            user=self.user, capability_id=MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, limit=2)
+
+    def consume(self, **data):
+        return self.client.post(
+            '/capabilities/consume/', data={'capability': 'mapper.match_operations', **data}, format='json',
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+
+    def test_same_idempotency_key_charges_once(self):
+        first = self.consume(idempotency_key='run-1:row-1')
+        self.assertEqual(first.status_code, 200)
+        self.assertFalse(first.data['already_consumed'])
+        self.assertEqual(first.data['used'], 1)
+
+        retry = self.consume(idempotency_key='run-1:row-1')
+        self.assertEqual(retry.status_code, 200)
+        self.assertTrue(retry.data['already_consumed'])
+        self.assertEqual(retry.data['usage_event_id'], first.data['usage_event_id'])
+        self.assertEqual(retry.data['used'], 1)
+        self.assertEqual(UsageEvent.objects.filter(user=self.user).count(), 1)
+
+    def test_retry_after_last_unit_still_succeeds(self):
+        self.assertEqual(self.consume(idempotency_key='a').status_code, 200)
+        self.assertEqual(self.consume(idempotency_key='b').status_code, 200)
+
+        self.assertEqual(self.consume(idempotency_key='c').status_code, 403)
+        retry = self.consume(idempotency_key='b')
+        self.assertEqual(retry.status_code, 200)
+        self.assertTrue(retry.data['already_consumed'])
+        self.assertEqual(retry.data['used'], 2)
+
+    def test_without_key_every_call_charges(self):
+        self.assertEqual(self.consume().status_code, 200)
+        response = self.consume()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['used'], 2)
+
+    def test_invalid_idempotency_key_400(self):
+        self.assertEqual(self.consume(idempotency_key='x' * 256).status_code, 400)
+        self.assertEqual(self.consume(idempotency_key=5).status_code, 400)
+
+    def test_blocked_reports_not_available(self):
+        UserCapabilityOverride.objects.filter(user=self.user).update(limit=-1)
+
+        response = self.consume()
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['error_code'], 'mapper_match_operations_not_entitled')
+        self.assertIsNone(response.data['limit'])
+
+
 class SeedGroupCapabilitiesTest(OCLAPITestCase):
     CONFIG = {
         'groups': {
@@ -310,20 +375,19 @@ class SeedGroupCapabilitiesTest(OCLAPITestCase):
         self.assertEqual(self.codenames('pro'), {'mapper_use', 'mapper_custom_algorithms'})
         self.assertEqual(self.limits('pro'), {'mapper.projects': 20, 'mapper.match_operations': 0})
 
-    def test_reseed_keeps_limits_and_adds_missing_permissions(self):
+    def test_reseed_syncs_permissions_and_limits(self):
         self.seed(self.CONFIG)
         self.seed({
             'groups': {
                 'pro': {
                     'permissions': ['mapper_use', 'mapper_ai_assistant'],
-                    'capabilities': {'mapper.projects': 99, 'ai_assistant.calls': 50},
+                    'capabilities': {'mapper.projects': -1, 'ai_assistant.calls': 50},
                 }
             }
         })
 
-        self.assertEqual(self.codenames('pro'), {'mapper_use', 'mapper_custom_algorithms', 'mapper_ai_assistant'})
-        self.assertEqual(
-            self.limits('pro'), {'mapper.projects': 20, 'mapper.match_operations': 0, 'ai_assistant.calls': 50})
+        self.assertEqual(self.codenames('pro'), {'mapper_use', 'mapper_ai_assistant'})
+        self.assertEqual(self.limits('pro'), {'mapper.projects': -1, 'ai_assistant.calls': 50})
 
     def test_grants_permissions_to_existing_group(self):
         self.assertFalse(self.codenames('core_user'))

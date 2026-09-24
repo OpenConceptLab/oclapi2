@@ -14,7 +14,10 @@ class Capability(models.Model):
 
 
 class GroupCapability(models.Model):
-    """This group's limit for a capability. limit=0, or no row, = unlimited."""
+    """
+    This group's limit for a capability: 0 = unlimited, -1 = blocked (the kill switch), N > 0 = the limit.
+    No row = this group grants nothing; a user with no row anywhere is not entitled (blocked).
+    """
     class Meta:
         db_table = 'group_capabilities'
         unique_together = ('group', 'capability')
@@ -25,7 +28,10 @@ class GroupCapability(models.Model):
 
 
 class UserCapabilityOverride(models.Model):
-    """Per-user override, wins over every GroupCapability the user's groups carry. limit=0 = unlimited."""
+    """
+    Per-user override; wins over every GroupCapability the user's groups carry.
+    0 = unlimited, -1 = blocked (this user only), N > 0 = the limit.
+    """
     class Meta:
         db_table = 'user_capability_overrides'
         unique_together = ('user', 'capability')
@@ -71,6 +77,12 @@ class UsageEvent(models.Model):
     class Meta:
         db_table = 'usage_events'
         indexes = [models.Index(fields=['user', 'capability'])]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'capability', 'idempotency_key'], condition=models.Q(idempotency_key__isnull=False),
+                name='usage_events_unique_idempotency_key'
+            )
+        ]
 
     user = models.ForeignKey('users.UserProfile', on_delete=models.CASCADE, related_name='usage_events')
     capability = models.ForeignKey(Capability, on_delete=models.CASCADE, related_name='usage_events')
@@ -85,4 +97,6 @@ class UsageEvent(models.Model):
         'map_projects.AutomatchRun', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='usage_events'
     )
+    # client-sent dedup key (e.g. per run/row): a repeat consume with the same key charges nothing
+    idempotency_key = models.CharField(max_length=255, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

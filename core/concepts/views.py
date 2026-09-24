@@ -1160,14 +1160,14 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
                 )
                 consumed_units = len(rows)
             except CapabilityExceeded as ex:
-                not_entitled = ex.limit is None
+                not_entitled = ex.not_entitled
                 return Response(
                     {
                         'detail': 'You do not have Mapper match access.' if not_entitled else
                         'Match operation limit reached.',
                         'error_code': CAPABILITY_NOT_ENTITLED_ERROR_CODE[MAPPER_MATCH_OPERATIONS_CAPABILITY]
                         if not_entitled else CAPABILITY_EXCEEDED_ERROR_CODE[MAPPER_MATCH_OPERATIONS_CAPABILITY],
-                        'limit': ex.limit, 'used': ex.used,
+                        'limit': None if not_entitled else ex.limit, 'used': ex.used,
                     },
                     status=status.HTTP_403_FORBIDDEN
                 )
