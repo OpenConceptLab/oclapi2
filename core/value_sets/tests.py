@@ -360,6 +360,7 @@ class ValueSetTest(OCLAPITestCase):
         self.assertIsNone(resource['compose']['include'][0].get('concept'))
 
     def test_can_update_empty(self):
+        self.org.members.add(self.user)  # changing an org's value set needs membership
         response = self.client.put(
             f'/orgs/{self.org.mnemonic}/ValueSet/c1/',
             HTTP_AUTHORIZATION='Token ' + self.user_token,
@@ -381,6 +382,7 @@ class ValueSetTest(OCLAPITestCase):
         self.assertFalse('compose' in resource)
 
     def test_update_with_compose(self):
+        self.org.members.add(self.user)  # changing an org's value set needs membership
         self.collection.add_references([
             CollectionReference(
                 expression=self.concept_1.uri, collection=self.collection, code=self.concept_1.mnemonic,

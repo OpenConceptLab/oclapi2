@@ -22,6 +22,7 @@ from core.common.constants import NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, L
     LAST_LOGIN_BEFORE_PARAM, DATE_JOINED_SINCE_PARAM, DATE_JOINED_BEFORE_PARAM, UPDATED_BY_USERNAME_PARAM, HEAD
 from core.common.exceptions import Http400
 from core.common.mixins import ListWithHeadersMixin
+from core.common.permissions import HasOwnership
 from core.common.swagger_parameters import last_login_before_param, last_login_since_param, updated_since_param, \
     date_joined_since_param, date_joined_before_param
 from core.common.utils import parse_updated_since_param, from_string_to_date, get_truthy_values, \
@@ -231,7 +232,7 @@ class UserBaseView(BaseAPIView):
 
 
 class UserLogoView(UserBaseView, BaseLogoView):
-    permission_classes = (IsAuthenticated, )
+    permission_classes = (IsAuthenticated, HasOwnership)
 
 
 class UserListView(UserBaseView,
@@ -517,12 +518,20 @@ class UserExtrasBaseView(APIView):
     def get_throttles(self):
         return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
+    def get_permissions(self):
+        """Any logged-in user can read a user's extras. Changing them needs that user or staff."""
+        if self.request.method in ['GET', 'HEAD']:
+            return [IsAuthenticated(), ]
+
+        return [IsAuthenticated(), HasOwnership()]
+
     def get_object(self):
         instance = self.request.user if self.kwargs.get('user_is_self') else UserProfile.objects.filter(
             username=self.kwargs['user']).first()
 
         if not instance:
             raise Http404()
+        self.check_object_permissions(self.request, instance)
         return instance
 
 

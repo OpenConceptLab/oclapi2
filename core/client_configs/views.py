@@ -1,10 +1,12 @@
 from django.db import models
 from rest_framework import generics, status
-from rest_framework.exceptions import PermissionDenied
 from rest_framework.generics import RetrieveAPIView, UpdateAPIView, DestroyAPIView, ListAPIView, CreateAPIView
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from core.client_configs.permissions import CanChangeClientConfig
 from core.client_configs.serializers import ClientConfigSerializer, ClientConfigTemplateSerializer
+from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary
 from core.common.views import BaseAPIView
 from .models import ClientConfig
 from ..common.throttling import ThrottleUtil
@@ -21,17 +23,23 @@ class ClientConfigBaseView(generics.GenericAPIView):
 
 
 class ClientConfigView(ClientConfigBaseView, RetrieveAPIView, UpdateAPIView, DestroyAPIView):
-    def perform_destroy(self, instance: ClientConfig):
-        if not self.request.user.is_staff:
-            if instance.created_by != self.request.user:
-                raise PermissionDenied()
-
-        super().perform_destroy(instance)
+    permission_classes = (IsAuthenticated, CanChangeClientConfig)
 
 
 class ResourceClientConfigsView(BaseAPIView, RetrieveAPIView):
+    """
+    Configs of an org or a repo. Reading them follows the resource's public access. Adding one needs staff or
+    `edit_permission_class` on the resource.
+    """
     swagger_schema = None
     serializer_class = ClientConfigSerializer
+    edit_permission_class = CanEditConceptDictionary
+
+    def get_permissions(self):
+        if self.request.method in ['GET', 'HEAD']:
+            return [CanViewConceptDictionary(), ]
+
+        return [IsAuthenticated(), self.edit_permission_class()]
 
     def get(self, request, *args, **kwargs):
         instance = self.get_object()

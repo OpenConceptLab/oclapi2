@@ -158,6 +158,7 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
         self.set_parent_resource()
         if not self.parent_resource:
             raise Http404()
+        self.check_object_permissions(request, self.parent_resource)
         data = request.data.dict() if isinstance(request.data, QueryDict) else request.data
         if isinstance(data, list):
             raise Http400()

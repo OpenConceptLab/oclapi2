@@ -227,6 +227,19 @@ class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeader
     processing_filter = None
     default_qs_sort_attr = '-created_at'
 
+    def get_permissions(self):
+        """Listing versions needs view access to the source. Creating one needs staff, the owner or a member."""
+        if self.request.method in ['GET', 'HEAD']:
+            return [CanViewConceptDictionary(), ]
+
+        return [IsAuthenticated(), HasAccessToVersionedObject()]
+
+    def get_head(self):
+        head = get(self.get_queryset().first(), 'head')
+        if head:
+            self.check_object_permissions(self.request, head)
+        return head
+
     def get_serializer_class(self):
         if self.request.method in ['GET', 'HEAD'] and self.is_verbose():
             return SourceVersionDetailSerializer
@@ -238,12 +251,15 @@ class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeader
         return SourceVersionListSerializer
 
     def get(self, request, *args, **kwargs):
+        self.get_head()
         self.released_filter = parse_boolean_query_param(request, RELEASED_PARAM, self.released_filter)
         self.processing_filter = parse_boolean_query_param(request, PROCESSING_PARAM, self.processing_filter)
         return self.list(request, *args, **kwargs)
 
     def create(self, request, *args, **kwargs):
-        head_object = self.get_queryset().first().head
+        head_object = self.get_head()
+        if not head_object:
+            raise Http404()
         version = request.data.pop('id', None)
         payload = {
             "mnemonic": head_object.mnemonic,
@@ -283,7 +299,12 @@ class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeader
 
 class SourceLatestVersionRetrieveUpdateView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):
     serializer_class = SourceVersionDetailSerializer
-    permission_classes = (CanViewConceptDictionaryVersion,)
+
+    def get_permissions(self):
+        if self.request.method in ['GET', 'HEAD']:
+            return [CanViewConceptDictionaryVersion(), ]
+
+        return [IsAuthenticated(), HasAccessToVersionedObject()]
 
     def get_object(self, queryset=None):
         obj = self.get_queryset().first()
@@ -479,8 +500,17 @@ class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIV
 
 
 class SourceExtrasBaseView(SourceBaseView):
+    def get_permissions(self):
+        """Reads need view access to the source. Writes need staff or edit access."""
+        if self.request.method in ['GET', 'HEAD']:
+            return [CanViewConceptDictionary(), ]
+
+        return [IsAuthenticated(), CanEditConceptDictionary()]
+
     def get_object(self, queryset=None):
-        return get_object_or_404(self.get_queryset(), version=HEAD)
+        instance = get_object_or_404(self.get_queryset(), version=HEAD)
+        self.check_object_permissions(self.request, instance)
+        return instance
 
 
 class SourceExtrasView(SourceExtrasBaseView, ListAPIView):
@@ -509,6 +539,7 @@ class SourceVersionExtrasView(SourceBaseView, ListAPIView):
 
     def list(self, request, *args, **kwargs):
         instance = get_object_or_404(self.get_queryset(), version=decode_string(self.kwargs['version']))
+        self.check_object_permissions(request, instance)
         return Response(get(instance, 'extras', {}))
 
 
@@ -517,6 +548,7 @@ class SourceVersionPropertiesView(SourceBaseView, ListAPIView):
 
     def list(self, request, *args, **kwargs):
         instance = get_object_or_404(self.get_queryset(), version=decode_string(self.kwargs['version']))
+        self.check_object_permissions(request, instance)
         return Response(get(instance, 'properties', []))
 
 
@@ -525,6 +557,7 @@ class SourceVersionFiltersView(SourceBaseView, ListAPIView):
 
     def list(self, request, *args, **kwargs):
         instance = get_object_or_404(self.get_queryset(), version=decode_string(self.kwargs['version']))
+        self.check_object_permissions(request, instance)
         return Response(get(instance, 'filters', []))
 
 
@@ -543,7 +576,7 @@ class SourceExtraRetrieveUpdateDestroyView(SourceExtrasBaseView, ConceptContaine
     serializer_class = SourceDetailSerializer
 
 
-class SourceVersionProcessingView(SourceBaseView, ConceptContainerProcessingMixin):
+class SourceVersionProcessingView(ConceptContainerProcessingMixin, SourceBaseView):
     serializer_class = SourceVersionDetailSerializer
     resource = 'source'
 
@@ -641,7 +674,6 @@ class SourceClientConfigsView(SourceBaseView, ResourceClientConfigsView):
     lookup_field = 'source'
     model = Source
     queryset = Source.objects.filter(is_active=True, version=HEAD)
-    permission_classes = (CanViewConceptDictionary, )
 
 
 class AbstractSourceMappedSourcesListView(SourceListView):

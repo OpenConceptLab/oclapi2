@@ -4,7 +4,7 @@ from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import mixins, status, generics
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, RetrieveUpdateDestroyAPIView, UpdateAPIView
-from rest_framework.permissions import IsAuthenticatedOrReadOnly, AllowAny, IsAuthenticated
+from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -50,7 +50,7 @@ class OrganizationListView(BaseAPIView,
             username = get(self.request.user, 'username')
 
         if username:
-            self.queryset = Organization.get_by_username(username)
+            self.queryset = self.get_visible(Organization.get_by_username(username))
         elif self.request.user.is_anonymous:
             self.queryset = Organization.get_public()
         elif self.request.user.is_superuser or self.request.user.is_staff:
@@ -68,6 +68,16 @@ class OrganizationListView(BaseAPIView,
             self.queryset = self.queryset.annotate(mem_count=Count('members')).filter(mem_count=0)
 
         return self.queryset.distinct()
+
+    def get_visible(self, queryset):
+        """Limits `queryset` to the orgs the requester can view: public orgs and the requester's own."""
+        user = self.request.user
+        if user.is_superuser or user.is_staff:
+            return queryset
+        visible = Organization.get_public()
+        if user.is_authenticated:
+            visible = visible | Organization.get_by_username(user.username)
+        return queryset.filter(id__in=visible.values('id'))
 
     def get_serializer_class(self):
         if self.request.method == 'GET' and self.is_verbose():
@@ -107,25 +117,20 @@ class OrganizationBaseView(BaseAPIView, RetrieveAPIView, DestroyAPIView):
     model = Organization
     queryset = Organization.objects.filter(is_active=True)
 
+    def get_permissions(self):
+        """Reads follow the org's public access. Writes need staff or membership of the org."""
+        if self.request.method in ['GET', 'HEAD']:
+            return [CanViewConceptDictionary(), ]
+
+        return [HasPrivateAccess(), ]
+
 
 class OrganizationLogoView(OrganizationBaseView, BaseLogoView):
     serializer_class = OrganizationDetailSerializer
 
-    def get_permissions(self):
-        if self.request.method == 'DELETE':
-            return [HasPrivateAccess(), ]
-
-        return [CanViewConceptDictionary(), ]
-
 
 class OrganizationOverviewView(OrganizationBaseView, RetrieveAPIView, UpdateAPIView):
     serializer_class = OrganizationOverviewSerializer
-
-    def get_permissions(self):
-        if self.request.method == 'PUT':
-            if self.request.method == 'DELETE':
-                return [HasPrivateAccess(), ]
-        return [AllowAny(), ]
 
     def get_queryset(self):
         return super().get_queryset().filter(mnemonic=self.kwargs['org'])
@@ -133,10 +138,11 @@ class OrganizationOverviewView(OrganizationBaseView, RetrieveAPIView, UpdateAPIV
 
 class OrganizationDetailView(OrganizationBaseView, mixins.UpdateModelMixin, mixins.CreateModelMixin, TaskMixin):
     def get_permissions(self):
-        if self.request.method == 'DELETE':
-            return [HasPrivateAccess(), ]
+        # POST creates a new org from the request body, as POST /orgs/ does.
+        if self.request.method == 'POST':
+            return [IsAuthenticated(), ]
 
-        return [CanViewConceptDictionary(), ]
+        return super().get_permissions()
 
     def get_serializer_class(self):
         if self.request.method == 'POST':
@@ -177,7 +183,7 @@ class OrganizationClientConfigsView(ResourceClientConfigsView):
     lookup_field = 'org'
     model = Organization
     queryset = Organization.objects.filter(is_active=True)
-    permission_classes = (CanViewConceptDictionary, )
+    edit_permission_class = HasPrivateAccess
 
 
 class OrganizationMemberView(generics.GenericAPIView):
@@ -244,6 +250,9 @@ class OrganizationMemberView(generics.GenericAPIView):
 
 
 class OrganizationResourceAbstractListView:
+    """
+    Resources owned by the orgs of the user in the URL, limited to those the requester can view.
+    """
     version = None
     permission_classes = (IsAuthenticated,)
 
@@ -258,7 +267,7 @@ class OrganizationResourceAbstractListView:
         queryset = self.queryset.filter(organization__in=user.organizations.all())
         if self.version:
             queryset = queryset.filter(version=self.version)
-        return queryset
+        return self.filter_queryset_by_public_access(queryset)
 
 
 class OrganizationSourceListView(OrganizationResourceAbstractListView, SourceListView):
@@ -277,11 +286,19 @@ class OrganizationExtrasBaseView(APIView):
     def get_throttles(self):
         return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
+    def get_permissions(self):
+        """Reads follow the org's public access. Writes need staff or membership of the org."""
+        if self.request.method in ['GET', 'HEAD']:
+            return [IsAuthenticated(), CanViewConceptDictionary()]
+
+        return [IsAuthenticated(), HasPrivateAccess()]
+
     def get_object(self):
         instance = Organization.objects.filter(is_active=True, mnemonic=self.kwargs['org']).first()
 
         if not instance:
             raise Http404()
+        self.check_object_permissions(self.request, instance)
         return instance
 
 
