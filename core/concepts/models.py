@@ -652,16 +652,31 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     @staticmethod
     def get_viewable_parent_uris(uris, user, linked_uris=None):
-        """Only parents in repos the user can view can be linked. Parents already linked are kept."""
+        """Only parents in repos the user can view can be linked. Parents already linked are kept,
+        and so are not-yet-existing ones pointing into a repo the user can view (linked later by the hierarchy task)."""
+        from core.common.utils import to_parent_uri
+        from core.sources.models import Source
         linked_uris = set(linked_uris or [])
         new_uris = [uri for uri in uris if uri not in linked_uris]
         viewable_uris = set()
         can_view_source = {}
+        existing_uris = set()
         for concept in Concept.objects.filter(uri__in=new_uris).select_related('parent') if new_uris else []:
+            existing_uris.add(concept.uri)
             if concept.parent_id not in can_view_source:
                 can_view_source[concept.parent_id] = concept.parent.has_view_access(user)
             if can_view_source[concept.parent_id]:
                 viewable_uris.add(concept.uri)
+        repo_view_by_uri = {}
+        for uri in new_uris:
+            if uri in existing_uris:
+                continue
+            repo_uri = to_parent_uri(uri)
+            if repo_uri not in repo_view_by_uri:
+                repo = Source.objects.filter(uri=repo_uri).first() if repo_uri else None
+                repo_view_by_uri[repo_uri] = bool(repo and repo.has_view_access(user))
+            if repo_view_by_uri[repo_uri]:
+                viewable_uris.add(uri)
         return [uri for uri in uris if uri in linked_uris or uri in viewable_uris]
 
     def set_parent_concepts_from_uris(self, create_parent_version=True):
