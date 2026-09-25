@@ -6,7 +6,8 @@ from rest_framework.serializers import ModelSerializer
 from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPINGS_PARAM, INCLUDE_EXTRAS_PARAM, \
     INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS, INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS, \
     CREATE_PARENT_VERSION_QUERY_PARAM, INCLUDE_HIERARCHY_PATH, INCLUDE_PARENT_CONCEPT_URLS, \
-    INCLUDE_CHILD_CONCEPT_URLS, HEAD, INCLUDE_SUMMARY, INCLUDE_VERBOSE_REFERENCES, VERBOSE_PARAM, INCLUDE_RETIRED_PARAM
+    INCLUDE_CHILD_CONCEPT_URLS, HEAD, INCLUDE_SUMMARY, INCLUDE_VERBOSE_REFERENCES, VERBOSE_PARAM, \
+    INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE
 from core.common.fields import EncodedDecodedCharField
 from core.common.serializers import AbstractResourceSerializer
 from core.common.utils import to_parent_uri_from_kwargs, get_truthy_values
@@ -14,6 +15,16 @@ from core.concepts.models import Concept, ConceptName
 
 
 TRUTHY = get_truthy_values()
+
+
+def get_viewable_concepts(queryset, request):
+    """Concepts from repos the requester can view."""
+    user = get(request, 'user')
+    if get(user, 'is_staff'):
+        return queryset
+    if not get(user, 'is_authenticated'):
+        return queryset.exclude(public_access=ACCESS_TYPE_NONE)
+    return Concept.apply_user_criteria(queryset, user)
 
 
 class LocalizedNameSerializer(ModelSerializer):
@@ -248,12 +259,14 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
 
     def get_child_concepts(self, obj):
         if self.include_child_concepts:
-            return ConceptDetailSerializer(obj.child_concepts.all(), many=True).data
+            return ConceptDetailSerializer(
+                get_viewable_concepts(obj.child_concepts.all(), get(self, 'context.request')), many=True).data
         return None
 
     def get_parent_concepts(self, obj):
         if self.include_parent_concepts:
-            return ConceptDetailSerializer(obj.parent_concepts.all(), many=True).data
+            return ConceptDetailSerializer(
+                get_viewable_concepts(obj.parent_concepts.all(), get(self, 'context.request')), many=True).data
         return None
 
     def get_hierarchy_path(self, obj):
@@ -666,12 +679,14 @@ class ConceptVersionDetailSerializer(ModelSerializer):
 
     def get_child_concepts(self, obj):
         if self.include_child_concepts:
-            return ConceptDetailSerializer(obj.child_concepts.all(), many=True).data
+            return ConceptDetailSerializer(
+                get_viewable_concepts(obj.child_concepts.all(), get(self, 'context.request')), many=True).data
         return None
 
     def get_parent_concepts(self, obj):
         if self.include_parent_concepts:
-            return ConceptDetailSerializer(obj.parent_concepts.all(), many=True).data
+            return ConceptDetailSerializer(
+                get_viewable_concepts(obj.parent_concepts.all(), get(self, 'context.request')), many=True).data
         return None
 
 

@@ -420,11 +420,14 @@ class SourceConceptsCloneView(SourceBaseView):
             from core.concepts.models import Concept
             result = {}
             concept_to_clone = Concept.objects.filter(uri=expression).first()
+            parent_resource = None
             if concept_to_clone:
                 parent_uri = to_parent_uri(expression)
                 if parent_uri not in parent_resources:
                     parent_resources[parent_uri] = Source.objects.filter(uri=parent_uri).first()
                 parent_resource = parent_resources[parent_uri]
+            # a concept in a repo the user can't view is reported as not found
+            if parent_resource and parent_resource.has_view_access(request.user):
                 from core.bundles.models import Bundle
                 try:
                     bundle = Bundle.clone(

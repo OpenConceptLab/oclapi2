@@ -854,6 +854,12 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         return self.has_parent_edit_access(user)
 
+    def has_view_access(self, user):
+        if self.public_can_view:
+            return True
+
+        return bool(user and user.is_authenticated and self.has_parent_edit_access(user))
+
     @staticmethod
     def get_version_url_kwarg():
         return 'version'

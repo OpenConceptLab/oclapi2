@@ -12,7 +12,7 @@ from core.common.tests import OCLTestCase, OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.orgs.models import Organization
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.constants import USER_OBJECT_TYPE, OCL_SERVERS_GROUP, MAPPER_USE_PERMISSION, \
-    MAPPER_AI_ASSISTANT_PERMISSION, MAPPER_SCISPACY_PERMISSION
+    MAPPER_AI_ASSISTANT_PERMISSION, MAPPER_SCISPACY_PERMISSION, STAFF_GROUP, SUPERADMIN_GROUP
 from core.users.documents import UserProfileDocument
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
@@ -276,6 +276,26 @@ class UserProfileTest(OCLTestCase):
 
         self.assertTrue(user.has_perm(MAPPER_USE_PERMISSION))
         self.assertTrue(user.has_perm(MAPPER_AI_ASSISTANT_PERMISSION))
+
+    def test_set_groups_makes_superuser_staff(self):
+        user = UserProfileFactory(is_staff=False, is_superuser=False)
+        Group.objects.get_or_create(name=SUPERADMIN_GROUP)
+        Group.objects.get_or_create(name=STAFF_GROUP)
+
+        user.set_groups([SUPERADMIN_GROUP])
+        user.refresh_from_db()
+        self.assertTrue(user.is_superuser)
+        self.assertTrue(user.is_staff)
+
+        user.set_groups([STAFF_GROUP])
+        user.refresh_from_db()
+        self.assertFalse(user.is_superuser)
+        self.assertTrue(user.is_staff)
+
+        user.set_groups([])
+        user.refresh_from_db()
+        self.assertFalse(user.is_superuser)
+        self.assertFalse(user.is_staff)
 
     def test_user_without_preview_group_has_no_mapper_permission(self):
         user = UserProfileFactory()
@@ -679,12 +699,48 @@ class UserViewsAPITest(OCLAPITestCase):
         self.assertNotIn('capabilities', response.data)
         self.assertNotIn('permissions', response.data)
 
-    def test_user_detail_include_verification_token_allow_any(self):
-        user = UserProfileFactory(username='verificationtokenuser')
+    def test_user_detail_never_returns_verification_token(self):
+        user = UserProfileFactory(username='verificationtokenuser', verification_token='secret-token')
 
         response = self.client.get(f'/users/{user.username}/?includeVerificationToken=true')
 
+        self.assertEqual(response.status_code, 401)
+
+        for token in [user.get_token(), self.admin_token]:
+            response = self.client.get(
+                f'/users/{user.username}/?includeVerificationToken=true', HTTP_AUTHORIZATION='Token ' + token)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertNotIn('verification_token', response.data)
+            self.assertNotIn('secret-token', str(response.data))
+
+    def test_user_detail_private_fields_only_for_self_and_staff(self):
+        user = UserProfileFactory(username='privatefieldsuser', email='private@example.com')
+        other_user = UserProfileFactory(username='privatefieldsother')
+        private_fields = ['email', 'last_login', 'is_staff', 'is_superuser']
+
+        response = self.client.get(
+            f'/users/{user.username}/', HTTP_AUTHORIZATION='Token ' + other_user.get_token())
+
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['username'], user.username)
+        for field in private_fields:
+            self.assertNotIn(field, response.data)
+
+        response = self.client.get(
+            f'/users/{user.username}/?summary=true', HTTP_AUTHORIZATION='Token ' + other_user.get_token())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('is_staff', response.data)
+        self.assertNotIn('is_superuser', response.data)
+
+        for token in [user.get_token(), self.admin_token]:
+            response = self.client.get(f'/users/{user.username}/', HTTP_AUTHORIZATION='Token ' + token)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data['email'], 'private@example.com')
+            for field in private_fields:
+                self.assertIn(field, response.data)
 
     def test_user_detail_get_object_anonymous_self_raises_404(self):
         from django.contrib.auth.models import AnonymousUser

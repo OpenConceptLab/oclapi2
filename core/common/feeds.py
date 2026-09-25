@@ -10,6 +10,7 @@ from core.orgs.models import Organization
 from core.users.models import UserProfile
 
 DEFAULT_LIMIT = 30
+MAX_LIMIT = 1000
 
 
 class FeedFilterMixin:
@@ -19,12 +20,9 @@ class FeedFilterMixin:
             queryset = queryset.filter(updated_at__gte=updated_since_date)
         queryset = queryset.order_by('-updated_at')
         if self.limit is None:
-            queryset = queryset[:DEFAULT_LIMIT]
-        else:
-            limit = int(self.limit)
-            if limit > 0:
-                queryset = queryset[:limit]
-        return queryset
+            return queryset[:DEFAULT_LIMIT]
+        limit = int(self.limit)
+        return queryset[:limit if 0 < limit < MAX_LIMIT else MAX_LIMIT]
 
 
 class ConceptContainerFeed(Feed, FeedFilterMixin):
@@ -39,10 +37,8 @@ class ConceptContainerFeed(Feed, FeedFilterMixin):
         username = kwargs.get('user')
         org_mnemonic = kwargs.get('org')
 
-        if username:
-            self.user = UserProfile.objects.filter(username=username).first()
-        if org_mnemonic:
-            self.org = Organization.objects.filter(mnemonic=org_mnemonic).first()
+        self.user = UserProfile.objects.filter(username=username).first() if username else None
+        self.org = Organization.objects.filter(mnemonic=org_mnemonic).first() if org_mnemonic else None
 
         if not (self.user or self.org):
             raise Http404(f"{self.entity_name} owner does not exist")
@@ -51,7 +47,11 @@ class ConceptContainerFeed(Feed, FeedFilterMixin):
         self.updated_since = request.GET.get('updated_since', None)
         self.limit = request.GET.get('limit', None)
 
-        return get_object_or_404(self.model, mnemonic=mnemonic, user=self.user, organization=self.org, version=HEAD)
+        obj = get_object_or_404(self.model, mnemonic=mnemonic, user=self.user, organization=self.org, version=HEAD)
+        # feeds are served without authentication, so only public repos have one
+        if not obj.public_can_view:
+            raise Http404(f"{self.entity_name} does not exist")
+        return obj
 
     def title(self, obj):
         return f"Updates to {obj.mnemonic}"

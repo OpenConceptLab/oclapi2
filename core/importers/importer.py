@@ -540,30 +540,55 @@ class ResourceImporter:
                     return result
         return None
 
+    @staticmethod
+    def get_owner(owner_type, owner):
+        if owner_type and owner_type.lower() in ['orgs', 'organization']:
+            return Organization.objects.filter(mnemonic=owner).first()
+        return UserProfile.objects.filter(username=owner).first()
+
+    @staticmethod
+    def can_edit_owner(owner, user):
+        """Staff, the owner user, or a member of the owner org."""
+        if not owner or not user:
+            return False
+        if user.is_staff:
+            return True
+        return owner.is_member(user) if isinstance(owner, Organization) else owner.id == user.id
+
     # pylint: disable=too-many-arguments
     @staticmethod
-    def import_concept_map(owner, owner_type, resource, resource_type, url, username):
-        source = ResourceImporter.find_existing_source(owner, owner_type, url)
-        context = {
-            'request': ImportRequest(owner_type, owner, username, resource_type)
-        }
-        if source:
-            serializer = ConceptMapDetailSerializer(source.first(), data=resource, context=context)
+    def save_fhir_resource(serializer_class, existing, owner, resource, request):
+        """Updates need edit access on the existing repo, creates need edit access on the owner."""
+        if existing:
+            if not existing.has_edit_access(request.user):
+                return PERMISSION_DENIED
+            serializer = serializer_class(existing, data=resource, context={'request': request})
             result = UPDATED
         else:
-            serializer = ConceptMapDetailSerializer(data=resource, context=context)
+            if not ResourceImporter.can_edit_owner(owner, request.user):
+                return PERMISSION_DENIED
+            serializer = serializer_class(data=resource, context={'request': request, 'owner': owner})
             result = CREATED
         if serializer.is_valid():
             serializer.save()
         return serializer.errors if serializer.errors else result
 
+    # pylint: disable=too-many-arguments
+    @staticmethod
+    def import_concept_map(owner, owner_type, resource, resource_type, url, username):
+        source = ResourceImporter.find_existing_source(owner, owner_type, url)
+        return ResourceImporter.save_fhir_resource(
+            ConceptMapDetailSerializer, source.first(), ResourceImporter.get_owner(owner_type, owner), resource,
+            ImportRequest(owner_type, owner, username, resource_type))
+
     @staticmethod
     def find_existing_source(owner, owner_type, url):
         org, user = None, None
-        if owner_type.lower() in ['orgs', 'organization']:
-            org = Organization.objects.filter(mnemonic=owner).first()
+        owner_object = ResourceImporter.get_owner(owner_type, owner)
+        if isinstance(owner_object, Organization):
+            org = owner_object
         else:
-            user = UserProfile.objects.filter(username=owner).first()
+            user = owner_object
 
         if not org and not user:
             raise ValidationError(f"Cannot find owner of type {owner_type} and id {owner}")
@@ -584,10 +609,11 @@ class ResourceImporter:
     @staticmethod
     def import_value_set(owner, owner_type, resource, resource_type, url, username):
         org, user = None, None
-        if owner_type.lower() in ['orgs', 'organization']:
-            org = Organization.objects.filter(mnemonic=owner).first()
+        owner_object = ResourceImporter.get_owner(owner_type, owner)
+        if isinstance(owner_object, Organization):
+            org = owner_object
         else:
-            user = UserProfile.objects.filter(username=owner).first()
+            user = owner_object
 
         if not org and not user:
             raise ValidationError(f"Cannot find owner of type {owner_type} and id {owner}")
@@ -603,35 +629,17 @@ class ResourceImporter:
                 collection = Collection.objects.filter(uri=url, organization=org)
             else:
                 collection = Collection.objects.filter(uri=url, user=user)
-        context = {
-            'request': ImportRequest(owner_type, owner, username, resource_type)
-        }
-        if collection:
-            serializer = ValueSetDetailSerializer(collection.first(), data=resource, context=context)
-            result = UPDATED
-        else:
-            serializer = ValueSetDetailSerializer(data=resource, context=context)
-            result = CREATED
-        if serializer.is_valid():
-            serializer.save()
-        return serializer.errors if serializer.errors else result
+        return ResourceImporter.save_fhir_resource(
+            ValueSetDetailSerializer, collection.first(), owner_object, resource,
+            ImportRequest(owner_type, owner, username, resource_type))
 
     # pylint: disable=too-many-arguments
     @staticmethod
     def import_code_system(owner, owner_type, resource, resource_type, url, username):
         source = ResourceImporter.find_existing_source(owner, owner_type, url)
-        context = {
-            'request': ImportRequest(owner_type, owner, username, resource_type)
-        }
-        if source:
-            serializer = CodeSystemDetailSerializer(source.first(), data=resource, context=context)
-            result = UPDATED
-        else:
-            serializer = CodeSystemDetailSerializer(data=resource, context=context)
-            result = CREATED
-        if serializer.is_valid():
-            serializer.save()
-        return serializer.errors if serializer.errors else result
+        return ResourceImporter.save_fhir_resource(
+            CodeSystemDetailSerializer, source.first(), ResourceImporter.get_owner(owner_type, owner), resource,
+            ImportRequest(owner_type, owner, username, resource_type))
 
 
 class ImporterSubtask:

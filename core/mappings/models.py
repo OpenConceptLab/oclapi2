@@ -317,7 +317,9 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         initial_version.save()
         return initial_version
 
-    def populate_fields_from_relations(self, data, cache=None):  # pylint: disable=too-many-locals,too-many-statements
+    def populate_fields_from_relations(  # pylint: disable=too-many-locals,too-many-statements
+            self, data, cache=None, user=None):
+        """Concepts and repos the user can't view are not linked; they are kept as external codes/URLs."""
         from core.concepts.models import Concept
         from core.sources.models import Source
 
@@ -330,32 +332,42 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
         concept_cache = None if cache is None else cache.setdefault('concept_by_expr', {})
         source_cache = None if cache is None else cache.setdefault('source_resolve_ref', {})
+        # caches are per import run (one user): view access is cached per source, this mapping's links are not
+        can_view_cache = {} if cache is None else cache.setdefault('can_view_source', {})
+        linked_concept_ids = {get(self, 'from_concept_id'), get(self, 'to_concept_id')} - {None}
+        linked_source_ids = {get(self, 'from_source_id'), get(self, 'to_source_id')} - {None}
+
+        def can_view(source):
+            if source.id not in can_view_cache:
+                can_view_cache[source.id] = source.has_view_access(user)
+            return can_view_cache[source.id]
 
         def get_concept(expr):
             if expr and not expr.endswith('/'):
                 expr = expr + '/'
             if concept_cache is not None and expr in concept_cache:
-                return concept_cache[expr]
-            concept = Concept.objects.filter(
-                uri=expr).first() or Concept.objects.filter(uri=encode_string(expr, safe='/')).first()
-
-            result = concept or {
-                'mnemonic': expr.replace(to_parent_uri(expr), '').replace('concepts/', '').split('/')[0]}
-            if concept_cache is not None:
-                concept_cache[expr] = result
-            return result
+                concept = concept_cache[expr]
+            else:
+                concept = Concept.objects.filter(
+                    uri=expr).first() or Concept.objects.filter(uri=encode_string(expr, safe='/')).first()
+                if concept_cache is not None:
+                    concept_cache[expr] = concept
+            if concept and (concept.id in linked_concept_ids or can_view(concept.parent)):
+                return concept
+            return {'mnemonic': expr.replace(to_parent_uri(expr), '').replace('concepts/', '').split('/')[0]}
 
         def get_source(url):
             if source_cache is not None and url in source_cache:
-                return source_cache[url]
-            source, _ = Source.resolve_reference_expression(url, None, HEAD)
-            if source.id:
-                result = (source, source.versioned_object_url or source.resolution_url or url)
+                source = source_cache[url]
             else:
-                result = (None, source.resolution_url or url)
-            if source_cache is not None:
-                source_cache[url] = result
-            return result
+                source, _ = Source.resolve_reference_expression(url, None, HEAD)
+                if source_cache is not None:
+                    source_cache[url] = source
+            if not source.id:
+                return None, source.resolution_url or url
+            if source.id in linked_source_ids or can_view(source):
+                return source, source.versioned_object_url or source.resolution_url or url
+            return None, url
 
         self.from_source, self.from_source_url = get_source(from_source_url)
         self.to_source, self.to_source_url = get_source(to_source_url)
@@ -408,7 +420,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
     @classmethod
     def create_new_version_for(cls, instance, data, user, cache=None):
-        instance.populate_fields_from_relations(data, cache=cache)
+        instance.populate_fields_from_relations(data, cache=cache, user=user)
         instance.extras = data.get('extras', instance.extras)
         instance.external_id = data.get('external_id', instance.external_id)
         instance.mnemonic = data.get('mnemonic', instance.mnemonic)
@@ -493,7 +505,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         if mapping.is_existing_in_parent():
             mapping.errors = {'__all__': [ALREADY_EXISTS]}
             return mapping
-        mapping.populate_fields_from_relations(url_params, cache=cache)
+        mapping.populate_fields_from_relations(url_params, cache=cache, user=user)
 
         try:
             mapping.full_clean()

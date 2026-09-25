@@ -206,6 +206,14 @@ class UserBaseView(BaseAPIView):
     is_searchable = True
     default_qs_sort_attr = '-date_joined'
     serializer_class = UserDetailSerializer
+    staff_only_filters = ('is_superuser', 'is_staff', 'is_admin')
+
+    def get_faceted_filters(self, split=False, params=None, additional_fields=None, repo_default_filters=None):
+        filters = super().get_faceted_filters(split, params, additional_fields, repo_default_filters)
+        if not self.request.user.is_staff:
+            for field in self.staff_only_filters:
+                filters.pop(field, None)
+        return filters
 
     def get_queryset(self):
         updated_since = parse_updated_since_param(self.request.query_params)
@@ -238,6 +246,7 @@ class UserLogoView(UserBaseView, BaseLogoView):
 class UserListView(UserBaseView,
                    ListWithHeadersMixin,
                    mixins.CreateModelMixin):
+    allow_csv_export = False  # user rows carry private account fields
 
     def get_serializer_class(self):
         if self.request.query_params.get('summary') in TRUTHY and self.request.method == 'GET':
@@ -436,9 +445,6 @@ class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.Updat
     def get_permissions(self):
         if self.request.method == 'DELETE':
             return [IsAdminUser()]
-
-        if self.request.query_params.get('includeVerificationToken') and self.request.method == 'GET':
-            return [AllowAny()]
         return [IsAuthenticated()]
 
     def get_object(self, queryset=None):
@@ -450,9 +456,6 @@ class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.Updat
 
         is_self = self.kwargs.get('user_is_self') or self.user_is_self
         is_admin = self.request.user.is_staff
-
-        if self.request.query_params.get('includeVerificationToken') and self.request.method == 'GET':
-            return instance
 
         if not is_self and not is_admin and self.request.method != 'GET':
             raise PermissionDenied()
@@ -603,7 +606,7 @@ class AbstractFollowerFollowedView(UserBaseView):
         if not klass:
             raise Http400('Invalid follow uri')
         follow = klass.objects.filter(uri=follow).first()
-        if not follow:
+        if not follow or not self.request.user.can_view(follow):
             raise Http400('Invalid follow uri')
         if not follow.is_active:
             raise Http404('Follow instance is not active')

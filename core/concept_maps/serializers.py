@@ -2,7 +2,6 @@ import logging
 from collections import OrderedDict
 
 from rest_framework import serializers
-from rest_framework.exceptions import ValidationError
 from rest_framework.fields import CharField, SerializerMethodField, \
     DateTimeField
 
@@ -13,11 +12,9 @@ from core.common.serializers import StatusField, IdentifierSerializer
 from core.mappings.constants import SAME_AS
 from core.mappings.models import Mapping
 from core.mappings.serializers import MappingDetailSerializer
-from core.orgs.models import Organization
 from core.parameters.serializers import ParametersSerializer
 from core.sources.models import Source
 from core.sources.serializers import SourceCreateOrUpdateSerializer
-from core.users.models import UserProfile
 
 logger = logging.getLogger('oclapi')
 
@@ -160,15 +157,7 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
         ident = IdentifierSerializer.include_ocl_identifier(uri, RESOURCE_TYPE, validated_data)
         source = SourceCreateOrUpdateSerializer().prepare_object(validated_data)
 
-        if ident['owner_type'].lower() in ['orgs', 'organization']:
-            owner = Organization.objects.filter(mnemonic=ident['owner_id']).first()
-        else:
-            owner = UserProfile.objects.filter(username=ident['owner_id']).first()
-
-        if not owner:
-            raise ValidationError(f"Cannot find owner of type {ident['owner_type']} and id {ident['owner_id']}")
-
-        source.set_parent(owner)
+        source.set_parent(IdentifierSerializer.get_checked_owner(self.context, ident))
         source.source_type = 'ConceptMap'
 
         user = self.context['request'].user

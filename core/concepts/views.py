@@ -5,10 +5,11 @@ from cid.locals import get_cid
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Q as DjangoQ
 from django.http import Http404
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
+from elasticsearch_dsl import Q
 from pydash import get, compact
 from rest_framework import status
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, ListCreateAPIView, RetrieveUpdateDestroyAPIView, \
@@ -30,7 +31,7 @@ from core.capabilities.constants import CAPABILITY_EXCEEDED_ERROR_CODE, CAPABILI
     MAPPER_MATCH_OPERATIONS_CAPABILITY, MAPPER_MATCH_OPERATIONS_CAPABILITY_ID
 from core.capabilities.exceptions import CapabilityExceeded
 from core.common.permissions import CanUseMapper
-from core.common.search import CustomESSearch, Reranker
+from core.common.search import CustomESSearch, Reranker, get_visible_repo_criteria
 from core.common.swagger_parameters import (
     q_param, limit_param, sort_desc_param, page_param, sort_asc_param, verbose_param,
     include_facets_header, updated_since_param, include_inverse_mappings_param, include_retired_param,
@@ -1004,9 +1005,13 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         is_semantic = self.request.query_params.get('semantic', None) in TRUTHY
         best_match = self.request.query_params.get('bestMatch', None) in TRUTHY
         score_threshold = self.score_threshold_semantic_very_high if is_semantic else self.score_threshold
-        repo_params = self.get_repo_params(is_semantic, target_repo_params, target_repo_url)
+        repo_params = self.get_repo_params(is_semantic, target_repo_params, target_repo_url, self.request.user)
         locale_filter = filters.pop('locale', None) if is_semantic else get(filters, 'locale', None)
         faceted_criterion = self.get_faceted_criterion(False, filters, minimum_should_match=1) if filters else None
+        visible_repo_criteria = get_visible_repo_criteria(self.request.user)
+        if visible_repo_criteria:
+            faceted_criterion = Q(
+                'bool', must=[visible_repo_criteria, faceted_criterion]) if faceted_criterion else visible_repo_criteria
         apply_for_name_locale = locale_filter and isinstance(locale_filter, str) and len(locale_filter.split(',')) == 1
         encoder_model = self.request.GET.get('encoder_model', None)
         reranker = self.request.GET.get('reranker', None) in TRUTHY
@@ -1100,16 +1105,42 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         concept._match_type = match_type  # pylint:disable=protected-access
 
     @staticmethod
-    def get_repo_params(is_semantic, target_repo_params, target_repo_url):
-        repo = ConceptFuzzySearch.get_target_repo(target_repo_url)
-        if not repo:
+    def get_target_repos_from_params(target_repo_params):
+        from core.sources.models import Source
+        owner = target_repo_params.get('owner')
+        owner_type = (target_repo_params.get('owner_type') or '').lower()
+        if owner_type in ['organization', 'orgs', 'org']:
+            owner_criteria = DjangoQ(organization__mnemonic=owner)
+        elif owner_type in ['user', 'userprofile', 'users']:
+            owner_criteria = DjangoQ(user__username=owner)
+        else:
+            owner_criteria = DjangoQ(organization__mnemonic=owner) | DjangoQ(user__username=owner)
+        return Source.objects.filter(
+            owner_criteria, mnemonic=target_repo_params.get('source'),
+            version=target_repo_params.get('source_version') or target_repo_params.get('version') or HEAD)
+
+    @staticmethod
+    def get_repo_params(is_semantic, target_repo_params, target_repo_url, user=None):
+        """The repo from target_repo_url, else the one described by target_repo.
+        Target repos the user can't view are reported as unresolvable."""
+        repo = ConceptFuzzySearch.get_target_repo(target_repo_url) if target_repo_url else None
+        if repo and HEAD in (get(target_repo_params, 'source_version'), get(target_repo_params, 'version')):
+            # HEAD's version_url is the bare repo URL, which resolves to the latest released version
+            repo = repo.head or repo
+        if repo:
+            if not repo.has_view_access(user):
+                raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')
+            repo_params = ConceptFuzzySearch.get_repo_params(repo)
+        elif target_repo_params:
+            repos = MetadataToConceptsListView.get_target_repos_from_params(target_repo_params)
+            if not repos.exists() or not all(target_repo.has_view_access(user) for target_repo in repos):
+                raise Http400(f'Unable to resolve "target_repo": "{target_repo_params}"')
+            repo = repos.first()
+            repo_params = target_repo_params
+        else:
             raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')
-        if is_semantic:
-            if repo and not repo.has_semantic_match_algorithm:
-                raise Http400('This repo version does not support semantic search')
-        repo_params = target_repo_params or ConceptFuzzySearch.get_repo_params(repo)
-        if not repo_params:
-            raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')
+        if is_semantic and not repo.has_semantic_match_algorithm:
+            raise Http400('This repo version does not support semantic search')
         return repo_params
 
     @swagger_auto_schema(

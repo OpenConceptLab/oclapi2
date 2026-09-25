@@ -38,6 +38,9 @@ class URLRegistryDetailSerializer(URLRegistryBaseSerializer):
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
+        repo = get(instance, 'repo')
+        if repo and not repo.has_view_access(get(self.context, 'request.user')):
+            data['repo'] = None
         if get(data, 'repo.search_meta'):
             data['repo'].pop('search_meta', None)
         return data

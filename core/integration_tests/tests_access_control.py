@@ -124,6 +124,19 @@ class OrganizationOverviewAccessTest(AccessTestMixin, OCLAPITestCase):
     def test_anonymous_cannot_delete(self):
         self.assert_not_deleted(self.request('delete', self.get_url()), 401)
 
+    def test_member_and_staff_delete_clears_overview_only(self):
+        for user in [self.member, self.staff]:
+            self.org.overview = {'text': 'Existing'}
+            self.org.save()
+
+            response = self.request('delete', self.get_url(), user)
+
+            self.assertEqual(response.status_code, 204)
+            self.org.refresh_from_db()
+            self.assertEqual(self.org.overview, {})
+            self.assertTrue(self.org.is_active)
+            self.assertEqual(self.org.updated_by, user)
+
     def test_public_org_overview_is_visible_to_anyone(self):
         self.assertEqual(self.request('get', self.get_url()).status_code, 200)
         self.assertEqual(self.request('get', self.get_url(), self.outsider).status_code, 200)
@@ -165,6 +178,25 @@ class OrganizationLogoAccessTest(AccessTestMixin, OCLAPITestCase):
 
     def test_staff_can_upload(self):
         self.assert_uploaded(self.upload(self.staff))
+
+    def test_delete_clears_logo_only(self):
+        for user, status_code in [(None, 401), (self.outsider, 403)]:
+            self.org.logo_path = f'orgs/{self.org.mnemonic}/logo.png'
+            self.org.save()
+
+            self.assertEqual(self.request('delete', self.org.uri + 'logo/', user).status_code, status_code)
+            self.org.refresh_from_db()
+            self.assertEqual(self.org.logo_path, f'orgs/{self.org.mnemonic}/logo.png')
+
+        for user in [self.member, self.staff]:
+            self.org.logo_path = f'orgs/{self.org.mnemonic}/logo.png'
+            self.org.save()
+
+            self.assertEqual(self.request('delete', self.org.uri + 'logo/', user).status_code, 204)
+            self.org.refresh_from_db()
+            self.assertIsNone(self.org.logo_path)
+            self.assertTrue(self.org.is_active)
+            self.assertEqual(self.org.updated_by, user)
 
 
 class OrganizationResourceListAccessMixin(AccessTestMixin):

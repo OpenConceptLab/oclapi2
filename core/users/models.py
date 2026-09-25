@@ -395,6 +395,18 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
     def is_member_of_org(self, org_mnemonic):
         return self.organizations.filter(mnemonic=org_mnemonic).exists()
 
+    def can_view(self, obj):
+        """Whether this user can view a user, an org, a repo or content inside a repo."""
+        from core.orgs.models import Organization
+        if self.is_staff or isinstance(obj, UserProfile):
+            return True
+        if isinstance(obj, Organization):
+            return obj.public_can_view or obj.is_member(self)
+        repo = obj if hasattr(obj, 'has_view_access') else (
+            getattr(obj, 'collection_version', None) or getattr(obj, 'collection', None) or
+            getattr(obj, 'parent', None))
+        return bool(repo and hasattr(repo, 'has_view_access') and repo.has_view_access(self))
+
     def follow(self, following):
         self.following.create(following_id=following.id, following_type=ContentType.objects.get_for_model(following))
 
@@ -421,7 +433,7 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
     def set_groups(self, groups, verify=True, _save=True):
         if not verify or sorted(self.groups.values_list('name', flat=True)) != sorted(groups):
             self.groups.set(Group.objects.filter(name__in=groups))
-            self.is_staff = self.has_auth_group(STAFF_GROUP)
             self.is_superuser = self.has_auth_group(SUPERADMIN_GROUP)
+            self.is_staff = self.is_superuser or self.has_auth_group(STAFF_GROUP)  # a superuser is always staff
             if _save:
                 self.save()
