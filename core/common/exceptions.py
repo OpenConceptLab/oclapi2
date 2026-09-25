@@ -27,13 +27,13 @@ class Http403(APIException):
     default_code = 'forbidden'
 
 
-class UnpaginatedListNotEntitled(APIException):
-    """403 for the `Compress` header (an unpaginated list) without `users.list_unpaginated` (ocl_online#230)."""
+class UnpaginatedListLimitReached(APIException):
+    """403 for `Compress` (an unpaginated list) over the limit without `users.list_unpaginated` (ocl_online#230)."""
     status_code = status.HTTP_403_FORBIDDEN
 
-    def __init__(self):  # pylint: disable=super-init-not-called
+    def __init__(self, limit, requested):  # pylint: disable=super-init-not-called
         self.detail = {
-            'detail': 'Unpaginated (Compress) responses are not available on your plan. '
-                      'Page through results with limit and page.',
-            'error_code': 'list_unpaginated_not_entitled',
+            'detail': f'Unpaginated (Compress) responses are limited to {limit:,} results; this list has '
+                      f'{requested:,}. Page through it with limit and page.',
+            'error_code': 'list_unpaginated_limit_reached', 'limit': limit, 'requested': requested,
         }

@@ -5170,6 +5170,29 @@ class BulkImportLimitsTest(OCLAPITestCase):
         self.assertEqual(task_mock.apply_async.call_args[0][0][3], 8)
         self.assertEqual(task_mock.apply_async.call_args[1]['queue'], 'concurrent')
 
+    @staticmethod
+    def json_text(size_kb):
+        line = '{"type": "Concept", "id": "c1", "concept_class": "Misc", "datatype": "N/A"}\n'
+        return line * (size_kb * 1024 // len(line))
+
+    @patch('core.common.tasks.bulk_import_parallel_inline')
+    def test_preview_json_body_just_under_limit_202(self, task_mock):
+        # JSON escaping makes the request body ~20% bigger than the pasted data; only the data counts
+        task_mock.__name__ = 'bulk_import_parallel_inline'
+        response = self.client.post(
+            '/importers/bulk-import-parallel-inline/', {'data': self.json_text(450), 'parallel': 2},
+            HTTP_AUTHORIZATION='Token ' + self.preview_user.get_token(), format='json')
+        self.assertEqual(response.status_code, 202)
+
+    @patch('core.common.tasks.bulk_import_parallel_inline')
+    def test_preview_json_body_over_limit_403(self, task_mock):
+        task_mock.__name__ = 'bulk_import_parallel_inline'
+        response = self.client.post(
+            '/importers/bulk-import-parallel-inline/', {'data': self.json_text(510), 'parallel': 2},
+            HTTP_AUTHORIZATION='Token ' + self.preview_user.get_token(), format='json')
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['error_code'], 'imports_file_size_limit_reached')
+
     @patch('core.common.tasks.bulk_import_inline')
     def test_deprecated_inline_route_limited_too(self, task_mock):
         task_mock.__name__ = 'bulk_import_inline'

@@ -28,7 +28,7 @@ from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConce
     CanViewConceptDictionaryVersion, CanEditConceptDictionary
 from core.users.constants import LIST_UNPAGINATED_PERMISSION
 from .checksums import ChecksumModel
-from .exceptions import Http403, UnpaginatedListNotEntitled
+from .exceptions import Http403, UnpaginatedListLimitReached
 from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
     to_owner_uri, parse_updated_since_param, get_export_service, to_int, get_truthy_values, generate_temp_version, \
     canonical_url_to_url_and_version, decode_string, to_parent_kwargs_from_uri
@@ -37,6 +37,7 @@ from ..toggles.models import Toggle
 
 logger = logging.getLogger('oclapi')
 TRUTHY = get_truthy_values()
+MAX_UNPAGINATED_RESULTS = 1000  # `Compress` lists; above this, users.list_unpaginated (ocl_online#230)
 
 
 class CustomPaginator:
@@ -298,11 +299,19 @@ class ListWithHeadersMixin(ListModelMixin):
         return self.request.query_params.get(SEARCH_STATS_ONLY, False) in TRUTHY
 
     def should_compress(self):
+        """
+        `Compress: true` returns the whole list, unpaginated (a zip). Anyone may, for up to MAX_UNPAGINATED_RESULTS
+        results; bigger lists need `users.list_unpaginated` (ocl_online#230).
+        """
         if self.request.META.get(HTTP_COMPRESS_HEADER, False) not in TRUTHY:
             return False
         user = self.request.user
-        if not (user.is_staff or user.has_perm(LIST_UNPAGINATED_PERMISSION)):
-            raise UnpaginatedListNotEntitled()
+        if user.is_staff or user.has_perm(LIST_UNPAGINATED_PERMISSION):
+            return True
+        total = self.total_count or (
+            self.object_list.count() if isinstance(self.object_list, QuerySet) else len(self.object_list))
+        if total > MAX_UNPAGINATED_RESULTS:
+            raise UnpaginatedListLimitReached(MAX_UNPAGINATED_RESULTS, total)
         return True
 
     def get_object_ids(self):

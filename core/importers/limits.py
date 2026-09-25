@@ -8,6 +8,8 @@ Limits come from the caller's groups, like every other capability:
 - `users.bulk_import_priority`: the `concurrent` queue and more than 5 threads.
 Staff and superusers are never limited.
 """
+import json
+
 import requests
 from pydash import get
 from rest_framework import status
@@ -18,7 +20,7 @@ from core.common.utils import is_zip_file
 from core.users.constants import BULK_IMPORT_ADVANCED_PERMISSION, BULK_IMPORT_PRIORITY_PERMISSION
 
 KB = 1024
-MULTIPART_OVERHEAD_BYTES = 64 * KB  # boundaries and form fields; the uploaded file itself is checked exactly
+ENVELOPE_SLACK_MIN_BYTES = 64 * KB  # multipart boundaries, JSON escaping; the data itself is checked exactly
 DEFAULT_IMPORT_THREADS = 5
 PRIORITY_QUEUES = ('concurrent', )
 DOWNLOAD_CHUNK_BYTES = 64 * KB
@@ -75,14 +77,16 @@ def check_advanced_import(user, feature):
 
 
 def check_request_body_size(request):
-    """Before the body is parsed: refuse a body that is already over the limit."""
+    """
+    Before the body is parsed: refuse a body far over the limit. Multipart boundaries and JSON escaping make the
+    body bigger than the data it carries, so this allows slack; check_import_payload checks the data exactly.
+    """
     user = request.user
     max_bytes = get_max_import_bytes(user)
     content_length = str(request.META.get('CONTENT_LENGTH') or '')
     if not max_bytes or not content_length.isdigit():
         return
-    slack = MULTIPART_OVERHEAD_BYTES if str(request.content_type).startswith('multipart/') else 0
-    if int(content_length) > max_bytes + slack:
+    if int(content_length) > max_bytes + max(ENVELOPE_SLACK_MIN_BYTES, max_bytes // 4):
         check_import_size(user, int(content_length))
 
 
@@ -104,6 +108,8 @@ def check_import_payload(request):
     text = data.get('data')
     if isinstance(text, str):
         check_import_size(user, len(text.encode('utf-8')))
+    elif text is not None:
+        check_import_size(user, len(json.dumps(text).encode('utf-8')))
 
 
 def enforce_import_request_limits(request):
