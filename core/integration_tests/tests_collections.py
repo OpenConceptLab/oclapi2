@@ -4493,3 +4493,23 @@ class ExpansionsComparisonViewTest(OCLAPITestCase):
         self.assertEqual(response.data['meta']['version1']['uri'], expansion1.uri)
         self.assertEqual(response.data['meta']['version2']['uri'], expansion2.uri)
         self.assertEqual(response.data['concepts']['new'], {'total': 1, 'mnemonic': ['concept2']})
+
+
+class CollectionReferencesPreviewPermissionTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.owner = UserProfileFactory()
+        self.collection = UserCollectionFactory(user=self.owner, public_access='View')
+        self.payload = {'data': {'expressions': ['/orgs/OCL/sources/NoSuchSource/concepts/']}}
+
+    def test_viewer_cannot_preview(self):
+        response = self.client.post(
+            self.collection.uri + 'references/preview/', self.payload,
+            HTTP_AUTHORIZATION='Token ' + UserProfileFactory().get_token(), format='json')
+        self.assertEqual(response.status_code, 403)
+
+    def test_owner_can_preview(self):
+        response = self.client.post(
+            self.collection.uri + 'references/preview/', self.payload,
+            HTTP_AUTHORIZATION='Token ' + self.owner.get_token(), format='json')
+        self.assertEqual(response.status_code, 200)
