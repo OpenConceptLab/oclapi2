@@ -11,7 +11,7 @@ from rest_framework.response import Response
 
 from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
-from core.common.constants import HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, \
+from core.common.constants import HEAD, RETIRED_ACCESS_TYPE_EDIT, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, \
     OPENMRS_VALIDATION_SCHEMA
 from core.common.tasks import index_source_mappings, index_source_concepts, get_concepts_to_index, \
     update_concepts_locale_fields
@@ -418,19 +418,12 @@ class SourceTest(OCLTestCase):
         self.assertFalse(Source(public_access='foobar').public_can_view)
         self.assertTrue(Source().public_can_view)  # default access_type is view
         self.assertTrue(Source(public_access='view').public_can_view)
-        self.assertTrue(Source(public_access='edit').public_can_view)
-
-    def test_public_can_edit(self):
-        self.assertFalse(Source().public_can_edit)
-        self.assertFalse(Source(public_access='none').public_can_edit)
-        self.assertFalse(Source(public_access='foobar').public_can_edit)
-        self.assertFalse(Source(public_access='view').public_can_edit)
-        self.assertTrue(Source(public_access='edit').public_can_edit)
+        self.assertFalse(Source(public_access='edit').public_can_view)  # retired, never stored
 
     def test_has_edit_access(self):
         admin = UserProfile.objects.get(username='ocladmin')
         source_private = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
-        source_public_edit = OrganizationSourceFactory(public_access=ACCESS_TYPE_EDIT)
+        source_public_edit = OrganizationSourceFactory(public_access=RETIRED_ACCESS_TYPE_EDIT)
         source_public_view = OrganizationSourceFactory(public_access=ACCESS_TYPE_VIEW)
 
         self.assertTrue(source_public_view.has_edit_access(admin))
@@ -439,7 +432,7 @@ class SourceTest(OCLTestCase):
 
         self.assertFalse(source_private.has_edit_access(self.user))
         self.assertFalse(source_public_view.has_edit_access(self.user))
-        self.assertTrue(source_public_edit.has_edit_access(self.user))
+        self.assertFalse(source_public_edit.has_edit_access(self.user))
 
         source_private.organization.members.add(self.user)
         self.assertTrue(source_private.has_edit_access(self.user))
@@ -448,7 +441,7 @@ class SourceTest(OCLTestCase):
         self.assertTrue(source_public_edit.has_edit_access(self.user))
 
         user_source_private = UserSourceFactory(public_access=ACCESS_TYPE_NONE)
-        user_source_public_edit = UserSourceFactory(public_access=ACCESS_TYPE_EDIT)
+        user_source_public_edit = UserSourceFactory(public_access=RETIRED_ACCESS_TYPE_EDIT)
         user_source_public_view = UserSourceFactory(public_access=ACCESS_TYPE_VIEW)
 
         self.assertTrue(user_source_private.has_edit_access(admin))
@@ -457,7 +450,7 @@ class SourceTest(OCLTestCase):
 
         self.assertFalse(user_source_private.has_edit_access(self.user))
         self.assertFalse(user_source_public_view.has_edit_access(self.user))
-        self.assertTrue(user_source_public_edit.has_edit_access(self.user))
+        self.assertFalse(user_source_public_edit.has_edit_access(self.user))
 
         self.assertTrue(user_source_private.has_edit_access(user_source_private.parent))
         self.assertTrue(user_source_public_edit.has_edit_access(user_source_public_edit.parent))
@@ -2234,8 +2227,8 @@ class SourceTest(OCLTestCase):
 
 class SourceSignalsTest(OCLTestCase):
     def test_propagate_parent_attributes_updates_mapping_public_access(self):
-        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_EDIT)
-        mapping = MappingFactory(parent=source, public_access=ACCESS_TYPE_EDIT)
+        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        mapping = MappingFactory(parent=source, public_access=ACCESS_TYPE_NONE)
 
         source.public_access = ACCESS_TYPE_VIEW
         source._should_update_public_access = True  # pylint: disable=protected-access

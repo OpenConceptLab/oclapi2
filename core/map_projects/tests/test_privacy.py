@@ -4,7 +4,7 @@ import json
 from django.apps import apps
 from mock import patch
 
-from core.common.constants import ACCESS_TYPE_EDIT, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
+from core.common.constants import RETIRED_ACCESS_TYPE_EDIT, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
 from core.map_projects.models import MapProject
 from core.map_projects.tests.factories import MapProjectFactory
 from core.map_projects.tests.tests import MapProjectAbstractViewTest
@@ -56,7 +56,7 @@ class MapProjectPrivacyTest(MapProjectAbstractViewTest):
     def test_migration_makes_existing_projects_private(self):
         migration = importlib.import_module('core.map_projects.migrations.0039_mapproject_private_by_default')
         viewable = MapProjectFactory(public_access=ACCESS_TYPE_VIEW)
-        editable = MapProjectFactory(public_access=ACCESS_TYPE_EDIT)
+        editable = MapProjectFactory(public_access=RETIRED_ACCESS_TYPE_EDIT)
 
         migration.make_existing_projects_private(apps, None)
 

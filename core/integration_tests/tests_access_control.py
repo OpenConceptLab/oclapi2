@@ -4,7 +4,7 @@ from core.client_configs.models import ClientConfig
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection, CollectionReference
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory, ExpansionFactory
-from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
+from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT
 from core.common.permissions import HasOwnership
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.concepts.models import Concept
@@ -1067,32 +1067,62 @@ class HasOwnershipTest(OCLTestCase):
         self.assertTrue(self.check(self.staff, source))
 
 
-class PublicEditSourceAccessTest(AccessTestMixin, OCLAPITestCase):
+class RetiredPublicEditAccessTest(AccessTestMixin, OCLAPITestCase):
     """
-    Any logged-in user can add content to a public-Edit source. Changing the source's own settings needs staff, the
-    owner or a member, for org sources as for user sources.
+    public_access='Edit' is retired and stored as 'View', so a formerly public-Edit repo stays publicly readable, and
+    only staff, the owner or a member can change it, add content to it or delete it.
     """
-    def test_anyone_logged_in_can_add_content(self):
-        source = OrganizationSourceFactory(organization=self.org, public_access=ACCESS_TYPE_EDIT)
+    def setUp(self):
+        super().setUp()
+        self.source = OrganizationSourceFactory(organization=self.org, public_access=RETIRED_ACCESS_TYPE_EDIT)
+        self.collection = UserCollectionFactory(user=self.owner, public_access=RETIRED_ACCESS_TYPE_EDIT)
+
+    def test_edit_is_stored_as_view(self):
+        for repo in [self.source, self.collection]:
+            repo.refresh_from_db()
+            self.assertEqual(repo.public_access, ACCESS_TYPE_VIEW)
+            self.assertEqual(self.request('get', repo.uri).status_code, 200)
+
+    def test_edit_in_payload_is_saved_as_view(self):
+        response = self.request('put', self.source.uri, self.member, {'public_access': RETIRED_ACCESS_TYPE_EDIT})
+
+        self.assertEqual(response.status_code, 200)
+        self.source.refresh_from_db()
+        self.assertEqual(self.source.public_access, ACCESS_TYPE_VIEW)
 
         response = self.request(
-            'post', source.uri + 'concepts/', self.outsider, SourceContentAccessTest.concept_payload)
+            'post', self.owner.uri + 'sources/', self.owner,
+            {'id': 'edit-src', 'name': 'edit-src', 'public_access': RETIRED_ACCESS_TYPE_EDIT}
+        )
 
         self.assertEqual(response.status_code, 201)
+        self.assertEqual(Source.objects.get(mnemonic='edit-src').public_access, ACCESS_TYPE_VIEW)
 
-    def test_org_source_settings(self):
-        source = OrganizationSourceFactory(organization=self.org, public_access=ACCESS_TYPE_EDIT)
+    def test_outsider_cannot_add_content(self):
+        url = self.source.uri + 'concepts/'
+        payload = SourceContentAccessTest.concept_payload
 
-        self.assertEqual(self.request('put', source.uri, self.outsider, {'name': 'Renamed'}).status_code, 403)
-        source.refresh_from_db()
-        self.assertNotEqual(source.name, 'Renamed')
+        self.assertEqual(self.request('post', url, self.outsider, payload).status_code, 403)
+        self.assertEqual(self.request('post', url, self.member, payload).status_code, 201)
 
-        self.assertEqual(self.request('put', source.uri, self.member, {'name': 'Renamed'}).status_code, 200)
-        source.refresh_from_db()
-        self.assertEqual(source.name, 'Renamed')
+    def test_outsider_cannot_edit_or_delete(self):
+        for repo in [self.source, self.collection]:
+            self.assertEqual(self.request('put', repo.uri, self.outsider, {'name': 'Renamed'}).status_code, 403)
+            self.assertEqual(self.request('delete', repo.uri, self.outsider).status_code, 403)
+            repo.refresh_from_db()
+            self.assertNotEqual(repo.name, 'Renamed')
+            self.assertTrue(repo.is_active)
 
-    def test_user_source_settings(self):
-        source = UserSourceFactory(user=self.owner, public_access=ACCESS_TYPE_EDIT)
+    def test_owner_and_member_can_edit_and_delete(self):
+        for repo, user in [(self.source, self.member), (self.collection, self.owner)]:
+            self.assertEqual(self.request('put', repo.uri, user, {'name': 'Renamed'}).status_code, 200)
+            repo.refresh_from_db()
+            self.assertEqual(repo.name, 'Renamed')
+            self.assertEqual(self.request('delete', repo.uri, user).status_code, 204)
 
-        self.assertEqual(self.request('put', source.uri, self.outsider, {'name': 'Renamed'}).status_code, 403)
-        self.assertEqual(self.request('put', source.uri, self.owner, {'name': 'Renamed'}).status_code, 200)
+    def test_unmigrated_edit_row_grants_outsider_nothing(self):
+        Source.objects.filter(id=self.source.id).update(public_access=RETIRED_ACCESS_TYPE_EDIT)
+
+        self.assertEqual(self.request('put', self.source.uri, self.outsider, {'name': 'Renamed'}).status_code, 403)
+        self.assertEqual(self.request('delete', self.source.uri, self.outsider).status_code, 403)
+        self.assertTrue(Source.objects.get(id=self.source.id).is_active)

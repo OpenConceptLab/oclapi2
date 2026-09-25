@@ -21,7 +21,7 @@ from core.collections.translators import CollectionReferenceTranslator
 from core.collections.utils import is_concept, is_mapping
 from core.common.checksums import VersionCompareMixin
 from core.common.constants import (
-    ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT,
+    ACCESS_TYPE_VIEW,
     ES_REQUEST_TIMEOUT, ES_REQUEST_TIMEOUT_ASYNC, HEAD, ALL, EXCLUDE_WILDCARD_SEARCH_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM,
     SEARCH_MAP_CODES_PARAM, INCLUDE_SEARCH_META_PARAM, VERBOSE_PARAM, NAMESPACE_INVALID_CHAR_REGEX,
     CONSECUTIVE_HYPHENS_REGEX)
@@ -129,7 +129,7 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             queryset = queryset.filter(cls.get_exact_or_criteria('mnemonic', collection))
         if contains_uri:
             queryset = queryset.filter(
-                references__expression=contains_uri, public_access__in=[ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW]
+                references__expression=contains_uri, public_access=ACCESS_TYPE_VIEW
             )
         if include_references:
             queryset = queryset.prefetch_related('references')

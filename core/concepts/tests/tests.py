@@ -12,7 +12,7 @@ from pydash import omit
 
 from core.collections.models import CollectionReference
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
-from core.common.constants import OPENMRS_VALIDATION_SCHEMA, HEAD, ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, LATEST
+from core.common.constants import OPENMRS_VALIDATION_SCHEMA, HEAD, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, LATEST
 from core.common.search import Reranker
 from core.common.tests import OCLTestCase, OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.concepts.constants import (
@@ -1525,11 +1525,10 @@ class ConceptTest(OCLTestCase):
         )
 
     def test_concept_access_changes_with_source(self):
-        source = OrganizationSourceFactory(version=HEAD)
-        self.assertEqual(source.public_access, ACCESS_TYPE_EDIT)
-        concept = ConceptFactory(parent=source, public_access=ACCESS_TYPE_EDIT)
+        source = OrganizationSourceFactory(version=HEAD, public_access=ACCESS_TYPE_NONE)
+        concept = ConceptFactory(parent=source, public_access=ACCESS_TYPE_NONE)
 
-        self.assertEqual(concept.public_access, ACCESS_TYPE_EDIT)
+        self.assertEqual(concept.public_access, ACCESS_TYPE_NONE)
 
         source.public_access = ACCESS_TYPE_VIEW
         source._should_update_public_access = True  # pylint: disable=protected-access

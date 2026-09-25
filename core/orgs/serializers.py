@@ -4,10 +4,10 @@ from rest_framework import serializers
 from rest_framework.fields import SerializerMethodField
 
 from core.client_configs.serializers import ClientConfigSerializer
-from core.common.constants import NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, INCLUDE_CLIENT_CONFIGS, \
+from core.common.constants import NAMESPACE_REGEX, DEFAULT_ACCESS_TYPE, INCLUDE_CLIENT_CONFIGS, \
     INCLUDE_OVERVIEW
 from .models import Organization
-from ..common.serializers import AbstractResourceSerializer
+from ..common.serializers import AbstractResourceSerializer, PublicAccessField
 from ..common.utils import get_truthy_values
 
 TRUTHY = get_truthy_values()
@@ -26,7 +26,7 @@ class OrganizationCreateSerializer(serializers.ModelSerializer):
     type = serializers.CharField(source='resource_type', read_only=True)
     uuid = serializers.CharField(source='id', read_only=True)
     id = serializers.CharField(required=True, validators=[RegexValidator(regex=NAMESPACE_REGEX)], source='mnemonic')
-    public_access = serializers.ChoiceField(required=False, choices=ACCESS_TYPE_CHOICES, default=DEFAULT_ACCESS_TYPE)
+    public_access = PublicAccessField(required=False, default=DEFAULT_ACCESS_TYPE)
     name = serializers.CharField(required=True)
     company = serializers.CharField(required=False, allow_blank=True)
     website = serializers.CharField(required=False, allow_blank=True)
@@ -76,7 +76,7 @@ class OrganizationDetailSerializer(AbstractResourceSerializer):
     type = serializers.CharField(source='resource_type', read_only=True)
     uuid = serializers.CharField(source='id', read_only=True)
     id = serializers.CharField(source='mnemonic', read_only=True)
-    public_access = serializers.ChoiceField(required=False, choices=ACCESS_TYPE_CHOICES, default=DEFAULT_ACCESS_TYPE)
+    public_access = PublicAccessField(required=False, default=DEFAULT_ACCESS_TYPE)
     name = serializers.CharField(required=False)
     company = serializers.CharField(required=False, allow_blank=True)
     website = serializers.CharField(required=False, allow_blank=True)

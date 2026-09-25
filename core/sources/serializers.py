@@ -2,16 +2,16 @@ import json
 
 from django.core.validators import RegexValidator
 from pydash import get, compact
-from rest_framework.fields import CharField, IntegerField, DateTimeField, ChoiceField, JSONField, ListField, \
+from rest_framework.fields import CharField, IntegerField, DateTimeField, JSONField, ListField, \
     BooleanField, SerializerMethodField
 from rest_framework.relations import PrimaryKeyRelatedField
 from rest_framework.serializers import ModelSerializer, ValidationError
 
 from core.client_configs.serializers import ClientConfigSerializer
-from core.common.constants import DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, HEAD, \
+from core.common.constants import DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, HEAD, \
     INCLUDE_SUMMARY, INCLUDE_CLIENT_CONFIGS, INCLUDE_HIERARCHY_ROOT, INCLUDE_STATES, INCLUDE_TASKS, \
     INCLUDE_EXTERNAL_EXPORTS, INCLUDE_LATEST_RELEASED_VERSION
-from core.common.serializers import AbstractRepoResourcesSerializer, AbstractResourceSerializer
+from core.common.serializers import AbstractRepoResourcesSerializer, AbstractResourceSerializer, PublicAccessField
 from core.common.utils import get_truthy_values
 from core.orgs.models import Organization
 from core.settings import DEFAULT_LOCALE
@@ -145,6 +145,7 @@ class SourceVersionListSerializer(ModelSerializer):
 
 class SourceCreateOrUpdateSerializer(ModelSerializer):
     canonical_url = CharField(allow_blank=True, allow_null=True, required=False)
+    public_access = PublicAccessField(required=False)
 
     class Meta:
         model = Source
@@ -221,7 +222,7 @@ class SourceCreateSerializer(SourceCreateOrUpdateSerializer):
     text = CharField(required=False, allow_blank=True)
     source_type = CharField(required=False, allow_blank=True)
     custom_validation_schema = CharField(required=False, allow_blank=True, allow_null=True)
-    public_access = ChoiceField(required=False, choices=ACCESS_TYPE_CHOICES)
+    public_access = PublicAccessField(required=False)
     default_locale = CharField(required=False, allow_blank=True)
     supported_locales = ListField(required=False, allow_empty=True)
     website = CharField(required=False, allow_blank=True)

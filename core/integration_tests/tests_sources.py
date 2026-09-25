@@ -2447,6 +2447,7 @@ class SourceConceptsCloneViewTest(OCLAPITestCase):
 
     @patch('core.bundles.models.Bundle.clone')
     def test_post_success(self, bundle_clone_mock):
+        self.clone_to_source.organization.members.add(self.user)
         parameters = {'mapTypes': 'Q-AND-A,CONCEPT-SET'}
         bundle_clone_mock.return_value = Bundle(
             root=self.concept, repo_version=self.concept.parent, params=parameters, verbose=False

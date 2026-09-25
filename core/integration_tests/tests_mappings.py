@@ -423,6 +423,7 @@ class MappingListViewTest(OCLAPITestCase):
         self.assertEqual(mapping.to_source, concept.parent)
         self.assertEqual(mapping.to_concept, concept)
 
+        org.members.add(self.user)
         response = self.client.post(
             source.mappings_url,
             {
