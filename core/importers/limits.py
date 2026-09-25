@@ -66,6 +66,11 @@ def check_import_size(user, size_bytes):
         })
 
 
+def check_import_entitled(user):
+    """Raises unless the user may bulk import at all (no limit configured, or -1 = blocked)."""
+    check_import_size(user, 0)
+
+
 def check_advanced_import(user, feature):
     if is_unrestricted(user) or user.has_perm(BULK_IMPORT_ADVANCED_PERMISSION):
         return
@@ -82,6 +87,7 @@ def check_request_body_size(request):
     body bigger than the data it carries, so this allows slack; check_import_payload checks the data exactly.
     """
     user = request.user
+    check_import_entitled(user)
     max_bytes = get_max_import_bytes(user)
     content_length = str(request.META.get('CONTENT_LENGTH') or '')
     if not max_bytes or not content_length.isdigit():
@@ -109,7 +115,7 @@ def check_import_payload(request):
     if isinstance(text, str):
         check_import_size(user, len(text.encode('utf-8')))
     elif text is not None:
-        check_import_size(user, len(json.dumps(text).encode('utf-8')))
+        check_import_size(user, len(json.dumps(text, separators=(',', ':'), ensure_ascii=False).encode('utf-8')))
 
 
 def enforce_import_request_limits(request):
@@ -142,6 +148,8 @@ def download_import_file(url, user=None, timeout=30):
     Streams `url`, refusing as soon as it passes the user's import size limit.
     Returns (response, content bytes); content is None when the response isn't OK.
     """
+    if user is not None:
+        check_import_entitled(user)
     headers = {'User-Agent': 'OCL'}  # user-agent required by mod_security on some servers
     response = requests.get(url, headers=headers, stream=True, timeout=timeout)
     if not response.ok:

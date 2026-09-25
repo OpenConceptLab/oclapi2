@@ -505,6 +505,14 @@ class AuthoringCapabilityDefaultTest(OCLAPITestCase):
         self.assertEqual(
             UserProfileFactory(is_staff=True).get_capability_limit(CLONE_RESOURCES_PER_CALL_CAPABILITY_ID), 0)
 
+    def test_missing_preview_row_falls_back_to_built_in_default(self):
+        GroupCapability.objects.filter(
+            group__name=PREVIEW_GROUP,
+            capability_id__in=[IMPORTS_FILE_SIZE_CAPABILITY_ID, CLONE_RESOURCES_PER_CALL_CAPABILITY_ID]).delete()
+        user = UserProfileFactory()
+        self.assertEqual(user.get_capability_limit(IMPORTS_FILE_SIZE_CAPABILITY_ID), 500)
+        self.assertEqual(user.get_capability_limit(CLONE_RESOURCES_PER_CALL_CAPABILITY_ID), 100)
+
     def test_per_request_limits_report_no_usage(self):
         user = UserProfileFactory()
         self.assertIsNone(user.get_capability_usage(IMPORTS_FILE_SIZE_CAPABILITY_ID))

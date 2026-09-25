@@ -35,7 +35,7 @@ from core.repos.serializers import RepoExternalExportSerializer
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
 from core.sources.documents import SourceDocument
 from core.sources.mixins import SummaryMixin
-from core.sources.clone_limits import clone_limit_error_detail, clone_lock, get_clone_budget
+from core.sources.clone_limits import CloneGuardrailError, clone_limit_error_detail, clone_lock, get_clone_budget
 from core.sources.models import Source, CloneError, CloneLimitExceeded
 from core.sources.search import SourceFacetedSearch
 from core.sources.serializers import (
@@ -417,6 +417,8 @@ class SourceConceptsCloneView(SourceBaseView):
             raise Http400()
         instance = self.get_object()
         budget = get_clone_budget(request.user)
+        if budget is not None and isinstance(expressions, list) and len(expressions) > budget:
+            raise CloneGuardrailError(clone_limit_error_detail(budget, len(expressions)))  # each creates at least one
         remaining = budget
         results = {}
         parent_resources = {}

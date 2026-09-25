@@ -1867,6 +1867,20 @@ class SourceTest(OCLTestCase):
         self.assertEqual(source2.get_active_concepts().count(), 0)
         self.assertEqual(source2.get_active_mappings().count(), 0)
 
+    def test_clone_resource_budget_counts_equivalency_mappings(self):
+        parent = self._source_with_wide_concept()  # cascade: 5 concepts + 4 mappings
+        source2 = OrganizationSourceFactory(mnemonic='source2')
+
+        with self.assertRaises(CloneLimitExceeded) as context:
+            source2.clone_with_cascade(
+                concept_to_clone=parent, user=parent.created_by, resource_budget=10,
+                map_types='Q-AND-A', equivalency_map_types='SAME-AS')
+        self.assertEqual(context.exception.requested, 14)  # + one SAME-AS mapping per cloned concept
+
+        added_concepts, _ = source2.clone_with_cascade(
+            concept_to_clone=parent, user=parent.created_by, resource_budget=10, map_types='Q-AND-A')
+        self.assertEqual(len(added_concepts), 5)
+
     def test_clone_with_cascade_within_resource_budget(self):
         parent = self._source_with_wide_concept()
         source2 = OrganizationSourceFactory(mnemonic='source2')

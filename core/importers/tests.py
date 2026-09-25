@@ -44,6 +44,8 @@ from core.sources.constants import AUTO_ID_SEQUENTIAL, AUTO_ID_UUID
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.tasks.models import Task
+from core.capabilities.constants import IMPORTS_FILE_SIZE_CAPABILITY_ID
+from core.capabilities.models import UserCapabilityOverride
 from core.users.constants import PREVIEW_GROUP, PREVIEW_GRANDFATHERED_GROUP
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
@@ -5192,6 +5194,68 @@ class BulkImportLimitsTest(OCLAPITestCase):
             HTTP_AUTHORIZATION='Token ' + self.preview_user.get_token(), format='json')
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.data['error_code'], 'imports_file_size_limit_reached')
+
+    @patch('core.importers.limits.requests.get')
+    def test_blocked_user_cannot_import_from_url(self, get_mock):
+        UserCapabilityOverride.objects.create(
+            user=self.grandfathered_user, capability_id=IMPORTS_FILE_SIZE_CAPABILITY_ID, limit=-1)
+        for url, data in [
+                ('/importers/bulk-import-parallel-inline/', {'file_url': 'https://example.org/concepts.json'}),
+                ('/importers/bulk-import/', {'import_type': 'npm', 'file_url': 'https://example.org/package.tgz'}),
+                ('/importers/bulk-import/file-url/', {'file_url': 'https://example.org/concepts.json'}),
+        ]:
+            response = self.post(self.grandfathered_user, data, url=url)
+            self.assertEqual(response.status_code, 403, url)
+            self.assertEqual(response.data['error_code'], 'imports_file_size_not_entitled', url)
+        get_mock.assert_not_called()
+
+    @patch('core.importers.limits.requests.get')
+    def test_grandfathered_npm_url_over_limit_403(self, get_mock):
+        get_mock.return_value = Mock(
+            ok=True, headers={'Content-Length': str(60 * 1024 * 1024)}, iter_content=Mock(return_value=[]))
+        response = self.post(
+            self.grandfathered_user, {'import_type': 'npm', 'file_url': 'https://example.org/package.tgz'},
+            url='/importers/bulk-import/')
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['error_code'], 'imports_file_size_limit_reached')
+
+    @patch('core.importers.views.get_export_service')
+    @patch('core.importers.views.bulk_import_new')
+    @patch('core.importers.limits.requests.get')
+    def test_grandfathered_npm_url_is_downloaded_and_handed_over_as_upload(
+            self, get_mock, bulk_import_new_mock, export_service_mock):
+        get_mock.return_value = Mock(ok=True, headers={}, iter_content=Mock(return_value=[b'package-bytes']))
+        bulk_import_new_mock.apply_async = Mock(return_value=Mock(id='task-id', state='PENDING'))
+        response = self.post(
+            self.grandfathered_user, {'import_type': 'npm', 'file_url': 'https://example.org/package.tgz'},
+            url='/importers/bulk-import/')
+        self.assertEqual(response.status_code, 202)
+        key = bulk_import_new_mock.apply_async.call_args[0][0][0]
+        self.assertTrue(key.startswith(Importer.IMPORT_CACHE))  # the task gets the capped copy, not the URL
+        export_service_mock.return_value.upload.assert_called_once()
+
+    @patch('core.common.tasks.bulk_import_parallel_inline')
+    def test_preview_json_object_data_is_measured_compactly(self, task_mock):
+        task_mock.__name__ = 'bulk_import_parallel_inline'
+        rows = [
+            {'type': 'Concept', 'id': f'c{index}', 'concept_class': 'Misc', 'datatype': 'N/A', 'name': 'caf\u00e9'}
+            for index in range(5600)
+        ]
+        self.assertLess(len(json.dumps(rows, separators=(',', ':'), ensure_ascii=False).encode()), 500 * 1024)
+        self.assertGreater(len(json.dumps(rows).encode()), 500 * 1024)
+        response = self.client.post(
+            '/importers/bulk-import-parallel-inline/', {'data': rows},
+            HTTP_AUTHORIZATION='Token ' + self.preview_user.get_token(), format='json')
+        self.assertEqual(response.status_code, 202)
+
+    @patch('core.importers.limits.requests.get')
+    def test_deprecated_file_url_non_utf8_400(self, get_mock):
+        get_mock.return_value = Mock(
+            ok=True, headers={}, encoding=None, iter_content=Mock(return_value=['caf\u00e9'.encode('latin-1')]))
+        response = self.post(
+            self.grandfathered_user, {'file_url': 'https://example.org/concepts.json'},
+            url='/importers/bulk-import/file-url/')
+        self.assertEqual(response.status_code, 400)
 
     @patch('core.common.tasks.bulk_import_inline')
     def test_deprecated_inline_route_limited_too(self, task_mock):

@@ -55,3 +55,6 @@ CAPABILITY_NOT_ENTITLED_ERROR_CODE = {
 # no row for one of these gets the `preview` group's value - the lowest tier - instead of being blocked
 # (UserProfile.get_capability_limit). New paid features (the Mapper, AI) keep "no row = blocked".
 AUTHORING_CAPABILITY_IDS = (IMPORTS_FILE_SIZE_CAPABILITY_ID, CLONE_RESOURCES_PER_CALL_CAPABILITY_ID)
+# Last resort when the `preview` group has no row yet (e.g. oclapi2 deployed before groups.yaml): the lowest tier,
+# never blocked. groups.yaml stays the source of truth; these only bridge a gap in configuration.
+AUTHORING_CAPABILITY_DEFAULT_LIMITS = {IMPORTS_FILE_SIZE_CAPABILITY_ID: 500, CLONE_RESOURCES_PER_CALL_CAPABILITY_ID: 100}

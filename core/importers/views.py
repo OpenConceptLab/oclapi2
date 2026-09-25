@@ -32,7 +32,7 @@ from core.importers.importer import Importer, ResourceImporter
 from core.importers.input_parsers import ImportContentParser
 from core.importers.limits import (
     check_advanced_import, check_import_payload, check_request_body_size, download_import_file,
-    enforce_import_request_limits, sanitize_import_queue, sanitize_import_threads,
+    enforce_import_request_limits, get_max_import_bytes, sanitize_import_queue, sanitize_import_threads,
 )
 from core.tasks.models import Task
 from core.tasks.serializers import TaskDetailSerializer, TaskListSerializer
@@ -216,12 +216,29 @@ class ImportView(BulkImportParallelInlineView, ImportRetrieveDestroyMixin):
                 return Response(status=status.HTTP_403_FORBIDDEN)
 
             file_url = get(request.data, 'file_url')  # importing as url to a file
+            file = None
+            if file_url and get_max_import_bytes(request.user):
+                # a limited user's package is downloaded here, capped, and handed over like an upload (ocl_online#230)
+                try:
+                    response, content = download_import_file(file_url, request.user)
+                except APIException:
+                    raise
+                except Exception as ex:  # pylint: disable=broad-except
+                    return Response({'exception': f'Failed to download file from {file_url}, Exception: {ex}.'},
+                                    status=status.HTTP_400_BAD_REQUEST)
+                if content is None:
+                    return Response(
+                        {'exception': f'Failed to download file from {file_url}, Status: {get(response, "status_code")}.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+                file = io.BytesIO(content)
+                file_url = None
             if not file_url:
-                data = get(request.data, 'data')  # importing by posting as text
-                if data:
-                    file = io.StringIO(data)
-                else:
-                    file = get(request.data, 'file')  # importing by uploading a file with multipart/form-data
+                if file is None:
+                    data = get(request.data, 'data')  # importing by posting as text
+                    if data:
+                        file = io.StringIO(data)
+                    else:
+                        file = get(request.data, 'file')  # importing by uploading a file with multipart/form-data
                 if file:
                     timestamp = datetime.now()
                     key = f'import_upload_{timestamp.strftime("%Y%m%d_%H%M%S")}_{str(uuid.uuid4())[:8]}'
@@ -315,7 +332,10 @@ class BulkImportFileURLView(APIView):  # pragma: no cover
         if not file or content is None:
             return Response({'exception': NO_CONTENT_TO_IMPORT}, status=status.HTTP_400_BAD_REQUEST)
 
-        text = content.decode('utf-8')
+        try:
+            text = content.decode(get(file, 'encoding') or 'utf-8')
+        except (UnicodeDecodeError, LookupError):
+            return Response({'exception': 'Could not read the file as text.'}, status=status.HTTP_400_BAD_REQUEST)
         if is_csv_file(name=file_url):
             try:
                 data = OclStandardCsvToJsonConverter(

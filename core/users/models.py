@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime
 from typing import Any
@@ -19,6 +20,8 @@ from core.common.utils import web_url
 from core.users.constants import STAFF_GROUP, SUPERADMIN_GROUP, GUEST_GROUP, CORE_USER_GROUP, PREVIEW_GROUP
 from .constants import USER_OBJECT_TYPE
 from ..common.checksums import ChecksumModel
+
+logger = logging.getLogger('oclapi')
 
 
 class Follow(models.Model):
@@ -285,12 +288,17 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
     @staticmethod
     def _get_default_authoring_limit(capability_id):
         """None (blocked) unless `capability_id` is an authoring capability, which falls back to `preview`."""
-        from core.capabilities.constants import AUTHORING_CAPABILITY_IDS
+        from core.capabilities.constants import AUTHORING_CAPABILITY_IDS, AUTHORING_CAPABILITY_DEFAULT_LIMITS
         from core.capabilities.models import GroupCapability
         if capability_id not in AUTHORING_CAPABILITY_IDS:
             return None
-        return GroupCapability.objects.filter(
+        limit = GroupCapability.objects.filter(
             group__name=PREVIEW_GROUP, capability_id=capability_id).values_list('limit', flat=True).first()
+        if limit is None:
+            logger.warning(
+                'The %s group has no limit for capability %s; using the built-in default', PREVIEW_GROUP, capability_id)
+            return AUTHORING_CAPABILITY_DEFAULT_LIMITS[capability_id]
+        return limit
 
     def get_capability_usage(self, capability_id):
         from core.capabilities.constants import (

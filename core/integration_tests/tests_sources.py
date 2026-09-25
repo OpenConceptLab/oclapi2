@@ -2480,6 +2480,12 @@ class SourceConceptsCloneViewTest(OCLAPITestCase):
         self.post_clone([self.concept.uri], user=UserProfileFactory(is_staff=True))
         self.assertIsNone(bundle_clone_mock.call_args[1]['resource_budget'])
 
+    def test_post_too_many_expressions_403(self):
+        response = self.post_clone([f'/orgs/NoOrg/sources/NoSource/concepts/{index}/' for index in range(101)])
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['error_code'], 'clone_resources_per_call_limit_reached')
+        self.assertEqual(response.data['requested'], 101)
+
     def test_post_blocked_user_403(self):
         UserCapabilityOverride.objects.create(
             user=self.user, capability_id=CLONE_RESOURCES_PER_CALL_CAPABILITY_ID, limit=-1)

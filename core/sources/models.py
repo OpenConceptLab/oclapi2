@@ -865,7 +865,10 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             concepts = result['concepts']
             mappings = result['mappings']
         if resource_budget is not None:
-            requested = concepts.count() + mappings.count()
+            concepts_count = concepts.count()
+            requested = concepts_count + mappings.count()
+            if compact((kwargs.get('equivalency_map_types') or '').split(',')):
+                requested += concepts_count  # clone_resources adds one equivalency mapping per cloned concept
             if requested > resource_budget:
                 raise CloneLimitExceeded(resource_budget, requested)
         return self.clone_resources(user, concepts, mappings, **kwargs)
