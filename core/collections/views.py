@@ -615,7 +615,7 @@ class CollectionReferencesView(
 
 class CollectionReferencesPreview(CollectionBaseView):
     def get_permissions(self):
-        # evaluating arbitrary expressions (with cascade) is expensive; only editors of the collection may (ocl_online#230)
+        # evaluating arbitrary expressions (with cascade) is expensive: collection editors only (ocl_online#230)
         return [CanEditConceptDictionary()]
 
     def get_serializer_class(self):

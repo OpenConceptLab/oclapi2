@@ -3,14 +3,13 @@ import time
 import zipfile
 
 from celery_once import AlreadyQueued
+from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
+from django.test import override_settings
 from mock import patch, Mock, ANY, PropertyMock
 from mock.mock import call
 from rest_framework.exceptions import ErrorDetail
-
-from django.core.cache import cache
-from django.test import override_settings
 
 from core.bundles.models import Bundle
 from core.capabilities.constants import CLONE_RESOURCES_PER_CALL_CAPABILITY_ID

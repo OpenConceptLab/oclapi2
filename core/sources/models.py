@@ -26,7 +26,7 @@ from core.tasks.models import Task
 
 
 class CloneLimitExceeded(Exception):
-    """A $clone would create more concepts + mappings than the caller's remaining per-call budget. Nothing was written."""
+    """A $clone would create more concepts + mappings than the caller's remaining per-call budget; nothing written."""
     def __init__(self, budget, requested):
         super().__init__(f'Clone would create {requested} resources, over the budget of {budget}.')
         self.budget = budget
