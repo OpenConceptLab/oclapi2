@@ -11,6 +11,7 @@ from zipfile import ZipFile
 
 import responses
 from celery_once import AlreadyQueued
+from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db.models import F
@@ -43,6 +44,7 @@ from core.sources.constants import AUTO_ID_SEQUENTIAL, AUTO_ID_UUID
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.tasks.models import Task
+from core.users.constants import PREVIEW_GROUP, PREVIEW_GRANDFATHERED_GROUP
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -3109,7 +3111,8 @@ class BulkImportViewTest(OCLAPITestCase):
             }
         )
         self.assertEqual(bulk_import_mock.apply_async.call_count, 3)
-        self.assertEqual(bulk_import_mock.apply_async.call_args[0], ((["some-data"], 'oswell', True, 10),))
+        # users without bulk_import_priority are held to 5 threads (ocl_online#230)
+        self.assertEqual(bulk_import_mock.apply_async.call_args[0], ((["some-data"], 'oswell', True, 5),))
         self.assertEqual(bulk_import_mock.apply_async.call_args[1]['task_id'][36:], '-oswell~foobar-queue')
         self.assertTrue(bulk_import_mock.apply_async.call_args[1]['queue'].startswith('bulk_import_'))
 
@@ -4956,7 +4959,7 @@ class ImportContentParserTest(OCLTestCase):
     @patch('requests.get')
     def test_parse_zip_file_url(self, requests_get_mock, zipfile_mock):
         file = open(os.path.join(os.path.dirname(__file__), '..', 'samples/DemoSource_v1.0.20230526120030.zip'), 'r')
-        requests_get_mock.return_value = Mock(ok=True, content=b'file-content')
+        requests_get_mock.return_value = Mock(ok=True, headers={}, iter_content=Mock(return_value=[b'file-content']))
         real_zipfile = ZipFile(file.name, 'r')
         zipfile_mock.return_value = real_zipfile
 
@@ -4987,13 +4990,14 @@ class ImportContentParserTest(OCLTestCase):
 
     @patch('requests.get')
     def test_set_file_from_response_non_zip_sets_file_to_text(self, requests_get_mock):
-        requests_get_mock.return_value = Mock(ok=True, text='{"type": "foobar"}')
+        requests_get_mock.return_value = Mock(
+            ok=True, headers={}, iter_content=Mock(return_value=[b'{"type": "foobar"}']))
 
         parser = ImportContentParser(file_url='https://file.json')
         parser.set_content_type()
-        parser.set_file_from_response(parser.fetch_file_from_url())
+        parser.set_file_from_response(*parser.fetch_file_from_url())
 
-        self.assertEqual(parser.file, '{"type": "foobar"}')
+        self.assertEqual(parser.file.read(), '{"type": "foobar"}')
 
     @patch('requests.get')
     def test_parse_file_url_failed_response(self, requests_get_mock):
@@ -5043,3 +5047,132 @@ class ImportContentParserTest(OCLTestCase):
 
         self.assertIsInstance(parser.content, list)
         self.assertTrue(len(parser.content) > 0)
+
+
+class BulkImportLimitsTest(OCLAPITestCase):
+    """Launch guardrails (ocl_online#230): per-group import size, formats, queue and threads."""
+    def setUp(self):
+        super().setUp()
+        self.preview_user = UserProfileFactory(username='preview-importer')
+        self.preview_user.groups.add(Group.objects.get(name=PREVIEW_GROUP))
+        self.grandfathered_user = UserProfileFactory(username='grandfathered-importer')
+        self.grandfathered_user.groups.add(
+            Group.objects.get(name=PREVIEW_GROUP), Group.objects.get(name=PREVIEW_GRANDFATHERED_GROUP))
+
+    @staticmethod
+    def json_file(size_kb, name='concepts.json'):
+        line = b'{"type": "Concept", "id": "c1", "concept_class": "Misc", "datatype": "N/A"}\n'
+        return SimpleUploadedFile(name, line * (size_kb * 1024 // len(line) + 1), 'application/json')
+
+    def post(self, user, data, url='/importers/bulk-import-parallel-inline/'):
+        return self.client.post(url, data, HTTP_AUTHORIZATION='Token ' + user.get_token())
+
+    @patch('core.common.tasks.bulk_import_parallel_inline')
+    def test_preview_upload_over_limit_403(self, task_mock):
+        task_mock.__name__ = 'bulk_import_parallel_inline'
+        response = self.post(self.preview_user, {'file': self.json_file(600)})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['error_code'], 'imports_file_size_limit_reached')
+        self.assertEqual(response.data['limit'], 500)
+        self.assertGreaterEqual(response.data['requested'], 600)
+        task_mock.apply_async.assert_not_called()
+
+    @patch('core.common.tasks.bulk_import_parallel_inline')
+    def test_grandfathered_upload_same_file_202(self, task_mock):
+        task_mock.__name__ = 'bulk_import_parallel_inline'
+        response = self.post(self.grandfathered_user, {'file': self.json_file(600)})
+        self.assertEqual(response.status_code, 202)
+        task_mock.apply_async.assert_called_once()
+
+    @patch('core.common.tasks.bulk_import_parallel_inline')
+    def test_user_without_group_gets_preview_limit(self, task_mock):
+        task_mock.__name__ = 'bulk_import_parallel_inline'
+        response = self.post(UserProfileFactory(), {'file': self.json_file(600)})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['limit'], 500)
+
+    @patch('core.importers.limits.requests.get')
+    def test_preview_file_url_403(self, get_mock):
+        response = self.post(self.preview_user, {'file_url': 'https://example.org/concepts.json'})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['error_code'], 'imports_advanced_not_entitled')
+        self.assertEqual(response.data['feature'], 'file_url')
+        get_mock.assert_not_called()
+
+    def test_preview_zip_upload_403(self):
+        response = self.post(
+            self.preview_user, {'file': SimpleUploadedFile('concepts.zip', b'PK\x03\x04', 'application/zip')})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['feature'], 'zip')
+
+    @patch('core.importers.views.bulk_import_new')
+    def test_preview_import_type_403(self, bulk_import_new_mock):
+        bulk_import_new_mock.apply_async = Mock(return_value=Mock(id='task-id', state='PENDING'))
+        response = self.client.post(
+            '/importers/bulk-import/', {'import_type': 'npm', 'file_url': 'http://fetch/package.zip'},
+            HTTP_AUTHORIZATION='Token ' + self.preview_user.get_token(), format='json')
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['feature'], 'import_type')
+        bulk_import_new_mock.apply_async.assert_not_called()
+
+    def test_preview_source_version_export_403(self):
+        export = SimpleUploadedFile(
+            'export.json', b'{"type": "Source Version", "id": "v1", "concepts": [], "mappings": []}',
+            'application/json')
+        response = self.post(self.preview_user, {'file': export})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['feature'], 'source_version_export')
+
+    @patch('core.common.tasks.bulk_import_parallel_inline')
+    @patch('core.importers.limits.requests.get')
+    def test_grandfathered_file_url_json_202(self, get_mock, task_mock):
+        task_mock.__name__ = 'bulk_import_parallel_inline'
+        get_mock.return_value = Mock(
+            ok=True, headers={}, iter_content=Mock(return_value=[b'{"type": "Concept"}\n']))
+        response = self.post(self.grandfathered_user, {'file_url': 'https://example.org/concepts.json'})
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(task_mock.apply_async.call_args[0][0][0], '{"type": "Concept"}\n')
+
+    @patch('core.importers.limits.requests.get')
+    def test_grandfathered_file_url_declared_over_limit_403(self, get_mock):
+        get_mock.return_value = Mock(
+            ok=True, headers={'Content-Length': str(60 * 1024 * 1024)}, iter_content=Mock(return_value=[]))
+        response = self.post(self.grandfathered_user, {'file_url': 'https://example.org/concepts.json'})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['limit'], 51200)
+
+    @patch('core.importers.limits.requests.get')
+    def test_grandfathered_file_url_streamed_over_limit_403(self, get_mock):
+        chunk = b'x' * (1024 * 1024)
+        get_mock.return_value = Mock(ok=True, headers={}, iter_content=Mock(return_value=iter([chunk] * 51)))
+        response = self.post(self.grandfathered_user, {'file_url': 'https://example.org/concepts.json'})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['error_code'], 'imports_file_size_limit_reached')
+
+    @patch('core.common.tasks.bulk_import_parallel_inline')
+    def test_preview_queue_and_threads_clamped(self, task_mock):
+        task_mock.__name__ = 'bulk_import_parallel_inline'
+        response = self.post(
+            self.preview_user, {'file': self.json_file(1), 'parallel': 20},
+            url='/importers/bulk-import-parallel-inline/concurrent/')
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(task_mock.apply_async.call_args[0][0][3], 5)
+        self.assertNotEqual(task_mock.apply_async.call_args[1]['queue'], 'concurrent')
+
+    @patch('core.common.tasks.bulk_import_parallel_inline')
+    def test_staff_not_limited(self, task_mock):
+        task_mock.__name__ = 'bulk_import_parallel_inline'
+        staff = UserProfileFactory(is_staff=True)
+        response = self.post(
+            staff, {'file': self.json_file(600), 'parallel': 8},
+            url='/importers/bulk-import-parallel-inline/concurrent/')
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(task_mock.apply_async.call_args[0][0][3], 8)
+        self.assertEqual(task_mock.apply_async.call_args[1]['queue'], 'concurrent')
+
+    @patch('core.common.tasks.bulk_import_inline')
+    def test_deprecated_inline_route_limited_too(self, task_mock):
+        task_mock.__name__ = 'bulk_import_inline'
+        response = self.post(self.preview_user, {'file': self.json_file(600)}, url='/importers/bulk-import-inline/')
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['error_code'], 'imports_file_size_limit_reached')
