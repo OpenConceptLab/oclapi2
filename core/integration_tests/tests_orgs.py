@@ -864,3 +864,20 @@ class OrganizationCollectionListViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
+
+
+class CompressHeaderPermissionTest(OCLAPITestCase):
+    def test_compress_requires_permission(self):
+        response = self.client.get(
+            '/orgs/', HTTP_COMPRESS='true', HTTP_AUTHORIZATION='Token ' + UserProfileFactory().get_token())
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['error_code'], 'list_unpaginated_not_entitled')
+
+    def test_compress_allowed_for_superuser(self):
+        admin = UserProfile.objects.get(username='ocladmin')
+        response = self.client.get('/orgs/', HTTP_COMPRESS='true', HTTP_AUTHORIZATION='Token ' + admin.get_token())
+        self.assertEqual(response.status_code, 200)
+
+    def test_without_header_unaffected(self):
+        response = self.client.get('/orgs/', HTTP_AUTHORIZATION='Token ' + UserProfileFactory().get_token())
+        self.assertEqual(response.status_code, 200)
