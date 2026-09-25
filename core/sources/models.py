@@ -762,7 +762,7 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         with transaction.atomic():
             added_concepts, added_mappings = [], []
             concept_errors, mapping_errors = [], []
-            equivalency_map_types = (kwargs.get('equivalency_map_types') or '').split(',')
+            equivalency_map_types = compact((kwargs.get('equivalency_map_types') or '').split(','))
             _concepts_to_add_mappings_for = []
             for concept in concepts:
                 if self.get_equivalent_concept(concept, equivalency_map_types):

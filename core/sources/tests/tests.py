@@ -1877,6 +1877,21 @@ class SourceTest(OCLTestCase):
 
         self.assertEqual(len(added_concepts), 5)
 
+    def test_clone_with_cascade_without_equivalency_map_type(self):
+        source1 = OrganizationSourceFactory(mnemonic='source1')
+        concept1 = ConceptFactory(
+            mnemonic='concept1', parent=source1, names=[ConceptNameFactory.build(name='concept1')])
+        concept2 = ConceptFactory(
+            mnemonic='concept2', parent=source1, names=[ConceptNameFactory.build(name='concept2')])
+        MappingFactory(from_concept=concept2, to_concept=concept1, parent=source1, map_type='Q-AND-A')
+        source2 = OrganizationSourceFactory(mnemonic='source2')
+
+        added_concepts, added_mappings = source2.clone_with_cascade(
+            concept_to_clone=concept2, user=concept2.created_by, map_types='Q-AND-A')
+
+        self.assertEqual(len(added_concepts), 2)
+        self.assertTrue(all(mapping.map_type for mapping in added_mappings))
+
     def test_clone_with_cascade_rolls_back_when_mapping_clone_fails(self):
         source1 = OrganizationSourceFactory(mnemonic='source1')
         source1_concept1 = ConceptFactory(
