@@ -225,3 +225,30 @@ class MappingTargetAccessTest(CrossRepoAccessBaseTest):
         mapping = member_source.mappings.first()
         self.assertEqual(mapping.to_concept.versioned_object_id, self.private_concept.id)
         self.assertEqual(mapping.to_source_id, self.private_source.id)
+
+    def test_edit_by_user_who_cannot_view_target_keeps_link(self):
+        from_concept = ConceptFactory(parent=self.outsider_source, mnemonic='from')
+        response = self.client.post(
+            self.outsider_source.mappings_url,
+            {'map_type': 'SAME-AS', 'from_concept_url': from_concept.uri, 'to_concept_url': self.private_concept.uri},
+            HTTP_AUTHORIZATION='Token ' + self.admin.get_token(),
+            format='json'
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        mapping = self.outsider_source.mappings.filter(id=F('versioned_object_id')).first()
+        linked_concept_id, linked_source_id = mapping.to_concept_id, mapping.to_source_id
+        self.assertIsNotNone(linked_concept_id)
+
+        # the edit forms re-send the target URLs with every edit
+        response = self.client.put(
+            mapping.uri,
+            {'map_type': 'NARROWER-THAN', 'from_concept_url': from_concept.uri,
+             'to_concept_url': self.private_concept.uri, 'comment': 'edit'},
+            HTTP_AUTHORIZATION='Token ' + self.outsider_token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        mapping.refresh_from_db()
+        self.assertEqual(mapping.to_concept_id, linked_concept_id)
+        self.assertEqual(mapping.to_source_id, linked_source_id)

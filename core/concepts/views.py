@@ -1124,6 +1124,9 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         """The repo from target_repo_url, else the one described by target_repo.
         Target repos the user can't view are reported as unresolvable."""
         repo = ConceptFuzzySearch.get_target_repo(target_repo_url) if target_repo_url else None
+        if repo and HEAD in (get(target_repo_params, 'source_version'), get(target_repo_params, 'version')):
+            # HEAD's version_url is the bare repo URL, which resolves to the latest released version
+            repo = repo.head or repo
         if repo:
             if not repo.has_view_access(user):
                 raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')

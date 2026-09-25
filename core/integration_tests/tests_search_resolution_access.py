@@ -1,9 +1,9 @@
-from django.contrib.auth.models import Permission
+from django.contrib.auth.models import Group
 from mock import patch
 
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.search import get_visible_repo_criteria
-from core.common.tests import OCLAPITestCase
+from core.common.tests import OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.concepts.search import ConceptFuzzySearch
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import OrganizationSourceFactory
@@ -51,7 +51,7 @@ class MatchAccessTest(SearchResolutionAccessBaseTest):
     @patch('core.concepts.views.MetadataToConceptsListView.get_repo_params')
     def test_match_search_is_limited_to_visible_repos(self, get_repo_params_mock):
         get_repo_params_mock.return_value = {'owner': 'ResolveOrg', 'source': 'ResolveSource'}
-        self.outsider.user_permissions.add(Permission.objects.get(codename='mapper_use'))
+        self.outsider.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
 
         with patch.object(ConceptFuzzySearch, 'search', side_effect=StopSearch) as search_mock:
             with self.assertRaises(StopSearch):
@@ -75,12 +75,12 @@ class MatchAccessTest(SearchResolutionAccessBaseTest):
             '/concepts/$match/', data, HTTP_AUTHORIZATION='Token ' + user.get_token(), format='json')
 
     def test_match_target_repo_needs_view_access(self):
-        mapper_use = Permission.objects.get(codename='mapper_use')
+        preview = Group.objects.get(name=PREVIEW_GROUP_NAME)
         public_source = OrganizationSourceFactory(mnemonic='PublicMatchSource')
         private_target_repo = {
             'owner': 'ResolveOrg', 'owner_type': 'Organization', 'source': 'ResolveSource', 'source_version': 'HEAD'}
         for user in [self.outsider, self.member]:
-            user.user_permissions.add(mapper_use)
+            user.groups.add(preview)
 
         for target_repo_url, target_repo in [
                 (self.private_source.uri, None), (None, private_target_repo),
@@ -101,6 +101,19 @@ class MatchAccessTest(SearchResolutionAccessBaseTest):
                     with self.assertRaises(StopSearch):
                         self.match(user, target_repo_url, target_repo)
                 self.assertEqual(search_mock.call_args[0][2], private_target_repo)
+
+    def test_match_head_target_repo_with_bare_url_searches_head(self):
+        # the HEAD version_url is the bare repo URL, which resolves to the latest released version
+        OrganizationSourceFactory(
+            organization=self.private_org, mnemonic='ResolveSource', version='v1', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        head_target_repo = {
+            'owner': 'ResolveOrg', 'owner_type': 'Organization', 'source': 'ResolveSource', 'source_version': 'HEAD'}
+
+        with patch.object(ConceptFuzzySearch, 'search', side_effect=StopSearch) as search_mock:
+            with self.assertRaises(StopSearch):
+                self.match(self.admin, self.private_source.uri, head_target_repo)
+        self.assertEqual(search_mock.call_args[0][2]['source_version'], 'HEAD')
 
 
 class ResolveReferenceAccessTest(SearchResolutionAccessBaseTest):
