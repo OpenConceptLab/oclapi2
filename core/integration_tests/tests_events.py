@@ -439,7 +439,8 @@ class UserEventsViewTest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 200)
         bruce_all_events = response.data
-        self.assertEqual(len(bruce_all_events), 16)
+        # not the private creation of Gotham Gazette Crime Unit: Bruce follows it but can't view it
+        self.assertEqual(len(bruce_all_events), 15)
         self.assertEqual(response.data[0]['object']['url'], mario.url)
         self.assertEqual(response.data[0]['referenced_object']['url'], gotham_gazette.url)
         self.assertEqual(response.data[1]['object']['url'], penguin.url)
@@ -463,15 +464,13 @@ class UserEventsViewTest(OCLAPITestCase):
         self.assertEqual(response.data[10]['object']['url'], joker.url)
         self.assertEqual(response.data[10]['referenced_object']['url'], bruce.url)
         self.assertEqual(response.data[11]['object']['url'], '/users/ocladmin/')
-        self.assertEqual(response.data[11]['referenced_object']['url'], gotham_gazette_crime_repo.url)
+        self.assertEqual(response.data[11]['referenced_object']['url'], gotham_gazette.url)
         self.assertEqual(response.data[12]['object']['url'], '/users/ocladmin/')
-        self.assertEqual(response.data[12]['referenced_object']['url'], gotham_gazette.url)
+        self.assertEqual(response.data[12]['referenced_object']['url'], gotham.url)
         self.assertEqual(response.data[13]['object']['url'], '/users/ocladmin/')
-        self.assertEqual(response.data[13]['referenced_object']['url'], gotham.url)
+        self.assertEqual(response.data[13]['referenced_object']['url'], bat_cave.url)
         self.assertEqual(response.data[14]['object']['url'], '/users/ocladmin/')
-        self.assertEqual(response.data[14]['referenced_object']['url'], bat_cave.url)
-        self.assertEqual(response.data[15]['object']['url'], '/users/ocladmin/')
-        self.assertEqual(response.data[15]['referenced_object']['url'], wayne_corp.url)
+        self.assertEqual(response.data[14]['referenced_object']['url'], wayne_corp.url)
 
         response = self.client.get(
             '/users/bruce/events/?scopes=orgs,following',

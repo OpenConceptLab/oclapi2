@@ -7,4 +7,4 @@ class CollectionFeed(ConceptContainerFeed):
     entity_name = 'Collection'
 
     def items(self, obj):
-        return self.filter_queryset(obj.concepts)
+        return self.filter_queryset(obj.get_concepts_queryset())
