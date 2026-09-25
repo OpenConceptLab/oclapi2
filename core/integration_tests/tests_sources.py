@@ -9,7 +9,12 @@ from mock import patch, Mock, ANY, PropertyMock
 from mock.mock import call
 from rest_framework.exceptions import ErrorDetail
 
+from django.core.cache import cache
+from django.test import override_settings
+
 from core.bundles.models import Bundle
+from core.capabilities.constants import CLONE_RESOURCES_PER_CALL_CAPABILITY_ID
+from core.capabilities.models import UserCapabilityOverride
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.tasks import export_source
 from core.common.tests import OCLAPITestCase
@@ -23,7 +28,7 @@ from core.mappings.models import Mapping
 from core.mappings.serializers import MappingVersionExportSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
-from core.sources.models import Source
+from core.sources.models import Source, CloneLimitExceeded
 from core.sources.serializers import SourceDetailSerializer, SourceVersionExportSerializer
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.users.models import UserProfile
@@ -2435,6 +2440,64 @@ class SourceConceptsCloneViewTest(OCLAPITestCase):
         self.concept = ConceptFactory()
         self.clone_to_source = OrganizationSourceFactory()
 
+    def post_clone(self, expressions, user=None, parameters=None):
+        token = (user or self.user).get_token()
+        return self.client.post(
+            self.clone_to_source.uri + 'concepts/$clone/',
+            {'expressions': expressions, 'parameters': parameters or {'mapTypes': 'Q-AND-A'}},
+            HTTP_AUTHORIZATION=f"Token {token}", format='json')
+
+    @patch('core.bundles.models.Bundle.clone')
+    def test_post_reports_limit_per_expression(self, bundle_clone_mock):
+        bundle_clone_mock.side_effect = CloneLimitExceeded(100, 150)
+        response = self.post_clone([self.concept.uri])
+        self.assertEqual(response.status_code, 200)
+        errors = response.data[self.concept.uri]['errors']
+        self.assertEqual(response.data[self.concept.uri]['status'], 403)
+        self.assertEqual(errors['error_code'], 'clone_resources_per_call_limit_reached')
+        self.assertEqual(errors['limit'], 100)
+        self.assertEqual(errors['requested'], 150)
+        self.assertEqual(bundle_clone_mock.call_args[1]['resource_budget'], 100)  # no group -> preview value
+
+    @patch('core.bundles.models.Bundle.clone')
+    def test_post_budget_is_per_call_across_expressions(self, bundle_clone_mock):
+        other = ConceptFactory(parent=self.concept.parent)
+
+        def fake_clone(*args, **kwargs):  # pylint: disable=unused-argument
+            bundle = Bundle(root=self.concept, repo_version=self.concept.parent, params={}, verbose=False)
+            bundle.concepts = [self.concept] * 60
+            bundle.mappings = []
+            return bundle
+        bundle_clone_mock.side_effect = fake_clone
+
+        response = self.post_clone([self.concept.uri, other.uri])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([call_[1]['resource_budget'] for call_ in bundle_clone_mock.call_args_list], [100, 40])
+
+    @patch('core.bundles.models.Bundle.clone')
+    def test_post_staff_has_no_budget(self, bundle_clone_mock):
+        bundle_clone_mock.return_value = Bundle(
+            root=self.concept, repo_version=self.concept.parent, params={}, verbose=False)
+        self.post_clone([self.concept.uri], user=UserProfileFactory(is_staff=True))
+        self.assertIsNone(bundle_clone_mock.call_args[1]['resource_budget'])
+
+    def test_post_blocked_user_403(self):
+        UserCapabilityOverride.objects.create(
+            user=self.user, capability_id=CLONE_RESOURCES_PER_CALL_CAPABILITY_ID, limit=-1)
+        response = self.post_clone([self.concept.uri])
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['error_code'], 'clone_resources_per_call_not_entitled')
+
+    @override_settings(CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}})
+    def test_post_409_while_another_clone_runs(self):
+        cache.add(f'clone_in_progress:{self.user.id}', 1, timeout=60)
+        try:
+            response = self.post_clone([self.concept.uri])
+        finally:
+            cache.delete(f'clone_in_progress:{self.user.id}')
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data['error_code'], 'clone_in_progress')
+
     def test_post_bad_request(self):
         response = self.client.post(
             self.clone_to_source.uri + 'concepts/$clone/',
@@ -2482,7 +2545,7 @@ class SourceConceptsCloneViewTest(OCLAPITestCase):
         )
         bundle_clone_mock.assert_called_once_with(
             self.concept, self.concept.parent, self.clone_to_source, self.user, ANY, False,
-            **parameters
+            resource_budget=100, **parameters  # no group: the preview per-call budget (ocl_online#230)
         )
 
 class SourceVersionsChangelogOutputViewTest(OCLAPITestCase):

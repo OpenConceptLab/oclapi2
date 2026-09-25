@@ -25,6 +25,14 @@ from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_R
 from core.tasks.models import Task
 
 
+class CloneLimitExceeded(Exception):
+    """A $clone would create more concepts + mappings than the caller's remaining per-call budget. Nothing was written."""
+    def __init__(self, budget, requested):
+        super().__init__(f'Clone would create {requested} resources, over the budget of {budget}.')
+        self.budget = budget
+        self.requested = requested
+
+
 class CloneError(Exception):
     def __init__(self, errors):
         super().__init__('Clone failed.')
@@ -837,16 +845,29 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             from_concept__parent_id=self.id, retired=False, id=F('versioned_object_id')
         ).first() if equivalency_map_type and concept else None
 
-    def clone_with_cascade(self, concept_to_clone, user, **kwargs):
+    def clone_with_cascade(self, concept_to_clone, user, resource_budget=None, **kwargs):
+        """
+        `resource_budget`: most concepts + mappings this clone may create (None = unlimited). The cascade stops
+        as soon as it passes the budget, and CloneLimitExceeded is raised before anything is written.
+        Unlimited callers get the whole cascade: no silent 1,000 cut-off.
+        """
         from core.mappings.models import Mapping
         mappings = Mapping.objects.none()
         concepts = Concept.objects.filter(id=concept_to_clone.id)
         if kwargs:
             kwargs.pop('view', None)
             kwargs['repo_version'] = kwargs.get('repo_version') or concept_to_clone.parent
-            result = concept_to_clone.cascade(**kwargs, omit_if_exists_in=self.uri, include_self=False)
+            result = concept_to_clone.cascade(
+                **kwargs, omit_if_exists_in=self.uri, include_self=False,
+                max_results=None if resource_budget is None else resource_budget + 1,
+                max_results_strict=resource_budget is not None,
+            )
             concepts = result['concepts']
             mappings = result['mappings']
+        if resource_budget is not None:
+            requested = concepts.count() + mappings.count()
+            if requested > resource_budget:
+                raise CloneLimitExceeded(resource_budget, requested)
         return self.clone_resources(user, concepts, mappings, **kwargs)
 
     def clone_mappings(self, cloned_mappings, user, update_count=True):

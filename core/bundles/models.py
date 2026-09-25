@@ -197,7 +197,7 @@ class Bundle:
     @classmethod
     def clone(  # pylint: disable=too-many-arguments
             cls, concept_to_clone, clone_from_source, clone_to_source, user, requested_url,
-            is_verbose=False, **parameters
+            is_verbose=False, resource_budget=None, **parameters
     ):
         # if parameters:
         #     _parameters = parameters.copy()
@@ -228,7 +228,8 @@ class Bundle:
                 _parameters['source_mappings'] = bundle.cascade_method == SOURCE_MAPPINGS
                 _parameters['source_to_concepts'] = bundle.cascade_method == SOURCE_TO_CONCEPTS
 
-        added_concepts, added_mappings = clone_to_source.clone_with_cascade(concept_to_clone, user, **_parameters)
+        added_concepts, added_mappings = clone_to_source.clone_with_cascade(
+            concept_to_clone, user, resource_budget=resource_budget, **_parameters)
         added_concepts = [concept for concept in added_concepts if get(concept, 'id')]
         added_mappings = [mapping for mapping in added_mappings if get(mapping, 'id')]
         bundle.root = (

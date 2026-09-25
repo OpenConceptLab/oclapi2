@@ -28,7 +28,7 @@ class BundleTest(OCLTestCase):
         self.assertEqual(len(bundle.entries), 2)
         self.assertEqual(bundle.root, cloned_concept)
         clone_to_source.clone_with_cascade.assert_called_once_with(
-            concept_to_clone, user, cascade_levels=2, repo_version=clone_from_source,
+            concept_to_clone, user, resource_budget=None, cascade_levels=2, repo_version=clone_from_source,
             map_types='', exclude_map_types=None, cascade_mappings=True, cascade_hierarchy=True,
             include_retired=False, reverse=False, return_map_types='*', equivalency_map_types=None,
             source_mappings=False, source_to_concepts=True

@@ -30,7 +30,7 @@ from core.orgs.tests.factories import OrganizationFactory
 from core.services.storages.postgres import PostgresQL
 from core.sources.constants import AUTO_ID_SEQUENTIAL
 from core.sources.documents import SourceDocument
-from core.sources.models import Source, CloneError
+from core.sources.models import Source, CloneError, CloneLimitExceeded
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.tasks.models import Task
 from core.url_registry.factories import OrganizationURLRegistryFactory, GlobalURLRegistryFactory
@@ -1842,6 +1842,40 @@ class SourceTest(OCLTestCase):
         self.assertEqual(result, source1_concept2)
         self.assertEqual(result.cascaded_entries['concepts'].count(), 0)
         self.assertEqual(result.cascaded_entries['mappings'].count(), 0)
+
+    @staticmethod
+    def _source_with_wide_concept():
+        source1 = OrganizationSourceFactory(mnemonic='source1')
+        parent = ConceptFactory(mnemonic='parent', parent=source1, names=[ConceptNameFactory.build(name='parent')])
+        for index in range(4):
+            child = ConceptFactory(
+                mnemonic=f'child{index}', parent=source1, names=[ConceptNameFactory.build(name=f'child{index}')])
+            MappingFactory(from_concept=parent, to_concept=child, parent=source1, map_type='Q-AND-A')
+        return parent
+
+    def test_clone_with_cascade_refuses_over_resource_budget(self):
+        parent = self._source_with_wide_concept()
+        source2 = OrganizationSourceFactory(mnemonic='source2')
+
+        with self.assertRaises(CloneLimitExceeded) as context:
+            source2.clone_with_cascade(
+                concept_to_clone=parent, user=parent.created_by, resource_budget=3,
+                map_types='Q-AND-A', equivalency_map_types='SAME-AS')
+
+        self.assertEqual(context.exception.budget, 3)
+        self.assertGreater(context.exception.requested, 3)
+        self.assertEqual(source2.get_active_concepts().count(), 0)
+        self.assertEqual(source2.get_active_mappings().count(), 0)
+
+    def test_clone_with_cascade_within_resource_budget(self):
+        parent = self._source_with_wide_concept()
+        source2 = OrganizationSourceFactory(mnemonic='source2')
+
+        added_concepts, _ = source2.clone_with_cascade(
+            concept_to_clone=parent, user=parent.created_by, resource_budget=20,
+            map_types='Q-AND-A', equivalency_map_types='SAME-AS')
+
+        self.assertEqual(len(added_concepts), 5)
 
     def test_clone_with_cascade_rolls_back_when_mapping_clone_fails(self):
         source1 = OrganizationSourceFactory(mnemonic='source1')

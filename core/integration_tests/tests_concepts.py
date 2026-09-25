@@ -9,6 +9,7 @@ from django.test import override_settings
 from mock import ANY
 
 from core.bundles.models import Bundle
+from core.sources.models import CloneLimitExceeded
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE, OPENMRS_VALIDATION_SCHEMA
 from core.common.tests import OCLAPITestCase
@@ -4094,6 +4095,27 @@ class ConceptCloneViewTest(OCLAPITestCase):
         self.concept = ConceptFactory()
         self.clone_to_source = OrganizationSourceFactory()
 
+    @patch('core.concepts.views.Bundle.clone')
+    def test_post_over_limit_403(self, bundle_clone_mock):
+        bundle_clone_mock.side_effect = CloneLimitExceeded(100, 101)
+        response = self.client.post(
+            self.concept.uri + '$clone/',
+            {'source_uri': self.clone_to_source.uri, 'parameters': {'mapTypes': 'Q-AND-A'}},
+            HTTP_AUTHORIZATION=f"Token {self.token}", format='json')
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['error_code'], 'clone_resources_per_call_limit_reached')
+        self.assertEqual(response.data['limit'], 100)
+
+    @patch('core.concepts.views.Bundle.clone')
+    def test_post_ignores_budget_sent_in_parameters(self, bundle_clone_mock):
+        bundle_clone_mock.return_value = Bundle(
+            root=self.concept, repo_version=self.concept.parent, params={}, verbose=False)
+        self.client.post(
+            self.concept.uri + '$clone/',
+            {'source_uri': self.clone_to_source.uri, 'parameters': {'resource_budget': 999999}},
+            HTTP_AUTHORIZATION=f"Token {self.token}", format='json')
+        self.assertEqual(bundle_clone_mock.call_args[1]['resource_budget'], 100)
+
     def test_post_bad_requests(self):
         response = self.client.post(
             self.concept.uri + '$clone/',
@@ -4150,5 +4172,5 @@ class ConceptCloneViewTest(OCLAPITestCase):
         )
         bundle_clone_mock.assert_called_once_with(
             self.concept, self.concept.parent, self.clone_to_source, self.user, ANY, False,
-            **parameters
+            resource_budget=100, **parameters  # no group: the preview per-call budget (ocl_online#230)
         )
