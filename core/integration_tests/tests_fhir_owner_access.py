@@ -145,8 +145,11 @@ class BulkImportOwnerAccessTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 404)
         bulk_import_mock.apply_async.assert_not_called()
 
+    @patch('core.importers.views.get_export_service', Mock())
+    @patch('core.importers.limits.requests.get')  # limited users' package URLs are downloaded in the request
     @patch('core.importers.views.bulk_import_new')
-    def test_owner_member_and_staff_are_allowed(self, bulk_import_mock):
+    def test_owner_member_and_staff_are_allowed(self, bulk_import_mock, get_mock):
+        get_mock.return_value = Mock(ok=True, headers={}, iter_content=Mock(return_value=[b'package']))
         bulk_import_mock.apply_async.return_value = Mock(id='task-id', state='PENDING')
 
         for user, data in [

@@ -199,6 +199,44 @@ class BulkImportParallelInlineView(APIView):
 class ImportView(BulkImportParallelInlineView, ImportRetrieveDestroyMixin):
     deprecated = False
 
+    @staticmethod
+    def download_capped(request, file_url):
+        """Downloads `file_url` within the user's import size limit. Returns (file, None) or (None, error_response)."""
+        try:
+            response, content = download_import_file(file_url, request.user)
+        except APIException:
+            raise
+        except Exception as ex:  # pylint: disable=broad-except
+            return None, Response(
+                {'exception': f'Failed to download file from {file_url}, Exception: {ex}.'},
+                status=status.HTTP_400_BAD_REQUEST)
+        if content is None:
+            return None, Response(
+                {'exception': f'Failed to download file from {file_url}, Status: {get(response, "status_code")}.'},
+                status=status.HTTP_400_BAD_REQUEST)
+        return io.BytesIO(content), None
+
+    @staticmethod
+    def store_upload(file):
+        """Stores an import file for the import task (media dir in DEBUG, else the import cache). Returns its path."""
+        timestamp = datetime.now()
+        key = f'import_upload_{timestamp.strftime("%Y%m%d_%H%M%S")}_{str(uuid.uuid4())[:8]}'
+        from core import settings
+        if settings.DEBUG:
+            dir_url = os.path.join(settings.MEDIA_ROOT, 'import_uploads')
+            os.makedirs(dir_url, exist_ok=True)
+            file_url = os.path.join(dir_url, key)
+            with open(file_url, 'wb') as f:
+                shutil.copyfileobj(file, f)
+            return file_url
+        if not key.startswith(Importer.IMPORT_CACHE):
+            key = Importer.IMPORT_CACHE + key
+        upload_service = get_export_service()
+        upload_service.upload(key, file,
+                              metadata={'ContentType': 'application/octet-stream'},
+                              headers={'content-type': 'application/octet-stream'})
+        return key
+
     @swagger_auto_schema(
         manual_parameters=[update_if_exists_param, file_url_param, file_upload_param, parallel_threads_param],
     )
@@ -219,18 +257,9 @@ class ImportView(BulkImportParallelInlineView, ImportRetrieveDestroyMixin):
             file = None
             if file_url and get_max_import_bytes(request.user):
                 # a limited user's package is downloaded here, capped, and handed over like an upload (ocl_online#230)
-                try:
-                    response, content = download_import_file(file_url, request.user)
-                except APIException:
-                    raise
-                except Exception as ex:  # pylint: disable=broad-except
-                    return Response({'exception': f'Failed to download file from {file_url}, Exception: {ex}.'},
-                                    status=status.HTTP_400_BAD_REQUEST)
-                if content is None:
-                    return Response(
-                        {'exception': f'Failed to download file from {file_url}, Status: {get(response, "status_code")}.'},
-                        status=status.HTTP_400_BAD_REQUEST)
-                file = io.BytesIO(content)
+                file, error_response = self.download_capped(request, file_url)
+                if error_response:
+                    return error_response
                 file_url = None
             if not file_url:
                 if file is None:
@@ -240,23 +269,7 @@ class ImportView(BulkImportParallelInlineView, ImportRetrieveDestroyMixin):
                     else:
                         file = get(request.data, 'file')  # importing by uploading a file with multipart/form-data
                 if file:
-                    timestamp = datetime.now()
-                    key = f'import_upload_{timestamp.strftime("%Y%m%d_%H%M%S")}_{str(uuid.uuid4())[:8]}'
-                    from core import settings
-                    if settings.DEBUG:
-                        dir_url = os.path.join(settings.MEDIA_ROOT, 'import_uploads')
-                        os.makedirs(dir_url, exist_ok=True)
-                        file_url = os.path.join(dir_url, key)
-                        with open(file_url, 'wb') as f:
-                            shutil.copyfileobj(file, f)
-                    else:
-                        if not key.startswith(Importer.IMPORT_CACHE):
-                            key = Importer.IMPORT_CACHE + key
-                        upload_service = get_export_service()
-                        upload_service.upload(key, file,
-                                              metadata={'ContentType': 'application/octet-stream'},
-                                              headers={'content-type': 'application/octet-stream'})
-                        file_url = key
+                    file_url = self.store_upload(file)
 
             task = get_queue_task_names(sanitize_import_queue(request.user, import_queue), self.request.user.username)
             new_task = bulk_import_new.apply_async(
