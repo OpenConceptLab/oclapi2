@@ -190,7 +190,7 @@ class ImportView(BulkImportParallelInlineView, ImportRetrieveDestroyMixin):
     @swagger_auto_schema(
         manual_parameters=[update_if_exists_param, file_url_param, file_upload_param, parallel_threads_param],
     )
-    def post(self, request, import_queue=None):
+    def post(self, request, import_queue=None):  # pylint: disable=too-many-locals
         if 'import_type' in request.data:
             owner_type = request.data.get('owner_type', 'user')
             owner = request.data.get('owner', self.request.user.username)
