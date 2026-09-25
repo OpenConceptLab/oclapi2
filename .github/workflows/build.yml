@@ -4,6 +4,10 @@ on:
   push:
     branches: [ "master" ]
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   AWS_REGION: "us-east-2"                     # set this to your preferred AWS region, e.g. us-west-1
   ECR_REPOSITORY: "oclapi2"                   # set this to your Amazon ECR repository name
@@ -137,10 +141,6 @@ jobs:
     name: Build and push image
     runs-on: ubuntu-latest
 
-    #permissions:
-    #  packages: write
-    #  contents: read
-
     steps:
     - name: Free Disk Space
       uses: jlumbroso/free-disk-space@main
@@ -154,18 +154,11 @@ jobs:
         swap-storage: false
     - name: Checkout repo
       uses: actions/checkout@v3
-    - name: Add GITHUB_SHA_SHORT env property with commit short sha
-      run: echo "GITHUB_SHA_SHORT=`echo ${GITHUB_SHA} | cut -c1-8`" >> $GITHUB_ENV
-    - name: Add VERSION to env property
+    - name: Compute version and short sha
+      id: version
       run: |
-        VERSION=$(cat core/__init__.py \
-          | grep API_VERSION \
-          | head -1 \
-          | awk -F= '{ print $2 }' \
-          | sed "s/[',]//g" \
-          | tr -d '[[:space:]]')
-        echo $VERSION
-        echo "VERSION=$VERSION" >> $GITHUB_ENV
+        echo "tag=$(bash release_version.sh full-version)" >> $GITHUB_OUTPUT
+        echo "sha=$(bash release_version.sh sha)" >> $GITHUB_OUTPUT
     - name: Log in to Docker Hub
       uses: docker/login-action@f4ef78c080cd8ba55a85445d5b36e214a81df20a
       with:
@@ -178,16 +171,18 @@ jobs:
       with:
         context: .
         push: true
-        tags: openconceptlab/oclapi2:nightly, openconceptlab/oclapi2:${{ env.VERSION }}-${{env.GITHUB_SHA_SHORT}}
-        build-args: SOURCE_COMMIT=${{env.GITHUB_SHA_SHORT}}
+        tags: openconceptlab/oclapi2:nightly, openconceptlab/oclapi2:${{ steps.version.outputs.tag }}
+        build-args: SOURCE_COMMIT=${{ steps.version.outputs.sha }}
         cache-from: type=gha
         cache-to: type=gha,mode=min
 
   release:
     needs: [build]
     runs-on: ubuntu-latest
-    name: Release draft
+    name: Release
     environment: rc
+    permissions:
+      contents: write
     steps:
       - name: Free Disk Space
         uses: jlumbroso/free-disk-space@main
@@ -201,24 +196,13 @@ jobs:
           swap-storage: false
       - name: Checkout repo
         uses: actions/checkout@v3
-      - name: Add GITHUB_SHA_SHORT env property with commit short sha
-        run: echo "GITHUB_SHA_SHORT=`echo ${GITHUB_SHA} | cut -c1-8`" >> $GITHUB_ENV
-      - name: Add VERSION to env property
-        run: |
-          VERSION=$(cat core/__init__.py \
-            | grep API_VERSION \
-            | head -1 \
-            | awk -F= '{ print $2 }' \
-            | sed "s/[',]//g" \
-            | tr -d '[[:space:]]')
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-      - name: Tag and release
-        uses: avakar/tag-and-release@v1
         with:
-          tag_name: ${{ env.VERSION }}-${{env.GITHUB_SHA_SHORT}}
-          draft: true
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
+      - name: Publish release and bump version
+        run: bash release_version.sh publish
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
 
   deploy-qa:
     needs: [release]
@@ -238,22 +222,14 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v1
       - name: Checkout repo
         uses: actions/checkout@v3
-      - name: Add GITHUB_SHA_SHORT env property with commit short sha
-        run: echo "GITHUB_SHA_SHORT=`echo ${GITHUB_SHA} | cut -c1-8`" >> $GITHUB_ENV
-      - name: Add VERSION to env property
-        run: |
-          VERSION=$(cat core/__init__.py \
-            | grep API_VERSION \
-            | head -1 \
-            | awk -F= '{ print $2 }' \
-            | sed "s/[',]//g" \
-            | tr -d '[[:space:]]')
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
+      - name: Compute version and short sha
+        id: version
+        run: echo "tag=$(bash release_version.sh full-version)" >> $GITHUB_OUTPUT
       - name: Push image to Amazon ECR
         id: push-image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ env.VERSION }}-${{env.GITHUB_SHA_SHORT}}
+          IMAGE_TAG: ${{ steps.version.outputs.tag }}
         run: |
           # Build a docker container and
           # push it to ECR so that it can
@@ -410,22 +386,14 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v1
       - name: Checkout repo
         uses: actions/checkout@v3
-      - name: Add GITHUB_SHA_SHORT env property with commit short sha
-        run: echo "GITHUB_SHA_SHORT=`echo ${GITHUB_SHA} | cut -c1-8`" >> $GITHUB_ENV
-      - name: Add VERSION to env property
-        run: |
-          VERSION=$(cat core/__init__.py \
-            | grep API_VERSION \
-            | head -1 \
-            | awk -F= '{ print $2 }' \
-            | sed "s/[',]//g" \
-            | tr -d '[[:space:]]')
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
+      - name: Compute version and short sha
+        id: version
+        run: echo "tag=$(bash release_version.sh full-version)" >> $GITHUB_OUTPUT
       - name: Push image to Amazon ECR
         id: push-image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ env.VERSION }}-${{env.GITHUB_SHA_SHORT}}
+          IMAGE_TAG: ${{ steps.version.outputs.tag }}
         run: |
           # Build a docker container and
           # push it to ECR so that it can
@@ -580,22 +548,14 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v1
       - name: Checkout repo
         uses: actions/checkout@v3
-      - name: Add GITHUB_SHA_SHORT env property with commit short sha
-        run: echo "GITHUB_SHA_SHORT=`echo ${GITHUB_SHA} | cut -c1-8`" >> $GITHUB_ENV
-      - name: Add VERSION to env property
-        run: |
-          VERSION=$(cat core/__init__.py \
-            | grep API_VERSION \
-            | head -1 \
-            | awk -F= '{ print $2 }' \
-            | sed "s/[',]//g" \
-            | tr -d '[[:space:]]')
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
+      - name: Compute version and short sha
+        id: version
+        run: echo "tag=$(bash release_version.sh full-version)" >> $GITHUB_OUTPUT
       - name: Push image to Amazon ECR
         id: push-image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ env.VERSION }}-${{env.GITHUB_SHA_SHORT}}
+          IMAGE_TAG: ${{ steps.version.outputs.tag }}
         run: |
           # Build a docker container and
           # push it to ECR so that it can

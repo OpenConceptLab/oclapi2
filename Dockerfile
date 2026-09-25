@@ -47,7 +47,7 @@ RUN python manage.py collectstatic --noinput
 
 USER ocl
 
-RUN chmod +x set_build_version.sh wait_for_it.sh startup.sh start_celery_worker.sh ping_celery_worker.sh start_flower.sh
+RUN chmod +x set_build_version.sh release_version.sh wait_for_it.sh startup.sh start_celery_worker.sh ping_celery_worker.sh start_flower.sh
 
 ARG SOURCE_COMMIT
 
