@@ -287,6 +287,11 @@ ELASTICSEARCH_DSL = {
         'retry_on_timeout': True,
     },
 }
+# Batch indexing: a bulk request ES rejects with a retryable error (HTTP 429, rejected execution, circuit breaker,
+# read-only index block) is retried up to ES_BULK_RETRY_MAX_ATTEMPTS times in all, waiting
+# ES_BULK_RETRY_BACKOFF_SECONDS before the first retry and doubling it for each one after (defaults: 10+20+40+80s).
+ES_BULK_RETRY_MAX_ATTEMPTS = int(os.environ.get('ES_BULK_RETRY_MAX_ATTEMPTS', 5))
+ES_BULK_RETRY_BACKOFF_SECONDS = float(os.environ.get('ES_BULK_RETRY_BACKOFF_SECONDS', 10))
 
 CID_GENERATE = True
 CID_RESPONSE_HEADER = None

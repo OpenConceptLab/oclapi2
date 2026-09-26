@@ -126,6 +126,8 @@ CURRENT_USER = 'CURRENT_USER'
 REQUEST_URL = 'REQUEST_URL'
 ES_REQUEST_TIMEOUT = 60  # seconds, default is 10
 ES_REQUEST_TIMEOUT_ASYNC = 60 * 5  # seconds, default is 10
+# ES refused the write but may take it later (overloaded, or index read-only on disk flood-stage): retry, don't fail
+ES_RETRYABLE_ERROR_TYPES = ('es_rejected_execution_exception', 'circuit_breaking_exception', 'cluster_block_exception')
 CASCADE_METHOD_PARAM = 'method'
 CASCADE_HIERARCHY_PARAM = 'cascadeHierarchy'
 CASCADE_MAPPINGS_PARAM = 'cascadeMappings'

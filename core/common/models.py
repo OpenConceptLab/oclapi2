@@ -1,4 +1,5 @@
 import logging
+import time
 
 from celery.result import AsyncResult
 from celery_once import AlreadyQueued
@@ -16,7 +17,8 @@ from django.utils.functional import cached_property
 from django.utils.text import get_valid_filename
 from django_elasticsearch_dsl.registries import registry
 from django_elasticsearch_dsl.signals import RealTimeSignalProcessor
-from elasticsearch import TransportError
+from elasticsearch import ApiError, TransportError
+from elasticsearch.helpers import BulkIndexError
 from pydash import get, compact
 
 from core.celery import app as celery_app
@@ -36,9 +38,9 @@ from .constants import (
     ACCESS_TYPE_VIEW, SUPER_ADMIN_USER_ID,
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
     CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, OPENMRS_VALIDATION_SCHEMA, VALIDATION_SCHEMAS,
-    DEFAULT_VALIDATION_SCHEMA, ES_REQUEST_TIMEOUT, UPDATED_BY_USERNAME_PARAM)
+    DEFAULT_VALIDATION_SCHEMA, ES_REQUEST_TIMEOUT, UPDATED_BY_USERNAME_PARAM, ES_RETRYABLE_ERROR_TYPES)
 from .es import ESScript
-from .exceptions import Http400
+from .exceptions import Http400, BatchIndexingError
 from .fields import URIField
 from .mixins import SourceContainerMixin
 from .tasks import handle_save, handle_m2m_changed, seed_children_to_new_version, update_validation_schema, \
@@ -48,6 +50,119 @@ from ..toggles.models import Toggle
 TRUTHY = get_truthy_values()
 
 logger = logging.getLogger('oclapi')
+
+
+class BatchIndexRun:
+    """
+    One batched ES indexing run (OpenConceptLab/ocl_online#241):
+    - every batch is attempted, even after an earlier one failed;
+    - a bulk request ES rejects for now (429, rejected execution, circuit breaker, read-only index block) is retried
+      with exponential backoff. Once a batch is still rejected after all its retries, later batches get one attempt
+      each until ES takes one again, so a read-only index fails a run in minutes rather than hours;
+    - a failed batch is logged and sent to Errbit with the first item errors ES reported: id, status, type and
+      reason, never the document;
+    - finish() raises BatchIndexingError with the counts if any batch failed, so the task running it fails.
+    """
+    MAX_LOGGED_ERRORS = 5
+
+    def __init__(self, document):
+        self.document_name = getattr(document, '__name__', None) or str(document)
+        self.batches = 0
+        self.failed_batches = 0
+        self.docs = 0
+        self.failed_docs = 0
+        self.rejected_batches = 0
+        self.es_rejecting = False
+
+    @property
+    def summary(self):
+        return {
+            'batches': self.batches, 'failed_batches': self.failed_batches,
+            'docs': self.docs, 'failed_docs': self.failed_docs
+        }
+
+    @staticmethod
+    def get_error_details(error):
+        """id, status, type and reason of one BulkIndexError item -- never its document source ('data')."""
+        details = next(iter(error.values()), {}) if isinstance(error, dict) else {}
+        cause = details.get('error')
+        cause = cause if isinstance(cause, dict) else {'reason': cause}
+        reason = cause.get('reason')
+        return {
+            'id': details.get('_id'), 'status': details.get('status'),
+            'type': cause.get('type'), 'reason': None if reason is None else str(reason)[:500]
+        }
+
+    @classmethod
+    def is_rejected(cls, ex):
+        """Whether ES refused the write only for now (overloaded, or the index is read-only), so it's worth a retry."""
+        if isinstance(ex, BulkIndexError):
+            return any(
+                details['status'] == 429 or details['type'] in ES_RETRYABLE_ERROR_TYPES
+                for details in map(cls.get_error_details, ex.errors)
+            )
+        if isinstance(ex, ApiError):
+            return ex.status_code == 429 or ex.error in ES_RETRYABLE_ERROR_TYPES
+        return isinstance(ex, BatchIndexingError) and ex.rejected
+
+    @classmethod
+    def describe(cls, ex, limit=MAX_LOGGED_ERRORS):
+        if isinstance(ex, BulkIndexError):
+            details = [cls.get_error_details(error) for error in ex.errors[:limit]]
+            return f'{len(ex.errors)} document(s) failed to index, first {len(details)}: {details}'
+        return f'{ex.__class__.__name__}: {str(ex)[:1000]}'
+
+    def retry_rejected(self, bulk_func):
+        """Returns bulk_func(), retrying it with exponential backoff while ES rejects it for now."""
+        attempts = 1 if self.es_rejecting else max(settings.ES_BULK_RETRY_MAX_ATTEMPTS, 1)
+        attempt = 1
+        while True:
+            try:
+                return bulk_func()
+            except (BulkIndexError, ApiError) as ex:
+                if attempt >= attempts or not self.is_rejected(ex):
+                    raise
+                wait = settings.ES_BULK_RETRY_BACKOFF_SECONDS * 2 ** (attempt - 1)
+                attempt += 1
+                logger.warning(
+                    '%s bulk request rejected by Elasticsearch (%s), retrying in %ss (attempt %s of %s)',
+                    self.document_name, self.describe(ex, 1), wait, attempt, attempts
+                )
+                time.sleep(wait)
+
+    def attempt(self, start, batch, index_func):
+        """Runs index_func(batch). A failure is logged and counted, not raised, so it can't stop the next batches."""
+        self.batches += 1
+        self.docs += len(batch)
+        try:
+            index_func(batch)
+            self.es_rejecting = False
+        except Exception as ex:  # pylint: disable=broad-except
+            self.es_rejecting = self.is_rejected(ex)
+            if self.es_rejecting:
+                self.rejected_batches += 1
+            self.failed_batches += 1
+            if isinstance(ex, BulkIndexError):
+                failed_docs = len(ex.errors)
+            elif isinstance(ex, BatchIndexingError) and ex.summary:
+                failed_docs = ex.summary['failed_docs']
+            else:
+                failed_docs = len(batch)
+            self.failed_docs += failed_docs
+            message = (f'{self.document_name} batch (start={start}, size={len(batch)}) failed to index '
+                       f'{failed_docs} document(s): {self.describe(ex)}')
+            logger.error(message)
+            ERRBIT_LOGGER.log(BatchIndexingError(message))
+
+    def finish(self):
+        """Returns the run's summary, or raises BatchIndexingError with it if any batch failed."""
+        if self.failed_batches:
+            message = (f'{self.document_name} indexing failed: {self.failed_batches} of {self.batches} batch(es) '
+                       f'and {self.failed_docs} of {self.docs} document(s) failed to index')
+            if self.rejected_batches:
+                message += f', {self.rejected_batches} batch(es) still rejected by Elasticsearch after retries'
+            raise BatchIndexingError(message, self.summary, bool(self.rejected_batches))
+        return self.summary
 
 
 class BaseModel(models.Model):
@@ -225,14 +340,12 @@ class BaseModel(models.Model):
         if partial_doc:
             version = partial_doc.get('_append_source_version')
             if version:
-                BaseModel.batch_index_source_version_append(
+                return BaseModel.batch_index_source_version_append(
                     queryset, document, version, partial_doc.get('is_in_latest_source_version'),
                     single_batch, bool(parallel)
                 )
-                return
-            BaseModel.batch_index_partial(queryset, document, single_batch, partial_doc, bool(parallel))
-            return
-        BaseModel.batch_index_full(single_batch, queryset, document, prefetch, select_related, bool(parallel))
+            return BaseModel.batch_index_partial(queryset, document, single_batch, partial_doc, bool(parallel))
+        return BaseModel.batch_index_full(single_batch, queryset, document, prefetch, select_related, bool(parallel))
 
     @staticmethod
     def batch_index_source_version_append(  # pylint: disable=too-many-arguments
@@ -244,7 +357,7 @@ class BaseModel(models.Model):
         back to a full re-index for any docs not yet present in ES.
         """
         if get(settings, 'TEST_MODE', False):
-            return
+            return None
 
         index_name = document()._index._name  # pylint: disable=protected-access
         params = {'version': version}
@@ -261,15 +374,19 @@ class BaseModel(models.Model):
                     'script': {'source': ESScript.APPEND_SOURCE_VERSION_SCRIPT, 'params': params},
                 }
 
-        BaseModel.batch_index_partial_by_ids(
+        return BaseModel.batch_index_partial_by_ids(
             queryset, document, get_actions, single_batch, parallel,
             on_bulk_error=lambda err: BaseModel.full_index_missing_docs_or_raise(err, queryset, document)
         )
 
     @staticmethod
     def batch_index_full(single_batch: bool, queryset, document, prefetch, select_related, parallel=True):  # pylint: disable=too-many-arguments
+        """
+        Full (re)index, 500 docs a batch. Every batch is attempted; if any failed, raises BatchIndexingError with
+        the counts once they all have (see BatchIndexRun). Returns the run's summary.
+        """
         if get(settings, 'TEST_MODE', False):
-            return
+            return None
 
         doc = document()
 
@@ -280,33 +397,23 @@ class BaseModel(models.Model):
 
         if single_batch:
             doc.update(queryset.all(), parallel=parallel)
-            return
+            return None
+
+        run = BatchIndexRun(document)
+
+        def index_batch(objects):
+            run.retry_rejected(lambda: doc.update(objects, parallel=parallel))
 
         batch_size = 500
         start = 0
-        failed_batches = []
         while True:
             batch = list(queryset.order_by('-id')[start:start+batch_size])
             if not batch:
                 break
-            try:
-                doc.update(batch, parallel=parallel)
-            except Exception as ex:  # pylint: disable=broad-except
-                # One bad batch must not stop the remaining batches from ever being tried --
-                # log it and keep going, same as batch_index_partial_by_ids.
-                logger.error(
-                    'batch_index_full failed for %s batch (start=%s, size=%s): %s',
-                    document.__name__, start, len(batch), ex.args
-                )
-                ERRBIT_LOGGER.log(ex)
-                failed_batches.append(start)
+            run.attempt(start, batch, index_batch)
             start += batch_size
 
-        if failed_batches:
-            logger.error(
-                'batch_index_full for %s finished with %s failed batch(es) out of %s (start indexes: %s)',
-                document.__name__, len(failed_batches), start // batch_size, failed_batches
-            )
+        return run.finish()
 
     @staticmethod
     def batch_index_partial_by_ids(  # pylint: disable=too-many-arguments
@@ -315,22 +422,23 @@ class BaseModel(models.Model):
         """
         Shared batching loop. get_actions(batch_ids) must yield ES action dicts.
 
-        If `on_bulk_error` is given, a BulkIndexError raised while indexing one batch is
-        handled by it instead of propagating -- each batch is attempted independently, so
-        one bad batch can't stop the remaining batches from ever being tried.
+        A BulkIndexError still left after BatchIndexRun's retries goes to `on_bulk_error` (default:
+        full_index_missing_docs_or_raise). Every batch is attempted; if any failed, raises BatchIndexingError
+        with the counts once they all have. Returns the run's summary.
         """
         if get(settings, 'TEST_MODE', False):
-            return
-        from elasticsearch.helpers import BulkIndexError  # noqa: PLC0415
+            return None
 
         doc = document()
         kwargs = {}
         if doc.django.auto_refresh:
             kwargs['refresh'] = doc.django.auto_refresh
+        run = BatchIndexRun(document)
 
         def index_batch(ids):
             try:
-                doc._bulk(get_actions(ids), parallel=parallel, **kwargs)  # pylint: disable=protected-access
+                run.retry_rejected(
+                    lambda: doc._bulk(get_actions(ids), parallel=parallel, **kwargs))  # pylint: disable=protected-access
             except BulkIndexError as err:
                 if on_bulk_error is None:
                     BaseModel.full_index_missing_docs_or_raise(err, queryset, document)
@@ -338,8 +446,7 @@ class BaseModel(models.Model):
                     on_bulk_error(err)
 
         if single_batch:
-            ids = queryset.all().values_list('id', flat=True)
-            index_batch(ids)
+            run.attempt(0, list(queryset.all().values_list('id', flat=True)), index_batch)
         else:
             batch_size = 500
             start = 0
@@ -348,8 +455,10 @@ class BaseModel(models.Model):
                 batch = list(id_qs[start:start + batch_size])
                 if not batch:
                     break
-                index_batch(batch)
+                run.attempt(start, batch, index_batch)
                 start += batch_size
+
+        return run.finish()
 
     @staticmethod
     def full_index_missing_docs_or_raise(err, queryset, document, prefetch=None, select_related=None):
@@ -358,8 +467,6 @@ class BaseModel(models.Model):
         contains any non-404 (genuine) failures, otherwise full-indexes just the docs that were
         missing (404) from ES so they get created with every field.
         """
-        from elasticsearch.helpers import BulkIndexError  # noqa: PLC0415
-
         missing_ids = {e['update']['_id'] for e in err.errors if e.get('update', {}).get('status') == 404}
         real_errors = [e for e in err.errors if e.get('update', {}).get('status') != 404]
         if real_errors:
@@ -385,7 +492,7 @@ class BaseModel(models.Model):
                     'doc_as_upsert': True,
                 }
 
-        BaseModel.batch_index_partial_by_ids(queryset, document, get_actions, single_batch, parallel)
+        return BaseModel.batch_index_partial_by_ids(queryset, document, get_actions, single_batch, parallel)
 
     @staticmethod
     @transaction.atomic
