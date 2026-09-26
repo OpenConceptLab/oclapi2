@@ -4090,10 +4090,10 @@ class ConceptSummaryViewTest(OCLAPITestCase):
 
 class ConceptCloneViewTest(OCLAPITestCase):
     def setUp(self):
-        self.user = UserProfileFactory()
-        self.token = self.user.get_token()
         self.concept = ConceptFactory()
         self.clone_to_source = OrganizationSourceFactory()
+        self.user = UserProfileFactory(organizations=[self.clone_to_source.organization])
+        self.token = self.user.get_token()
 
     @patch('core.concepts.views.Bundle.clone')
     def test_post_over_limit_403(self, bundle_clone_mock):
@@ -4139,14 +4139,13 @@ class ConceptCloneViewTest(OCLAPITestCase):
         response = self.client.post(
             self.concept.uri + '$clone/',
             {'source_uri': self.clone_to_source.uri},
-            HTTP_AUTHORIZATION=f"Token {self.token}",
+            HTTP_AUTHORIZATION=f"Token {UserProfileFactory().get_token()}",
             format='json'
         )
         self.assertEqual(response.status_code, 403)
 
     @patch('core.concepts.views.Bundle.clone')
     def test_post_success(self, bundle_clone_mock):
-        self.clone_to_source.organization.members.add(self.user)
         parameters = {'mapTypes': 'Q-AND-A,CONCEPT-SET'}
         bundle_clone_mock.return_value = Bundle(
             root=self.concept, repo_version=self.concept.parent, params=parameters, verbose=False

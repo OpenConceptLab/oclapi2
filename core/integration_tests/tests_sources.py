@@ -2434,10 +2434,10 @@ class SourceVersionMappedSourcesListViewTest(OCLAPITestCase):
 
 class SourceConceptsCloneViewTest(OCLAPITestCase):
     def setUp(self):
-        self.user = UserProfileFactory()
-        self.token = self.user.get_token()
         self.concept = ConceptFactory()
         self.clone_to_source = OrganizationSourceFactory()
+        self.user = UserProfileFactory(organizations=[self.clone_to_source.organization])
+        self.token = self.user.get_token()
 
     def post_clone(self, expressions, user=None, parameters=None):
         token = (user or self.user).get_token()
@@ -2515,7 +2515,6 @@ class SourceConceptsCloneViewTest(OCLAPITestCase):
 
     @patch('core.bundles.models.Bundle.clone')
     def test_post_success(self, bundle_clone_mock):
-        self.clone_to_source.organization.members.add(self.user)
         parameters = {'mapTypes': 'Q-AND-A,CONCEPT-SET'}
         bundle_clone_mock.return_value = Bundle(
             root=self.concept, repo_version=self.concept.parent, params=parameters, verbose=False
