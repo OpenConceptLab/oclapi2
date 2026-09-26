@@ -151,7 +151,7 @@ class BaseModel(models.Model):
 
     @property
     def public_can_view(self):
-        return self.public_access.lower() == ACCESS_TYPE_VIEW.lower()
+        return normalize_public_access(self.public_access).lower() == ACCESS_TYPE_VIEW.lower()
 
     @property
     def resource_type(self):

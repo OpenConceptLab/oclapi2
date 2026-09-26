@@ -3,6 +3,7 @@ from rest_framework.permissions import BasePermission
 from core.capabilities.constants import MAPPER_PROJECTS_CAPABILITY_ID
 from core.capabilities.exceptions import MapProjectCapacityExceeded
 from core.common.constants import ACCESS_TYPE_VIEW
+from core.common.utils import normalize_public_access
 from core.users.constants import (
     MAPPER_CUSTOM_ALGORITHMS_PERMISSION, MAPPER_ORG_PROJECTS_PERMISSION, MAPPER_USE_PERMISSION,
 )
@@ -55,7 +56,7 @@ class CanViewConceptDictionary(HasPrivateAccess):
     """
 
     def has_object_permission(self, request, view, obj):
-        if obj.public_access == ACCESS_TYPE_VIEW:
+        if normalize_public_access(obj.public_access) == ACCESS_TYPE_VIEW:
             return True
 
         return super().has_object_permission(request, view, obj)
@@ -94,7 +95,7 @@ class CanViewConceptDictionaryVersion(HasAccessToVersionedObject):
     """
 
     def has_object_permission(self, request, view, obj):
-        if obj.public_access == ACCESS_TYPE_VIEW:
+        if normalize_public_access(obj.public_access) == ACCESS_TYPE_VIEW:
             return True
         return super().has_object_permission(request, view, obj)
 

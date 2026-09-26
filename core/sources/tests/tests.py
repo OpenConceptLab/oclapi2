@@ -418,7 +418,7 @@ class SourceTest(OCLTestCase):
         self.assertFalse(Source(public_access='foobar').public_can_view)
         self.assertTrue(Source().public_can_view)  # default access_type is view
         self.assertTrue(Source(public_access='view').public_can_view)
-        self.assertFalse(Source(public_access='edit').public_can_view)  # retired, never stored
+        self.assertTrue(Source(public_access='edit').public_can_view)  # retired: read as View for one release
 
     def test_has_edit_access(self):
         admin = UserProfile.objects.get(username='ocladmin')

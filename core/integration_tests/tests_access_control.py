@@ -1113,7 +1113,8 @@ class RetiredPublicEditAccessTest(AccessTestMixin, OCLAPITestCase):
             self.assertNotEqual(repo.name, 'Renamed')
             self.assertTrue(repo.is_active)
 
-    def test_owner_and_member_can_edit_and_delete(self):
+    @patch('core.common.models.delete_s3_objects')
+    def test_owner_and_member_can_edit_and_delete(self, _delete_s3_objects_mock):
         for repo, user in [(self.source, self.member), (self.collection, self.owner)]:
             self.assertEqual(self.request('put', repo.uri, user, {'name': 'Renamed'}).status_code, 200)
             repo.refresh_from_db()
