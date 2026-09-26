@@ -63,6 +63,9 @@ class BaseModel(models.Model):
             models.Index(fields=['is_active']),
         ]
 
+    # what a retired 'Edit' is stored as
+    public_access_for_retired_edit = ACCESS_TYPE_VIEW
+
     id = models.BigAutoField(primary_key=True)
     public_access = models.CharField(
         max_length=16, choices=ACCESS_TYPE_CHOICES, default=DEFAULT_ACCESS_TYPE, blank=True
@@ -137,11 +140,11 @@ class BaseModel(models.Model):
             decode_string(value), decode_string(value, False)
         ]
     def clean_fields(self, exclude=None):
-        self.public_access = normalize_public_access(self.public_access)
+        self.public_access = normalize_public_access(self.public_access, self.public_access_for_retired_edit)
         super().clean_fields(exclude=exclude)
 
     def save(self, *args, force_insert=False, force_update=False, using=None, update_fields=None):
-        self.public_access = normalize_public_access(self.public_access)
+        self.public_access = normalize_public_access(self.public_access, self.public_access_for_retired_edit)
         super().save(
             *args, force_insert=force_insert, force_update=force_update, using=using, update_fields=update_fields)
 

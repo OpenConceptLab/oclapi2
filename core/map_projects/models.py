@@ -25,6 +25,7 @@ class MapProject(BaseModel):
     name = models.TextField()
     description = models.TextField(null=True, blank=True)
     # Private unless shared explicitly: only the owner, members of the owning org and staff can see a project.
+    public_access_for_retired_edit = ACCESS_TYPE_NONE
     public_access = models.CharField(
         max_length=16, choices=ACCESS_TYPE_CHOICES, default=ACCESS_TYPE_NONE, blank=True
     )

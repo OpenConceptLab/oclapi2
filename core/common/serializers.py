@@ -5,7 +5,7 @@ from rest_framework.serializers import Serializer, Field, ValidationError, Model
 from core import settings
 from core.code_systems.constants import RESOURCE_TYPE as CODE_SYSTEM_RESOURCE_TYPE
 from core.common.constants import INCLUDE_CONCEPTS_PARAM, INCLUDE_MAPPINGS_PARAM, LIMIT_PARAM, OFFSET_PARAM, \
-    INCLUDE_VERBOSE_REFERENCES, INCLUDE_SEARCH_META_PARAM, ACCESS_TYPE_CHOICES
+    INCLUDE_VERBOSE_REFERENCES, INCLUDE_SEARCH_META_PARAM, ACCESS_TYPE_CHOICES, ACCESS_TYPE_VIEW
 from core.common.feeds import DEFAULT_LIMIT
 from core.common.utils import to_int, get_truthy_values, normalize_public_access
 from core.concept_maps.constants import RESOURCE_TYPE as CONCEPT_MAP_RESOURCE_TYPE
@@ -37,13 +37,14 @@ class ReadSerializerMixin:
 
 
 class PublicAccessField(ChoiceField):
-    """public_access choice that accepts the retired 'Edit' and stores it as 'View'."""
-    def __init__(self, **kwargs):
+    """public_access choice that accepts the retired 'Edit' and stores it as retired_edit_as ('View' by default)."""
+    def __init__(self, retired_edit_as=ACCESS_TYPE_VIEW, **kwargs):
+        self.retired_edit_as = retired_edit_as
         kwargs.setdefault('choices', ACCESS_TYPE_CHOICES)
         super().__init__(**kwargs)
 
     def to_internal_value(self, data):
-        return super().to_internal_value(normalize_public_access(data))
+        return super().to_internal_value(normalize_public_access(data, self.retired_edit_as))
 
 
 class StatusField(Field):

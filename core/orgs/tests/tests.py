@@ -1,8 +1,11 @@
+import importlib
+
+from django.apps import apps
 from django.core.exceptions import ValidationError
 from mock import patch, Mock
 
 from core.collections.models import Collection, CollectionReference, Expansion
-from core.common.constants import ACCESS_TYPE_NONE, HEAD
+from core.common.constants import ACCESS_TYPE_NONE, HEAD, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT
 from core.common.tasks import delete_organization
 from core.common.tests import OCLTestCase
 from core.concepts.models import Concept
@@ -193,3 +196,18 @@ class OrganizationTest(OCLTestCase):
             Organization(logo_path='path/foo.png').logo_url.replace('https://', 'http://'),
             'http://oclapi2-dev.s3.amazonaws.com/path/foo.png'
         )
+
+
+class RetirePublicEditMigrationTest(OCLTestCase):
+    def test_migration_moves_public_edit_orgs_to_view(self):
+        migration = importlib.import_module('core.orgs.migrations.0022_retire_public_edit_access')
+        editable = OrganizationFactory()
+        private = OrganizationFactory(public_access=ACCESS_TYPE_NONE)
+        Organization.objects.filter(id=editable.id).update(public_access=RETIRED_ACCESS_TYPE_EDIT)
+
+        migration.retire_public_edit_access(apps, None)
+
+        editable.refresh_from_db()
+        private.refresh_from_db()
+        self.assertEqual(editable.public_access, ACCESS_TYPE_VIEW)
+        self.assertEqual(private.public_access, ACCESS_TYPE_NONE)

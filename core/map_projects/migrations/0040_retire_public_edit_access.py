@@ -3,9 +3,9 @@
 from django.db import migrations, models
 
 
-# 'Edit' is retired: every public-Edit resource becomes public-View.
+# 'Edit' is retired: public-Edit projects become private (only editors can open a project), runs become public-View.
 def retire_public_edit_access(apps, schema_editor):  # pylint: disable=unused-argument
-    apps.get_model('map_projects', 'MapProject').objects.filter(public_access__iexact='Edit').update(public_access='View')
+    apps.get_model('map_projects', 'MapProject').objects.filter(public_access__iexact='Edit').update(public_access='None')
     apps.get_model('map_projects', 'AutomatchRun').objects.filter(public_access__iexact='Edit').update(public_access='View')
 
 

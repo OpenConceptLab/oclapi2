@@ -5,8 +5,8 @@ from django.apps import apps
 from mock import patch
 
 from core.common.constants import RETIRED_ACCESS_TYPE_EDIT, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
-from core.map_projects.models import MapProject
-from core.map_projects.tests.factories import MapProjectFactory
+from core.map_projects.models import MapProject, AutomatchRun
+from core.map_projects.tests.factories import MapProjectFactory, AutomatchRunFactory
 from core.map_projects.tests.tests import MapProjectAbstractViewTest
 from core.users.tests.factories import UserProfileFactory
 
@@ -53,10 +53,25 @@ class MapProjectPrivacyTest(MapProjectAbstractViewTest):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(MapProject.objects.get(id=response.data['id']).public_access, ACCESS_TYPE_VIEW)
 
+    @patch('core.services.storages.cloud.aws.S3.upload')
+    def test_post_saves_retired_edit_as_private(self, _upload_mock):
+        response = self.client.post(
+            f'/users/{self.user.username}/map-projects/',
+            data={
+                'name': 'Edit Project', 'file': self.file, 'columns': COLUMNS,
+                'public_access': RETIRED_ACCESS_TYPE_EDIT
+            },
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(MapProject.objects.get(id=response.data['id']).public_access, ACCESS_TYPE_NONE)
+
     def test_migration_makes_existing_projects_private(self):
         migration = importlib.import_module('core.map_projects.migrations.0039_mapproject_private_by_default')
         viewable = MapProjectFactory(public_access=ACCESS_TYPE_VIEW)
-        editable = MapProjectFactory(public_access=RETIRED_ACCESS_TYPE_EDIT)
+        editable = MapProjectFactory()
+        MapProject.objects.filter(id=editable.id).update(public_access=RETIRED_ACCESS_TYPE_EDIT)
 
         migration.make_existing_projects_private(apps, None)
 
@@ -64,3 +79,22 @@ class MapProjectPrivacyTest(MapProjectAbstractViewTest):
         editable.refresh_from_db()
         self.assertEqual(viewable.public_access, ACCESS_TYPE_NONE)
         self.assertEqual(editable.public_access, ACCESS_TYPE_NONE)
+
+    def test_retire_public_edit_migration(self):
+        migration = importlib.import_module('core.map_projects.migrations.0040_retire_public_edit_access')
+        viewable = MapProjectFactory(public_access=ACCESS_TYPE_VIEW)
+        editable = MapProjectFactory()
+        run = AutomatchRunFactory(map_project=editable)
+        MapProject.objects.filter(id=editable.id).update(public_access=RETIRED_ACCESS_TYPE_EDIT)
+        AutomatchRun.objects.filter(id=run.id).update(public_access=RETIRED_ACCESS_TYPE_EDIT)
+
+        migration.retire_public_edit_access(apps, None)
+
+        for instance in [viewable, editable, run]:
+            instance.refresh_from_db()
+        self.assertEqual(viewable.public_access, ACCESS_TYPE_VIEW)
+        self.assertEqual(editable.public_access, ACCESS_TYPE_NONE)
+        self.assertEqual(run.public_access, ACCESS_TYPE_VIEW)
+
+    def test_retired_edit_is_saved_as_private(self):
+        self.assertEqual(MapProjectFactory(public_access=RETIRED_ACCESS_TYPE_EDIT).public_access, ACCESS_TYPE_NONE)

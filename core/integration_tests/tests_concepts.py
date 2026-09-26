@@ -2038,7 +2038,7 @@ class ConceptHeadOnlyHardDeleteTest(OCLAPITestCase):
 
     def test_editor_cannot_hard_delete_individual_concept_version(self):
         source = OrganizationSourceFactory()
-        user = UserProfileFactory()
+        user = UserProfileFactory(organizations=[source.organization])
         concept = ConceptFactory(parent=source)
         concept_version = concept.get_latest_version()
 

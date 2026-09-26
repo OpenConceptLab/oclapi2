@@ -16,7 +16,7 @@ class MapProjectCreateUpdateSerializer(serializers.ModelSerializer):
     user_id = IntegerField(write_only=True, required=False)
     organization_id = IntegerField(write_only=True, required=False)
     input_file_name = CharField(required=False)
-    public_access = PublicAccessField(required=False)
+    public_access = PublicAccessField(required=False, retired_edit_as=ACCESS_TYPE_NONE)
 
     class Meta:
         model = MapProject

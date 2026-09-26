@@ -1,12 +1,14 @@
+import importlib
 from datetime import datetime
 
+from django.apps import apps
 from django.contrib.auth.models import Group, Permission
 from django.http import Http404
 from mock import Mock, patch, ANY
 from rest_framework.authtoken.models import Token
 
 from core.collections.tests.factories import OrganizationCollectionFactory
-from core.common.constants import ACCESS_TYPE_NONE, HEAD, OCL_ORG_ID
+from core.common.constants import ACCESS_TYPE_NONE, HEAD, OCL_ORG_ID, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT
 from core.common.tasks import send_user_verification_email, send_user_reset_password_email
 from core.common.tests import OCLTestCase, OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.orgs.models import Organization
@@ -839,3 +841,18 @@ class UserViewsAPITest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+
+
+class RetirePublicEditMigrationTest(OCLTestCase):
+    def test_migration_moves_public_edit_users_to_view(self):
+        migration = importlib.import_module('core.users.migrations.0036_retire_public_edit_access')
+        editable = UserProfileFactory()
+        private = UserProfileFactory(public_access=ACCESS_TYPE_NONE)
+        UserProfile.objects.filter(id=editable.id).update(public_access=RETIRED_ACCESS_TYPE_EDIT)
+
+        migration.retire_public_edit_access(apps, None)
+
+        editable.refresh_from_db()
+        private.refresh_from_db()
+        self.assertEqual(editable.public_access, ACCESS_TYPE_VIEW)
+        self.assertEqual(private.public_access, ACCESS_TYPE_NONE)

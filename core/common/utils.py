@@ -965,10 +965,10 @@ def get_falsy_values():
     return ['false', False, 'False', 0, '0', 'None', 'null']
 
 
-def normalize_public_access(value):
-    # 'Edit' is retired, so it is stored as 'View'
+def normalize_public_access(value, retired_edit_as=ACCESS_TYPE_VIEW):
+    # 'Edit' is retired, so it is stored as retired_edit_as ('View' unless the model says otherwise)
     if isinstance(value, str) and value.lower() == RETIRED_ACCESS_TYPE_EDIT.lower():
-        return ACCESS_TYPE_VIEW
+        return retired_edit_as
     return value
 
 

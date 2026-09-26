@@ -1,7 +1,9 @@
+import importlib
 from types import SimpleNamespace
 
 import factory
 from celery_once import AlreadyQueued
+from django.apps import apps
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.test import override_settings
@@ -2819,3 +2821,31 @@ class TasksTest(OCLTestCase):
         source.refresh_from_db()
         self.assertEqual(source.custom_validation_schema, 'None')
         validate_child_concepts_mock.assert_called_once()
+
+
+class RetirePublicEditMigrationTest(OCLTestCase):
+    def test_migration_moves_public_edit_sources_and_their_content_to_view(self):
+        migration = importlib.import_module('core.sources.migrations.0046_retire_public_edit_access')
+        source = OrganizationSourceFactory()
+        source_version = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1')
+        concept = ConceptFactory(parent=source)
+        mapping = MappingFactory(parent=source)
+        private_source = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        private_concept = ConceptFactory(parent=private_source, public_access=ACCESS_TYPE_NONE)
+        Source.objects.filter(id__in=[source.id, source_version.id]).update(public_access=RETIRED_ACCESS_TYPE_EDIT)
+        Concept.objects.filter(parent_id=source.id).update(public_access=RETIRED_ACCESS_TYPE_EDIT)
+        Mapping.objects.filter(parent_id=source.id).update(public_access=RETIRED_ACCESS_TYPE_EDIT)
+
+        migration.retire_public_edit_access(apps, None)
+
+        for instance in [source, source_version, private_source, private_concept]:
+            instance.refresh_from_db()
+        self.assertEqual(source.public_access, ACCESS_TYPE_VIEW)
+        self.assertEqual(source_version.public_access, ACCESS_TYPE_VIEW)
+        self.assertFalse(Concept.objects.filter(parent_id=source.id).exclude(public_access=ACCESS_TYPE_VIEW).exists())
+        self.assertFalse(Mapping.objects.filter(parent_id=source.id).exclude(public_access=ACCESS_TYPE_VIEW).exists())
+        self.assertTrue(Concept.objects.filter(id=concept.id).exists())
+        self.assertTrue(Mapping.objects.filter(id=mapping.id).exists())
+        self.assertEqual(private_source.public_access, ACCESS_TYPE_NONE)
+        self.assertEqual(private_concept.public_access, ACCESS_TYPE_NONE)
