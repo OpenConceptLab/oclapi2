@@ -5,7 +5,6 @@ import shutil
 import uuid
 
 from datetime import datetime
-import requests
 from celery_once import AlreadyQueued
 from django.db.models import Q
 from django.http import Http404
@@ -14,6 +13,7 @@ from drf_yasg.utils import swagger_auto_schema
 from ocldev.oclcsvtojsonconverter import OclStandardCsvToJsonConverter
 from pydash import get
 from rest_framework import status
+from rest_framework.exceptions import APIException
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -30,6 +30,10 @@ from core.common.utils import queue_bulk_import, is_csv_file, get_truthy_values,
 from core.importers.constants import ALREADY_QUEUED, INVALID_UPDATE_IF_EXISTS, NO_CONTENT_TO_IMPORT
 from core.importers.importer import Importer, ResourceImporter
 from core.importers.input_parsers import ImportContentParser
+from core.importers.limits import (
+    check_advanced_import, check_import_payload, check_request_body_size, download_import_file,
+    enforce_import_request_limits, get_max_import_bytes, sanitize_import_queue, sanitize_import_threads,
+)
 from core.tasks.models import Task
 from core.tasks.serializers import TaskDetailSerializer, TaskListSerializer
 from core.users.models import UserProfile
@@ -45,6 +49,7 @@ def import_response(request, import_queue, data, threads=None, inline=False, dep
     if not data:
         return Response({'exception': NO_CONTENT_TO_IMPORT}, status=status.HTTP_400_BAD_REQUEST)
 
+    import_queue = sanitize_import_queue(request.user, import_queue)
     user = request.user
     username = user.username
     update_if_exists = request.GET.get('update_if_exists', 'true')
@@ -160,9 +165,11 @@ class BulkImportParallelInlineView(APIView):
         deprecated=True
     )
     def post(self, request, import_queue=None):
+        check_request_body_size(request)
         if isinstance(request.data, list):
             return Response({'exception': "Invalid input."}, status=status.HTTP_400_BAD_REQUEST)
-        parallel_threads = request.data.get('parallel') or 5
+        check_import_payload(request)
+        parallel_threads = sanitize_import_threads(request.user, request.data.get('parallel'))
         is_upload = 'file' in request.data
         is_file_url = 'file_url' in request.data
         is_data = 'data' in request.data
@@ -173,13 +180,18 @@ class BulkImportParallelInlineView(APIView):
             owner=get(request.data, 'owner') or None,
             owner_type=get(request.data, 'owner_type') or None,
             version=get(request.data, 'version') or None,
+            user=request.user,
         )
         try:
             parser.parse()
+        except APIException:
+            raise
         except Exception as ex:  # pylint: disable=broad-except
             return Response({'exception': f'Failed to parse input. ({str(ex)})'}, status=status.HTTP_400_BAD_REQUEST)
         if parser.errors:
             return Response({'exception': ' '.join(parser.errors)}, status=status.HTTP_400_BAD_REQUEST)
+        if parser.is_source_version_export:
+            check_advanced_import(request.user, 'source_version_export')
 
         return import_response(self.request, import_queue, parser.content, parallel_threads, True, self.deprecated)
 
@@ -187,11 +199,51 @@ class BulkImportParallelInlineView(APIView):
 class ImportView(BulkImportParallelInlineView, ImportRetrieveDestroyMixin):
     deprecated = False
 
+    @staticmethod
+    def download_capped(request, file_url):
+        """Downloads `file_url` within the user's import size limit. Returns (file, None) or (None, error_response)."""
+        try:
+            response, content = download_import_file(file_url, request.user)
+        except APIException:
+            raise
+        except Exception as ex:  # pylint: disable=broad-except
+            return None, Response(
+                {'exception': f'Failed to download file from {file_url}, Exception: {ex}.'},
+                status=status.HTTP_400_BAD_REQUEST)
+        if content is None:
+            return None, Response(
+                {'exception': f'Failed to download file from {file_url}, Status: {get(response, "status_code")}.'},
+                status=status.HTTP_400_BAD_REQUEST)
+        return io.BytesIO(content), None
+
+    @staticmethod
+    def store_upload(file):
+        """Stores an import file for the import task (media dir in DEBUG, else the import cache). Returns its path."""
+        timestamp = datetime.now()
+        key = f'import_upload_{timestamp.strftime("%Y%m%d_%H%M%S")}_{str(uuid.uuid4())[:8]}'
+        from core import settings
+        if settings.DEBUG:
+            dir_url = os.path.join(settings.MEDIA_ROOT, 'import_uploads')
+            os.makedirs(dir_url, exist_ok=True)
+            file_url = os.path.join(dir_url, key)
+            with open(file_url, 'wb') as f:
+                shutil.copyfileobj(file, f)
+            return file_url
+        if not key.startswith(Importer.IMPORT_CACHE):
+            key = Importer.IMPORT_CACHE + key
+        upload_service = get_export_service()
+        upload_service.upload(key, file,
+                              metadata={'ContentType': 'application/octet-stream'},
+                              headers={'content-type': 'application/octet-stream'})
+        return key
+
     @swagger_auto_schema(
         manual_parameters=[update_if_exists_param, file_url_param, file_upload_param, parallel_threads_param],
     )
     def post(self, request, import_queue=None):  # pylint: disable=too-many-locals
+        check_request_body_size(request)
         if 'import_type' in request.data:
+            check_import_payload(request)
             owner_type = request.data.get('owner_type', 'user')
             owner = request.data.get('owner', self.request.user.username)
             owner_object = ResourceImporter.get_owner(owner_type, owner)
@@ -202,32 +254,24 @@ class ImportView(BulkImportParallelInlineView, ImportRetrieveDestroyMixin):
                 return Response(status=status.HTTP_403_FORBIDDEN)
 
             file_url = get(request.data, 'file_url')  # importing as url to a file
+            file = None
+            if file_url and get_max_import_bytes(request.user):
+                # a limited user's package is downloaded here, capped, and handed over like an upload (ocl_online#230)
+                file, error_response = self.download_capped(request, file_url)
+                if error_response:
+                    return error_response
+                file_url = None
             if not file_url:
-                data = get(request.data, 'data')  # importing by posting as text
-                if data:
-                    file = io.StringIO(data)
-                else:
-                    file = get(request.data, 'file')  # importing by uploading a file with multipart/form-data
-                if file:
-                    timestamp = datetime.now()
-                    key = f'import_upload_{timestamp.strftime("%Y%m%d_%H%M%S")}_{str(uuid.uuid4())[:8]}'
-                    from core import settings
-                    if settings.DEBUG:
-                        dir_url = os.path.join(settings.MEDIA_ROOT, 'import_uploads')
-                        os.makedirs(dir_url, exist_ok=True)
-                        file_url = os.path.join(dir_url, key)
-                        with open(file_url, 'wb') as f:
-                            shutil.copyfileobj(file, f)
+                if file is None:
+                    data = get(request.data, 'data')  # importing by posting as text
+                    if data:
+                        file = io.StringIO(data)
                     else:
-                        if not key.startswith(Importer.IMPORT_CACHE):
-                            key = Importer.IMPORT_CACHE + key
-                        upload_service = get_export_service()
-                        upload_service.upload(key, file,
-                                              metadata={'ContentType': 'application/octet-stream'},
-                                              headers={'content-type': 'application/octet-stream'})
-                        file_url = key
+                        file = get(request.data, 'file')  # importing by uploading a file with multipart/form-data
+                if file:
+                    file_url = self.store_upload(file)
 
-            task = get_queue_task_names(import_queue, self.request.user.username)
+            task = get_queue_task_names(sanitize_import_queue(request.user, import_queue), self.request.user.username)
             new_task = bulk_import_new.apply_async(
                 (file_url, self.request.user.username, owner_type, owner,
                  request.data.get('import_type', 'npm')), task_id=task.id, queue=task.queue)
@@ -253,6 +297,7 @@ class BulkImportFileUploadView(APIView):  # pragma: no cover
         deprecated=True
     )
     def post(self, request, import_queue=None):
+        enforce_import_request_limits(request)
         file = request.data.get('file', None)
 
         if not file:
@@ -286,28 +331,32 @@ class BulkImportFileURLView(APIView):  # pragma: no cover
         deprecated=True
     )
     def post(self, request, import_queue=None):
-        file = None
+        enforce_import_request_limits(request)
+        file, content = None, None
         file_url = request.data.get('file_url')
 
         try:
-            headers = {
-                'User-Agent': 'OCL'  # user-agent required by mod_security on some servers
-            }
-            file = requests.get(file_url, headers=headers)
+            file, content = download_import_file(file_url, request.user)
+        except APIException:
+            raise
         except:  # pylint: disable=bare-except
             pass
 
-        if not file:
+        if not file or content is None:
             return Response({'exception': NO_CONTENT_TO_IMPORT}, status=status.HTTP_400_BAD_REQUEST)
 
+        try:
+            text = content.decode(get(file, 'encoding') or 'utf-8')
+        except (UnicodeDecodeError, LookupError):
+            return Response({'exception': 'Could not read the file as text.'}, status=status.HTTP_400_BAD_REQUEST)
         if is_csv_file(name=file_url):
             try:
                 data = OclStandardCsvToJsonConverter(
-                    input_list=csv_file_data_to_input_list(file.text), allow_special_characters=True).process()
+                    input_list=csv_file_data_to_input_list(text), allow_special_characters=True).process()
             except Exception as ex:  # pylint: disable=broad-except
                 return Response({'exception': f'Bad CSV ({str(ex)})'}, status=status.HTTP_400_BAD_REQUEST)
         else:
-            data = file.text
+            data = text
 
         return import_response(request=self.request, import_queue=import_queue, data=data, deprecated=self.deprecated)
 
@@ -370,6 +419,7 @@ class BulkImportInlineView(APIView):  # pragma: no cover
         deprecated=True
     )
     def post(self, request, import_queue=None):
+        enforce_import_request_limits(request)
         file = None
         file_name = None
         is_upload = 'file' in request.data
@@ -383,11 +433,10 @@ class BulkImportInlineView(APIView):  # pragma: no cover
                 file_content = file.read().decode('utf-8')
             elif is_file_url:
                 file_name = request.data['file_url']
-                headers = {
-                    'User-Agent': 'OCL'  # user-agent required by mod_security on some servers
-                }
-                file = requests.get(file_name, headers=headers)
-                file_content = file.text
+                file, downloaded = download_import_file(file_name, request.user)
+                file_content = downloaded.decode('utf-8') if downloaded is not None else None
+        except APIException:
+            raise
         except:  # pylint: disable=bare-except
             pass
 

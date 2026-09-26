@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime
 from typing import Any
@@ -16,9 +17,11 @@ from core.common.mixins import SourceContainerMixin
 from core.common.models import BaseModel, CommonLogoModel
 from core.common.tasks import send_user_verification_email, send_user_reset_password_email
 from core.common.utils import web_url
-from core.users.constants import STAFF_GROUP, SUPERADMIN_GROUP, GUEST_GROUP, CORE_USER_GROUP
+from core.users.constants import STAFF_GROUP, SUPERADMIN_GROUP, GUEST_GROUP, CORE_USER_GROUP, PREVIEW_GROUP
 from .constants import USER_OBJECT_TYPE
 from ..common.checksums import ChecksumModel
+
+logger = logging.getLogger('oclapi')
 
 
 class Follow(models.Model):
@@ -256,6 +259,10 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
         groups' limits, where an explicit 0 from any one group wins outright (it
         isn't just "the lowest number" - max() alone would let a capped group beat an
         unlimited one).
+
+        Exception: for the authoring capabilities in AUTHORING_CAPABILITY_IDS (bulk
+        import, $clone), which every account has always had, no row means the
+        `preview` group's value - the lowest tier - not blocked (ocl_online#230).
         """
         if self.is_superuser or self.is_staff:
             return 0
@@ -264,7 +271,7 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
             return override
         group_limits = self._get_group_capability_limit(capability_id)
         if not group_limits:
-            return None
+            return self._get_default_authoring_limit(capability_id)
         if 0 in group_limits:
             return 0
         return max(group_limits)
@@ -278,8 +285,27 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
     def _get_capability_limit(self, capability_id):
         return self.capability_overrides.filter(capability_id=capability_id).values_list('limit', flat=True).first()
 
+    @staticmethod
+    def _get_default_authoring_limit(capability_id):
+        """None (blocked) unless `capability_id` is an authoring capability, which falls back to `preview`."""
+        from core.capabilities.constants import AUTHORING_CAPABILITY_IDS, AUTHORING_CAPABILITY_DEFAULT_LIMITS
+        from core.capabilities.models import GroupCapability
+        if capability_id not in AUTHORING_CAPABILITY_IDS:
+            return None
+        limit = GroupCapability.objects.filter(
+            group__name=PREVIEW_GROUP, capability_id=capability_id).values_list('limit', flat=True).first()
+        if limit is None:
+            logger.warning(
+                'The %s group has no limit for capability %s; using the built-in default', PREVIEW_GROUP, capability_id)
+            return AUTHORING_CAPABILITY_DEFAULT_LIMITS[capability_id]
+        return limit
+
     def get_capability_usage(self, capability_id):
-        from core.capabilities.constants import MAPPER_PROJECTS_CAPABILITY_ID, MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID
+        from core.capabilities.constants import (
+            AUTHORING_CAPABILITY_IDS, MAPPER_PROJECTS_CAPABILITY_ID, MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID
+        )
+        if capability_id in AUTHORING_CAPABILITY_IDS:
+            return None  # per-request limits: nothing accumulates
         if capability_id == MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID:
             # A per-project cap has no per-user usage; clients show the cap itself.
             return None

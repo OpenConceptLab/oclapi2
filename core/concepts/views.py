@@ -61,7 +61,8 @@ from core.concepts.serializers import (
     ConceptVersionListSerializer, ConceptSummarySerializer, ConceptMinimalSerializer,
     ConceptChildrenSerializer, ConceptParentsSerializer, ConceptLookupListSerializer, ConceptChecksumSerializer)
 from core.mappings.serializers import MappingListSerializer
-from core.sources.models import CloneError
+from core.sources.clone_limits import clone_limit_error_detail, clone_lock, get_clone_budget
+from core.sources.models import CloneError, CloneLimitExceeded
 from core.tasks.models import Task
 
 TRUTHY = get_truthy_values()
@@ -537,12 +538,18 @@ class ConceptCloneView(ConceptCascadeView):
         """
         clone_to_source = self.get_clone_to_source()
         self.set_parent_resource(False)
+        budget = get_clone_budget(request.user)
+        parameters = dict(request.data.get('parameters') or {})
+        parameters.pop('resource_budget', None)
         try:
-            bundle = Bundle.clone(
-                self.get_object(), self.parent_resource, clone_to_source, request.user,
-                self.request.get_full_path(), self.is_verbose(), **(request.data.get('parameters') or {})
-            )
+            with clone_lock(request.user, budget):
+                bundle = Bundle.clone(
+                    self.get_object(), self.parent_resource, clone_to_source, request.user,
+                    self.request.get_full_path(), self.is_verbose(), resource_budget=budget, **parameters
+                )
             return Response(BundleSerializer(bundle, context={'request': request}).data)
+        except CloneLimitExceeded as ex:
+            return Response(clone_limit_error_detail(budget, ex.requested), status=status.HTTP_403_FORBIDDEN)
         except CloneError as ex:
             return Response({'errors': ex.errors}, status=status.HTTP_400_BAD_REQUEST)
 

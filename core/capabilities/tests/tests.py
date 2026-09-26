@@ -2,16 +2,18 @@ import json
 from io import StringIO
 from unittest.mock import patch
 
-from django.contrib.auth.models import Group
+from django.contrib.auth.models import Group, Permission
 from django.core.management import call_command, CommandError
 
 from core.capabilities.constants import (
     AI_ASSISTANT_CALLS_CAPABILITY_ID, AI_ASSISTANT_CHANGE_COMMENTS_CAPABILITY_ID,
+    CLONE_RESOURCES_PER_CALL_CAPABILITY_ID, IMPORTS_FILE_SIZE_CAPABILITY_ID,
     MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, MAPPER_PROJECTS_CAPABILITY_ID,
 )
 from core.capabilities.exceptions import CapabilityExceeded
-from core.capabilities.models import GroupCapability, UsageEvent, UserCapabilityOverride
+from core.capabilities.models import Capability, GroupCapability, UsageEvent, UserCapabilityOverride
 from core.common.tests import OCLAPITestCase, PREVIEW_GROUP_NAME
+from core.users.constants import PREVIEW_GROUP, PREVIEW_GRANDFATHERED_GROUP
 from core.users.tests.factories import UserProfileFactory
 
 
@@ -450,3 +452,68 @@ class SeedGroupCapabilitiesTest(OCLAPITestCase):
 
         with self.assertRaises(CommandError):
             self.seed({'pro': {}})
+
+
+class LaunchGuardrailConfigTest(OCLAPITestCase):
+    def test_capabilities_registered(self):
+        self.assertEqual(Capability.objects.get(id=IMPORTS_FILE_SIZE_CAPABILITY_ID).name, 'imports.file_size_kb')
+        self.assertEqual(
+            Capability.objects.get(id=CLONE_RESOURCES_PER_CALL_CAPABILITY_ID).name, 'clone.resources_per_call')
+
+    def test_permissions_registered(self):
+        for codename in ('bulk_import_advanced', 'bulk_import_priority', 'list_unpaginated'):
+            self.assertTrue(
+                Permission.objects.filter(codename=codename, content_type__app_label='users').exists(), codename)
+
+    def test_seeded_group_limits_and_permissions(self):
+        preview = Group.objects.get(name=PREVIEW_GROUP)
+        grandfathered = Group.objects.get(name=PREVIEW_GRANDFATHERED_GROUP)
+
+        def limit(group, capability_id):
+            return GroupCapability.objects.get(group=group, capability_id=capability_id).limit
+
+        self.assertEqual(limit(preview, IMPORTS_FILE_SIZE_CAPABILITY_ID), 500)
+        self.assertEqual(limit(preview, CLONE_RESOURCES_PER_CALL_CAPABILITY_ID), 100)
+        self.assertEqual(limit(grandfathered, IMPORTS_FILE_SIZE_CAPABILITY_ID), 51200)
+        self.assertEqual(limit(grandfathered, CLONE_RESOURCES_PER_CALL_CAPABILITY_ID), 1000)
+        self.assertEqual(
+            list(grandfathered.permissions.values_list('codename', flat=True)), ['bulk_import_advanced'])
+        self.assertFalse(preview.permissions.filter(codename='bulk_import_advanced').exists())
+        self.assertFalse(
+            GroupCapability.objects.filter(group=grandfathered, capability__name__startswith='mapper.').exists())
+
+
+class AuthoringCapabilityDefaultTest(OCLAPITestCase):
+    def test_user_without_group_gets_preview_values(self):
+        user = UserProfileFactory()
+        self.assertEqual(user.get_capability_limit(IMPORTS_FILE_SIZE_CAPABILITY_ID), 500)
+        self.assertEqual(user.get_capability_limit(CLONE_RESOURCES_PER_CALL_CAPABILITY_ID), 100)
+        self.assertIsNone(user.get_capability_limit(MAPPER_PROJECTS_CAPABILITY_ID))  # Mapper keeps "no row = blocked"
+
+    def test_grandfathered_gets_higher_authoring_values_and_preview_mapper_values(self):
+        user = UserProfileFactory()
+        user.groups.add(Group.objects.get(name=PREVIEW_GROUP), Group.objects.get(name=PREVIEW_GRANDFATHERED_GROUP))
+        self.assertEqual(user.get_capability_limit(IMPORTS_FILE_SIZE_CAPABILITY_ID), 51200)
+        self.assertEqual(user.get_capability_limit(CLONE_RESOURCES_PER_CALL_CAPABILITY_ID), 1000)
+        self.assertEqual(user.get_capability_limit(MAPPER_PROJECTS_CAPABILITY_ID), 1)
+
+    def test_override_and_staff(self):
+        user = UserProfileFactory()
+        UserCapabilityOverride.objects.create(
+            user=user, capability_id=CLONE_RESOURCES_PER_CALL_CAPABILITY_ID, limit=-1)
+        self.assertEqual(user.get_capability_limit(CLONE_RESOURCES_PER_CALL_CAPABILITY_ID), -1)
+        self.assertEqual(
+            UserProfileFactory(is_staff=True).get_capability_limit(CLONE_RESOURCES_PER_CALL_CAPABILITY_ID), 0)
+
+    def test_missing_preview_row_falls_back_to_built_in_default(self):
+        GroupCapability.objects.filter(
+            group__name=PREVIEW_GROUP,
+            capability_id__in=[IMPORTS_FILE_SIZE_CAPABILITY_ID, CLONE_RESOURCES_PER_CALL_CAPABILITY_ID]).delete()
+        user = UserProfileFactory()
+        self.assertEqual(user.get_capability_limit(IMPORTS_FILE_SIZE_CAPABILITY_ID), 500)
+        self.assertEqual(user.get_capability_limit(CLONE_RESOURCES_PER_CALL_CAPABILITY_ID), 100)
+
+    def test_per_request_limits_report_no_usage(self):
+        user = UserProfileFactory()
+        self.assertIsNone(user.get_capability_usage(IMPORTS_FILE_SIZE_CAPABILITY_ID))
+        self.assertIsNone(user.get_capability_usage(CLONE_RESOURCES_PER_CALL_CAPABILITY_ID))

@@ -2,12 +2,13 @@ import csv
 import io
 from zipfile import ZipFile
 
-import requests
 from ocldev.oclexporttoimportconverter import OCLExportToImportConverter
 from ocldev.oclcsvtojsonconverter import OclStandardCsvToJsonConverter
 from pydash import get, compact
+from rest_framework.exceptions import APIException
 
 from core.common.utils import is_zip_file, is_csv_file
+from core.importers.limits import download_import_file
 
 
 def csv_file_data_to_input_list(file_content):
@@ -20,10 +21,11 @@ class ImportContentParser:
     2. Processes json/csv/zip file url from 'file_url' arg
     3. Processes json/csv/zip file from 'file' arg
     """
-    def __init__(self, content=None, file_url=None, file=None, **kwargs):
+    def __init__(self, content=None, file_url=None, file=None, user=None, **kwargs):  # pylint: disable=too-many-arguments
         self.content = content
         self.file_url = file_url
         self.file = file
+        self.user = user
         self.kwargs = kwargs
         self.file_name = get(self, 'file.name') if self.file else None
         self.errors = []
@@ -31,6 +33,7 @@ class ImportContentParser:
         self.is_zip_file = False
         self.is_csv_file = False
         self.is_json_file = False
+        self.is_source_version_export = False
 
     def parse(self):
         self.validate_args()
@@ -52,25 +55,21 @@ class ImportContentParser:
         if self.file:
             self.file_name = get(self, 'file.name')
         elif self.file_url:
-            self.set_file_from_response(self.fetch_file_from_url())
+            self.set_file_from_response(*self.fetch_file_from_url())
         self.set_content()
 
     def fetch_file_from_url(self):
         try:
-            headers = {
-                'User-Agent': 'OCL'  # user-agent required by mod_security on some servers
-            }
-            return requests.get(self.file_url, headers=headers, stream=True, timeout=30)
+            return download_import_file(self.file_url, self.user)
+        except APIException:
+            raise
         except Exception as e:
             self.errors.append(f'Failed to download file from {self.file_url}, Exception: {e}.')
-        return None
+        return None, None
 
-    def set_file_from_response(self, response):
+    def set_file_from_response(self, response, content):
         if get(response, 'ok'):
-            if self.is_zip_file:
-                self.file = io.BytesIO(response.content)
-            else:
-                self.file = response.text
+            self.file = io.BytesIO(content) if self.is_zip_file else io.StringIO(content.decode('utf-8'))
         elif response:
             self.errors.append(f'Failed to download file from {self.file_url}, Status: {response.status_code}.')
 
@@ -85,6 +84,7 @@ class ImportContentParser:
                 if self.is_csv_file:
                     self.set_csv_content()
             if self.is_ocl_source_version_export():
+                self.is_source_version_export = True
                 converter = OCLExportToImportConverter(
                     content=self.content,
                     return_output=True,

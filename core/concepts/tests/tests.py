@@ -1887,6 +1887,22 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(concepts.count(), 1)
         self.assertEqual(concepts.first().id, concept_v1.id)
 
+    def test_cascade_strict_max_results_stops_inside_a_level(self):
+        source = OrganizationSourceFactory()
+        root = ConceptFactory(parent=source)
+        for _ in range(3):
+            child = ConceptFactory(parent=source)
+            MappingFactory(from_concept=root, to_concept=child, parent=source, map_type='Q-AND-A')
+            for _ in range(3):
+                MappingFactory(
+                    from_concept=child, to_concept=ConceptFactory(parent=source), parent=source, map_type='Q-AND-A')
+
+        result = root.cascade(repo_version=source, max_results=10)
+        self.assertEqual(result['concepts'].count() + result['mappings'].count(), 25)  # checked only between levels
+
+        result = root.cascade(repo_version=source, max_results=10, max_results_strict=True)
+        self.assertEqual(result['concepts'].count() + result['mappings'].count(), 13)  # stops after the first child
+
     def test_cascade_as_hierarchy(self):
         source = OrganizationSourceFactory()
         root = ConceptFactory(parent=source, mnemonic='root')

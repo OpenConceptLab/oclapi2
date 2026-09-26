@@ -1463,8 +1463,13 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             map_types=None, exclude_map_types=None, return_map_types=ALL, equivalency_map_types=None,
             cascade_mappings=True, cascade_hierarchy=True, cascade_levels=ALL,
             include_retired=False, reverse=False, omit_if_exists_in=None,
-            include_self=True, max_results=1000,
+            include_self=True, max_results=1000, max_results_strict=False,
     ):
+        """
+        `max_results` is checked between levels, so one wide level can return far more. With
+        `max_results_strict` the walk stops as soon as the running total reaches `max_results`, even mid-level
+        ($clone uses it to know it is over its budget before writing anything).
+        """
         from core.mappings.models import Mapping
         empty_result = {'concepts': Concept.objects.none(), 'mappings': Mapping.objects.none()}
         result = {'concepts': Concept.objects.filter(id=self.id), 'mappings': Mapping.objects.none()}
@@ -1496,8 +1501,17 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             is_collection = repo_version.__class__ == Collection
 
         cascaded = []
+        stopped = []
+
+        def is_over_strict_limit(concept_ids, mapping_ids):
+            # the id lists are an upper bound (before omissions); count only when they say we might be over
+            return max_results_strict and max_results is not None and \
+                len(concept_ids) + len(mapping_ids) >= max_results and \
+                result['concepts'].count() + result['mappings'].count() >= max_results
 
         def iterate(level):
+            if stopped:
+                return
             if level == ALL or level > 0:
                 if not cascaded or max_results is None or (
                         result['concepts'].count() + result['mappings'].count()) < max_results:
@@ -1516,14 +1530,20 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                             cascaded.append(concept.versioned_object_id)
 
                             concepts_qs = res['concepts'].union(res['hierarchy_concepts']).union(result['concepts'])
+                            concept_ids = list(concepts_qs.values_list('id', flat=True))
                             result['concepts'] = Concept.objects.filter(
-                                id__in=list(concepts_qs.values_list('id', flat=True))
+                                id__in=concept_ids
                             ).exclude(omit_concepts_criteria)
 
                             mappings_qs = res['mappings'].union(result['mappings'])
+                            mapping_ids = list(mappings_qs.values_list('id', flat=True))
                             result['mappings'] = Mapping.objects.filter(
-                                id__in=list(mappings_qs.values_list('id', flat=True))
+                                id__in=mapping_ids
                             ).exclude(omit_mappings_criteria).order_by('map_type', 'sort_weight')
+
+                            if is_over_strict_limit(concept_ids, mapping_ids):
+                                stopped.append(True)
+                                return
 
                         iterate(level if level == ALL else level - 1)
 

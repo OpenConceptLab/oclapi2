@@ -1,4 +1,4 @@
-# The Mapper-gating Django permissions (ocl_issues#2780/#2782/#2766). Plan groups granting
+# The Mapper-gating and authoring Django permissions (ocl_issues#2780/#2782/#2766, ocl_online#230). Plan groups granting
 # them are seeded by `manage.py seed_group_capabilities` from deployment config.
 # pk is pinned so re-running `loaddata core/fixtures/*` on every container start
 # (pre_startup.sh) updates these same rows instead of inserting duplicates on the
@@ -35,6 +35,24 @@
   fields:
     codename: mapper_scispacy
     name: Can use ScispaCy-LOINC Mapper matching
+    content_type: [users, userprofile]
+- model: "auth.permission"
+  pk: 1006
+  fields:
+    codename: bulk_import_advanced
+    name: Can bulk import zip files, FHIR/NPM packages, OCL repository exports, or from a URL
+    content_type: [users, userprofile]
+- model: "auth.permission"
+  pk: 1007
+  fields:
+    codename: bulk_import_priority
+    name: Can use the concurrent import queue and more than 5 import threads
+    content_type: [users, userprofile]
+- model: "auth.permission"
+  pk: 1008
+  fields:
+    codename: list_unpaginated
+    name: Can request unpaginated (Compress) list responses
     content_type: [users, userprofile]
 - model: "auth.group"
   pk: 1

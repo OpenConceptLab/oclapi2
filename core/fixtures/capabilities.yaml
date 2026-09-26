@@ -23,3 +23,13 @@
   fields:
     name: ai_assistant.change_comments
     description: Number of AI-generated concept change comments (TermBrowser)
+- model: "capabilities.capability"
+  pk: 6
+  fields:
+    name: imports.file_size_kb
+    description: Largest bulk import a user may send in one request, in KB
+- model: "capabilities.capability"
+  pk: 7
+  fields:
+    name: clone.resources_per_call
+    description: Most concepts + mappings one $clone call may create

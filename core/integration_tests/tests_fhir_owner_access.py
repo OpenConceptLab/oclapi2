@@ -1,3 +1,4 @@
+from django.contrib.auth.models import Group
 from mock.mock import patch, Mock
 from rest_framework.exceptions import ValidationError
 
@@ -8,6 +9,7 @@ from core.importers.models import CREATED, UPDATED, PERMISSION_DENIED
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
+from core.users.constants import PREVIEW_GRANDFATHERED_GROUP
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -115,6 +117,10 @@ class BulkImportOwnerAccessTest(OCLAPITestCase):
         self.org.members.add(self.member)
         self.outsider = UserProfileFactory(username='importoutsider')
         self.admin = UserProfile.objects.get(username='ocladmin')
+        # FHIR/NPM (import_type) imports need users.bulk_import_advanced (ocl_online#230); these are existing users
+        grandfathered = Group.objects.get(name=PREVIEW_GRANDFATHERED_GROUP)
+        self.member.groups.add(grandfathered)
+        self.outsider.groups.add(grandfathered)
 
     def post(self, user, data):
         return self.client.post(
@@ -139,8 +145,11 @@ class BulkImportOwnerAccessTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 404)
         bulk_import_mock.apply_async.assert_not_called()
 
+    @patch('core.importers.views.get_export_service', Mock())
+    @patch('core.importers.limits.requests.get')  # limited users' package URLs are downloaded in the request
     @patch('core.importers.views.bulk_import_new')
-    def test_owner_member_and_staff_are_allowed(self, bulk_import_mock):
+    def test_owner_member_and_staff_are_allowed(self, bulk_import_mock, get_mock):
+        get_mock.return_value = Mock(ok=True, headers={}, iter_content=Mock(return_value=[b'package']))
         bulk_import_mock.apply_async.return_value = Mock(id='task-id', state='PENDING')
 
         for user, data in [

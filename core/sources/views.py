@@ -35,7 +35,8 @@ from core.repos.serializers import RepoExternalExportSerializer
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
 from core.sources.documents import SourceDocument
 from core.sources.mixins import SummaryMixin
-from core.sources.models import Source, CloneError
+from core.sources.clone_limits import CloneGuardrailError, clone_limit_error_detail, clone_lock, get_clone_budget
+from core.sources.models import Source, CloneError, CloneLimitExceeded
 from core.sources.search import SourceFacetedSearch
 from core.sources.serializers import (
     SourceDetailSerializer, SourceListSerializer, SourceCreateSerializer, SourceVersionDetailSerializer,
@@ -407,42 +408,54 @@ class SourceConceptsCloneView(SourceBaseView):
                 “expressions”: [“/orgs/CIEL/sources/CIEL/concepts/123/”], (cloneFrom)
                 “parameters”: { ….same as cascade… }
             }
+        One call creates at most the caller's `clone.resources_per_call` concepts + mappings, across all expressions.
         """
         expressions = request.data.get('expressions')
-        parameters = request.data.get('parameters') or {}
+        parameters = dict(request.data.get('parameters') or {})
+        parameters.pop('resource_budget', None)
         if not expressions:
             raise Http400()
         instance = self.get_object()
+        budget = get_clone_budget(request.user)
+        if budget is not None and isinstance(expressions, list) and len(expressions) > budget:
+            raise CloneGuardrailError(clone_limit_error_detail(budget, len(expressions)))  # each creates at least one
+        remaining = budget
         results = {}
         parent_resources = {}
         is_verbose = self.is_verbose()
-        for expression in expressions:
-            from core.concepts.models import Concept
-            result = {}
-            concept_to_clone = Concept.objects.filter(uri=expression).first()
-            parent_resource = None
-            if concept_to_clone:
-                parent_uri = to_parent_uri(expression)
-                if parent_uri not in parent_resources:
-                    parent_resources[parent_uri] = Source.objects.filter(uri=parent_uri).first()
-                parent_resource = parent_resources[parent_uri]
-            # a concept in a repo the user can't view is reported as not found
-            if parent_resource and parent_resource.has_view_access(request.user):
-                from core.bundles.models import Bundle
-                try:
-                    bundle = Bundle.clone(
-                        concept_to_clone, parent_resource, instance, request.user,
-                        self.request.get_full_path(), is_verbose, **parameters
-                    )
-                    result['status'] = status.HTTP_200_OK
-                    result['bundle'] = BundleSerializer(bundle, context={'request': request}).data
-                except CloneError as ex:
-                    result['status'] = status.HTTP_400_BAD_REQUEST
-                    result['errors'] = ex.errors
-            else:
-                result['status'] = status.HTTP_404_NOT_FOUND
-                result['errors'] = [f'Concept to clone with expression {expression} not found.']
-            results[expression] = result
+        with clone_lock(request.user, budget):
+            for expression in expressions:
+                from core.concepts.models import Concept
+                result = {}
+                concept_to_clone = Concept.objects.filter(uri=expression).first()
+                parent_resource = None
+                if concept_to_clone:
+                    parent_uri = to_parent_uri(expression)
+                    if parent_uri not in parent_resources:
+                        parent_resources[parent_uri] = Source.objects.filter(uri=parent_uri).first()
+                    parent_resource = parent_resources[parent_uri]
+                # a concept in a repo the user can't view is reported as not found
+                if parent_resource and parent_resource.has_view_access(request.user):
+                    from core.bundles.models import Bundle
+                    try:
+                        bundle = Bundle.clone(
+                            concept_to_clone, parent_resource, instance, request.user,
+                            self.request.get_full_path(), is_verbose, resource_budget=remaining, **parameters
+                        )
+                        if remaining is not None:
+                            remaining = max(remaining - len(bundle.concepts or []) - len(bundle.mappings or []), 0)
+                        result['status'] = status.HTTP_200_OK
+                        result['bundle'] = BundleSerializer(bundle, context={'request': request}).data
+                    except CloneLimitExceeded as ex:
+                        result['status'] = status.HTTP_403_FORBIDDEN
+                        result['errors'] = clone_limit_error_detail(budget, ex.requested)
+                    except CloneError as ex:
+                        result['status'] = status.HTTP_400_BAD_REQUEST
+                        result['errors'] = ex.errors
+                else:
+                    result['status'] = status.HTTP_404_NOT_FOUND
+                    result['errors'] = [f'Concept to clone with expression {expression} not found.']
+                results[expression] = result
 
         return Response(results, status.HTTP_200_OK)
 
