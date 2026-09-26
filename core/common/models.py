@@ -18,7 +18,7 @@ from django.utils.text import get_valid_filename
 from django_elasticsearch_dsl.registries import registry
 from django_elasticsearch_dsl.signals import RealTimeSignalProcessor
 from elasticsearch import ApiError, TransportError
-from elasticsearch.helpers import BulkIndexError
+from elasticsearch.helpers import BulkIndexError, parallel_bulk, streaming_bulk
 from pydash import get, compact
 
 from core.celery import app as celery_app
@@ -56,6 +56,7 @@ class BatchIndexRun:
     """
     One batched ES indexing run (OpenConceptLab/ocl_online#241):
     - every batch is attempted, even after an earlier one failed;
+    - every failed item of a batch is counted, whichever of its bulk request chunks it was in (see bulk());
     - a bulk request ES rejects for now (429, rejected execution, circuit breaker, read-only index block) is retried
       with exponential backoff. Once a batch is still rejected after all its retries, later batches get one attempt
       each until ES takes one again, so a read-only index fails a run in minutes rather than hours;
@@ -94,16 +95,38 @@ class BatchIndexRun:
         }
 
     @classmethod
+    def is_rejected_error(cls, error):
+        """Whether ES refused this BulkIndexError item only for now (overloaded, or the index is read-only)."""
+        details = cls.get_error_details(error)
+        return details['status'] == 429 or details['type'] in ES_RETRYABLE_ERROR_TYPES
+
+    @classmethod
     def is_rejected(cls, ex):
         """Whether ES refused the write only for now (overloaded, or the index is read-only), so it's worth a retry."""
         if isinstance(ex, BulkIndexError):
-            return any(
-                details['status'] == 429 or details['type'] in ES_RETRYABLE_ERROR_TYPES
-                for details in map(cls.get_error_details, ex.errors)
-            )
+            return any(map(cls.is_rejected_error, ex.errors))
         if isinstance(ex, ApiError):
             return ex.status_code == 429 or ex.error in ES_RETRYABLE_ERROR_TYPES
         return isinstance(ex, BatchIndexingError) and ex.rejected
+
+    @staticmethod
+    def bulk(doc, actions, parallel=True, **kwargs):
+        """
+        Sends actions through the ES bulk helpers and, once every chunk has been sent, raises one BulkIndexError
+        with every failed item (in the helpers' {op_type: item} shape). Their own raise_on_error stops at the first
+        failed chunk -- parallel_bulk drops the other chunks' errors, streaming_bulk never sends the later chunks --
+        so a batch spanning chunks would be under-counted. Request-level errors (e.g. a 429 ApiError) still raise.
+        """
+        client = doc._get_connection()  # pylint: disable=protected-access
+        if parallel:
+            if doc.django.queryset_pagination and 'chunk_size' not in kwargs:
+                kwargs['chunk_size'] = doc.django.queryset_pagination  # as django_elasticsearch_dsl's parallel_bulk
+            results = parallel_bulk(client, actions, raise_on_error=False, **kwargs)
+        else:
+            results = streaming_bulk(client, actions, raise_on_error=False, **kwargs)
+        errors = [item for ok, item in results if not ok]
+        if errors:
+            raise BulkIndexError(f'{len(errors)} document(s) failed to index.', errors)
 
     @classmethod
     def describe(cls, ex, limit=MAX_LOGGED_ERRORS):
@@ -382,8 +405,8 @@ class BaseModel(models.Model):
     @staticmethod
     def batch_index_full(single_batch: bool, queryset, document, prefetch, select_related, parallel=True):  # pylint: disable=too-many-arguments
         """
-        Full (re)index, 500 docs a batch. Every batch is attempted; if any failed, raises BatchIndexingError with
-        the counts once they all have (see BatchIndexRun). Returns the run's summary.
+        Full (re)index, 500 docs a batch (single_batch: all in one). Every batch is attempted; if any failed, raises
+        BatchIndexingError with the counts once they all have (see BatchIndexRun). Returns the run's summary.
         """
         if get(settings, 'TEST_MODE', False):
             return None
@@ -395,23 +418,26 @@ class BaseModel(models.Model):
         if select_related:
             queryset = queryset.select_related(*select_related)
 
-        if single_batch:
-            doc.update(queryset.all(), parallel=parallel)
-            return None
-
+        kwargs = {}
+        if doc.django.auto_refresh:  # as django_elasticsearch_dsl's Document.update
+            kwargs['refresh'] = doc.django.auto_refresh
         run = BatchIndexRun(document)
 
         def index_batch(objects):
-            run.retry_rejected(lambda: doc.update(objects, parallel=parallel))
+            run.retry_rejected(lambda: BatchIndexRun.bulk(
+                doc, doc._get_actions(objects, 'index'), parallel, **kwargs))  # pylint: disable=protected-access
 
-        batch_size = 500
-        start = 0
-        while True:
-            batch = list(queryset.order_by('-id')[start:start+batch_size])
-            if not batch:
-                break
-            run.attempt(start, batch, index_batch)
-            start += batch_size
+        if single_batch:
+            run.attempt(0, list(queryset.all()), index_batch)
+        else:
+            batch_size = 500
+            start = 0
+            while True:
+                batch = list(queryset.order_by('-id')[start:start+batch_size])
+                if not batch:
+                    break
+                run.attempt(start, batch, index_batch)
+                start += batch_size
 
         return run.finish()
 
@@ -437,8 +463,7 @@ class BaseModel(models.Model):
 
         def index_batch(ids):
             try:
-                run.retry_rejected(
-                    lambda: doc._bulk(get_actions(ids), parallel=parallel, **kwargs))  # pylint: disable=protected-access
+                run.retry_rejected(lambda: BatchIndexRun.bulk(doc, get_actions(ids), parallel, **kwargs))
             except BulkIndexError as err:
                 if on_bulk_error is None:
                     BaseModel.full_index_missing_docs_or_raise(err, queryset, document)
@@ -463,20 +488,27 @@ class BaseModel(models.Model):
     @staticmethod
     def full_index_missing_docs_or_raise(err, queryset, document, prefetch=None, select_related=None):
         """
-        Handles a BulkIndexError from a single scripted/partial-update batch: re-raises if it
-        contains any non-404 (genuine) failures, otherwise full-indexes just the docs that were
-        missing (404) from ES so they get created with every field.
+        Handles a BulkIndexError from a single scripted/partial-update batch: full-indexes the docs that were
+        missing (404) from ES so they get created with every field, then re-raises for any non-404 (genuine)
+        failures -- with the missing docs among them if their full index failed. If ES rejected some of the batch
+        for now (429 / read-only), the missing docs aren't full-indexed (that would be rejected too) but re-raised.
         """
-        missing_ids = {e['update']['_id'] for e in err.errors if e.get('update', {}).get('status') == 404}
+        missing = [e for e in err.errors if e.get('update', {}).get('status') == 404]
         real_errors = [e for e in err.errors if e.get('update', {}).get('status') != 404]
+        if missing and not any(map(BatchIndexRun.is_rejected_error, real_errors)):
+            try:
+                # Docs not yet in ES -- full index so they appear with all fields
+                BaseModel.batch_index_full(
+                    single_batch=False, queryset=queryset.filter(id__in={e['update']['_id'] for e in missing}),
+                    document=document, prefetch=prefetch or [], select_related=select_related or []
+                )
+                missing = []
+            except BatchIndexingError:
+                if not real_errors:
+                    raise
         if real_errors:
-            raise BulkIndexError(f'{len(real_errors)} document(s) failed to index.', real_errors) from err
-        if missing_ids:
-            # Docs not yet in ES -- full index so they appear with all fields
-            BaseModel.batch_index_full(
-                single_batch=False, queryset=queryset.filter(id__in=missing_ids),
-                document=document, prefetch=prefetch or [], select_related=select_related or []
-            )
+            errors = real_errors + missing
+            raise BulkIndexError(f'{len(errors)} document(s) failed to index.', errors) from err
 
     @staticmethod
     def batch_index_partial(queryset, document, single_batch, partial_doc, parallel=True):

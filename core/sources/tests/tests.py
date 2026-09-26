@@ -1,4 +1,5 @@
 import importlib
+import json
 from types import SimpleNamespace
 
 import factory
@@ -2864,22 +2865,25 @@ class TasksTest(OCLTestCase):
     def test_index_source_concepts_append_on_read_only_index_fails_without_full_reindex_fallback(self, sleep_mock):
         # A read-only index (e.g. ES disk flood-stage): the append must fail after backing off, without falling
         # back to a full reindex that ES would reject the same way.
-        from elasticsearch.helpers import BulkIndexError
+        from elasticsearch import Elasticsearch
         source = OrganizationSourceFactory()
         ConceptFactory(parent=source)
         ConceptFactory(parent=source)
         concept_ids = list(source.concepts.values_list('id', flat=True))
         task = Task.new(queue='indexing', user=source.created_by, name='index_source_concepts')
-        read_only = BulkIndexError(f'{len(concept_ids)} document(s) failed to index.', [
-            {'update': {'_index': 'concepts', '_id': str(concept_id), 'status': 429, 'error': {
-                'type': 'cluster_block_exception',
-                'reason': 'index [concepts] blocked by: [TOO_MANY_REQUESTS/12/disk usage exceeded flood-stage '
-                          'watermark, index has read-only-allow-delete block];'}}}
-            for concept_id in concept_ids
-        ])
+
+        def read_only(operations=None, **kwargs):  # pylint: disable=unused-argument
+            headers = [json.loads(line) for line in operations[::2]]  # each scripted update has a body line
+            return Mock(body={'errors': True, 'items': [
+                {'update': {'_index': 'concepts', '_id': str(header['update']['_id']), 'status': 429, 'error': {
+                    'type': 'cluster_block_exception',
+                    'reason': 'index [concepts] blocked by: [TOO_MANY_REQUESTS/12/disk usage exceeded flood-stage '
+                              'watermark, index has read-only-allow-delete block];'}}}
+                for header in headers
+            ]})
 
         with override_settings(TEST_MODE=False), \
-                patch.object(ConceptDocument, '_bulk', side_effect=read_only) as bulk_mock, \
+                patch.object(Elasticsearch, 'bulk', side_effect=read_only) as bulk_mock, \
                 patch.object(BaseModel, 'batch_index_full') as batch_index_full_mock, \
                 patch('core.common.tasks.current_task', Mock(request=Mock(id=task.id))), \
                 patch('core.common.tasks.logger') as task_logger_mock:

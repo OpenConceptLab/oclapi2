@@ -2253,10 +2253,10 @@ class ExpansionTest(OCLTestCase):
         expansion.mappings.set([mapping])
 
         with override_settings(TEST_MODE=False):
-            with patch.object(ConceptDocument, '_bulk') as concept_bulk_mock:
+            with patch('core.common.models.parallel_bulk', return_value=[]) as concept_bulk_mock:
                 expansion.batch_index(expansion.concepts, ConceptDocument)
                 self.assertEqual(concept_bulk_mock.call_count, 1)
-                actions = list(concept_bulk_mock.call_args[0][0])
+                actions = list(concept_bulk_mock.call_args[0][1])
                 self.assertEqual(len(actions), 2)
                 for action in actions:
                     self.assertEqual(action['_op_type'], 'update')
@@ -2275,10 +2275,10 @@ class ExpansionTest(OCLTestCase):
                     self.assertNotIn('upsert', action)
                     self.assertNotIn('scripted_upsert', action)
 
-            with patch.object(MappingDocument, '_bulk') as mapping_bulk_mock:
+            with patch('core.common.models.parallel_bulk', return_value=[]) as mapping_bulk_mock:
                 expansion.batch_index(expansion.mappings, MappingDocument)
                 self.assertEqual(mapping_bulk_mock.call_count, 1)
-                actions = list(mapping_bulk_mock.call_args[0][0])
+                actions = list(mapping_bulk_mock.call_args[0][1])
                 self.assertEqual(len(actions), 1)
                 self.assertEqual(actions[0]['_id'], mapping.id)
                 self.assertEqual(actions[0]['script']['params']['expansion'], [expansion.mnemonic])
@@ -2287,7 +2287,7 @@ class ExpansionTest(OCLTestCase):
         collection = OrganizationCollectionFactory()
         expansion = ExpansionFactory(collection_version=collection)
 
-        with patch.object(ConceptDocument, '_bulk') as bulk_mock:
+        with patch('core.common.models.parallel_bulk') as bulk_mock:
             expansion.batch_index(Concept.objects.none(), ConceptDocument)
             bulk_mock.assert_not_called()
 
