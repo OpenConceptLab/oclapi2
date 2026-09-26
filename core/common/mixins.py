@@ -23,7 +23,7 @@ from rest_framework.response import Response
 from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY, INCLUDE_RETIRED_PARAM, \
     SEARCH_STATS_ONLY, INCLUDE_SEARCH_STATS, UPDATED_BY_USERNAME_PARAM, CHECKSUM_STANDARD_HEADER, \
-    CHECKSUM_SMART_HEADER, SEARCH_LATEST_REPO_VERSION, SAME_STANDARD_CHECKSUM_ERROR, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
+    CHECKSUM_SMART_HEADER, SEARCH_LATEST_REPO_VERSION, SAME_STANDARD_CHECKSUM_ERROR, ACCESS_TYPE_VIEW
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion, CanEditConceptDictionary
 from core.users.constants import LIST_UNPAGINATED_PERMISSION
@@ -608,8 +608,8 @@ class SourceContainerMixin:
         collections = self.collection_set.filter(is_active=True)
 
         if not private:
-            sources = sources.filter(public_access__in=[ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT])
-            collections = collections.filter(public_access__in=[ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT])
+            sources = sources.filter(public_access=ACCESS_TYPE_VIEW)
+            collections = collections.filter(public_access=ACCESS_TYPE_VIEW)
 
         source_uris = sources.values_list('uri', flat=True)
         collection_uris = collections.values_list('uri', flat=True)

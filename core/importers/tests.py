@@ -1587,6 +1587,19 @@ class ResourceImporterModelsTest(OCLTestCase):
         result = importer.run()
         self.assertEqual(result, PERMISSION_DENIED)
 
+    def test_importers_store_public_edit_as_view(self):
+        admin = UserProfile.objects.get(username='ocladmin')
+
+        OrganizationImporter({'id': 'EditOrg', 'name': 'Edit Org', 'public_access': 'Edit'}, admin).run()
+        SourceImporter(
+            {'id': 'edit-src', 'name': 'Edit Source', 'owner_type': 'Organization', 'owner': 'EditOrg',
+             'public_access': 'Edit'},
+            admin
+        ).run()
+
+        self.assertEqual(Organization.objects.get(mnemonic='EditOrg').public_access, 'View')
+        self.assertEqual(Source.objects.get(mnemonic='edit-src').public_access, 'View')
+
     def test_source_importer_delete_not_found(self):
         importer = SourceImporter(
             {'id': 'no-such-source', 'owner_type': 'Organization', 'owner': 'NoSuchOrg'}, UserProfileFactory()

@@ -2,7 +2,8 @@ from rest_framework.permissions import BasePermission
 
 from core.capabilities.constants import MAPPER_PROJECTS_CAPABILITY_ID
 from core.capabilities.exceptions import MapProjectCapacityExceeded
-from core.common.constants import ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW
+from core.common.constants import ACCESS_TYPE_VIEW
+from core.common.utils import normalize_public_access
 from core.users.constants import (
     MAPPER_CUSTOM_ALGORITHMS_PERMISSION, MAPPER_ORG_PROJECTS_PERMISSION, MAPPER_USE_PERMISSION,
 )
@@ -55,7 +56,7 @@ class CanViewConceptDictionary(HasPrivateAccess):
     """
 
     def has_object_permission(self, request, view, obj):
-        if obj.public_access in [ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW]:
+        if normalize_public_access(obj.public_access) == ACCESS_TYPE_VIEW:
             return True
 
         return super().has_object_permission(request, view, obj)
@@ -63,14 +64,8 @@ class CanViewConceptDictionary(HasPrivateAccess):
 
 class CanEditConceptDictionary(HasPrivateAccess):
     """
-    The request is authenticated as a user, and the user can edit this source
+    The user is staff, the repo's owner, or a member of the owning organization
     """
-
-    def has_object_permission(self, request, view, obj):
-        if request.user.is_authenticated and ACCESS_TYPE_EDIT == obj.public_access:
-            return True
-
-        return super().has_object_permission(request, view, obj)
 
 
 class HasAccessToVersionedObject(BasePermission):
@@ -100,7 +95,7 @@ class CanViewConceptDictionaryVersion(HasAccessToVersionedObject):
     """
 
     def has_object_permission(self, request, view, obj):
-        if obj.public_access in [ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW]:
+        if normalize_public_access(obj.public_access) == ACCESS_TYPE_VIEW:
             return True
         return super().has_object_permission(request, view, obj)
 

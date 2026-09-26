@@ -24,7 +24,8 @@ from core.common.tasks import update_collection_active_concepts_count, update_co
     delete_s3_objects
 from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version, \
     to_parent_uri, is_canonical_uri, get_export_service, from_string_to_date, get_truthy_values, \
-    canonical_url_to_url_and_version, get_current_authorized_user, encode_string, decode_string
+    canonical_url_to_url_and_version, get_current_authorized_user, encode_string, decode_string, \
+    normalize_public_access
 from core.common.utils import to_owner_uri
 from core.common.constants import VERSION_UNCOPYABLE_EXTRAS
 from core.settings import DEFAULT_LOCALE
@@ -32,7 +33,7 @@ from . import ERRBIT_LOGGER
 from .checksums import ChecksumModel
 from .constants import (
     ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX,
-    ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT, SUPER_ADMIN_USER_ID,
+    ACCESS_TYPE_VIEW, SUPER_ADMIN_USER_ID,
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
     CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, OPENMRS_VALIDATION_SCHEMA, VALIDATION_SCHEMAS,
     DEFAULT_VALIDATION_SCHEMA, ES_REQUEST_TIMEOUT, UPDATED_BY_USERNAME_PARAM)
@@ -61,6 +62,9 @@ class BaseModel(models.Model):
             models.Index(fields=['-created_at']),
             models.Index(fields=['is_active']),
         ]
+
+    # what a retired 'Edit' is stored as
+    public_access_for_retired_edit = ACCESS_TYPE_VIEW
 
     id = models.BigAutoField(primary_key=True)
     public_access = models.CharField(
@@ -135,17 +139,22 @@ class BaseModel(models.Model):
             encode_string(value, safe='+%'), encode_string(value, safe='% +'),
             decode_string(value), decode_string(value, False)
         ]
+    def clean_fields(self, exclude=None):
+        self.public_access = normalize_public_access(self.public_access, self.public_access_for_retired_edit)
+        super().clean_fields(exclude=exclude)
+
+    def save(self, *args, force_insert=False, force_update=False, using=None, update_fields=None):
+        self.public_access = normalize_public_access(self.public_access, self.public_access_for_retired_edit)
+        super().save(
+            *args, force_insert=force_insert, force_update=force_update, using=using, update_fields=update_fields)
+
     @property
     def is_versioned(self):
         return False
 
     @property
     def public_can_view(self):
-        return self.public_access.lower() in [ACCESS_TYPE_EDIT.lower(), ACCESS_TYPE_VIEW.lower()]
-
-    @property
-    def public_can_edit(self):
-        return self.public_access.lower() == ACCESS_TYPE_EDIT.lower()
+        return normalize_public_access(self.public_access).lower() == ACCESS_TYPE_VIEW.lower()
 
     @property
     def resource_type(self):
@@ -849,9 +858,6 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         return self.user_id == user.id
 
     def has_edit_access(self, user):
-        if self.public_can_edit or user.is_staff:
-            return True
-
         return self.has_parent_edit_access(user)
 
     def has_view_access(self, user):

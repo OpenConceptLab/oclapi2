@@ -4,7 +4,7 @@ from mock import patch
 from rest_framework.authtoken.models import Token
 from rest_framework.exceptions import ErrorDetail
 
-from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
+from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT
 from core.common.tests import OCLAPITestCase
 from core.orgs.documents import OrganizationDocument
 from core.orgs.tests.factories import OrganizationFactory
@@ -227,7 +227,7 @@ class UserOrganizationListViewTest(OCLAPITestCase):
         self.user = UserProfileFactory(username='user')
         self.org_private = OrganizationFactory(mnemonic='private-org', public_access=ACCESS_TYPE_NONE)
         self.org_public_view = OrganizationFactory(mnemonic='public-view-org', public_access=ACCESS_TYPE_VIEW)
-        self.org_public_edit = OrganizationFactory(mnemonic='public-edit-org', public_access=ACCESS_TYPE_EDIT)
+        self.org_public_edit = OrganizationFactory(mnemonic='public-edit-org', public_access=RETIRED_ACCESS_TYPE_EDIT)
         self.user_org_public = OrganizationFactory(mnemonic='user-public-view-org', public_access=ACCESS_TYPE_VIEW)
         self.user_org_private = OrganizationFactory(mnemonic='user-private-org', public_access=ACCESS_TYPE_NONE)
         self.user.organizations.set([self.user_org_private, self.user_org_public])

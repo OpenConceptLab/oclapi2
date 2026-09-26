@@ -1685,7 +1685,7 @@ class ConceptHeadOnlyHardDeleteTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertFalse(Concept.objects.filter(id=concept.id).exists())
 
-    def test_authenticated_user_can_hard_delete_from_public_edit_source(self):
+    def test_outsider_cannot_hard_delete_from_public_source(self):
         source = OrganizationSourceFactory()
         user = UserProfileFactory()
         concept = ConceptFactory(parent=source)
@@ -1695,13 +1695,13 @@ class ConceptHeadOnlyHardDeleteTest(OCLAPITestCase):
             HTTP_AUTHORIZATION='Token ' + user.get_token(),
         )
 
-        self.assertEqual(response.status_code, 204)
-        self.assertFalse(Concept.objects.filter(id=concept.id).exists())
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Concept.objects.filter(id=concept.id).exists())
 
     def test_same_mnemonic_in_versioned_different_source_does_not_block_delete(self):
         source = OrganizationSourceFactory()
         other_source = OrganizationSourceFactory()
-        user = UserProfileFactory()
+        user = UserProfileFactory(organizations=[source.organization])
         concept = ConceptFactory(parent=source, mnemonic='shared-id')
         other_concept = ConceptFactory(parent=other_source, mnemonic='shared-id')
         self._create_source_version(other_source, other_concept, released=True)
@@ -1717,7 +1717,7 @@ class ConceptHeadOnlyHardDeleteTest(OCLAPITestCase):
 
     def test_hard_delete_removes_all_head_only_concept_versions(self):
         source = OrganizationSourceFactory()
-        user = UserProfileFactory()
+        user = UserProfileFactory(organizations=[source.organization])
         concept = ConceptFactory(
             parent=source,
             names=[ConceptNameFactory.build(name='Edited HEAD-only concept')],
@@ -2039,7 +2039,7 @@ class ConceptHeadOnlyHardDeleteTest(OCLAPITestCase):
 
     def test_editor_cannot_hard_delete_individual_concept_version(self):
         source = OrganizationSourceFactory()
-        user = UserProfileFactory()
+        user = UserProfileFactory(organizations=[source.organization])
         concept = ConceptFactory(parent=source)
         concept_version = concept.get_latest_version()
 
@@ -2053,7 +2053,7 @@ class ConceptHeadOnlyHardDeleteTest(OCLAPITestCase):
 
     def test_regular_delete_still_retires_for_editor(self):
         source = OrganizationSourceFactory()
-        user = UserProfileFactory()
+        user = UserProfileFactory(organizations=[source.organization])
         concept = ConceptFactory(parent=source)
 
         response = self.client.delete(
@@ -4146,6 +4146,7 @@ class ConceptCloneViewTest(OCLAPITestCase):
 
     @patch('core.concepts.views.Bundle.clone')
     def test_post_success(self, bundle_clone_mock):
+        self.clone_to_source.organization.members.add(self.user)
         parameters = {'mapTypes': 'Q-AND-A,CONCEPT-SET'}
         bundle_clone_mock.return_value = Bundle(
             root=self.concept, repo_version=self.concept.parent, params=parameters, verbose=False

@@ -136,6 +136,8 @@ class ParentConceptAccessTest(CrossRepoAccessBaseTest):
 
     def test_existing_private_parent_is_kept_on_update(self):
         child = self.persist_child('keptchild', [self.private_concept.uri])
+        # can edit the child's source, but can't view the private parent
+        self.public_source.organization.members.add(self.outsider)
 
         response = self.client.put(
             child.uri,

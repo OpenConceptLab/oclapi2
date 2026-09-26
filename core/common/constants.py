@@ -13,11 +13,11 @@ NAMESPACE_INVALID_CHAR_REGEX = re.compile(r'[^' + NAMESPACE_CHARS + r']')
 CONSECUTIVE_HYPHENS_REGEX = re.compile(r'-{2,}')
 
 ACCESS_TYPE_VIEW = 'View'
-ACCESS_TYPE_EDIT = 'Edit'
+# Retired: no longer stored, incoming 'Edit' is saved as 'View'.
+RETIRED_ACCESS_TYPE_EDIT = 'Edit'
 ACCESS_TYPE_NONE = 'None'
 DEFAULT_ACCESS_TYPE = ACCESS_TYPE_VIEW
 ACCESS_TYPE_CHOICES = ((ACCESS_TYPE_VIEW, 'View'),
-                       (ACCESS_TYPE_EDIT, 'Edit'),
                        (ACCESS_TYPE_NONE, 'None'))
 SUPER_ADMIN_USER_ID = 1
 OCL_ORG_ID = 1

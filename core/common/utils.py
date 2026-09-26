@@ -29,7 +29,7 @@ from requests.auth import HTTPBasicAuth
 from rest_framework.utils import encoders
 
 from core.common.constants import UPDATED_SINCE_PARAM, BULK_IMPORT_QUEUES_COUNT, CURRENT_USER, REQUEST_URL, \
-    TEMP_PREFIX, HEAD, EXPORT_TIME_EXTRA
+    TEMP_PREFIX, HEAD, EXPORT_TIME_EXTRA, RETIRED_ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW
 from core.settings import EXPORT_SERVICE
 
 
@@ -963,6 +963,13 @@ def generic_sort(_list):
 
 def get_falsy_values():
     return ['false', False, 'False', 0, '0', 'None', 'null']
+
+
+def normalize_public_access(value, retired_edit_as=ACCESS_TYPE_VIEW):
+    # 'Edit' is retired, so it is stored as retired_edit_as ('View' unless the model says otherwise)
+    if isinstance(value, str) and value.lower() == RETIRED_ACCESS_TYPE_EDIT.lower():
+        return retired_edit_as
+    return value
 
 
 def get_truthy_values():

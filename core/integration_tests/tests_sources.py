@@ -2187,7 +2187,7 @@ class SourceVersionConceptsCacheViewTest(OCLAPITestCase):
 
     @patch('core.sources.models.Source.clear_concepts_cache')
     def test_delete_403_for_non_staff_user(self, clear_concepts_cache_mock):
-        user = UserProfileFactory(username='non-staff')
+        user = UserProfileFactory(username='non-staff', organizations=[self.source.organization])
 
         response = self.client.delete(
             self.source_version.url + 'concepts/cache/',
@@ -2234,7 +2234,7 @@ class SourceVersionMappingsCacheViewTest(OCLAPITestCase):
 
     @patch('core.sources.models.Source.clear_mappings_cache')
     def test_delete_403_for_non_staff_user(self, clear_mappings_cache_mock):
-        user = UserProfileFactory(username='non-staff')
+        user = UserProfileFactory(username='non-staff', organizations=[self.source.organization])
 
         response = self.client.delete(
             self.source_version.url + 'mappings/cache/',
@@ -2515,6 +2515,7 @@ class SourceConceptsCloneViewTest(OCLAPITestCase):
 
     @patch('core.bundles.models.Bundle.clone')
     def test_post_success(self, bundle_clone_mock):
+        self.clone_to_source.organization.members.add(self.user)
         parameters = {'mapTypes': 'Q-AND-A,CONCEPT-SET'}
         bundle_clone_mock.return_value = Bundle(
             root=self.concept, repo_version=self.concept.parent, params=parameters, verbose=False

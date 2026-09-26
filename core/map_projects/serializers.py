@@ -5,6 +5,7 @@ from rest_framework import serializers
 from rest_framework.fields import CharField, DateTimeField, IntegerField, FileField
 
 from core.common.constants import ACCESS_TYPE_NONE, INCLUDE_SUMMARY, INCLUDE_LOGS
+from core.common.serializers import PublicAccessField
 from core.common.utils import get_truthy_values
 from core.map_projects.models import MapProject, AutomatchRun
 
@@ -15,6 +16,7 @@ class MapProjectCreateUpdateSerializer(serializers.ModelSerializer):
     user_id = IntegerField(write_only=True, required=False)
     organization_id = IntegerField(write_only=True, required=False)
     input_file_name = CharField(required=False)
+    public_access = PublicAccessField(required=False, retired_edit_as=ACCESS_TYPE_NONE)
 
     class Meta:
         model = MapProject

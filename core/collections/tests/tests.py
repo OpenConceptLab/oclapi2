@@ -1,4 +1,7 @@
+import importlib
+
 from celery_once import AlreadyQueued
+from django.apps import apps
 from django.core.exceptions import ValidationError
 from django.http import QueryDict
 from django.test import override_settings
@@ -20,7 +23,8 @@ from core.collections.serializers import CollectionVersionListSerializer, Collec
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory, UserCollectionFactory
 from core.collections.utils import is_mapping, is_concept, is_version_specified, \
     get_concept_by_expression
-from core.common.constants import OPENMRS_VALIDATION_SCHEMA, ACCESS_TYPE_NONE
+from core.common.constants import OPENMRS_VALIDATION_SCHEMA, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, \
+    RETIRED_ACCESS_TYPE_EDIT
 from core.common.tasks import add_references, seed_children_to_new_version
 from core.common.tasks import update_collection_active_concepts_count
 from core.common.tasks import update_collection_active_mappings_count
@@ -4716,3 +4720,24 @@ class ExpansionMappingsIndexViewTest(OCLAPITestCase):
         )
         index_expansion_mappings_task_mock.apply_async.assert_called_once_with(
             (expansion.id,), task_id=ANY, queue='indexing')
+
+
+class RetirePublicEditMigrationTest(OCLTestCase):
+    def test_migration_moves_public_edit_collections_and_expansions_to_view(self):
+        migration = importlib.import_module('core.collections.migrations.0071_retire_public_edit_access')
+        collection = OrganizationCollectionFactory()
+        collection_version = OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v1')
+        expansion = ExpansionFactory(collection_version=collection_version)
+        private = OrganizationCollectionFactory(public_access=ACCESS_TYPE_NONE)
+        Collection.objects.filter(id__in=[collection.id, collection_version.id]).update(
+            public_access=RETIRED_ACCESS_TYPE_EDIT)
+        Expansion.objects.filter(id=expansion.id).update(public_access=RETIRED_ACCESS_TYPE_EDIT)
+
+        migration.retire_public_edit_access(apps, None)
+
+        for instance in [collection, collection_version, expansion]:
+            instance.refresh_from_db()
+            self.assertEqual(instance.public_access, ACCESS_TYPE_VIEW)
+        private.refresh_from_db()
+        self.assertEqual(private.public_access, ACCESS_TYPE_NONE)

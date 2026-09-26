@@ -2,7 +2,7 @@ import factory
 from factory import Sequence, SubFactory
 
 from core.collections.models import Collection, CollectionReference, Expansion
-from core.common.constants import ACCESS_TYPE_EDIT, HEAD
+from core.common.constants import ACCESS_TYPE_VIEW, HEAD
 from core.orgs.tests.factories import OrganizationFactory
 from core.users.tests.factories import UserProfileFactory
 
@@ -14,7 +14,7 @@ class OrganizationCollectionFactory(factory.django.DjangoModelFactory):
     mnemonic = Sequence("collection{}".format)  # pylint: disable=consider-using-f-string
     name = Sequence("collection{}".format)  # pylint: disable=consider-using-f-string
     collection_type = "Dictionary"
-    public_access = ACCESS_TYPE_EDIT
+    public_access = ACCESS_TYPE_VIEW
     default_locale = "en"
     supported_locales = ["en"]
     website = 'www.collection.com'
@@ -30,7 +30,7 @@ class UserCollectionFactory(factory.django.DjangoModelFactory):
     mnemonic = Sequence("collection{}".format)  # pylint: disable=consider-using-f-string
     name = Sequence("collection{}".format)  # pylint: disable=consider-using-f-string
     collection_type = "Dictionary"
-    public_access = ACCESS_TYPE_EDIT
+    public_access = ACCESS_TYPE_VIEW
     default_locale = "en"
     supported_locales = ["en"]
     website = 'www.collection.com'

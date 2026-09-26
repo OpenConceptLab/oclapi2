@@ -3,17 +3,17 @@ from datetime import datetime
 
 from django.core.validators import RegexValidator
 from pydash import get
-from rest_framework.fields import CharField, ChoiceField, ListField, IntegerField, DateTimeField, JSONField, \
+from rest_framework.fields import CharField, ListField, IntegerField, DateTimeField, JSONField, \
     BooleanField, SerializerMethodField
 from rest_framework.relations import PrimaryKeyRelatedField
 from rest_framework.serializers import ModelSerializer, Serializer, ValidationError
 
 from core.client_configs.serializers import ClientConfigSerializer
 from core.collections.models import Collection, CollectionReference, Expansion
-from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, ACCESS_TYPE_CHOICES, INCLUDE_SUMMARY, \
+from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, INCLUDE_SUMMARY, \
     INCLUDE_CLIENT_CONFIGS, INVALID_EXPANSION_URL, INCLUDE_STATES, INCLUDE_TASKS, INCLUDE_RESOLVED_REPO_VERSIONS, \
     INCLUDE_EXTERNAL_EXPORTS, INCLUDE_LATEST_RELEASED_VERSION
-from core.common.serializers import AbstractRepoResourcesSerializer, AbstractResourceSerializer
+from core.common.serializers import AbstractRepoResourcesSerializer, AbstractResourceSerializer, PublicAccessField
 from core.common.utils import get_truthy_values
 from core.orgs.models import Organization
 from core.settings import DEFAULT_LOCALE
@@ -155,6 +155,7 @@ class CollectionVersionListSerializer(ModelSerializer):
 
 class CollectionCreateOrUpdateSerializer(ModelSerializer):
     canonical_url = CharField(allow_blank=True, allow_null=True, required=False)
+    public_access = PublicAccessField(required=False)
 
     class Meta:
         model = Collection
@@ -227,7 +228,7 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
     text = CharField(required=False, allow_blank=True)
     collection_type = CharField(required=False)
     custom_validation_schema = CharField(required=False, allow_blank=True, allow_null=True)
-    public_access = ChoiceField(required=False, choices=ACCESS_TYPE_CHOICES)
+    public_access = PublicAccessField(required=False)
     default_locale = CharField(required=False, allow_blank=True)
     supported_locales = ListField(required=False, allow_empty=True)
     website = CharField(required=False, allow_blank=True)

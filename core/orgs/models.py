@@ -4,7 +4,7 @@ from django.db import models, transaction
 
 from core.client_configs.models import ClientConfig
 from core.common.checksums import ChecksumModel
-from core.common.constants import NAMESPACE_REGEX, ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT
+from core.common.constants import NAMESPACE_REGEX, ACCESS_TYPE_VIEW
 from core.common.mixins import SourceContainerMixin
 from core.common.models import BaseResourceModel
 from core.orgs.constants import ORG_OBJECT_TYPE
@@ -77,7 +77,7 @@ class Organization(BaseResourceModel, SourceContainerMixin, ChecksumModel):
 
     @classmethod
     def get_public(cls):
-        return cls.objects.filter(public_access__in=[ACCESS_TYPE_VIEW, ACCESS_TYPE_EDIT])
+        return cls.objects.filter(public_access=ACCESS_TYPE_VIEW)
 
     def save(self, *args, force_insert=False, force_update=False, using=None, update_fields=None):
         """
