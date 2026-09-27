@@ -17,7 +17,8 @@ from ..common.serializers import AbstractResourceSerializer
 from ..common.utils import get_truthy_values
 
 TRUTHY = get_truthy_values()
-PRIVATE_USER_FIELDS = ('email', 'last_login', 'is_staff', 'is_superuser')
+PRIVATE_USER_FIELDS = (
+    'email', 'last_login', 'is_staff', 'is_superuser', 'auth_groups', 'permissions', 'capabilities')
 
 
 def can_view_private_user_fields(request, user):
@@ -29,7 +30,7 @@ def can_view_private_user_fields(request, user):
 
 
 class PrivateUserFieldsMixin:
-    """Email and account flags are only for the user themselves and staff."""
+    """Email, account flags and plan fields are only for the user themselves and staff."""
     def to_representation(self, instance):
         data = super().to_representation(instance)
         if not can_view_private_user_fields(get(self, 'context.request'), instance):
@@ -250,13 +251,17 @@ class UserDetailSerializer(PrivateUserFieldsMixin, AbstractResourceSerializer):
 
         return None
 
+    def should_include_plan(self, obj):
+        """Plan data is looked up only when asked for and visible to the requester; the mixin drops it otherwise."""
+        return self.include_capabilities and can_view_private_user_fields(get(self, 'context.request'), obj)
+
     def get_permissions(self, obj):
-        if self.include_capabilities:
+        if self.should_include_plan(obj):
             return sorted(obj.get_all_permissions())
         return None
 
     def get_capabilities(self, obj):
-        if not self.include_capabilities:
+        if not self.should_include_plan(obj):
             return None
         from core.capabilities.serializers import CapabilitySerializer
         return CapabilitySerializer(obj.capabilities, many=True, context={'user': obj}).data

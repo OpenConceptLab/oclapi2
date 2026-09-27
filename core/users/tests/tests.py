@@ -744,6 +744,45 @@ class UserViewsAPITest(OCLAPITestCase):
             for field in private_fields:
                 self.assertIn(field, response.data)
 
+    def test_user_detail_plan_fields_only_for_self_and_staff(self):
+        user = UserProfileFactory(username='planfieldsuser')
+        user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
+        other_user = UserProfileFactory(username='planfieldsother')
+        plan_fields = ['auth_groups', 'permissions', 'capabilities']
+        url = f'/users/{user.username}/?includeCapabilities=true&includeAuthGroups=true'
+
+        response = self.client.get(url, HTTP_AUTHORIZATION='Token ' + other_user.get_token())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['username'], user.username)
+        for field in plan_fields:
+            self.assertNotIn(field, response.data)
+
+        for token in [user.get_token(), self.admin_token]:
+            response = self.client.get(url, HTTP_AUTHORIZATION='Token ' + token)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data['auth_groups'], [PREVIEW_GROUP_NAME])
+            self.assertIn(MAPPER_USE_PERMISSION, response.data['permissions'])
+            self.assertIn(
+                {'name': 'mapper.match_operations', 'limit': 100, 'used': 0}, response.data['capabilities'])
+
+    @patch('core.users.models.UserProfile.get_capability_usage', return_value=0)
+    def test_user_detail_does_not_compute_capabilities_for_other_users(self, get_capability_usage_mock):
+        user = UserProfileFactory(username='planusageuser')
+        other_user = UserProfileFactory(username='planusageother')
+        url = f'/users/{user.username}/?includeCapabilities=true'
+
+        response = self.client.get(url, HTTP_AUTHORIZATION='Token ' + other_user.get_token())
+
+        self.assertEqual(response.status_code, 200)
+        get_capability_usage_mock.assert_not_called()
+
+        response = self.client.get(url, HTTP_AUTHORIZATION='Token ' + user.get_token())
+
+        self.assertEqual(response.status_code, 200)
+        get_capability_usage_mock.assert_called()
+
     def test_user_detail_get_object_anonymous_self_raises_404(self):
         from django.contrib.auth.models import AnonymousUser
         from core.users.views import UserDetailView
