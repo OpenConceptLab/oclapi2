@@ -1846,6 +1846,44 @@ class BaseModelTest(OCLTestCase):
         batch_index_full_mock.assert_called_once()
         self.assertEqual(context.exception.summary, {'batches': 1, 'failed_batches': 1, 'docs': 2, 'failed_docs': 2})
 
+    @override_settings(TEST_MODE=False)
+    def test_batch_index_source_version_append_keeps_rejection_from_missing_docs_full_index(self):
+        # A 400 next to missing docs whose full index ES then rejected: the run still counts as rejected, so the task
+        # doesn't fall back to a full reindex against an index that refuses writes.
+        queryset, _, document = self.get_append_mocks([10, 11, 12])
+        results = [(False, {'update': {'_id': _id, 'status': 404}}) for _id in ['11', '12']] + self.get_bulk_failures(
+            [10], status=400, error_type='mapper_parsing_exception', reason='failed to parse')
+
+        with patch('core.common.models.parallel_bulk', return_value=results), \
+                patch.object(BaseModel, 'batch_index_full', side_effect=BatchIndexingError(
+                    'ConceptDocument indexing failed', {'batches': 1, 'failed_batches': 1, 'docs': 2, 'failed_docs': 2},
+                    rejected=True)), \
+                patch('core.common.models.ERRBIT_LOGGER'), patch('core.common.models.time.sleep'):
+            with self.assertRaises(BatchIndexingError) as context:
+                BaseModel.batch_index_source_version_append(queryset, document, 'v1', True, False)
+
+        self.assertTrue(context.exception.rejected)
+        self.assertEqual(context.exception.summary, {'batches': 1, 'failed_batches': 1, 'docs': 3, 'failed_docs': 3})
+
+    @override_settings(TEST_MODE=False)
+    def test_batch_index_source_version_append_counts_missing_docs_recovered_by_full_index(self):
+        # A 400 next to two missing docs, and the full index recovers one of them: 2 docs failed, not 3.
+        queryset, _, document = self.get_append_mocks([10, 11, 12])
+        results = [(False, {'update': {'_id': _id, 'status': 404}}) for _id in ['11', '12']] + self.get_bulk_failures(
+            [10], status=400, error_type='mapper_parsing_exception', reason='failed to parse')
+
+        with patch('core.common.models.parallel_bulk', return_value=results), \
+                patch.object(BaseModel, 'batch_index_full', side_effect=BatchIndexingError(
+                    'ConceptDocument indexing failed',
+                    {'batches': 1, 'failed_batches': 1, 'docs': 2, 'failed_docs': 1})), \
+                patch('core.common.models.ERRBIT_LOGGER') as errbit_mock, patch('core.common.models.time.sleep'):
+            with self.assertRaises(BatchIndexingError) as context:
+                BaseModel.batch_index_source_version_append(queryset, document, 'v1', True, False)
+
+        self.assertFalse(context.exception.rejected)
+        self.assertEqual(context.exception.summary, {'batches': 1, 'failed_batches': 1, 'docs': 3, 'failed_docs': 2})
+        self.assertIn('mapper_parsing_exception', str(errbit_mock.log.call_args[0][0]))  # the real error's reason
+
     @override_settings(TEST_MODE=False, ES_BULK_RETRY_MAX_ATTEMPTS=2)
     def test_batch_index_source_version_append_leaves_missing_docs_failed_while_es_rejects(self):
         # A 404 next to a 429: the missing doc's full index would be rejected too (and restart the backoff), so it

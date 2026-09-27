@@ -490,8 +490,9 @@ class BaseModel(models.Model):
         """
         Handles a BulkIndexError from a single scripted/partial-update batch: full-indexes the docs that were
         missing (404) from ES so they get created with every field, then re-raises for any non-404 (genuine)
-        failures -- with the missing docs among them if their full index failed. If ES rejected some of the batch
-        for now (429 / read-only), the missing docs aren't full-indexed (that would be rejected too) but re-raised.
+        failures. If that full index failed too, raises one BatchIndexingError counting the genuine failures plus
+        the missing docs still failing, and keeping whether ES rejected it. If ES rejected some of the batch for now
+        (429 / read-only), the missing docs aren't full-indexed (that would be rejected too) but re-raised.
         """
         missing = [e for e in err.errors if e.get('update', {}).get('status') == 404]
         real_errors = [e for e in err.errors if e.get('update', {}).get('status') != 404]
@@ -503,9 +504,15 @@ class BaseModel(models.Model):
                     document=document, prefetch=prefetch or [], select_related=select_related or []
                 )
                 missing = []
-            except BatchIndexingError:
+            except BatchIndexingError as ex:
                 if not real_errors:
                     raise
+                real_error = BulkIndexError(f'{len(real_errors)} document(s) failed to index.', real_errors)
+                raise BatchIndexingError(
+                    f'{BatchIndexRun.describe(real_error)}; full-indexing the {len(missing)} missing document(s) '
+                    f'failed too: {ex}',
+                    {'failed_docs': len(real_errors) + get(ex, 'summary.failed_docs', len(missing))}, ex.rejected
+                ) from err
         if real_errors:
             errors = real_errors + missing
             raise BulkIndexError(f'{len(errors)} document(s) failed to index.', errors) from err
