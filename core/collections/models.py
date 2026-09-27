@@ -1314,7 +1314,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         Falls back to full re-index for any docs not yet present in ES.
         """
         if get(settings, 'TEST_MODE', False):
-            return
+            return None
 
         collection_fields = self._get_resources_index_collection_fields()
         from core.common.models import BaseModel  # avoid circular import at module level
@@ -1333,7 +1333,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                     },
                 }
 
-        BaseModel.batch_index_partial_by_ids(
+        return BaseModel.batch_index_partial_by_ids(
             queryset, document, get_actions,
             on_bulk_error=lambda err: BaseModel.full_index_missing_docs_or_raise(
                 err, queryset, document, kwargs.get('prefetch', []), kwargs.get('select_related', [])

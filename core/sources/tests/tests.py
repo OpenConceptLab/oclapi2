@@ -1,4 +1,5 @@
 import importlib
+import json
 from types import SimpleNamespace
 
 import factory
@@ -15,6 +16,8 @@ from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.constants import HEAD, RETIRED_ACCESS_TYPE_EDIT, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, \
     OPENMRS_VALIDATION_SCHEMA
+from core.common.exceptions import BatchIndexingError
+from core.common.models import BaseModel
 from core.common.tasks import index_source_mappings, index_source_concepts, get_concepts_to_index, \
     update_concepts_locale_fields
 from core.common.tasks import seed_children_to_new_version
@@ -2856,6 +2859,102 @@ class TasksTest(OCLTestCase):
             'Falling back to full mapping reindex for source %s', source.id
         )
         clear_mappings_cache_mock.assert_called_once()
+
+    @patch('core.common.models.ERRBIT_LOGGER', Mock())
+    @patch('core.common.models.time.sleep')
+    def test_index_source_concepts_append_on_read_only_index_fails_without_full_reindex_fallback(self, sleep_mock):
+        # A read-only index (e.g. ES disk flood-stage): the append must fail after backing off, without falling
+        # back to a full reindex that ES would reject the same way.
+        from elasticsearch import Elasticsearch
+        source = OrganizationSourceFactory()
+        ConceptFactory(parent=source)
+        ConceptFactory(parent=source)
+        concept_ids = list(source.concepts.values_list('id', flat=True))
+        task = Task.new(queue='indexing', user=source.created_by, name='index_source_concepts')
+
+        def read_only(operations=None, **kwargs):  # pylint: disable=unused-argument
+            headers = [json.loads(line) for line in operations[::2]]  # each scripted update has a body line
+            return Mock(body={'errors': True, 'items': [
+                {'update': {'_index': 'concepts', '_id': str(header['update']['_id']), 'status': 429, 'error': {
+                    'type': 'cluster_block_exception',
+                    'reason': 'index [concepts] blocked by: [TOO_MANY_REQUESTS/12/disk usage exceeded flood-stage '
+                              'watermark, index has read-only-allow-delete block];'}}}
+                for header in headers
+            ]})
+
+        with override_settings(TEST_MODE=False), \
+                patch.object(Elasticsearch, 'bulk', side_effect=read_only) as bulk_mock, \
+                patch.object(BaseModel, 'batch_index_full') as batch_index_full_mock, \
+                patch('core.common.tasks.current_task', Mock(request=Mock(id=task.id))), \
+                patch('core.common.tasks.logger') as task_logger_mock:
+            with self.assertRaises(BatchIndexingError) as context:
+                index_source_concepts(source.id, {'_append_source_version': 'v1', 'is_in_latest_source_version': True})
+
+        self.assertTrue(context.exception.rejected)
+        self.assertEqual(bulk_mock.call_count, 5)
+        self.assertEqual([args[0][0] for args in sleep_mock.call_args_list], [10, 20, 40, 80])
+        batch_index_full_mock.assert_not_called()  # neither a missing-docs index nor the task's fallback reindex
+        task_logger_mock.exception.assert_not_called()
+        task.refresh_from_db()
+        self.assertEqual(
+            task.summary,
+            {'batches': 1, 'failed_batches': 1, 'docs': len(concept_ids), 'failed_docs': len(concept_ids)}
+        )
+
+    @patch('core.sources.models.Source.clear_mappings_cache')
+    @patch('core.common.tasks.logger.exception')
+    @patch('core.sources.models.Source.mappings')
+    @patch('core.sources.models.Source.batch_index')
+    def test_index_source_mappings_partial_update_rejected_by_es_fails_without_fallback(
+            self, batch_index_mock, source_mappings_mock, logger_exception_mock, clear_mappings_cache_mock
+    ):
+        source = OrganizationSourceFactory()
+        task = Task.new(queue='indexing', user=source.created_by, name='index_source_mappings')
+        summary = {'batches': 3, 'failed_batches': 3, 'docs': 1200, 'failed_docs': 1200}
+        batch_index_mock.side_effect = BatchIndexingError('MappingDocument indexing failed', summary, rejected=True)
+
+        with patch('core.common.tasks.current_task', Mock(request=Mock(id=task.id))):
+            with self.assertRaises(BatchIndexingError):
+                index_source_mappings(source.id, {'_append_source_version': 'v1'})
+
+        batch_index_mock.assert_called_once_with(
+            source_mappings_mock, MappingDocument, partial_doc={'_append_source_version': 'v1'}, single_batch=False,
+            parallel=True
+        )
+        logger_exception_mock.assert_not_called()
+        clear_mappings_cache_mock.assert_called_once()
+        task.refresh_from_db()
+        self.assertEqual(task.summary, summary)
+
+    @patch('core.sources.models.Source.clear_concepts_cache')
+    @patch('core.common.tasks.logger.exception')
+    @patch('core.sources.models.Source.concepts')
+    @patch('core.sources.models.Source.batch_index')
+    def test_index_source_concepts_partial_update_failure_records_fallback_summary(
+            self, batch_index_mock, source_concepts_mock, logger_exception_mock, clear_concepts_cache_mock
+    ):
+        source = OrganizationSourceFactory()
+        task = Task.new(queue='indexing', user=source.created_by, name='index_source_concepts')
+        full_index_summary = {'batches': 2, 'failed_batches': 0, 'docs': 600, 'failed_docs': 0}
+        batch_index_mock.side_effect = [
+            BatchIndexingError(
+                'ConceptDocument indexing failed', {'batches': 2, 'failed_batches': 1, 'docs': 600, 'failed_docs': 1}),
+            full_index_summary
+        ]
+
+        with patch('core.common.tasks.current_task', Mock(request=Mock(id=task.id))):
+            index_source_concepts(source.id, {'_append_source_version': 'v1'})
+
+        self.assertEqual(batch_index_mock.call_args_list[1], call(
+            source_concepts_mock, ConceptDocument,
+            prefetch=['sources', 'names', 'descriptions'],
+            select_related=['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'],
+            parallel=True
+        ))
+        logger_exception_mock.assert_called_once_with('Falling back to full concept reindex for source %s', source.id)
+        clear_concepts_cache_mock.assert_called_once()
+        task.refresh_from_db()
+        self.assertEqual(task.summary, full_index_summary)
 
     @patch('core.sources.models.Source.validate_child_concepts')
     def test_update_validation_schema_success(self, validate_child_concepts_mock):

@@ -28,6 +28,7 @@ from core.collections.tests.factories import ExpansionFactory, OrganizationColle
 from core.common.checksums import VersionCompareMixin, ChecksumDiff
 from core.common.constants import HEAD
 from core.common.es import ESScript
+from core.common.exceptions import BatchIndexingError
 from core.common.models import BaseModel
 from core.common.tasks import delete_s3_objects, bulk_import_parallel_inline, resources_report, calculate_checksums, \
     delete_organization, delete_source, delete_collection, add_references, handle_m2m_changed, handle_pre_delete, \
@@ -1296,7 +1297,8 @@ class BaseModelTest(OCLTestCase):
         self.assertEqual(Source().app_name, 'sources')
 
     @override_settings(TEST_MODE=False)
-    def test_batch_index_full_streams_batches_without_parallel_bulk(self):
+    @patch('core.common.models.parallel_bulk', return_value=[])
+    def test_batch_index_full_streams_batches_without_parallel_bulk(self, parallel_bulk_mock):
         ordered_queryset = MagicMock()
 
         def get_batch(batch_slice):
@@ -1313,6 +1315,7 @@ class BaseModelTest(OCLTestCase):
 
         doc_instance = Mock()
         doc_instance.django.auto_refresh = False
+        doc_instance.django.queryset_pagination = None
         document = Mock(return_value=doc_instance)
 
         BaseModel.batch_index_full(False, queryset, document, None, None)
@@ -1322,22 +1325,21 @@ class BaseModelTest(OCLTestCase):
             call(slice(0, 500, None)),
             call(slice(500, 1000, None)),
         ])
-        self.assertEqual(doc_instance.update.call_args_list, [
-            call([1, 2], parallel=True),
-        ])
+        doc_instance._get_actions.assert_called_once_with([1, 2], 'index')  # pylint: disable=protected-access
+        parallel_bulk_mock.assert_called_once_with(
+            doc_instance._get_connection.return_value,  # pylint: disable=protected-access
+            doc_instance._get_actions.return_value,  # pylint: disable=protected-access
+            raise_on_error=False
+        )
 
-    @override_settings(TEST_MODE=False)
-    def test_batch_index_full_continues_remaining_batches_after_error(self):
-        # A failing batch must not abort the remaining batches -- see OpenConceptLab/ocl_issues#2694.
-        ordered_queryset = MagicMock()
-
+    @staticmethod
+    def get_batched_full_index_mocks(batches):
+        """queryset/document mocks for batch_index_full whose 500-slices are `batches`."""
         def get_batch(batch_slice):
-            if batch_slice == slice(0, 500, None):
-                return [1, 2]
-            if batch_slice == slice(500, 1000, None):
-                return [3]
-            return []
+            index = batch_slice.start // 500
+            return batches[index] if index < len(batches) else []
 
+        ordered_queryset = MagicMock()
         ordered_queryset.__getitem__.side_effect = get_batch
 
         queryset = Mock()
@@ -1347,18 +1349,132 @@ class BaseModelTest(OCLTestCase):
 
         doc_instance = Mock()
         doc_instance.django.auto_refresh = False
-        doc_instance.update.side_effect = [Exception('mapping conflict'), None]
+        doc_instance.django.queryset_pagination = None
         document = Mock(return_value=doc_instance)
         document.__name__ = 'ConceptDocument'
+        return queryset, doc_instance, document
 
-        with patch('core.common.models.ERRBIT_LOGGER') as errbit_mock:
-            BaseModel.batch_index_full(False, queryset, document, None, None)
+    @staticmethod
+    def get_bulk_failures(ids, status=429, error_type='cluster_block_exception', reason=None):
+        """What the ES bulk helpers yield (raise_on_error=False) for items of `ids` that failed."""
+        reason = reason or ('index [concepts] blocked by: [TOO_MANY_REQUESTS/12/disk usage exceeded flood-stage '
+                            'watermark, index has read-only-allow-delete block];')
+        return [
+            (False, {'update': {'_index': 'concepts', '_id': str(_id), 'status': status,
+                                'error': {'type': error_type, 'reason': reason}}})
+            for _id in ids
+        ]
 
-        self.assertEqual(doc_instance.update.call_args_list, [
-            call([1, 2], parallel=True),
-            call([3], parallel=True),
+    @staticmethod
+    def get_actions_batches(doc_instance):
+        return [args[0][0] for args in doc_instance._get_actions.call_args_list]  # pylint: disable=protected-access
+
+    @override_settings(TEST_MODE=False)
+    def test_batch_index_full_continues_remaining_batches_after_error(self):
+        # A failing batch must not abort the remaining batches (ocl_issues#2694), and must still fail the run once
+        # they've all been attempted (ocl_online#241).
+        queryset, doc_instance, document = self.get_batched_full_index_mocks([[1, 2], [3]])
+
+        with patch('core.common.models.parallel_bulk', side_effect=[Exception('mapping conflict'), []]), \
+                patch('core.common.models.ERRBIT_LOGGER') as errbit_mock:
+            with self.assertRaises(BatchIndexingError) as context:
+                BaseModel.batch_index_full(False, queryset, document, None, None)
+
+        self.assertEqual(doc_instance._get_actions.call_args_list, [  # pylint: disable=protected-access
+            call([1, 2], 'index'),
+            call([3], 'index'),
         ])
         errbit_mock.log.assert_called_once()
+        self.assertEqual(
+            str(context.exception),
+            'ConceptDocument indexing failed: 1 of 2 batch(es) and 2 of 3 document(s) failed to index'
+        )
+        self.assertEqual(
+            context.exception.summary, {'batches': 2, 'failed_batches': 1, 'docs': 3, 'failed_docs': 2})
+        self.assertFalse(context.exception.rejected)
+
+    @override_settings(TEST_MODE=False)
+    def test_batch_index_full_logs_first_item_errors_without_documents(self):
+        queryset, _, document = self.get_batched_full_index_mocks([list(range(1, 8))])
+        errors = [
+            {'index': {'_index': 'concepts', '_id': str(_id), 'status': 400,
+                       'error': {'type': 'mapper_parsing_exception', 'reason': f'failed to parse field [x] of {_id}'},
+                       'data': {'id': _id, '_embeddings': {'vector': [0.123456789] * 3}}}}
+            for _id in range(1, 8)
+        ]
+
+        with patch('core.common.models.parallel_bulk', return_value=[(False, e) for e in errors]) as bulk_mock, \
+                patch('core.common.models.ERRBIT_LOGGER') as errbit_mock, \
+                patch('core.common.models.logger') as logger_mock, \
+                patch('core.common.models.time.sleep') as sleep_mock:
+            with self.assertRaises(BatchIndexingError) as context:
+                BaseModel.batch_index_full(False, queryset, document, None, None)
+
+        sleep_mock.assert_not_called()  # a mapping error isn't worth a retry
+        self.assertEqual(bulk_mock.call_count, 1)
+        message = logger_mock.error.call_args[0][0]
+        self.assertTrue(message.startswith(
+            'ConceptDocument batch (start=0, size=7) failed to index 7 document(s): '
+            '7 document(s) failed to index, first 5: '
+        ))
+        for _id in range(1, 6):
+            self.assertIn(
+                str({'id': str(_id), 'status': 400, 'type': 'mapper_parsing_exception',
+                     'reason': f'failed to parse field [x] of {_id}'}),
+                message
+            )
+        self.assertNotIn("'id': '6'", message)
+        self.assertNotIn('0.123456789', message)
+        self.assertNotIn('_embeddings', message)
+        errbit_exception = errbit_mock.log.call_args[0][0]
+        self.assertIsInstance(errbit_exception, BatchIndexingError)
+        self.assertEqual(str(errbit_exception), message)
+        self.assertEqual(context.exception.summary, {'batches': 1, 'failed_batches': 1, 'docs': 7, 'failed_docs': 7})
+
+    @override_settings(TEST_MODE=False)
+    def test_batch_index_full_retries_bulk_request_rejected_by_circuit_breaker(self):
+        from elastic_transport import ApiResponseMeta, HttpHeaders, NodeConfig
+        from elasticsearch import ApiError
+        queryset, doc_instance, document = self.get_batched_full_index_mocks([[1, 2]])
+        meta = ApiResponseMeta(
+            status=429, http_version='1.1', headers=HttpHeaders(), duration=0.0, node=NodeConfig('http', 'es', 9200))
+        rejection = ApiError(
+            'circuit_breaking_exception', meta=meta, body={'error': {'type': 'circuit_breaking_exception'}})
+
+        with patch('core.common.models.parallel_bulk', side_effect=[rejection, []]) as bulk_mock, \
+                patch('core.common.models.ERRBIT_LOGGER') as errbit_mock, \
+                patch('core.common.models.time.sleep') as sleep_mock:
+            summary = BaseModel.batch_index_full(False, queryset, document, None, None)
+
+        self.assertEqual(bulk_mock.call_count, 2)
+        self.assertEqual(self.get_actions_batches(doc_instance), [[1, 2]] * 2)
+        sleep_mock.assert_called_once_with(10)
+        errbit_mock.log.assert_not_called()
+        self.assertEqual(summary, {'batches': 1, 'failed_batches': 0, 'docs': 2, 'failed_docs': 0})
+
+    @override_settings(TEST_MODE=False)
+    def test_batch_index_full_gives_one_attempt_per_batch_while_es_keeps_rejecting(self):
+        # Once a batch has outlasted its retries, later batches don't each wait the whole backoff again: a
+        # read-only index should fail a LOINC-size run in minutes. The first batch ES takes resets that.
+        queryset, doc_instance, document = self.get_batched_full_index_mocks([[1, 2], [3], [4], [5]])
+        results = [self.get_bulk_failures([1, 2])] * 5 + [
+            self.get_bulk_failures([3]), [], self.get_bulk_failures([5]), []
+        ]
+
+        with patch('core.common.models.parallel_bulk', side_effect=results), \
+                patch('core.common.models.ERRBIT_LOGGER'), patch('core.common.models.time.sleep') as sleep_mock:
+            with self.assertRaises(BatchIndexingError) as context:
+                BaseModel.batch_index_full(False, queryset, document, None, None)
+
+        self.assertEqual(self.get_actions_batches(doc_instance), [[1, 2]] * 5 + [[3], [4], [5], [5]])
+        self.assertEqual([args[0][0] for args in sleep_mock.call_args_list], [10, 20, 40, 80, 10])
+        self.assertTrue(context.exception.rejected)
+        self.assertEqual(context.exception.summary, {'batches': 4, 'failed_batches': 2, 'docs': 5, 'failed_docs': 3})
+        self.assertEqual(
+            str(context.exception),
+            'ConceptDocument indexing failed: 2 of 4 batch(es) and 3 of 5 document(s) failed to index, '
+            '2 batch(es) still rejected by Elasticsearch after retries'
+        )
 
     @override_settings(TEST_MODE=False)
     def test_batch_index_full_with_no_failures_is_unchanged(self):
@@ -1372,14 +1488,41 @@ class BaseModelTest(OCLTestCase):
 
         doc_instance = Mock()
         doc_instance.django.auto_refresh = False
+        doc_instance.django.queryset_pagination = None
         document = Mock(return_value=doc_instance)
         document.__name__ = 'ConceptDocument'
 
-        with patch('core.common.models.ERRBIT_LOGGER') as errbit_mock:
-            BaseModel.batch_index_full(False, queryset, document, None, None)
+        with patch('core.common.models.parallel_bulk', return_value=[]), \
+                patch('core.common.models.ERRBIT_LOGGER') as errbit_mock:
+            summary = BaseModel.batch_index_full(False, queryset, document, None, None)
 
-        self.assertEqual(doc_instance.update.call_args_list, [call([1, 2], parallel=True)])
+        self.assertEqual(self.get_actions_batches(doc_instance), [[1, 2]])
         errbit_mock.log.assert_not_called()
+        self.assertEqual(summary, {'batches': 1, 'failed_batches': 0, 'docs': 2, 'failed_docs': 0})
+
+    @override_settings(TEST_MODE=False)
+    def test_batch_index_full_single_batch_is_one_retried_batch(self):
+        queryset = Mock()
+        queryset.all.return_value = [1, 2, 3]
+        doc_instance = Mock()
+        doc_instance.django.auto_refresh = True
+        document = Mock(return_value=doc_instance)
+        document.__name__ = 'ConceptDocument'
+
+        with patch('core.common.models.streaming_bulk', side_effect=[self.get_bulk_failures([2]), []]) as bulk_mock, \
+                patch('core.common.models.parallel_bulk') as parallel_bulk_mock, \
+                patch('core.common.models.time.sleep') as sleep_mock:
+            summary = BaseModel.batch_index_full(True, queryset, document, None, None, parallel=False)
+
+        parallel_bulk_mock.assert_not_called()
+        self.assertEqual(bulk_mock.call_args_list, [call(
+            doc_instance._get_connection.return_value,  # pylint: disable=protected-access
+            doc_instance._get_actions.return_value,  # pylint: disable=protected-access
+            raise_on_error=False, refresh=True
+        )] * 2)
+        self.assertEqual(self.get_actions_batches(doc_instance), [[1, 2, 3]] * 2)
+        sleep_mock.assert_called_once_with(10)
+        self.assertEqual(summary, {'batches': 1, 'failed_batches': 0, 'docs': 3, 'failed_docs': 0})
 
     def test_batch_index_routes_append_source_version_partial_doc(self):
         queryset, document = Mock(), Mock()
@@ -1405,7 +1548,8 @@ class BaseModelTest(OCLTestCase):
         full_mock.assert_not_called()
 
     @override_settings(TEST_MODE=False)
-    def test_batch_index_partial_streams_batches_without_parallel_bulk(self):
+    @patch('core.common.models.parallel_bulk', return_value=[])
+    def test_batch_index_partial_streams_batches_without_parallel_bulk(self, parallel_bulk_mock):
         # The document bulk helper stores index metadata on protected members.
         ids_queryset = MagicMock()
 
@@ -1423,6 +1567,7 @@ class BaseModelTest(OCLTestCase):
 
         doc_instance = Mock()
         doc_instance.django.auto_refresh = False
+        doc_instance.django.queryset_pagination = None
         document = Mock(return_value=doc_instance)
 
         BaseModel.batch_index_partial(queryset, document, False, {'flag': True})
@@ -1433,9 +1578,11 @@ class BaseModelTest(OCLTestCase):
             call(slice(0, 500, None)),
             call(slice(500, 1000, None)),
         ])
-        bulk_calls = doc_instance._bulk.call_args_list  # pylint: disable=protected-access
+        bulk_calls = parallel_bulk_mock.call_args_list
         self.assertEqual(len(bulk_calls), 1)
-        self.assertEqual(list(bulk_calls[0].args[0]), [
+        self.assertEqual(
+            bulk_calls[0].args[0], doc_instance._get_connection.return_value)  # pylint: disable=protected-access
+        self.assertEqual(list(bulk_calls[0].args[1]), [
             {
                 '_op_type': 'update',
                 '_index': doc_instance._index._name,  # pylint: disable=protected-access
@@ -1451,10 +1598,11 @@ class BaseModelTest(OCLTestCase):
                 'doc_as_upsert': True
             }
         ])
-        self.assertEqual([call.kwargs for call in bulk_calls], [{'parallel': True}])
+        self.assertEqual([call.kwargs for call in bulk_calls], [{'raise_on_error': False}])
 
     @override_settings(TEST_MODE=False)
-    def test_batch_index_source_version_append_streams_batches_without_parallel_bulk(self):
+    @patch('core.common.models.parallel_bulk', return_value=[])
+    def test_batch_index_source_version_append_streams_batches_without_parallel_bulk(self, parallel_bulk_mock):
         ids_queryset = MagicMock()
 
         def get_batch(batch_slice):
@@ -1471,13 +1619,14 @@ class BaseModelTest(OCLTestCase):
 
         doc_instance = Mock()
         doc_instance.django.auto_refresh = False
+        doc_instance.django.queryset_pagination = None
         document = Mock(return_value=doc_instance)
 
         BaseModel.batch_index_source_version_append(queryset, document, 'v1', True, False)
 
-        bulk_calls = doc_instance._bulk.call_args_list  # pylint: disable=protected-access
+        bulk_calls = parallel_bulk_mock.call_args_list
         self.assertEqual(len(bulk_calls), 1)
-        actions = list(bulk_calls[0].args[0])
+        actions = list(bulk_calls[0].args[1])
         expected_script = {
             'source': ESScript.APPEND_SOURCE_VERSION_SCRIPT,
             'params': {'version': 'v1', 'is_in_latest_source_version': True}
@@ -1503,9 +1652,8 @@ class BaseModelTest(OCLTestCase):
             self.assertNotIn('upsert', action)
 
     @override_settings(TEST_MODE=False)
-    def test_batch_index_source_version_append_falls_back_to_full_index_for_missing_docs(self):
-        from elasticsearch.helpers import BulkIndexError
-
+    @patch('core.common.models.parallel_bulk', return_value=[(False, {'update': {'_id': 11, 'status': 404}})])
+    def test_batch_index_source_version_append_falls_back_to_full_index_for_missing_docs(self, _):
         ids_queryset = MagicMock()
         ids_queryset.__getitem__.side_effect = lambda s: [10, 11] if s == slice(0, 500, None) else []
 
@@ -1518,10 +1666,7 @@ class BaseModelTest(OCLTestCase):
 
         doc_instance = Mock()
         doc_instance.django.auto_refresh = False
-        doc_instance._bulk.side_effect = BulkIndexError(  # pylint: disable=protected-access
-            '1 document(s) failed to index.',
-            [{'update': {'_id': 11, 'status': 404}}]
-        )
+        doc_instance.django.queryset_pagination = None
         document = Mock(return_value=doc_instance)
 
         with patch.object(BaseModel, 'batch_index_full') as batch_index_full_mock:
@@ -1536,8 +1681,6 @@ class BaseModelTest(OCLTestCase):
     def test_batch_index_source_version_append_continues_remaining_batches_after_bulk_error(self):
         # A BulkIndexError (missing docs) on an earlier batch must not stop later batches
         # from being attempted.
-        from elasticsearch.helpers import BulkIndexError
-
         ids_queryset = MagicMock()
 
         def get_batch(batch_slice):
@@ -1558,25 +1701,22 @@ class BaseModelTest(OCLTestCase):
 
         doc_instance = Mock()
         doc_instance.django.auto_refresh = False
-        doc_instance._bulk.side_effect = [  # pylint: disable=protected-access
-            BulkIndexError('1 document(s) failed to index.', [{'update': {'_id': 11, 'status': 404}}]),
-            None,
-        ]
+        doc_instance.django.queryset_pagination = None
         document = Mock(return_value=doc_instance)
 
-        with patch.object(BaseModel, 'batch_index_full') as batch_index_full_mock:
+        with patch('core.common.models.parallel_bulk', side_effect=[
+            [(False, {'update': {'_id': 11, 'status': 404}})], []
+        ]) as bulk_mock, patch.object(BaseModel, 'batch_index_full') as batch_index_full_mock:
             BaseModel.batch_index_source_version_append(queryset, document, 'v1', True, False)
 
-        self.assertEqual(doc_instance._bulk.call_count, 2)  # pylint: disable=protected-access
+        self.assertEqual(bulk_mock.call_count, 2)
         queryset.filter.assert_called_once_with(id__in={11})
         batch_index_full_mock.assert_called_once_with(
             single_batch=False, queryset=missing_queryset, document=document, prefetch=[], select_related=[]
         )
 
     @override_settings(TEST_MODE=False)
-    def test_batch_index_source_version_append_reraises_real_errors(self):
-        from elasticsearch.helpers import BulkIndexError
-
+    def test_batch_index_source_version_append_fails_on_real_errors(self):
         ids_queryset = MagicMock()
         ids_queryset.__getitem__.side_effect = lambda s: [10] if s == slice(0, 500, None) else []
 
@@ -1587,17 +1727,216 @@ class BaseModelTest(OCLTestCase):
 
         doc_instance = Mock()
         doc_instance.django.auto_refresh = False
-        doc_instance._bulk.side_effect = BulkIndexError(  # pylint: disable=protected-access
-            '1 document(s) failed to index.',
-            [{'update': {'_id': 10, 'status': 500}}]
-        )
+        doc_instance.django.queryset_pagination = None
         document = Mock(return_value=doc_instance)
+        results = [(False, {'update': {'_id': 10, 'status': 500}})]
 
-        with patch.object(BaseModel, 'batch_index_full') as batch_index_full_mock:
-            with self.assertRaises(BulkIndexError):
+        with patch('core.common.models.parallel_bulk', return_value=results), \
+                patch.object(BaseModel, 'batch_index_full') as batch_index_full_mock, \
+                patch('core.common.models.ERRBIT_LOGGER'), patch('core.common.models.time.sleep') as sleep_mock:
+            with self.assertRaises(BatchIndexingError) as context:
                 BaseModel.batch_index_source_version_append(queryset, document, 'v1', True, False)
 
         batch_index_full_mock.assert_not_called()
+        sleep_mock.assert_not_called()
+        self.assertFalse(context.exception.rejected)
+        self.assertEqual(context.exception.summary, {'batches': 1, 'failed_batches': 1, 'docs': 1, 'failed_docs': 1})
+
+    @staticmethod
+    def get_append_mocks(ids):
+        ids_queryset = MagicMock()
+        ids_queryset.__getitem__.side_effect = lambda s: ids if s == slice(0, 500, None) else []
+        queryset = Mock()
+        ordered_queryset = Mock()
+        ordered_queryset.values_list.return_value = ids_queryset
+        queryset.order_by.return_value = ordered_queryset
+        doc_instance = Mock()
+        doc_instance.django.auto_refresh = False
+        doc_instance.django.queryset_pagination = None
+        doc_instance._index._name = 'concepts'  # pylint: disable=protected-access
+        document = Mock(return_value=doc_instance)
+        document.__name__ = 'ConceptDocument'
+        return queryset, doc_instance, document
+
+    @override_settings(TEST_MODE=False)
+    def test_batch_index_source_version_append_retries_read_only_index_then_succeeds(self):
+        queryset, _, document = self.get_append_mocks([10, 11])
+        actions_sent = []
+
+        def bulk(client, actions, **kwargs):  # pylint: disable=unused-argument
+            actions_sent.append([action['_id'] for action in actions])
+            if len(actions_sent) == 1:
+                return self.get_bulk_failures([10, 11])
+            if len(actions_sent) == 2:
+                return self.get_bulk_failures([11], error_type='es_rejected_execution_exception', reason='queue full')
+            return []
+
+        with patch('core.common.models.parallel_bulk', side_effect=bulk), \
+                patch.object(BaseModel, 'batch_index_full') as batch_index_full_mock, \
+                patch('core.common.models.ERRBIT_LOGGER') as errbit_mock, \
+                patch('core.common.models.logger') as logger_mock, \
+                patch('core.common.models.time.sleep') as sleep_mock:
+            summary = BaseModel.batch_index_source_version_append(queryset, document, 'v1', True, False)
+
+        self.assertEqual(actions_sent, [[10, 11]] * 3)  # every retry re-sends the whole batch
+        self.assertEqual([args[0][0] for args in sleep_mock.call_args_list], [10, 20])
+        self.assertEqual(logger_mock.warning.call_count, 2)
+        self.assertIn('cluster_block_exception', logger_mock.warning.call_args_list[0][0][2])
+        logger_mock.error.assert_not_called()
+        errbit_mock.log.assert_not_called()
+        batch_index_full_mock.assert_not_called()
+        self.assertEqual(summary, {'batches': 1, 'failed_batches': 0, 'docs': 2, 'failed_docs': 0})
+
+    @override_settings(TEST_MODE=False, ES_BULK_RETRY_MAX_ATTEMPTS=3)
+    def test_batch_index_source_version_append_fails_rejected_when_index_stays_read_only(self):
+        queryset, _, document = self.get_append_mocks([10, 11])
+
+        with patch('core.common.models.parallel_bulk', return_value=self.get_bulk_failures([10, 11])) as bulk_mock, \
+                patch.object(BaseModel, 'batch_index_full') as batch_index_full_mock, \
+                patch('core.common.models.ERRBIT_LOGGER') as errbit_mock, \
+                patch('core.common.models.time.sleep') as sleep_mock:
+            with self.assertRaises(BatchIndexingError) as context:
+                BaseModel.batch_index_source_version_append(queryset, document, 'v1', True, False)
+
+        self.assertEqual(bulk_mock.call_count, 3)
+        self.assertEqual([args[0][0] for args in sleep_mock.call_args_list], [10, 20])
+        batch_index_full_mock.assert_not_called()
+        errbit_mock.log.assert_called_once()
+        self.assertIn('read-only-allow-delete', str(errbit_mock.log.call_args[0][0]))
+        self.assertTrue(context.exception.rejected)
+        self.assertEqual(context.exception.summary, {'batches': 1, 'failed_batches': 1, 'docs': 2, 'failed_docs': 2})
+
+    @override_settings(TEST_MODE=False)
+    def test_batch_index_source_version_append_indexes_missing_docs_before_failing_on_real_errors(self):
+        # One doc missing from ES (404) and one real error: the missing doc still gets its full index.
+        queryset, _, document = self.get_append_mocks([10, 11])
+        missing_queryset = Mock()
+        queryset.filter.return_value = missing_queryset
+        results = [(False, {'update': {'_id': '11', 'status': 404}})] + self.get_bulk_failures(
+            [10], status=400, error_type='mapper_parsing_exception', reason='failed to parse')
+
+        with patch('core.common.models.parallel_bulk', return_value=results), \
+                patch.object(BaseModel, 'batch_index_full') as batch_index_full_mock, \
+                patch('core.common.models.ERRBIT_LOGGER'), patch('core.common.models.time.sleep') as sleep_mock:
+            with self.assertRaises(BatchIndexingError) as context:
+                BaseModel.batch_index_source_version_append(queryset, document, 'v1', True, False)
+
+        queryset.filter.assert_called_once_with(id__in={'11'})
+        batch_index_full_mock.assert_called_once_with(
+            single_batch=False, queryset=missing_queryset, document=document, prefetch=[], select_related=[]
+        )
+        sleep_mock.assert_not_called()
+        self.assertFalse(context.exception.rejected)
+        self.assertEqual(context.exception.summary, {'batches': 1, 'failed_batches': 1, 'docs': 2, 'failed_docs': 1})
+
+    @override_settings(TEST_MODE=False)
+    def test_batch_index_source_version_append_counts_missing_docs_whose_full_index_failed(self):
+        queryset, _, document = self.get_append_mocks([10, 11])
+        results = [(False, {'update': {'_id': '11', 'status': 404}})] + self.get_bulk_failures(
+            [10], status=400, error_type='mapper_parsing_exception', reason='failed to parse')
+
+        with patch('core.common.models.parallel_bulk', return_value=results), \
+                patch.object(BaseModel, 'batch_index_full', side_effect=BatchIndexingError(
+                    'ConceptDocument indexing failed',
+                    {'batches': 1, 'failed_batches': 1, 'docs': 1, 'failed_docs': 1})) as batch_index_full_mock, \
+                patch('core.common.models.ERRBIT_LOGGER'):
+            with self.assertRaises(BatchIndexingError) as context:
+                BaseModel.batch_index_source_version_append(queryset, document, 'v1', True, False)
+
+        batch_index_full_mock.assert_called_once()
+        self.assertEqual(context.exception.summary, {'batches': 1, 'failed_batches': 1, 'docs': 2, 'failed_docs': 2})
+
+    @override_settings(TEST_MODE=False)
+    def test_batch_index_source_version_append_keeps_rejection_from_missing_docs_full_index(self):
+        # A 400 next to missing docs whose full index ES then rejected: the run still counts as rejected, so the task
+        # doesn't fall back to a full reindex against an index that refuses writes.
+        queryset, _, document = self.get_append_mocks([10, 11, 12])
+        results = [(False, {'update': {'_id': _id, 'status': 404}}) for _id in ['11', '12']] + self.get_bulk_failures(
+            [10], status=400, error_type='mapper_parsing_exception', reason='failed to parse')
+
+        with patch('core.common.models.parallel_bulk', return_value=results), \
+                patch.object(BaseModel, 'batch_index_full', side_effect=BatchIndexingError(
+                    'ConceptDocument indexing failed', {'batches': 1, 'failed_batches': 1, 'docs': 2, 'failed_docs': 2},
+                    rejected=True)), \
+                patch('core.common.models.ERRBIT_LOGGER'), patch('core.common.models.time.sleep'):
+            with self.assertRaises(BatchIndexingError) as context:
+                BaseModel.batch_index_source_version_append(queryset, document, 'v1', True, False)
+
+        self.assertTrue(context.exception.rejected)
+        self.assertEqual(context.exception.summary, {'batches': 1, 'failed_batches': 1, 'docs': 3, 'failed_docs': 3})
+
+    @override_settings(TEST_MODE=False)
+    def test_batch_index_source_version_append_counts_missing_docs_recovered_by_full_index(self):
+        # A 400 next to two missing docs, and the full index recovers one of them: 2 docs failed, not 3.
+        queryset, _, document = self.get_append_mocks([10, 11, 12])
+        results = [(False, {'update': {'_id': _id, 'status': 404}}) for _id in ['11', '12']] + self.get_bulk_failures(
+            [10], status=400, error_type='mapper_parsing_exception', reason='failed to parse')
+
+        with patch('core.common.models.parallel_bulk', return_value=results), \
+                patch.object(BaseModel, 'batch_index_full', side_effect=BatchIndexingError(
+                    'ConceptDocument indexing failed',
+                    {'batches': 1, 'failed_batches': 1, 'docs': 2, 'failed_docs': 1})), \
+                patch('core.common.models.ERRBIT_LOGGER') as errbit_mock, patch('core.common.models.time.sleep'):
+            with self.assertRaises(BatchIndexingError) as context:
+                BaseModel.batch_index_source_version_append(queryset, document, 'v1', True, False)
+
+        self.assertFalse(context.exception.rejected)
+        self.assertEqual(context.exception.summary, {'batches': 1, 'failed_batches': 1, 'docs': 3, 'failed_docs': 2})
+        self.assertIn('mapper_parsing_exception', str(errbit_mock.log.call_args[0][0]))  # the real error's reason
+
+    @override_settings(TEST_MODE=False, ES_BULK_RETRY_MAX_ATTEMPTS=2)
+    def test_batch_index_source_version_append_leaves_missing_docs_failed_while_es_rejects(self):
+        # A 404 next to a 429: the missing doc's full index would be rejected too (and restart the backoff), so it
+        # is counted as failed with the rejected one instead.
+        queryset, _, document = self.get_append_mocks([10, 11])
+        results = [(False, {'update': {'_id': '11', 'status': 404}})] + self.get_bulk_failures([10])
+
+        with patch('core.common.models.parallel_bulk', return_value=results) as bulk_mock, \
+                patch.object(BaseModel, 'batch_index_full') as batch_index_full_mock, \
+                patch('core.common.models.ERRBIT_LOGGER'), patch('core.common.models.time.sleep') as sleep_mock:
+            with self.assertRaises(BatchIndexingError) as context:
+                BaseModel.batch_index_source_version_append(queryset, document, 'v1', True, False)
+
+        self.assertEqual(bulk_mock.call_count, 2)
+        sleep_mock.assert_called_once_with(10)
+        batch_index_full_mock.assert_not_called()
+        self.assertTrue(context.exception.rejected)
+        self.assertEqual(context.exception.summary, {'batches': 1, 'failed_batches': 1, 'docs': 2, 'failed_docs': 2})
+
+    @override_settings(TEST_MODE=False)
+    def test_batch_index_partial_by_ids_counts_failed_items_in_every_bulk_chunk(self):
+        # One logical batch of 1,200 docs goes out in three helper chunks (500, 500, 200). Every chunk must be sent
+        # and every failed item counted: the helpers' own raise_on_error stops at the first failed chunk.
+        from elasticsearch import Elasticsearch
+        from core.concepts.documents import ConceptDocument
+        queryset = Mock()
+        queryset.all.return_value.values_list.return_value = list(range(1, 1201))
+        chunk_sizes = []
+
+        def bulk(operations=None, **kwargs):  # pylint: disable=unused-argument
+            headers = [json.loads(line) for line in operations[::2]]  # each action here has a body line
+            chunk_sizes.append(len(headers))
+            return Mock(body={'errors': True, 'items': [
+                {'update': {'_index': 'concepts', '_id': str(header['update']['_id']), 'status': 400,
+                            'error': {'type': 'mapper_parsing_exception', 'reason': 'failed to parse'}}}
+                for header in headers
+            ]})
+
+        def get_actions(ids):
+            for _id in ids:
+                yield {'_op_type': 'update', '_index': 'concepts', '_id': _id, 'doc': {'flag': True}}
+
+        for parallel in (True, False):
+            chunk_sizes.clear()
+            with self.subTest(parallel=parallel), patch.object(Elasticsearch, 'bulk', side_effect=bulk), \
+                    patch('core.common.models.ERRBIT_LOGGER'):
+                with self.assertRaises(BatchIndexingError) as context:
+                    BaseModel.batch_index_partial_by_ids(
+                        queryset, ConceptDocument, get_actions, single_batch=True, parallel=parallel)
+
+                self.assertEqual(sorted(chunk_sizes), [200, 500, 500])
+                self.assertEqual(
+                    context.exception.summary, {'batches': 1, 'failed_batches': 1, 'docs': 1200, 'failed_docs': 1200})
 
 
 class TaskTest(OCLTestCase):
@@ -1852,6 +2191,18 @@ class TaskTest(OCLTestCase):
 
         self.assertEqual(result, 1)
         concept.refresh_from_db()
+
+    @patch('core.concepts.models.Concept.batch_index')
+    def test_batch_index_resources_failure_still_ends_indexing_deferral(self, batch_index_mock):
+        concept = ConceptFactory()
+        Concept.objects.filter(id=concept.id).update(_index=False)
+        batch_index_mock.side_effect = BatchIndexingError('ConceptDocument indexing failed')
+
+        with self.assertRaises(BatchIndexingError):
+            batch_index_resources('concepts', {'id': concept.id}, update_indexed=True)
+
+        concept.refresh_from_db()
+        self.assertTrue(concept._index)  # pylint: disable=protected-access
 
     def test_index_expansion_concepts_without_concept_ids(self):
         collection = OrganizationCollectionFactory()

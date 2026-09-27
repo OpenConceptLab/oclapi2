@@ -4,7 +4,7 @@ from datetime import datetime
 from json import JSONDecodeError
 
 from billiard.exceptions import WorkerLostError
-from celery import chord
+from celery import chord, current_task
 from celery.states import STARTED
 from celery.utils.log import get_task_logger
 from celery_once import AlreadyQueued
@@ -24,6 +24,7 @@ from pydash import get, compact
 from core.celery import app
 from core.common import ERRBIT_LOGGER
 from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_RESET_MAIL_SUBJECT
+from core.common.exceptions import BatchIndexingError
 from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service, \
     get_date_range_label
 from core.reports.models import ResourceUsageReport
@@ -566,14 +567,34 @@ def batch_index_resources(resource, filters, update_indexed=False):
         filters = json.loads(filters)
     if model and filters is not None:
         queryset = model.objects.filter(**filters)
-        model.batch_index(queryset, model.get_search_document())
-
-        from core.concepts.models import Concept
-        from core.mappings.models import Mapping
-        if update_indexed and model in [Concept, Mapping]:
-            queryset.update(_index=True)
+        try:
+            model.batch_index(queryset, model.get_search_document())
+        finally:
+            #  Ends the import's indexing deferral even when a batch failed, so later saves index those resources
+            from core.concepts.models import Concept
+            from core.mappings.models import Mapping
+            if update_indexed and model in [Concept, Mapping]:
+                queryset.update(_index=True)
 
     return 1
+
+
+def batch_index_with_summary(index_func, *args, **kwargs):
+    """
+    Runs a batch indexing call and records its counts (batches, failed_batches, docs, failed_docs) in the running
+    task's Task.summary -- also when it fails, so a FAILURE says how much failed.
+    """
+    summary = None
+    try:
+        summary = index_func(*args, **kwargs)
+        return summary
+    except BatchIndexingError as ex:
+        summary = ex.summary
+        raise
+    finally:
+        task_id = current_task.request.id if current_task else None
+        if task_id and isinstance(summary, dict):
+            Task.objects.filter(id=task_id).update(summary=summary)
 
 
 @app.task(ignore_result=True, base=QueueOnceCustomTask)
@@ -587,8 +608,8 @@ def index_expansion_concepts(expansion_id, count=None, concept_ids=None):  # pyl
             queryset = Concept.objects.filter(id__in=concept_ids)
         else:
             queryset = expansion.concepts
-        expansion.batch_index(
-            queryset, ConceptDocument,
+        batch_index_with_summary(
+            expansion.batch_index, queryset, ConceptDocument,
             prefetch=['sources', 'names', 'descriptions'],
             select_related=['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by']
         )
@@ -605,8 +626,8 @@ def index_expansion_mappings(expansion_id, count=None, mapping_ids=None):  # pyl
             queryset = Mapping.objects.filter(id__in=mapping_ids)
         else:
             queryset = expansion.mappings
-        expansion.batch_index(
-            queryset, MappingDocument,
+        batch_index_with_summary(
+            expansion.batch_index, queryset, MappingDocument,
             prefetch=['sources'],
             select_related=['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by']
         )
@@ -636,12 +657,14 @@ def make_hierarchy(concept_map):  # pragma: no cover
 
 
 @app.task(ignore_result=True, base=QueueOnceCustomTask)
-def index_source_concepts(  # pylint: disable=too-many-arguments
+def index_source_concepts(  # pylint: disable=too-many-arguments,too-many-locals
         source_id, partial_doc=None, single_batch=False, should_prefetch=True, should_select_related=True,
         parallel=True, locales=None, exclude_locale=None
 ):
     """
     Index source concepts, or partially update existing ES documents when `partial_doc` is supplied.
+    A failed partial update falls back to a full reindex -- unless ES was still refusing writes (429 / read-only
+    index) after retries: a full reindex would only fail the same way, slower, so the task fails instead.
     """
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
@@ -653,7 +676,7 @@ def index_source_concepts(  # pylint: disable=too-many-arguments
         ] if should_select_related else []
         queryset = get_concepts_to_index(source, locales, exclude_locale)
         if (locales or exclude_locale) and not partial_doc and not source.has_semantic_match_algorithm:
-            update_concepts_locale_fields(queryset, single_batch, parallel)
+            batch_index_with_summary(update_concepts_locale_fields, queryset, single_batch, parallel)
             source.clear_concepts_cache()
             return
         try:
@@ -661,14 +684,16 @@ def index_source_concepts(  # pylint: disable=too-many-arguments
                 'prefetch': prefetch, 'select_related': select_related}
             kwargs['single_batch'] = single_batch
             kwargs['parallel'] = parallel
-            source.batch_index(queryset, ConceptDocument, **kwargs)
-        except Exception:  # pragma: no cover
-            if not partial_doc:
+            batch_index_with_summary(source.batch_index, queryset, ConceptDocument, **kwargs)
+        except Exception as ex:  # pragma: no cover
+            if not partial_doc or (isinstance(ex, BatchIndexingError) and ex.rejected):
                 raise
             logger.exception('Falling back to full concept reindex for source %s', source_id)
-            source.batch_index(
-                queryset, ConceptDocument, prefetch=prefetch, select_related=select_related, parallel=parallel)
-        source.clear_concepts_cache()
+            batch_index_with_summary(
+                source.batch_index, queryset, ConceptDocument, prefetch=prefetch, select_related=select_related,
+                parallel=parallel)
+        finally:
+            source.clear_concepts_cache()
 
 
 def get_concepts_to_index(source, locales=None, exclude_locale=None):
@@ -712,7 +737,7 @@ def update_concepts_locale_fields(queryset, single_batch=False, parallel=True):
                 },
             }
 
-    BaseModel.batch_index_partial_by_ids(
+    return BaseModel.batch_index_partial_by_ids(
         queryset, ConceptDocument, get_actions, single_batch=single_batch, parallel=parallel)
 
 
@@ -722,6 +747,8 @@ def index_source_mappings(
 ):
     """
     Index source mappings, or partially update existing ES documents when `partial_doc` is supplied.
+    A failed partial update falls back to a full reindex -- unless ES was still refusing writes (429 / read-only
+    index) after retries: a full reindex would only fail the same way, slower, so the task fails instead.
     """
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
@@ -736,14 +763,16 @@ def index_source_mappings(
                 'prefetch': prefetch, 'select_related': select_related}
             kwargs['single_batch'] = single_batch
             kwargs['parallel'] = parallel
-            source.batch_index(source.mappings, MappingDocument, **kwargs)
-        except Exception:  # pragma: no cover
-            if not partial_doc:
+            batch_index_with_summary(source.batch_index, source.mappings, MappingDocument, **kwargs)
+        except Exception as ex:  # pragma: no cover
+            if not partial_doc or (isinstance(ex, BatchIndexingError) and ex.rejected):
                 raise
             logger.exception('Falling back to full mapping reindex for source %s', source_id)
-            source.batch_index(
-                source.mappings, MappingDocument, prefetch=prefetch, select_related=select_related, parallel=parallel)
-        source.clear_mappings_cache()
+            batch_index_with_summary(
+                source.batch_index, source.mappings, MappingDocument, prefetch=prefetch, select_related=select_related,
+                parallel=parallel)
+        finally:
+            source.clear_mappings_cache()
 
 
 @app.task(base=QueueOnceCustomTask)

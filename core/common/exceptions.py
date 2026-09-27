@@ -27,6 +27,18 @@ class Http403(APIException):
     default_code = 'forbidden'
 
 
+class BatchIndexingError(Exception):
+    """
+    Raised once a batched ES indexing run has attempted every batch and one or more failed (ocl_online#241).
+    `summary` holds the run's counts; `rejected` is True if ES was still refusing writes (429 / read-only index)
+    after the retries, when falling back to a heavier reindex would only fail the same way.
+    """
+    def __init__(self, message, summary=None, rejected=False):
+        super().__init__(message)
+        self.summary = summary
+        self.rejected = rejected
+
+
 class UnpaginatedListLimitReached(APIException):
     """403 for `Compress` (an unpaginated list) over the limit without `users.list_unpaginated` (ocl_online#230)."""
     status_code = status.HTTP_403_FORBIDDEN
