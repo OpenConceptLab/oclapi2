@@ -1,15 +1,16 @@
 from unittest.mock import Mock, ANY
 
+from django.contrib.auth.models import Group
 from mock import patch
 from rest_framework.authtoken.models import Token
 from rest_framework.exceptions import ErrorDetail
 
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT
-from core.common.tests import OCLAPITestCase
+from core.common.tests import OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.orgs.documents import OrganizationDocument
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import OrganizationSourceFactory
-from core.users.constants import VERIFY_EMAIL_MESSAGE, VERIFICATION_TOKEN_MISMATCH
+from core.users.constants import VERIFY_EMAIL_MESSAGE, VERIFICATION_TOKEN_MISMATCH, MAPPER_USE_PERMISSION
 from core.users.documents import UserProfileDocument
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
@@ -515,6 +516,42 @@ class UserListViewTest(OCLAPITestCase):
 
             self.assertEqual(response.status_code, 200)
             self.assertEqual([user['username'] for user in response.data], ['ocladmin'])
+
+    def test_get_verbose_plan_fields_only_for_self_and_staff(self):
+        regular_user = UserProfileFactory(username='planfieldsregular')
+        other_user = UserProfileFactory(username='planfieldsother')
+        other_user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
+        plan_fields = ['auth_groups', 'permissions', 'capabilities']
+        url = '/users/?verbose=true&includeCapabilities=true&includeAuthGroups=true'
+
+        response = self.client.get(url, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 3)
+        for user in response.data:
+            for field in plan_fields:
+                self.assertNotIn(field, user)
+
+        response = self.client.get(url, HTTP_AUTHORIZATION='Token ' + regular_user.get_token(), format='json')
+
+        self.assertEqual(response.status_code, 200)
+        users = {user['username']: user for user in response.data}
+        self.assertEqual(sorted(users), ['ocladmin', 'planfieldsother', 'planfieldsregular'])
+        for field in plan_fields:
+            self.assertIsNotNone(users['planfieldsregular'].get(field))
+            self.assertNotIn(field, users['planfieldsother'])
+            self.assertNotIn(field, users['ocladmin'])
+
+        response = self.client.get(url, HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(), format='json')
+
+        self.assertEqual(response.status_code, 200)
+        users = {user['username']: user for user in response.data}
+        self.assertEqual(sorted(users), ['ocladmin', 'planfieldsother', 'planfieldsregular'])
+        for user in users.values():
+            for field in plan_fields:
+                self.assertIsNotNone(user.get(field))
+        self.assertEqual(users['planfieldsother']['auth_groups'], [PREVIEW_GROUP_NAME])
+        self.assertIn(MAPPER_USE_PERMISSION, users['planfieldsother']['permissions'])
 
     @patch('core.common.mixins.ListWithHeadersMixin.get_csv')
     def test_get_csv_is_not_exported(self, get_csv_mock):
