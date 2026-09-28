@@ -16,7 +16,7 @@ from core.collections.models import Collection
 from core.common import ERRBIT_LOGGER
 from core.common.constants import HEAD, ALL
 from core.common.tasks import bulk_import_parts_inline, delete_organization, batch_index_resources, \
-    post_import_update_resource_counts, make_hierarchy
+    post_import_update_resource_counts, make_hierarchy, index_concepts_mapped_codes
 from core.common.utils import drop_version, is_url_encoded_string, encode_string, to_parent_uri, chunks
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -789,13 +789,18 @@ class ReferenceImporter(BaseResourceImporter):
         return NOT_FOUND
 
 
+def should_index_import(index, lines):
+    """`index` as the request gave it; otherwise whether an import of this many lines is small enough to index."""
+    return lines <= settings.IMPORT_INDEX_MAX_LINES if index is None else index
+
+
 class ImportIndexer:
     """
     Ends the indexing deferral for the concepts and mappings an import saved with _index=False: the versions it
     created or retired, their versioned objects and the versions they superseded. finish() resets their _index,
-    whether or not they get indexed, so later saves index them again. Unless the import turned indexing off, it then
-    queues their batch indexing, and the reindex of the concepts the imported mappings come from, whose documents
-    carry their mapped codes.
+    whether or not they get indexed, so later saves index them again. Unless the import doesn't index, it then queues
+    their batch indexing, without forcing a refresh per batch, and an update of the mapped codes in the documents of
+    the concepts the imported mappings come from.
     """
     CHUNK_SIZE = 5000
 
@@ -823,13 +828,12 @@ class ImportIndexer:
             for chunk in chunks(sorted(self.ids[resource]), self.CHUNK_SIZE):
                 model.objects.filter(id__in=chunk, _index=False).update(_index=True)
         if self.index:
-            self.queue('concept', self.ids['concept'])
-            self.queue('mapping', self.ids['mapping'])
-            self.queue('concept', self.get_mapped_concept_ids() - self.ids['concept'])
-
-    def queue(self, resource, ids):
-        for chunk in chunks(sorted(ids), self.CHUNK_SIZE):
-            batch_index_resources.apply_async((resource, {'id__in': chunk}, True), queue='indexing', permanent=False)
+            for resource in ('concept', 'mapping'):
+                for chunk in chunks(sorted(self.ids[resource]), self.CHUNK_SIZE):
+                    batch_index_resources.apply_async(
+                        (resource, {'id__in': chunk}, True, False), queue='indexing', permanent=False)
+            for chunk in chunks(sorted(self.get_mapped_concept_ids() - self.ids['concept']), self.CHUNK_SIZE):
+                index_concepts_mapped_codes.apply_async((chunk,), queue='indexing', permanent=False)
 
     def get_mapped_concept_ids(self):
         """
@@ -851,7 +855,7 @@ class BulkImportInline(BaseImporter):
 
     def __init__(  # pylint: disable=too-many-arguments
             self, content, username, update_if_exists=False, input_list=None, user=None, set_user=True,
-            self_task_id=None, skip_hierarchy_tasks=False, index=True
+            self_task_id=None, skip_hierarchy_tasks=False, index=None
     ):
         super().__init__(content, username, update_if_exists, user, not bool(input_list), set_user)
         self.self_task_id = self_task_id
@@ -885,7 +889,7 @@ class BulkImportInline(BaseImporter):
         self.start_time = time.time()
         self.last_progress_notified_at = 0
         self.elapsed_seconds = 0
-        self.index = index
+        self.index = should_index_import(index, self.total)
 
     def set_task(self):
         self.task = Task.objects.filter(id=self.self_task_id).first()
@@ -1075,12 +1079,11 @@ class BulkImportInline(BaseImporter):
 
 class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
     def __init__(
-            self, content, username, update_if_exists, parallel=None, self_task_id=None, index=True
+            self, content, username, update_if_exists, parallel=None, self_task_id=None, index=None
     ):  # pylint: disable=too-many-arguments
         super().__init__(content, username, update_if_exists, None, False)
         self.start_time = time.time()
         self.self_task_id = self_task_id
-        self.index = index
         self.set_task()
         self.username = username
         self.total = 0
@@ -1099,6 +1102,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         if self.content:
             self.populate_input_list()
             self.total = len(self.input_list)
+        self.index = should_index_import(index, self.total)
         self.make_resource_distribution()
         self.make_parts()
         self.collect_concept_hierarchy_map()

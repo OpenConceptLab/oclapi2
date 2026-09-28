@@ -31,7 +31,7 @@ from core.code_systems.converter import CodeSystemConverter
 from core.common.utils import get_export_service
 from core.importers.models import SourceImporter, SourceVersionImporter, ConceptImporter, OrganizationImporter, \
     CollectionImporter, CollectionVersionImporter, MappingImporter, ReferenceImporter, ImportIndexer, CREATED, \
-    UPDATED, FAILED, DELETED, NOT_FOUND, PERMISSION_DENIED, UNCHANGED
+    UPDATED, FAILED, DELETED, NOT_FOUND, PERMISSION_DENIED, UNCHANGED, should_index_import
 from core.orgs.models import Organization
 from core.sources.models import Source
 from core.users.models import UserProfile
@@ -213,12 +213,12 @@ class Importer:
     owner_type: str
     owner: str
     import_type: str = 'default'
-    index: bool = True
+    index: bool | None = None  # None: whether the import is small enough (should_index_import)
     MIN_BATCH_SIZE: int = 50
     IMPORT_CACHE: str = "import_cache/"
 
     # pylint: disable=too-many-arguments
-    def __init__(self, task_id, path, username, owner_type, owner, import_type='default', index=True):
+    def __init__(self, task_id, path, username, owner_type, owner, import_type='default', index=None):
         super().__init__()
         self.task_id = task_id
         self.path = path
@@ -271,6 +271,7 @@ class Importer:
         dependencies = []
 
         self.prepare_resources(self.path, resource_types, dependencies, [], resources)
+        self.index = should_index_import(self.index, sum(sum(files.values()) for files in resources.values()))
         tasks = self.prepare_tasks(resource_types, dependencies, resources)
         if tasks:
             # In the future we will let the user approve the import before scheduling tasks.

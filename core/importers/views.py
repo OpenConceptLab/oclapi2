@@ -46,9 +46,16 @@ def csv_file_data_to_input_list(file_content):
 
 
 def get_index_param(request):
-    """The `index` query param as a bool (default true), or None when it's neither 'true' nor 'false'."""
-    index = request.GET.get('index', 'true')
-    return index == 'true' if index in ['true', 'false'] else None
+    """
+    The `index` query param: (True or False, None), or (None, None) when it's absent and the import's size decides
+    (see should_index_import), or (None, a 400 response) when it's neither 'true' nor 'false'.
+    """
+    index = request.GET.get('index')
+    if index is None:
+        return None, None
+    if index not in ['true', 'false']:
+        return None, Response({'exception': INVALID_INDEX}, status=status.HTTP_400_BAD_REQUEST)
+    return index == 'true', None
 
 
 def import_response(request, import_queue, data, threads=None, inline=False, deprecated=False):  # pylint: disable=too-many-arguments
@@ -65,9 +72,9 @@ def import_response(request, import_queue, data, threads=None, inline=False, dep
             status=status.HTTP_400_BAD_REQUEST
         )
     update_if_exists = update_if_exists == 'true'
-    index = get_index_param(request)
-    if index is None:
-        return Response({'exception': INVALID_INDEX}, status=status.HTTP_400_BAD_REQUEST)
+    index, error_response = get_index_param(request)
+    if error_response:
+        return error_response
 
     data = data.decode('utf-8') if isinstance(data, bytes) else data
     task = None
@@ -256,9 +263,9 @@ class ImportView(BulkImportParallelInlineView, ImportRetrieveDestroyMixin):
     def post(self, request, import_queue=None):  # pylint: disable=too-many-locals
         check_request_body_size(request)
         if 'import_type' in request.data:
-            index = get_index_param(request)
-            if index is None:
-                return Response({'exception': INVALID_INDEX}, status=status.HTTP_400_BAD_REQUEST)
+            index, error_response = get_index_param(request)
+            if error_response:
+                return error_response
             check_import_payload(request)
             owner_type = request.data.get('owner_type', 'user')
             owner = request.data.get('owner', self.request.user.username)

@@ -292,6 +292,10 @@ ELASTICSEARCH_DSL = {
 # ES_BULK_RETRY_BACKOFF_SECONDS before the first retry and doubling it for each one after (defaults: 10+20+40+80s).
 ES_BULK_RETRY_MAX_ATTEMPTS = int(os.environ.get('ES_BULK_RETRY_MAX_ATTEMPTS', 5))
 ES_BULK_RETRY_BACKOFF_SECONDS = float(os.environ.get('ES_BULK_RETRY_BACKOFF_SECONDS', 10))
+# Bulk imports of up to this many lines index what they import as each part finishes, unless the request's `index`
+# param says otherwise. Bigger ones leave it to a release or a reindex unless asked, as indexing them saturates the
+# shared indexing worker for hours (and re-embeds every row of a semantic HEAD).
+IMPORT_INDEX_MAX_LINES = int(os.environ.get('IMPORT_INDEX_MAX_LINES', 5000))
 
 CID_GENERATE = True
 CID_RESPONSE_HEADER = None

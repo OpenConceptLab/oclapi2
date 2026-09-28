@@ -253,7 +253,7 @@ def bulk_import(to_import, username, update_if_exists):
 
 
 @app.task(base=QueueOnceCustomTask, bind=True, retry_kwargs={'max_retries': 0})
-def bulk_import_parallel_inline(self, to_import, username, update_if_exists, threads=5, index=True):  # pylint: disable=too-many-arguments
+def bulk_import_parallel_inline(self, to_import, username, update_if_exists, threads=5, index=None):  # pylint: disable=too-many-arguments
     from core.importers.models import BulkImportParallelRunner
     try:
         importer = BulkImportParallelRunner(
@@ -268,7 +268,7 @@ def bulk_import_parallel_inline(self, to_import, username, update_if_exists, thr
 
 
 @app.task(base=QueueOnceCustomTask, retry_kwargs={'max_retries': 0})
-def bulk_import_inline(to_import, username, update_if_exists, index=True):
+def bulk_import_inline(to_import, username, update_if_exists, index=None):
     from core.importers.models import BulkImportInline
     return BulkImportInline(
         content=to_import, username=username, update_if_exists=update_if_exists, index=index).run()
@@ -276,7 +276,7 @@ def bulk_import_inline(to_import, username, update_if_exists, index=True):
 
 # pylint: disable=too-many-arguments
 @app.task(bind=True, base=QueueOnceCustomTask, retry_kwargs={'max_retries': 0})
-def bulk_import_new(self, path, username, owner_type, owner, import_type='default', index=True):
+def bulk_import_new(self, path, username, owner_type, owner, import_type='default', index=None):
     from core.importers.importer import Importer
     task_id = self.request.id
     return Importer(task_id, path, username, owner_type, owner, import_type, index).run()
@@ -562,14 +562,15 @@ def delete_concept(concept_id):  # pragma: no cover
     ignore_result=True, autoretry_for=(WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
     acks_late=True, reject_on_worker_lost=True
 )
-def batch_index_resources(resource, filters, update_indexed=False):
+def batch_index_resources(resource, filters, update_indexed=False, refresh=None):
     model = get_resource_class_from_resource_name(resource)
     if isinstance(filters, str):
         filters = json.loads(filters)
     if model and filters is not None:
         queryset = model.objects.filter(**filters)
         try:
-            model.batch_index(queryset, model.get_search_document())
+            model.batch_index(
+                queryset, model.get_search_document(), refresh=refresh, **get_batch_index_relations(model))
         finally:
             #  Ends the import's indexing deferral even when a batch failed, so later saves index those resources
             from core.concepts.models import Concept
@@ -578,6 +579,30 @@ def batch_index_resources(resource, filters, update_indexed=False):
                 queryset.update(_index=True)
 
     return 1
+
+
+def get_batch_index_relations(model):
+    """The relations to load with each batch of concepts or mappings, instead of querying them for every document."""
+    from core.concepts.models import Concept
+    from core.mappings.models import Mapping
+    select_related = ['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by']
+    if model is Concept:
+        return {'prefetch': ['sources', 'names', 'descriptions'], 'select_related': select_related}
+    if model is Mapping:
+        return {
+            'prefetch': ['sources'],
+            'select_related': [*select_related, 'from_concept', 'to_concept', 'from_source', 'to_source']
+        }
+    return {}
+
+
+@app.task(
+    ignore_result=True, autoretry_for=(WorkerLostError, ), retry_kwargs={'max_retries': 2, 'countdown': 2},
+    acks_late=True, reject_on_worker_lost=True
+)
+def index_concepts_mapped_codes(concept_ids):
+    from core.concepts.models import Concept
+    Concept.index_mapped_codes(Concept.objects.filter(id__in=concept_ids))
 
 
 def batch_index_with_summary(index_func, *args, **kwargs):

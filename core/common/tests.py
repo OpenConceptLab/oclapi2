@@ -36,7 +36,7 @@ from core.common.tasks import delete_s3_objects, bulk_import_parallel_inline, re
     process_hierarchy_for_new_parent_concept_version, batch_index_resources, index_expansion_concepts, \
     index_expansion_mappings, vacuum_and_analyze_db, resolve_url_registry_entries, expire_old_celery_tasks, \
     source_version_compare, bulk_import_new, bulk_import_subtask, bulk_import_queue, \
-    collection_version_compare, expansion_compare
+    collection_version_compare, expansion_compare, index_concepts_mapped_codes
 from core.common.throttling import (
     CoreDayThrottle,
     CoreMinuteThrottle,
@@ -61,7 +61,9 @@ from core.common.utils import (
     get_start_of_month, es_id_in, web_url, get_queue_task_names, get_resource_class_from_resource_uri, encode_string,
     to_parent_kwargs_from_uri, reverse_resource, reverse_resource_version, write_export_file, queue_bulk_import,
     get_bulk_import_celery_once_lock_key, generic_sort, get_embeddings)
+from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
+from core.mappings.documents import MappingDocument
 from core.orgs.models import Organization
 from core.sources.models import Source
 from core.users.constants import CORE_USER_GROUP, GUEST_GROUP
@@ -1370,6 +1372,18 @@ class BaseModelTest(OCLTestCase):
         return [args[0][0] for args in doc_instance._get_actions.call_args_list]  # pylint: disable=protected-access
 
     @override_settings(TEST_MODE=False)
+    @patch('core.common.models.parallel_bulk', return_value=[])
+    def test_batch_index_full_can_skip_the_forced_refresh(self, parallel_bulk_mock):
+        queryset, doc_instance, document = self.get_batched_full_index_mocks([[1, 2]])
+        doc_instance.django.auto_refresh = True
+
+        BaseModel.batch_index_full(False, queryset, document, None, None)
+        self.assertIs(parallel_bulk_mock.call_args[1]['refresh'], True)
+
+        BaseModel.batch_index_full(False, queryset, document, None, None, refresh=False)
+        self.assertNotIn('refresh', parallel_bulk_mock.call_args[1])
+
+    @override_settings(TEST_MODE=False)
     def test_batch_index_full_continues_remaining_batches_after_error(self):
         # A failing batch must not abort the remaining batches (ocl_issues#2694), and must still fail the run once
         # they've all been attempted (ocl_online#241).
@@ -1908,7 +1922,6 @@ class BaseModelTest(OCLTestCase):
         # One logical batch of 1,200 docs goes out in three helper chunks (500, 500, 200). Every chunk must be sent
         # and every failed item counted: the helpers' own raise_on_error stops at the first failed chunk.
         from elasticsearch import Elasticsearch
-        from core.concepts.documents import ConceptDocument
         queryset = Mock()
         queryset.all.return_value.values_list.return_value = list(range(1, 1201))
         chunk_sizes = []
@@ -2206,6 +2219,28 @@ class TaskTest(OCLTestCase):
 
         self.assertEqual(result, 1)
         concept.refresh_from_db()
+
+    @patch('core.mappings.models.Mapping.batch_index')
+    @patch('core.concepts.models.Concept.batch_index')
+    def test_batch_index_resources_loads_relations_per_batch(self, concept_batch_index_mock, mapping_batch_index_mock):
+        batch_index_resources('concept', {'id__in': [1]}, False, False)
+        batch_index_resources('mapping', {'id__in': [1]})
+
+        concept_batch_index_mock.assert_called_once_with(
+            ANY, ConceptDocument, refresh=False, prefetch=['sources', 'names', 'descriptions'],
+            select_related=['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'])
+        mapping_batch_index_mock.assert_called_once_with(
+            ANY, MappingDocument, refresh=None, prefetch=['sources'],
+            select_related=['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by',
+                            'from_concept', 'to_concept', 'from_source', 'to_source'])
+
+    @patch('core.concepts.models.Concept.index_mapped_codes')
+    def test_index_concepts_mapped_codes(self, index_mapped_codes_mock):
+        concept = ConceptFactory()
+
+        index_concepts_mapped_codes([concept.id])
+
+        self.assertEqual(list(index_mapped_codes_mock.call_args[0][0]), [concept])
 
     @patch('core.concepts.models.Concept.batch_index')
     def test_batch_index_resources_failure_still_ends_indexing_deferral(self, batch_index_mock):
