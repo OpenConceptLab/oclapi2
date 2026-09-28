@@ -7,7 +7,7 @@ from celery import group
 from celery.utils.log import get_task_logger
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db.models import F
+from django.db.models import F, Q
 from ocldev.oclfleximporter import OclFlexImporter
 from pydash import compact, get
 
@@ -191,6 +191,19 @@ class BaseResourceImporter:
 
     def process(self):
         raise NotImplementedError()
+
+    def retire_resource(self, resource):
+        """
+        Retires a concept or mapping and keeps the version the retire saved as the instance, marked with the one it
+        superseded, as process() keeps what it saves. The retire clones the latest version, so both are left deferred
+        (_index=False) when the latest version was.
+        """
+        prev_latest = resource.get_latest_version()
+        resource.retire(
+            self.user, self.data.get('update_comment') or self.data.get('comment'), self.data.get('retire_reason'))
+        self.instance = resource.get_latest_version()
+        if self.instance:
+            self.instance.prev_latest_version_id = get(prev_latest, 'id')
 
 
 class OrganizationImporter(BaseResourceImporter):
@@ -510,12 +523,7 @@ class ConceptImporter(BaseResourceImporter):
             parent = self.data.get('parent')
             try:
                 if parent.has_edit_access(self.user):
-                    concept = self.get_queryset().first()
-                    concept.retire(
-                        self.user,
-                        self.data.get('update_comment') or self.data.get('comment'),
-                        self.data.get('retire_reason')
-                    )
+                    self.retire_resource(self.get_queryset().first())
                     return DELETED
                 return PERMISSION_DENIED
             except Exception as ex:
@@ -676,12 +684,7 @@ class MappingImporter(BaseResourceImporter):
             parent = self.data.get('parent')
             try:
                 if parent.has_edit_access(self.user):
-                    mapping = self.get_queryset().first()
-                    mapping.retire(
-                        self.user,
-                        self.data.get('update_comment') or self.data.get('comment'),
-                        self.data.get('retire_reason')
-                    )
+                    self.retire_resource(self.get_queryset().first())
                     return DELETED
                 return PERMISSION_DENIED
             except Exception as ex:
@@ -789,33 +792,54 @@ class ReferenceImporter(BaseResourceImporter):
 class ImportIndexer:
     """
     Ends the indexing deferral for the concepts and mappings an import saved with _index=False: the versions it
-    created, their versioned objects and the versions they superseded. finish() resets their _index, whether or not
-    they get indexed, so later saves index them again; unless the import turned indexing off, it also queues their
-    batch indexing.
+    created or retired, their versioned objects and the versions they superseded. finish() resets their _index,
+    whether or not they get indexed, so later saves index them again. Unless the import turned indexing off, it then
+    queues their batch indexing, and the reindex of the concepts the imported mappings come from, whose documents
+    carry their mapped codes.
     """
     CHUNK_SIZE = 5000
 
     def __init__(self, index=True):
         self.index = index
         self.ids = {'concept': set(), 'mapping': set()}
+        self.mapped_concept_ids = set()
 
     def add(self, instance):
         resource = {Concept: 'concept', Mapping: 'mapping'}.get(type(instance))
-        if resource and instance.id:
-            self.ids[resource].update(compact([
-                instance.versioned_object_id,
-                get(instance, 'prev_latest_version_id'),
-                get(instance, 'latest_version_id'),
-                instance.id,
-            ]))
+        if not resource or not instance.id or instance.should_index:
+            return  # nothing saved, or saved with _index=True, which indexes it
+        self.ids[resource].update(compact([
+            instance.versioned_object_id,
+            get(instance, 'prev_latest_version_id'),
+            get(instance, 'latest_version_id'),
+            instance.id,
+        ]))
+        if resource == 'mapping' and instance.from_concept_id and instance.from_source_id == instance.parent_id:
+            self.mapped_concept_ids.add(instance.from_concept_id)
 
     def finish(self):
+        # every row first, so that a failure to queue can't leave any deferred
         for resource, model in (('concept', Concept), ('mapping', Mapping)):
             for chunk in chunks(sorted(self.ids[resource]), self.CHUNK_SIZE):
                 model.objects.filter(id__in=chunk, _index=False).update(_index=True)
-                if self.index:
-                    batch_index_resources.apply_async(
-                        (resource, {'id__in': chunk}, True), queue='indexing', permanent=False)
+        if self.index:
+            self.queue('concept', self.ids['concept'])
+            self.queue('mapping', self.ids['mapping'])
+            self.queue('concept', self.get_mapped_concept_ids() - self.ids['concept'])
+
+    def queue(self, resource, ids):
+        for chunk in chunks(sorted(ids), self.CHUNK_SIZE):
+            batch_index_resources.apply_async((resource, {'id__in': chunk}, True), queue='indexing', permanent=False)
+
+    def get_mapped_concept_ids(self):
+        """The versioned objects and latest versions of the concepts the imported mappings come from."""
+        ids = set()
+        for chunk in chunks(sorted(self.mapped_concept_ids), self.CHUNK_SIZE):
+            versioned_ids = Concept.objects.filter(id__in=chunk).values('versioned_object_id')
+            ids.update(Concept.objects.filter(
+                Q(id__in=versioned_ids) | Q(versioned_object_id__in=versioned_ids, is_latest_version=True)
+            ).values_list('id', flat=True))
+        return ids
 
 
 class BulkImportInline(BaseImporter):
@@ -925,76 +949,78 @@ class BulkImportInline(BaseImporter):
             print(f"TASK ID: {self.self_task_id}")
             print("***************")
         indexer = ImportIndexer(self.index)
-        for original_item in self.input_list:
-            self.processed += 1
-            logger.info('Processing %s of %s', str(self.processed), str(self.total))
-            self.notify_progress()
-            item = original_item.copy()
-            item_type = item.pop('type', '').lower()
-            action = item.pop('__action', '').lower()
-            if not item_type:
-                self.unknown.append(original_item)
-            if item_type == 'organization':
-                org_importer = OrganizationImporter(item, self.user, self.update_if_exists)
-                self.handle_item_import_result(
-                    org_importer.delete() if action == 'delete' else org_importer.run(), original_item
-                )
-                continue
-            if item_type == 'source':
-                source_importer = SourceImporter(item, self.user, self.update_if_exists)
-                self.handle_item_import_result(
-                    source_importer.delete() if action == 'delete' else source_importer.run(), original_item
-                )
-                continue
-            if item_type == 'source version':
-                self.handle_item_import_result(
-                    SourceVersionImporter(item, self.user, self.update_if_exists).run(), original_item
-                )
-                continue
-            if item_type == 'collection':
-                collection_importer = CollectionImporter(item, self.user, self.update_if_exists)
-                self.handle_item_import_result(
-                    collection_importer.delete() if action == 'delete' else collection_importer.run(), original_item
-                )
-                continue
-            if item_type == 'collection version':
-                self.handle_item_import_result(
-                    CollectionVersionImporter(item, self.user, self.update_if_exists).run(), original_item
-                )
-                continue
-            if item_type == 'concept':
-                try:
-                    concept_importer = ConceptImporter(
-                        item, self.user, self.update_if_exists,
-                        skip_hierarchy_tasks=self.skip_hierarchy_tasks and bool(item.get('id')),
-                        cache=self.cache
+        try:
+            for original_item in self.input_list:
+                self.processed += 1
+                logger.info('Processing %s of %s', str(self.processed), str(self.total))
+                self.notify_progress()
+                item = original_item.copy()
+                item_type = item.pop('type', '').lower()
+                action = item.pop('__action', '').lower()
+                if not item_type:
+                    self.unknown.append(original_item)
+                if item_type == 'organization':
+                    org_importer = OrganizationImporter(item, self.user, self.update_if_exists)
+                    self.handle_item_import_result(
+                        org_importer.delete() if action == 'delete' else org_importer.run(), original_item
                     )
-                    _result = concept_importer.delete() if action == 'delete' else concept_importer.run()
-                    indexer.add(concept_importer.instance)
-                except Exception as ex:
-                    ERRBIT_LOGGER.log(ex)
-                    _result = {'__all__': str(ex)}
-                self.handle_item_import_result(_result, original_item)
-                continue
-            if item_type == 'mapping':
-                try:
-                    mapping_importer = MappingImporter(item, self.user, self.update_if_exists, cache=self.cache)
-                    _result = mapping_importer.delete() if action == 'delete' else mapping_importer.run()
-                    indexer.add(mapping_importer.instance)
-                except Exception as ex:
-                    ERRBIT_LOGGER.log(ex)
-                    _result = {'__all__': str(ex)}
-                self.handle_item_import_result(_result, original_item)
-                continue
-            if item_type == 'reference':
-                reference_importer = ReferenceImporter(item, self.user, self.update_if_exists)
-                self.handle_item_import_result(
-                    reference_importer.delete() if action == 'delete' else reference_importer.run(), original_item
-                )
-                continue
+                    continue
+                if item_type == 'source':
+                    source_importer = SourceImporter(item, self.user, self.update_if_exists)
+                    self.handle_item_import_result(
+                        source_importer.delete() if action == 'delete' else source_importer.run(), original_item
+                    )
+                    continue
+                if item_type == 'source version':
+                    self.handle_item_import_result(
+                        SourceVersionImporter(item, self.user, self.update_if_exists).run(), original_item
+                    )
+                    continue
+                if item_type == 'collection':
+                    collection_importer = CollectionImporter(item, self.user, self.update_if_exists)
+                    self.handle_item_import_result(
+                        collection_importer.delete() if action == 'delete' else collection_importer.run(), original_item
+                    )
+                    continue
+                if item_type == 'collection version':
+                    self.handle_item_import_result(
+                        CollectionVersionImporter(item, self.user, self.update_if_exists).run(), original_item
+                    )
+                    continue
+                if item_type == 'concept':
+                    try:
+                        concept_importer = ConceptImporter(
+                            item, self.user, self.update_if_exists,
+                            skip_hierarchy_tasks=self.skip_hierarchy_tasks and bool(item.get('id')),
+                            cache=self.cache
+                        )
+                        _result = concept_importer.delete() if action == 'delete' else concept_importer.run()
+                        indexer.add(concept_importer.instance)
+                    except Exception as ex:
+                        ERRBIT_LOGGER.log(ex)
+                        _result = {'__all__': str(ex)}
+                    self.handle_item_import_result(_result, original_item)
+                    continue
+                if item_type == 'mapping':
+                    try:
+                        mapping_importer = MappingImporter(item, self.user, self.update_if_exists, cache=self.cache)
+                        _result = mapping_importer.delete() if action == 'delete' else mapping_importer.run()
+                        indexer.add(mapping_importer.instance)
+                    except Exception as ex:
+                        ERRBIT_LOGGER.log(ex)
+                        _result = {'__all__': str(ex)}
+                    self.handle_item_import_result(_result, original_item)
+                    continue
+                if item_type == 'reference':
+                    reference_importer = ReferenceImporter(item, self.user, self.update_if_exists)
+                    self.handle_item_import_result(
+                        reference_importer.delete() if action == 'delete' else reference_importer.run(), original_item
+                    )
+                    continue
 
-        self.notify_progress(force=True)
-        indexer.finish()
+            self.notify_progress(force=True)
+        finally:
+            indexer.finish()
         self.elapsed_seconds = round(time.time() - self.start_time, 4)
 
         self.make_result()

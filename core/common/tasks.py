@@ -252,12 +252,7 @@ def bulk_import(to_import, username, update_if_exists):
     return BulkImport(content=to_import, username=username, update_if_exists=update_if_exists).run()
 
 
-# `index` doesn't make an import a different one, so it stays out of the celery_once lock key, which
-# get_bulk_import_celery_once_lock_key rebuilds from these args to clear a revoked import's lock.
-@app.task(
-    base=QueueOnceCustomTask, bind=True, retry_kwargs={'max_retries': 0},
-    once={'keys': ['to_import', 'username', 'update_if_exists', 'threads']}
-)
+@app.task(base=QueueOnceCustomTask, bind=True, retry_kwargs={'max_retries': 0})
 def bulk_import_parallel_inline(self, to_import, username, update_if_exists, threads=5, index=True):  # pylint: disable=too-many-arguments
     from core.importers.models import BulkImportParallelRunner
     try:
@@ -272,10 +267,7 @@ def bulk_import_parallel_inline(self, to_import, username, update_if_exists, thr
     return importer.run()
 
 
-@app.task(
-    base=QueueOnceCustomTask, retry_kwargs={'max_retries': 0},
-    once={'keys': ['to_import', 'username', 'update_if_exists']}  # as bulk_import_parallel_inline
-)
+@app.task(base=QueueOnceCustomTask, retry_kwargs={'max_retries': 0})
 def bulk_import_inline(to_import, username, update_if_exists, index=True):
     from core.importers.models import BulkImportInline
     return BulkImportInline(

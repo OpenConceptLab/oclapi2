@@ -734,8 +734,11 @@ def get_bulk_import_celery_once_lock_key(async_result):
         return None
     args = [('to_import', result_args[0]), ('username', result_args[1]), ('update_if_exists', result_args[2])]
 
+    # celery_once keys on the args the task was sent, so the optional ones count only when present
     if async_result.name == 'core.common.tasks.bulk_import_parallel_inline':
-        args.append(('threads', result_args[3]))
+        args += zip(['threads', 'index'], result_args[3:])
+    elif async_result.name == 'core.common.tasks.bulk_import_inline':
+        args += zip(['index'], result_args[3:])
 
     return get_celery_once_lock_key(async_result.name, args)
 

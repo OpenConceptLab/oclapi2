@@ -928,8 +928,9 @@ class BulkImportInlineTest(OCLTestCase):
         mapping = Mapping.objects.filter(map_type='Has Child', id=F('versioned_object_id')).first()
         self.assertEqual(mapping.versions.count(), 1)
         self.assertTrue(Mapping.objects.filter(map_type='Has Child', is_latest_version=True).exists())
-        batch_index_resources_mock.apply_async.assert_called_once_with(
+        batch_index_resources_mock.apply_async.assert_any_call(
             ('mapping', {'id__in': ANY}, True), queue='indexing', permanent=False)
+        self.assertEqual(queued_index_resources(batch_index_resources_mock), ['mapping', 'concept'])
         self.assertEqual(
             Mapping.objects.filter(map_type='Has Child', id=F('versioned_object_id')).first().versions.count(), 1
         )
@@ -958,9 +959,9 @@ class BulkImportInlineTest(OCLTestCase):
 
         mapping = Mapping.objects.filter(map_type='Has Child', id=F('versioned_object_id')).first()
         self.assertEqual(mapping.versions.count(), 2)
-        self.assertEqual(queued_index_resources(batch_index_resources_mock), ['mapping', 'mapping'])
+        self.assertEqual(queued_index_resources(batch_index_resources_mock), ['mapping', 'concept'] * 2)
         self.assertEqual(
-            sorted(batch_index_resources_mock.apply_async.mock_calls[1][1][0][1]['id__in']),
+            sorted(batch_index_resources_mock.apply_async.mock_calls[2][1][0][1]['id__in']),
             sorted([mapping.id, mapping.get_latest_version().prev_version.id, mapping.get_latest_version().id])
         )
         self.assertFalse(Mapping.objects.filter(map_type='Has Child', _index=False).exists())
@@ -987,7 +988,7 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(mapping.versions.count(), 3)
         self.assertTrue(mapping.retired)
         self.assertTrue(mapping.get_latest_version().retired)
-        self.assertEqual(queued_index_resources(batch_index_resources_mock), ['mapping'] * 3)
+        self.assertEqual(queued_index_resources(batch_index_resources_mock), ['mapping', 'concept'] * 3)
         self.assertEqual(importer.processed, 1)
         self.assertEqual(len(importer.created), 0)
         self.assertEqual(len(importer.updated), 1)
@@ -1014,7 +1015,7 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.failed), 1)
         self.assertEqual(importer.failed[0]['errors'], {'source': 'Not Found'})
         self.assertTrue(importer.elapsed_seconds > 0)
-        self.assertEqual(queued_index_resources(batch_index_resources_mock), ['mapping'] * 3)  # nothing to index
+        self.assertEqual(queued_index_resources(batch_index_resources_mock), ['mapping', 'concept'] * 3)  # nothing new
 
     @patch('core.importers.models.batch_index_resources')
     def test_mapping_import_cache_reuse_correctness(self, batch_index_resources_mock):
@@ -1167,8 +1168,9 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(len(importer.created), 1)
         self.assertEqual(importer.failed, [])
         self.assertTrue(importer.elapsed_seconds > 0)
-        batch_index_resources_mock.apply_async.assert_called_once_with(
+        batch_index_resources_mock.apply_async.assert_any_call(
             ('mapping', {'id__in': ANY}, True), queue='indexing', permanent=False)
+        self.assertEqual(queued_index_resources(batch_index_resources_mock), ['mapping', 'concept'])
 
     @patch('core.importers.models.batch_index_resources')
     def test_reference_import(self, batch_index_resources_mock):
@@ -1615,43 +1617,205 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(queued_index_resources(batch_index_resources_mock), ['concept', 'concept'])
         self.assertFalse(Concept.objects.filter(parent=source, _index=False).exists())
 
+    @staticmethod
+    def concept_line(source, mnemonic, **extra):
+        return {
+            'type': 'Concept', 'id': mnemonic, 'concept_class': 'Misc', 'datatype': 'None',
+            'owner_type': 'Organization', 'owner': source.organization.mnemonic, 'source': source.mnemonic,
+            'names': [{'name': mnemonic, 'locale': 'en', 'locale_preferred': True, 'name_type': 'Fully Specified'}],
+            **extra
+        }
+
+    @staticmethod
+    def mapping_line(source, from_mnemonic, to_mnemonic, **extra):
+        return {
+            'type': 'Mapping', 'map_type': 'Same As', 'from_concept_url': source.uri + f'concepts/{from_mnemonic}/',
+            'to_concept_url': source.uri + f'concepts/{to_mnemonic}/', 'owner_type': 'Organization',
+            'owner': source.organization.mnemonic, 'source': source.mnemonic, **extra
+        }
+
+    @staticmethod
+    def queued_ids(batch_index_resources_mock, resource):
+        return {
+            _id for call_args in batch_index_resources_mock.apply_async.call_args_list
+            if call_args[0][0][0] == resource for _id in call_args[0][0][1]['id__in']
+        }
+
+    @patch('core.importers.models.batch_index_resources')
+    def test_concept_created_or_updated_then_deleted_in_one_part_is_not_left_deferred(
+            self, batch_index_resources_mock):
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='RetireOrg'))
+        # the delete retires by cloning the latest version, which this part has deferred (_index=False)
+        importer = BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[
+            self.concept_line(source, 'Food'), self.concept_line(source, 'Food', __action='delete')])
+        importer.run()
+
+        self.assertEqual((len(importer.created), len(importer.deleted)), (1, 1))
+        rows = Concept.objects.filter(parent=source, mnemonic='Food')
+        self.assertEqual(rows.count(), 3)  # versioned object, initial version, retired version
+        self.assertTrue(rows.get(is_latest_version=True).retired)
+        self.assertFalse(rows.filter(_index=False).exists())
+        self.assertEqual(self.queued_ids(batch_index_resources_mock, 'concept'), set(rows.values_list('id', flat=True)))
+
+        BulkImportInline(
+            content=None, username='ocladmin', update_if_exists=True, input_list=[self.concept_line(source, 'Drink')]
+        ).run()
+        batch_index_resources_mock.reset_mock()
+        importer = BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[
+            self.concept_line(source, 'Drink', datatype='Text'), self.concept_line(source, 'Drink', __action='delete')
+        ])
+        importer.run()
+
+        self.assertEqual((len(importer.updated), len(importer.deleted)), (1, 1))
+        rows = Concept.objects.filter(parent=source, mnemonic='Drink')
+        self.assertEqual(rows.count(), 4)  # versioned object, initial, updated and retired versions
+        self.assertFalse(rows.filter(_index=False).exists())
+        self.assertEqual(self.queued_ids(batch_index_resources_mock, 'concept'), set(rows.values_list('id', flat=True)))
+
+    @patch('core.importers.models.batch_index_resources')
+    def test_deleting_a_row_left_deferred_by_an_earlier_import_ends_its_deferral(self, batch_index_resources_mock):
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='StuckOrg'))
+        BulkImportInline(
+            content=None, username='ocladmin', update_if_exists=True, input_list=[self.concept_line(source, 'Food')]
+        ).run()
+        rows = Concept.objects.filter(parent=source, mnemonic='Food')
+        rows.update(_index=False)  # as imports left them before ocl_online#245
+        batch_index_resources_mock.reset_mock()
+
+        BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[
+            self.concept_line(source, 'Food', __action='delete')]).run()
+
+        self.assertEqual(rows.count(), 3)
+        self.assertFalse(rows.filter(_index=False).exists())
+        self.assertEqual(self.queued_ids(batch_index_resources_mock, 'concept'), set(rows.values_list('id', flat=True)))
+
+    @patch('core.importers.models.batch_index_resources')
+    def test_deleting_an_indexed_row_leaves_it_to_the_normal_save_path(self, batch_index_resources_mock):
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='IndexedOrg'))
+        BulkImportInline(
+            content=None, username='ocladmin', update_if_exists=True, input_list=[self.concept_line(source, 'Food')]
+        ).run()
+        batch_index_resources_mock.reset_mock()
+
+        importer = BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[
+            self.concept_line(source, 'Food', __action='delete')])
+        importer.run()
+
+        self.assertEqual(len(importer.deleted), 1)
+        batch_index_resources_mock.apply_async.assert_not_called()  # the retire indexed itself
+        self.assertFalse(Concept.objects.filter(parent=source, _index=False).exists())
+
+    @patch('core.importers.models.batch_index_resources')
+    def test_mapping_created_then_deleted_in_one_part_is_not_left_deferred(self, batch_index_resources_mock):
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='MapRetireOrg'))
+        ConceptFactory(parent=source, mnemonic='From')
+        ConceptFactory(parent=source, mnemonic='To')
+
+        importer = BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[
+            self.mapping_line(source, 'From', 'To'), self.mapping_line(source, 'From', 'To', __action='delete')])
+        importer.run()
+
+        self.assertEqual((len(importer.created), len(importer.deleted)), (1, 1))
+        rows = Mapping.objects.filter(parent=source)
+        self.assertEqual(rows.count(), 3)  # versioned object, initial version, retired version
+        self.assertTrue(rows.get(is_latest_version=True).retired)
+        self.assertFalse(rows.filter(_index=False).exists())
+        self.assertEqual(self.queued_ids(batch_index_resources_mock, 'mapping'), set(rows.values_list('id', flat=True)))
+
+    @patch('core.importers.models.batch_index_resources')
+    def test_import_ends_the_deferral_when_the_part_fails(self, batch_index_resources_mock):
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='FailOrg'))
+        input_list = [
+            self.concept_line(source, 'Food'),
+            {'type': 'Source', 'id': 'Other', 'owner_type': 'Organization', 'owner': 'FailOrg', 'name': 'Other'},
+        ]
+
+        with patch.object(SourceImporter, 'run', side_effect=RuntimeError('boom')):
+            with self.assertRaises(RuntimeError):
+                BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=input_list).run()
+
+        self.assertFalse(Concept.objects.filter(parent=source, _index=False).exists())
+        self.assertEqual(
+            self.queued_ids(batch_index_resources_mock, 'concept'),
+            set(Concept.objects.filter(parent=source).values_list('id', flat=True))
+        )
+
+    @patch('core.importers.models.batch_index_resources')
+    def test_import_ends_the_deferral_of_every_row_before_queueing(self, batch_index_resources_mock):
+        batch_index_resources_mock.apply_async.side_effect = ConnectionError('broker unavailable')
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='BrokerOrg'))
+        ConceptFactory(parent=source, mnemonic='To')
+        input_list = [self.concept_line(source, 'From'), self.mapping_line(source, 'From', 'To')]
+
+        with self.assertRaises(ConnectionError):
+            BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=input_list).run()
+
+        self.assertEqual(Mapping.objects.filter(parent=source).count(), 2)
+        self.assertFalse(Concept.objects.filter(parent=source, _index=False).exists())
+        self.assertFalse(Mapping.objects.filter(parent=source, _index=False).exists())
+
+    @patch('core.importers.models.batch_index_resources')
+    def test_mapping_import_refreshes_the_concepts_it_maps_from(self, batch_index_resources_mock):
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='MappedCodesOrg'))
+        from_concept = ConceptFactory(parent=source, mnemonic='From')
+        to_concept = ConceptFactory(parent=source, mnemonic='To')
+
+        BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[
+            self.mapping_line(source, 'From', 'To')]).run()
+
+        # the concept document carries its mapped codes (same_as_map_codes etc.), so the concept is indexed again
+        # once its mappings exist
+        self.assertEqual(queued_index_resources(batch_index_resources_mock), ['mapping', 'concept'])
+        self.assertEqual(
+            self.queued_ids(batch_index_resources_mock, 'concept'),
+            {from_concept.versioned_object_id, from_concept.get_latest_version().id}
+        )
+        self.assertNotIn(to_concept.versioned_object_id, self.queued_ids(batch_index_resources_mock, 'concept'))
+
 
 class ImportSearchTest(OCLAPITestCase):
     # parallel_bulk builds the documents on pool threads, whose DB connections can't see this test's rows
     @patch('core.common.models.parallel_bulk', streaming_bulk)
     @patch('core.importers.models.batch_index_resources')
     def test_imported_concepts_and_mappings_are_searchable(self, batch_index_resources_mock):
-        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='ImportSearchOrg'))
+        org = OrganizationFactory(mnemonic=f'ImportSearch{uuid.uuid4().hex[:8]}')  # no documents from earlier runs
+        source = OrganizationSourceFactory(organization=org)
         input_list = [
             {
                 'type': 'Concept', 'id': mnemonic, 'concept_class': 'Misc', 'datatype': 'None',
-                'owner_type': 'Organization', 'owner': 'ImportSearchOrg', 'source': source.mnemonic,
+                'owner_type': 'Organization', 'owner': org.mnemonic, 'source': source.mnemonic,
                 'names': [{'name': mnemonic, 'locale': 'en', 'locale_preferred': True, 'name_type': 'Fully Specified'}]
             } for mnemonic in ['Zephyranthes', 'Quillwort']
         ]
         input_list.append({
             'type': 'Mapping', 'map_type': 'Same As', 'from_concept_url': source.uri + 'concepts/Zephyranthes/',
             'to_concept_url': source.uri + 'concepts/Quillwort/',
-            'owner_type': 'Organization', 'owner': 'ImportSearchOrg', 'source': source.mnemonic,
+            'owner_type': 'Organization', 'owner': org.mnemonic, 'source': source.mnemonic,
         })
         importer = BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=input_list)
         importer.run()
         self.assertEqual(len(importer.created), 3)
+        self.assertEqual(queued_index_resources(batch_index_resources_mock), ['concept', 'mapping'])
+
+        token = UserProfile.objects.get(username='ocladmin').get_token()
+
+        def search(url):
+            response = self.client.get(url, HTTP_AUTHORIZATION='Token ' + token)
+            self.assertEqual(response.status_code, 200)
+            return response.data
+
+        concepts_url = source.concepts_url + '?q=Zephyranthes'
+        mappings_url = source.mappings_url + '?q=Zephyranthes'
+        self.assertEqual((search(concepts_url), search(mappings_url)), ([], []))  # nothing has indexed them yet
 
         # run the indexing the import queued, for real: batch_index_full does nothing in TEST_MODE
         with override_settings(TEST_MODE=False):
             for call_args in batch_index_resources_mock.apply_async.call_args_list:
                 batch_index_resources(*call_args[0][0])
 
-        token = UserProfile.objects.get(username='ocladmin').get_token()
-        response = self.client.get(source.concepts_url + '?q=Zephyranthes', HTTP_AUTHORIZATION='Token ' + token)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual([concept['id'] for concept in response.data], ['Zephyranthes'])
-
-        response = self.client.get(source.mappings_url + '?q=Zephyranthes', HTTP_AUTHORIZATION='Token ' + token)
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual([concept['id'] for concept in search(concepts_url)], ['Zephyranthes'])
         self.assertEqual(
-            [(mapping['from_concept_code'], mapping['to_concept_code']) for mapping in response.data],
+            [(mapping['from_concept_code'], mapping['to_concept_code']) for mapping in search(mappings_url)],
             [('Zephyranthes', 'Quillwort')]
         )
 
@@ -2165,7 +2329,7 @@ class ResourceImporterModelsTest(OCLTestCase):
         importer.run()
 
         self.assertEqual(len(importer.created), 1)
-        batch_index_resources_mock.apply_async.assert_called_with(
+        batch_index_resources_mock.apply_async.assert_any_call(
             ('mapping', {'id__in': ANY}, True), queue='indexing', permanent=False)
 
     def test_organization_importer_process_creates_successfully(self):
@@ -2486,12 +2650,15 @@ class BulkImportParallelRunnerTest(OCLTestCase):
             importer.queue_tasks([concept], True)
             bulk_import_parts_inline_mock.s.assert_called_once_with([concept], 'ocladmin', True, index)
 
-    def test_celery_once_lock_key_ignores_index(self):
+    def test_celery_once_lock_key_matches_the_task_key(self):
         """Revoking an import clears its celery_once lock under the key get_bulk_import_celery_once_lock_key rebuilds
-        from the task's args, so `index` must stay out of that key."""
+        from the task's args, so it must match the key the task locked, whichever args were sent."""
         for task, args in [
                 (bulk_import_parallel_inline, ('content', 'ocladmin', True, 5, False)),
+                (bulk_import_parallel_inline, ('content', 'ocladmin', True, 5)),  # sent before `index` existed
+                (bulk_import_parallel_inline, ('content', 'ocladmin', True)),  # threads left to its default
                 (bulk_import_inline, ('content', 'ocladmin', True, False)),
+                (bulk_import_inline, ('content', 'ocladmin', True)),
         ]:
             result = Mock(args=list(args))
             result.name = task.name
