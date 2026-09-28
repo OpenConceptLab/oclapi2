@@ -7,7 +7,7 @@ from celery import group
 from celery.utils.log import get_task_logger
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db.models import F, Q
+from django.db.models import F
 from ocldev.oclfleximporter import OclFlexImporter
 from pydash import compact, get
 
@@ -842,11 +842,13 @@ class ImportIndexer:
         """
         ids = set()
         for chunk in chunks(sorted(self.mapped_concept_ids), self.CHUNK_SIZE):
-            versioned_ids = Concept.objects.filter(id__in=chunk).values('versioned_object_id')
+            # plain id lists, since an OR of subqueries can't use an index and reads the whole concepts table
+            rows = list(Concept.objects.filter(id__in=chunk).values_list('id', 'versioned_object_id'))
+            versioned_ids = {versioned_id for _, versioned_id in rows if versioned_id}
+            ids.update(concept_id for concept_id, _ in rows)
+            ids.update(versioned_ids)
             ids.update(Concept.objects.filter(
-                Q(id__in=chunk) | Q(id__in=versioned_ids) |
-                Q(versioned_object_id__in=versioned_ids, is_latest_version=True)
-            ).values_list('id', flat=True))
+                versioned_object_id__in=versioned_ids, is_latest_version=True).values_list('id', flat=True))
         return ids
 
 

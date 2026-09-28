@@ -14,8 +14,10 @@ from celery_once import AlreadyQueued
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
+from django.db import connection
 from django.db.models import F
 from django.test import override_settings
+from django.test.utils import CaptureQueriesContext
 from elasticsearch.helpers import streaming_bulk
 from ijson import JSONError
 from mock import patch, Mock, ANY, PropertyMock, call
@@ -37,7 +39,7 @@ from core.importers.input_parsers import ImportContentParser
 from core.importers.models import BulkImport, BulkImportInline, BulkImportParallelRunner, \
     CREATED, UPDATED, DELETED, PERMISSION_DENIED, UNCHANGED, FAILED, NOT_FOUND, \
     BaseImporter, BaseResourceImporter, OrganizationImporter, SourceImporter, SourceVersionImporter, \
-    CollectionImporter, CollectionVersionImporter, ConceptImporter, MappingImporter, ReferenceImporter
+    CollectionImporter, CollectionVersionImporter, ConceptImporter, MappingImporter, ReferenceImporter, ImportIndexer
 from core.importers.views import csv_file_data_to_input_list, ImportRetrieveDestroyMixin
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
@@ -1833,6 +1835,23 @@ class BulkImportInlineTest(OCLTestCase):
             self.queued_mapped_code_ids(index_concepts_mapped_codes_mock),
             {concept.id, first_version.id, concept.get_latest_version().id}
         )
+
+    @patch('core.importers.models.batch_index_resources')
+    def test_mapped_concept_lookup_queries_plain_id_lists(self, _):
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='MappedLookupOrg'))
+        for line in [self.concept_line(source, 'From'), self.concept_line(source, 'From', datatype='Text')]:
+            BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[line]).run()
+        concept = Concept.objects.get(parent=source, mnemonic='From', id=F('versioned_object_id'))
+        first_version = concept.versions.order_by('id').first()
+        indexer = ImportIndexer()
+        indexer.mapped_concept_ids = {first_version.id}
+
+        with CaptureQueriesContext(connection) as context:
+            ids = indexer.get_mapped_concept_ids()
+
+        self.assertEqual(ids, {concept.id, first_version.id, concept.get_latest_version().id})
+        # an OR of `IN (SELECT ...)` conditions can't use an index, so on a large concepts table it reads every row
+        self.assertEqual([query['sql'] for query in context.captured_queries if '(SELECT' in query['sql'].upper()], [])
 
     def test_mapped_codes_actions_update_just_the_mapped_codes(self):
         source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='MappedActionsOrg'))
