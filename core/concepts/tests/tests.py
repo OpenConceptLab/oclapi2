@@ -354,6 +354,14 @@ class ConceptViewsAPITest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 500)
 
+    def test_match_knn_params(self):
+        from core.concepts.views import MetadataToConceptsListView as View
+        self.assertEqual(View.get_knn_params(QueryDict('')), (500, 100))
+        self.assertEqual(View.get_knn_params(QueryDict('numCandidates=3000&kNearest=50')), (3000, 50))
+        self.assertEqual(View.get_knn_params(QueryDict('numCandidates=99999&kNearest=500')), (3000, 100))
+        self.assertEqual(View.get_knn_params(QueryDict('numCandidates=50')), (50, 50))
+        self.assertEqual(View.get_knn_params(QueryDict('numCandidates=-5&kNearest=x')), (1, 1))
+
     def test_match_concepts_access_denied_403(self):
         user = UserProfileFactory()
         user.groups.clear()

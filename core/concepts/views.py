@@ -947,9 +947,24 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
     serializer_class = ConceptListSerializer
     permission_classes = (IsAuthenticated, CanUseMapper)
     es_fields = Concept.es_fields
+    # Semantic kNN. Above ~1000 candidates ES compares far more vectors per clause for no gain in hits
+    # (OpenConceptLab/ocl_online#255).
+    num_candidates_default = 500
+    num_candidates_max = 3000
+    k_nearest_default = 100
+    k_nearest_max = 100
 
     def get_throttles(self):
         return ThrottleUtil.get_match_throttles_by_user_plan(self.request.user)
+
+    @classmethod
+    def get_knn_params(cls, query_params):
+        """numCandidates and kNearest, clamped so ES accepts them: 1 <= k <= num_candidates."""
+        num_candidates = min(
+            max(to_int(query_params.get('numCandidates'), cls.num_candidates_default), 1), cls.num_candidates_max)
+        k_nearest = min(
+            max(to_int(query_params.get('kNearest'), cls.k_nearest_default), 1), cls.k_nearest_max, num_candidates)
+        return num_candidates, k_nearest
 
     def get_serializer_class(self):
         if self.is_brief():
@@ -1002,8 +1017,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         variants_repo = self._resolve_variants_repo(self.request.data.get('variants')) if is_core_user else None
         original_filters = filters.copy()
         include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM) in TRUTHY
-        num_candidates = min(to_int(self.request.query_params.get('numCandidates', 0), 3000), 3000)
-        k_nearest = min(to_int(self.request.query_params.get('kNearest', 0), 100), 100)
+        num_candidates, k_nearest = self.get_knn_params(self.request.query_params)
         offset = max(to_int(self.request.GET.get('offset'), 0), 0)
         limit = max(to_int(self.request.GET.get('limit'), 0), 0) or self.default_limit
         page = max(to_int(self.request.GET.get('page'), 1), 1)
