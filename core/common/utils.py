@@ -442,8 +442,8 @@ def es_get(url, **kwargs):
     return None
 
 
-def queue_bulk_import(  # pylint: disable=too-many-arguments
-        to_import, import_queue, username, update_if_exists, threads=None, inline=False, sub_task=False
+def queue_bulk_import(  # pylint: disable=too-many-arguments,too-many-locals
+        to_import, import_queue, username, update_if_exists, threads=None, inline=False, sub_task=False, index=True
 ):
     """
     Used to queue bulk imports. It assigns a bulk import task to a specified import queue or a random one.
@@ -456,6 +456,7 @@ def queue_bulk_import(  # pylint: disable=too-many-arguments
     :param threads:
     :param inline:
     :param sub_task:
+    :param index: inline imports only: whether to index the imported concepts and mappings when each part finishes
     :return: task
     """
 
@@ -474,6 +475,7 @@ def queue_bulk_import(  # pylint: disable=too-many-arguments
             # Consider removing bulk_import_inline and this branch once confirmed no external
             # callers rely on it (check API consumers and the test suite first).
             task_func = bulk_import_inline
+        args = (*args, index)
     else:
         task_func = bulk_import
     task = get_queue_task_names(import_queue, username, name=task_func.__name__)

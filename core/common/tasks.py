@@ -252,13 +252,18 @@ def bulk_import(to_import, username, update_if_exists):
     return BulkImport(content=to_import, username=username, update_if_exists=update_if_exists).run()
 
 
-@app.task(base=QueueOnceCustomTask, bind=True, retry_kwargs={'max_retries': 0})
-def bulk_import_parallel_inline(self, to_import, username, update_if_exists, threads=5):
+# `index` doesn't make an import a different one, so it stays out of the celery_once lock key, which
+# get_bulk_import_celery_once_lock_key rebuilds from these args to clear a revoked import's lock.
+@app.task(
+    base=QueueOnceCustomTask, bind=True, retry_kwargs={'max_retries': 0},
+    once={'keys': ['to_import', 'username', 'update_if_exists', 'threads']}
+)
+def bulk_import_parallel_inline(self, to_import, username, update_if_exists, threads=5, index=True):  # pylint: disable=too-many-arguments
     from core.importers.models import BulkImportParallelRunner
     try:
         importer = BulkImportParallelRunner(
             content=to_import, username=username, update_if_exists=update_if_exists,
-            parallel=threads, self_task_id=self.request.id
+            parallel=threads, self_task_id=self.request.id, index=index
         )
     except JSONDecodeError as ex:
         return {'error': f"Invalid JSON ({ex.msg})"}
@@ -267,25 +272,29 @@ def bulk_import_parallel_inline(self, to_import, username, update_if_exists, thr
     return importer.run()
 
 
-@app.task(base=QueueOnceCustomTask, retry_kwargs={'max_retries': 0})
-def bulk_import_inline(to_import, username, update_if_exists):
+@app.task(
+    base=QueueOnceCustomTask, retry_kwargs={'max_retries': 0},
+    once={'keys': ['to_import', 'username', 'update_if_exists']}  # as bulk_import_parallel_inline
+)
+def bulk_import_inline(to_import, username, update_if_exists, index=True):
     from core.importers.models import BulkImportInline
-    return BulkImportInline(content=to_import, username=username, update_if_exists=update_if_exists).run()
+    return BulkImportInline(
+        content=to_import, username=username, update_if_exists=update_if_exists, index=index).run()
 
 
 # pylint: disable=too-many-arguments
 @app.task(bind=True, base=QueueOnceCustomTask, retry_kwargs={'max_retries': 0})
-def bulk_import_new(self, path, username, owner_type, owner, import_type='default'):
+def bulk_import_new(self, path, username, owner_type, owner, import_type='default', index=True):
     from core.importers.importer import Importer
     task_id = self.request.id
-    return Importer(task_id, path, username, owner_type, owner, import_type).run()
+    return Importer(task_id, path, username, owner_type, owner, import_type, index).run()
 
 
 # pylint: disable=too-many-arguments
 @app.task(retry_kwargs={'max_retries': 0}, compression='gzip')
-def bulk_import_subtask(path, username, owner_type, owner, resource_type, files):
+def bulk_import_subtask(path, username, owner_type, owner, resource_type, files, index=True):
     from core.importers.importer import ImporterSubtask
-    return ImporterSubtask(path, username, owner_type, owner, resource_type, files).run()
+    return ImporterSubtask(path, username, owner_type, owner, resource_type, files, index).run()
 
 
 @app.task(retry_kwargs={'max_retries': 0}, compression='gzip')
@@ -321,11 +330,11 @@ def import_finisher(task_id):
 
 
 @app.task(bind=True, retry_kwargs={'max_retries': 0})
-def bulk_import_parts_inline(self, input_list, username, update_if_exists):
+def bulk_import_parts_inline(self, input_list, username, update_if_exists, index=True):
     from core.importers.models import BulkImportInline
     return BulkImportInline(
         content=None, username=username, update_if_exists=update_if_exists, input_list=input_list,
-        self_task_id=self.request.id, skip_hierarchy_tasks=True
+        self_task_id=self.request.id, skip_hierarchy_tasks=True, index=index
     ).run()
 
 

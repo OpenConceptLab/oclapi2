@@ -724,6 +724,7 @@ class ReferenceImporter(BaseResourceImporter):
                     self.get('data'), self.user, self.get('__cascade', False),
                     self.get('__transform', False)
                 )
+                # Stays off: the expansion already indexes the members these references add (Expansion.add_references)
                 if self.index_resources and not get(settings, 'TEST_MODE', False):  # pragma: no cover
                     concept_ids = []
                     mapping_ids = []
@@ -785,12 +786,44 @@ class ReferenceImporter(BaseResourceImporter):
         return NOT_FOUND
 
 
+class ImportIndexer:
+    """
+    Ends the indexing deferral for the concepts and mappings an import saved with _index=False: the versions it
+    created, their versioned objects and the versions they superseded. finish() resets their _index, whether or not
+    they get indexed, so later saves index them again; unless the import turned indexing off, it also queues their
+    batch indexing.
+    """
+    CHUNK_SIZE = 5000
+
+    def __init__(self, index=True):
+        self.index = index
+        self.ids = {'concept': set(), 'mapping': set()}
+
+    def add(self, instance):
+        resource = {Concept: 'concept', Mapping: 'mapping'}.get(type(instance))
+        if resource and instance.id:
+            self.ids[resource].update(compact([
+                instance.versioned_object_id,
+                get(instance, 'prev_latest_version_id'),
+                get(instance, 'latest_version_id'),
+                instance.id,
+            ]))
+
+    def finish(self):
+        for resource, model in (('concept', Concept), ('mapping', Mapping)):
+            for chunk in chunks(sorted(self.ids[resource]), self.CHUNK_SIZE):
+                model.objects.filter(id__in=chunk, _index=False).update(_index=True)
+                if self.index:
+                    batch_index_resources.apply_async(
+                        (resource, {'id__in': chunk}, True), queue='indexing', permanent=False)
+
+
 class BulkImportInline(BaseImporter):
     PROGRESS_NOTIFY_INTERVAL_SECONDS = 2
 
     def __init__(  # pylint: disable=too-many-arguments
             self, content, username, update_if_exists=False, input_list=None, user=None, set_user=True,
-            self_task_id=None, skip_hierarchy_tasks=False
+            self_task_id=None, skip_hierarchy_tasks=False, index=True
     ):
         super().__init__(content, username, update_if_exists, user, not bool(input_list), set_user)
         self.self_task_id = self_task_id
@@ -824,7 +857,7 @@ class BulkImportInline(BaseImporter):
         self.start_time = time.time()
         self.last_progress_notified_at = 0
         self.elapsed_seconds = 0
-        self.index_resources = False
+        self.index = index
 
     def set_task(self):
         self.task = Task.objects.filter(id=self.self_task_id).first()
@@ -891,8 +924,7 @@ class BulkImportInline(BaseImporter):
             print("****STARTED SUBPROCESS****")
             print(f"TASK ID: {self.self_task_id}")
             print("***************")
-        new_concept_ids = set()
-        new_mapping_ids = set()
+        indexer = ImportIndexer(self.index)
         for original_item in self.input_list:
             self.processed += 1
             logger.info('Processing %s of %s', str(self.processed), str(self.total))
@@ -938,15 +970,7 @@ class BulkImportInline(BaseImporter):
                         cache=self.cache
                     )
                     _result = concept_importer.delete() if action == 'delete' else concept_importer.run()
-                    if self.index_resources and get(concept_importer.instance, 'id'):
-                        new_concept_ids.update(set(compact(
-                            [
-                                concept_importer.instance.versioned_object_id,
-                                get(concept_importer.instance, 'prev_latest_version_id'),
-                                get(concept_importer.instance, 'latest_version_id'),
-                                concept_importer.instance.id,
-                            ]
-                        )))
+                    indexer.add(concept_importer.instance)
                 except Exception as ex:
                     ERRBIT_LOGGER.log(ex)
                     _result = {'__all__': str(ex)}
@@ -956,15 +980,7 @@ class BulkImportInline(BaseImporter):
                 try:
                     mapping_importer = MappingImporter(item, self.user, self.update_if_exists, cache=self.cache)
                     _result = mapping_importer.delete() if action == 'delete' else mapping_importer.run()
-                    if self.index_resources and get(mapping_importer.instance, 'id'):
-                        new_mapping_ids.update(set(compact(
-                            [
-                                mapping_importer.instance.versioned_object_id,
-                                get(mapping_importer.instance, 'prev_latest_version_id'),
-                                get(mapping_importer.instance, 'latest_version_id'),
-                                mapping_importer.instance.id,
-                            ]
-                        )))
+                    indexer.add(mapping_importer.instance)
                 except Exception as ex:
                     ERRBIT_LOGGER.log(ex)
                     _result = {'__all__': str(ex)}
@@ -978,14 +994,7 @@ class BulkImportInline(BaseImporter):
                 continue
 
         self.notify_progress(force=True)
-        if new_concept_ids:
-            for chunk in chunks(list(set(new_concept_ids)), 5000):
-                batch_index_resources.apply_async(
-                    ('concept', {'id__in': chunk}, True), queue='indexing', permanent=False)
-        if new_mapping_ids:
-            for chunk in chunks(list(set(new_mapping_ids)), 5000):
-                batch_index_resources.apply_async(
-                    ('mapping', {'id__in': chunk}, True), queue='indexing', permanent=False)
+        indexer.finish()
         self.elapsed_seconds = round(time.time() - self.start_time, 4)
 
         self.make_result()
@@ -1036,11 +1045,12 @@ class BulkImportInline(BaseImporter):
 
 class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
     def __init__(
-            self, content, username, update_if_exists, parallel=None, self_task_id=None
+            self, content, username, update_if_exists, parallel=None, self_task_id=None, index=True
     ):  # pylint: disable=too-many-arguments
         super().__init__(content, username, update_if_exists, None, False)
         self.start_time = time.time()
         self.self_task_id = self_task_id
+        self.index = index
         self.set_task()
         self.username = username
         self.total = 0
@@ -1376,7 +1386,10 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         has_delete_action = not is_child and any(line.get('__action') == 'DELETE' for line in part_list)
         chunked_lists = [part_list] if has_delete_action else compact(
             self.chunker_list(part_list, self.parallel, is_child))
-        jobs = group(bulk_import_parts_inline.s(_list, self.username, self.update_if_exists) for _list in chunked_lists)
+        jobs = group(
+            bulk_import_parts_inline.s(_list, self.username, self.update_if_exists, self.index)
+            for _list in chunked_lists
+        )
         group_result = jobs.apply_async(queue='concurrent')
         self.groups.append(group_result)
         self.tasks += group_result.results

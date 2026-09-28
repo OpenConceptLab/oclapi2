@@ -2123,6 +2123,21 @@ class TaskTest(OCLTestCase):
         self.assertEqual(result, 'import-result')
         run_mock.assert_called_once()
 
+    @patch('core.importers.importer.Importer')
+    def test_bulk_import_new_passes_index(self, importer_mock):
+        bulk_import_new(  # pylint: disable=no-value-for-parameter
+            'some/path', 'ocladmin', 'Organization', 'org1', 'npm', False
+        )
+
+        importer_mock.assert_called_once_with(ANY, 'some/path', 'ocladmin', 'Organization', 'org1', 'npm', False)
+
+    @patch('core.importers.importer.ImporterSubtask')
+    def test_bulk_import_subtask_passes_index(self, subtask_mock):
+        bulk_import_subtask('some/path', 'ocladmin', 'Organization', 'org1', 'Concept', ['f1.json'], False)
+
+        subtask_mock.assert_called_once_with(
+            'some/path', 'ocladmin', 'Organization', 'org1', 'Concept', ['f1.json'], False)
+
     @patch('core.common.tasks.chord')
     def test_bulk_import_queue(self, chord_mock):
         chord_instance_mock = Mock()
