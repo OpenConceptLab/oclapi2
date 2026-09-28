@@ -1,0 +1,135 @@
+name: PR checks
+
+# Runs build.yml's "Pylint" and "Tests" jobs on every pull request, so a PR
+# shows the result before it merges (OpenConceptLab/ocl_issues#2838). Keep
+# these jobs the same as build.yml's.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pylint:
+    name: Pylint
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Run linting rules
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+    - run: pip install -r requirements.txt
+    - run: pylint -j0 core/
+
+  tests:
+    name: Tests
+    needs: [pylint]
+    runs-on: ubuntu-latest
+    services:
+        db:
+          image: postgres:14.7
+          ports:
+            - 5432:5432
+          env:
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: Postgres123
+            POSTGRES_DB: postgres
+          options: >-
+            --health-cmd "pg_isready -U postgres"
+            --health-interval 10s
+            --health-timeout 5s
+            --health-retries 5
+        es:
+          image: docker.elastic.co/elasticsearch/elasticsearch:8.15.2
+          options: >-
+            --ulimit memlock=-1:-1
+            --ulimit nofile=65536:65536
+          ports:
+            - 9200:9200
+          env:
+            discovery.type: single-node
+            xpack.security.enabled: "false"
+            xpack.security.http.ssl.enabled: "false"
+            xpack.security.transport.ssl.enabled: "false"
+            ES_JAVA_OPTS: "-Xmx1024m -Xms1024m"
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      - name: Install dependencies
+        run: |
+          python -m venv venv
+          . venv/bin/activate
+          python -m pip install --cache-dir ~/.cache/pip --upgrade pip "setuptools==80.9.0"
+          python -m pip install --cache-dir ~/.cache/pip -r requirements.txt
+      - name: Wait for Postgres
+        run: |
+          echo "Waiting for Postgres..."
+          for i in {1..30}; do
+            pg_isready -h 0.0.0.0 -p 5432 -U postgres && echo "Postgres ready!" && exit 0
+            echo "Still waiting..."
+            sleep 2
+          done
+          echo "Postgres did not start!" && exit 1
+      - name: Wait for Elasticsearch HTTP
+        run: |
+          echo "Waiting for Elasticsearch..."
+          for i in {1..60}; do
+            # Quoted: an unquoted & backgrounded curl, so this step always passed at once.
+            # localhost: the job runs on the runner, where the es service is on a mapped port.
+            curl -sf "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s" >/dev/null && \
+              echo "Elasticsearch is ready!" && exit 0
+            echo "Still not ready..."
+            sleep 2
+          done
+          echo "Elasticsearch failed to start"
+          exit 1
+      - name: Free Disk Space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          android: true
+          dotnet: true
+          haskell: true
+          tool-cache: false
+          docker-images: false
+          large-packages: false
+          swap-storage: false
+      - name: Create Elasticsearch indices
+        env:
+          DB_HOST: 0.0.0.0
+          ES_HOST: 0.0.0.0
+          ENVIRONMENT: ci
+        run: |
+          . venv/bin/activate
+          python manage.py search_index --create
+      - name: Run Tests
+        env:
+          DB_HOST: 0.0.0.0
+          ES_HOST: 0.0.0.0
+          ENVIRONMENT: ci
+          # Concept.properties dicts carry both a `value<Type>` key and a `display` key; ConceptDocument.prepare_properties
+          # picks between them via `list(set(prop.keys()) - {'code'})[0]`, whose result depends on Python's per-process
+          # string hash randomization. Pinning the seed makes that pick land on `value<Type>` deterministically instead
+          # of varying by CI run. See OpenConceptLab/ocl_issues#2708.
+          PYTHONHASHSEED: "2"
+        run: |
+          . venv/bin/activate
+          COVERAGE_FILE=/tmp/.coverage coverage run --parallel-mode --source='core' manage.py test --parallel=1 -v 3 --keepdb
+          COVERAGE_FILE=/tmp/.coverage coverage combine
+          COVERAGE_FILE=/tmp/.coverage coverage report -m --include=core/* --fail-under=95 --sort=cover

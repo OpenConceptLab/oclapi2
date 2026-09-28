@@ -95,7 +95,9 @@ jobs:
         run: |
           echo "Waiting for Elasticsearch..."
           for i in {1..60}; do
-            curl -s http://es:9200/_cluster/health?wait_for_status=yellow&timeout=1s >/dev/null && \
+            # Quoted: an unquoted & backgrounded curl, so this step always passed at once.
+            # localhost: the job runs on the runner, where the es service is on a mapped port.
+            curl -sf "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s" >/dev/null && \
               echo "Elasticsearch is ready!" && exit 0
             echo "Still not ready..."
             sleep 2
