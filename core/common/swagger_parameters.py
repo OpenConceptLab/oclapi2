@@ -1,3 +1,4 @@
+from django.conf import settings
 from drf_yasg import openapi
 
 from core.collections.constants import SOURCE_TO_CONCEPTS, SOURCE_MAPPINGS
@@ -101,6 +102,12 @@ result_param = openapi.Parameter(
 update_if_exists_param = openapi.Parameter(
     'update_if_exists', openapi.IN_QUERY, description="true | false (mandatory)", type=openapi.TYPE_STRING,
     default='true'
+)
+index_param = openapi.Parameter(
+    'index', openapi.IN_QUERY, type=openapi.TYPE_STRING,
+    description="Index the imported concepts and mappings for search as the import finishes: true | false. "
+                f"When omitted, imports of up to {settings.IMPORT_INDEX_MAX_LINES:,} lines are indexed and larger "
+                "ones aren't"
 )
 file_upload_param = openapi.Parameter(
     'file', openapi.IN_FORM, description="JSON Content File (json, csv or zip)", type=openapi.TYPE_FILE

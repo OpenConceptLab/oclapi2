@@ -1326,6 +1326,29 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             from_concept_code=self.mnemonic, from_source_url__in=parent_uris, from_concept__isnull=True
         ).update(from_concept=self)
 
+    @classmethod
+    def get_mapped_codes_actions(cls, ids):
+        """Partial updates of these concepts' mapped codes, the fields their documents build from their mappings."""
+        from core.concepts.documents import ConceptDocument
+        index_name = ConceptDocument()._index._name  # pylint: disable=protected-access
+        for concept in cls.objects.filter(id__in=ids):
+            same_as_codes, other_codes, mapped_codes = ConceptDocument.get_mapped_codes(concept)
+            yield {
+                '_op_type': 'update', '_index': index_name, '_id': concept.id, 'retry_on_conflict': 3,
+                'doc': {
+                    'same_as_map_codes': same_as_codes, 'other_map_codes': other_codes, 'mapped_codes': mapped_codes
+                },
+            }
+
+    @classmethod
+    def index_mapped_codes(cls, queryset):
+        """
+        Updates just the mapped codes in these concepts' documents after their mappings changed, instead of
+        reindexing (and re-embedding) the whole documents. Documents not in the index yet are fully indexed.
+        """
+        from core.concepts.documents import ConceptDocument
+        return cls.batch_index_partial_by_ids(queryset, ConceptDocument, cls.get_mapped_codes_actions, refresh=False)
+
     @property
     def parent_concept_urls(self):
         return self.get_hierarchy_concept_urls('parent_concepts')

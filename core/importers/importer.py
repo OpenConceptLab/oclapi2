@@ -30,8 +30,8 @@ from core.common.tasks import import_finisher
 from core.code_systems.converter import CodeSystemConverter
 from core.common.utils import get_export_service
 from core.importers.models import SourceImporter, SourceVersionImporter, ConceptImporter, OrganizationImporter, \
-    CollectionImporter, CollectionVersionImporter, MappingImporter, ReferenceImporter, CREATED, UPDATED, FAILED, \
-    DELETED, NOT_FOUND, PERMISSION_DENIED, UNCHANGED
+    CollectionImporter, CollectionVersionImporter, MappingImporter, ReferenceImporter, ImportIndexer, CREATED, \
+    UPDATED, FAILED, DELETED, NOT_FOUND, PERMISSION_DENIED, UNCHANGED, should_index_import
 from core.orgs.models import Organization
 from core.sources.models import Source
 from core.users.models import UserProfile
@@ -213,11 +213,12 @@ class Importer:
     owner_type: str
     owner: str
     import_type: str = 'default'
+    index: bool | None = None  # None: whether the import is small enough (should_index_import)
     MIN_BATCH_SIZE: int = 50
     IMPORT_CACHE: str = "import_cache/"
 
     # pylint: disable=too-many-arguments
-    def __init__(self, task_id, path, username, owner_type, owner, import_type='default'):
+    def __init__(self, task_id, path, username, owner_type, owner, import_type='default', index=None):
         super().__init__()
         self.task_id = task_id
         self.path = path
@@ -225,6 +226,7 @@ class Importer:
         self.owner_type = owner_type
         self.owner = owner
         self.import_type = import_type
+        self.index = index
 
     def is_npm_import(self) -> bool:
         return self.import_type == 'npm'
@@ -269,6 +271,7 @@ class Importer:
         dependencies = []
 
         self.prepare_resources(self.path, resource_types, dependencies, [], resources)
+        self.index = should_index_import(self.index, sum(sum(files.values()) for files in resources.values()))
         tasks = self.prepare_tasks(resource_types, dependencies, resources)
         if tasks:
             # In the future we will let the user approve the import before scheduling tasks.
@@ -446,7 +449,8 @@ class Importer:
                 subtask_ids.append(subtask_id)
                 group_tasks.append(bulk_import_subtask.si(group_task['path'], group_task['username'],
                                                           group_task['owner_type'], group_task['owner'],
-                                                          group_task['resource_type'], group_task['files'])
+                                                          group_task['resource_type'], group_task['files'],
+                                                          self.index)
                                    .set(task_id=subtask_id))
             if len(group_tasks) == 1:  # Prevent celery from converting group to a single task
                 group_tasks.append(bulk_import_subtask_empty.si())
@@ -510,6 +514,9 @@ class ResourceImporter:
     converters = [CodeSystemConverter]
     result_type = [CREATED, UPDATED, FAILED, DELETED, NOT_FOUND, PERMISSION_DENIED, UNCHANGED]
 
+    def __init__(self, indexer=None):
+        self.indexer = indexer  # collects the concepts and mappings imported with _index=False
+
     @staticmethod
     def get_resource_types():
         resource_types = []
@@ -536,7 +543,10 @@ class ResourceImporter:
             for resource_importer in self.resource_importers:
                 if resource_importer.can_handle(resource):
                     user_profile = UserProfile.objects.get(username=username)
-                    result = resource_importer(resource, user_profile, True).run()
+                    importer = resource_importer(resource, user_profile, True)
+                    result = importer.run()
+                    if self.indexer:
+                        self.indexer.add(get(importer, 'instance'))
                     return result
         return None
 
@@ -650,9 +660,10 @@ class ImporterSubtask:
     resource_type: str
     files: bytes
     progress: int
+    indexer: ImportIndexer
 
     # pylint: disable=too-many-arguments
-    def __init__(self, path, username, owner_type, owner, resource_type, files):
+    def __init__(self, path, username, owner_type, owner, resource_type, files, index=True):
         super().__init__()
         self.path = path
         self.username = username
@@ -660,6 +671,7 @@ class ImporterSubtask:
         self.owner = owner
         self.resource_type = resource_type
         self.files = files
+        self.indexer = ImportIndexer(index)
 
     def run(self):
         results = []
@@ -699,6 +711,7 @@ class ImporterSubtask:
             if len(results) < results_count:
                 results.extend([str(ex)] * (results_count - len(results)))
 
+        self.indexer.finish()
         return results
 
     def import_zip(self, temp, results):
@@ -786,7 +799,8 @@ class ImporterSubtask:
                             resource['owner_type'] = self.owner_type
                         if 'owner' not in resource:
                             resource['owner'] = self.owner
-                    result = ResourceImporter().import_resource(resource, self.username, self.owner_type, self.owner)
+                    result = ResourceImporter(self.indexer).import_resource(
+                        resource, self.username, self.owner_type, self.owner)
                     if isinstance(result, int):
                         results.append(result)
                     else:

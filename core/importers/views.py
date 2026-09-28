@@ -24,10 +24,10 @@ from core.common.throttling import ThrottleUtil
 from core.common.views import BaseAPIView
 from core.common.tasks import bulk_import_new
 from core.common.swagger_parameters import update_if_exists_param, task_param, result_param, username_param, \
-    file_upload_param, file_url_param, parallel_threads_param, verbose_param
+    file_upload_param, file_url_param, parallel_threads_param, verbose_param, index_param
 from core.common.utils import queue_bulk_import, is_csv_file, get_truthy_values, get_queue_task_names, \
     get_export_service
-from core.importers.constants import ALREADY_QUEUED, INVALID_UPDATE_IF_EXISTS, NO_CONTENT_TO_IMPORT
+from core.importers.constants import ALREADY_QUEUED, INVALID_UPDATE_IF_EXISTS, NO_CONTENT_TO_IMPORT, INVALID_INDEX
 from core.importers.importer import Importer, ResourceImporter
 from core.importers.input_parsers import ImportContentParser
 from core.importers.limits import (
@@ -45,6 +45,19 @@ def csv_file_data_to_input_list(file_content):
     return [row for row in csv.DictReader(io.StringIO(file_content))]  # pylint: disable=unnecessary-comprehension
 
 
+def get_index_param(request):
+    """
+    The `index` query param: (True or False, None), or (None, None) when it's absent and the import's size decides
+    (see should_index_import), or (None, a 400 response) when it's neither 'true' nor 'false'.
+    """
+    index = request.GET.get('index')
+    if index is None:
+        return None, None
+    if index not in ['true', 'false']:
+        return None, Response({'exception': INVALID_INDEX}, status=status.HTTP_400_BAD_REQUEST)
+    return index == 'true', None
+
+
 def import_response(request, import_queue, data, threads=None, inline=False, deprecated=False):  # pylint: disable=too-many-arguments
     if not data:
         return Response({'exception': NO_CONTENT_TO_IMPORT}, status=status.HTTP_400_BAD_REQUEST)
@@ -59,11 +72,14 @@ def import_response(request, import_queue, data, threads=None, inline=False, dep
             status=status.HTTP_400_BAD_REQUEST
         )
     update_if_exists = update_if_exists == 'true'
+    index, error_response = get_index_param(request)
+    if error_response:
+        return error_response
 
     data = data.decode('utf-8') if isinstance(data, bytes) else data
     task = None
     try:
-        task = queue_bulk_import(data, import_queue, username, update_if_exists, threads, inline)
+        task = queue_bulk_import(data, import_queue, username, update_if_exists, threads, inline, index=index)
         task.refresh_from_db()
     except AlreadyQueued:
         if task:
@@ -161,7 +177,9 @@ class BulkImportParallelInlineView(APIView):
         return super().get_parsers()
 
     @swagger_auto_schema(
-        manual_parameters=[update_if_exists_param, file_url_param, file_upload_param, parallel_threads_param],
+        manual_parameters=[
+            update_if_exists_param, index_param, file_url_param, file_upload_param, parallel_threads_param
+        ],
         deprecated=True
     )
     def post(self, request, import_queue=None):
@@ -238,11 +256,16 @@ class ImportView(BulkImportParallelInlineView, ImportRetrieveDestroyMixin):
         return key
 
     @swagger_auto_schema(
-        manual_parameters=[update_if_exists_param, file_url_param, file_upload_param, parallel_threads_param],
+        manual_parameters=[
+            update_if_exists_param, index_param, file_url_param, file_upload_param, parallel_threads_param
+        ],
     )
     def post(self, request, import_queue=None):  # pylint: disable=too-many-locals
         check_request_body_size(request)
         if 'import_type' in request.data:
+            index, error_response = get_index_param(request)
+            if error_response:
+                return error_response
             check_import_payload(request)
             owner_type = request.data.get('owner_type', 'user')
             owner = request.data.get('owner', self.request.user.username)
@@ -274,7 +297,7 @@ class ImportView(BulkImportParallelInlineView, ImportRetrieveDestroyMixin):
             task = get_queue_task_names(sanitize_import_queue(request.user, import_queue), self.request.user.username)
             new_task = bulk_import_new.apply_async(
                 (file_url, self.request.user.username, owner_type, owner,
-                 request.data.get('import_type', 'npm')), task_id=task.id, queue=task.queue)
+                 request.data.get('import_type', 'npm'), index), task_id=task.id, queue=task.queue)
             return Response({
                 'task': new_task.id,
                 'state': new_task.state

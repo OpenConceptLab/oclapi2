@@ -358,7 +358,8 @@ class BaseModel(models.Model):
 
     @staticmethod
     def batch_index(    # pylint: disable=too-many-arguments
-            queryset, document, single_batch=False, prefetch=None, select_related=None, partial_doc=None, parallel=True
+            queryset, document, single_batch=False, prefetch=None, select_related=None, partial_doc=None, parallel=True,
+            refresh=None
     ):
         if partial_doc:
             version = partial_doc.get('_append_source_version')
@@ -368,7 +369,8 @@ class BaseModel(models.Model):
                     single_batch, bool(parallel)
                 )
             return BaseModel.batch_index_partial(queryset, document, single_batch, partial_doc, bool(parallel))
-        return BaseModel.batch_index_full(single_batch, queryset, document, prefetch, select_related, bool(parallel))
+        return BaseModel.batch_index_full(
+            single_batch, queryset, document, prefetch, select_related, bool(parallel), refresh)
 
     @staticmethod
     def batch_index_source_version_append(  # pylint: disable=too-many-arguments
@@ -403,10 +405,12 @@ class BaseModel(models.Model):
         )
 
     @staticmethod
-    def batch_index_full(single_batch: bool, queryset, document, prefetch, select_related, parallel=True):  # pylint: disable=too-many-arguments
+    def batch_index_full(  # pylint: disable=too-many-arguments
+            single_batch: bool, queryset, document, prefetch, select_related, parallel=True, refresh=None):
         """
         Full (re)index, 500 docs a batch (single_batch: all in one). Every batch is attempted; if any failed, raises
         BatchIndexingError with the counts once they all have (see BatchIndexRun). Returns the run's summary.
+        refresh=False doesn't make ES refresh after each batch (the document's auto_refresh does by default).
         """
         if get(settings, 'TEST_MODE', False):
             return None
@@ -419,8 +423,9 @@ class BaseModel(models.Model):
             queryset = queryset.select_related(*select_related)
 
         kwargs = {}
-        if doc.django.auto_refresh:  # as django_elasticsearch_dsl's Document.update
-            kwargs['refresh'] = doc.django.auto_refresh
+        refresh = doc.django.auto_refresh if refresh is None else refresh
+        if refresh:  # as django_elasticsearch_dsl's Document.update
+            kwargs['refresh'] = refresh
         run = BatchIndexRun(document)
 
         def index_batch(objects):
@@ -443,22 +448,23 @@ class BaseModel(models.Model):
 
     @staticmethod
     def batch_index_partial_by_ids(  # pylint: disable=too-many-arguments
-            queryset, document, get_actions, single_batch=False, parallel=True, on_bulk_error=None
+            queryset, document, get_actions, single_batch=False, parallel=True, on_bulk_error=None, refresh=None
     ):
         """
         Shared batching loop. get_actions(batch_ids) must yield ES action dicts.
 
         A BulkIndexError still left after BatchIndexRun's retries goes to `on_bulk_error` (default:
         full_index_missing_docs_or_raise). Every batch is attempted; if any failed, raises BatchIndexingError
-        with the counts once they all have. Returns the run's summary.
+        with the counts once they all have. Returns the run's summary. refresh as in batch_index_full.
         """
         if get(settings, 'TEST_MODE', False):
             return None
 
         doc = document()
         kwargs = {}
-        if doc.django.auto_refresh:
-            kwargs['refresh'] = doc.django.auto_refresh
+        refresh = doc.django.auto_refresh if refresh is None else refresh
+        if refresh:
+            kwargs['refresh'] = refresh
         run = BatchIndexRun(document)
 
         def index_batch(ids):

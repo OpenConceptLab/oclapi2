@@ -9,15 +9,13 @@ import tempfile
 import time
 import uuid
 import zipfile
-from collections import OrderedDict
 from collections.abc import MutableMapping  # pylint: disable=no-name-in-module,deprecated-class
 from datetime import timedelta
 from threading import local
 from urllib import parse
 
 import requests
-from celery_once import AlreadyQueued
-from celery_once.helpers import queue_once_key
+from celery_once import AlreadyQueued, QueueOnce
 from dateutil import parser
 from django.conf import settings
 from django.urls import NoReverseMatch, reverse, get_resolver
@@ -442,8 +440,8 @@ def es_get(url, **kwargs):
     return None
 
 
-def queue_bulk_import(  # pylint: disable=too-many-arguments
-        to_import, import_queue, username, update_if_exists, threads=None, inline=False, sub_task=False
+def queue_bulk_import(  # pylint: disable=too-many-arguments,too-many-locals
+        to_import, import_queue, username, update_if_exists, threads=None, inline=False, sub_task=False, index=None
 ):
     """
     Used to queue bulk imports. It assigns a bulk import task to a specified import queue or a random one.
@@ -456,6 +454,8 @@ def queue_bulk_import(  # pylint: disable=too-many-arguments
     :param threads:
     :param inline:
     :param sub_task:
+    :param index: inline imports only: whether to index the imported concepts and mappings when each part finishes
+        (None: whether the import is small enough, see should_index_import)
     :return: task
     """
 
@@ -474,6 +474,7 @@ def queue_bulk_import(  # pylint: disable=too-many-arguments
             # Consider removing bulk_import_inline and this branch once confirmed no external
             # callers rely on it (check API consumers and the test suite first).
             task_func = bulk_import_inline
+        args = (*args, index)
     else:
         task_func = bulk_import
     task = get_queue_task_names(import_queue, username, name=task_func.__name__)
@@ -727,19 +728,15 @@ def flatten_extras(dikt, sep='__'):
 
 
 def get_bulk_import_celery_once_lock_key(async_result):
-    result_args = async_result.args
-    if not result_args:
+    """
+    The celery_once lock key of a queued bulk import, built by its task from the args it was sent, so it matches the
+    lock however they were passed. None for a task that takes no celery_once lock.
+    """
+    from core.celery import app
+    task = app.tasks.get(async_result.name)
+    if not isinstance(task, QueueOnce) or not (async_result.args or async_result.kwargs):
         return None
-    args = [('to_import', result_args[0]), ('username', result_args[1]), ('update_if_exists', result_args[2])]
-
-    if async_result.name == 'core.common.tasks.bulk_import_parallel_inline':
-        args.append(('threads', result_args[3]))
-
-    return get_celery_once_lock_key(async_result.name, args)
-
-
-def get_celery_once_lock_key(name, args):
-    return queue_once_key(name, OrderedDict(args), None)
+    return task.get_key(async_result.args, async_result.kwargs)
 
 
 def guess_extension(file=None, name=None):
