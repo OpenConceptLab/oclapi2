@@ -26,7 +26,7 @@ from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.constants import OPENMRS_VALIDATION_SCHEMA, DEPRECATED_API_HEADER, ACCESS_TYPE_NONE
 from core.common.tasks import post_import_update_resource_counts, bulk_import_parts_inline, bulk_import_inline, \
-    bulk_import, batch_index_resources, bulk_import_parallel_inline
+    bulk_import, batch_index_resources, bulk_import_parallel_inline, bulk_import_new
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.common.utils import decode_string, startswith_temp_version, get_bulk_import_celery_once_lock_key
 from core.concepts.models import Concept
@@ -1702,7 +1702,7 @@ class BulkImportInlineTest(OCLTestCase):
         importer.run()
 
         self.assertEqual(len(importer.deleted), 1)
-        batch_index_resources_mock.apply_async.assert_not_called()  # the retire indexed itself
+        batch_index_resources_mock.apply_async.assert_not_called()  # the retire's normal save path indexes it
         self.assertFalse(Concept.objects.filter(parent=source, _index=False).exists())
 
     @patch('core.importers.models.batch_index_resources')
@@ -1771,6 +1771,26 @@ class BulkImportInlineTest(OCLTestCase):
             {from_concept.versioned_object_id, from_concept.get_latest_version().id}
         )
         self.assertNotIn(to_concept.versioned_object_id, self.queued_ids(batch_index_resources_mock, 'concept'))
+
+    @patch('core.importers.models.batch_index_resources')
+    def test_mapping_from_a_concept_version_refreshes_that_version_too(self, batch_index_resources_mock):
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='MappedVersionOrg'))
+        ConceptFactory(parent=source, mnemonic='To')
+        for line in [self.concept_line(source, 'From'), self.concept_line(source, 'From', datatype='Text')]:
+            BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[line]).run()
+        concept = Concept.objects.get(parent=source, mnemonic='From', id=F('versioned_object_id'))
+        first_version = concept.versions.order_by('id').first()
+        self.assertFalse(first_version.is_latest_version)
+        batch_index_resources_mock.reset_mock()
+
+        BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[
+            self.mapping_line(source, 'From', 'To', from_concept_url=first_version.uri)]).run()
+
+        # a version's document carries the mappings from that version, besides its versioned object's
+        self.assertEqual(
+            self.queued_ids(batch_index_resources_mock, 'concept'),
+            {concept.id, first_version.id, concept.get_latest_version().id}
+        )
 
 
 class ImportSearchTest(OCLAPITestCase):
@@ -2653,17 +2673,26 @@ class BulkImportParallelRunnerTest(OCLTestCase):
     def test_celery_once_lock_key_matches_the_task_key(self):
         """Revoking an import clears its celery_once lock under the key get_bulk_import_celery_once_lock_key rebuilds
         from the task's args, so it must match the key the task locked, whichever args were sent."""
-        for task, args in [
-                (bulk_import_parallel_inline, ('content', 'ocladmin', True, 5, False)),
-                (bulk_import_parallel_inline, ('content', 'ocladmin', True, 5)),  # sent before `index` existed
-                (bulk_import_parallel_inline, ('content', 'ocladmin', True)),  # threads left to its default
-                (bulk_import_inline, ('content', 'ocladmin', True, False)),
-                (bulk_import_inline, ('content', 'ocladmin', True)),
+        for task, args, kwargs in [
+                (bulk_import_parallel_inline, ('content', 'ocladmin', True, 5, False), {}),
+                (bulk_import_parallel_inline, ('content', 'ocladmin', True, 5), {}),  # sent before `index` existed
+                (bulk_import_parallel_inline, ('content', 'ocladmin', True), {}),  # threads left to its default
+                (bulk_import_parallel_inline, ('content', 'ocladmin', True), {'index': False}),
+                (bulk_import_parallel_inline, (), {'to_import': 'content', 'username': 'ocladmin',
+                                                   'update_if_exists': True}),
+                (bulk_import_inline, ('content', 'ocladmin', True, False), {}),
+                (bulk_import_inline, ('content', 'ocladmin', True), {}),
+                (bulk_import, ('content', 'ocladmin', True), {}),
+                (bulk_import_new, ('path', 'ocladmin', 'users', 'ocladmin', 'npm', False), {}),
         ]:
-            result = Mock(args=list(args))
+            result = Mock(args=list(args), kwargs=kwargs)
             result.name = task.name
 
-            self.assertEqual(get_bulk_import_celery_once_lock_key(result), task.get_key(args))
+            self.assertEqual(get_bulk_import_celery_once_lock_key(result), task.get_key(args, kwargs))
+
+        result = Mock(args=['content', 'ocladmin', True, False], kwargs={})
+        result.name = bulk_import_parts_inline.name
+        self.assertIsNone(get_bulk_import_celery_once_lock_key(result))  # takes no celery_once lock
 
     def test_chunker_list(self):
         self.assertEqual(
@@ -3621,7 +3650,7 @@ class BulkImportViewTest(OCLAPITestCase):
         clear_lock_mock = Mock()
         queue_once_backend_mock.return_value = Mock(clear_lock=clear_lock_mock)
         result_mock = Mock(
-            args=['content', 'ocladmin', True, 5]  # content, username, update_if_exists, threads
+            args=['content', 'ocladmin', True, 5], kwargs={}  # content, username, update_if_exists, threads
         )
         result_mock.name = 'core.common.tasks.bulk_import_parallel_inline'
         async_result_mock.return_value = result_mock
@@ -3648,7 +3677,7 @@ class BulkImportViewTest(OCLAPITestCase):
         clear_lock_mock = Mock()
         queue_once_backend_mock.return_value = Mock(clear_lock=clear_lock_mock)
         result_mock = Mock(
-            args=['content', 'ocladmin', True]  # content, username, update_if_exists
+            args=['content', 'ocladmin', True], kwargs={}  # content, username, update_if_exists
         )
         result_mock.name = 'core.common.tasks.bulk_import'
         async_result_mock.return_value = result_mock
@@ -3680,7 +3709,7 @@ class BulkImportViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 400)
 
         result_mock = Mock(
-            args=['content', 'ocladmin', True]  # content, username, update_if_exists
+            args=['content', 'ocladmin', True], kwargs={}  # content, username, update_if_exists
         )
         result_mock.name = 'core.common.tasks.bulk_import'
         async_result_mock.return_value = result_mock

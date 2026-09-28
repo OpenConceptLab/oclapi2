@@ -832,12 +832,16 @@ class ImportIndexer:
             batch_index_resources.apply_async((resource, {'id__in': chunk}, True), queue='indexing', permanent=False)
 
     def get_mapped_concept_ids(self):
-        """The versioned objects and latest versions of the concepts the imported mappings come from."""
+        """
+        The concepts the imported mappings come from, with their versioned objects and latest versions. Older versions
+        are left as they were indexed, as their releases were.
+        """
         ids = set()
         for chunk in chunks(sorted(self.mapped_concept_ids), self.CHUNK_SIZE):
             versioned_ids = Concept.objects.filter(id__in=chunk).values('versioned_object_id')
             ids.update(Concept.objects.filter(
-                Q(id__in=versioned_ids) | Q(versioned_object_id__in=versioned_ids, is_latest_version=True)
+                Q(id__in=chunk) | Q(id__in=versioned_ids) |
+                Q(versioned_object_id__in=versioned_ids, is_latest_version=True)
             ).values_list('id', flat=True))
         return ids
 

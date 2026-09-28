@@ -9,15 +9,13 @@ import tempfile
 import time
 import uuid
 import zipfile
-from collections import OrderedDict
 from collections.abc import MutableMapping  # pylint: disable=no-name-in-module,deprecated-class
 from datetime import timedelta
 from threading import local
 from urllib import parse
 
 import requests
-from celery_once import AlreadyQueued
-from celery_once.helpers import queue_once_key
+from celery_once import AlreadyQueued, QueueOnce
 from dateutil import parser
 from django.conf import settings
 from django.urls import NoReverseMatch, reverse, get_resolver
@@ -729,22 +727,15 @@ def flatten_extras(dikt, sep='__'):
 
 
 def get_bulk_import_celery_once_lock_key(async_result):
-    result_args = async_result.args
-    if not result_args:
+    """
+    The celery_once lock key of a queued bulk import, built by its task from the args it was sent, so it matches the
+    lock however they were passed. None for a task that takes no celery_once lock.
+    """
+    from core.celery import app
+    task = app.tasks.get(async_result.name)
+    if not isinstance(task, QueueOnce) or not (async_result.args or async_result.kwargs):
         return None
-    args = [('to_import', result_args[0]), ('username', result_args[1]), ('update_if_exists', result_args[2])]
-
-    # celery_once keys on the args the task was sent, so the optional ones count only when present
-    if async_result.name == 'core.common.tasks.bulk_import_parallel_inline':
-        args += zip(['threads', 'index'], result_args[3:])
-    elif async_result.name == 'core.common.tasks.bulk_import_inline':
-        args += zip(['index'], result_args[3:])
-
-    return get_celery_once_lock_key(async_result.name, args)
-
-
-def get_celery_once_lock_key(name, args):
-    return queue_once_key(name, OrderedDict(args), None)
+    return task.get_key(async_result.args, async_result.kwargs)
 
 
 def guess_extension(file=None, name=None):
