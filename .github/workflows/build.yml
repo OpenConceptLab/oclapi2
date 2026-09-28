@@ -97,7 +97,9 @@ jobs:
           for i in {1..60}; do
             # Quoted: an unquoted & backgrounded curl, so this step always passed at once.
             # localhost: the job runs on the runner, where the es service is on a mapped port.
-            curl -sf "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s" >/dev/null && \
+            # ES 8 answers 200 even when wait_for_status times out, so check the status too.
+            health=$(curl -sf "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s") && \
+              echo "$health" | grep -E '"status":"(yellow|green)"' >/dev/null && \
               echo "Elasticsearch is ready!" && exit 0
             echo "Still not ready..."
             sleep 2
