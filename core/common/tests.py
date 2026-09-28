@@ -2227,10 +2227,10 @@ class TaskTest(OCLTestCase):
         batch_index_resources('mapping', {'id__in': [1]})
 
         concept_batch_index_mock.assert_called_once_with(
-            ANY, ConceptDocument, refresh=False, prefetch=['sources', 'names', 'descriptions'],
+            ANY, ConceptDocument, refresh=False, prefetch=['names'],
             select_related=['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'])
         mapping_batch_index_mock.assert_called_once_with(
-            ANY, MappingDocument, refresh=None, prefetch=['sources'],
+            ANY, MappingDocument, refresh=None,
             select_related=['parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by',
                             'from_concept', 'to_concept', 'from_source', 'to_source'])
 

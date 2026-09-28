@@ -1847,14 +1847,18 @@ class BulkImportInlineTest(OCLTestCase):
                                   to_concept_code='A01'),
             ]).run()
 
-        actions = list(Concept.get_mapped_codes_actions([from_concept.versioned_object_id]))
+        unmapped = ConceptFactory(parent=source, mnemonic='Unmapped')
 
-        self.assertEqual(len(actions), 1)
-        action = actions[0]
-        self.assertEqual(
-            {key: action[key] for key in ('_op_type', '_id')},
-            {'_op_type': 'update', '_id': from_concept.versioned_object_id}
-        )
+        actions = {
+            action['_id']: action
+            for action in Concept.get_mapped_codes_actions([from_concept.versioned_object_id, unmapped.id])
+        }
+
+        self.assertEqual(  # just the mapped codes, emptied when there are none
+            actions[unmapped.id]['doc'], {'same_as_map_codes': [], 'other_map_codes': [], 'mapped_codes': []})
+        action = actions[from_concept.versioned_object_id]
+        self.assertEqual(action['_op_type'], 'update')
+        self.assertEqual(set(action['doc']), {'same_as_map_codes', 'other_map_codes', 'mapped_codes'})
         self.assertEqual(sorted(action['doc']['same_as_map_codes']), ['A01', 'To'])
         self.assertEqual(action['doc']['other_map_codes'], ['To'])
         self.assertEqual(
