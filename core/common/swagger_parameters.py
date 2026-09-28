@@ -220,7 +220,7 @@ match_best_match_param = openapi.Parameter(
     description='Apply minimum score threshold, filtering out low-quality matches'
 )
 match_num_candidates_param = openapi.Parameter(
-    'numCandidates', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, default=3000,
+    'numCandidates', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, default=500,
     description='Number of approximate nearest neighbor candidates (semantic only). Max: 3000'
 )
 match_k_nearest_param = openapi.Parameter(
