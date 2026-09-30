@@ -10,14 +10,17 @@ one atomic script, renews them from a background thread while it runs, and relea
 that isn't renewed expires, so a worker that dies frees its slots within `lease_seconds`.
 
 If Redis can't be reached, calls go ahead uncounted and it's logged (fail open): the limiter must never cause an
-outage. It uses its own Redis client with short timeouts and no retries, and each process skips Redis (acquire,
-renewal and release) for CAPACITY_REDIS_RETRY_SECONDS after an error. So an outage delays at most one call per
-process in that time, by a timeout per connection attempt (a few, with Sentinel); leases it can't release expire.
+outage. It uses its own Redis client with short timeouts and no retries, and waits at most
+CAPACITY_REDIS_DEADLINE_SECONDS for any Redis operation, DNS and Sentinel discovery included. After an error, each
+process skips Redis (acquire, renewal and release) for CAPACITY_REDIS_RETRY_SECONDS, and leases it can't release
+expire. So an outage delays at most one call per process in that time, by at most the deadline.
 """
+import os
 import socket
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from contextlib import contextmanager
 
 import redis
@@ -72,18 +75,23 @@ end
 return result
 """
 
-# KEYS: the call's lanes. ARGV: token, lease ms. Extends the leases the call still holds; returns how many.
+# KEYS: the call's lanes. ARGV: token, lease ms. Renews the call's leases only if it still holds every one of them
+# unexpired, so a lease that expired is never revived and a call is never counted in only some lanes. Returns how
+# many it still held.
 RENEW_SCRIPT = _NOW_MS + """
 local lease_ms = tonumber(ARGV[2])
-local renewed = 0
+local held = 0
 for _, key in ipairs(KEYS) do
-  if redis.call('ZSCORE', key, ARGV[1]) then
+  local expiry = redis.call('ZSCORE', key, ARGV[1])
+  if expiry and tonumber(expiry) > now_ms then held = held + 1 end
+end
+if held == #KEYS then
+  for _, key in ipairs(KEYS) do
     redis.call('ZADD', key, now_ms + lease_ms, ARGV[1])
     keep(key, lease_ms * 2)
-    renewed = renewed + 1
   end
 end
-return renewed
+return held
 """
 
 # KEYS: lanes. Returns each lane's count of unexpired leases.
@@ -130,6 +138,8 @@ class RedisLanes:
     scripts = {}
     unavailable_until = 0.0
     lock = threading.Lock()
+    executor = None
+    executor_pid = None
 
     @classmethod
     def use_client(cls, client):
@@ -137,6 +147,39 @@ class RedisLanes:
             cls.client = client
             cls.scripts = {}
             cls.unavailable_until = 0.0
+            if cls.executor is not None:
+                cls.executor.shutdown(wait=False, cancel_futures=True)
+            cls.executor = None
+
+    @classmethod
+    def get_executor(cls):
+        if cls.executor is None or cls.executor_pid != os.getpid():
+            with cls.lock:
+                if cls.executor is None or cls.executor_pid != os.getpid():
+                    cls.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='ocl-capacity-redis')
+                    cls.executor_pid = os.getpid()
+        return cls.executor
+
+    @classmethod
+    def call(cls, operation, *args):
+        """
+        Run a Redis operation on this process's Redis thread, and wait at most CAPACITY_REDIS_DEADLINE_SECONDS for
+        it in all: socket timeouts don't bound DNS or a walk through the Sentinels. An operation still queued when
+        its caller gives up is skipped. One already running finishes, so an acquire that lands late holds a lease
+        nobody renews, which expires.
+        """
+        abandoned = threading.Event()
+
+        def run():
+            return None if abandoned.is_set() else operation(*args)
+
+        future = cls.get_executor().submit(run)
+        try:
+            return future.result(timeout=settings.CAPACITY_REDIS_DEADLINE_SECONDS)
+        except FutureTimeoutError as ex:
+            abandoned.set()
+            raise redis.TimeoutError(
+                f'no answer from Redis within {settings.CAPACITY_REDIS_DEADLINE_SECONDS} s') from ex
 
     @classmethod
     def get_client(cls):
@@ -166,28 +209,33 @@ class RedisLanes:
     @classmethod
     def acquire(cls, keys, limits, token, lease_ms, force):  # pylint: disable=too-many-arguments
         """(whether the lease was taken, each lane's count before this call)"""
-        result = cls.run_script(ACQUIRE_SCRIPT, keys, [token, lease_ms, '1' if force else '0', *limits])
+        result = cls.call(cls.run_script, ACQUIRE_SCRIPT, keys, [token, lease_ms, '1' if force else '0', *limits])
         return bool(result[0]), [int(count) for count in result[1:]]
 
     @classmethod
     def renew(cls, keys, token, lease_ms):
-        return int(cls.run_script(RENEW_SCRIPT, keys, [token, lease_ms]))
+        """How many of its leases the call still held; they're renewed only if that's all of them."""
+        return int(cls.call(cls.run_script, RENEW_SCRIPT, keys, [token, lease_ms]))
 
     @classmethod
     def release(cls, keys, token):
-        pipeline = cls.get_client().pipeline(transaction=False)
-        for key in keys:
-            pipeline.zrem(key, token)
-        pipeline.execute()
+        def remove():
+            pipeline = cls.get_client().pipeline(transaction=False)
+            for key in keys:
+                pipeline.zrem(key, token)
+            pipeline.execute()
+        cls.call(remove)
 
     @classmethod
     def count(cls, keys):
-        return [int(count) for count in cls.run_script(COUNT_SCRIPT, keys)] if keys else []
+        return [int(count) for count in cls.call(cls.run_script, COUNT_SCRIPT, keys)] if keys else []
 
     @classmethod
     def find_keys(cls, lane):
-        return sorted(key.decode() if isinstance(key, bytes) else key
-                      for key in cls.get_client().scan_iter(match=lane_key(lane, '*'), count=100))
+        def scan():
+            return sorted(key.decode() if isinstance(key, bytes) else key
+                          for key in cls.get_client().scan_iter(match=lane_key(lane, '*'), count=100))
+        return cls.call(scan)
 
 
 def get_tier(user):
@@ -230,12 +278,14 @@ class LeaseRenewer(threading.Thread):
     def run(self):
         while not self.finished.wait(self.interval) and time.monotonic() < self.deadline:
             self.gate.renew()
+            if self.gate.lease_lost:
+                return  # its leases expired: renewing the rest would count the call in only some lanes
 
     def stop(self):
         # No need to wait out a renewal in flight: renewing only extends leases the call still holds, so one that
         # lands after the release changes nothing.
         self.finished.set()
-        self.join(timeout=0.2)
+        self.join(timeout=0.1)
 
 
 class CapacityGate:
@@ -317,7 +367,8 @@ class CapacityGate:
                 self.renewer = renewer
         except Exception as ex:
             self.record_error(ex)
-            self.decision = self.decision or DECISION_UNAVAILABLE
+            if not self.holding or not self.decision:  # never refuse because the limiter itself failed
+                self.decision, self.retry_after = DECISION_UNAVAILABLE, None
         return self
 
     def get_lanes(self):

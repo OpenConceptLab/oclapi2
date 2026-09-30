@@ -19,6 +19,7 @@ from core.capacity.constants import (
     HEADER_SUGGESTED_CONCURRENCY, ENDPOINT_MATCH, ENDPOINT_RERANK, DECISION_ADMITTED, DECISION_SHADOW_REFUSED,
     DECISION_REFUSED, DECISION_UNAVAILABLE, LANE_API_HEAVY, LANE_API_HEAVY_TASK, LANE_ES2_KNN, LANE_TIER, LANE_USER,
     LOG_EVENT, CONFIG_LOG_EVENT, SOURCE_COMMAND)
+from core.capacity import logs
 from core.capacity.limiter import (
     RedisLanes, CapacityGate, LeaseRenewer, get_tier, get_queue_ms, lane_key, get_task_id, build_redis_client,
     get_status)
@@ -475,22 +476,42 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
         self.assertEqual(preview.get_suggested_concurrency(), 1)  # never below 1 unless paused
         self.assertIsNone(CapacityGate(Mock(), ENDPOINT_MATCH).get_suggested_concurrency())
 
-    def test_renewal_extends_the_leases_it_still_holds(self):
+    def test_renewal_extends_every_lease_or_none(self):
         gate = self.acquire(make_user(PREVIEW_GROUP_NAME))
         key = lane_key(LANE_USER, gate.request.user.id)
-        self.redis.zadd(key, {gate.token: 1000})
+        soon = time.time() * 1000 + 5000
+        for lane_key_ in gate.keys:
+            self.redis.zadd(lane_key_, {gate.token: soon})
 
         gate.renew()
 
-        self.assertGreater(self.redis.zscore(key, gate.token), time.time() * 1000)
+        for lane_key_ in gate.keys:
+            self.assertGreater(self.redis.zscore(lane_key_, gate.token), soon + 30000)
         self.assertFalse(gate.lease_lost)
-        self.redis.delete(key)
+
+        # one lease has expired (its renewal came late): nothing is renewed, and the expired one isn't revived
+        self.redis.zadd(key, {gate.token: 1000})
+        cluster_expiry = self.redis.zscore(lane_key(LANE_API_HEAVY), gate.token)
         gate.renew()
         self.assertTrue(gate.lease_lost)
+        self.assertEqual(self.redis.zscore(key, gate.token), 1000)
+        self.assertEqual(self.redis.zscore(lane_key(LANE_API_HEAVY), gate.token), cluster_expiry)
+
+        self.redis.delete(key)
+        gate.renew()
         self.assertFalse(self.redis.exists(key))  # a lost lease isn't re-added
 
+    def test_the_renewer_stops_once_a_lease_is_lost(self):
+        gate = Mock(config={'renew_seconds': 0.01, 'max_hold_seconds': 60}, lease_lost=True)
+        renewer = LeaseRenewer(gate)
+        renewer.start()
+        renewer.join(1)
+
+        self.assertFalse(renewer.is_alive())
+        gate.renew.assert_called_once()
+
     def test_the_renewer_thread_renews_until_stopped(self):
-        gate = Mock(config={'renew_seconds': 0.01, 'max_hold_seconds': 60})
+        gate = Mock(config={'renew_seconds': 0.01, 'max_hold_seconds': 60}, lease_lost=False)
         renewer = LeaseRenewer(gate)
         renewer.start()
         time.sleep(0.1)
@@ -499,7 +520,7 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
         self.assertFalse(renewer.is_alive())
         self.assertGreater(gate.renew.call_count, 1)
 
-        gate = Mock(config={'renew_seconds': 0.01, 'max_hold_seconds': 0})
+        gate = Mock(config={'renew_seconds': 0.01, 'max_hold_seconds': 0}, lease_lost=False)
         renewer = LeaseRenewer(gate)
         renewer.start()
         renewer.join(1)
@@ -580,6 +601,48 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
 
         self.assertGreater(self.redis.pttl(lane_key(LANE_API_HEAVY)), 600000)
         self.assertGreater(self.redis.pttl(lane_key(LANE_USER, gate.request.user.id)), 60000)
+
+    @override_settings(CAPACITY_REDIS_DEADLINE_SECONDS=0.1)
+    def test_a_redis_call_that_hangs_fails_open_at_the_deadline(self):
+        def hang(*_):
+            time.sleep(0.5)
+
+        with patch.object(RedisLanes, 'run_script', side_effect=hang):
+            started = time.monotonic()
+            gate = self.acquire(make_user(PREVIEW_GROUP_NAME))
+            elapsed = time.monotonic() - started
+
+        self.assertLess(elapsed, 0.4)
+        self.assertEqual(gate.decision, DECISION_UNAVAILABLE)
+        self.assertEqual(gate.error, 'TimeoutError: no answer from Redis within 0.1 s')
+        self.assertFalse(RedisLanes.is_available())
+
+    def test_a_queued_redis_call_is_skipped_once_its_caller_gave_up(self):
+        release_first = __import__('threading').Event()
+        calls = []
+
+        def first():
+            release_first.wait(1)
+
+        with override_settings(CAPACITY_REDIS_DEADLINE_SECONDS=0.05):
+            with self.assertRaises(redis.TimeoutError):
+                RedisLanes.call(first)
+            with self.assertRaises(redis.TimeoutError):
+                RedisLanes.call(calls.append, 'second')  # queued behind the first, which still hangs
+        release_first.set()
+        RedisLanes.call(lambda: None)  # runs after both
+
+        self.assertEqual(calls, [])
+
+    def test_an_error_after_a_refusal_never_refuses(self):
+        self.configure(mode='enforce', enforce_for='all', per_user={'preview': 0})
+
+        with patch.object(CapacityGate, 'get_retry_after', side_effect=ValueError('bad math')):
+            gate = self.acquire(make_user(PREVIEW_GROUP_NAME))
+
+        self.assertEqual(gate.decision, DECISION_UNAVAILABLE)
+        self.assertFalse(gate.refused)
+        self.assertIsNone(gate.retry_after)
 
     def test_an_unexpected_error_fails_open(self):
         with patch('core.capacity.limiter.get_tier', side_effect=KeyError('tier')):
@@ -741,6 +804,19 @@ class CapacityViewsTest(CapacityTestMixin, OCLAPITestCase):
         self.assertFalse(UsageEvent.objects.filter(user=self.preview_user).exists())
 
     @patch('core.concepts.views.MetadataToConceptsListView.filter_queryset', return_value=[])
+    def test_a_limiter_error_in_enforce_mode_lets_the_match_through(self, filter_queryset_mock):
+        from core.capabilities.models import UsageEvent
+        self.configure(mode='enforce', enforce_for='all', per_user={'preview': 0})
+
+        with patch.object(CapacityGate, 'get_retry_after', side_effect=ValueError('bad math')):
+            response = self.match()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response[HEADER_DECISION], 'unavailable')
+        filter_queryset_mock.assert_called_once()
+        self.assertTrue(UsageEvent.objects.filter(user=self.preview_user, action='match_concepts').exists())
+
+    @patch('core.concepts.views.MetadataToConceptsListView.filter_queryset', return_value=[])
     def test_shadow_mode_charges_and_matches_as_usual(self, filter_queryset_mock):
         from core.capabilities.models import UsageEvent
         self.configure(per_user={'preview': 0})
@@ -894,3 +970,59 @@ class CapacityCommandTest(CapacityTestMixin, OCLTestCase):
                     self.run_command(*args)
                 self.assertIn(message, str(context.exception))
         self.assertFalse(CapacityConfig.objects.exists())
+
+
+class CapacityLogsTest(OCLTestCase):
+    def setUp(self):
+        super().setUp()
+        logs._state.update(queue=None, pid=None, dropped=0)  # pylint: disable=protected-access
+
+    def tearDown(self):
+        logs._state.update(queue=None, pid=None, dropped=0)  # pylint: disable=protected-access
+        super().tearDown()
+
+    def test_a_line_is_printed_by_the_writer_thread(self):
+        written = []
+        with patch('core.capacity.logs.write', side_effect=written.append):
+            logs.emit({'event': 'ocl_capacity', 'decision': 'admitted', 'error': None})
+            deadline = time.monotonic() + 2
+            while not written and time.monotonic() < deadline:
+                time.sleep(0.01)
+
+        self.assertEqual(written, ['{"event":"ocl_capacity","decision":"admitted"}'])
+
+    def test_a_blocked_log_sink_never_blocks_the_call(self):
+        unblock = __import__('threading').Event()
+        written = []
+
+        def blocked_write(line):
+            unblock.wait(2)
+            written.append(line)
+
+        with patch('core.capacity.logs.MAX_QUEUED_LINES', 2), patch('core.capacity.logs.write', blocked_write):
+            started = time.monotonic()
+            for number in range(10):
+                logs.emit({'n': number})
+            self.assertLess(time.monotonic() - started, 0.5)
+            self.assertGreater(logs._state['dropped'], 0)  # pylint: disable=protected-access
+
+            unblock.set()
+            deadline = time.monotonic() + 2
+            while logs._state['queue'].qsize() and time.monotonic() < deadline:  # pylint: disable=protected-access
+                time.sleep(0.01)
+            logs.emit({'n': 'after'})
+            while 'log_dropped' not in ''.join(written) and time.monotonic() < deadline:
+                time.sleep(0.01)
+
+        self.assertEqual(json.loads(written[-1])['n'], 'after')
+        self.assertGreater(json.loads(written[-1])['log_dropped'], 0)
+        self.assertEqual(logs._state['dropped'], 0)  # pylint: disable=protected-access
+
+    def test_drain_prints_what_is_left(self):
+        out = StringIO()
+        with patch('core.capacity.logs.write_lines'):  # no writer thread: the lines stay queued
+            logs.emit({'n': 1})
+            with patch('sys.stdout', out):
+                logs.drain()
+
+        self.assertEqual(out.getvalue(), '{"n":1}\n')
