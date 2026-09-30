@@ -142,6 +142,20 @@ def get_current():
     return latest, resolve(latest.config if latest else None)
 
 
+def read_current():
+    """
+    get_current() for the request path, bounded: a locked or stalled table costs the call at most
+    CAPACITY_CONFIG_READ_TIMEOUT_MS, then raises. Inside a transaction (tests) the timeout would outlive this read,
+    so it isn't set there; requests don't run in one.
+    """
+    if connection.vendor != 'postgresql' or connection.in_atomic_block:
+        return get_current()
+    with transaction.atomic():
+        with connection.cursor() as cursor:
+            cursor.execute('SET LOCAL statement_timeout = %s', [int(settings.CAPACITY_CONFIG_READ_TIMEOUT_MS)])
+        return get_current()
+
+
 def get_config():
     """The config in force, cached per process for CAPACITY_CONFIG_CACHE_SECONDS. Never raises."""
     now = time.monotonic()
@@ -152,7 +166,7 @@ def get_config():
         if _cache['config'] is not None and time.monotonic() < _cache['expires_at']:
             return _cache['config']  # another thread just refreshed it
         try:
-            _, config = get_current()
+            _, config = read_current()
         except Exception as ex:
             # Keep the last good config (or the defaults) rather than fail the request, but never refuse on a
             # config that couldn't be confirmed: enforce falls back to shadow until a read succeeds.

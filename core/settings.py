@@ -683,6 +683,7 @@ if ENV not in ['ci', 'demo'] and not NO_LM:
 # are runtime config (core.capacity.config); CAPACITY_LIMIT_MODE is only the default until staff change it.
 CAPACITY_LIMIT_MODE = os.environ.get('CAPACITY_LIMIT_MODE', 'shadow')
 CAPACITY_CONFIG_CACHE_SECONDS = int(os.environ.get('CAPACITY_CONFIG_CACHE_SECONDS', 10))
+CAPACITY_CONFIG_READ_TIMEOUT_MS = int(os.environ.get('CAPACITY_CONFIG_READ_TIMEOUT_MS', 500))
 CAPACITY_REDIS_TIMEOUT_SECONDS = float(os.environ.get('CAPACITY_REDIS_TIMEOUT_SECONDS', 0.5))
 CAPACITY_REDIS_RETRY_SECONDS = int(os.environ.get('CAPACITY_REDIS_RETRY_SECONDS', 30))
 CAPACITY_REDIS_DEADLINE_SECONDS = float(os.environ.get('CAPACITY_REDIS_DEADLINE_SECONDS', 1.0))

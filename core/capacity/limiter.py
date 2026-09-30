@@ -20,7 +20,7 @@ import socket
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import contextmanager
 
 import redis
@@ -40,6 +40,7 @@ from core.capacity.constants import (
     HEADER_DECISION, HEADER_LIMIT, HEADER_IN_FLIGHT, HEADER_TIER, HEADER_TIER_LIMIT, HEADER_TIER_IN_FLIGHT,
     HEADER_SUGGESTED_CONCURRENCY, CAPACITY_EXCEEDED_ERROR_CODE, LOG_EVENT, REDIS_KEY_PREFIX)
 from core.capacity.logs import emit
+from core.capacity.threads import RedisThread
 from core.common.utils import get_event_metadata
 from core.users.constants import CORE_USER_GROUP, EARLY_ACCESS_GROUP
 
@@ -138,8 +139,8 @@ class RedisLanes:
     scripts = {}
     unavailable_until = 0.0
     lock = threading.Lock()
-    executor = None
-    executor_pid = None
+    redis_thread = None
+    redis_thread_pid = None
 
     @classmethod
     def use_client(cls, client):
@@ -147,37 +148,29 @@ class RedisLanes:
             cls.client = client
             cls.scripts = {}
             cls.unavailable_until = 0.0
-            if cls.executor is not None:
-                cls.executor.shutdown(wait=False, cancel_futures=True)
-            cls.executor = None
+            cls.redis_thread = None
 
     @classmethod
-    def get_executor(cls):
-        if cls.executor is None or cls.executor_pid != os.getpid():
+    def get_redis_thread(cls):
+        if cls.redis_thread is None or cls.redis_thread_pid != os.getpid():
             with cls.lock:
-                if cls.executor is None or cls.executor_pid != os.getpid():
-                    cls.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='ocl-capacity-redis')
-                    cls.executor_pid = os.getpid()
-        return cls.executor
+                if cls.redis_thread is None or cls.redis_thread_pid != os.getpid():  # gunicorn forks workers
+                    cls.redis_thread = RedisThread()
+                    cls.redis_thread_pid = os.getpid()
+        return cls.redis_thread
 
     @classmethod
     def call(cls, operation, *args):
         """
-        Run a Redis operation on this process's Redis thread, and wait at most CAPACITY_REDIS_DEADLINE_SECONDS for
-        it in all: socket timeouts don't bound DNS or a walk through the Sentinels. An operation still queued when
-        its caller gives up is skipped. One already running finishes, so an acquire that lands late holds a lease
-        nobody renews, which expires.
+        Run a Redis operation on this process's RedisThread, and wait at most CAPACITY_REDIS_DEADLINE_SECONDS for it
+        in all. An operation still queued when its caller gives up is skipped. One already running finishes, so an
+        acquire that lands late holds a lease nobody renews, which expires.
         """
-        abandoned = threading.Event()
-
-        def run():
-            return None if abandoned.is_set() else operation(*args)
-
-        future = cls.get_executor().submit(run)
+        future = cls.get_redis_thread().submit(operation, *args)
         try:
             return future.result(timeout=settings.CAPACITY_REDIS_DEADLINE_SECONDS)
         except FutureTimeoutError as ex:
-            abandoned.set()
+            future.cancel()
             raise redis.TimeoutError(
                 f'no answer from Redis within {settings.CAPACITY_REDIS_DEADLINE_SECONDS} s') from ex
 

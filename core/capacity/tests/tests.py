@@ -1,16 +1,21 @@
 import json
 import os
+import subprocess
+import sys
+import threading
 import time
 from io import StringIO
 from unittest.mock import patch, Mock
 
 import fakeredis
+import psycopg2
 import redis
 from django.conf import settings
 from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
 from django.core.management import call_command, CommandError
-from django.test import RequestFactory, override_settings
+from django.db import connection
+from django.test import RequestFactory, TransactionTestCase, override_settings
 
 from core.capacity.config import (
     get_defaults, validate, merge, diff, resolve, save_config, get_config, clear_cache, _cache)
@@ -24,6 +29,7 @@ from core.capacity.limiter import (
     RedisLanes, CapacityGate, LeaseRenewer, get_tier, get_queue_ms, lane_key, get_task_id, build_redis_client,
     get_status)
 from core.capacity.models import CapacityConfig
+from core.capacity.threads import RedisThread
 from core.common.tests import OCLTestCase, OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.common.utils import get_event_metadata
 from core.users.constants import CORE_USER_GROUP, EARLY_ACCESS_GROUP
@@ -618,7 +624,7 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
         self.assertFalse(RedisLanes.is_available())
 
     def test_a_queued_redis_call_is_skipped_once_its_caller_gave_up(self):
-        release_first = __import__('threading').Event()
+        release_first = threading.Event()
         calls = []
 
         def first():
@@ -975,24 +981,22 @@ class CapacityCommandTest(CapacityTestMixin, OCLTestCase):
 class CapacityLogsTest(OCLTestCase):
     def setUp(self):
         super().setUp()
-        logs._state.update(queue=None, pid=None, dropped=0)  # pylint: disable=protected-access
+        logs._sink.update(sink=None, pid=None)  # pylint: disable=protected-access
 
     def tearDown(self):
-        logs._state.update(queue=None, pid=None, dropped=0)  # pylint: disable=protected-access
+        logs._sink.update(sink=None, pid=None)  # pylint: disable=protected-access
         super().tearDown()
 
     def test_a_line_is_printed_by_the_writer_thread(self):
         written = []
         with patch('core.capacity.logs.write', side_effect=written.append):
             logs.emit({'event': 'ocl_capacity', 'decision': 'admitted', 'error': None})
-            deadline = time.monotonic() + 2
-            while not written and time.monotonic() < deadline:
-                time.sleep(0.01)
+            self.assertTrue(logs.get_sink().drain(2))
 
         self.assertEqual(written, ['{"event":"ocl_capacity","decision":"admitted"}'])
 
     def test_a_blocked_log_sink_never_blocks_the_call(self):
-        unblock = __import__('threading').Event()
+        unblock = threading.Event()
         written = []
 
         def blocked_write(line):
@@ -1004,25 +1008,120 @@ class CapacityLogsTest(OCLTestCase):
             for number in range(10):
                 logs.emit({'n': number})
             self.assertLess(time.monotonic() - started, 0.5)
-            self.assertGreater(logs._state['dropped'], 0)  # pylint: disable=protected-access
+            sink = logs.get_sink()
+            self.assertGreater(sink.dropped, 0)
+            self.assertFalse(sink.drain(0.1))  # a drain gives up at its deadline
 
             unblock.set()
-            deadline = time.monotonic() + 2
-            while logs._state['queue'].qsize() and time.monotonic() < deadline:  # pylint: disable=protected-access
-                time.sleep(0.01)
+            self.assertTrue(sink.drain(2))
             logs.emit({'n': 'after'})
-            while 'log_dropped' not in ''.join(written) and time.monotonic() < deadline:
-                time.sleep(0.01)
+            self.assertTrue(sink.drain(2))
 
         self.assertEqual(json.loads(written[-1])['n'], 'after')
         self.assertGreater(json.loads(written[-1])['log_dropped'], 0)
-        self.assertEqual(logs._state['dropped'], 0)  # pylint: disable=protected-access
+        self.assertEqual(sink.dropped, 0)
 
-    def test_drain_prints_what_is_left(self):
-        out = StringIO()
-        with patch('core.capacity.logs.write_lines'):  # no writer thread: the lines stay queued
+    def test_drain_waits_for_a_line_being_written(self):
+        written = []
+
+        def slow_write(line):
+            time.sleep(0.2)
+            written.append(line)
+
+        with patch('core.capacity.logs.write', slow_write):
             logs.emit({'n': 1})
-            with patch('sys.stdout', out):
-                logs.drain()
+            time.sleep(0.05)  # the writer has taken it off the queue and is writing it
+            logs.drain()
 
-        self.assertEqual(out.getvalue(), '{"n":1}\n')
+        self.assertEqual(written, ['{"n":1}'])
+
+    def test_concurrent_emitters_keep_the_dropped_count_right(self):
+        unblock = threading.Event()
+        written = []
+
+        def blocked_write(line):
+            unblock.wait(2)
+            written.append(line)
+
+        with patch('core.capacity.logs.MAX_QUEUED_LINES', 1), patch('core.capacity.logs.write', blocked_write):
+            threads = [threading.Thread(target=lambda: [logs.emit({'n': 1}) for _ in range(50)]) for _ in range(4)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+            unblock.set()
+            sink = logs.get_sink()
+            self.assertTrue(sink.drain(2))
+
+        # every line is either written, or counted as dropped: on a line that got through, or still pending
+        reported = sum(json.loads(line).get('log_dropped', 0) for line in written)
+        self.assertEqual(len(written) + reported + sink.dropped, 200)
+        self.assertGreaterEqual(sink.dropped, 0)
+
+
+class CapacityRedisThreadTest(OCLTestCase):
+    def test_a_full_queue_fails_at_once(self):
+        unblock = threading.Event()
+        with patch.object(RedisThread, 'MAX_QUEUED', 1):
+            redis_thread = RedisThread()
+        redis_thread.submit(unblock.wait, 2)  # running
+        time.sleep(0.05)
+        redis_thread.submit(lambda: None)  # queued
+
+        with self.assertRaises(redis.ConnectionError):
+            redis_thread.submit(lambda: None)
+        unblock.set()
+
+    def test_a_process_exits_while_a_redis_call_hangs(self):
+        # A ThreadPoolExecutor's thread would hold the exit for the whole minute.
+        result = subprocess.run(
+            [sys.executable, '-c',
+             'import time; from core.capacity.threads import RedisThread; RedisThread().submit(time.sleep, 60)'],
+            cwd=settings.BASE_DIR, capture_output=True, timeout=30, check=False)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_a_process_prints_its_last_line_before_it_exits(self):
+        result = subprocess.run(
+            [sys.executable, '-c', 'from core.capacity import logs; logs.emit({"n": 1})'],
+            cwd=settings.BASE_DIR, capture_output=True, text=True, timeout=30, check=False)
+
+        self.assertEqual(result.stdout, '{"n":1}\n', result.stderr)
+
+    def test_a_blocked_log_sink_doesnt_hold_up_exit(self):
+        code = (
+            'import sys, threading\n'
+            'class Blocked:\n'
+            '    def write(self, _): threading.Event().wait()\n'
+            '    def flush(self): pass\n'
+            'from core.capacity import logs\n'
+            'sys.stdout = Blocked()\n'
+            'logs.emit({"n": 1})\n'
+        )
+        started = time.monotonic()
+        result = subprocess.run(
+            [sys.executable, '-c', code], cwd=settings.BASE_DIR, capture_output=True, timeout=30, check=False)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertLess(time.monotonic() - started, 20)
+
+
+class CapacityConfigReadTimeoutTest(TransactionTestCase):
+    @override_settings(CAPACITY_CONFIG_READ_TIMEOUT_MS=200)
+    def test_a_locked_config_table_costs_a_call_at_most_the_read_timeout(self):
+        clear_cache()
+        locker = psycopg2.connect(**connection.get_connection_params())
+        try:
+            locker.cursor().execute('LOCK TABLE capacity_configs IN ACCESS EXCLUSIVE MODE')
+            started = time.monotonic()
+            with self.assertLogs('oclapi', level='WARNING'):
+                config = get_config()
+            elapsed = time.monotonic() - started
+        finally:
+            locker.rollback()
+            locker.close()
+            clear_cache()
+
+        self.assertLess(elapsed, 2)
+        self.assertEqual(config, get_defaults())
+        self.assertEqual(get_config(), get_defaults())  # and the connection still works
