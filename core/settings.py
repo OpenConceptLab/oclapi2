@@ -96,6 +96,13 @@ CORS_EXPOSE_HEADERS = (
     'X-LimitRemaining-Minute',
     'X-LimitRemaining-Day',
     'Retry-After',
+    'X-OCL-Capacity-Decision',
+    'X-OCL-Capacity-Limit',
+    'X-OCL-Capacity-In-Flight',
+    'X-OCL-Capacity-Tier',
+    'X-OCL-Capacity-Tier-Limit',
+    'X-OCL-Capacity-Tier-In-Flight',
+    'X-OCL-Capacity-Suggested-Concurrency',
 )
 
 CORS_ORIGIN_ALLOW_ALL = True
@@ -139,6 +146,7 @@ INSTALLED_APPS = [
     'core.events',
     'core.map_projects',
     'core.capabilities',
+    'core.capacity',
     'core.graphql.apps.GraphqlConfig'
 ]
 REST_FRAMEWORK = {
@@ -670,6 +678,14 @@ if ENV not in ['ci', 'demo'] and not NO_LM:
         ENCODER_MODEL_NAME = "BAAI/bge-reranker-v2-m3"
         ENCODER = CrossEncoder(ENCODER_MODEL_NAME, device="cpu", max_length=128)
 
+
+# Capacity limit on heavy calls (semantic $match, $rerank): OpenConceptLab/ocl_online#275. The mode and numbers
+# are runtime config (core.capacity.config); CAPACITY_LIMIT_MODE is only the default until staff change it.
+CAPACITY_LIMIT_MODE = os.environ.get('CAPACITY_LIMIT_MODE', 'shadow')
+CAPACITY_CONFIG_CACHE_SECONDS = int(os.environ.get('CAPACITY_CONFIG_CACHE_SECONDS', 10))
+CAPACITY_REDIS_TIMEOUT_SECONDS = float(os.environ.get('CAPACITY_REDIS_TIMEOUT_SECONDS', 0.5))
+CAPACITY_REDIS_RETRY_SECONDS = int(os.environ.get('CAPACITY_REDIS_RETRY_SECONDS', 30))
+CAPACITY_TASK_ID = os.environ.get('CAPACITY_TASK_ID', '')
 
 ANALYTICS_API = os.environ.get('ANALYTICS_API', 'http://host.docker.internal:8002')
 if ANALYTICS_API:

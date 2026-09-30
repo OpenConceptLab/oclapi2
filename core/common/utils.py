@@ -950,6 +950,18 @@ def parse_id(value):
     return None
 
 
+def get_event_metadata(request):
+    """The request's X-OCL-Event-Metadata JSON object (oclmap's attribution bag), or {} if it's missing or malformed."""
+    raw = request.META.get('HTTP_X_OCL_EVENT_METADATA')
+    if not raw:
+        return {}
+    try:
+        metadata = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return metadata if isinstance(metadata, dict) else {}
+
+
 def generic_sort(_list):
     def compare(item):
         if isinstance(item, (int, float, str, bool)):

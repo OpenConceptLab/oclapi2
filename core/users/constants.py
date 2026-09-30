@@ -28,6 +28,7 @@ MAPPER_ORG_PROJECTS_PERMISSION = 'users.mapper_org_projects'
 MAPPER_SCISPACY_PERMISSION = 'users.mapper_scispacy'
 PREVIEW_GROUP = 'preview'
 PREVIEW_GRANDFATHERED_GROUP = 'preview_grandfathered'  # existing accounts (ocl_online#230); layered on `preview`
+EARLY_ACCESS_GROUP = 'early_access'
 BULK_IMPORT_ADVANCED_PERMISSION = 'users.bulk_import_advanced'
 BULK_IMPORT_PRIORITY_PERMISSION = 'users.bulk_import_priority'
 LIST_UNPAGINATED_PERMISSION = 'users.list_unpaginated'

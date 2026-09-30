@@ -36,6 +36,14 @@ API supports the OpenID implicit flow.
 
 If `OIDC_SERVER_URL` and `OIDC_REALM` are not provided then the Django Auth is enabled by default.
 
+#### Capacity limit on heavy calls
+Semantic `$match` calls (kNN search and/or the in-request rerank) and `$rerank` calls are heavy: each holds an API worker for seconds. The capacity limit counts how many run at once in Redis lanes (cluster-wide, per API process host, semantic kNN, per plan tier and per user) and sends `X-OCL-Capacity-*` headers on those responses. It has three modes:
+- `off`: nothing is counted.
+- `shadow` (the default): calls are counted and logged, and none is refused.
+- `enforce`: a call that finds a lane full gets a 429 with `Retry-After`, before any work or quota charge. With `enforce_for=aware` (the default) only clients that send `"capacity_aware": "true"` in `X-OCL-Event-Metadata` are refused; the rest stay in shadow mode.
+
+The mode and all the numbers are runtime settings, changed by staff with `GET`/`PATCH`/`PUT /capacity/config/` or `python manage.py capacity show|set|reset|history|status`. Each change is kept in `/capacity/config/history/`, and every API process picks it up within `CAPACITY_CONFIG_CACHE_SECONDS` (10). `CAPACITY_LIMIT_MODE` sets the mode until staff first change it. If Redis can't be reached, calls go ahead uncounted.
+
 ### Run Checks
 (use the `docker exec` command in a service started with `docker compose up -d`)
 1. Pylint (pep8):

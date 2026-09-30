@@ -30,6 +30,8 @@ django-ordered-model==3.7.4
 django-health-check==3.17.0
 markdown==3.8.1
 mock==5.1.0
+fakeredis[lua]==2.38.0 # tests run the capacity limit's Redis scripts without a Redis server
+lupa==2.8
 django-request-logging==0.7.5
 django-cid==2.4
 django-dirtyfields==1.9.2
