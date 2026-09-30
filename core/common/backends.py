@@ -1,3 +1,5 @@
+import logging
+
 from celery_once.backends import Redis
 from django.conf import settings
 from django.contrib.auth.backends import ModelBackend
@@ -5,6 +7,10 @@ from django_redis import get_redis_connection
 from mozilla_django_oidc.auth import OIDCAuthenticationBackend
 from pydash import get
 from redis import Sentinel
+
+from core.common.exceptions import DeactivatedAccountLoginRefused
+
+logger = logging.getLogger('oclapi')
 
 
 class QueueOnceRedisSentinelBackend(Redis):
@@ -84,7 +90,22 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
 
         return user
 
+    def authenticate(self, request, **kwargs):
+        try:
+            return super().authenticate(request, **kwargs)
+        except DeactivatedAccountLoginRefused:
+            # the refused identity's tokens were stored in the session before its account was looked up
+            for key in ('oidc_access_token', 'oidc_id_token'):
+                request.session.pop(key, None)
+            return None
+
     def filter_users_by_claims(self, claims):
+        """
+        Matches the account with the claims' username, exactly as Keycloak sends it. A deactivated account is never
+        matched on its username alone (ocl_online#339): it's reactivated when the claims carry its email, verified by
+        Keycloak, and otherwise the sign-in is refused and the account left untouched. The username can't go to a new
+        account either, since usernames are unique.
+        """
         from core.users.models import UserProfile
 
         username = claims.get('preferred_username')
@@ -92,7 +113,25 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         if not username:
             return UserProfile.objects.none()
 
-        return UserProfile.objects.filter(username=username)
+        # evaluated once, so the row checked here is the one the caller updates
+        users = UserProfile.objects.filter(username=username)
+        user = users[0] if users else None
+        if user and not user.is_active:
+            if not self.has_verified_email_of(user, claims):
+                logger.warning(
+                    'OIDC sign-in refused: user %s is deactivated and the claims lack its verified email', user.id)
+                raise DeactivatedAccountLoginRefused()
+            user.undelete()
+            logger.warning('OIDC sign-in reactivated deactivated user %s on its verified email', user.id)
+
+        return users
+
+    @staticmethod
+    def has_verified_email_of(user, claims):
+        email = claims.get('email')
+        if claims.get('email_verified') is not True or not isinstance(email, str) or not email.strip():
+            return False
+        return email.strip().lower() == (user.email or '').strip().lower()
 
 
 class OCLAuthenticationBackend(ModelBackend):

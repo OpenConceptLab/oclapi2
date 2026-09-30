@@ -1,6 +1,7 @@
-from rest_framework import status
-from rest_framework.exceptions import APIException
+from django.conf import settings
 from django.utils.translation import gettext_lazy as _
+from rest_framework import status
+from rest_framework.exceptions import APIException, AuthenticationFailed
 
 
 class Http409(APIException):
@@ -25,6 +26,20 @@ class Http403(APIException):
     status_code = status.HTTP_403_FORBIDDEN
     default_detail = _('Forbidden.')
     default_code = 'forbidden'
+
+
+class DeactivatedAccountLoginRefused(AuthenticationFailed):
+    """
+    Raised when a Keycloak sign-in's username matches a deactivated account but the claims don't carry that
+    account's email, verified by Keycloak (ocl_online#339). The account is left as it was; staff can reactivate it.
+    """
+    default_code = 'deactivated_account'
+
+    def __init__(self):
+        super().__init__(
+            'This username belongs to a deactivated OCL account. If it is yours, contact '
+            f'{settings.COMMUNITY_EMAIL} and we will restore it.'
+        )
 
 
 class BatchIndexingError(Exception):

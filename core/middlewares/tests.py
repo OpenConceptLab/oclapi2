@@ -5,7 +5,9 @@ from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 from django.http import HttpResponse
 from django.test import RequestFactory, SimpleTestCase, override_settings
+from rest_framework.exceptions import AuthenticationFailed
 
+from core.common.exceptions import DeactivatedAccountLoginRefused
 from core.middlewares.middlewares import RequireAuthenticationMiddleware
 
 
@@ -59,6 +61,26 @@ class RequireAuthenticationMiddlewareTest(SimpleTestCase):
         response = self.middleware(self.make_request('/orgs/OCL/', HTTP_AUTHORIZATION='Token bad-token'))
 
         self.assertEqual(response.status_code, 403)
+
+    @patch('core.middlewares.middlewares.OCLAuthentication.authenticate')
+    def test_blocks_request_when_drf_header_auth_raises(self, authenticate_mock):
+        """An invalid header credential reads as anonymous access."""
+        authenticate_mock.side_effect = AuthenticationFailed('Login failed')
+
+        response = self.middleware(self.make_request('/orgs/OCL/', HTTP_AUTHORIZATION='Bearer bad-token'))
+
+        self.assertEqual(response.status_code, 403)
+
+    @patch('core.middlewares.middlewares.OCLAuthentication.authenticate')
+    def test_rejects_sign_in_refused_for_deactivated_account(self, authenticate_mock):
+        """A sign-in refused for a deactivated account gets a 401 that says why, not the anonymous 403."""
+        authenticate_mock.side_effect = DeactivatedAccountLoginRefused()
+
+        response = self.middleware(self.make_request('/user/', HTTP_AUTHORIZATION='Bearer sso-token'))
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response['WWW-Authenticate'], 'Bearer realm="api"')
+        self.assertIn('deactivated OCL account', json.loads(response.content)['detail'])
 
     def test_blocks_anonymous_request_for_protected_path(self):
         """Anonymous traffic to protected API paths should receive a 403 response."""

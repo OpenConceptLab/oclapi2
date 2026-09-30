@@ -14,7 +14,8 @@ from django.conf import settings
 from django.contrib.auth.models import AnonymousUser, Group
 from django.core.files.base import File
 from django.core.management import call_command
-from django.test import TestCase, override_settings
+from django.http import HttpResponse
+from django.test import TestCase, override_settings, RequestFactory
 from django.test.runner import DiscoverRunner
 from django.utils import timezone
 from mock.mock import call
@@ -24,11 +25,12 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.test import APITestCase, APITransactionTestCase
 
 from core.collections.models import CollectionReference, Expansion
-from core.collections.tests.factories import ExpansionFactory, OrganizationCollectionFactory
+from core.collections.tests.factories import ExpansionFactory, OrganizationCollectionFactory, \
+    UserCollectionFactory
 from core.common.checksums import VersionCompareMixin, ChecksumDiff
 from core.common.constants import HEAD
 from core.common.es import ESScript
-from core.common.exceptions import BatchIndexingError
+from core.common.exceptions import BatchIndexingError, DeactivatedAccountLoginRefused
 from core.common.models import BaseModel
 from core.common.tasks import delete_s3_objects, bulk_import_parallel_inline, resources_report, calculate_checksums, \
     delete_organization, delete_source, delete_collection, add_references, handle_m2m_changed, handle_pre_delete, \
@@ -64,6 +66,7 @@ from core.common.utils import (
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.mappings.documents import MappingDocument
+from core.middlewares.middlewares import RequireAuthenticationMiddleware
 from core.orgs.models import Organization
 from core.sources.models import Source
 from core.users.constants import CORE_USER_GROUP, GUEST_GROUP
@@ -79,7 +82,7 @@ from ..concepts.serializers import ConceptDetailSerializer
 from ..concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from ..mappings.serializers import MappingDetailSerializer
 from ..mappings.tests.factories import MappingFactory
-from ..sources.tests.factories import OrganizationSourceFactory
+from ..sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 
 PREVIEW_GROUP_NAME = 'preview'
 TEST_GROUPS_CONFIG_FILE = 'core/capabilities/tests/groups.test.yaml'
@@ -2564,6 +2567,199 @@ class OCLOIDCAuthenticationBackendTest(OCLTestCase):
         self.assertEqual(users.first(), batman)
 
         self.assertEqual(self.backend.filter_users_by_claims({**self.claim, 'preferred_username': None}).count(), 0)
+
+    def test_filter_users_by_claims_matches_username_exactly(self):
+        """Keycloak sends usernames in lowercase, and a mixed-case account is never matched, active or not"""
+        UserProfileFactory(username='Batman', email='batman@gotham.com')
+        robin = UserProfileFactory(username='Robin', email='robin@gotham.com')
+        robin.deactivate()
+
+        self.assertEqual(self.backend.filter_users_by_claims(self.claim).count(), 0)
+        self.assertEqual(
+            self.backend.filter_users_by_claims(
+                {**self.claim, 'preferred_username': 'robin', 'email': 'robin@gotham.com'}).count(),
+            0
+        )
+        robin.refresh_from_db()
+        self.assertFalse(robin.is_active)
+
+    def test_filter_users_by_claims_reactivates_deactivated_user_with_its_verified_email(self):
+        batman = UserProfileFactory(username='batman', email='Batman@Gotham.com ')
+        source = UserSourceFactory(user=batman)
+        collection = UserCollectionFactory(user=batman)
+        batman.deactivate()
+        source.refresh_from_db()
+        collection.refresh_from_db()
+        self.assertFalse(source.is_active)
+        self.assertFalse(collection.is_active)
+
+        users = self.backend.filter_users_by_claims(self.claim)
+
+        self.assertEqual(list(users), [batman])
+        self.assertTrue(users[0].is_active)
+        batman.refresh_from_db()
+        self.assertTrue(batman.is_active)
+        self.assertTrue(batman.verified)
+        self.assertIsNone(batman.deactivated_at)
+        self.assertEqual(batman.status, 'verified')
+        source.refresh_from_db()
+        collection.refresh_from_db()
+        self.assertTrue(source.is_active)
+        self.assertTrue(collection.is_active)
+
+    def test_filter_users_by_claims_refuses_deactivated_user_without_its_verified_email(self):
+        batman = UserProfileFactory(username='batman', email='batman@gotham.com', first_name='Bat')
+        source = UserSourceFactory(user=batman)
+        collection = UserCollectionFactory(user=batman)
+        batman.deactivate()
+        batman.refresh_from_db()
+        deactivated_at = batman.deactivated_at
+        updated_at = batman.updated_at
+        without_email_verified = {key: value for key, value in self.claim.items() if key != 'email_verified'}
+
+        for claims in [
+                {**self.claim, 'email_verified': False},
+                {**self.claim, 'email_verified': 'true'},
+                without_email_verified,
+                {**self.claim, 'email': 'joker@gotham.com'},
+                {**self.claim, 'email': None},
+                {**self.claim, 'email': 42},
+                {**self.claim, 'email': ['batman@gotham.com']},
+        ]:
+            with self.subTest(claims=claims):
+                with patch('core.users.models.UserProfile.save') as save_mock:
+                    with self.assertRaises(DeactivatedAccountLoginRefused):
+                        self.backend.filter_users_by_claims(claims)
+                save_mock.assert_not_called()
+
+                batman.refresh_from_db()
+                self.assertFalse(batman.is_active)
+                self.assertFalse(batman.verified)
+                self.assertEqual(batman.email, 'batman@gotham.com')
+                self.assertEqual(batman.first_name, 'Bat')
+                self.assertEqual(batman.deactivated_at, deactivated_at)
+                self.assertEqual(batman.updated_at, updated_at)
+                source.refresh_from_db()
+                collection.refresh_from_db()
+                self.assertFalse(source.is_active)
+                self.assertFalse(collection.is_active)
+
+    def test_filter_users_by_claims_looks_up_the_user_once(self):
+        UserProfileFactory(username='batman')
+
+        with self.assertNumQueries(1):
+            users = self.backend.filter_users_by_claims(self.claim)
+            self.assertEqual(len(users), 1)
+            self.assertEqual(users[0].username, 'batman')
+
+    def test_filter_users_by_claims_refuses_deactivated_user_without_email(self):
+        batman = UserProfileFactory(username='batman', email='')
+        batman.deactivate()
+
+        with self.assertRaises(DeactivatedAccountLoginRefused):
+            self.backend.filter_users_by_claims({**self.claim, 'email': ''})
+
+        batman.refresh_from_db()
+        self.assertFalse(batman.is_active)
+
+    @patch('core.common.backends.OCLOIDCAuthenticationBackend.get_userinfo')
+    def test_get_or_create_user_for_active_user(self, get_userinfo_mock):
+        get_userinfo_mock.return_value = self.claim
+        batman = UserProfileFactory(username='batman', email='old@gotham.com', first_name='Bat')
+
+        user = self.backend.get_or_create_user('access-token', None, None)
+
+        self.assertEqual(user, batman)
+        batman.refresh_from_db()
+        self.assertTrue(batman.is_active)
+        self.assertEqual(batman.email, 'batman@gotham.com')
+        self.assertEqual(batman.first_name, 'Bruce')
+
+    @patch('core.common.backends.OCLOIDCAuthenticationBackend.get_userinfo')
+    def test_get_or_create_user_for_deactivated_user(self, get_userinfo_mock):
+        batman = UserProfileFactory(username='batman', email='batman@gotham.com', first_name='Bat')
+        batman.deactivate()
+
+        get_userinfo_mock.return_value = {**self.claim, 'email': 'joker@gotham.com'}
+        with patch.object(self.backend, 'update_user') as update_user_mock, \
+                patch.object(self.backend, 'create_user') as create_user_mock:
+            with self.assertRaises(DeactivatedAccountLoginRefused):
+                self.backend.get_or_create_user('access-token', None, None)
+        update_user_mock.assert_not_called()
+        create_user_mock.assert_not_called()
+        self.assertEqual(UserProfile.objects.filter(username__iexact='batman').count(), 1)
+        batman.refresh_from_db()
+        self.assertFalse(batman.is_active)
+        self.assertEqual(batman.email, 'batman@gotham.com')
+        self.assertEqual(batman.first_name, 'Bat')
+
+        get_userinfo_mock.return_value = self.claim
+        user = self.backend.get_or_create_user('access-token', None, None)
+
+        self.assertEqual(user, batman)
+        batman.refresh_from_db()
+        self.assertTrue(batman.is_active)
+        self.assertEqual(batman.first_name, 'Bruce')
+
+    @patch('core.common.backends.OCLOIDCAuthenticationBackend.get_userinfo')
+    def test_get_or_create_user_leaves_mixed_case_deactivated_user(self, get_userinfo_mock):
+        get_userinfo_mock.return_value = self.claim
+        old_batman = UserProfileFactory(username='Batman', email='batman@gotham.com', first_name='Bat')
+        old_batman.deactivate()
+
+        user = self.backend.get_or_create_user('access-token', None, None)
+
+        self.assertNotEqual(user, old_batman)
+        self.assertEqual(user.username, 'batman')
+        self.assertTrue(user.is_active)
+        old_batman.refresh_from_db()
+        self.assertFalse(old_batman.is_active)
+        self.assertEqual(old_batman.first_name, 'Bat')
+
+    @patch('mozilla_django_oidc.auth.OIDCAuthenticationBackend.authenticate')
+    def test_authenticate_fails_and_drops_stored_tokens_when_sign_in_is_refused(self, authenticate_mock):
+        def store_tokens_then_refuse(request, **kwargs):  # pylint: disable=unused-argument
+            request.session['oidc_access_token'] = 'access-token'
+            request.session['oidc_id_token'] = 'id-token'
+            raise DeactivatedAccountLoginRefused()
+        authenticate_mock.side_effect = store_tokens_then_refuse
+        request = Mock(session={'other': 'kept'})
+
+        self.assertIsNone(self.backend.authenticate(request, nonce='nonce'))
+
+        authenticate_mock.assert_called_once()
+        self.assertEqual(request.session, {'other': 'kept'})
+
+    @override_settings(TEST_MODE=False, ES_SYNC=False, OIDC_SERVER_URL='https://sso.example.org')
+    @patch('core.common.backends.OCLOIDCAuthenticationBackend.get_userinfo')
+    def test_bearer_request_for_deactivated_user(self, get_userinfo_mock):
+        """Through the real middleware, DRF OIDC authentication and backend"""
+        batman = UserProfileFactory(username='batman', email='batman@gotham.com', first_name='Bat')
+        batman.deactivate()
+        middleware = RequireAuthenticationMiddleware(lambda request: HttpResponse('ok'))
+
+        def get(claims):
+            get_userinfo_mock.return_value = claims
+            request = RequestFactory().get('/user/', HTTP_AUTHORIZATION='Bearer sso-token')
+            request.user = AnonymousUser()
+            return request, middleware(request)
+
+        _, response = get({**self.claim, 'email': 'joker@gotham.com'})
+
+        self.assertEqual(response.status_code, 401)
+        self.assertIn('deactivated OCL account', json.loads(response.content)['detail'])
+        batman.refresh_from_db()
+        self.assertFalse(batman.is_active)
+        self.assertEqual(batman.email, 'batman@gotham.com')
+        self.assertEqual(batman.first_name, 'Bat')
+
+        request, response = get(self.claim)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(request.user, batman)
+        batman.refresh_from_db()
+        self.assertTrue(batman.is_active)
+        self.assertEqual(batman.first_name, 'Bruce')
 
 
 class ChecksumTest(OCLTestCase):
