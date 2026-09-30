@@ -114,9 +114,9 @@ class CapacityConfigTest(OCLTestCase):
             ({'es2_knn': '3'}, '"es2_knn" must be a whole number'),
             ({'per_user': {'preview': 100001}}, '"per_user.preview" must be a whole number'),
             ({'reserve_single_row': 5}, '"reserve_single_row" can\'t be more than "api_heavy.cluster".'),
-            ({'lease_seconds': 4, 'renew_seconds': 1}, '"lease_seconds" must be at least 5.'),
-            ({'renew_seconds': 60}, '"renew_seconds" must be at least 1 and less than "lease_seconds".'),
-            ({'renew_seconds': 0}, '"renew_seconds" must be at least 1 and less than "lease_seconds".'),
+            ({'lease_seconds': 14, 'renew_seconds': 1}, '"lease_seconds" must be at least 15.'),
+            ({'renew_seconds': 21}, '"renew_seconds" must be at least 1 and at most a third of "lease_seconds".'),
+            ({'renew_seconds': 0}, '"renew_seconds" must be at least 1 and at most a third of "lease_seconds".'),
             ({'max_hold_seconds': 30}, '"max_hold_seconds" can\'t be less than "lease_seconds".'),
             ({'retry_after': {'base': 0}}, '"retry_after" needs'),
             ({'retry_after': {'base': 10, 'max': 5}}, '"retry_after" needs'),
@@ -185,6 +185,15 @@ class CapacityConfigTest(OCLTestCase):
         self.assertEqual(config, {**get_defaults(), 'mode': 'off'})
         self.assertEqual(changes, {'es2_knn': [1, 3], 'mode': ['shadow', 'off'], 'tiers.preview': [1, 2]})
 
+    def test_a_failed_log_line_doesnt_fail_a_saved_change(self):
+        self.emit.side_effect = BrokenPipeError('stdout closed')
+
+        with self.assertLogs('oclapi', level='WARNING'):
+            row, config, _ = save_config({'es2_knn': 1})
+
+        self.assertEqual(CapacityConfig.get_latest(), row)
+        self.assertEqual(config['es2_knn'], 1)
+
     def test_save_config_rejects_an_invalid_change(self):
         with self.assertRaises(ValidationError):
             save_config({'es2_knn': -1})
@@ -205,12 +214,16 @@ class CapacityConfigTest(OCLTestCase):
             with self.assertLogs('oclapi', level='WARNING'):
                 self.assertEqual(get_config(), get_defaults())
 
-        save_config({'es2_knn': 1})
+        save_config({'es2_knn': 1, 'mode': 'enforce'})
         get_config()
         _cache['expires_at'] = 0.0
         with patch('core.capacity.config.get_current', side_effect=Exception('db down')):
             with self.assertLogs('oclapi', level='WARNING'):
-                self.assertEqual(get_config()['es2_knn'], 1)
+                config = get_config()
+        self.assertEqual(config['es2_knn'], 1)
+        self.assertEqual(config['mode'], 'shadow')  # never refuse on a config that couldn't be confirmed
+        clear_cache()
+        self.assertEqual(get_config()['mode'], 'enforce')
 
 
 class CapacityHelpersTest(OCLTestCase):
@@ -240,6 +253,8 @@ class CapacityHelpersTest(OCLTestCase):
         self.assertIsNone(get_queue_ms(request('Root=1-zz-abc'), now=received))
         self.assertIsNone(get_queue_ms(request('Root=nope'), now=received))
         self.assertIsNone(get_queue_ms(request('garbage'), now=received))
+        self.assertEqual(
+            get_queue_ms(request(f'Root=1-{received - 100:x}-abc; Self=1-{received:x}-def'), now=received + 1), 1000)
 
     def test_get_event_metadata(self):
         def request(value=None):
@@ -278,9 +293,13 @@ class CapacityHelpersTest(OCLTestCase):
             client = build_redis_client()
 
         self.assertEqual(client, sentinel_mock.return_value.master_for.return_value)
-        sentinel_mock.assert_called_once_with(
-            [('s1', 26379), ('s2', 26379)],
-            sentinel_kwargs={'socket_timeout': 0.25, 'socket_connect_timeout': 0.25, 'password': 'secret'})
+        args, kwargs = sentinel_mock.call_args
+        self.assertEqual(args, ([('s1', 26379), ('s2', 26379)],))
+        sentinel_options = kwargs['sentinel_kwargs']
+        self.assertEqual(sentinel_options['retry']._retries, 0)  # pylint: disable=protected-access
+        self.assertEqual(
+            {key: value for key, value in sentinel_options.items() if key != 'retry'},
+            {'socket_timeout': 0.25, 'socket_connect_timeout': 0.25, 'password': 'secret'})
         args, kwargs = sentinel_mock.return_value.master_for.call_args
         self.assertEqual(args, ('primary',))
         self.assertEqual((kwargs['password'], kwargs['socket_timeout']), ('secret', 0.25))
@@ -520,11 +539,47 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
         with patch.object(RedisLanes, 'renew', side_effect=redis.TimeoutError('slow')):
             gate.renew()
         self.assertEqual(gate.error, 'TimeoutError: slow')
+        self.assertFalse(RedisLanes.is_available())
 
+        RedisLanes.unavailable_until = 0.0
         with patch.object(RedisLanes, 'release', side_effect=redis.ConnectionError('gone')):
             gate.release()
         self.assertEqual(self.lines()[-1]['error'], 'ConnectionError: gone')
         self.assertFalse(RedisLanes.is_available())
+
+    def test_renewal_and_release_skip_redis_after_it_failed(self):
+        gate = self.acquire(make_user(PREVIEW_GROUP_NAME))
+        RedisLanes.mark_unavailable()
+
+        with patch.object(RedisLanes, 'renew') as renew_mock, patch.object(RedisLanes, 'release') as release_mock:
+            gate.renew()
+            gate.release()
+
+        renew_mock.assert_not_called()
+        release_mock.assert_not_called()
+        self.assertEqual(self.lines()[-1]['error'], 'release skipped: Redis failed recently; the leases will expire')
+        self.assertEqual(self.redis.zcard(lane_key(LANE_USER, gate.request.user.id)), 1)
+
+    def test_a_renewer_that_fails_to_start_still_releases(self):
+        with patch.object(LeaseRenewer, 'start', side_effect=RuntimeError("can't start new thread")):
+            gate = self.acquire(make_user(PREVIEW_GROUP_NAME))
+
+        self.assertEqual(gate.decision, DECISION_ADMITTED)
+        self.assertIsNone(gate.renewer)
+        self.assertEqual(gate.error, "RuntimeError: can't start new thread")
+        gate.release()
+        for key in gate.keys:
+            self.assertEqual(self.redis.zcard(key), 0)
+
+    def test_a_short_lease_never_shortens_a_lanes_ttl(self):
+        self.redis.zadd(lane_key(LANE_API_HEAVY), {'long-lease': time.time() * 1000 + 600000})
+        self.redis.pexpire(lane_key(LANE_API_HEAVY), 1200000)
+
+        gate = self.acquire(make_user(PREVIEW_GROUP_NAME))
+        gate.renew()
+
+        self.assertGreater(self.redis.pttl(lane_key(LANE_API_HEAVY)), 600000)
+        self.assertGreater(self.redis.pttl(lane_key(LANE_USER, gate.request.user.id)), 60000)
 
     def test_an_unexpected_error_fails_open(self):
         with patch('core.capacity.limiter.get_tier', side_effect=KeyError('tier')):

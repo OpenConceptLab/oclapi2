@@ -14,7 +14,7 @@ from django.core.exceptions import ValidationError
 from django.db import connection, transaction
 
 from core.capacity.constants import (
-    MODES, MODE_SHADOW, ENFORCE_FOR, ENFORCE_FOR_AWARE, TIER_STAFF, TIER_CORE, TIER_EARLY_ACCESS,
+    MODES, MODE_SHADOW, MODE_ENFORCE, ENFORCE_FOR, ENFORCE_FOR_AWARE, TIER_STAFF, TIER_CORE, TIER_EARLY_ACCESS,
     TIER_PREVIEW, CONFIG_LOG_EVENT, SOURCE_API)
 from core.capacity.logs import emit
 
@@ -111,10 +111,10 @@ def validate(config):
     if not errors:
         if config['reserve_single_row'] > config['api_heavy']['cluster']:
             errors.append('"reserve_single_row" can\'t be more than "api_heavy.cluster".')
-        if config['lease_seconds'] < 5:
-            errors.append('"lease_seconds" must be at least 5.')
-        if not 1 <= config['renew_seconds'] < config['lease_seconds']:
-            errors.append('"renew_seconds" must be at least 1 and less than "lease_seconds".')
+        if config['lease_seconds'] < 15:
+            errors.append('"lease_seconds" must be at least 15.')
+        if not 1 <= config['renew_seconds'] <= config['lease_seconds'] // 3:
+            errors.append('"renew_seconds" must be at least 1 and at most a third of "lease_seconds".')
         if config['max_hold_seconds'] < config['lease_seconds']:
             errors.append('"max_hold_seconds" can\'t be less than "lease_seconds".')
         retry_after = config['retry_after']
@@ -154,9 +154,12 @@ def get_config():
         try:
             _, config = get_current()
         except Exception as ex:
-            # Keep the last good config (or the defaults) rather than fail the request.
+            # Keep the last good config (or the defaults) rather than fail the request, but never refuse on a
+            # config that couldn't be confirmed: enforce falls back to shadow until a read succeeds.
             logger.warning('Capacity config could not be read (%s); using the last known config', ex)
-            config = _cache['config'] or get_defaults()
+            config = copy.deepcopy(_cache['config'] or get_defaults())
+            if config['mode'] == MODE_ENFORCE:
+                config['mode'] = MODE_SHADOW
         _cache['config'] = config
         _cache['expires_at'] = now + settings.CAPACITY_CONFIG_CACHE_SECONDS
     return config
@@ -187,8 +190,11 @@ def save_config(changes, user=None, source=SOURCE_API, note='', replace=False):
         row = CapacityConfig.objects.create(
             config=config, previous_config=previous, created_by=user, source=source, note=note or '')
     clear_cache()
-    emit({
-        'event': CONFIG_LOG_EVENT, 'version': row.id, 'changed_by': getattr(user, 'username', None),
-        'source': source, 'note': note or None, 'changes': changed, 'mode': config['mode'],
-    })
+    try:
+        emit({
+            'event': CONFIG_LOG_EVENT, 'version': row.id, 'changed_by': getattr(user, 'username', None),
+            'source': source, 'note': note or None, 'changes': changed, 'mode': config['mode'],
+        })
+    except Exception as ex:  # the change is saved, and its row is the record; don't fail the request over a log line
+        logger.warning('Capacity config version %s was saved, but its log line failed: %s', row.id, ex)
     return row, config, changed

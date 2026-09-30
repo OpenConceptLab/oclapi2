@@ -1,7 +1,8 @@
 """
 The capacity limit on heavy calls (OpenConceptLab/ocl_online#275): semantic `$match` (kNN searches and/or the
 in-request rerank) and `$rerank`. It caps how many run at once across all users, to protect the API workers and
-Elasticsearch. It isn't a quota: it charges nothing, and a call it refuses (in enforce mode only) is asked to retry shortly.
+Elasticsearch. It isn't a quota: it charges nothing, and a call it refuses (in enforce mode only) is asked to retry
+shortly.
 
 Each lane is a Redis sorted set of leases: member = a random token per call, score = the lease's expiry in ms by
 Redis's own clock, so the API tasks' clocks don't matter. A call takes a lease in every lane that applies to it, in
@@ -9,8 +10,9 @@ one atomic script, renews them from a background thread while it runs, and relea
 that isn't renewed expires, so a worker that dies frees its slots within `lease_seconds`.
 
 If Redis can't be reached, calls go ahead uncounted and it's logged (fail open): the limiter must never cause an
-outage. It uses its own Redis client with short timeouts and no retries, and skips Redis for
-CAPACITY_REDIS_RETRY_SECONDS after an error, so an outage costs a call at most one short timeout.
+outage. It uses its own Redis client with short timeouts and no retries, and each process skips Redis (acquire,
+renewal and release) for CAPACITY_REDIS_RETRY_SECONDS after an error. So an outage delays at most one call per
+process in that time, by a timeout per connection attempt (a few, with Sentinel); leases it can't release expire.
 """
 import socket
 import threading
@@ -42,6 +44,10 @@ _NOW_MS = """
 if redis.replicate_commands then redis.replicate_commands() end
 local now = redis.call('TIME')
 local now_ms = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
+-- Extend a lane's TTL to cover a new lease, never shorten it: other calls' leases may be longer.
+local function keep(key, ms)
+  if redis.call('PTTL', key) < ms then redis.call('PEXPIRE', key, ms) end
+end
 """
 
 # KEYS: one per lane. ARGV: token, lease ms, force ('1': take the lease even when a lane is full), then one limit
@@ -60,7 +66,7 @@ if ARGV[3] == '1' or not full then
   result[1] = 1
   for _, key in ipairs(KEYS) do
     redis.call('ZADD', key, now_ms + lease_ms, ARGV[1])
-    redis.call('PEXPIRE', key, lease_ms * 2)
+    keep(key, lease_ms * 2)
   end
 end
 return result
@@ -73,7 +79,7 @@ local renewed = 0
 for _, key in ipairs(KEYS) do
   if redis.call('ZSCORE', key, ARGV[1]) then
     redis.call('ZADD', key, now_ms + lease_ms, ARGV[1])
-    redis.call('PEXPIRE', key, lease_ms * 2)
+    keep(key, lease_ms * 2)
     renewed = renewed + 1
   end
 end
@@ -106,7 +112,8 @@ def build_redis_client():
         'retry_on_timeout': False, 'health_check_interval': 0,
     }
     if settings.REDIS_SENTINELS:
-        sentinel_options = {'socket_timeout': timeout, 'socket_connect_timeout': timeout}
+        sentinel_options = {
+            'socket_timeout': timeout, 'socket_connect_timeout': timeout, 'retry': Retry(NoBackoff(), 0)}
         if settings.REDIS_PASSWORD:
             sentinel_options['password'] = settings.REDIS_PASSWORD
         sentinel = Sentinel(settings.REDIS_SENTINELS_LIST, sentinel_kwargs=sentinel_options)
@@ -201,8 +208,8 @@ def get_queue_ms(request, now=None):
     adds X-Amzn-Trace-Id with the time it received the request, in whole seconds (in `Self`, or in `Root` when it
     started the trace), so this reads up to a second high. Mostly it's time spent queued for a free API worker.
     """
-    fields = dict(part.split('=', 1) for part in (request.META.get('HTTP_X_AMZN_TRACE_ID') or '').split(';')
-                  if '=' in part)
+    fields = {key.strip(): value.strip() for key, value in (
+        part.split('=', 1) for part in (request.META.get('HTTP_X_AMZN_TRACE_ID') or '').split(';') if '=' in part)}
     try:
         received = int((fields.get('Self') or fields.get('Root')).split('-')[1], 16)
     except (AttributeError, IndexError, ValueError):
@@ -225,8 +232,10 @@ class LeaseRenewer(threading.Thread):
             self.gate.renew()
 
     def stop(self):
+        # No need to wait out a renewal in flight: renewing only extends leases the call still holds, so one that
+        # lands after the release changes nothing.
         self.finished.set()
-        self.join(timeout=2 * settings.CAPACITY_REDIS_TIMEOUT_SECONDS + 1)
+        self.join(timeout=0.2)
 
 
 class CapacityGate:
@@ -303,8 +312,9 @@ class CapacityGate:
                 self.decision = DECISION_SHADOW_REFUSED if taken else DECISION_REFUSED
                 self.retry_after = self.get_retry_after(dict(zip([lane for lane, _, _ in self.lanes], before)))
             if taken:
-                self.renewer = LeaseRenewer(self)
-                self.renewer.start()
+                renewer = LeaseRenewer(self)
+                renewer.start()
+                self.renewer = renewer
         except Exception as ex:
             self.record_error(ex)
             self.decision = self.decision or DECISION_UNAVAILABLE
@@ -353,6 +363,8 @@ class CapacityGate:
 
     def renew(self):
         try:
+            if not RedisLanes.is_available():
+                return
             if RedisLanes.renew(self.keys, self.token, self.lease_ms) < len(self.lanes):
                 self.lease_lost = True
         except Exception as ex:
@@ -365,16 +377,20 @@ class CapacityGate:
         try:
             if self.renewer:
                 self.renewer.stop()
-            if self.holding:
+        except Exception as ex:
+            self.record_error(ex)
+        try:
+            if self.holding and not RedisLanes.is_available():
+                self.error = self.error or 'release skipped: Redis failed recently; the leases will expire'
+            elif self.holding:
                 RedisLanes.release(self.keys, self.token)
         except Exception as ex:
             self.record_error(ex)
-        finally:
-            if self.decision:
-                try:
-                    self.log()
-                except Exception:  # a log line must never fail the call
-                    pass
+        if self.decision:
+            try:
+                self.log()
+            except Exception:  # a log line must never fail the call
+                pass
 
     def record_error(self, ex):
         if isinstance(ex, redis.RedisError):
