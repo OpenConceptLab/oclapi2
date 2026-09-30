@@ -94,6 +94,9 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         try:
             return super().authenticate(request, **kwargs)
         except DeactivatedAccountLoginRefused:
+            # the refused identity's tokens were stored in the session before its account was looked up
+            for key in ('oidc_access_token', 'oidc_id_token'):
+                request.session.pop(key, None)
             return None
 
     def filter_users_by_claims(self, claims):
@@ -110,8 +113,10 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         if not username:
             return UserProfile.objects.none()
 
-        user = UserProfile.objects.filter(username=username, is_active=False).first()
-        if user:
+        # evaluated once, so the row checked here is the one the caller updates
+        users = UserProfile.objects.filter(username=username)
+        user = users[0] if users else None
+        if user and not user.is_active:
             if not self.has_verified_email_of(user, claims):
                 logger.warning(
                     'OIDC sign-in refused: user %s is deactivated and the claims lack its verified email', user.id)
@@ -119,12 +124,14 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
             user.undelete()
             logger.warning('OIDC sign-in reactivated deactivated user %s on its verified email', user.id)
 
-        return UserProfile.objects.filter(username=username, is_active=True)
+        return users
 
     @staticmethod
     def has_verified_email_of(user, claims):
-        email = (claims.get('email') or '').strip().lower()
-        return claims.get('email_verified') is True and bool(email) and email == (user.email or '').strip().lower()
+        email = claims.get('email')
+        if claims.get('email_verified') is not True or not isinstance(email, str) or not email.strip():
+            return False
+        return email.strip().lower() == (user.email or '').strip().lower()
 
 
 class OCLAuthenticationBackend(ModelBackend):
