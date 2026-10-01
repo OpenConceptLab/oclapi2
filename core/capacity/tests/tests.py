@@ -461,6 +461,19 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
         self.assertEqual(gate.get_suggested_concurrency(), 0)
         self.assertTrue(gate.get_refusal_response().data['paused'])
 
+    def test_a_paused_lane_is_the_scope_reported(self):
+        self.configure(mode='enforce', enforce_for='all', reserve_single_row=0,
+                       api_heavy={'cluster': 1, 'per_task': 5}, tiers={'preview': 0})
+        self.acquire(make_user(CORE_USER_GROUP))
+
+        gate = self.acquire(make_user(PREVIEW_GROUP_NAME))
+
+        self.assertEqual(gate.full, [LANE_API_HEAVY, LANE_TIER])
+        self.assertEqual(gate.scope, LANE_TIER)
+        self.assertEqual(gate.retry_after, 120)
+        data = gate.get_refusal_response().data
+        self.assertEqual((data['scope'], data['paused'], data['retry_after']), (LANE_TIER, True, 120))
+
     def test_retry_after_grows_with_the_calls_ahead_up_to_the_max(self):
         self.configure(tiers={'core': 10}, per_user={'core': 10}, api_heavy={'cluster': 10, 'per_task': 10})
         user = make_user(CORE_USER_GROUP)

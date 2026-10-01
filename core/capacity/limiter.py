@@ -340,6 +340,12 @@ class CapacityGate:
         return {lane: limit for lane, _, limit in self.lanes}
 
     @property
+    def scope(self):
+        """The lane that refused the call (or would have): a paused one first, as it's what sets the long wait."""
+        limits = self.limits
+        return next((lane for lane in self.full if limits[lane] == 0), self.full[0] if self.full else None)
+
+    @property
     def lease_ms(self):
         return self.config['lease_seconds'] * 1000
 
@@ -458,7 +464,7 @@ class CapacityGate:
         self.error = f'{ex.__class__.__name__}: {ex}'[:300]
 
     def get_refusal_response(self):
-        scope = self.full[0]
+        scope = self.scope
         return Response(
             {
                 'detail': f'Matching is busy. Please retry in {self.retry_after} seconds.',
@@ -510,7 +516,7 @@ class CapacityGate:
             'single_row': self.single_row,
             'tier': self.tier,
             'user_id': self.request.user.id,
-            'scope': self.full[0] if self.full else None,
+            'scope': self.scope,
             'full': self.full or None,
             **lane_fields(LANE_API_HEAVY, ''),
             **lane_fields(LANE_API_HEAVY_TASK, 'task_'),
