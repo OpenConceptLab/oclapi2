@@ -520,6 +520,10 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
         gate.renew()
         self.assertFalse(self.redis.exists(key))  # a lost lease isn't re-added
 
+    def test_one_redis_error_cant_cost_a_call_two_renewals(self):
+        from core.capacity.config import DEFAULTS
+        self.assertLess(settings.CAPACITY_REDIS_RETRY_SECONDS, DEFAULTS['lease_seconds'] - 2 * DEFAULTS['renew_seconds'])
+
     def test_the_renewer_stops_once_a_lease_is_lost(self):
         gate = Mock(config={'renew_seconds': 0.01, 'max_hold_seconds': 60}, lease_lost=True)
         renewer = LeaseRenewer(gate)

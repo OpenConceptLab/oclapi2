@@ -685,7 +685,9 @@ CAPACITY_LIMIT_MODE = os.environ.get('CAPACITY_LIMIT_MODE', 'shadow')
 CAPACITY_CONFIG_CACHE_SECONDS = int(os.environ.get('CAPACITY_CONFIG_CACHE_SECONDS', 10))
 CAPACITY_CONFIG_READ_TIMEOUT_MS = int(os.environ.get('CAPACITY_CONFIG_READ_TIMEOUT_MS', 500))
 CAPACITY_REDIS_TIMEOUT_SECONDS = float(os.environ.get('CAPACITY_REDIS_TIMEOUT_SECONDS', 0.5))
-CAPACITY_REDIS_RETRY_SECONDS = int(os.environ.get('CAPACITY_REDIS_RETRY_SECONDS', 30))
+# How long a process skips Redis after an error. Under lease_seconds - 2 x renew_seconds (60 - 40), so one error
+# can't make a long call miss two renewals and lose its lease.
+CAPACITY_REDIS_RETRY_SECONDS = int(os.environ.get('CAPACITY_REDIS_RETRY_SECONDS', 15))
 CAPACITY_REDIS_DEADLINE_SECONDS = float(os.environ.get('CAPACITY_REDIS_DEADLINE_SECONDS', 1.0))
 CAPACITY_TASK_ID = os.environ.get('CAPACITY_TASK_ID', '')
 
