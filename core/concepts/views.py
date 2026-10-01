@@ -1,4 +1,3 @@
-import json
 import time
 
 from cid.locals import get_cid
@@ -30,6 +29,8 @@ from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.capabilities.constants import CAPABILITY_EXCEEDED_ERROR_CODE, CAPABILITY_NOT_ENTITLED_ERROR_CODE, \
     MAPPER_MATCH_OPERATIONS_CAPABILITY, MAPPER_MATCH_OPERATIONS_CAPABILITY_ID
 from core.capabilities.exceptions import CapabilityExceeded
+from core.capacity.constants import ENDPOINT_MATCH, ENDPOINT_RERANK
+from core.capacity.limiter import CapacityLimitMixin
 from core.common.permissions import CanUseMapper
 from core.common.search import CustomESSearch, Reranker, get_visible_repo_criteria
 from core.common.swagger_parameters import (
@@ -44,7 +45,7 @@ from core.common.swagger_parameters import (
 from core.common.tasks import delete_concept, make_hierarchy
 from core.common.throttling import ThrottleUtil
 from core.common.utils import (to_parent_uri_from_kwargs, generate_temp_version, get_truthy_values, to_int,
-                               drop_version, get_falsy_values, parse_id)
+                               drop_version, get_falsy_values, parse_id, get_event_metadata)
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
 from core.concepts.constants import (
@@ -913,14 +914,8 @@ def get_match_operations_attribution(request):
     effort: a missing/malformed header never blocks the match, it only means
     the UsageEvent stays algorithm=None/map_project=None.
     """
-    raw = request.META.get('HTTP_X_OCL_EVENT_METADATA')
-    if not raw:
-        return None, None
-    try:
-        metadata = json.loads(raw)
-    except (TypeError, ValueError):
-        return None, None
-    if not isinstance(metadata, dict):
+    metadata = get_event_metadata(request)
+    if not metadata:
         return None, None
 
     algorithm_id = metadata.get('algorithm_id')
@@ -940,7 +935,7 @@ def get_match_operations_attribution(request):
     return algorithm_id, map_project
 
 
-class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
+class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):  # pragma: no cover
     default_limit = 1
     score_threshold = 0.9
     score_threshold_semantic_very_high = 0.9
@@ -1208,6 +1203,18 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         }
     )
     def post(self, request, **kwargs):  # pylint: disable=unused-argument
+        # Semantic (kNN) and reranked matches are heavy calls: the capacity limit counts them, and in enforce mode
+        # refuses them with a 429 before any quota is charged (OpenConceptLab/ocl_online#275).
+        rows = request.data.get('rows')
+        semantic = request.query_params.get('semantic', None) in TRUTHY
+        reranker = request.query_params.get('reranker', None) in TRUTHY
+        if not (isinstance(rows, list) and rows and (semantic or reranker)):
+            return self.match(request)
+        with self.capacity_gate(
+                request, endpoint=ENDPOINT_MATCH, rows=len(rows), semantic=semantic, reranker=reranker) as gate:
+            return gate.get_refusal_response() if gate.refused else self.match(request)
+
+    def match(self, request):
         rows = request.data.get('rows')
         consumed_units = 0
         if isinstance(rows, list) and rows:
@@ -1252,7 +1259,7 @@ class MetadataToConceptsListView(BaseAPIView):  # pragma: no cover
         return response
 
 
-class RerankConceptsListView(BaseAPIView):
+class RerankConceptsListView(CapacityLimitMixin, BaseAPIView):
     is_searchable = False
     serializer_class = ConceptListSerializer
     permission_classes = (IsAuthenticated, CanUseMapper)
@@ -1280,14 +1287,18 @@ class RerankConceptsListView(BaseAPIView):
                 {'detail': 'Missing "q" in request body.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        try:
-            reranker = Reranker(model_name=encoder_model)
-            results = reranker.rerank(hits=rows, name_key=name_key, txt=text, score_key=score_key, order_results=True)
-            return Response(results)
-        except (ValueError, RuntimeError, OSError) as e:
-            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            ERRBIT_LOGGER.log(e)
-            return Response(
-                {'detail': 'An error occurred while processing the rerank request.'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        with self.capacity_gate(request, endpoint=ENDPOINT_RERANK, rows=len(rows)) as gate:
+            if gate.refused:
+                return gate.get_refusal_response()
+            try:
+                reranker = Reranker(model_name=encoder_model)
+                results = reranker.rerank(
+                    hits=rows, name_key=name_key, txt=text, score_key=score_key, order_results=True)
+                return Response(results)
+            except (ValueError, RuntimeError, OSError) as e:
+                return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            except Exception as e:
+                ERRBIT_LOGGER.log(e)
+                return Response(
+                    {'detail': 'An error occurred while processing the rerank request.'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR)
