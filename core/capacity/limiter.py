@@ -54,9 +54,12 @@ local function keep(key, ms)
 end
 """
 
-# KEYS: one per lane. ARGV: token, lease ms, force ('1': take the lease even when a lane is full), then one limit
-# per key. Returns {1 if the lease was taken else 0, then each lane's count before this call}.
+# KEYS: one per lane. ARGV: token, lease ms, force ('1': take the lease even when a lane is full), not-after (epoch
+# ms), then one limit per key. Returns {1 if the lease was taken else 0, then each lane's count before this call}, or
+# {-1} if Redis runs it after its caller stopped waiting (it sat in a buffer while Redis hung): a lease taken then
+# would be held by nobody.
 ACQUIRE_SCRIPT = _NOW_MS + """
+if now_ms > tonumber(ARGV[4]) then return {-1} end
 local lease_ms = tonumber(ARGV[2])
 local result = {0}
 local full = false
@@ -64,7 +67,7 @@ for i, key in ipairs(KEYS) do
   redis.call('ZREMRANGEBYSCORE', key, '-inf', now_ms)
   local count = redis.call('ZCARD', key)
   result[i + 1] = count
-  if count >= tonumber(ARGV[3 + i]) then full = true end
+  if count >= tonumber(ARGV[4 + i]) then full = true end
 end
 if ARGV[3] == '1' or not full then
   result[1] = 1
@@ -200,9 +203,17 @@ class RedisLanes:
         cls.unavailable_until = time.monotonic() + settings.CAPACITY_REDIS_RETRY_SECONDS
 
     @classmethod
-    def acquire(cls, keys, limits, token, lease_ms, force):  # pylint: disable=too-many-arguments
-        """(whether the lease was taken, each lane's count before this call)"""
-        result = cls.call(cls.run_script, ACQUIRE_SCRIPT, keys, [token, lease_ms, '1' if force else '0', *limits])
+    def acquire(cls, keys, limits, token, lease_ms, force, not_after_ms=None):  # pylint: disable=too-many-arguments
+        """
+        (whether the lease was taken, each lane's count before this call). Raises redis.TimeoutError if Redis ran it
+        after not_after_ms (by default, the deadline plus 2 s for clock differences), when its caller had given up.
+        """
+        if not_after_ms is None:
+            not_after_ms = get_not_after_ms()
+        result = cls.call(
+            cls.run_script, ACQUIRE_SCRIPT, keys, [token, lease_ms, '1' if force else '0', not_after_ms, *limits])
+        if int(result[0]) == -1:
+            raise redis.TimeoutError('Redis ran the acquire after its caller stopped waiting; no lease was taken')
         return bool(result[0]), [int(count) for count in result[1:]]
 
     @classmethod
@@ -229,6 +240,11 @@ class RedisLanes:
             return sorted(key.decode() if isinstance(key, bytes) else key
                           for key in cls.get_client().scan_iter(match=lane_key(lane, '*'), count=100))
         return cls.call(scan)
+
+
+def get_not_after_ms():
+    """When an acquire stops being worth running: its caller's deadline, plus 2 s for clock differences."""
+    return int((time.time() + settings.CAPACITY_REDIS_DEADLINE_SECONDS + 2) * 1000)
 
 
 def get_tier(user):

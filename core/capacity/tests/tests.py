@@ -598,6 +598,21 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
         for key in gate.keys:
             self.assertEqual(self.redis.zcard(key), 0)
 
+    def test_an_acquire_that_redis_runs_too_late_takes_no_lease(self):
+        # Redis hung and ran the buffered script once it came back, after the caller had stopped waiting.
+        keys = [lane_key(LANE_API_HEAVY), lane_key(LANE_USER, 1)]
+        with self.assertRaises(redis.TimeoutError):
+            RedisLanes.acquire(keys, [4, 1], 'late', 60000, force=True, not_after_ms=int(time.time() * 1000) - 5000)
+        for key in keys:
+            self.assertEqual(self.redis.zcard(key), 0)
+
+        with patch('core.capacity.limiter.get_not_after_ms', return_value=int(time.time() * 1000) - 5000):
+            gate = self.acquire(make_user(PREVIEW_GROUP_NAME))
+        self.assertEqual(gate.decision, DECISION_UNAVAILABLE)
+        self.assertFalse(gate.holding)
+        self.assertIn('no lease was taken', gate.error)
+        self.assertEqual(self.redis.zcard(lane_key(LANE_API_HEAVY)), 0)
+
     def test_a_short_lease_never_shortens_a_lanes_ttl(self):
         self.redis.zadd(lane_key(LANE_API_HEAVY), {'long-lease': time.time() * 1000 + 600000})
         self.redis.pexpire(lane_key(LANE_API_HEAVY), 1200000)
