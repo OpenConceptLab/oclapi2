@@ -46,7 +46,7 @@ ijson==3.2.3
 responses==0.25.0
 pydantic==2.10.6
 minio==7.2.9
-sentence-transformers==5.4.0
+sentence-transformers==5.6.0
 elastic-transport==8.17
 litellm==1.84.0
 strawberry-graphql==0.315.7
