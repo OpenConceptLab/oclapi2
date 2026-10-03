@@ -532,6 +532,9 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         user = user or self.updated_by
 
         task = Task.new(queue='indexing', user=user, name=index_source_concepts.__name__)
+        # A sync request carries a token of its own, so QueueOnce can't drop it as a duplicate of a sync that's
+        # already running, which may have checked its docs before this change (sync_concept_vectors)
+        sync_vectors = uuid.uuid4().hex if sync_vectors else None
         narrowing = {key: value for key, value in {
             'locales': locales, 'exclude_locale': exclude_locale, 'sync_vectors': sync_vectors}.items() if value}
         celery_args = [(self.id, partial_doc)]

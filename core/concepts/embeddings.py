@@ -1,41 +1,39 @@
 """
 Concept vectors (OpenConceptLab/ocl_online#247).
 
-A concept doc carries vectors when its repo's HEAD, or any repo version the row belongs to, is semantic. Each vector
+A concept doc carries vectors when any repo version the row belongs to is semantic, HEAD included: exactly the docs a
+semantic $match can return, since it always searches one repo version's members. Each vector
 records the exact text it encoded, and each doc the model, so a rebuild can reuse a vector rather than re-encode it:
 only when the doc itself, or its versioned object's doc, already holds a vector for the same text from the same model.
 The other texts are encoded together, in one batched call per chunk of docs. Docs written before #247 record neither,
 so their vectors are re-encoded the next time they're rebuilt.
 """
 from django.conf import settings
-from elasticsearch import NotFoundError
 from elasticsearch_dsl.connections import connections
 from pydash import get
 
 from core.common.utils import encode_texts
 
 SYNC_BATCH_SIZE = 500
+SYNC_MAX_PASSES = 5
 
 
-def needs_vectors(parent, versions_match_algorithms):
+def needs_vectors(versions_match_algorithms):
     """
-    Whether a concept row's doc carries vectors: its repo's HEAD (`parent`) is semantic, or any repo version the row
-    belongs to is. get_concept_ids_needing_vectors is the same rule in SQL.
+    Whether a concept row's doc carries vectors: any repo version it belongs to (HEAD included) is semantic, given
+    each one's match_algorithms. get_concept_ids_needing_vectors is the same rule in SQL.
     """
-    return bool(parent.has_semantic_match_algorithm) or any(
-        parent.SEMANTIC_MATCH_ALGORITHM in (algorithms or []) for algorithms in versions_match_algorithms)
+    from core.sources.models import Source
+    return any(Source.SEMANTIC_MATCH_ALGORITHM in (algorithms or []) for algorithms in versions_match_algorithms)
 
 
 def get_concept_ids_needing_vectors(ids):
     """The ids, among these concept rows, whose docs carry vectors (needs_vectors, in SQL)."""
     from core.concepts.models import Concept
     from core.sources.models import Source
-    semantic = [Source.SEMANTIC_MATCH_ALGORITHM]
-    in_semantic_version = Concept.sources.through.objects.filter(
-        concept_id__in=ids, source__match_algorithms__contains=semantic).values_list('concept_id', flat=True)
-    under_semantic_head = Concept.objects.filter(
-        id__in=ids, parent__match_algorithms__contains=semantic).values_list('id', flat=True)
-    return set(in_semantic_version) | set(under_semantic_head)
+    return set(Concept.sources.through.objects.filter(
+        concept_id__in=ids, source__match_algorithms__contains=[Source.SEMANTIC_MATCH_ALGORITHM]
+    ).values_list('concept_id', flat=True))
 
 
 def get_ids_with_vectors(index_name, ids, synonyms_too=False):
@@ -100,12 +98,12 @@ class ConceptVectors:
         self.pending = []
 
     def get_stored_vectors(self, doc_ids):
-        """{doc id: {text: vector}} from the stored docs that recorded the text of each vector and this model."""
-        try:
-            response = connections.get_connection().mget(
-                index=self.index_name, ids=sorted(doc_ids), source_includes=self.STORED_FIELDS)
-        except NotFoundError:  # no index yet
-            return {}
+        """
+        {doc id: {text: vector}} from the stored docs that recorded the text of each vector and this model. A doc that
+        isn't there, or an index that isn't (ES answers each id with an error), gives nothing.
+        """
+        response = connections.get_connection().mget(
+            index=self.index_name, ids=sorted(doc_ids), source_includes=self.STORED_FIELDS)
         stored = {}
         for doc in response['docs']:
             source = doc.get('_source') or {}
@@ -125,20 +123,28 @@ class ConceptVectors:
         return [value] if value else []
 
 
+def get_repo_flags(version):
+    """The match_algorithms of every version of the repo, HEAD included: what decides which of its docs need vectors."""
+    return list(version.versions.order_by('id').values_list('id', 'match_algorithms'))
+
+
 def sync_concept_vectors(version, parallel=True):
     """
     Gives a repo version's concept docs the vectors they need, and leaves every other doc alone:
     - a doc that needs vectors and has none is rebuilt, which embeds it (reusing what it can);
-    - a doc that has vectors, though neither HEAD nor any version it belongs to is semantic any more, is rebuilt
-      without them;
+    - a doc that has vectors, though no version it belongs to is semantic any more, is rebuilt without them;
     - the rest aren't touched. So opting a version in embeds only what's missing, and opting it out never strips the
-      vectors that HEAD or another semantic version still uses.
+      vectors another semantic version (HEAD included) still uses.
     Checks 500 rows at a time. Every batch is attempted, and a failed one fails the run (BatchIndexRun). Returns the
-    run's summary, plus how many docs were filled and stripped, and how many vectors were reused and texts encoded.
+    run's summary, plus the docs filled and stripped, the vectors reused and texts encoded, the passes it took, and
+    whether the flags were still settled after the last one.
 
-    Concurrency: the index is refreshed first, so the docs the previous sync wrote are visible to this one. A row
-    whose need for vectors changes while its batch is being written (another version opted in or out meanwhile) is
-    rebuilt once more, so that change's own sync, which may have checked the doc before this write, can't lose it.
+    Concurrency: a doc is prepared from the flags as they are at that moment, then written, so a flag change in
+    between (on this version or another of the same repo) can leave a doc wrong after another sync has already
+    checked it. So a pass ends by comparing the match_algorithms of every version of the repo with what they were
+    when it began, and runs again if any changed, up to SYNC_MAX_PASSES: the last pass that saw no change wrote every
+    doc from the flags as they are. Every change also queues its own sync (index_concepts_async never lets QueueOnce
+    drop one). Each pass refreshes the index first, so it sees what the previous one wrote.
     """
     if get(settings, 'TEST_MODE', False):
         return None
@@ -154,13 +160,6 @@ def sync_concept_vectors(version, parallel=True):
     ids = sorted(Concept.sources.through.objects.filter(
         source_id=version.id).values_list('concept_id', flat=True), reverse=True)
 
-    def rebuild(concept_ids):
-        concepts = list(Concept.objects.filter(id__in=concept_ids).select_related(
-            'parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'
-        ).prefetch_related('names'))
-        run.retry_rejected(lambda: BatchIndexRun.bulk(
-            doc, doc._get_actions(concepts, 'index'), parallel, refresh=False))  # pylint: disable=protected-access
-
     def sync_batch(batch):
         needing = get_concept_ids_needing_vectors(batch)
         with_vectors = get_ids_with_vectors(index_name, batch)
@@ -168,16 +167,25 @@ def sync_concept_vectors(version, parallel=True):
         not_needing = [_id for _id in batch if _id not in needing]
         strip = list(get_ids_with_vectors(index_name, not_needing, synonyms_too=True)) if not_needing else []
         if fill or strip:
-            rebuild(fill + strip)
-            needing_now = get_concept_ids_needing_vectors(fill + strip)
-            changed = [_id for _id in fill + strip if (_id in needing_now) != (_id in needing)]
-            if changed:
-                rebuild(changed)
+            concepts = list(Concept.objects.filter(id__in=fill + strip).select_related(
+                'parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'
+            ).prefetch_related('names'))
+            run.retry_rejected(lambda: BatchIndexRun.bulk(
+                doc, doc._get_actions(concepts, 'index'), parallel, refresh=False))  # pylint: disable=protected-access
         counts['filled'] += len(fill)
         counts['stripped'] += len(strip)
 
-    connections.get_connection().indices.refresh(index=index_name)
-    for start in range(0, len(ids), SYNC_BATCH_SIZE):
-        run.attempt(start, ids[start:start + SYNC_BATCH_SIZE], sync_batch)
+    passes = 0
+    settled = False
+    while not settled and passes < SYNC_MAX_PASSES:
+        passes += 1
+        flags = get_repo_flags(version)
+        connections.get_connection().indices.refresh(index=index_name)
+        for start in range(0, len(ids), SYNC_BATCH_SIZE):
+            run.attempt(start, ids[start:start + SYNC_BATCH_SIZE], sync_batch)
+        settled = get_repo_flags(version) == flags
 
-    return {**run.finish(), **counts, 'vectors_reused': doc.vectors_reused, 'texts_encoded': doc.texts_encoded}
+    return {
+        **run.finish(), **counts, 'vectors_reused': doc.vectors_reused, 'texts_encoded': doc.texts_encoded,
+        'passes': passes, 'settled': settled
+    }

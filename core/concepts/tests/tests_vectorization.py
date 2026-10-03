@@ -15,10 +15,11 @@ from elasticsearch.helpers import streaming_bulk
 from elasticsearch_dsl.connections import connections
 
 from core.common.models import BatchIndexRun
-from core.common.tasks import index_source_concepts, batch_index_resources, index_concepts_mapped_codes
+from core.common.tasks import index_source_concepts, batch_index_resources, index_concepts_mapped_codes, \
+    handle_save
 from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.concepts.documents import ConceptDocument
-from core.concepts.embeddings import sync_concept_vectors, ConceptVectors
+from core.concepts.embeddings import sync_concept_vectors, ConceptVectors, SYNC_MAX_PASSES
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from core.importers.models import BulkImportInline
@@ -172,6 +173,20 @@ class ConceptDocumentVectorsTest(VectorTestMixin, OCLTestCase):
 
         self.assert_no_vectors(concept)
 
+    def test_superseded_row_under_a_semantic_head_has_no_vectors_unless_a_semantic_version_holds_it(self):
+        self.source.match_algorithms = LLM
+        self.source.save()
+        superseded = self.create_concept('Malaria', 'Paludism')
+        superseded.sources.remove(self.source)  # as unmark_latest_version does once a newer version replaces it
+        kept = self.create_concept('Fever')
+        kept.sources.remove(self.source)
+        self.create_version('v1', LLM, [kept])
+
+        self.index(superseded, kept)
+
+        self.assert_no_vectors(superseded)  # no semantic $match can return it
+        self.assert_vectors(kept, ['Fever'])
+
     def test_no_stored_vectors_to_reuse_without_an_index(self):
         self.assertEqual(ConceptVectors(f'concepts-missing-{uuid.uuid4().hex[:8]}').get_stored_vectors({'1'}), {})
 
@@ -251,6 +266,7 @@ class VectorReuseTest(VectorTestMixin, OCLTestCase):
         new_row.version = new_row.id
         new_row.save()
         new_row.set_locales(versioned_object.names.all(), type(versioned_object.names.first()))
+        new_row.sources.add(self.source)  # an edit's new version joins HEAD
         self.encoder.reset()
 
         self.index(Concept.objects.get(id=new_row.id))
@@ -286,15 +302,19 @@ class VersionVectorSyncTest(VectorTestMixin, OCLTestCase):
         self.shared = [self.create_concept('Malaria', 'Paludism'), self.create_concept('Fever', 'Pyrexia')]
         self.own = self.create_concept('Cholera', 'Asiatic cholera')
 
-    def sync(self, version):
+    def sync(self, version, passes=1):
         self.refresh()
         self.encoder.reset()
         with override_settings(TEST_MODE=False):
             summary = sync_concept_vectors(version, parallel=False)
         self.refresh()
         self.assertEqual(summary['failed_docs'], 0)
-        self.assertEqual(summary['texts_encoded'], len(set(self.encoder.texts)))
-        return {key: summary[key] for key in ('docs', 'filled', 'stripped')}
+        self.assertEqual(summary['passes'], passes)
+        if passes == 1:
+            self.assertTrue(summary['settled'])
+            self.assertEqual(summary['texts_encoded'], len(set(self.encoder.texts)))
+        return {key: summary[key] for key in ('docs', 'filled', 'stripped', 'settled')} if passes > 1 else {
+            key: summary[key] for key in ('docs', 'filled', 'stripped')}
 
     def test_opting_a_version_in_embeds_only_its_docs_without_vectors(self):
         self.create_version('v1', LLM, self.shared)
@@ -343,6 +363,19 @@ class VersionVectorSyncTest(VectorTestMixin, OCLTestCase):
         self.assertEqual(summary, {'docs': 3, 'filled': 0, 'stripped': 0})
         self.assert_vectors(self.own, ['Cholera', 'Asiatic cholera'])
 
+    def test_opting_head_in_fills_its_members_only(self):
+        superseded = self.create_concept('Ague')
+        superseded.sources.remove(self.source)
+        self.index(*self.shared, self.own, superseded)
+        self.source.match_algorithms = LLM
+        self.source.save()
+
+        summary = self.sync(self.source)
+
+        self.assertEqual(summary['filled'], summary['docs'])  # every HEAD member: latest rows and versioned objects
+        self.assert_vectors(self.own, ['Cholera', 'Asiatic cholera'])
+        self.assert_no_vectors(superseded)  # in no version, so no semantic $match can return it
+
     def test_sync_is_a_no_op_when_docs_already_match(self):
         v1 = self.create_version('v1', LLM, self.shared)
         self.index(*self.shared, self.own)
@@ -352,26 +385,59 @@ class VersionVectorSyncTest(VectorTestMixin, OCLTestCase):
         self.assertEqual(summary, {'docs': 2, 'filled': 0, 'stripped': 0})
         self.assertEqual(self.encoder.calls, [])
 
+    def flip_during_writes(self, *changes):
+        """Patches the sync's writes: before the nth write is sent (its docs already prepared), applies changes[n]."""
+        real_bulk = BatchIndexRun.bulk
+        pending = list(changes)
+
+        def bulk(doc, actions, *args, **kwargs):
+            actions = list(actions)  # prepared with the flags as they were
+            if pending:
+                version, match_algorithms = pending.pop(0)
+                Source.objects.filter(id=version.id).update(match_algorithms=match_algorithms)
+            return real_bulk(doc, iter(actions), *args, **kwargs)
+        return patch('core.common.models.BatchIndexRun.bulk', side_effect=bulk)
+
     def test_opting_out_while_another_version_opts_in_keeps_the_vectors_that_version_needs(self):
         v1 = self.create_version('v1', LLM, [*self.shared, self.own])
         v2 = self.create_version('v2', ['es'], [self.own])
         self.index(*self.shared, self.own)
         v1.match_algorithms = ['es']
         v1.save()
-        real_bulk = BatchIndexRun.bulk
 
-        def opt_v2_in_between_prepare_and_write(doc, actions, *args, **kwargs):
-            actions = list(actions)  # prepared while v2 is still lexical, so own's doc is prepared without vectors
-            # v2 opts in now: its own sync would still find own's vectors in place, and skip it
-            Source.objects.filter(id=v2.id).update(match_algorithms=LLM)
-            return real_bulk(doc, iter(actions), *args, **kwargs)
+        # v2 opts in once v1's sync has prepared own's doc without vectors: v2's own sync could check own before
+        # that write lands, find its vectors, and skip it
+        with self.flip_during_writes((v2, LLM)):
+            summary = self.sync(v1, passes=2)
 
-        with patch('core.common.models.BatchIndexRun.bulk', side_effect=opt_v2_in_between_prepare_and_write):
-            summary = self.sync(v1)
-
-        self.assertEqual(summary, {'docs': 3, 'filled': 0, 'stripped': 3})
-        self.assert_vectors(self.own, ['Cholera', 'Asiatic cholera'])  # rebuilt again once v2 needed it
+        self.assertEqual(summary, {'docs': 6, 'filled': 1, 'stripped': 3, 'settled': True})
+        self.assert_vectors(self.own, ['Cholera', 'Asiatic cholera'])  # the second pass gave it back
         self.assert_no_vectors(self.shared[0])
+
+    def test_a_late_corrective_strip_cannot_win_over_a_later_opt_in(self):
+        v1 = self.create_version('v1', ['es'], [self.own])
+        v2 = self.create_version('v2', ['es'], [self.own])
+        self.index(self.own)
+        Source.objects.filter(id=v1.id).update(match_algorithms=LLM)  # v1 opts in: own has no vectors yet
+
+        # pass 1 fills own, then v1 opts out before that write lands; pass 2 strips own, then v2 opts in before
+        # that write lands; pass 3 sees v2 and fills own again
+        with self.flip_during_writes((v1, ['es']), (v2, LLM)):
+            summary = self.sync(v1, passes=3)
+
+        self.assertEqual((summary['filled'], summary['stripped']), (2, 1))
+        self.assert_vectors(self.own, ['Cholera', 'Asiatic cholera'])
+
+    def test_sync_gives_up_after_its_last_pass_while_flags_keep_changing(self):
+        v1 = self.create_version('v1', ['es'], [self.own])
+        self.index(self.own)
+        Source.objects.filter(id=v1.id).update(match_algorithms=LLM)
+        flips = [(v1, ['es']), (v1, LLM)] * SYNC_MAX_PASSES
+
+        with self.flip_during_writes(*flips):
+            summary = self.sync(v1, passes=SYNC_MAX_PASSES)
+
+        self.assertFalse(summary['settled'])
 
     def test_sync_sees_vectors_written_since_the_last_refresh(self):
         v1 = self.create_version('v1', LLM, self.shared)
@@ -443,6 +509,28 @@ class ReindexKeepsSharedVectorsTest(VectorTestMixin, OCLTestCase):
         self.assertEqual(self.encoder.texts, [])  # reused
 
     def test_import_reindex_keeps_the_vectors_of_rows_in_a_semantic_release(self):
+        self.import_update_and_check(index=True)
+
+    def test_small_import_reindex_keeps_the_vectors_of_rows_in_a_semantic_release(self):
+        self.import_update_and_check()  # no `index`: imports of up to IMPORT_INDEX_MAX_LINES lines index anyway
+
+    def test_edit_keeps_the_vectors_of_the_row_it_supersedes(self):
+        errors = Concept.create_new_version_for(
+            instance=self.concept.clone(),
+            data={'names': [{'locale': 'en', 'name': 'Malaria', 'locale_preferred': True},
+                            {'locale': 'en', 'name': 'Paludism'}, {'locale': 'en', 'name': 'Swamp fever'}]},
+            user=self.concept.created_by
+        )
+        self.assertEqual(errors, {})
+        previous_row = Concept.objects.get(id=self.concept.id)
+        self.assertFalse(previous_row.is_latest_version)
+
+        handle_save('concepts', 'Concept', previous_row.id)  # what the edit queues for it (Concept.index)
+
+        self.assert_vectors(previous_row, ['Malaria', 'Paludism'])  # still in v1: not stripped
+        self.assertEqual(self.encoder.texts, [])
+
+    def import_update_and_check(self, **importer_kwargs):
         with patch('core.importers.models.batch_index_resources') as batch_index_mock, \
                 patch('core.importers.models.index_concepts_mapped_codes') as mapped_codes_mock:
             importer = BulkImportInline(
@@ -454,7 +542,7 @@ class ReindexKeepsSharedVectorsTest(VectorTestMixin, OCLTestCase):
                         {'name': 'Paludism', 'locale': 'en', 'name_type': 'Synonym'},
                         {'name': 'Swamp fever', 'locale': 'en', 'name_type': 'Synonym'},
                     ]
-                }], index=True)
+                }], **importer_kwargs)
             importer.run()
             self.assertEqual(len(importer.updated), 1)
             with override_settings(TEST_MODE=False):
@@ -524,11 +612,15 @@ class VectorSyncQueuingTest(OCLTestCase):
         source = OrganizationSourceFactory()
 
         source.index_concepts_async(source.created_by, sync_vectors=True)
+        source.index_concepts_async(source.created_by, sync_vectors=True)
 
-        index_source_concepts_mock.apply_async.assert_called_once()
-        args, kwargs = index_source_concepts_mock.apply_async.call_args
-        self.assertEqual(args, ((source.id, None), {'sync_vectors': True}))
-        self.assertEqual(kwargs['queue'], 'indexing')
+        # each request carries its own token, so QueueOnce can't drop one queued while another sync runs
+        (first_args, first_kwargs), (second_args, _) = index_source_concepts_mock.apply_async.call_args_list
+        self.assertEqual(first_args[0], (source.id, None))
+        self.assertEqual(set(first_args[1]), {'sync_vectors'})
+        self.assertTrue(first_args[1]['sync_vectors'])
+        self.assertNotEqual(first_args[1]['sync_vectors'], second_args[1]['sync_vectors'])
+        self.assertEqual(first_kwargs['queue'], 'indexing')
 
     @patch('core.common.tasks.sync_concept_vectors')
     def test_index_source_concepts_with_sync_vectors_only_syncs(self, sync_mock):
