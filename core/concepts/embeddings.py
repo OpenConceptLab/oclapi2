@@ -9,6 +9,7 @@ The other texts are encoded together, in one batched call per chunk of docs. Doc
 so their vectors are re-encoded the next time they're rebuilt.
 """
 from django.conf import settings
+from django.db.models import Exists, OuterRef
 from elasticsearch_dsl.connections import connections
 from pydash import get
 
@@ -17,22 +18,30 @@ from core.common.utils import encode_texts
 SYNC_BATCH_SIZE = 500
 
 
-def needs_vectors(versions_match_algorithms):
+def needs_vectors(parent, versions_match_algorithms):
     """
     Whether a concept row's doc carries vectors: any repo version it belongs to (HEAD included) is semantic, given
-    each one's match_algorithms. get_concept_ids_needing_vectors is the same rule in SQL.
+    each one's match_algorithms. A row in no version yet counts as its HEAD's (`parent`): a new concept is saved, and
+    indexed, before it's added to HEAD, so this keeps those writes in step with the one after, whichever lands last.
+    get_concept_ids_needing_vectors is the same rule in SQL.
     """
-    from core.sources.models import Source
-    return any(Source.SEMANTIC_MATCH_ALGORITHM in (algorithms or []) for algorithms in versions_match_algorithms)
+    if not versions_match_algorithms:
+        return bool(parent.has_semantic_match_algorithm)
+    return any(parent.SEMANTIC_MATCH_ALGORITHM in (algorithms or []) for algorithms in versions_match_algorithms)
 
 
 def get_concept_ids_needing_vectors(ids):
     """The ids, among these concept rows, whose docs carry vectors (needs_vectors, in SQL)."""
     from core.concepts.models import Concept
     from core.sources.models import Source
-    return set(Concept.sources.through.objects.filter(
-        concept_id__in=ids, source__match_algorithms__contains=[Source.SEMANTIC_MATCH_ALGORITHM]
-    ).values_list('concept_id', flat=True))
+    semantic = [Source.SEMANTIC_MATCH_ALGORITHM]
+    through = Concept.sources.through.objects
+    in_semantic_version = through.filter(
+        concept_id__in=ids, source__match_algorithms__contains=semantic).values_list('concept_id', flat=True)
+    in_no_version_of_semantic_head = Concept.objects.filter(
+        id__in=ids, parent__match_algorithms__contains=semantic
+    ).exclude(Exists(through.filter(concept_id=OuterRef('id')))).values_list('id', flat=True)
+    return set(in_semantic_version) | set(in_no_version_of_semantic_head)
 
 
 def get_ids_with_vectors(index_name, ids, synonyms_too=False):

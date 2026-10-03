@@ -412,6 +412,9 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                 instance.seed_concepts(index=False)
                 instance.seed_mappings(index=False)
                 instance.update_children_counts(sync)
+                if instance.has_semantic_match_algorithm:
+                    # whether or not it's still the latest release, and however its indexing below goes
+                    instance.sync_concept_vectors_async(instance.created_by)
                 if instance.released:
                     instance.index_resources_for_self_as_latest_released()
                 else:
@@ -693,8 +696,6 @@ def index_source_concepts(  # pylint: disable=too-many-arguments,too-many-locals
     Index source concepts, or partially update existing ES documents when `partial_doc` is supplied.
     A failed partial update falls back to a full reindex -- unless ES was still refusing writes (429 / read-only
     index) after retries: a full reindex would only fail the same way, slower, so the task fails instead.
-    Appending a semantic version to its docs then queues its vector sync, so a new vectorized release embeds the
-    docs that have no vectors yet (OpenConceptLab/ocl_online#247).
     """
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
@@ -710,8 +711,6 @@ def index_source_concepts(  # pylint: disable=too-many-arguments,too-many-locals
                 index_concepts_locale_change(source, queryset, single_batch, parallel)
             else:
                 index_concepts(source, queryset, partial_doc, single_batch, parallel, prefetch, select_related)
-            if get(partial_doc, '_append_source_version') and source.has_semantic_match_algorithm:
-                source.sync_concept_vectors_async()
         finally:
             source.clear_concepts_cache()
 

@@ -271,7 +271,7 @@ class ConceptDocument(Document):
         data['synonyms'] = compact(set(n.name for n in synonyms))
         data['_synonyms'] = data['synonyms']
 
-        if needs_vectors(versions_match_algorithms):
+        if needs_vectors(instance.parent, versions_match_algorithms):
             self.add_vectors(data, instance, name, preferred_locale, synonyms)
 
         expansions = list(instance.expansion_set.only('mnemonic', 'uri'))

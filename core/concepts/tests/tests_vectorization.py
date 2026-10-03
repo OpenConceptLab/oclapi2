@@ -19,10 +19,10 @@ from elasticsearch_dsl.connections import connections
 from core.common.models import BatchIndexRun
 from core.common.exceptions import BatchIndexingError
 from core.common.tasks import index_source_concepts, batch_index_resources, index_concepts_mapped_codes, \
-    handle_save, sync_source_concept_vectors
+    handle_save, sync_source_concept_vectors, seed_children_to_new_version
 from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.concepts.documents import ConceptDocument
-from core.concepts.embeddings import sync_concept_vectors, ConceptVectors
+from core.concepts.embeddings import sync_concept_vectors, ConceptVectors, get_concept_ids_needing_vectors
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from core.importers.models import BulkImportInline
@@ -177,19 +177,34 @@ class ConceptDocumentVectorsTest(VectorTestMixin, OCLTestCase):
 
         self.assert_no_vectors(concept)
 
-    def test_superseded_row_under_a_semantic_head_has_no_vectors_unless_a_semantic_version_holds_it(self):
+    def test_superseded_row_under_a_semantic_head_has_vectors_only_if_a_semantic_version_holds_it(self):
         self.source.match_algorithms = LLM
         self.source.save()
         superseded = self.create_concept('Malaria', 'Paludism')
         superseded.sources.remove(self.source)  # as unmark_latest_version does once a newer version replaces it
+        self.create_version('v0', ['es'], [superseded])
         kept = self.create_concept('Fever')
         kept.sources.remove(self.source)
         self.create_version('v1', LLM, [kept])
 
         self.index(superseded, kept)
 
-        self.assert_no_vectors(superseded)  # no semantic $match can return it
+        self.assert_no_vectors(superseded)  # only in a lexical release: no semantic $match can return it
         self.assert_vectors(kept, ['Fever'])
+
+    def test_a_row_in_no_version_yet_counts_as_its_heads(self):
+        concept = self.create_concept('Malaria', 'Paludism')
+        concept.sources.clear()  # as while it's being created, before it joins HEAD
+        self.create_version('v1', LLM, [])
+
+        self.index(concept)
+        self.assert_no_vectors(concept)  # HEAD isn't semantic
+
+        self.source.match_algorithms = LLM
+        self.source.save()
+        self.index(Concept.objects.get(id=concept.id))
+        self.assert_vectors(concept, ['Malaria', 'Paludism'])  # so a write that races its HEAD membership agrees
+        self.assertEqual(get_concept_ids_needing_vectors([concept.id]), {concept.id})
 
     def test_no_stored_vectors_to_reuse_without_an_index(self):
         self.assertEqual(ConceptVectors(f'concepts-missing-{uuid.uuid4().hex[:8]}').get_stored_vectors({'1'}), {})
@@ -366,6 +381,7 @@ class VersionVectorSyncTest(VectorTestMixin, OCLTestCase):
     def test_opting_head_in_fills_its_members_only(self):
         superseded = self.create_concept('Ague')
         superseded.sources.remove(self.source)
+        self.create_version('v0', ['es'], [superseded])  # superseded: only in an old lexical release
         self.index(*self.shared, self.own, superseded)
         self.source.match_algorithms = LLM
         self.source.save()
@@ -455,34 +471,32 @@ class VersionVectorSyncTest(VectorTestMixin, OCLTestCase):
 
         self.assertIsNone(sync_concept_vectors(v1))
 
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.Source.sync_concept_vectors_async')
-    def test_release_indexing_gives_a_semantic_release_its_vectors(self, sync_async_mock):
+    def test_seeding_a_semantic_version_queues_its_sync(self, sync_async_mock):
+        v1 = self.create_version('v1', ['es'], [])
+        v2 = self.create_version('v2', ['es'], [])  # v1 is no longer the latest release: nothing indexes it
+        Source.objects.filter(id=v1.id).update(match_algorithms=LLM)
+
+        seed_children_to_new_version('source', v1.id, False)
+
+        sync_async_mock.assert_called_once_with(v1.created_by)
+        self.assertEqual(
+            set(v1.concepts.values_list('id', flat=True)), {self.shared[0].id, self.shared[1].id, self.own.id})
+        sync_async_mock.reset_mock()
+        seed_children_to_new_version('source', v2.id, False)
+        sync_async_mock.assert_not_called()  # lexical
+
+    def test_a_seeded_semantic_release_gets_its_vectors_from_the_sync(self):
         v1 = self.create_version('v1', ['es'], [*self.shared, self.own])
-        self.index(*self.shared, self.own)
-        v1.match_algorithms = LLM
-        v1.save(update_fields=['match_algorithms'])  # as if created vectorized; nothing has indexed it yet
-        self.refresh()
+        self.index(*self.shared, self.own)  # HEAD's docs as they were: no vectors
+        Source.objects.filter(id=v1.id).update(match_algorithms=LLM)  # v1 was created vectorized
 
-        with override_settings(TEST_MODE=False):
-            index_source_concepts(v1.id, {'_append_source_version': 'v1', 'is_in_latest_source_version': True})
+        self.assertEqual(self.sync(v1), {'docs': 3, 'filled': 3, 'stripped': 0})  # the sync its seeding queued
 
-        sync_async_mock.assert_called_once_with()
-        self.assertIn('v1', self.get_source(self.own)['source_version'])
-        self.assert_no_vectors(self.own)
-        self.assertEqual(self.sync(v1), {'docs': 3, 'filled': 3, 'stripped': 0})  # what that queued
         self.assert_vectors(self.shared[0], ['Malaria', 'Paludism'])
         self.assert_vectors(self.own, ['Cholera', 'Asiatic cholera'])
-
-    @patch('core.sources.models.Source.sync_concept_vectors_async')
-    def test_release_indexing_of_a_release_that_is_not_semantic_queues_no_sync(self, sync_async_mock):
-        v1 = self.create_version('v1', ['es'], [*self.shared, self.own])
-        self.refresh()
-
-        with override_settings(TEST_MODE=False):
-            index_source_concepts(v1.id, {'_append_source_version': 'v1', 'is_in_latest_source_version': True})
-
-        sync_async_mock.assert_not_called()
-        self.assert_no_vectors(self.own)
 
 
 @override_settings(LM_MODEL_NAME=MODEL)
@@ -651,11 +665,14 @@ class VectorSyncQueuingTest(OCLTestCase):
         self.assertEqual(task.name, 'core.common.tasks.sync_source_concept_vectors')
         self.assertEqual(list(task.args), [self.version.id, False])  # a rerun is still a sync
 
-    @patch('core.sources.models.sync_source_concept_vectors')
-    def test_in_test_mode_the_sync_runs_inline(self, sync_task_mock):
-        self.version.sync_concept_vectors_async()
+    @patch('core.sources.models.sync_source_concept_vectors', Mock(__name__='sync_source_concept_vectors'))
+    def test_in_test_mode_the_sync_runs_inline(self):
+        from core.sources import models as source_models
+        sync_task_mock = source_models.sync_source_concept_vectors
+        task = self.version.sync_concept_vectors_async()
 
         sync_task_mock.assert_called_once_with(self.version.id, True)
+        self.assertEqual(task.name, 'sync_source_concept_vectors')
 
 
 class SourceConceptsIndexViewSyncVectorsTest(OCLAPITestCase):
@@ -675,8 +692,18 @@ class SourceConceptsIndexViewSyncVectorsTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 202, response.data)
         return task_mock.apply_async.call_args[0][0]
 
-    def test_sync_vectors_queues_only_the_sync(self):
-        self.assertEqual(self.post({'sync_vectors': True}, 'sync_source_concept_vectors'), (self.version.id, True))
+    @patch('celery.app.task.Task.apply_async')
+    def test_sync_vectors_persists_its_arguments(self, celery_apply_async_mock):
+        with override_settings(TEST_MODE=False):
+            response = self.client.post(
+                self.version.uri + 'concepts/indexes/', {'sync_vectors': True},
+                HTTP_AUTHORIZATION='Token ' + self.token, format='json')
+
+        self.assertEqual(response.status_code, 202, response.data)
+        task = Task.objects.get(id=response.data['id'])
+        self.assertEqual(task.name, 'core.common.tasks.sync_source_concept_vectors')
+        self.assertEqual(list(task.args), [self.version.id, True])  # a rerun is still a sync
+        self.assertEqual(celery_apply_async_mock.call_args[0][0], (self.version.id, True))
 
     def test_without_sync_vectors_queues_the_full_reindex_as_before(self):
         self.assertEqual(

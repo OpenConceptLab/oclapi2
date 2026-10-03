@@ -26,7 +26,7 @@ from core.common.swagger_parameters import q_param, limit_param, sort_desc_param
     page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header, \
     canonical_url_param, all_versions_param
 from core.common.tasks import export_source, index_source_concepts, index_source_mappings, delete_source, \
-    sync_source_concept_vectors, generate_source_resources_checksums, source_version_compare
+    generate_source_resources_checksums, source_version_compare
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values, to_parent_uri, decode_string, \
     get_truthy_values
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
@@ -366,14 +366,14 @@ class SourceConceptsIndexView(SourceIndexBaseView):
     with its recheck): embeds the docs that need them and lack them, strips those no semantic version uses, and
     leaves the rest. That re-runs a lost or failed sync without changing the version's flag (ocl_online#247).
     """
-    def is_vector_sync(self):
-        return (self.request.data or {}).get('sync_vectors', None) in get_truthy_values()
-
     def get_task_function(self):
-        return sync_source_concept_vectors if self.is_vector_sync() else index_source_concepts
+        return index_source_concepts
 
-    def get_task_args(self, instance):
-        return (instance.id, True) if self.is_vector_sync() else super().get_task_args(instance)
+    def post(self, request, *args, **kwargs):
+        if (request.data or {}).get('sync_vectors', None) in get_truthy_values():
+            task = self.get_object().sync_concept_vectors_async(request.user)
+            return Response(TaskBriefSerializer(task).data, status=status.HTTP_202_ACCEPTED)
+        return super().post(request, *args, **kwargs)
 
 
 class SourceMappingsIndexView(SourceIndexBaseView):

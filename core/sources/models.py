@@ -547,14 +547,15 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     def sync_concept_vectors_async(self, user=None, recheck=True, countdown=None):
         """
         Queues this version's vector sync (sync_source_concept_vectors) on the indexing queue, with its arguments
-        persisted, so that a rerun of the task is still a sync. In TEST_MODE it runs inline.
+        persisted, so that a rerun of the task is still a sync, and returns its Task. In TEST_MODE it runs inline.
         """
+        task = Task.new(queue='indexing', user=user or self.updated_by, name=sync_source_concept_vectors.__name__)
         if get(settings, 'TEST_MODE', False):
             sync_source_concept_vectors(self.id, recheck)
-            return
-        task = Task.new(queue='indexing', user=user or self.updated_by, name=sync_source_concept_vectors.__name__)
-        sync_source_concept_vectors.apply_async(
-            (self.id, recheck), queue='indexing', persist_args=True, task_id=task.id, countdown=countdown)
+        else:
+            sync_source_concept_vectors.apply_async(
+                (self.id, recheck), queue='indexing', persist_args=True, task_id=task.id, countdown=countdown)
+        return task
 
     def get_concepts_reindex_filters(self, original):
         """
