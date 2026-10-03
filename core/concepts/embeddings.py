@@ -15,7 +15,6 @@ from pydash import get
 from core.common.utils import encode_texts
 
 SYNC_BATCH_SIZE = 500
-SYNC_MAX_PASSES = 5
 
 
 def needs_vectors(versions_match_algorithms):
@@ -123,11 +122,6 @@ class ConceptVectors:
         return [value] if value else []
 
 
-def get_repo_flags(version):
-    """The match_algorithms of every version of the repo, HEAD included: what decides which of its docs need vectors."""
-    return list(version.versions.order_by('id').values_list('id', 'match_algorithms'))
-
-
 def sync_concept_vectors(version, parallel=True):
     """
     Gives a repo version's concept docs the vectors they need, and leaves every other doc alone:
@@ -135,16 +129,12 @@ def sync_concept_vectors(version, parallel=True):
     - a doc that has vectors, though no version it belongs to is semantic any more, is rebuilt without them;
     - the rest aren't touched. So opting a version in embeds only what's missing, and opting it out never strips the
       vectors another semantic version (HEAD included) still uses.
-    Checks 500 rows at a time. Every batch is attempted, and a failed one fails the run (BatchIndexRun). Returns the
-    run's summary, plus the docs filled and stripped, the vectors reused and texts encoded, the passes it took, and
-    whether the flags were still settled after the last one.
+    Checks 500 rows at a time, from the flags as they are at that moment, after refreshing the index so that what an
+    earlier sync wrote counts. Every batch is attempted, and a failed one fails the run (BatchIndexRun). Returns the
+    run's summary, plus the docs filled and stripped, and the vectors reused and texts encoded.
 
-    Concurrency: a doc is prepared from the flags as they are at that moment, then written, so a flag change in
-    between (on this version or another of the same repo) can leave a doc wrong after another sync has already
-    checked it. So a pass ends by comparing the match_algorithms of every version of the repo with what they were
-    when it began, and runs again if any changed, up to SYNC_MAX_PASSES: the last pass that saw no change wrote every
-    doc from the flags as they are. Every change also queues its own sync (index_concepts_async never lets QueueOnce
-    drop one). Each pass refreshes the index first, so it sees what the previous one wrote.
+    A doc written from flags read just before a change can land after that change's own sync has checked it, so
+    every sync that a change queues runs once more a few minutes later (sync_source_concept_vectors).
     """
     if get(settings, 'TEST_MODE', False):
         return None
@@ -175,17 +165,8 @@ def sync_concept_vectors(version, parallel=True):
         counts['filled'] += len(fill)
         counts['stripped'] += len(strip)
 
-    passes = 0
-    settled = False
-    while not settled and passes < SYNC_MAX_PASSES:
-        passes += 1
-        flags = get_repo_flags(version)
-        connections.get_connection().indices.refresh(index=index_name)
-        for start in range(0, len(ids), SYNC_BATCH_SIZE):
-            run.attempt(start, ids[start:start + SYNC_BATCH_SIZE], sync_batch)
-        settled = get_repo_flags(version) == flags
+    connections.get_connection().indices.refresh(index=index_name)
+    for start in range(0, len(ids), SYNC_BATCH_SIZE):
+        run.attempt(start, ids[start:start + SYNC_BATCH_SIZE], sync_batch)
 
-    return {
-        **run.finish(), **counts, 'vectors_reused': doc.vectors_reused, 'texts_encoded': doc.texts_encoded,
-        'passes': passes, 'settled': settled
-    }
+    return {**run.finish(), **counts, 'vectors_reused': doc.vectors_reused, 'texts_encoded': doc.texts_encoded}

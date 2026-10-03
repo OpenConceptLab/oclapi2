@@ -673,6 +673,9 @@ ENCODER = None
 # unchanged (OpenConceptLab/ocl_online#247), so it's set even where the model isn't loaded.
 LM_MODEL_NAME = 'all-MiniLM-L6-v2'
 LM_ENCODE_BATCH_SIZE = int(os.environ.get('LM_ENCODE_BATCH_SIZE', 64))
+# A version's vector sync runs once more this long after it (OpenConceptLab/ocl_online#247), once any doc prepared from
+# the flags as they were before has long been written
+VECTOR_SYNC_RECHECK_SECONDS = int(os.environ.get('VECTOR_SYNC_RECHECK_SECONDS', 600))
 LM = None
 if ENV not in ['ci', 'demo'] and not NO_LM:
     LM = SentenceTransformer(LM_MODEL_NAME)

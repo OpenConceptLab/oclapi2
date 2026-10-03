@@ -687,15 +687,14 @@ def make_hierarchy(concept_map):  # pragma: no cover
 @app.task(ignore_result=True, base=QueueOnceCustomTask)
 def index_source_concepts(  # pylint: disable=too-many-arguments,too-many-locals
         source_id, partial_doc=None, single_batch=False, should_prefetch=True, should_select_related=True,
-        parallel=True, locales=None, exclude_locale=None, sync_vectors=False
+        parallel=True, locales=None, exclude_locale=None
 ):
     """
     Index source concepts, or partially update existing ES documents when `partial_doc` is supplied.
     A failed partial update falls back to a full reindex -- unless ES was still refusing writes (429 / read-only
     index) after retries: a full reindex would only fail the same way, slower, so the task fails instead.
-    `sync_vectors` (on its own: instead of a reindex) then gives the version's docs the vectors they need and nothing
-    else (sync_concept_vectors). Appending a semantic version to its docs does that too, so a new vectorized release
-    embeds the docs that have no vectors yet (OpenConceptLab/ocl_online#247).
+    Appending a semantic version to its docs then queues its vector sync, so a new vectorized release embeds the
+    docs that have no vectors yet (OpenConceptLab/ocl_online#247).
     """
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
@@ -707,15 +706,32 @@ def index_source_concepts(  # pylint: disable=too-many-arguments,too-many-locals
         narrowed = bool(locales or exclude_locale)
         queryset = get_concepts_to_index(source, locales, exclude_locale)
         try:
-            if partial_doc or not sync_vectors or narrowed:
-                if narrowed and not partial_doc and not source.has_semantic_match_algorithm:
-                    index_concepts_locale_change(source, queryset, single_batch, parallel)
-                else:
-                    index_concepts(source, queryset, partial_doc, single_batch, parallel, prefetch, select_related)
-            if sync_vectors or (get(partial_doc, '_append_source_version') and source.has_semantic_match_algorithm):
-                batch_index_with_summary(sync_concept_vectors, source, parallel=parallel)
+            if narrowed and not partial_doc and not source.has_semantic_match_algorithm:
+                index_concepts_locale_change(source, queryset, single_batch, parallel)
+            else:
+                index_concepts(source, queryset, partial_doc, single_batch, parallel, prefetch, select_related)
+            if get(partial_doc, '_append_source_version') and source.has_semantic_match_algorithm:
+                source.sync_concept_vectors_async()
         finally:
             source.clear_concepts_cache()
+
+
+@app.task(ignore_result=True)
+def sync_source_concept_vectors(source_id, recheck=True):
+    """
+    Gives a repo version's concept docs the vectors they need and nothing else (sync_concept_vectors). Unless this
+    is the recheck, then queues one more sync VECTOR_SYNC_RECHECK_SECONDS later, even when this one failed: a doc
+    written from the flags as they were just before the change that queued this sync can land after this sync has
+    checked it, and the recheck sees it (OpenConceptLab/ocl_online#247).
+    """
+    from core.sources.models import Source
+    source = Source.objects.filter(id=source_id).first()
+    if source:
+        try:
+            batch_index_with_summary(sync_concept_vectors, source)
+        finally:
+            if recheck:
+                source.sync_concept_vectors_async(recheck=False, countdown=settings.VECTOR_SYNC_RECHECK_SECONDS)
 
 
 def index_concepts(source, queryset, partial_doc, single_batch, parallel, prefetch, select_related):  # pylint: disable=too-many-arguments

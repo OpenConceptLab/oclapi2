@@ -11,6 +11,12 @@ from core.concepts.models import Concept
 
 # The text a vector encoded, kept in _source only: reuse reads it back, nothing searches it (ocl_online#247)
 EMBEDDING_TEXT = {"type": "keyword", "index": False, "doc_values": False}
+# What ocl_online#247 adds to an existing concepts index's mapping (the concept_vector_mapping command)
+VECTOR_PROVENANCE_MAPPING = {
+    '_embeddings': {'type': 'nested', 'properties': {'text': EMBEDDING_TEXT}},
+    '_synonyms_embeddings': {'type': 'nested', 'properties': {'text': EMBEDDING_TEXT}},
+    '_embeddings_model': {'type': 'keyword'},
+}
 
 
 @registry.register_document

@@ -15,7 +15,7 @@ from core.common.checksums import VersionCompareMixin
 from core.common.constants import HEAD
 from core.common.models import ConceptContainerModel
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings, \
-    resolve_url_registry_entries
+    sync_source_concept_vectors, resolve_url_registry_entries
 from core.common.utils import to_camel_case
 from core.common.validators import validate_non_negative
 from core.concepts.models import ConceptName, Concept
@@ -528,15 +528,12 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         except AlreadyQueued:
             pass
 
-    def index_concepts_async(self, user, partial_doc=None, locales=None, exclude_locale=None, sync_vectors=False):  # pylint: disable=too-many-arguments
+    def index_concepts_async(self, user, partial_doc=None, locales=None, exclude_locale=None):
         user = user or self.updated_by
 
         task = Task.new(queue='indexing', user=user, name=index_source_concepts.__name__)
-        # A sync request carries a token of its own, so QueueOnce can't drop it as a duplicate of a sync that's
-        # already running, which may have checked its docs before this change (sync_concept_vectors)
-        sync_vectors = uuid.uuid4().hex if sync_vectors else None
         narrowing = {key: value for key, value in {
-            'locales': locales, 'exclude_locale': exclude_locale, 'sync_vectors': sync_vectors}.items() if value}
+            'locales': locales, 'exclude_locale': exclude_locale}.items() if value}
         celery_args = [(self.id, partial_doc)]
         if narrowing:
             celery_args.append(narrowing)
@@ -547,18 +544,24 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         except AlreadyQueued:
             pass
 
+    def sync_concept_vectors_async(self, user=None, recheck=True, countdown=None):
+        """
+        Queues this version's vector sync (sync_source_concept_vectors) on the indexing queue, with its arguments
+        persisted, so that a rerun of the task is still a sync. In TEST_MODE it runs inline.
+        """
+        if get(settings, 'TEST_MODE', False):
+            sync_source_concept_vectors(self.id, recheck)
+            return
+        task = Task.new(queue='indexing', user=user or self.updated_by, name=sync_source_concept_vectors.__name__)
+        sync_source_concept_vectors.apply_async(
+            (self.id, recheck), queue='indexing', persist_args=True, task_id=task.id, countdown=countdown)
+
     def get_concepts_reindex_filters(self, original):
         """
-        What a change to this repo version needs reindexed: None for nothing, {} for every concept doc, or the narrowing
-        to pass to index_concepts_async. A semantic flag change only syncs the version's vectors (sync_vectors): it
-        embeds the docs that lack them and strips only those no other semantic version uses (ocl_online#247).
+        What a locale change to this repo version needs reindexed: None for nothing, {} for every concept doc, or the
+        narrowing to pass to index_concepts_async. A semantic flag change syncs the version's vectors instead
+        (persist_changes, sync_concept_vectors_async).
         """
-        filters = self.get_concepts_locale_reindex_filters(original)
-        if bool(self.has_semantic_match_algorithm) != bool(original.has_semantic_match_algorithm) and filters != {}:
-            filters = {**(filters or {}), 'sync_vectors': True}
-        return filters
-
-    def get_concepts_locale_reindex_filters(self, original):
         old_supported, new_supported = original.supported_locales, self.supported_locales
         default_changed = self.default_locale != original.default_locale
         nullness_changed = (old_supported is None) != (new_supported is None)
