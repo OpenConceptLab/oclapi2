@@ -62,7 +62,7 @@ from core.common.utils import (
     split_list_by_condition, is_zip_file, get_date_range_label, get_prev_month, from_string_to_date, get_end_of_month,
     get_start_of_month, es_id_in, web_url, get_queue_task_names, get_resource_class_from_resource_uri, encode_string,
     to_parent_kwargs_from_uri, reverse_resource, reverse_resource_version, write_export_file, queue_bulk_import,
-    get_bulk_import_celery_once_lock_key, generic_sort, get_embeddings)
+    get_bulk_import_celery_once_lock_key, generic_sort, get_embeddings, encode_texts)
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.mappings.documents import MappingDocument
@@ -1290,6 +1290,36 @@ class UtilsTest(OCLTestCase):
         sentence_transformer_mock.assert_called_once_with('some-model')
         model_instance_mock.encode.assert_called_once_with('some text')
         self.assertEqual(result, [0.1, 0.2])
+
+    @patch('core.common.utils.settings')
+    def test_encode_texts_ci_env_returns_none_for_each_text(self, settings_mock):
+        settings_mock.ENV = 'ci'
+        self.assertEqual(encode_texts(['a', 'b']), [None, None])
+        self.assertEqual(encode_texts([]), [])
+
+    @patch('core.common.utils.settings')
+    def test_encode_texts_encodes_in_one_batched_call(self, settings_mock):
+        settings_mock.ENV = 'production'
+        settings_mock.LM_ENCODE_BATCH_SIZE = 32
+        settings_mock.LM.encode.return_value = [[0.1], [0.2]]
+
+        self.assertEqual(encode_texts(['a', 2]), [[0.1], [0.2]])
+
+        settings_mock.LM.encode.assert_called_once_with(['a', '2'], batch_size=32)
+
+    @patch('sentence_transformers.SentenceTransformer')
+    @patch('core.common.utils.settings')
+    def test_encode_texts_loads_model_when_not_loaded(self, settings_mock, sentence_transformer_mock):
+        settings_mock.ENV = 'production'
+        settings_mock.LM = None
+        settings_mock.LM_MODEL_NAME = 'some-model'
+        settings_mock.LM_ENCODE_BATCH_SIZE = 64
+        sentence_transformer_mock.return_value.encode.return_value = [[0.1]]
+
+        self.assertEqual(encode_texts(['a']), [[0.1]])
+
+        sentence_transformer_mock.assert_called_once_with('some-model')
+        sentence_transformer_mock.return_value.encode.assert_called_once_with(['a'], batch_size=64)
 
 
 class BaseModelTest(OCLTestCase):

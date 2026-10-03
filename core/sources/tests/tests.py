@@ -714,7 +714,11 @@ class SourceTest(OCLTestCase):
         self.assertEqual(filters(default_locale='es'), {'locales': ['en', 'es']})
         self.assertEqual(
             filters(default_locale='es', supported_locales=['de']), {'locales': ['de', 'en', 'es', 'fr']})
-        self.assertEqual(filters(match_algorithms=['llm']), {})
+        # a semantic flag change syncs the version's vectors instead (ocl_online#247): no reindex of its own
+        self.assertIsNone(filters(match_algorithms=['llm']))
+        self.assertEqual(
+            filters(match_algorithms=['llm'], supported_locales=['fr', 'es']),
+            {'locales': ['es'], 'exclude_locale': 'en'})
 
     def test_get_concepts_reindex_filters_null_supported_locales(self):
         source = OrganizationSourceFactory(default_locale='en', supported_locales=None)
@@ -725,6 +729,7 @@ class SourceTest(OCLTestCase):
 
         updated.default_locale = 'es'
         self.assertEqual(updated.get_concepts_reindex_filters(source), {})
+
 
     def test_source_version_create_positive(self):
         source = OrganizationSourceFactory()

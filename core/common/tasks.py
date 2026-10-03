@@ -27,6 +27,7 @@ from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_R
 from core.common.exceptions import BatchIndexingError
 from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service, \
     get_date_range_label
+from core.concepts.embeddings import sync_concept_vectors
 from core.reports.models import ResourceUsageReport
 from core.tasks.models import QueueOnceCustomTask, Task
 
@@ -411,6 +412,12 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                 instance.seed_concepts(index=False)
                 instance.seed_mappings(index=False)
                 instance.update_children_counts(sync)
+                # read now, not as it was when the task started: an opt-in while seeding ran, synced before any of
+                # this version's members existed. Whether or not it's still the latest release, and however its
+                # indexing below goes.
+                instance.refresh_from_db(fields=['match_algorithms'])
+                if instance.has_semantic_match_algorithm:
+                    instance.sync_concept_vectors_async(instance.created_by)
                 if instance.released:
                     instance.index_resources_for_self_as_latest_released()
                 else:
@@ -696,31 +703,73 @@ def index_source_concepts(  # pylint: disable=too-many-arguments,too-many-locals
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
     if source:
-        from core.concepts.documents import ConceptDocument
         prefetch = ['sources', 'names', 'descriptions'] if should_prefetch else []
         select_related = [
             'parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'
         ] if should_select_related else []
+        narrowed = bool(locales or exclude_locale)
         queryset = get_concepts_to_index(source, locales, exclude_locale)
-        if (locales or exclude_locale) and not partial_doc and not source.has_semantic_match_algorithm:
-            batch_index_with_summary(update_concepts_locale_fields, queryset, single_batch, parallel)
-            source.clear_concepts_cache()
-            return
         try:
-            kwargs = {'partial_doc': partial_doc} if partial_doc else {
-                'prefetch': prefetch, 'select_related': select_related}
-            kwargs['single_batch'] = single_batch
-            kwargs['parallel'] = parallel
-            batch_index_with_summary(source.batch_index, queryset, ConceptDocument, **kwargs)
-        except Exception as ex:  # pragma: no cover
-            if not partial_doc or (isinstance(ex, BatchIndexingError) and ex.rejected):
-                raise
-            logger.exception('Falling back to full concept reindex for source %s', source_id)
-            batch_index_with_summary(
-                source.batch_index, queryset, ConceptDocument, prefetch=prefetch, select_related=select_related,
-                parallel=parallel)
+            if narrowed and not partial_doc and not source.has_semantic_match_algorithm:
+                index_concepts_locale_change(source, queryset, single_batch, parallel)
+            else:
+                index_concepts(source, queryset, partial_doc, single_batch, parallel, prefetch, select_related)
         finally:
             source.clear_concepts_cache()
+
+
+@app.task(ignore_result=True)
+def sync_source_concept_vectors(source_id, recheck=True):
+    """
+    Gives a repo version's concept docs the vectors they need and nothing else (sync_concept_vectors). Unless this
+    is the recheck, then queues one more sync VECTOR_SYNC_RECHECK_SECONDS later, even when this one failed: a doc
+    written from the flags as they were just before the change that queued this sync can land after this sync has
+    checked it, and the recheck sees it (OpenConceptLab/ocl_online#247).
+    """
+    from core.sources.models import Source
+    source = Source.objects.filter(id=source_id).first()
+    if source:
+        try:
+            batch_index_with_summary(sync_concept_vectors, source)
+        finally:
+            if recheck:
+                source.sync_concept_vectors_async(recheck=False, countdown=settings.VECTOR_SYNC_RECHECK_SECONDS)
+
+
+def index_concepts(source, queryset, partial_doc, single_batch, parallel, prefetch, select_related):  # pylint: disable=too-many-arguments
+    from core.concepts.documents import ConceptDocument
+    try:
+        kwargs = {'partial_doc': partial_doc} if partial_doc else {
+            'prefetch': prefetch, 'select_related': select_related}
+        kwargs['single_batch'] = single_batch
+        kwargs['parallel'] = parallel
+        batch_index_with_summary(source.batch_index, queryset, ConceptDocument, **kwargs)
+    except Exception as ex:  # pragma: no cover
+        if not partial_doc or (isinstance(ex, BatchIndexingError) and ex.rejected):
+            raise
+        logger.exception('Falling back to full concept reindex for source %s', source.id)
+        batch_index_with_summary(
+            source.batch_index, queryset, ConceptDocument, prefetch=prefetch, select_related=select_related,
+            parallel=parallel)
+
+
+def index_concepts_locale_change(source, queryset, single_batch, parallel):
+    """
+    A locale change on a repo whose HEAD isn't semantic only updates the docs' name fields -- except for the docs of
+    rows in a semantic version, which carry vectors: they're rebuilt, so their display-name vector follows the new
+    display name (reusing the vectors their names already have).
+    """
+    from core.concepts.documents import ConceptDocument
+    from core.concepts.models import Concept
+    in_semantic_version = Exists(Concept.sources.through.objects.filter(
+        concept_id=OuterRef('id'), source__match_algorithms__contains=[source.SEMANTIC_MATCH_ALGORITHM]))
+    batch_index_with_summary(
+        update_concepts_locale_fields, queryset.filter(~in_semantic_version), single_batch, parallel)
+    with_vectors = queryset.filter(in_semantic_version)
+    if with_vectors.exists():
+        batch_index_with_summary(
+            source.batch_index, with_vectors, ConceptDocument, single_batch=single_batch, parallel=parallel,
+            **get_batch_index_relations(Concept))
 
 
 def get_concepts_to_index(source, locales=None, exclude_locale=None):
