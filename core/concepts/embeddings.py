@@ -135,6 +135,10 @@ def sync_concept_vectors(version, parallel=True):
       vectors that HEAD or another semantic version still uses.
     Checks 500 rows at a time. Every batch is attempted, and a failed one fails the run (BatchIndexRun). Returns the
     run's summary, plus how many docs were filled and stripped, and how many vectors were reused and texts encoded.
+
+    Concurrency: the index is refreshed first, so the docs the previous sync wrote are visible to this one. A row
+    whose need for vectors changes while its batch is being written (another version opted in or out meanwhile) is
+    rebuilt once more, so that change's own sync, which may have checked the doc before this write, can't lose it.
     """
     if get(settings, 'TEST_MODE', False):
         return None
@@ -150,6 +154,13 @@ def sync_concept_vectors(version, parallel=True):
     ids = sorted(Concept.sources.through.objects.filter(
         source_id=version.id).values_list('concept_id', flat=True), reverse=True)
 
+    def rebuild(concept_ids):
+        concepts = list(Concept.objects.filter(id__in=concept_ids).select_related(
+            'parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'
+        ).prefetch_related('names'))
+        run.retry_rejected(lambda: BatchIndexRun.bulk(
+            doc, doc._get_actions(concepts, 'index'), parallel, refresh=False))  # pylint: disable=protected-access
+
     def sync_batch(batch):
         needing = get_concept_ids_needing_vectors(batch)
         with_vectors = get_ids_with_vectors(index_name, batch)
@@ -157,14 +168,15 @@ def sync_concept_vectors(version, parallel=True):
         not_needing = [_id for _id in batch if _id not in needing]
         strip = list(get_ids_with_vectors(index_name, not_needing, synonyms_too=True)) if not_needing else []
         if fill or strip:
-            concepts = list(Concept.objects.filter(id__in=fill + strip).select_related(
-                'parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'
-            ).prefetch_related('names'))
-            run.retry_rejected(lambda: BatchIndexRun.bulk(
-                doc, doc._get_actions(concepts, 'index'), parallel, refresh=False))  # pylint: disable=protected-access
+            rebuild(fill + strip)
+            needing_now = get_concept_ids_needing_vectors(fill + strip)
+            changed = [_id for _id in fill + strip if (_id in needing_now) != (_id in needing)]
+            if changed:
+                rebuild(changed)
         counts['filled'] += len(fill)
         counts['stripped'] += len(strip)
 
+    connections.get_connection().indices.refresh(index=index_name)
     for start in range(0, len(ids), SYNC_BATCH_SIZE):
         run.attempt(start, ids[start:start + SYNC_BATCH_SIZE], sync_batch)
 

@@ -14,6 +14,7 @@ from django.test import override_settings
 from elasticsearch.helpers import streaming_bulk
 from elasticsearch_dsl.connections import connections
 
+from core.common.models import BatchIndexRun
 from core.common.tasks import index_source_concepts, batch_index_resources, index_concepts_mapped_codes
 from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.concepts.documents import ConceptDocument
@@ -351,6 +352,43 @@ class VersionVectorSyncTest(VectorTestMixin, OCLTestCase):
         self.assertEqual(summary, {'docs': 2, 'filled': 0, 'stripped': 0})
         self.assertEqual(self.encoder.calls, [])
 
+    def test_opting_out_while_another_version_opts_in_keeps_the_vectors_that_version_needs(self):
+        v1 = self.create_version('v1', LLM, [*self.shared, self.own])
+        v2 = self.create_version('v2', ['es'], [self.own])
+        self.index(*self.shared, self.own)
+        v1.match_algorithms = ['es']
+        v1.save()
+        real_bulk = BatchIndexRun.bulk
+
+        def opt_v2_in_between_prepare_and_write(doc, actions, *args, **kwargs):
+            actions = list(actions)  # prepared while v2 is still lexical, so own's doc is prepared without vectors
+            # v2 opts in now: its own sync would still find own's vectors in place, and skip it
+            Source.objects.filter(id=v2.id).update(match_algorithms=LLM)
+            return real_bulk(doc, iter(actions), *args, **kwargs)
+
+        with patch('core.common.models.BatchIndexRun.bulk', side_effect=opt_v2_in_between_prepare_and_write):
+            summary = self.sync(v1)
+
+        self.assertEqual(summary, {'docs': 3, 'filled': 0, 'stripped': 3})
+        self.assert_vectors(self.own, ['Cholera', 'Asiatic cholera'])  # rebuilt again once v2 needed it
+        self.assert_no_vectors(self.shared[0])
+
+    def test_sync_sees_vectors_written_since_the_last_refresh(self):
+        v1 = self.create_version('v1', LLM, self.shared)
+        self.es().indices.put_settings(index=self.index_name(), settings={'index': {'refresh_interval': '-1'}})
+        self.addCleanup(
+            self.es().indices.put_settings, index=self.index_name(), settings={'index': {'refresh_interval': None}})
+        ConceptDocument().update(self.shared, refresh=False, parallel=False)  # vectors written, not yet searchable
+        seq_nos = [self.seq_no(concept) for concept in self.shared]
+        self.encoder.reset()
+
+        with override_settings(TEST_MODE=False):
+            summary = sync_concept_vectors(v1, parallel=False)
+
+        self.assertEqual((summary['filled'], summary['stripped']), (0, 0))
+        self.assertEqual([self.seq_no(concept) for concept in self.shared], seq_nos)
+        self.assertEqual(self.encoder.calls, [])
+
     def test_sync_does_nothing_in_test_mode(self):
         v1 = self.create_version('v1', LLM, self.shared)
 
@@ -502,6 +540,31 @@ class VectorSyncQueuingTest(OCLTestCase):
         sync_mock.assert_called_once()
         self.assertEqual(sync_mock.call_args[0][0].id, source.id)
         batch_index_mock.assert_not_called()
+
+
+class SourceConceptsIndexViewSyncVectorsTest(OCLAPITestCase):
+    """Staff can re-run a version's vector sync without changing its flag, e.g. after a sync task was lost."""
+    def setUp(self):
+        super().setUp()
+        self.token = UserProfile.objects.filter(is_superuser=True).first().get_token()
+        self.source = OrganizationSourceFactory()
+        self.version = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.source.organization, version='v1', match_algorithms=LLM)
+
+    def post(self, data):
+        with patch('core.sources.views.index_source_concepts') as task_mock:
+            task_mock.__name__ = 'index_source_concepts'
+            response = self.client.post(
+                self.version.uri + 'concepts/indexes/', data, HTTP_AUTHORIZATION='Token ' + self.token, format='json')
+        self.assertEqual(response.status_code, 202, response.data)
+        return task_mock.apply_async.call_args[0][0]
+
+    def test_sync_vectors_queues_only_the_sync(self):
+        self.assertEqual(
+            self.post({'sync_vectors': True}), (self.version.id, None, False, True, True, True, None, None, True))
+
+    def test_without_sync_vectors_queues_the_full_reindex_as_before(self):
+        self.assertEqual(self.post({}), (self.version.id, None, False, True, True, True))
 
 
 class VersionCreateInheritsVectorizationTest(OCLAPITestCase):

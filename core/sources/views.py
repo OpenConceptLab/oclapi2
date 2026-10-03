@@ -364,6 +364,17 @@ class SourceConceptsIndexView(SourceIndexBaseView):
     def get_task_function(self):
         return index_source_concepts
 
+    def get_task_args(self, instance):
+        """
+        With `sync_vectors`, only syncs the version's vectors (index_source_concepts): embeds the docs that need them
+        and lack them, strips those no semantic version uses, and leaves the rest. Re-runs a lost or failed sync
+        without changing the version's flag (OpenConceptLab/ocl_online#247).
+        """
+        args = super().get_task_args(instance)
+        if (self.request.data or {}).get('sync_vectors', None) in get_truthy_values():
+            return *args, None, None, True
+        return args
+
 
 class SourceMappingsIndexView(SourceIndexBaseView):
     def get_task_function(self):
