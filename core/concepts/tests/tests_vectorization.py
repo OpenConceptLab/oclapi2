@@ -488,6 +488,19 @@ class VersionVectorSyncTest(VectorTestMixin, OCLTestCase):
         seed_children_to_new_version('source', v2.id, False)
         sync_async_mock.assert_not_called()  # lexical
 
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.Source.sync_concept_vectors_async')
+    def test_seeding_reads_the_flag_after_seeding(self, sync_async_mock):
+        v1 = self.create_version('v1', ['es'], [])
+
+        def opt_in_meanwhile(*_):  # the opt-in's own sync, and its recheck, find no members yet
+            Source.objects.filter(id=v1.id).update(match_algorithms=LLM)
+        with patch('core.sources.models.Source.update_children_counts', side_effect=opt_in_meanwhile):
+            seed_children_to_new_version('source', v1.id, False)
+
+        sync_async_mock.assert_called_once_with(v1.created_by)
+
     def test_a_seeded_semantic_release_gets_its_vectors_from_the_sync(self):
         v1 = self.create_version('v1', ['es'], [*self.shared, self.own])
         self.index(*self.shared, self.own)  # HEAD's docs as they were: no vectors

@@ -412,8 +412,11 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                 instance.seed_concepts(index=False)
                 instance.seed_mappings(index=False)
                 instance.update_children_counts(sync)
+                # read now, not as it was when the task started: an opt-in while seeding ran, synced before any of
+                # this version's members existed. Whether or not it's still the latest release, and however its
+                # indexing below goes.
+                instance.refresh_from_db(fields=['match_algorithms'])
                 if instance.has_semantic_match_algorithm:
-                    # whether or not it's still the latest release, and however its indexing below goes
                     instance.sync_concept_vectors_async(instance.created_by)
                 if instance.released:
                     instance.index_resources_for_self_as_latest_released()
