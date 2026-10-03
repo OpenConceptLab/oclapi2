@@ -714,7 +714,11 @@ class SourceTest(OCLTestCase):
         self.assertEqual(filters(default_locale='es'), {'locales': ['en', 'es']})
         self.assertEqual(
             filters(default_locale='es', supported_locales=['de']), {'locales': ['de', 'en', 'es', 'fr']})
-        self.assertEqual(filters(match_algorithms=['llm']), {})
+        # a semantic flag change syncs the version's vectors instead of rebuilding every doc (ocl_online#247)
+        self.assertEqual(filters(match_algorithms=['llm']), {'sync_vectors': True})
+        self.assertEqual(
+            filters(match_algorithms=['llm'], supported_locales=['fr', 'es']),
+            {'locales': ['es'], 'exclude_locale': 'en', 'sync_vectors': True})
 
     def test_get_concepts_reindex_filters_null_supported_locales(self):
         source = OrganizationSourceFactory(default_locale='en', supported_locales=None)
@@ -724,6 +728,9 @@ class SourceTest(OCLTestCase):
         self.assertEqual(updated.get_concepts_reindex_filters(source), {'exclude_locale': 'en'})
 
         updated.default_locale = 'es'
+        self.assertEqual(updated.get_concepts_reindex_filters(source), {})
+
+        updated.match_algorithms = ['llm']  # a full reindex already gives every doc the vectors it needs
         self.assertEqual(updated.get_concepts_reindex_filters(source), {})
 
     def test_source_version_create_positive(self):

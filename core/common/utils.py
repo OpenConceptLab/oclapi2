@@ -1019,3 +1019,18 @@ def get_embeddings(txt):
         from sentence_transformers import SentenceTransformer
         model = SentenceTransformer(settings.LM_MODEL_NAME)
     return model.encode(str(txt))
+
+
+def encode_texts(texts):
+    """Embeddings for several texts, from one batched model call (OpenConceptLab/ocl_online#247)."""
+    texts = [str(text) for text in texts]
+    if not texts:
+        return []
+    if settings.ENV == 'ci':
+        return [None] * len(texts)
+
+    model = settings.LM
+    if not model:
+        from sentence_transformers import SentenceTransformer
+        model = SentenceTransformer(settings.LM_MODEL_NAME)
+    return list(model.encode(texts, batch_size=settings.LM_ENCODE_BATCH_SIZE))

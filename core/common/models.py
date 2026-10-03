@@ -1186,7 +1186,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                     obj.index_resources_for_self_as_latest_released(only_update=True)
                 else:
                     obj.index_resources_for_self_as_unreleased()
-            elif concepts_reindex_filters is not None:
+            if concepts_reindex_filters is not None:
                 obj.index_concepts_async(obj.updated_by, **concepts_reindex_filters)
 
         except IntegrityError as ex:

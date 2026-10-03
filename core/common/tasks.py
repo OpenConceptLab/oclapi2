@@ -27,6 +27,7 @@ from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_R
 from core.common.exceptions import BatchIndexingError
 from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service, \
     get_date_range_label
+from core.concepts.embeddings import sync_concept_vectors
 from core.reports.models import ResourceUsageReport
 from core.tasks.models import QueueOnceCustomTask, Task
 
@@ -686,41 +687,71 @@ def make_hierarchy(concept_map):  # pragma: no cover
 @app.task(ignore_result=True, base=QueueOnceCustomTask)
 def index_source_concepts(  # pylint: disable=too-many-arguments,too-many-locals
         source_id, partial_doc=None, single_batch=False, should_prefetch=True, should_select_related=True,
-        parallel=True, locales=None, exclude_locale=None
+        parallel=True, locales=None, exclude_locale=None, sync_vectors=False
 ):
     """
     Index source concepts, or partially update existing ES documents when `partial_doc` is supplied.
     A failed partial update falls back to a full reindex -- unless ES was still refusing writes (429 / read-only
     index) after retries: a full reindex would only fail the same way, slower, so the task fails instead.
+    `sync_vectors` (on its own: instead of a reindex) then gives the version's docs the vectors they need and nothing
+    else (sync_concept_vectors). Appending a semantic version to its docs does that too, so a new vectorized release
+    embeds the docs that have no vectors yet (OpenConceptLab/ocl_online#247).
     """
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
     if source:
-        from core.concepts.documents import ConceptDocument
         prefetch = ['sources', 'names', 'descriptions'] if should_prefetch else []
         select_related = [
             'parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'
         ] if should_select_related else []
+        narrowed = bool(locales or exclude_locale)
         queryset = get_concepts_to_index(source, locales, exclude_locale)
-        if (locales or exclude_locale) and not partial_doc and not source.has_semantic_match_algorithm:
-            batch_index_with_summary(update_concepts_locale_fields, queryset, single_batch, parallel)
-            source.clear_concepts_cache()
-            return
         try:
-            kwargs = {'partial_doc': partial_doc} if partial_doc else {
-                'prefetch': prefetch, 'select_related': select_related}
-            kwargs['single_batch'] = single_batch
-            kwargs['parallel'] = parallel
-            batch_index_with_summary(source.batch_index, queryset, ConceptDocument, **kwargs)
-        except Exception as ex:  # pragma: no cover
-            if not partial_doc or (isinstance(ex, BatchIndexingError) and ex.rejected):
-                raise
-            logger.exception('Falling back to full concept reindex for source %s', source_id)
-            batch_index_with_summary(
-                source.batch_index, queryset, ConceptDocument, prefetch=prefetch, select_related=select_related,
-                parallel=parallel)
+            if partial_doc or not sync_vectors or narrowed:
+                if narrowed and not partial_doc and not source.has_semantic_match_algorithm:
+                    index_concepts_locale_change(source, queryset, single_batch, parallel)
+                else:
+                    index_concepts(source, queryset, partial_doc, single_batch, parallel, prefetch, select_related)
+            if sync_vectors or (get(partial_doc, '_append_source_version') and source.has_semantic_match_algorithm):
+                batch_index_with_summary(sync_concept_vectors, source, parallel=parallel)
         finally:
             source.clear_concepts_cache()
+
+
+def index_concepts(source, queryset, partial_doc, single_batch, parallel, prefetch, select_related):  # pylint: disable=too-many-arguments
+    from core.concepts.documents import ConceptDocument
+    try:
+        kwargs = {'partial_doc': partial_doc} if partial_doc else {
+            'prefetch': prefetch, 'select_related': select_related}
+        kwargs['single_batch'] = single_batch
+        kwargs['parallel'] = parallel
+        batch_index_with_summary(source.batch_index, queryset, ConceptDocument, **kwargs)
+    except Exception as ex:  # pragma: no cover
+        if not partial_doc or (isinstance(ex, BatchIndexingError) and ex.rejected):
+            raise
+        logger.exception('Falling back to full concept reindex for source %s', source.id)
+        batch_index_with_summary(
+            source.batch_index, queryset, ConceptDocument, prefetch=prefetch, select_related=select_related,
+            parallel=parallel)
+
+
+def index_concepts_locale_change(source, queryset, single_batch, parallel):
+    """
+    A locale change on a repo whose HEAD isn't semantic only updates the docs' name fields -- except for the docs of
+    rows in a semantic version, which carry vectors: they're rebuilt, so their display-name vector follows the new
+    display name (reusing the vectors their names already have).
+    """
+    from core.concepts.documents import ConceptDocument
+    from core.concepts.models import Concept
+    in_semantic_version = Exists(Concept.sources.through.objects.filter(
+        concept_id=OuterRef('id'), source__match_algorithms__contains=[source.SEMANTIC_MATCH_ALGORITHM]))
+    batch_index_with_summary(
+        update_concepts_locale_fields, queryset.filter(~in_semantic_version), single_batch, parallel)
+    with_vectors = queryset.filter(in_semantic_version)
+    if with_vectors.exists():
+        batch_index_with_summary(
+            source.batch_index, with_vectors, ConceptDocument, single_batch=single_batch, parallel=parallel,
+            **get_batch_index_relations(Concept))
 
 
 def get_concepts_to_index(source, locales=None, exclude_locale=None):

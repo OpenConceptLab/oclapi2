@@ -271,7 +271,9 @@ class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeader
             'version': version,
             "meta": request.data.get('meta', head_object.meta),
             "properties": request.data.get('properties', head_object.properties),
-            "filters": request.data.get('filters', head_object.filters)
+            "filters": request.data.get('filters', head_object.filters),
+            "match_algorithms": request.data.get(
+                'match_algorithms', head_object.get_match_algorithms_for_new_version())
         }
         serializer = self.get_serializer(data=payload)
         if serializer.is_valid():
