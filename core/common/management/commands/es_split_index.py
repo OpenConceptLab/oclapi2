@@ -30,8 +30,8 @@ class Command(BaseCommand):
         target = f"{index}-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
         self.stdout.write(
             f"Plan: block writes on '{index}' ({store_bytes / 1024 ** 3:.1f} GB on {node}), split it into '{target}' "
-            f"with {shards} primaries and 0 replicas, check doc counts, then point alias '{index}' at '{target}' "
-            f"and delete '{index}'.")
+            f"with {shards} primaries and 0 replicas pinned to {node}, check doc counts, then point alias '{index}' at "
+            f"'{target}' and delete '{index}'.")
         if options['dry_run']:
             self.stdout.write('Dry run: nothing changed.')
             return
@@ -39,7 +39,7 @@ class Command(BaseCommand):
         client.indices.put_settings(index=index, settings={'index.blocks.write': True})
         self.stdout.write(f"Blocked writes on '{index}'.")
         try:
-            self.split(index, target, shards, options['timeout'])
+            self.split(index, target, shards, node, options['timeout'])
             self.check_counts(index, target)
             if not options['yes'] and input(
                     f"Point alias '{index}' at '{target}' and delete index '{index}'? [y/N]: ").lower() != 'y':
@@ -56,8 +56,9 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS(f"Alias '{index}' now points at '{target}'; old index deleted."))
         self.stdout.write(
-            f"Next: let shards rebalance, then POST {index}/_forcemerge?only_expunge_deletes=true, then "
-            f"PUT {index}/_settings {{\"index.number_of_replicas\": 1}}.")
+            f"Next: POST {index}/_forcemerge?only_expunge_deletes=true and wait for merges to finish, then "
+            f"PUT {index}/_settings {{\"index.routing.allocation.require._name\": null}} to let shards rebalance, "
+            f"then PUT {index}/_settings {{\"index.number_of_replicas\": 1}}.")
 
     def preflight(self, index, shards, max_disk_percent):
         """Returns (primary store bytes, node) once every check passes; raises CommandError otherwise."""
@@ -92,7 +93,7 @@ class Command(BaseCommand):
                 f"{store_bytes / 1024 ** 3:.1f} GB as the new shards merge apart.")
         return store_bytes, node
 
-    def split(self, index, target, shards, timeout):
+    def split(self, index, target, shards, node, timeout):  # pylint: disable=too-many-arguments
         client = self.client
         client.indices.flush(index=index)
         client.options(request_timeout=timeout).indices.split(
@@ -100,6 +101,8 @@ class Command(BaseCommand):
                 'index.number_of_shards': shards,
                 'index.number_of_replicas': 0,
                 'index.blocks.write': None,
+                # Each new shard holds the whole source via hard links until merged; moving it early copies all that.
+                'index.routing.allocation.require._name': node,
             })
         self.stdout.write(f"Split '{index}' into '{target}', waiting for green...")
         health = client.options(request_timeout=timeout + 30).cluster.health(

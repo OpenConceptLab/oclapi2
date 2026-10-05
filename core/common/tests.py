@@ -3218,7 +3218,8 @@ class ESSplitIndexCommandTest(OCLTestCase):
         target = split_kwargs['target']
         self.assertRegex(target, r'^concepts-\d{20}$')
         self.assertEqual(split_kwargs['settings'], {
-            'index.number_of_shards': 6, 'index.number_of_replicas': 0, 'index.blocks.write': None})
+            'index.number_of_shards': 6, 'index.number_of_replicas': 0, 'index.blocks.write': None,
+            'index.routing.allocation.require._name': 'es2'})
         client.cluster.health.assert_called_with(index=target, wait_for_status='green', timeout='3600s')
         client.indices.update_aliases.assert_called_once_with(actions=[
             {'add': {'index': target, 'alias': 'concepts'}},
