@@ -1,3 +1,4 @@
+from django.conf import settings as django_settings
 from django_elasticsearch_dsl import Document, fields
 from django_elasticsearch_dsl.registries import registry
 from pydash import compact, get
@@ -10,7 +11,10 @@ from core.concepts.models import Concept
 class ConceptDocument(Document):
     class Index:
         name = 'concepts'
-        settings = {'number_of_shards': 1, 'number_of_replicas': 0}
+        settings = {
+            'number_of_shards': django_settings.ES_CONCEPTS_SHARDS,
+            'number_of_replicas': django_settings.ES_CONCEPTS_REPLICAS
+        }
 
     id = fields.TextField(attr='mnemonic')
     id_lowercase = fields.KeywordField(attr='mnemonic', normalizer="lowercase")

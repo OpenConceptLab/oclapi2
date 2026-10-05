@@ -240,10 +240,12 @@ def __run_search_index_command(command, app_names=None):
     if not command:
         return
 
+    # Builds a new timestamped index and swaps the alias to it; without this a rebuild breaks an aliased index.
+    extra_args = ['--use-alias'] if command == '--rebuild' else []
     if app_names:
-        call_command('search_index', f'{command}', '-f', '--models', *app_names, '--parallel')
+        call_command('search_index', f'{command}', '-f', '--models', *app_names, '--parallel', *extra_args)
     else:
-        call_command('search_index', command, '-f', '--parallel')
+        call_command('search_index', command, '-f', '--parallel', *extra_args)
 
 
 @app.task(base=QueueOnceCustomTask, retry_kwargs={'max_retries': 0})
