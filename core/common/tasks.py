@@ -766,19 +766,52 @@ def index_concepts_locale_change(source, queryset, single_batch, parallel):
     """
     A locale change on a repo whose HEAD isn't semantic only updates the docs' name fields -- except for the docs of
     rows in a semantic version, which carry vectors: they're rebuilt, so their display-name vector follows the new
-    display name (reusing the vectors their names already have).
+    display name (reusing the vectors their names already have). Each set is attempted even when the other fails, and
+    the task's summary counts both (index_in_parts). Returns it.
     """
     from core.concepts.documents import ConceptDocument
     from core.concepts.models import Concept
     in_semantic_version = Exists(Concept.sources.through.objects.filter(
         concept_id=OuterRef('id'), source__match_algorithms__contains=[source.SEMANTIC_MATCH_ALGORITHM]))
-    batch_index_with_summary(
-        update_concepts_locale_fields, queryset.filter(~in_semantic_version), single_batch, parallel)
     with_vectors = queryset.filter(in_semantic_version)
-    if with_vectors.exists():
-        batch_index_with_summary(
-            source.batch_index, with_vectors, ConceptDocument, single_batch=single_batch, parallel=parallel,
+
+    def rebuild_with_vectors():
+        if not with_vectors.exists():
+            return None
+        return source.batch_index(
+            with_vectors, ConceptDocument, single_batch=single_batch, parallel=parallel,
             **get_batch_index_relations(Concept))
+
+    return batch_index_with_summary(
+        index_in_parts,
+        lambda: update_concepts_locale_fields(queryset.filter(~in_semantic_version), single_batch, parallel),
+        rebuild_with_vectors)
+
+
+def index_in_parts(*parts):
+    """
+    Runs each part, a batch indexing call that returns its run's summary, even after an earlier part failed, and
+    returns their summaries summed. If any part failed, raises once they all have run: BatchIndexingError with the
+    summed summary when every failure was one, else the first other error.
+    """
+    summaries, failures = [], []
+    for part in parts:
+        try:
+            summaries.append(part())
+        except Exception as ex:  # pylint: disable=broad-except
+            failures.append(ex)
+            summaries.append(getattr(ex, 'summary', None))
+    summaries = [summary for summary in summaries if isinstance(summary, dict)]
+    summary = {
+        key: sum(get(part_summary, key, 0) for part_summary in summaries)
+        for key in dict.fromkeys(key for part_summary in summaries for key in part_summary)
+    } if summaries else None
+    if not failures:
+        return summary
+    if all(isinstance(ex, BatchIndexingError) for ex in failures):
+        raise BatchIndexingError(
+            '; '.join(str(ex) for ex in failures), summary, any(ex.rejected for ex in failures)) from failures[0]
+    raise next(ex for ex in failures if not isinstance(ex, BatchIndexingError))
 
 
 def get_concepts_to_index(source, locales=None, exclude_locale=None):

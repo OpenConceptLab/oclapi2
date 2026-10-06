@@ -19,7 +19,8 @@ from elasticsearch_dsl.connections import connections
 from core.common.models import BatchIndexRun
 from core.common.exceptions import BatchIndexingError
 from core.common.tasks import index_source_concepts, batch_index_resources, index_concepts_mapped_codes, \
-    handle_save, sync_source_concept_vectors, seed_children_to_new_version
+    handle_save, sync_source_concept_vectors, seed_children_to_new_version, index_concepts_locale_change, \
+    get_concepts_to_index, index_in_parts
 from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.concepts.documents import ConceptDocument
 from core.concepts.embeddings import sync_concept_vectors, ConceptVectors, get_concept_ids_needing_vectors
@@ -586,13 +587,17 @@ class ReindexKeepsSharedVectorsTest(VectorTestMixin, OCLTestCase):
         self.assert_no_vectors(new_row)  # in no semantic version
         self.assertEqual(self.encoder.texts, [])  # the previous row's vectors were reused
 
-    def test_locale_change_rebuilds_rows_with_vectors_so_their_display_vector_follows(self):
+    def change_locale(self):
+        """The repo's default locale becomes French, in which the concept has a preferred name."""
         ConceptNameFactory(concept=self.concept, name='Paludisme', locale='fr', locale_preferred=True)
         self.index(Concept.objects.get(id=self.concept.id))
         self.encoder.reset()
         self.source.default_locale = 'fr'
         self.source.supported_locales = ['fr', 'en']
         self.source.save()
+
+    def test_locale_change_rebuilds_rows_with_vectors_so_their_display_vector_follows(self):
+        self.change_locale()
 
         with override_settings(TEST_MODE=False):
             index_source_concepts(self.source.id, None, locales=['en', 'fr'])
@@ -602,6 +607,59 @@ class ReindexKeepsSharedVectorsTest(VectorTestMixin, OCLTestCase):
         self.assertEqual(source['name'], 'Paludisme')
         self.assertEqual(self.encoder.texts, [])  # every name already had a vector
         self.assert_no_vectors(self.plain)
+
+    def test_locale_change_summary_counts_the_rows_with_vectors_and_the_rest(self):
+        self.change_locale()
+        queryset = get_concepts_to_index(self.source, ['en', 'fr'])
+
+        with override_settings(TEST_MODE=False):
+            summary = index_concepts_locale_change(self.source, queryset, False, False)
+
+        self.assertEqual(summary['docs'], queryset.count())
+        self.assertEqual((summary['batches'], summary['failed_docs']), (2, 0))  # one batch of each
+
+    @patch('core.common.tasks.update_concepts_locale_fields', side_effect=BatchIndexingError(
+        'failed', {'batches': 1, 'failed_batches': 1, 'docs': 3, 'failed_docs': 3}))
+    def test_locale_change_rebuilds_rows_with_vectors_even_when_the_rest_fail(self, _):
+        self.change_locale()
+
+        with override_settings(TEST_MODE=False), self.assertRaises(BatchIndexingError) as raised:
+            index_source_concepts(self.source.id, None, locales=['en', 'fr'])
+
+        self.assertEqual(self.get_source(self.concept)['_embeddings']['text'], 'Paludisme')
+        self.assertEqual(raised.exception.summary, {'batches': 2, 'failed_batches': 1, 'docs': 4, 'failed_docs': 3})
+
+
+class IndexInPartsTest(OCLTestCase):
+    """Batch indexing calls run one after another, each attempted whatever happened to the others."""
+    def test_sums_the_parts_summaries(self):
+        self.assertEqual(
+            index_in_parts(lambda: {'docs': 2, 'batches': 1}, lambda: None, lambda: {'docs': 1, 'batches': 1}),
+            {'docs': 3, 'batches': 2})
+        self.assertIsNone(index_in_parts(lambda: None))  # TEST_MODE
+
+    def test_attempts_every_part_then_raises_their_failures_with_the_summary_of_all(self):
+        last = Mock(return_value={'docs': 5, 'failed_docs': 0})
+
+        with self.assertRaises(BatchIndexingError) as raised:
+            index_in_parts(
+                Mock(side_effect=BatchIndexingError('first failed', {'docs': 2, 'failed_docs': 1})),
+                Mock(side_effect=BatchIndexingError('second failed', {'docs': 3, 'failed_docs': 3}, rejected=True)),
+                last)
+
+        last.assert_called_once()
+        self.assertEqual(raised.exception.summary, {'docs': 10, 'failed_docs': 4})
+        self.assertTrue(raised.exception.rejected)
+        self.assertIn('first failed', str(raised.exception))
+        self.assertIn('second failed', str(raised.exception))
+
+    def test_attempts_every_part_before_raising_any_other_error(self):
+        last = Mock(return_value={'docs': 5})
+
+        with self.assertRaisesRegex(ValueError, 'broken'):
+            index_in_parts(Mock(side_effect=ValueError('broken')), last)
+
+        last.assert_called_once()
 
 
 class VectorSyncQueuingTest(OCLTestCase):
