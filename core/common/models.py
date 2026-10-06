@@ -38,7 +38,8 @@ from .constants import (
     ACCESS_TYPE_VIEW, SUPER_ADMIN_USER_ID,
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
     CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, OPENMRS_VALIDATION_SCHEMA, VALIDATION_SCHEMAS,
-    DEFAULT_VALIDATION_SCHEMA, ES_REQUEST_TIMEOUT, UPDATED_BY_USERNAME_PARAM, ES_RETRYABLE_ERROR_TYPES)
+    DEFAULT_VALIDATION_SCHEMA, ES_REQUEST_TIMEOUT, UPDATED_BY_USERNAME_PARAM, ES_RETRYABLE_ERROR_TYPES,
+    INDEX_BATCH_SIZE)
 from .es import ESScript
 from .exceptions import Http400, BatchIndexingError
 from .fields import URIField
@@ -408,8 +409,9 @@ class BaseModel(models.Model):
     def batch_index_full(  # pylint: disable=too-many-arguments
             single_batch: bool, queryset, document, prefetch, select_related, parallel=True, refresh=None):
         """
-        Full (re)index, 500 docs a batch (single_batch: all in one). Every batch is attempted; if any failed, raises
-        BatchIndexingError with the counts once they all have (see BatchIndexRun). Returns the run's summary.
+        Full (re)index, INDEX_BATCH_SIZE docs a batch (single_batch: all in one). Every batch is attempted; if any
+        failed, raises BatchIndexingError with the counts once they all have (see BatchIndexRun). Returns the run's
+        summary.
         refresh=False doesn't make ES refresh after each batch (the document's auto_refresh does by default).
         """
         if get(settings, 'TEST_MODE', False):
@@ -435,7 +437,7 @@ class BaseModel(models.Model):
         if single_batch:
             run.attempt(0, list(queryset.all()), index_batch)
         else:
-            batch_size = 500
+            batch_size = INDEX_BATCH_SIZE
             start = 0
             while True:
                 batch = list(queryset.order_by('-id')[start:start+batch_size])
@@ -479,7 +481,7 @@ class BaseModel(models.Model):
         if single_batch:
             run.attempt(0, list(queryset.all().values_list('id', flat=True)), index_batch)
         else:
-            batch_size = 500
+            batch_size = INDEX_BATCH_SIZE
             start = 0
             id_qs = queryset.order_by('-id').values_list('id', flat=True)
             while True:
@@ -1143,7 +1145,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         pass
 
     @classmethod
-    def persist_changes(cls, obj, updated_by, original_schema, **kwargs):  # pylint: disable=too-many-locals
+    def persist_changes(cls, obj, updated_by, original_schema, **kwargs):  # pylint: disable=too-many-locals,too-many-branches
         errors = {}
         parent_resource = kwargs.pop('parent_resource', obj.parent)
         if not parent_resource:
@@ -1155,6 +1157,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         is_source = cls.__name__ == 'Source'
         should_reindex_resources = is_source and obj.released != original_repo.released
         concepts_reindex_filters = obj.get_concepts_reindex_filters(original_repo) if is_source else None
+        should_sync_vectors = is_source and (
+            bool(obj.has_semantic_match_algorithm) != bool(original_repo.has_semantic_match_algorithm))
 
         obj._should_update_public_access = is_source and obj.public_access != original_repo.public_access  # pylint: disable=protected-access
         obj._should_update_is_active = is_source and obj.is_active != original_repo.is_active  # pylint: disable=protected-access
@@ -1186,8 +1190,10 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                     obj.index_resources_for_self_as_latest_released(only_update=True)
                 else:
                     obj.index_resources_for_self_as_unreleased()
-            elif concepts_reindex_filters is not None:
+            if concepts_reindex_filters is not None:
                 obj.index_concepts_async(obj.updated_by, **concepts_reindex_filters)
+            if should_sync_vectors:
+                obj.sync_concept_vectors_async(obj.updated_by)
 
         except IntegrityError as ex:
             errors.update({'__all__': ex.args})

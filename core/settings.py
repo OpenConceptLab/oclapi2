@@ -669,10 +669,18 @@ RERANKER_SIGMOID_MODEL_PREFIXES = [
 ]
 ENCODER_MODEL_NAME = None
 ENCODER = None
-LM_MODEL_NAME = None
+# The model concept vectors are encoded with. Each concept doc records it, and a vector is only reused while it's
+# unchanged (OpenConceptLab/ocl_online#247), so it's set even where the model isn't loaded.
+LM_MODEL_NAME = 'all-MiniLM-L6-v2'
+LM_ENCODE_BATCH_SIZE = int(os.environ.get('LM_ENCODE_BATCH_SIZE', 64))
+# A version's vector sync runs once more this long after it (OpenConceptLab/ocl_online#247), once any doc prepared from
+# the flags as they were before has long been written
+VECTOR_SYNC_RECHECK_SECONDS = int(os.environ.get('VECTOR_SYNC_RECHECK_SECONDS', 600))
+# No language model in this environment: it's never loaded, and embeddings are None (get_embeddings, encode_texts).
+# Not so with NO_LM, which only skips loading it at startup: a process that needs it still loads it (get_lm_model).
+LM_DISABLED = ENV in ['ci', 'demo']
 LM = None
-if ENV not in ['ci', 'demo'] and not NO_LM:
-    LM_MODEL_NAME = 'all-MiniLM-L6-v2'
+if not LM_DISABLED and not NO_LM:
     LM = SentenceTransformer(LM_MODEL_NAME)
     if not NO_ENCODER:
         ENCODER_MODEL_NAME = "BAAI/bge-reranker-v2-m3"

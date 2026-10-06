@@ -146,3 +146,5 @@ FACET_SIZE = 100
 ALL = '*'
 CANONICAL_URL_REQUEST_PARAM = 'canonicalUrl'
 SAME_STANDARD_CHECKSUM_ERROR = 'No changes detected. Standard checksum is same as last version.'
+# Docs per bulk request when (re)indexing or syncing a repo's resources (batch_index_full, sync_concept_vectors)
+INDEX_BATCH_SIZE = 500
