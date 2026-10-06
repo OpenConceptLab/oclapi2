@@ -1,4 +1,4 @@
-from django.conf import settings as django_settings
+from django.conf import settings
 from django_elasticsearch_dsl import Document, fields
 from django_elasticsearch_dsl.registries import registry
 from pydash import get
@@ -12,8 +12,8 @@ class MappingDocument(Document):
     class Index:
         name = 'mappings'
         settings = {
-            'number_of_shards': django_settings.ES_MAPPINGS_SHARDS,
-            'number_of_replicas': django_settings.ES_MAPPINGS_REPLICAS
+            'number_of_shards': settings.ES_MAPPINGS_SHARDS,
+            'number_of_replicas': settings.ES_MAPPINGS_REPLICAS
         }
 
     class Django:

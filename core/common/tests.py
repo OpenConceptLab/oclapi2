@@ -2223,23 +2223,44 @@ class TaskTest(OCLTestCase):
     def test_populate_indexes_with_app_names(self, call_command_mock):
         populate_indexes(['concepts'])
         call_command_mock.assert_called_once_with(
-            'search_index', '--populate', '-f', '--models', 'concepts', '--parallel')
+            'search_index', '--populate', '-f', '--models', 'concepts', '--parallel', refresh=False)
 
     @patch('core.common.tasks.call_command')
     def test_populate_indexes_without_app_names(self, call_command_mock):
         populate_indexes(None)
-        call_command_mock.assert_called_once_with('search_index', '--populate', '-f', '--parallel')
+        call_command_mock.assert_called_once_with('search_index', '--populate', '-f', '--parallel', refresh=False)
 
     @patch('core.common.tasks.call_command')
     def test_rebuild_indexes_with_app_names(self, call_command_mock):
         rebuild_indexes(['concepts'])
         call_command_mock.assert_called_once_with(
-            'search_index', '--rebuild', '-f', '--models', 'concepts', '--parallel', '--use-alias')
+            'search_index', '--rebuild', '-f', '--models', 'concepts', '--parallel', '--use-alias', refresh=False)
 
     @patch('core.common.tasks.call_command')
     def test_rebuild_indexes_without_app_names(self, call_command_mock):
         rebuild_indexes(None)
-        call_command_mock.assert_called_once_with('search_index', '--rebuild', '-f', '--parallel', '--use-alias')
+        call_command_mock.assert_called_once_with(
+            'search_index', '--rebuild', '-f', '--parallel', '--use-alias', refresh=False)
+
+    @patch('core.common.tasks.call_command')
+    def test_rebuild_indexes_restores_the_index_names(self, call_command_mock):
+        def rename(*_, **__):  # as django_elasticsearch_dsl's _rebuild does with --use-alias
+            ConceptDocument._index._name = 'concepts-20261006000000000000'  # pylint: disable=protected-access
+            MappingDocument._index._name = 'mappings-20261006000000000000'  # pylint: disable=protected-access
+
+        call_command_mock.side_effect = rename
+        rebuild_indexes(['concepts', 'mappings'])
+        self.assertEqual(ConceptDocument._index._name, 'concepts')  # pylint: disable=protected-access
+        self.assertEqual(MappingDocument._index._name, 'mappings')  # pylint: disable=protected-access
+
+        def rename_and_fail(*args, **kwargs):
+            rename(*args, **kwargs)
+            raise CommandError('populate failed')
+
+        call_command_mock.side_effect = rename_and_fail
+        with self.assertRaisesMessage(CommandError, 'populate failed'):
+            rebuild_indexes(['concepts'])
+        self.assertEqual(ConceptDocument._index._name, 'concepts')  # pylint: disable=protected-access
 
     @patch('core.importers.importer.Importer.run')
     def test_bulk_import_new(self, run_mock):
@@ -3241,8 +3262,8 @@ class ESSplitIndexCommandTest(OCLTestCase):
         client.cluster.health.return_value = {'status': 'green', 'timed_out': False}
         client.cat.shards.return_value = [{'prirep': 'p', 'node': 'es2', 'store': str(10 * 1024 ** 3)}]
         client.cat.allocation.return_value = [
-            {'node': 'es', 'disk.percent': '10', 'disk.avail': '0'},
-            {'node': 'es2', 'disk.percent': '45', 'disk.avail': str(100 * 1024 ** 3)},
+            {'node': 'es', 'disk.used': '0', 'disk.total': str(10 * 1024 ** 3)},
+            {'node': 'es2', 'disk.used': str(45 * 1024 ** 3), 'disk.total': str(100 * 1024 ** 3)},
         ]
         client.count.return_value = {'count': 42}
         for attr, value in overrides.items():
@@ -3254,15 +3275,18 @@ class ESSplitIndexCommandTest(OCLTestCase):
         return client
 
     def run_command(self, client, *args):
+        stderr = Mock()
         with patch('core.common.management.commands.es_split_index.connections.get_connection', return_value=client):
-            call_command('es_split_index', 'concepts', *args, stdout=Mock(), stderr=Mock())
+            call_command('es_split_index', 'concepts', *args, stdout=Mock(), stderr=stderr)
+        return stderr
 
     def test_splits_then_swaps_alias_atomically(self):
         client = self.get_client()
 
         self.run_command(client, '--shards', '6', '--yes')
 
-        client.indices.put_settings.assert_called_once_with(index='concepts', settings={'index.blocks.write': True})
+        client.indices.add_block.assert_called_once_with(index='concepts', block='write')
+        client.indices.put_settings.assert_not_called()
         client.indices.flush.assert_called_once_with(index='concepts')
         split_kwargs = client.indices.split.call_args[1]
         target = split_kwargs['target']
@@ -3271,6 +3295,7 @@ class ESSplitIndexCommandTest(OCLTestCase):
             'index.number_of_shards': 6, 'index.number_of_replicas': 0, 'index.blocks.write': None,
             'index.routing.allocation.require._name': 'es2'})
         client.cluster.health.assert_called_with(index=target, wait_for_status='green', timeout='3600s')
+        client.options.assert_any_call(max_retries=0)
         client.indices.update_aliases.assert_called_once_with(actions=[
             {'add': {'index': target, 'alias': 'concepts'}},
             {'remove_index': {'index': 'concepts'}},
@@ -3282,9 +3307,20 @@ class ESSplitIndexCommandTest(OCLTestCase):
 
         self.run_command(client, '--shards', '6', '--dry-run')
 
-        client.indices.put_settings.assert_not_called()
+        client.indices.add_block.assert_not_called()
         client.indices.split.assert_not_called()
         client.indices.update_aliases.assert_not_called()
+
+    @patch('builtins.input', return_value='n')
+    def test_asks_before_blocking_writes(self, input_mock):
+        client = self.get_client()
+
+        with self.assertRaisesMessage(CommandError, 'nothing changed'):
+            self.run_command(client, '--shards', '6')
+
+        input_mock.assert_called_once()
+        client.indices.add_block.assert_not_called()
+        client.indices.split.assert_not_called()
 
     def test_preflight_rejects_unsafe_sources(self):
         cases = [
@@ -3295,16 +3331,15 @@ class ESSplitIndexCommandTest(OCLTestCase):
             ({'indices.get_settings.return_value': {'concepts': {'settings': {'index': {
                 'number_of_shards': '1', 'blocks': {'read_only_allow_delete': 'true'}}}}}}, 'blocks set'),
             ({'cluster.health.return_value': {'status': 'red'}}, 'not green'),
-            ({'cat.allocation.return_value': [
-                {'node': 'es2', 'disk.percent': '90', 'disk.avail': str(100 * 1024 ** 3)}]}, 'above 85%'),
-            ({'cat.allocation.return_value': [
-                {'node': 'es2', 'disk.percent': '50', 'disk.avail': str(1024 ** 3)}]}, 'GB free'),
+            ({'cat.allocation.return_value': [  # 76 + 10 GB of 100: past 85% while the shards merge apart
+                {'node': 'es2', 'disk.used': str(76 * 1024 ** 3), 'disk.total': str(100 * 1024 ** 3)}]},
+             'could reach 86% disk'),
         ]
         for overrides, message in cases:
             client = self.get_client(**overrides)
             with self.assertRaisesMessage(CommandError, message):
                 self.run_command(client, '--shards', '6', '--yes')
-            client.indices.put_settings.assert_not_called()
+            client.indices.add_block.assert_not_called()
 
         with self.assertRaisesMessage(CommandError, 'at least 2'):
             self.run_command(self.get_client(), '--shards', '1')
@@ -3337,18 +3372,53 @@ class ESSplitIndexCommandTest(OCLTestCase):
 
         self.assert_rolled_back(client)
 
-    @patch('builtins.input', return_value='n')
-    def test_rolls_back_when_swap_is_declined(self, _):
+    def test_clears_a_block_that_applied_but_timed_out(self):
         client = self.get_client()
+        client.indices.add_block.side_effect = Exception('ConnectionTimeout')
 
-        with self.assertRaisesMessage(CommandError, 'Aborted'):
-            self.run_command(client, '--shards', '6')
+        with self.assertRaisesMessage(CommandError, 'rolled back: ConnectionTimeout'):
+            self.run_command(client, '--shards', '6', '--yes')
 
-        self.assert_rolled_back(client)
+        client.indices.split.assert_not_called()
+        client.indices.put_settings.assert_called_once_with(index='concepts', settings={'index.blocks.write': None})
+
+    def test_does_not_roll_back_a_swap_that_went_through(self):
+        client = self.get_client()
+        client.indices.update_aliases.side_effect = Exception('ConnectionTimeout')  # applied, response lost
+        client.indices.exists_alias.side_effect = [False, True]  # preflight, then the reconcile check
+
+        stderr = self.run_command(client, '--shards', '6', '--yes')
+
+        target = client.indices.split.call_args[1]['target']
+        client.indices.exists_alias.assert_called_with(name='concepts', index=target)
+        client.indices.delete.assert_not_called()
+        client.indices.put_settings.assert_not_called()
+        self.assertIn('swap went through', stderr.write.call_args[0][0])
+
+    def test_keeps_the_target_when_the_swap_state_is_unknown(self):
+        client = self.get_client()
+        client.indices.update_aliases.side_effect = Exception('ConnectionTimeout')
+        client.indices.exists_alias.side_effect = [False, Exception('ES unreachable')]
+
+        with self.assertRaisesMessage(CommandError, 'Rollback incomplete'):
+            self.run_command(client, '--shards', '6', '--yes')
+
+        client.indices.delete.assert_not_called()
+        client.indices.put_settings.assert_called_once_with(index='concepts', settings={'index.blocks.write': None})
+
+    def test_clears_the_block_even_when_deleting_the_target_fails(self):
+        client = self.get_client()
+        client.indices.split.side_effect = Exception('boom')
+        client.indices.delete.side_effect = Exception('delete timed out')
+
+        with self.assertRaisesMessage(CommandError, 'Rollback incomplete'):
+            self.run_command(client, '--shards', '6', '--yes')
+
+        client.indices.put_settings.assert_called_once_with(index='concepts', settings={'index.blocks.write': None})
 
     @staticmethod
     def assert_rolled_back(client):
         client.indices.update_aliases.assert_not_called()
         target = client.indices.split.call_args[1]['target']
         client.indices.delete.assert_called_once_with(index=target, ignore_unavailable=True)
-        client.indices.put_settings.assert_called_with(index='concepts', settings={'index.blocks.write': None})
+        client.indices.put_settings.assert_called_once_with(index='concepts', settings={'index.blocks.write': None})

@@ -1,11 +1,14 @@
 from datetime import datetime
 
 from django.core.management import BaseCommand, CommandError
+from django.utils import timezone
 from elasticsearch_dsl.connections import connections
 
 # manage.py es_split_index concepts --shards 6 --dry-run    preflight checks and the plan, no changes
 # manage.py es_split_index concepts --shards 6 [--yes]      split, then swap the alias (asks first unless --yes)
 # Hard-links segments into <index>-<timestamp> (writes blocked for minutes), then atomically swaps in an alias <index>.
+
+REQUEST_TIMEOUT = 120
 
 
 class Command(BaseCommand):
@@ -16,15 +19,16 @@ class Command(BaseCommand):
         parser.add_argument('index', help='Concrete index to split, e.g. concepts')
         parser.add_argument('--shards', type=int, required=True, help='Primary shards of the new index')
         parser.add_argument('--dry-run', action='store_true', help='Run the preflight checks only')
-        parser.add_argument('--yes', action='store_true', help="Don't ask before swapping the alias")
+        parser.add_argument('--yes', action='store_true', help="Don't ask before blocking writes")
         parser.add_argument('--timeout', type=int, default=3600, help='Seconds to wait for the new index to be green')
         parser.add_argument(
-            '--max-disk-percent', type=int, default=85, help='Abort if the shard\'s node disk use is above this')
+            '--max-disk-percent', type=int, default=85,
+            help="Abort if the shard's node could pass this disk use while the new shards merge apart")
 
     def handle(self, *args, **options):
         index = options['index']
         shards = options['shards']
-        self.client = client = connections.get_connection()
+        self.client = client = connections.get_connection().options(request_timeout=REQUEST_TIMEOUT)
 
         store_bytes, node = self.preflight(index, shards, options['max_disk_percent'])
         target = f"{index}-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
@@ -35,27 +39,30 @@ class Command(BaseCommand):
         if options['dry_run']:
             self.stdout.write('Dry run: nothing changed.')
             return
+        if not options['yes'] and input(f"Block writes on '{index}' and go ahead? [y/N]: ").lower() != 'y':
+            raise CommandError('Aborted: nothing changed.')
 
-        client.indices.put_settings(index=index, settings={'index.blocks.write': True})
-        self.stdout.write(f"Blocked writes on '{index}'.")
+        blocked_at = timezone.now().isoformat()
         try:
+            client.indices.add_block(index=index, block='write')  # unlike the setting, waits for in-flight writes
+            self.stdout.write(f"Blocked writes on '{index}' at {blocked_at}.")
             self.split(index, target, shards, node, options['timeout'])
             self.check_counts(index, target)
-            if not options['yes'] and input(
-                    f"Point alias '{index}' at '{target}' and delete index '{index}'? [y/N]: ").lower() != 'y':
-                raise CommandError('Aborted before the alias swap.')
-            client.indices.update_aliases(actions=[
+            # No client retry: a resent swap fails once the first went through, and would look like a failed swap.
+            client.options(max_retries=0).indices.update_aliases(actions=[
                 {'add': {'index': target, 'alias': index}},
                 {'remove_index': {'index': index}},
             ])
         except BaseException as ex:  # pylint: disable=broad-exception-caught
-            self.rollback(index, target)
-            if isinstance(ex, CommandError):
-                raise
-            raise CommandError(f'Split failed and was rolled back: {ex}') from ex
+            swapped = self.is_swapped(index, target)
+            if not swapped:
+                self.rollback(index, target, ex, delete_target=swapped is False)
+            self.stderr.write(f"The swap went through although it reported: {ex}")
 
         self.stdout.write(self.style.SUCCESS(f"Alias '{index}' now points at '{target}'; old index deleted."))
         self.stdout.write(
+            f"If the indexing worker wasn't paused, re-index what changed while writes were blocked: POST "
+            f"/indexes/resources/{index}/ with filter={{\"updated_at__gte\": \"{blocked_at}\"}}.\n"
             f"Next: POST {index}/_forcemerge?only_expunge_deletes=true and wait for merges to finish, then "
             f"PUT {index}/_settings {{\"index.routing.allocation.require._name\": null}} to let shards rebalance, "
             f"then PUT {index}/_settings {{\"index.number_of_replicas\": 1}}.")
@@ -85,12 +92,12 @@ class Command(BaseCommand):
         store_bytes, node = int(primary['store']), primary['node']
         allocation = next(
             row for row in client.cat.allocation(format='json', bytes='b') if row['node'] == node)
-        if int(allocation['disk.percent']) > max_disk_percent:
-            raise CommandError(f"{node} disk is {allocation['disk.percent']}% used, above {max_disk_percent}%.")
-        if int(allocation['disk.avail']) < store_bytes:
+        # Hard-linked source files are only freed once every new shard has merged away from them.
+        peak_percent = 100 * (int(allocation['disk.used']) + store_bytes) / int(allocation['disk.total'])
+        if peak_percent > max_disk_percent:
             raise CommandError(
-                f"{node} has {int(allocation['disk.avail']) / 1024 ** 3:.1f} GB free; the split can need up to "
-                f"{store_bytes / 1024 ** 3:.1f} GB as the new shards merge apart.")
+                f"{node} could reach {peak_percent:.0f}% disk while the new shards merge apart (used + "
+                f"{store_bytes / 1024 ** 3:.1f} GB), above {max_disk_percent}%.")
         return store_bytes, node
 
     def split(self, index, target, shards, node, timeout):  # pylint: disable=too-many-arguments
@@ -119,8 +126,33 @@ class Command(BaseCommand):
             raise CommandError(f"Doc counts differ: '{index}' {source_count}, '{target}' {target_count}.")
         self.stdout.write(f'Doc counts match: {source_count}.')
 
-    def rollback(self, index, target):
-        client = self.client
-        client.indices.delete(index=target, ignore_unavailable=True)
-        client.indices.put_settings(index=index, settings={'index.blocks.write': None})
+    def is_swapped(self, index, target):
+        """Whether the alias points at the target already; None if ES couldn't be asked."""
+        try:
+            return bool(self.client.indices.exists_alias(name=index, index=target))
+        except Exception:  # pylint: disable=broad-exception-caught
+            return None
+
+    def rollback(self, index, target, error, delete_target):
+        """Deletes the target (only if it's known not to be serving) and clears the write block, then raises."""
+        cleanup_errors = []
+        if delete_target:
+            try:
+                self.client.indices.delete(index=target, ignore_unavailable=True)
+            except Exception as ex:  # pylint: disable=broad-exception-caught
+                cleanup_errors.append(f"deleting '{target}': {ex}")
+        else:
+            cleanup_errors.append(f"couldn't tell whether alias '{index}' points at '{target}', so kept it")
+        try:
+            self.client.indices.put_settings(index=index, settings={'index.blocks.write': None})
+        except Exception as ex:  # pylint: disable=broad-exception-caught
+            cleanup_errors.append(f"clearing the write block on '{index}': {ex}")
+
+        if cleanup_errors:
+            raise CommandError(
+                f"Split failed: {error}. Rollback incomplete ({'; '.join(cleanup_errors)}): check _cat/aliases, "
+                f"and the write block on '{index}'.") from error
         self.stderr.write(f"Rolled back: deleted '{target}' (if created) and cleared the write block on '{index}'.")
+        if isinstance(error, CommandError):
+            raise error
+        raise CommandError(f'Split failed and was rolled back: {error}') from error
