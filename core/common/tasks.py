@@ -412,9 +412,12 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                 instance.seed_concepts(index=False)
                 instance.seed_mappings(index=False)
                 instance.update_children_counts(sync)
-                # read now, not as it was when the task started: an opt-in while seeding ran, synced before any of
-                # this version's members existed. Whether or not it's still the latest release, and however its
-                # indexing below goes.
+                # A semantic version's vectors come from this sync. Seeding copies HEAD's membership only, and the
+                # indexing below only appends this version to its members' docs, a partial update that never
+                # computes vectors: with a lexical HEAD, those docs have none, so this sync is what embeds the
+                # version; with a semantic HEAD it's a cheap, read-only check. The flag is read now, not as it was
+                # when the task started: an opt-in while seeding ran synced before any of this version's members
+                # existed. Whether or not it's still the latest release, and however its indexing below goes.
                 instance.refresh_from_db(fields=['match_algorithms'])
                 if instance.has_semantic_match_algorithm:
                     instance.sync_concept_vectors_async(instance.created_by)
@@ -718,13 +721,14 @@ def index_source_concepts(  # pylint: disable=too-many-arguments,too-many-locals
             source.clear_concepts_cache()
 
 
-@app.task(ignore_result=True)
-def sync_source_concept_vectors(source_id, recheck=True):
+@app.task(bind=True, ignore_result=True)
+def sync_source_concept_vectors(self, source_id, recheck=True):
     """
     Gives a repo version's concept docs the vectors they need and nothing else (sync_concept_vectors). Unless this
     is the recheck, then queues one more sync VECTOR_SYNC_RECHECK_SECONDS later, even when this one failed: a doc
     written from the flags as they were just before the change that queued this sync can land after this sync has
-    checked it, and the recheck sees it (OpenConceptLab/ocl_online#247).
+    checked it, and the recheck sees it (OpenConceptLab/ocl_online#247). The recheck is this task's child, so
+    revoking or rerunning this task revokes it too. Not a chained task, which wouldn't run after a failure.
     """
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
@@ -733,7 +737,12 @@ def sync_source_concept_vectors(source_id, recheck=True):
             batch_index_with_summary(sync_concept_vectors, source)
         finally:
             if recheck:
-                source.sync_concept_vectors_async(recheck=False, countdown=settings.VECTOR_SYNC_RECHECK_SECONDS)
+                recheck_task = source.sync_concept_vectors_async(
+                    recheck=False, countdown=settings.VECTOR_SYNC_RECHECK_SECONDS)
+                task = Task.objects.filter(id=self.request.id).first() if recheck_task else None
+                if task:
+                    task.children = [*(task.children or []), recheck_task.id]
+                    task.save(update_fields=['children'])
 
 
 def index_concepts(source, queryset, partial_doc, single_batch, parallel, prefetch, select_related):  # pylint: disable=too-many-arguments

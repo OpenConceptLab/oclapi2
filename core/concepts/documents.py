@@ -241,9 +241,11 @@ class ConceptDocument(Document):
             return
         objects = iter(object_list)
         while chunk := list(islice(objects, self.VECTOR_CHUNK_SIZE)):
-            self._vectors = ConceptVectors(self._index._name)
+            self._vectors = ConceptVectors()
             try:
-                actions = [self._prepare_action(obj, action) for obj in chunk if self.should_index_object(obj)]
+                # Not self.get_actions, which calls this method. A list, so every doc in the chunk is prepared before
+                # resolve() fills in their vectors.
+                actions = list(super()._get_actions(chunk, action))
                 self._vectors.resolve()
                 self.vectors_reused += self._vectors.reused
                 self.texts_encoded += self._vectors.encoded
@@ -297,7 +299,7 @@ class ConceptDocument(Document):
             {'vector': None, 'text': s.name, 'type': get(s, 'type'), 'locale': get(s, 'locale')} for s in synonyms
         ]
         data['_embeddings_model'] = settings.LM_MODEL_NAME
-        vectors = self._vectors or ConceptVectors(self._index._name)
+        vectors = self._vectors or ConceptVectors()
         vectors.add(instance, [data['_embeddings'], *data['_synonyms_embeddings']])
         if self._vectors is None:
             vectors.resolve()

@@ -371,8 +371,8 @@ class SourceConceptsIndexView(SourceIndexBaseView):
 
     def post(self, request, *args, **kwargs):
         if (request.data or {}).get('sync_vectors', None) in get_truthy_values():
-            task = self.get_object().sync_concept_vectors_async(request.user)
-            return Response(TaskBriefSerializer(task).data, status=status.HTTP_202_ACCEPTED)
+            task = self.get_object().sync_concept_vectors_async(request.user)  # None when run inline (TEST_MODE)
+            return Response(TaskBriefSerializer(task).data if task else None, status=status.HTTP_202_ACCEPTED)
         return super().post(request, *args, **kwargs)
 
 

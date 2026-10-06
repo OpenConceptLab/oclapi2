@@ -11,11 +11,10 @@ so their vectors are re-encoded the next time they're rebuilt.
 from django.conf import settings
 from django.db.models import Exists, OuterRef
 from elasticsearch_dsl.connections import connections
-from pydash import get
+from pydash import get, compact, flatten
 
+from core.common.constants import INDEX_BATCH_SIZE
 from core.common.utils import encode_texts
-
-SYNC_BATCH_SIZE = 500
 
 
 def needs_vectors(parent, versions_match_algorithms):
@@ -27,7 +26,7 @@ def needs_vectors(parent, versions_match_algorithms):
     """
     if not versions_match_algorithms:
         return bool(parent.has_semantic_match_algorithm)
-    return any(parent.SEMANTIC_MATCH_ALGORITHM in (algorithms or []) for algorithms in versions_match_algorithms)
+    return parent.SEMANTIC_MATCH_ALGORITHM in compact(flatten(versions_match_algorithms))
 
 
 def get_concept_ids_needing_vectors(ids):
@@ -69,8 +68,7 @@ class ConceptVectors:
     """
     STORED_FIELDS = ['_embeddings', '_synonyms_embeddings', '_embeddings_model']
 
-    def __init__(self, index_name):
-        self.index_name = index_name
+    def __init__(self):
         self.model = settings.LM_MODEL_NAME
         self.pending = []
         self.reused = 0
@@ -124,6 +122,12 @@ class ConceptVectors:
             }
         return stored
 
+    @property
+    def index_name(self):
+        """The concepts index, which the stored docs are read from."""
+        from core.concepts.documents import ConceptDocument
+        return ConceptDocument._index._name  # pylint: disable=protected-access
+
     @staticmethod
     def as_list(value):
         if isinstance(value, list):
@@ -138,9 +142,9 @@ def sync_concept_vectors(version, parallel=True):
     - a doc that has vectors, though no version it belongs to is semantic any more, is rebuilt without them;
     - the rest aren't touched. So opting a version in embeds only what's missing, and opting it out never strips the
       vectors another semantic version (HEAD included) still uses.
-    Checks 500 rows at a time, from the flags as they are at that moment, after refreshing the index so that what an
-    earlier sync wrote counts. Every batch is attempted, and a failed one fails the run (BatchIndexRun). Returns the
-    run's summary, plus the docs filled and stripped, and the vectors reused and texts encoded.
+    Checks INDEX_BATCH_SIZE rows at a time, from the flags as they are at that moment, after refreshing the index so
+    that what an earlier sync wrote counts. Every batch is attempted, and a failed one fails the run (BatchIndexRun).
+    Returns the run's summary, plus the docs filled and stripped, and the vectors reused and texts encoded.
 
     A doc written from flags read just before a change can land after that change's own sync has checked it, so
     every sync that a change queues runs once more a few minutes later (sync_source_concept_vectors).
@@ -160,13 +164,13 @@ def sync_concept_vectors(version, parallel=True):
         source_id=version.id).values_list('concept_id', flat=True), reverse=True)
 
     def sync_batch(batch):
-        needing = get_concept_ids_needing_vectors(batch)
-        with_vectors = get_ids_with_vectors(index_name, batch)
-        fill = [_id for _id in batch if _id in needing and _id not in with_vectors]
-        not_needing = [_id for _id in batch if _id not in needing]
-        strip = list(get_ids_with_vectors(index_name, not_needing, synonyms_too=True)) if not_needing else []
+        batch_ids = set(batch)
+        needing = get_concept_ids_needing_vectors(batch_ids)
+        fill = (batch_ids & needing) - get_ids_with_vectors(index_name, batch_ids)
+        not_needing = batch_ids - needing
+        strip = get_ids_with_vectors(index_name, not_needing, synonyms_too=True) if not_needing else set()
         if fill or strip:
-            concepts = list(Concept.objects.filter(id__in=fill + strip).select_related(
+            concepts = list(Concept.objects.filter(id__in=fill | strip).select_related(
                 'parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'
             ).prefetch_related('names'))
             run.retry_rejected(lambda: BatchIndexRun.bulk(
@@ -175,7 +179,7 @@ def sync_concept_vectors(version, parallel=True):
         counts['stripped'] += len(strip)
 
     connections.get_connection().indices.refresh(index=index_name)
-    for start in range(0, len(ids), SYNC_BATCH_SIZE):
-        run.attempt(start, ids[start:start + SYNC_BATCH_SIZE], sync_batch)
+    for start in range(0, len(ids), INDEX_BATCH_SIZE):
+        run.attempt(start, ids[start:start + INDEX_BATCH_SIZE], sync_batch)
 
     return {**run.finish(), **counts, 'vectors_reused': doc.vectors_reused, 'texts_encoded': doc.texts_encoded}

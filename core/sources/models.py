@@ -547,14 +547,15 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     def sync_concept_vectors_async(self, user=None, recheck=True, countdown=None):
         """
         Queues this version's vector sync (sync_source_concept_vectors) on the indexing queue, with its arguments
-        persisted, so that a rerun of the task is still a sync, and returns its Task. In TEST_MODE it runs inline.
+        persisted, so that a rerun of the task is still a sync, and returns its Task. In TEST_MODE it runs inline, and
+        there's no Task: returns None.
         """
-        task = Task.new(queue='indexing', user=user or self.updated_by, name=sync_source_concept_vectors.__name__)
         if get(settings, 'TEST_MODE', False):
             sync_source_concept_vectors(self.id, recheck)
-        else:
-            sync_source_concept_vectors.apply_async(
-                (self.id, recheck), queue='indexing', persist_args=True, task_id=task.id, countdown=countdown)
+            return None
+        task = Task.new(queue='indexing', user=user or self.updated_by, name=sync_source_concept_vectors.__name__)
+        sync_source_concept_vectors.apply_async(
+            (self.id, recheck), queue='indexing', persist_args=True, task_id=task.id, countdown=countdown)
         return task
 
     def get_concepts_reindex_filters(self, original):
@@ -587,14 +588,10 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     def get_match_algorithms_for_new_version(self):
         """
         The match algorithms a new version of this repo (HEAD) is created with unless the request sets them: HEAD's,
-        and vectorized when HEAD or the latest released version is (decision V1, OpenConceptLab/ocl_online#247).
+        and only HEAD's (decision V1, OpenConceptLab/ocl_online#247). A semantic release doesn't make the next one
+        semantic: the create request opts a version in or out, and so can a later edit.
         """
-        match_algorithms = list(self.match_algorithms or [self.TOKEN_MATCH_ALGORITHM])  # as clean_match_algorithms
-        if self.SEMANTIC_MATCH_ALGORITHM not in match_algorithms:
-            latest_released = self.get_latest_released_version()
-            if latest_released and latest_released.has_semantic_match_algorithm:
-                match_algorithms.append(self.SEMANTIC_MATCH_ALGORITHM)
-        return match_algorithms
+        return list(self.match_algorithms or [self.TOKEN_MATCH_ALGORITHM])  # as clean_match_algorithms
 
     def get_export_task(self):
         return Task.find(name__iendswith='export_source', args__contains=[self.id])

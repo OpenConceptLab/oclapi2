@@ -38,7 +38,8 @@ from .constants import (
     ACCESS_TYPE_VIEW, SUPER_ADMIN_USER_ID,
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
     CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, OPENMRS_VALIDATION_SCHEMA, VALIDATION_SCHEMAS,
-    DEFAULT_VALIDATION_SCHEMA, ES_REQUEST_TIMEOUT, UPDATED_BY_USERNAME_PARAM, ES_RETRYABLE_ERROR_TYPES)
+    DEFAULT_VALIDATION_SCHEMA, ES_REQUEST_TIMEOUT, UPDATED_BY_USERNAME_PARAM, ES_RETRYABLE_ERROR_TYPES,
+    INDEX_BATCH_SIZE)
 from .es import ESScript
 from .exceptions import Http400, BatchIndexingError
 from .fields import URIField
@@ -408,8 +409,9 @@ class BaseModel(models.Model):
     def batch_index_full(  # pylint: disable=too-many-arguments
             single_batch: bool, queryset, document, prefetch, select_related, parallel=True, refresh=None):
         """
-        Full (re)index, 500 docs a batch (single_batch: all in one). Every batch is attempted; if any failed, raises
-        BatchIndexingError with the counts once they all have (see BatchIndexRun). Returns the run's summary.
+        Full (re)index, INDEX_BATCH_SIZE docs a batch (single_batch: all in one). Every batch is attempted; if any
+        failed, raises BatchIndexingError with the counts once they all have (see BatchIndexRun). Returns the run's
+        summary.
         refresh=False doesn't make ES refresh after each batch (the document's auto_refresh does by default).
         """
         if get(settings, 'TEST_MODE', False):
@@ -435,7 +437,7 @@ class BaseModel(models.Model):
         if single_batch:
             run.attempt(0, list(queryset.all()), index_batch)
         else:
-            batch_size = 500
+            batch_size = INDEX_BATCH_SIZE
             start = 0
             while True:
                 batch = list(queryset.order_by('-id')[start:start+batch_size])
@@ -479,7 +481,7 @@ class BaseModel(models.Model):
         if single_batch:
             run.attempt(0, list(queryset.all().values_list('id', flat=True)), index_batch)
         else:
-            batch_size = 500
+            batch_size = INDEX_BATCH_SIZE
             start = 0
             id_qs = queryset.order_by('-id').values_list('id', flat=True)
             while True:

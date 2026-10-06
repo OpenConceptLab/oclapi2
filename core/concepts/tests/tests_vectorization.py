@@ -206,8 +206,12 @@ class ConceptDocumentVectorsTest(VectorTestMixin, OCLTestCase):
         self.assert_vectors(concept, ['Malaria', 'Paludism'])  # so a write that races its HEAD membership agrees
         self.assertEqual(get_concept_ids_needing_vectors([concept.id]), {concept.id})
 
+    def test_reuses_vectors_from_the_concepts_index(self):
+        self.assertEqual(ConceptVectors().index_name, self.index_name())
+
     def test_no_stored_vectors_to_reuse_without_an_index(self):
-        self.assertEqual(ConceptVectors(f'concepts-missing-{uuid.uuid4().hex[:8]}').get_stored_vectors({'1'}), {})
+        with patch.object(ConceptVectors, 'index_name', f'concepts-missing-{uuid.uuid4().hex[:8]}'):
+            self.assertEqual(ConceptVectors().get_stored_vectors({'1'}), {})
 
     def test_prepare_outside_a_batch_resolves_vectors_for_that_doc(self):
         concept = self.create_concept('Malaria', 'Paludism')
@@ -644,7 +648,7 @@ class VectorSyncQueuingTest(OCLTestCase):
     @patch('core.common.tasks.sync_concept_vectors')
     @patch('core.sources.models.Source.sync_concept_vectors_async')
     def test_sync_task_syncs_then_queues_one_delayed_recheck(self, sync_async_mock, sync_mock):
-        sync_source_concept_vectors(self.version.id)
+        sync_source_concept_vectors(self.version.id)  # pylint: disable=no-value-for-parameter
 
         self.assertEqual(sync_mock.call_args[0][0].id, self.version.id)
         sync_async_mock.assert_called_once_with(recheck=False, countdown=600)
@@ -661,9 +665,44 @@ class VectorSyncQueuingTest(OCLTestCase):
     @patch('core.sources.models.Source.sync_concept_vectors_async')
     def test_a_failed_sync_still_queues_its_recheck(self, sync_async_mock, _):
         with self.assertRaises(BatchIndexingError):
-            sync_source_concept_vectors(self.version.id)
+            sync_source_concept_vectors(self.version.id)  # pylint: disable=no-value-for-parameter
 
         sync_async_mock.assert_called_once_with(recheck=False, countdown=600)
+
+    def run_sync_task(self):
+        """
+        Runs the sync task's body under its own Task row's id, as a worker would. Returns that row, the recheck's, and
+        what the sync raised.
+        """
+        user = self.version.created_by
+        parent = Task.new(queue='indexing', user=user, name='core.common.tasks.sync_source_concept_vectors')
+        recheck = Task.new(queue='indexing', user=user, name='core.common.tasks.sync_source_concept_vectors')
+        raised = None
+        with patch('core.sources.models.Source.sync_concept_vectors_async', return_value=recheck) as async_mock:
+            sync_source_concept_vectors.push_request(id=parent.id)
+            try:
+                sync_source_concept_vectors.run(self.version.id)
+            except BatchIndexingError as ex:
+                raised = ex
+            finally:
+                sync_source_concept_vectors.pop_request()
+        async_mock.assert_called_once_with(recheck=False, countdown=600)
+        return Task.objects.get(id=parent.id), recheck, raised
+
+    @patch('core.common.tasks.sync_concept_vectors', Mock(return_value={}))
+    def test_the_recheck_is_a_child_of_the_sync_task(self):
+        parent, recheck, raised = self.run_sync_task()
+
+        self.assertIsNone(raised)
+        self.assertEqual(parent.children, [recheck.id])
+        self.assertEqual(list(parent.child_tasks), [recheck])  # so revoking or rerunning the sync revokes it too
+
+    @patch('core.common.tasks.sync_concept_vectors', Mock(side_effect=BatchIndexingError('failed')))
+    def test_a_failed_syncs_recheck_is_its_child_too(self):
+        parent, recheck, raised = self.run_sync_task()
+
+        self.assertIsInstance(raised, BatchIndexingError)
+        self.assertEqual(parent.children, [recheck.id])
 
     @patch('celery.app.task.Task.apply_async')
     def test_a_queued_sync_keeps_its_arguments_for_recovery(self, celery_apply_async_mock):
@@ -682,10 +721,12 @@ class VectorSyncQueuingTest(OCLTestCase):
     def test_in_test_mode_the_sync_runs_inline(self):
         from core.sources import models as source_models
         sync_task_mock = source_models.sync_source_concept_vectors
-        task = self.version.sync_concept_vectors_async()
+        tasks = Task.objects.count()
+
+        self.assertIsNone(self.version.sync_concept_vectors_async())
 
         sync_task_mock.assert_called_once_with(self.version.id, True)
-        self.assertEqual(task.name, 'sync_source_concept_vectors')
+        self.assertEqual(Task.objects.count(), tasks)  # nothing queued, so no Task
 
 
 class SourceConceptsIndexViewSyncVectorsTest(OCLAPITestCase):
@@ -718,13 +759,25 @@ class SourceConceptsIndexViewSyncVectorsTest(OCLAPITestCase):
         self.assertEqual(list(task.args), [self.version.id, True])  # a rerun is still a sync
         self.assertEqual(celery_apply_async_mock.call_args[0][0], (self.version.id, True))
 
+    @patch('core.sources.models.sync_source_concept_vectors', Mock(__name__='sync_source_concept_vectors'))
+    def test_sync_vectors_runs_inline_in_test_mode(self):
+        from core.sources import models as source_models
+
+        response = self.client.post(
+            self.version.uri + 'concepts/indexes/', {'sync_vectors': True},
+            HTTP_AUTHORIZATION='Token ' + self.token, format='json')
+
+        self.assertEqual(response.status_code, 202, response.data)
+        self.assertFalse(response.data)  # no Task to describe
+        source_models.sync_source_concept_vectors.assert_called_once_with(self.version.id, True)
+
     def test_without_sync_vectors_queues_the_full_reindex_as_before(self):
         self.assertEqual(
             self.post({}, 'index_source_concepts'), (self.version.id, None, False, True, True, True))
 
 
 class VersionCreateInheritsVectorizationTest(OCLAPITestCase):
-    """Decision V1: a new version is vectorized when HEAD or the latest release is, unless the request says not."""
+    """Decision V1: a new version inherits HEAD's match algorithms, and only HEAD's, unless the request sets them."""
     def setUp(self):
         super().setUp()
         self.organization = Organization.objects.first()
@@ -751,31 +804,26 @@ class VersionCreateInheritsVectorizationTest(OCLAPITestCase):
         self.assertEqual(sorted(api_value), LLM)
         self.assertEqual(sorted(stored), LLM)
 
-    def test_inherits_llm_from_the_latest_semantic_release(self):
+    def test_a_semantic_latest_release_does_not_make_the_new_version_semantic(self):
         OrganizationSourceFactory(
             mnemonic=self.source.mnemonic, organization=self.organization, version='v1', released=True,
             match_algorithms=LLM)
 
+        api_value, stored = self.create()
+
+        self.assertEqual(api_value, ['es'])
+        self.assertEqual(stored, ['es'])
+
+    def test_not_vectorized_when_head_is_not(self):
         _, stored = self.create()
+
+        self.assertEqual(stored, ['es'])
+        self.assertEqual(Source(match_algorithms=None).get_match_algorithms_for_new_version(), ['es'])
+
+    def test_owner_can_opt_a_new_release_in_when_head_is_lexical(self):
+        _, stored = self.create(match_algorithms=LLM)
 
         self.assertEqual(sorted(stored), LLM)
-
-    def test_does_not_inherit_from_an_older_release_than_the_latest(self):
-        OrganizationSourceFactory(
-            mnemonic=self.source.mnemonic, organization=self.organization, version='v1', released=True,
-            match_algorithms=LLM)
-        OrganizationSourceFactory(
-            mnemonic=self.source.mnemonic, organization=self.organization, version='v2', released=True,
-            match_algorithms=['es'])
-
-        _, stored = self.create()
-
-        self.assertEqual(stored, ['es'])
-
-    def test_not_vectorized_when_neither_head_nor_the_latest_release_is(self):
-        _, stored = self.create()
-
-        self.assertEqual(stored, ['es'])
 
     def test_owner_can_opt_a_new_release_out(self):
         self.source.match_algorithms = LLM
