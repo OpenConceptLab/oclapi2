@@ -126,9 +126,9 @@ class OrganizationDetailSerializer(AbstractResourceSerializer):
         instance.name = validated_data.get('name', instance.name)
         instance.company = validated_data.get('company', instance.company)
         instance.website = validated_data.get('website', instance.website)
-        instance.location = validated_data.get('location', instance.website)
+        instance.location = validated_data.get('location', instance.location)
         instance.extras = validated_data.get('extras', instance.extras)
-        instance.text = validated_data.get('text', None)
+        instance.text = validated_data.get('text', instance.text)
         instance.updated_by = request_user
         instance.save()
         if instance.id:

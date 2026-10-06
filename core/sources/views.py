@@ -271,7 +271,9 @@ class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeader
             'version': version,
             "meta": request.data.get('meta', head_object.meta),
             "properties": request.data.get('properties', head_object.properties),
-            "filters": request.data.get('filters', head_object.filters)
+            "filters": request.data.get('filters', head_object.filters),
+            "match_algorithms": request.data.get(
+                'match_algorithms', head_object.get_match_algorithms_for_new_version())
         }
         serializer = self.get_serializer(data=payload)
         if serializer.is_valid():
@@ -359,8 +361,19 @@ class SourceIndexBaseView(SourceBaseView, IndexingTaskMixin):  # pylint: disable
 
 
 class SourceConceptsIndexView(SourceIndexBaseView):
+    """
+    Reindexes the version's concepts. With `sync_vectors`, only syncs its vectors instead (sync_source_concept_vectors,
+    with its recheck): embeds the docs that need them and lack them, strips those no semantic version uses, and
+    leaves the rest. That re-runs a lost or failed sync without changing the version's flag (ocl_online#247).
+    """
     def get_task_function(self):
         return index_source_concepts
+
+    def post(self, request, *args, **kwargs):
+        if (request.data or {}).get('sync_vectors', None) in get_truthy_values():
+            task = self.get_object().sync_concept_vectors_async(request.user)  # None when run inline (TEST_MODE)
+            return Response(TaskBriefSerializer(task).data if task else None, status=status.HTTP_202_ACCEPTED)
+        return super().post(request, *args, **kwargs)
 
 
 class SourceMappingsIndexView(SourceIndexBaseView):

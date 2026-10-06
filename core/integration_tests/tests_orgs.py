@@ -252,6 +252,94 @@ class OrganizationDetailViewTest(OCLAPITestCase):
         self.assertEqual(self.org.updated_by, staff)
         self.assertFalse(self.org.is_member(staff))
 
+    def test_put_200_keeps_omitted_text_and_location(self):
+        self.org.text = '<p>About Stark</p>'
+        self.org.location = 'New York'
+        self.org.website = 'https://stark.com'
+        self.org.save()
+
+        response = self.client.put(
+            f'/orgs/{self.org.mnemonic}/',
+            {'name': 'Wayne Corporation'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.name, 'Wayne Corporation')
+        self.assertEqual(self.org.text, '<p>About Stark</p>')
+        self.assertEqual(self.org.location, 'New York')
+        self.assertEqual(self.org.website, 'https://stark.com')
+
+    def test_put_200_clears_text_and_location_when_sent_empty(self):
+        self.org.text = '<p>About Stark</p>'
+        self.org.location = 'New York'
+        self.org.save()
+
+        response = self.client.put(
+            f'/orgs/{self.org.mnemonic}/',
+            {'text': '', 'location': ''},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.text, '')
+        self.assertEqual(self.org.location, '')
+
+    def test_patch_200_keeps_omitted_text_and_location(self):
+        self.org.text = '<p>About Stark</p>'
+        self.org.location = 'New York'
+        self.org.website = 'https://stark.com'
+        self.org.save()
+
+        response = self.client.patch(
+            f'/orgs/{self.org.mnemonic}/',
+            {'name': 'Wayne Corporation'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['name'], 'Wayne Corporation')
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.name, 'Wayne Corporation')
+        self.assertEqual(self.org.text, '<p>About Stark</p>')
+        self.assertEqual(self.org.location, 'New York')
+        self.assertEqual(self.org.website, 'https://stark.com')
+
+    def test_patch_200_clears_text_and_location_when_sent_empty(self):
+        self.org.text = '<p>About Stark</p>'
+        self.org.location = 'New York'
+        self.org.save()
+
+        response = self.client.patch(
+            f'/orgs/{self.org.mnemonic}/',
+            {'text': '', 'location': ''},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.text, '')
+        self.assertEqual(self.org.location, '')
+
+    def test_patch_403(self):
+        stranger = UserProfileFactory()
+        response = self.client.patch(
+            f'/orgs/{self.org.mnemonic}/',
+            {'name': 'Wayne Corporation'},
+            HTTP_AUTHORIZATION='Token ' + stranger.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.name, 'Stark Enterprises')
+
     def test_delete_403(self):
         stranger = UserProfileFactory()
         response = self.client.delete(

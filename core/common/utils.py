@@ -1010,12 +1010,28 @@ def clean_term(term):
     return term.lower().replace(' ', '').replace('-', '').replace('_', '')
 
 
-def get_embeddings(txt):
-    if settings.ENV == 'ci':
-        return None
-
+def get_lm_model():
+    """The language model: the one loaded at startup, or else loaded now."""
     model = settings.LM
     if not model:
         from sentence_transformers import SentenceTransformer
         model = SentenceTransformer(settings.LM_MODEL_NAME)
-    return model.encode(str(txt))
+    return model
+
+
+def get_embeddings(txt):
+    if settings.LM_DISABLED:
+        return None
+    return get_lm_model().encode(str(txt))
+
+
+def encode_texts(texts):
+    """
+    Embeddings for a list of texts, from one batched model call (OpenConceptLab/ocl_online#247). Where the model is
+    disabled, None for each text.
+    """
+    if not texts:
+        return []
+    if settings.LM_DISABLED:
+        return [None] * len(texts)
+    return list(get_lm_model().encode([str(text) for text in texts], batch_size=settings.LM_ENCODE_BATCH_SIZE))

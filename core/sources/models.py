@@ -15,7 +15,7 @@ from core.common.checksums import VersionCompareMixin
 from core.common.constants import HEAD
 from core.common.models import ConceptContainerModel
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings, \
-    resolve_url_registry_entries
+    sync_source_concept_vectors, resolve_url_registry_entries
 from core.common.utils import to_camel_case
 from core.common.validators import validate_non_negative
 from core.concepts.models import ConceptName, Concept
@@ -544,10 +544,26 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         except AlreadyQueued:
             pass
 
-    def get_concepts_reindex_filters(self, original):
-        if bool(self.has_semantic_match_algorithm) != bool(original.has_semantic_match_algorithm):
-            return {}
+    def sync_concept_vectors_async(self, user=None, recheck=True, countdown=None):
+        """
+        Queues this version's vector sync (sync_source_concept_vectors) on the indexing queue, with its arguments
+        persisted, so that a rerun of the task is still a sync, and returns its Task. In TEST_MODE it runs inline, and
+        there's no Task: returns None.
+        """
+        if get(settings, 'TEST_MODE', False):
+            sync_source_concept_vectors(self.id, recheck)
+            return None
+        task = Task.new(queue='indexing', user=user or self.updated_by, name=sync_source_concept_vectors.__name__)
+        sync_source_concept_vectors.apply_async(
+            (self.id, recheck), queue='indexing', persist_args=True, task_id=task.id, countdown=countdown)
+        return task
 
+    def get_concepts_reindex_filters(self, original):
+        """
+        What a locale change to this repo version needs reindexed: None for nothing, {} for every concept doc, or the
+        narrowing to pass to index_concepts_async. A semantic flag change syncs the version's vectors instead
+        (persist_changes, sync_concept_vectors_async).
+        """
         old_supported, new_supported = original.supported_locales, self.supported_locales
         default_changed = self.default_locale != original.default_locale
         nullness_changed = (old_supported is None) != (new_supported is None)
@@ -568,6 +584,14 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 filters['exclude_locale'] = self.default_locale
 
         return filters
+
+    def get_match_algorithms_for_new_version(self):
+        """
+        The match algorithms a new version of this repo (HEAD) is created with unless the request sets them: HEAD's,
+        and only HEAD's (decision V1, OpenConceptLab/ocl_online#247). A semantic release doesn't make the next one
+        semantic: the create request opts a version in or out, and so can a later edit.
+        """
+        return list(self.match_algorithms or [self.TOKEN_MATCH_ALGORITHM])  # as clean_match_algorithms
 
     def get_export_task(self):
         return Task.find(name__iendswith='export_source', args__contains=[self.id])
