@@ -1169,7 +1169,10 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response['Location'], 'https://signed.example/head.zip')
         s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
-        s3_url_for_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
+        s3_url_for_mock.assert_called_once_with(
+            f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip",
+            filename=f"users_username_sources_source1_HEAD_{self.HEAD_updated_at}.zip"
+        )
 
     @patch('core.services.storages.cloud.aws.S3.url_for')
     @patch('core.services.storages.cloud.aws.S3.get_last_key_from_path')
@@ -1189,7 +1192,10 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         self.assertEqual(response['Location'], 'https://signed.example/v1.zip')
         s3_has_path_mock.assert_called_once_with("users/username/username_source1_v1.")
         s3_get_last_key_from_path_mock.assert_called_once_with("users/username/username_source1_v1.")
-        s3_url_for_mock.assert_called_once_with(f'users/username/username_source1_v1.{self.v1_updated_at}.zip')
+        s3_url_for_mock.assert_called_once_with(
+            f'users/username/username_source1_v1.{self.v1_updated_at}.zip',
+            filename=f'users_username_sources_source1_v1_{self.v1_updated_at}.zip'
+        )
 
     @patch('core.services.storages.cloud.aws.S3.url_for')
     @patch('core.services.storages.cloud.aws.S3.exists')
@@ -1206,7 +1212,10 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.data, {'detail': 'Export exists but could not generate a download URL.'})
         s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
-        s3_url_for_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
+        s3_url_for_mock.assert_called_once_with(
+            f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip",
+            filename=f"users_username_sources_source1_HEAD_{self.HEAD_updated_at}.zip"
+        )
 
     @patch('core.sources.models.Source.is_exporting', new_callable=PropertyMock)
     @patch('core.services.storages.cloud.aws.S3.exists')

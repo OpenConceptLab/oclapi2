@@ -5,6 +5,7 @@ from botocore.config import Config
 from botocore.exceptions import ClientError, NoCredentialsError, WaiterError
 from django.conf import settings
 from django.core.files.base import ContentFile
+from django.utils.http import content_disposition_header
 from pydash import get
 
 from core.services.storages.cloud.core import CloudStorageServiceInterface
@@ -64,8 +65,11 @@ class S3(CloudStorageServiceInterface):
 
         return file_name_with_ext
 
-    def url_for(self, file_path):
-        return self._generate_signed_url(self.GET, file_path) if file_path else None
+    def url_for(self, file_path, filename=None):
+        if not file_path:
+            return None
+        metadata = {'ResponseContentDisposition': content_disposition_header(True, filename)} if filename else None
+        return self._generate_signed_url(self.GET, file_path, metadata)
 
     def public_url_for(self, file_path):
         url = f"http://{settings.AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com/{file_path}"

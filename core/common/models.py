@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 
 from celery.result import AsyncResult
@@ -1399,6 +1400,27 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             return self.version_export_path
         service = get_export_service()
         return service.get_last_key_from_path(self.get_version_export_path(suffix=None)) or self.version_export_path
+
+    def get_export_download_name(self, export_path):
+        """
+        Name a client saves the export under, set on the signed URL:
+        [owner-type]_[owner]_[repo-type]_[repo]_[repo-version]_[expansion]_[lastUpdated].zip
+        lastUpdated is read from the storage key, so the name matches the export's content.
+        """
+        owner = self.parent
+        parts = [
+            f'{owner.get_url_kwarg()}s', owner.mnemonic,
+            f'{self.get_resource_url_kwarg()}s', self.mnemonic,
+            self.version,
+        ]
+        expansion = get(self, 'expansion.mnemonic')
+        if expansion:
+            parts.append(expansion)
+        last_update = export_path.split('/')[-1].removesuffix('.zip').split('.')[-1]
+        if not re.fullmatch(r'\d{4}-\d{2}-\d{2}_\d{6}', last_update):
+            last_update = self.last_child_update.strftime('%Y-%m-%d_%H%M%S')
+        parts.append(last_update)
+        return '_'.join(parts) + '.zip'
 
     def has_export(self):
         service = get_export_service()

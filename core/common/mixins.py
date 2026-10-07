@@ -1058,7 +1058,8 @@ class ConceptContainerExportMixin:
 
         if version.has_export():
             export_path = version.get_export_path()
-            export_url = get_export_service().url_for(export_path)
+            export_url = get_export_service().url_for(
+                export_path, filename=version.get_export_download_name(export_path))
             if export_url:
                 return redirect(export_url)
             logger.error(
