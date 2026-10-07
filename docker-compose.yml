@@ -85,6 +85,8 @@ services:
     restart: "always"
     healthcheck:
       test: ["CMD-SHELL", "-c", "CELERY_WORKER_NAME=default ./ping_celery_worker.sh"]
+      timeout: 30s
+      start_period: 120s
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
@@ -131,6 +133,8 @@ services:
     restart: "always"
     healthcheck:
       test: ["CMD-SHELL", "-c", "CELERY_WORKER_NAME=indexing ./ping_celery_worker.sh"]
+      timeout: 30s
+      start_period: 120s
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
@@ -153,6 +157,8 @@ services:
     restart: "always"
     healthcheck:
       test:  ["CMD-SHELL", "-c", "CELERY_WORKER_NAME=concurrent ./ping_celery_worker.sh"]
+      timeout: 30s
+      start_period: 120s
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
@@ -178,6 +184,8 @@ services:
     restart: "always"
     healthcheck:
       test:  ["CMD-SHELL", "-c", "CELERY_WORKER_NAME=bulk_import_0_1 ./ping_celery_worker.sh"]
+      timeout: 30s
+      start_period: 120s
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
@@ -203,6 +211,8 @@ services:
     restart: "always"
     healthcheck:
       test:  ["CMD-SHELL", "-c", "CELERY_WORKER_NAME=bulk_import_2_3 ./ping_celery_worker.sh"]
+      timeout: 30s
+      start_period: 120s
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
@@ -228,6 +238,8 @@ services:
     restart: "always"
     healthcheck:
       test:  ["CMD-SHELL", "-c", "CELERY_WORKER_NAME=bulk_import_root ./ping_celery_worker.sh"]
+      timeout: 30s
+      start_period: 120s
     environment:
       - REDIS_HOST=${REDIS_HOST-redis}
       - REDIS_PORT=${REDIS_PORT-6379}
