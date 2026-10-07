@@ -175,6 +175,13 @@ class RepoExportDownloadNameTest(OCLTestCase):
 
         self.assertIsNone(source_v1.get_export_download_name('orgs/PIH/PIH_PIH_v1.8.24.zip'))
 
+    def test_date_like_version_is_not_read_as_the_timestamp(self):
+        source_v1 = OrganizationSourceFactory(
+            organization=OrganizationFactory(mnemonic='PIH'), mnemonic='PIH', version='1.20260930123456')
+
+        self.assertIsNone(source_v1.get_export_download_name('orgs/PIH/PIH_PIH_v1.20260930123456.zip'))
+        self.assertIsNone(source_v1.get_export_download_name('orgs/PIH/PIH_PIH_v1.20260930123456.1.zip'))
+
     def test_unsafe_version_characters_become_hyphens(self):
         source_v1 = OrganizationSourceFactory(
             organization=OrganizationFactory(mnemonic='PIH'), mnemonic='PIH', version='1.0 beta: [draft] "x";100%')

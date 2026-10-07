@@ -1410,7 +1410,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         gets no name (None), and the download keeps its storage name. Characters that aren't safe in a filename
         become '-'.
         """
-        key_timestamp = export_path.split('/')[-1].removesuffix('.zip').split('.')[-1]
+        prefix = self.get_version_export_path(suffix=None)
+        key_timestamp = export_path[len(prefix):].removesuffix('.zip') if export_path.startswith(prefix) else ''
         for key_format in ('%Y-%m-%d_%H%M%S', '%Y%m%d%H%M%S'):
             try:
                 last_update = datetime.strptime(key_timestamp, key_format).strftime('%Y-%m-%d_%H%M%S')
