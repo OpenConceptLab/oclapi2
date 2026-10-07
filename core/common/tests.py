@@ -13,7 +13,7 @@ from colour_runner.django_runner import ColourRunnerMixin
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser, Group
 from django.core.files.base import File
-from django.core.management import call_command
+from django.core.management import call_command, CommandError
 from django.http import HttpResponse
 from django.test import TestCase, override_settings, RequestFactory
 from django.test.runner import DiscoverRunner
@@ -1426,15 +1426,78 @@ class BaseModelTest(OCLTestCase):
 
     @override_settings(TEST_MODE=False)
     @patch('core.common.models.parallel_bulk', return_value=[])
-    def test_batch_index_full_can_skip_the_forced_refresh(self, parallel_bulk_mock):
-        queryset, doc_instance, document = self.get_batched_full_index_mocks([[1, 2]])
+    def test_batch_index_full_refreshes_once_after_the_last_batch(self, parallel_bulk_mock):
+        queryset, doc_instance, document = self.get_batched_full_index_mocks([[1, 2], [3]])
         doc_instance.django.auto_refresh = True
 
         BaseModel.batch_index_full(False, queryset, document, None, None)
-        self.assertIs(parallel_bulk_mock.call_args[1]['refresh'], True)
+
+        self.assertEqual(parallel_bulk_mock.call_count, 2)
+        for bulk_call in parallel_bulk_mock.call_args_list:
+            self.assertNotIn('refresh', bulk_call[1])
+        doc_instance._index.refresh.assert_called_once_with()  # pylint: disable=protected-access
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.common.models.parallel_bulk', return_value=[])
+    def test_batch_index_full_can_skip_the_refresh(self, parallel_bulk_mock):
+        queryset, doc_instance, document = self.get_batched_full_index_mocks([[1, 2]])
+        doc_instance.django.auto_refresh = True
 
         BaseModel.batch_index_full(False, queryset, document, None, None, refresh=False)
+
         self.assertNotIn('refresh', parallel_bulk_mock.call_args[1])
+        doc_instance._index.refresh.assert_not_called()  # pylint: disable=protected-access
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.common.models.parallel_bulk', return_value=[])
+    def test_batch_index_full_does_not_refresh_when_nothing_was_sent(self, _):
+        queryset, doc_instance, document = self.get_batched_full_index_mocks([])
+        doc_instance.django.auto_refresh = True
+
+        BaseModel.batch_index_full(False, queryset, document, None, None)
+
+        doc_instance._index.refresh.assert_not_called()  # pylint: disable=protected-access
+
+    @override_settings(TEST_MODE=False)
+    def test_batch_index_full_refreshes_even_when_a_batch_failed(self):
+        queryset, doc_instance, document = self.get_batched_full_index_mocks([[1, 2], [3]])
+        doc_instance.django.auto_refresh = True
+
+        with patch('core.common.models.parallel_bulk', side_effect=[Exception('mapping conflict'), []]), \
+                patch('core.common.models.ERRBIT_LOGGER'):
+            with self.assertRaises(BatchIndexingError):
+                BaseModel.batch_index_full(False, queryset, document, None, None)
+
+        doc_instance._index.refresh.assert_called_once_with()  # pylint: disable=protected-access
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.common.models.parallel_bulk', return_value=[])
+    def test_batch_index_full_refresh_error_does_not_fail_the_run(self, _):
+        queryset, doc_instance, document = self.get_batched_full_index_mocks([[1, 2]])
+        doc_instance.django.auto_refresh = True
+        doc_instance._index.refresh.side_effect = Exception('timeout')  # pylint: disable=protected-access
+
+        summary = BaseModel.batch_index_full(False, queryset, document, None, None)
+
+        self.assertEqual(summary['failed_batches'], 0)
+        self.assertEqual(summary['docs'], 2)
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.common.models.parallel_bulk', return_value=[])
+    def test_batch_index_partial_by_ids_refreshes_once_after_the_last_batch(self, parallel_bulk_mock):
+        id_queryset = MagicMock()
+        id_queryset.__getitem__.side_effect = lambda batch_slice: [1, 2] if batch_slice.start == 0 else []
+        queryset = Mock()
+        queryset.order_by.return_value.values_list.return_value = id_queryset
+        doc_instance = Mock()
+        doc_instance.django.auto_refresh = True
+        doc_instance.django.queryset_pagination = None
+        document = Mock(return_value=doc_instance)
+
+        BaseModel.batch_index_partial_by_ids(queryset, document, lambda ids: iter([]))
+
+        self.assertNotIn('refresh', parallel_bulk_mock.call_args[1])
+        doc_instance._index.refresh.assert_called_once_with()  # pylint: disable=protected-access
 
     @override_settings(TEST_MODE=False)
     def test_batch_index_full_continues_remaining_batches_after_error(self):
@@ -1585,8 +1648,9 @@ class BaseModelTest(OCLTestCase):
         self.assertEqual(bulk_mock.call_args_list, [call(
             doc_instance._get_connection.return_value,  # pylint: disable=protected-access
             doc_instance._get_actions.return_value,  # pylint: disable=protected-access
-            raise_on_error=False, refresh=True
+            raise_on_error=False
         )] * 2)
+        doc_instance._index.refresh.assert_called_once_with()  # pylint: disable=protected-access
         self.assertEqual(self.get_actions_batches(doc_instance), [[1, 2, 3]] * 2)
         sleep_mock.assert_called_once_with(10)
         self.assertEqual(summary, {'batches': 1, 'failed_batches': 0, 'docs': 3, 'failed_docs': 0})
@@ -1741,7 +1805,8 @@ class BaseModelTest(OCLTestCase):
 
         queryset.filter.assert_called_once_with(id__in={11})
         batch_index_full_mock.assert_called_once_with(
-            single_batch=False, queryset=missing_queryset, document=document, prefetch=[], select_related=[]
+            single_batch=False, queryset=missing_queryset, document=document, prefetch=[], select_related=[],
+            refresh=False
         )
 
     @override_settings(TEST_MODE=False)
@@ -1779,7 +1844,8 @@ class BaseModelTest(OCLTestCase):
         self.assertEqual(bulk_mock.call_count, 2)
         queryset.filter.assert_called_once_with(id__in={11})
         batch_index_full_mock.assert_called_once_with(
-            single_batch=False, queryset=missing_queryset, document=document, prefetch=[], select_related=[]
+            single_batch=False, queryset=missing_queryset, document=document, prefetch=[], select_related=[],
+            refresh=False
         )
 
     @override_settings(TEST_MODE=False)
@@ -1890,7 +1956,8 @@ class BaseModelTest(OCLTestCase):
 
         queryset.filter.assert_called_once_with(id__in={'11'})
         batch_index_full_mock.assert_called_once_with(
-            single_batch=False, queryset=missing_queryset, document=document, prefetch=[], select_related=[]
+            single_batch=False, queryset=missing_queryset, document=document, prefetch=[], select_related=[],
+            refresh=False
         )
         sleep_mock.assert_not_called()
         self.assertFalse(context.exception.rejected)
@@ -2156,18 +2223,44 @@ class TaskTest(OCLTestCase):
     def test_populate_indexes_with_app_names(self, call_command_mock):
         populate_indexes(['concepts'])
         call_command_mock.assert_called_once_with(
-            'search_index', '--populate', '-f', '--models', 'concepts', '--parallel')
+            'search_index', '--populate', '-f', '--models', 'concepts', '--parallel', refresh=False)
 
     @patch('core.common.tasks.call_command')
     def test_populate_indexes_without_app_names(self, call_command_mock):
         populate_indexes(None)
-        call_command_mock.assert_called_once_with('search_index', '--populate', '-f', '--parallel')
+        call_command_mock.assert_called_once_with('search_index', '--populate', '-f', '--parallel', refresh=False)
 
     @patch('core.common.tasks.call_command')
     def test_rebuild_indexes_with_app_names(self, call_command_mock):
         rebuild_indexes(['concepts'])
         call_command_mock.assert_called_once_with(
-            'search_index', '--rebuild', '-f', '--models', 'concepts', '--parallel')
+            'search_index', '--rebuild', '-f', '--models', 'concepts', '--parallel', '--use-alias', refresh=False)
+
+    @patch('core.common.tasks.call_command')
+    def test_rebuild_indexes_without_app_names(self, call_command_mock):
+        rebuild_indexes(None)
+        call_command_mock.assert_called_once_with(
+            'search_index', '--rebuild', '-f', '--parallel', '--use-alias', refresh=False)
+
+    @patch('core.common.tasks.call_command')
+    def test_rebuild_indexes_restores_the_index_names(self, call_command_mock):
+        def rename(*_, **__):  # as django_elasticsearch_dsl's _rebuild does with --use-alias
+            ConceptDocument._index._name = 'concepts-20261006000000000000'  # pylint: disable=protected-access
+            MappingDocument._index._name = 'mappings-20261006000000000000'  # pylint: disable=protected-access
+
+        call_command_mock.side_effect = rename
+        rebuild_indexes(['concepts', 'mappings'])
+        self.assertEqual(ConceptDocument._index._name, 'concepts')  # pylint: disable=protected-access
+        self.assertEqual(MappingDocument._index._name, 'mappings')  # pylint: disable=protected-access
+
+        def rename_and_fail(*args, **kwargs):
+            rename(*args, **kwargs)
+            raise CommandError('populate failed')
+
+        call_command_mock.side_effect = rename_and_fail
+        with self.assertRaisesMessage(CommandError, 'populate failed'):
+            rebuild_indexes(['concepts'])
+        self.assertEqual(ConceptDocument._index._name, 'concepts')  # pylint: disable=protected-access
 
     @patch('core.importers.importer.Importer.run')
     def test_bulk_import_new(self, run_mock):
@@ -3155,3 +3248,177 @@ class LexicalVariantsTest(OCLTestCase):
 
         terms = LexicalVariantDictionary.get_variant_terms('childhood leukaemia colour')
         self.assertEqual(set(terms), {'leukemia', 'color'})
+
+
+class ESSplitIndexCommandTest(OCLTestCase):
+    @staticmethod
+    def get_client(**overrides):
+        client = MagicMock()
+        client.options.return_value = client
+        client.indices.exists_alias.return_value = False
+        client.indices.exists.return_value = True
+        client.indices.get_settings.return_value = {
+            'concepts': {'settings': {'index': {'number_of_shards': '1', 'number_of_replicas': '0'}}}}
+        client.cluster.health.return_value = {'status': 'green', 'timed_out': False}
+        client.cat.shards.return_value = [{'prirep': 'p', 'node': 'es2', 'store': str(10 * 1024 ** 3)}]
+        client.cat.allocation.return_value = [
+            {'node': 'es', 'disk.used': '0', 'disk.total': str(10 * 1024 ** 3)},
+            {'node': 'es2', 'disk.used': str(45 * 1024 ** 3), 'disk.total': str(100 * 1024 ** 3)},
+        ]
+        client.count.return_value = {'count': 42}
+        for attr, value in overrides.items():
+            obj = client
+            *path, last = attr.split('.')
+            for part in path:
+                obj = getattr(obj, part)
+            setattr(obj, last, value)
+        return client
+
+    def run_command(self, client, *args):
+        stderr = Mock()
+        with patch('core.common.management.commands.es_split_index.connections.get_connection', return_value=client):
+            call_command('es_split_index', 'concepts', *args, stdout=Mock(), stderr=stderr)
+        return stderr
+
+    def test_splits_then_swaps_alias_atomically(self):
+        client = self.get_client()
+
+        self.run_command(client, '--shards', '6', '--yes')
+
+        client.indices.add_block.assert_called_once_with(index='concepts', block='write')
+        client.indices.put_settings.assert_not_called()
+        client.indices.flush.assert_called_once_with(index='concepts')
+        split_kwargs = client.indices.split.call_args[1]
+        target = split_kwargs['target']
+        self.assertRegex(target, r'^concepts-\d{20}$')
+        self.assertEqual(split_kwargs['settings'], {
+            'index.number_of_shards': 6, 'index.number_of_replicas': 0, 'index.blocks.write': None,
+            'index.routing.allocation.require._name': 'es2'})
+        client.cluster.health.assert_called_with(index=target, wait_for_status='green', timeout='3600s')
+        client.options.assert_any_call(max_retries=0)
+        client.indices.update_aliases.assert_called_once_with(actions=[
+            {'add': {'index': target, 'alias': 'concepts'}},
+            {'remove_index': {'index': 'concepts'}},
+        ])
+        client.indices.delete.assert_not_called()
+
+    def test_dry_run_changes_nothing(self):
+        client = self.get_client()
+
+        self.run_command(client, '--shards', '6', '--dry-run')
+
+        client.indices.add_block.assert_not_called()
+        client.indices.split.assert_not_called()
+        client.indices.update_aliases.assert_not_called()
+
+    @patch('builtins.input', return_value='n')
+    def test_asks_before_blocking_writes(self, input_mock):
+        client = self.get_client()
+
+        with self.assertRaisesMessage(CommandError, 'nothing changed'):
+            self.run_command(client, '--shards', '6')
+
+        input_mock.assert_called_once()
+        client.indices.add_block.assert_not_called()
+        client.indices.split.assert_not_called()
+
+    def test_preflight_rejects_unsafe_sources(self):
+        cases = [
+            ({'indices.exists_alias.return_value': True}, 'already an alias'),
+            ({'indices.exists.return_value': False}, "doesn't exist"),
+            ({'indices.get_settings.return_value': {
+                'concepts': {'settings': {'index': {'number_of_shards': '3'}}}}}, 'only 1 is supported'),
+            ({'indices.get_settings.return_value': {'concepts': {'settings': {'index': {
+                'number_of_shards': '1', 'blocks': {'read_only_allow_delete': 'true'}}}}}}, 'blocks set'),
+            ({'cluster.health.return_value': {'status': 'red'}}, 'not green'),
+            ({'cat.allocation.return_value': [  # 76 + 10 GB of 100: past 85% while the shards merge apart
+                {'node': 'es2', 'disk.used': str(76 * 1024 ** 3), 'disk.total': str(100 * 1024 ** 3)}]},
+             'could reach 86% disk'),
+        ]
+        for overrides, message in cases:
+            client = self.get_client(**overrides)
+            with self.assertRaisesMessage(CommandError, message):
+                self.run_command(client, '--shards', '6', '--yes')
+            client.indices.add_block.assert_not_called()
+
+        with self.assertRaisesMessage(CommandError, 'at least 2'):
+            self.run_command(self.get_client(), '--shards', '1')
+
+    def test_rolls_back_when_counts_differ(self):
+        client = self.get_client()
+        client.count.side_effect = [{'count': 42}, {'count': 41}]
+
+        with self.assertRaisesMessage(CommandError, 'Doc counts differ'):
+            self.run_command(client, '--shards', '6', '--yes')
+
+        self.assert_rolled_back(client)
+
+    def test_rolls_back_when_split_fails(self):
+        client = self.get_client()
+        client.indices.split.side_effect = Exception('boom')
+
+        with self.assertRaisesMessage(CommandError, 'rolled back: boom'):
+            self.run_command(client, '--shards', '6', '--yes')
+
+        self.assert_rolled_back(client)
+
+    def test_rolls_back_when_target_never_turns_green(self):
+        client = self.get_client()
+        client.cluster.health.side_effect = [
+            {'status': 'green', 'timed_out': False}, {'status': 'yellow', 'timed_out': True}]
+
+        with self.assertRaisesMessage(CommandError, "isn't green"):
+            self.run_command(client, '--shards', '6', '--yes')
+
+        self.assert_rolled_back(client)
+
+    def test_clears_a_block_that_applied_but_timed_out(self):
+        client = self.get_client()
+        client.indices.add_block.side_effect = Exception('ConnectionTimeout')
+
+        with self.assertRaisesMessage(CommandError, 'rolled back: ConnectionTimeout'):
+            self.run_command(client, '--shards', '6', '--yes')
+
+        client.indices.split.assert_not_called()
+        client.indices.put_settings.assert_called_once_with(index='concepts', settings={'index.blocks.write': None})
+
+    def test_does_not_roll_back_a_swap_that_went_through(self):
+        client = self.get_client()
+        client.indices.update_aliases.side_effect = Exception('ConnectionTimeout')  # applied, response lost
+        client.indices.exists_alias.side_effect = [False, True]  # preflight, then the reconcile check
+
+        stderr = self.run_command(client, '--shards', '6', '--yes')
+
+        target = client.indices.split.call_args[1]['target']
+        client.indices.exists_alias.assert_called_with(name='concepts', index=target)
+        client.indices.delete.assert_not_called()
+        client.indices.put_settings.assert_not_called()
+        self.assertIn('swap went through', stderr.write.call_args[0][0])
+
+    def test_keeps_the_target_when_the_swap_state_is_unknown(self):
+        client = self.get_client()
+        client.indices.update_aliases.side_effect = Exception('ConnectionTimeout')
+        client.indices.exists_alias.side_effect = [False, Exception('ES unreachable')]
+
+        with self.assertRaisesMessage(CommandError, 'Rollback incomplete'):
+            self.run_command(client, '--shards', '6', '--yes')
+
+        client.indices.delete.assert_not_called()
+        client.indices.put_settings.assert_called_once_with(index='concepts', settings={'index.blocks.write': None})
+
+    def test_clears_the_block_even_when_deleting_the_target_fails(self):
+        client = self.get_client()
+        client.indices.split.side_effect = Exception('boom')
+        client.indices.delete.side_effect = Exception('delete timed out')
+
+        with self.assertRaisesMessage(CommandError, 'Rollback incomplete'):
+            self.run_command(client, '--shards', '6', '--yes')
+
+        client.indices.put_settings.assert_called_once_with(index='concepts', settings={'index.blocks.write': None})
+
+    @staticmethod
+    def assert_rolled_back(client):
+        client.indices.update_aliases.assert_not_called()
+        target = client.indices.split.call_args[1]['target']
+        client.indices.delete.assert_called_once_with(index=target, ignore_unavailable=True)
+        client.indices.put_settings.assert_called_once_with(index='concepts', settings={'index.blocks.write': None})

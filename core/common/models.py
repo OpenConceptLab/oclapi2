@@ -178,6 +178,15 @@ class BatchIndexRun:
             logger.error(message)
             ERRBIT_LOGGER.log(BatchIndexingError(message))
 
+    def refresh(self, doc):
+        """Refreshes the run's index once, if it sent any docs. A failed refresh is only logged."""
+        if not self.docs:
+            return
+        try:
+            doc._index.refresh()  # pylint: disable=protected-access
+        except Exception as ex:  # pylint: disable=broad-except
+            logger.warning('%s index refresh after batch indexing failed: %s', self.document_name, ex)
+
     def finish(self):
         """Returns the run's summary, or raises BatchIndexingError with it if any batch failed."""
         if self.failed_batches:
@@ -411,8 +420,8 @@ class BaseModel(models.Model):
         """
         Full (re)index, INDEX_BATCH_SIZE docs a batch (single_batch: all in one). Every batch is attempted; if any
         failed, raises BatchIndexingError with the counts once they all have (see BatchIndexRun). Returns the run's
-        summary.
-        refresh=False doesn't make ES refresh after each batch (the document's auto_refresh does by default).
+        summary. refresh (default: the document's auto_refresh) refreshes the index once after the last batch, not
+        per bulk.
         """
         if get(settings, 'TEST_MODE', False):
             return None
@@ -424,15 +433,12 @@ class BaseModel(models.Model):
         if select_related:
             queryset = queryset.select_related(*select_related)
 
-        kwargs = {}
         refresh = doc.django.auto_refresh if refresh is None else refresh
-        if refresh:  # as django_elasticsearch_dsl's Document.update
-            kwargs['refresh'] = refresh
         run = BatchIndexRun(document)
 
         def index_batch(objects):
             run.retry_rejected(lambda: BatchIndexRun.bulk(
-                doc, doc._get_actions(objects, 'index'), parallel, **kwargs))  # pylint: disable=protected-access
+                doc, doc._get_actions(objects, 'index'), parallel))  # pylint: disable=protected-access
 
         if single_batch:
             run.attempt(0, list(queryset.all()), index_batch)
@@ -446,6 +452,8 @@ class BaseModel(models.Model):
                 run.attempt(start, batch, index_batch)
                 start += batch_size
 
+        if refresh:
+            run.refresh(doc)
         return run.finish()
 
     @staticmethod
@@ -463,15 +471,12 @@ class BaseModel(models.Model):
             return None
 
         doc = document()
-        kwargs = {}
         refresh = doc.django.auto_refresh if refresh is None else refresh
-        if refresh:
-            kwargs['refresh'] = refresh
         run = BatchIndexRun(document)
 
         def index_batch(ids):
             try:
-                run.retry_rejected(lambda: BatchIndexRun.bulk(doc, get_actions(ids), parallel, **kwargs))
+                run.retry_rejected(lambda: BatchIndexRun.bulk(doc, get_actions(ids), parallel))
             except BulkIndexError as err:
                 if on_bulk_error is None:
                     BaseModel.full_index_missing_docs_or_raise(err, queryset, document)
@@ -491,6 +496,8 @@ class BaseModel(models.Model):
                 run.attempt(start, batch, index_batch)
                 start += batch_size
 
+        if refresh:
+            run.refresh(doc)
         return run.finish()
 
     @staticmethod
@@ -509,7 +516,7 @@ class BaseModel(models.Model):
                 # Docs not yet in ES -- full index so they appear with all fields
                 BaseModel.batch_index_full(
                     single_batch=False, queryset=queryset.filter(id__in={e['update']['_id'] for e in missing}),
-                    document=document, prefetch=prefetch or [], select_related=select_related or []
+                    document=document, prefetch=prefetch or [], select_related=select_related or [], refresh=False
                 )
                 missing = []
             except BatchIndexingError as ex:

@@ -241,10 +241,20 @@ def __run_search_index_command(command, app_names=None):
     if not command:
         return
 
-    if app_names:
-        call_command('search_index', f'{command}', '-f', '--models', *app_names, '--parallel')
-    else:
-        call_command('search_index', command, '-f', '--parallel')
+    # Builds a new timestamped index and swaps the alias to it; without this a rebuild breaks an aliased index.
+    extra_args = ['--use-alias'] if command == '--rebuild' else []
+    # --use-alias renames the shared registry Index objects and never renames them back; this process outlives the task.
+    names = {index: index._name for index in registry.get_indices()}  # pylint: disable=protected-access
+    try:
+        # refresh=False: no refresh per bulk chunk; the 1s refresh interval makes the docs searchable.
+        if app_names:
+            call_command(
+                'search_index', f'{command}', '-f', '--models', *app_names, '--parallel', *extra_args, refresh=False)
+        else:
+            call_command('search_index', command, '-f', '--parallel', *extra_args, refresh=False)
+    finally:
+        for index, name in names.items():
+            index._name = name  # pylint: disable=protected-access
 
 
 @app.task(base=QueueOnceCustomTask, retry_kwargs={'max_retries': 0})

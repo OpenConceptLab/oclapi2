@@ -82,7 +82,7 @@ Make sure to commit newly created migration files.
 ### Indexing in ES:
 - `cd oclapi2/`
 - `docker exec -it oclapi2-api-1 python manage.py search_index --populate -f --parallel` -- for populating all indexes
-- `docker exec -it oclapi2-api-1  python manage.py search_index --rebuild -f --parallel` -- for rebuild (delete and create) all indexes.
+- `docker exec -it oclapi2-api-1  python manage.py search_index --rebuild -f --parallel --use-alias` -- for rebuild all indexes: builds new timestamped indexes, then swaps the aliases to them. Keep `--use-alias` once `concepts`/`mappings` are aliases: without it the rebuild deletes the indexes behind them.
 You can also populate/re-index specific indexes, [read more](https://django-elasticsearch-dsl.readthedocs.io/en/latest/management.html)
 
 

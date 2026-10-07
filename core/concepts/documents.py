@@ -23,7 +23,10 @@ VECTOR_PROVENANCE_MAPPING = {
 class ConceptDocument(Document):
     class Index:
         name = 'concepts'
-        settings = {'number_of_shards': 1, 'number_of_replicas': 0}
+        settings = {
+            'number_of_shards': settings.ES_CONCEPTS_SHARDS,
+            'number_of_replicas': settings.ES_CONCEPTS_REPLICAS
+        }
 
     id = fields.TextField(attr='mnemonic')
     id_lowercase = fields.KeywordField(attr='mnemonic', normalizer="lowercase")

@@ -300,6 +300,11 @@ ELASTICSEARCH_DSL = {
 # ES_BULK_RETRY_BACKOFF_SECONDS before the first retry and doubling it for each one after (defaults: 10+20+40+80s).
 ES_BULK_RETRY_MAX_ATTEMPTS = int(os.environ.get('ES_BULK_RETRY_MAX_ATTEMPTS', 5))
 ES_BULK_RETRY_BACKOFF_SECONDS = float(os.environ.get('ES_BULK_RETRY_BACKOFF_SECONDS', 10))
+# Shard layout used only when an index is created (search_index --create / --rebuild --use-alias).
+ES_CONCEPTS_SHARDS = int(os.environ.get('ES_CONCEPTS_SHARDS', 1))
+ES_CONCEPTS_REPLICAS = int(os.environ.get('ES_CONCEPTS_REPLICAS', 0))
+ES_MAPPINGS_SHARDS = int(os.environ.get('ES_MAPPINGS_SHARDS', 1))
+ES_MAPPINGS_REPLICAS = int(os.environ.get('ES_MAPPINGS_REPLICAS', 0))
 # Bulk imports of up to this many lines index what they import as each part finishes, unless the request's `index`
 # param says otherwise. Bigger ones leave it to a release or a reindex unless asked, as indexing them saturates the
 # shared indexing worker for hours (and re-embeds every row of a semantic HEAD).

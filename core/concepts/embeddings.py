@@ -124,9 +124,9 @@ class ConceptVectors:
 
     @property
     def index_name(self):
-        """The concepts index, which the stored docs are read from."""
+        """The concepts alias, which the stored docs are read from (not _index._name, which a rebuild renames)."""
         from core.concepts.documents import ConceptDocument
-        return ConceptDocument._index._name  # pylint: disable=protected-access
+        return ConceptDocument.Index.name
 
     @staticmethod
     def as_list(value):
