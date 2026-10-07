@@ -1,6 +1,7 @@
 import logging
 import re
 import time
+from datetime import datetime
 
 from celery.result import AsyncResult
 from celery_once import AlreadyQueued
@@ -1405,8 +1406,20 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         """
         Name a client saves the export under, set on the signed URL:
         [owner-type]_[owner]_[repo-type]_[repo]_[repo-version]_[expansion]_[lastUpdated].zip
-        lastUpdated is read from the storage key, so the name matches the export's content.
+        lastUpdated is read from the storage key, so the name matches the export's content. A key without one
+        gets no name (None), and the download keeps its storage name. Characters that aren't safe in a filename
+        become '-'.
         """
+        key_timestamp = export_path.split('/')[-1].removesuffix('.zip').split('.')[-1]
+        for key_format in ('%Y-%m-%d_%H%M%S', '%Y%m%d%H%M%S'):
+            try:
+                last_update = datetime.strptime(key_timestamp, key_format).strftime('%Y-%m-%d_%H%M%S')
+                break
+            except ValueError:
+                continue
+        else:
+            return None
+
         owner = self.parent
         parts = [
             f'{owner.get_url_kwarg()}s', owner.mnemonic,
@@ -1416,11 +1429,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         expansion = get(self, 'expansion.mnemonic')
         if expansion:
             parts.append(expansion)
-        last_update = export_path.split('/')[-1].removesuffix('.zip').split('.')[-1]
-        if not re.fullmatch(r'\d{4}-\d{2}-\d{2}_\d{6}', last_update):
-            last_update = self.last_child_update.strftime('%Y-%m-%d_%H%M%S')
         parts.append(last_update)
-        return '_'.join(parts) + '.zip'
+        return '_'.join(re.sub(r'[^A-Za-z0-9._@-]+', '-', part) for part in parts) + '.zip'
 
     def has_export(self):
         service = get_export_service()

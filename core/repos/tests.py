@@ -160,14 +160,29 @@ class RepoExportDownloadNameTest(OCLTestCase):
             f'orgs_PIH_collections_PIHEMR_Concepts_HEAD_autoexpand-HEAD_{last_update}.zip'
         )
 
-    def test_key_without_timestamp_uses_last_child_update(self):
+    def test_legacy_key_timestamp(self):
         source_v1 = OrganizationSourceFactory(
-            organization=OrganizationFactory(mnemonic='PIH'), mnemonic='PIH', version='1.8.24')
-        last_update = source_v1.last_child_update.strftime('%Y-%m-%d_%H%M%S')
+            organization=OrganizationFactory(mnemonic='CIEL'), mnemonic='CIEL', version='v2016-08-22')
 
         self.assertEqual(
-            source_v1.get_export_download_name('orgs/PIH/PIH_PIH_v1.8.24.zip'),
-            f'orgs_PIH_sources_PIH_1.8.24_{last_update}.zip'
+            source_v1.get_export_download_name('orgs/CIEL/CIEL_CIEL_v2016-08-22.20150516122820.zip'),
+            'orgs_CIEL_sources_CIEL_v2016-08-22_2015-05-16_122820.zip'
+        )
+
+    def test_key_without_timestamp_gets_no_name(self):
+        source_v1 = OrganizationSourceFactory(
+            organization=OrganizationFactory(mnemonic='PIH'), mnemonic='PIH', version='1.8.24')
+
+        self.assertIsNone(source_v1.get_export_download_name('orgs/PIH/PIH_PIH_v1.8.24.zip'))
+
+    def test_unsafe_version_characters_become_hyphens(self):
+        source_v1 = OrganizationSourceFactory(
+            organization=OrganizationFactory(mnemonic='PIH'), mnemonic='PIH', version='1.0 beta: [draft] "x";100%')
+        export_path = source_v1.get_version_export_path(suffix='2026-09-30_123456.zip')
+
+        self.assertEqual(
+            source_v1.get_export_download_name(export_path),
+            'orgs_PIH_sources_PIH_1.0-beta-draft-x-100-_2026-09-30_123456.zip'
         )
 
 
