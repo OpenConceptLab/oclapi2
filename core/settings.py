@@ -17,7 +17,6 @@ from kombu import Queue, Exchange
 from redis.backoff import ExponentialBackoff
 from redis.exceptions import ConnectionError  # pylint: disable=redefined-builtin
 from redis.retry import Retry
-from sentence_transformers import SentenceTransformer, CrossEncoder
 
 from core import __version__
 
@@ -686,6 +685,7 @@ VECTOR_SYNC_RECHECK_SECONDS = int(os.environ.get('VECTOR_SYNC_RECHECK_SECONDS', 
 LM_DISABLED = ENV in ['ci', 'demo']
 LM = None
 if not LM_DISABLED and not NO_LM:
+    from sentence_transformers import SentenceTransformer, CrossEncoder
     LM = SentenceTransformer(LM_MODEL_NAME)
     if not NO_ENCODER:
         ENCODER_MODEL_NAME = "BAAI/bge-reranker-v2-m3"
