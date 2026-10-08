@@ -12,6 +12,7 @@ from zipfile import ZipFile
 import responses
 from celery_once import AlreadyQueued
 from django.contrib.auth.models import Group
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db import connection
@@ -356,8 +357,10 @@ class BulkImportInlineTest(OCLTestCase):
         data = {
             "type": "Concept", "id": "Food", "concept_class": "Root",
             "datatype": "Foo", "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
-            "names": [{"name": "Food", "locale": "en", "locale_preferred": "True", "name_type": "Fully Specified"}],
-            "descriptions": [],
+            "names": [{"name": "Food", "locale": "en", "locale_preferred": "TRUE", "name_type": "Fully Specified"}],
+            "descriptions": [
+                {"description": "Food description", "locale": "en", "locale_preferred": "TRUE"}
+            ],
         }
 
         importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
@@ -371,13 +374,70 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(source.concepts_set.count(), 4)
         concept = Concept.objects.filter(mnemonic='Food', id=F('versioned_object_id')).first()
         self.assertEqual(concept.versions.count(), 3)
+        latest = concept.get_latest_version()
         self.assertTrue(Concept.objects.filter(mnemonic='Food', is_latest_version=True, datatype='Foo').exists())
+        self.assertTrue(latest.names.filter(name='Food', locale_preferred=True).exists())
+        self.assertTrue(latest.descriptions.filter(name='Food description', locale_preferred=True).exists())
         batch_index_resources_mock.apply_async.assert_called_with(
             ('concept', {'id__in': ANY}, True, False), queue='indexing', permanent=False)
         self.assertEqual(
             sorted(batch_index_resources_mock.apply_async.mock_calls[2][1][0][1]['id__in']),
             sorted([concept.id, concept.get_latest_version().prev_version.id, concept.get_latest_version().id])
         )
+
+        data = {
+            "type": "Concept", "id": "NotFood", "concept_class": "Root",
+            "datatype": "None", "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
+            "names": [{"name": "NotFood", "locale": "en", "locale_preferred": "TRUE", "name_type": "Fully Specified"}],
+            "descriptions": [
+                {"description": "NotFood description", "locale": "en", "locale_preferred": "TRUE"}
+            ],
+        }
+
+        importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+        importer.run()
+
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 1)
+        self.assertEqual(len(importer.updated), 0)
+        self.assertEqual(importer.failed, [])
+        self.assertTrue(importer.elapsed_seconds > 0)
+        self.assertEqual(source.concepts_set.count(), 6)
+        concept = Concept.objects.filter(mnemonic='NotFood', id=F('versioned_object_id')).first()
+        self.assertEqual(concept.versions.count(), 1)
+        self.assertTrue(concept.names.filter(name='NotFood', locale_preferred=True).exists())
+        self.assertTrue(concept.descriptions.filter(name='NotFood description', locale_preferred=True).exists())
+        batch_index_resources_mock.apply_async.assert_called_with(
+            ('concept', {'id__in': ANY}, True, False), queue='indexing', permanent=False)
+        self.assertEqual(
+            sorted(batch_index_resources_mock.apply_async.mock_calls[3][1][0][1]['id__in']),
+            sorted([concept.id, concept.get_latest_version().id])
+        )
+
+    @patch('core.importers.models.batch_index_resources', Mock())
+    def test_concept_import_reports_list_style_persist_new_validation_error(self):
+        """A persist_new ValidationError without a message_dict must be included in the failed row."""
+        OrganizationSourceFactory(
+            organization=(OrganizationFactory(mnemonic='DemoOrg')), mnemonic='DemoSource', version='HEAD'
+        )
+        data = {
+            "type": "Concept", "id": "ValidationProbe", "concept_class": "Root",
+            "datatype": "None", "source": "DemoSource", "owner": "DemoOrg", "owner_type": "Organization",
+            "names": [
+                {"name": "ValidationProbe", "locale": "en", "locale_preferred": "TRUE",
+                 "name_type": "Fully Specified"}
+            ],
+            "descriptions": [],
+        }
+
+        with patch.object(Concept, 'full_clean', side_effect=DjangoValidationError('validation boom')):
+            importer = BulkImportInline(json.dumps(data), 'ocladmin', True)
+            importer.run()
+
+        self.assertEqual(importer.processed, 1)
+        self.assertEqual(len(importer.created), 0)
+        self.assertEqual(len(importer.failed), 1)
+        self.assertEqual(importer.failed[0]['errors'], {'__all__': ['validation boom']})
 
     @patch('core.importers.models.batch_index_resources', Mock())
     def test_concept_import_with_nested_mapping_to_concept_code(self):

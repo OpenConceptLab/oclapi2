@@ -38,6 +38,7 @@ class AbstractLocalizedText(ChecksumModel):
     retire_reason = models.TextField(null=True, blank=True)
 
     SMART_CHECKSUM_KEY = None
+    TRUE_VALUES = {'t', 'T', 'true', 'True', 'TRUE', '1', True, 'on', 'On', 'ON', 'y', 'Y', 'yes', 'Yes', 'YES'}
 
     def to_dict(self):
         return {
@@ -63,6 +64,21 @@ class AbstractLocalizedText(ChecksumModel):
     @staticmethod
     def _build(_):
         pass
+
+    @classmethod
+    def normalize_locale_preferred(cls, params):
+        """Match the concepts API's boolean parsing for imported locale payloads."""
+        if 'locale_preferred' not in params:
+            return params
+        return {
+            **params,
+            'locale_preferred': cls.to_boolean_value(params['locale_preferred'])
+        }
+
+    @classmethod
+    def to_boolean_value(cls, value):
+        """Return True for API-compatible truthy strings; everything else is false."""
+        return value in cls.TRUE_VALUES
 
     @classmethod
     def build(cls, params):
@@ -123,6 +139,7 @@ class ConceptDescription(AbstractLocalizedText):
 
     @staticmethod
     def _build(params):
+        params = ConceptDescription.normalize_locale_preferred(params)
         _type = params.get('type', None)
         description_type = params.get('description_type', None)
         if not description_type or description_type == 'ConceptDescription':
@@ -180,6 +197,7 @@ class ConceptName(AbstractLocalizedText):
 
     @staticmethod
     def _build(params):
+        params = ConceptName.normalize_locale_preferred(params)
         _type = params.get('type', None)
         name_type = params.get('name_type', None)
         if not name_type or name_type == 'ConceptName':
@@ -271,6 +289,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     ALREADY_NOT_RETIRED = CONCEPT_IS_ALREADY_NOT_RETIRED
     WAS_RETIRED = CONCEPT_WAS_RETIRED
     WAS_UNRETIRED = CONCEPT_WAS_UNRETIRED
+
+    @staticmethod
+    def get_validation_errors(error):
+        """Preserve field and list-style validation errors for importer responses."""
+        return get(error, 'message_dict', {}) or get(error, 'error_dict', {}) or {'__all__': error.messages}
 
     CHECKSUM_INCLUSIONS = [
         'extras', 'concept_class', 'datatype', 'retired'
@@ -1087,7 +1110,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         except ValidationError as ex:
             if self.id:
                 self.delete()
-            self.errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
+            self.errors.update(Concept.get_validation_errors(ex))
         except IntegrityError as ex:
             if self.id:
                 self.delete()
@@ -1184,7 +1207,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 initial_version.delete()
             if concept.id:
                 concept.delete()
-            concept.errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
+            concept.errors.update(Concept.get_validation_errors(ex))
             if has_mapping_errors:
                 concept.errors['mappings'] = concept._get_errors_from_mappings(mappings_result)
         except (IntegrityError, ValueError) as ex:
