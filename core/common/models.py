@@ -543,7 +543,6 @@ class BaseModel(models.Model):
                     '_index': index_name,
                     '_id': object_id,
                     'doc': partial_doc,
-                    'doc_as_upsert': True,
                 }
 
         return BaseModel.batch_index_partial_by_ids(queryset, document, get_actions, single_batch, parallel)

@@ -903,6 +903,35 @@ def index_source_mappings(
             source.clear_mappings_cache()
 
 
+@app.task(
+    bind=True, autoretry_for=(Exception, WorkerLostError, ), retry_backoff=True, retry_backoff_max=600,
+    max_retries=2, acks_late=True, reject_on_worker_lost=True
+)
+def index_source_public_access(self, source_id):
+    """
+    Sets public_can_view on a source's concept and mapping docs from its current public_access, with retries; the
+    source shows as processing meanwhile. Not queued once, so each public_access change gets its own run.
+    """
+    from core.sources.models import Source
+    from core.concepts.documents import ConceptDocument
+    from core.mappings.documents import MappingDocument
+    source = Source.objects.filter(id=source_id).first()
+    if not source:
+        return
+    task_id = self.request.id
+    source.add_processing(task_id)
+    try:
+        partial_doc = {'public_can_view': source.public_can_view}
+        batch_index_with_summary(source.batch_index, source.concepts_set, ConceptDocument, partial_doc=partial_doc)
+        batch_index_with_summary(source.batch_index, source.mappings_set, MappingDocument, partial_doc=partial_doc)
+    except Exception:
+        if self.request.retries < self.max_retries:
+            raise
+        source.remove_processing(task_id)
+        raise
+    source.remove_processing(task_id)
+
+
 @app.task(base=QueueOnceCustomTask)
 def update_source_active_concepts_count(source_id):
     from core.sources.models import Source
