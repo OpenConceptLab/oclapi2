@@ -559,7 +559,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             is_latest_version=self.is_latest_version,
             parent_id=self.parent_id,
             versioned_object_id=self.versioned_object_id,
-            _index=self._index
         )
         concept_version.cloned_names = self.clone_name_locales()
         concept_version.cloned_descriptions = self.clone_description_locales()
@@ -582,6 +581,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     @classmethod
     def create_initial_version(cls, concept, **kwargs):
         initial_version = cls.version_for_concept(concept, generate_temp_version())
+        initial_version._index = concept._index  # pylint: disable=protected-access
         initial_version.comment = concept.comment
         initial_version.save(**kwargs)
         initial_version.version = initial_version.id

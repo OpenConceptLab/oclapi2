@@ -787,11 +787,11 @@ class SourceChildMixin(ChecksumModel):
             kwargs['version'] = None
         return kwargs
 
-    def retire(self, user, comment=None, reason=None):
+    def retire(self, user, comment=None, reason=None, index=True):
         if self.versioned_object.retired:
             return {'__all__': self.ALREADY_RETIRED}
 
-        return self.__update_retire(True, user, comment or self.WAS_RETIRED, reason)
+        return self.__update_retire(True, user, comment or self.WAS_RETIRED, reason, index)
 
     def unretire(self, user, comment=None):
         if not self.versioned_object.retired:
@@ -799,9 +799,10 @@ class SourceChildMixin(ChecksumModel):
 
         return self.__update_retire(False, user, comment or self.WAS_UNRETIRED)
 
-    def __update_retire(self, retired, user, comment, reason=None):
+    def __update_retire(self, retired, user, comment, reason=None, index=True):  # pylint: disable=too-many-arguments
         latest_version = self.get_latest_version() or self.get_last_version()
         new_version = latest_version.clone()
+        new_version._index = index  # pylint: disable=protected-access
         new_version.retired = retired
         new_version.comment = comment
         if reason is not None:
