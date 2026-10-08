@@ -1207,7 +1207,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 initial_version.delete()
             if concept.id:
                 concept.delete()
-            concept.errors.update(Concept.get_validation_errors(ex))
+            if not has_mapping_errors:
+                concept.errors.update(Concept.get_validation_errors(ex))
             if has_mapping_errors:
                 concept.errors['mappings'] = concept._get_errors_from_mappings(mappings_result)
         except (IntegrityError, ValueError) as ex:
