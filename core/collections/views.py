@@ -953,7 +953,6 @@ class CollectionVersionExpansionResolvedRepoUpdatesView(
 
 class CollectionVersionExpansionReEvaluateView(CollectionVersionExpansionBaseView, TaskMixin):
     serializer_class = TaskSerializer
-    permission_classes = (CanViewConceptDictionary, )
 
     def post(self, request, **kwargs):  # pylint: disable=unused-argument
         obj = self.get_object()

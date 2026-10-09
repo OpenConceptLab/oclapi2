@@ -710,14 +710,15 @@ class VersionedModel(BaseResourceModel):
         return self.active_versions.order_by('-created_at').first()
 
     def get_latest_released_version(self):
-        return self.released_versions.order_by('-created_at').first()
+        return self.released_versions.filter(retired=False).order_by('-created_at').first()
 
     def get_prev_released_version(self):
         return self.released_versions.exclude(id=self.id).order_by('-created_at').first()
 
     @property
     def is_latest_released(self):
-        return self.released and self.id == self.get_latest_released_version().id
+        latest_released = self.get_latest_released_version()
+        return bool(self.released and latest_released and self.id == latest_released.id)
 
     @classmethod
     def find_latest_released_version_by(cls, filters):

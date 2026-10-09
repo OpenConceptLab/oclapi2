@@ -2516,6 +2516,77 @@ class ExpansionTest(OCLTestCase):
         self.assertEqual(expansion.mappings.count(), 0)
 
 
+    def _evaluated_expansion(self, source, references):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        for expression in references:
+            reference = CollectionReference(
+                expression=expression, collection=collection, system=source.uri, cascade='sourcetoconcepts')
+            reference.evaluate()
+            reference.save()
+        return collection, expansion
+
+    def test_re_evaluate_moves_to_newer_release_and_drops_stale_members(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source, mnemonic='c1')
+        old_version = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+        collection, expansion = self._evaluated_expansion(source, [source.uri + 'concepts/'])
+        stale = ConceptFactory(parent=source, mnemonic='stale')
+        expansion.concepts.add(stale)
+        expansion.evaluated_source_versions.add(old_version)
+        new_version = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v2', released=True)
+
+        with patch('core.collections.models.batch_index_resources') as batch_index_mock, \
+                patch.object(Expansion, 'index_resources'):
+            expansion.add_references(
+                collection.references.all(), index=True, is_adding_all=True, force_reevaluate=True)
+
+        self.assertEqual(expansion.id, Expansion.objects.get(mnemonic='e1', collection_version=collection).id)
+        self.assertNotIn(old_version.id, expansion.evaluated_source_versions.values_list('id', flat=True))
+        self.assertNotIn(stale.id, expansion.concepts.values_list('id', flat=True))
+        self.assertNotIn(
+            old_version.id, expansion.evaluated_source_versions.values_list('id', flat=True))
+        for version in expansion.evaluated_source_versions.all():
+            self.assertEqual(version.id, new_version.id)
+        batch_index_mock.assert_any_call('concept', {'id__in': [stale.id]})
+        self.assertIsNotNone(concept)
+
+    def test_unreleased_or_retired_version_never_picked_implicitly(self):
+        source = OrganizationSourceFactory()
+        released = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+        OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v2', released=False)
+        OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v3', released=True, retired=True)
+
+        self.assertEqual(source.get_latest_released_version().id, released.id)
+
+    def test_add_references_indexes_only_post_dedupe_members(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source, mnemonic='c1')
+        latest = concept.get_latest_version()
+        collection, expansion = self._evaluated_expansion(source, [concept.uri, latest.uri])
+        by_expression = {concept.uri: concept, latest.uri: latest}
+
+        def get_concepts(reference, *args, **kwargs):  # pylint: disable=unused-argument
+            return Concept.objects.filter(id=by_expression[reference.expression].id), Mapping.objects.none()
+
+        with patch.object(CollectionReference, 'get_concepts', get_concepts), \
+                patch.object(Expansion, 'index_resources') as index_mock, \
+                patch.object(Expansion, 'full_index_resources') as full_index_mock:
+            expansion.add_references(
+                collection.references.all(), index=True, is_adding_all=True, force_reevaluate=True)
+
+        self.assertEqual(list(expansion.concepts.values_list('id', flat=True)), [latest.id])
+        self.assertEqual(index_mock.call_args[0][0], [latest.id])
+        full_index_mock.assert_called_once_with([concept.id], [])
+
+
 class ExpansionParametersTest(OCLTestCase):
     def test_apply_active_only(self):
         ConceptFactory(id=1, retired=False, mnemonic='active')
@@ -4575,6 +4646,20 @@ class CollectionViewsAPITest(OCLAPITestCase):
             )
 
         self.assertEqual(response.status_code, 204)
+
+    def test_expansion_re_evaluate_forbidden_for_non_member(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        expansion = ExpansionFactory(collection_version=collection, created_by=self.admin, is_processing=False)
+        outsider = UserProfileFactory()
+
+        with patch('core.collections.views.seed_children_to_expansion') as seed_mock:
+            response = self.client.post(
+                f'{collection.uri}HEAD/expansions/{expansion.mnemonic}/re-evaluate/', {},
+                HTTP_AUTHORIZATION=f"Token {outsider.get_token()}"
+            )
+
+        self.assertEqual(response.status_code, 403)
+        seed_mock.assert_not_called()
 
     def test_expansion_children_not_found(self):
         collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
