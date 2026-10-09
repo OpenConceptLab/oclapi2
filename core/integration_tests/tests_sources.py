@@ -1182,11 +1182,12 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         s3_has_path_mock.return_value = True
         s3_get_last_key_from_path_mock.return_value = f'users/username/username_source1_v1.{self.v1_updated_at}.zip'
 
-        response = self.client.get(
-            self.source_v1.uri + 'export/',
-            HTTP_AUTHORIZATION='Token ' + self.token,
-            format='json'
-        )
+        with self.assertLogs('oclapi', level='INFO') as logs:
+            response = self.client.get(
+                self.source_v1.uri + 'export/',
+                HTTP_AUTHORIZATION='Token ' + self.token,
+                format='json'
+            )
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response['Location'], 'https://signed.example/v1.zip')
@@ -1195,6 +1196,11 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         s3_url_for_mock.assert_called_once_with(
             f'users/username/username_source1_v1.{self.v1_updated_at}.zip',
             filename=f'users_username_sources_source1_v1_{self.v1_updated_at}.zip'
+        )
+        self.assertIn(
+            f'INFO:oclapi:Export users/username/username_source1_v1.{self.v1_updated_at}.zip downloads as '
+            f'users_username_sources_source1_v1_{self.v1_updated_at}.zip',
+            logs.output
         )
 
     @patch('core.services.storages.cloud.aws.S3.url_for')
