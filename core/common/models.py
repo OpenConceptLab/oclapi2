@@ -373,10 +373,12 @@ class BaseModel(models.Model):
     ):
         if partial_doc:
             version = partial_doc.get('_append_source_version')
-            if version:
+            flag = partial_doc.get('is_in_latest_source_version')
+            flag_only = set(partial_doc) <= {'_append_source_version', 'is_in_latest_source_version'}
+            if version or (flag is not None and flag_only):
+                # Scripted, never upserted: a doc missing from ES is full-indexed, not stubbed with flags only
                 return BaseModel.batch_index_source_version_append(
-                    queryset, document, version, partial_doc.get('is_in_latest_source_version'),
-                    single_batch, bool(parallel)
+                    queryset, document, version, flag, single_batch, bool(parallel)
                 )
             return BaseModel.batch_index_partial(queryset, document, single_batch, partial_doc, bool(parallel))
         return BaseModel.batch_index_full(
@@ -384,18 +386,20 @@ class BaseModel(models.Model):
 
     @staticmethod
     def batch_index_source_version_append(  # pylint: disable=too-many-arguments
-            queryset, document, version, is_in_latest_source_version=None, single_batch=False, parallel=True
+            queryset, document, version=None, is_in_latest_source_version=None, single_batch=False, parallel=True
     ):
         """
-        Partial-update: append `version` to each resource's `source_version` list (and optionally
-        set `is_in_latest_source_version`), without recomputing the rest of the document. Falls
-        back to a full re-index for any docs not yet present in ES.
+        Partial-update: append `version` (if given) to each resource's `source_version` list, and optionally
+        set `is_in_latest_source_version`, without recomputing the rest of the document. Never upserts: docs
+        not yet present in ES are full-indexed.
         """
         if get(settings, 'TEST_MODE', False):
             return None
 
         index_name = document()._index._name  # pylint: disable=protected-access
-        params = {'version': version}
+        params = {}
+        if version:
+            params['version'] = version
         if is_in_latest_source_version is not None:
             params['is_in_latest_source_version'] = is_in_latest_source_version
 
@@ -545,6 +549,7 @@ class BaseModel(models.Model):
                     'doc': partial_doc,
                 }
 
+        # No upsert: a doc missing from ES 404s and is full-indexed by batch_index_partial_by_ids' default handler
         return BaseModel.batch_index_partial_by_ids(queryset, document, get_actions, single_batch, parallel)
 
     @staticmethod

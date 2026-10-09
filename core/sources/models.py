@@ -453,7 +453,9 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
             prev_released_version = self.get_prev_released_version()
             if prev_released_version:
-                prev_released_version.index_children_async(user, {'is_in_latest_source_version': False})
+                # Members shared with this release keep their True: the False request leaves them out
+                prev_released_version.index_children_async(
+                    user, {'is_in_latest_source_version': False}, exclude_members_of=self.id)
 
             if only_update:
                 self.index_children_async(user, {'is_in_latest_source_version': True})
@@ -470,9 +472,12 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         """
         if not self.released:
             user = self.updated_by
-            self.index_children_async(user, {'is_in_latest_source_version': False})
-
             latest_released = self.get_latest_released_version()
+            # Members shared with the latest release keep their True: the False request leaves them out
+            self.index_children_async(
+                user, {'is_in_latest_source_version': False},
+                exclude_members_of=latest_released.id if latest_released else None)
+
             if latest_released:
                 latest_released.index_children_async(user, {'is_in_latest_source_version': True})
 
@@ -511,29 +516,35 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         else:
             self.index_children_async(user, {'_append_source_version': self.version})
 
-    def index_children_async(self, user=None, partial_doc=None):
+    def index_children_async(self, user=None, partial_doc=None, exclude_members_of=None):
         user = user or self.updated_by
 
-        self.index_concepts_async(user, partial_doc)
-        self.index_mappings_async(user, partial_doc)
+        self.index_concepts_async(user, partial_doc, exclude_members_of=exclude_members_of)
+        self.index_mappings_async(user, partial_doc, exclude_members_of=exclude_members_of)
 
-    def index_mappings_async(self, user, partial_doc=None):
+    def index_mappings_async(self, user, partial_doc=None, exclude_members_of=None):
         user = user or self.updated_by
 
         task = Task.new(queue='indexing', user=user, name=index_source_mappings.__name__)
+        narrowing = {'exclude_members_of': exclude_members_of} if exclude_members_of else {}
+        celery_args = [(self.id, partial_doc)]
+        if narrowing:
+            celery_args.append(narrowing)
         try:
             index_source_mappings.apply_async(
-                (self.id, partial_doc), queue='indexing', persist_args=True, task_id=task.id
+                *celery_args, queue='indexing', persist_args=True, task_id=task.id
             )
         except AlreadyQueued:
             pass
 
-    def index_concepts_async(self, user, partial_doc=None, locales=None, exclude_locale=None):
+    def index_concepts_async(
+            self, user, partial_doc=None, locales=None, exclude_locale=None, exclude_members_of=None):
         user = user or self.updated_by
 
         task = Task.new(queue='indexing', user=user, name=index_source_concepts.__name__)
         narrowing = {key: value for key, value in {
-            'locales': locales, 'exclude_locale': exclude_locale}.items() if value}
+            'locales': locales, 'exclude_locale': exclude_locale, 'exclude_members_of': exclude_members_of
+        }.items() if value}
         celery_args = [(self.id, partial_doc)]
         if narrowing:
             celery_args.append(narrowing)
@@ -557,6 +568,24 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         transaction.on_commit(lambda: index_source_public_access.apply_async(
             (self.id, ), queue='indexing', persist_args=True, task_id=task.id))
         return task
+
+    def flag_write_is_current(self, partial_doc=None, exclude_members_of=None):
+        """
+        Replay guard for the release-flag writes. A True write is current only while this version is the
+        latest release. A False write for a superseded release is current only while the release that
+        excluded its shared members (exclude_members_of) is still the latest release. Without that
+        exclusion, a False write is current only while this version is not released. Other partial docs
+        are always current.
+        """
+        flag = get(partial_doc, 'is_in_latest_source_version')
+        if flag is None:
+            return True
+        if flag:
+            return bool(self.is_latest_released)
+        if exclude_members_of:
+            excluding = Source.objects.filter(id=exclude_members_of).first()
+            return bool(excluding and excluding.is_latest_released)
+        return not self.released
 
     def sync_concept_vectors_async(self, user=None, recheck=True, countdown=None):
         """

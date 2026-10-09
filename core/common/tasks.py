@@ -706,22 +706,23 @@ def make_hierarchy(concept_map):  # pragma: no cover
 @app.task(ignore_result=True, base=QueueOnceCustomTask)
 def index_source_concepts(  # pylint: disable=too-many-arguments,too-many-locals
         source_id, partial_doc=None, single_batch=False, should_prefetch=True, should_select_related=True,
-        parallel=True, locales=None, exclude_locale=None
+        parallel=True, locales=None, exclude_locale=None, exclude_members_of=None
 ):
     """
     Index source concepts, or partially update existing ES documents when `partial_doc` is supplied.
     A failed partial update falls back to a full reindex -- unless ES was still refusing writes (429 / read-only
     index) after retries: a full reindex would only fail the same way, slower, so the task fails instead.
+    `exclude_members_of` (a source id) leaves out the concepts that are members of that source.
     """
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
-    if source:
+    if source and source.flag_write_is_current(partial_doc, exclude_members_of):
         prefetch = ['sources', 'names', 'descriptions'] if should_prefetch else []
         select_related = [
             'parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'
         ] if should_select_related else []
         narrowed = bool(locales or exclude_locale)
-        queryset = get_concepts_to_index(source, locales, exclude_locale)
+        queryset = get_concepts_to_index(source, locales, exclude_locale, exclude_members_of)
         try:
             if narrowed and not partial_doc and not source.has_semantic_match_algorithm:
                 index_concepts_locale_change(source, queryset, single_batch, parallel)
@@ -824,7 +825,17 @@ def index_in_parts(*parts):
     raise next(ex for ex in failures if not isinstance(ex, BatchIndexingError))
 
 
-def get_concepts_to_index(source, locales=None, exclude_locale=None):
+def exclude_source_members(queryset, source_id):
+    """
+    Leaves out the queryset's rows that are members of source_id. An explicit id__in: Django's exclude(sources=...)
+    correlates on the join table's own row id rather than the resource id, so it leaves the wrong rows out.
+    """
+    through = queryset.model.sources.through
+    member_field = queryset.model._meta.model_name + '_id'
+    return queryset.exclude(id__in=through.objects.filter(source_id=source_id).values(member_field))
+
+
+def get_concepts_to_index(source, locales=None, exclude_locale=None, exclude_members_of=None):
     from core.concepts.models import ConceptName
     queryset = source.concepts
 
@@ -835,6 +846,8 @@ def get_concepts_to_index(source, locales=None, exclude_locale=None):
         queryset = queryset.filter(named_in(locale__in=locales))
     if exclude_locale:
         queryset = queryset.filter(~named_in(locale=exclude_locale))
+    if exclude_members_of:
+        queryset = exclude_source_members(queryset, exclude_members_of)
 
     return queryset
 
@@ -871,33 +884,36 @@ def update_concepts_locale_fields(queryset, single_batch=False, parallel=True):
 
 @app.task(ignore_result=True, base=QueueOnceCustomTask)
 def index_source_mappings(
-        source_id, partial_doc=None, single_batch=False, should_prefetch=True, should_select_related=True, parallel=True
+        source_id, partial_doc=None, single_batch=False, should_prefetch=True, should_select_related=True, parallel=True,
+        exclude_members_of=None
 ):
     """
     Index source mappings, or partially update existing ES documents when `partial_doc` is supplied.
     A failed partial update falls back to a full reindex -- unless ES was still refusing writes (429 / read-only
     index) after retries: a full reindex would only fail the same way, slower, so the task fails instead.
+    `exclude_members_of` (a source id) leaves out the mappings that are members of that source.
     """
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
-    if source:
+    if source and source.flag_write_is_current(partial_doc, exclude_members_of):
         from core.mappings.documents import MappingDocument
         prefetch = ['sources'] if should_prefetch else []
         select_related = [
             'parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'
         ] if should_select_related else []
+        queryset = exclude_source_members(source.mappings, exclude_members_of) if exclude_members_of else source.mappings
         try:
             kwargs = {'partial_doc': partial_doc} if partial_doc else {
                 'prefetch': prefetch, 'select_related': select_related}
             kwargs['single_batch'] = single_batch
             kwargs['parallel'] = parallel
-            batch_index_with_summary(source.batch_index, source.mappings, MappingDocument, **kwargs)
+            batch_index_with_summary(source.batch_index, queryset, MappingDocument, **kwargs)
         except Exception as ex:  # pragma: no cover
             if not partial_doc or (isinstance(ex, BatchIndexingError) and ex.rejected):
                 raise
             logger.exception('Falling back to full mapping reindex for source %s', source_id)
             batch_index_with_summary(
-                source.batch_index, source.mappings, MappingDocument, prefetch=prefetch, select_related=select_related,
+                source.batch_index, queryset, MappingDocument, prefetch=prefetch, select_related=select_related,
                 parallel=parallel)
         finally:
             source.clear_mappings_cache()

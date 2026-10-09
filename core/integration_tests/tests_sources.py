@@ -15,7 +15,8 @@ from core.bundles.models import Bundle
 from core.capabilities.constants import CLONE_RESOURCES_PER_CALL_CAPABILITY_ID
 from core.capabilities.models import UserCapabilityOverride
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
-from core.common.tasks import export_source
+from core.common.models import BaseModel
+from core.common.tasks import export_source, index_source_concepts, index_source_mappings
 from core.common.tests import OCLAPITestCase
 from core.common.utils import get_latest_dir_in_path
 from core.concepts.documents import ConceptDocument
@@ -959,7 +960,7 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(
             index_source_concepts_task_mock.apply_async.mock_calls,
             [
-                call((source_v2.id, {'is_in_latest_source_version': False}),
+                call((source_v2.id, {'is_in_latest_source_version': False}), {'exclude_members_of': self.source_v1.id},
                      queue='indexing', persist_args=True, task_id=ANY),
                 call((self.source_v1.id, {'is_in_latest_source_version': True}),
                      queue='indexing', persist_args=True, task_id=ANY)
@@ -968,7 +969,7 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(
             index_source_mappings_task_mock.apply_async.mock_calls,
             [
-                call((source_v2.id, {'is_in_latest_source_version': False}),
+                call((source_v2.id, {'is_in_latest_source_version': False}), {'exclude_members_of': self.source_v1.id},
                      queue='indexing', persist_args=True, task_id=ANY),
                 call((self.source_v1.id, {'is_in_latest_source_version': True}),
                      queue='indexing', persist_args=True, task_id=ANY)
@@ -1015,7 +1016,7 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
             index_source_concepts_task_mock.apply_async.mock_calls,
             [
                 call(
-                    (self.source_v1.id, {'is_in_latest_source_version': False}),
+                    (self.source_v1.id, {'is_in_latest_source_version': False}), {'exclude_members_of': source_v2.id},
                     queue='indexing', persist_args=True, task_id=ANY),
                 call(
                     (source_v2.id, {'is_in_latest_source_version': True}),
@@ -1025,7 +1026,7 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(
             index_source_mappings_task_mock.apply_async.mock_calls,
             [
-                call((self.source_v1.id, {'is_in_latest_source_version': False}),
+                call((self.source_v1.id, {'is_in_latest_source_version': False}), {'exclude_members_of': source_v2.id},
                      queue='indexing', persist_args=True, task_id=ANY),
                 call((source_v2.id, {'is_in_latest_source_version': True}),
                      queue='indexing', persist_args=True, task_id=ANY)
@@ -3162,3 +3163,115 @@ class SourceVersionsChangelogViewTest(OCLAPITestCase):
                 }
             }
         )
+
+
+class SourceReleaseFlagsTest(OCLAPITestCase):
+    """
+    Release flags (ocl_online#394): the previous release's False write must leave out members shared with the new
+    release, so each member gets exactly one flag write. Test mode makes ES writes no-ops, so these tests capture the
+    queryset each indexing task would write to.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.organization = Organization.objects.first()
+        self.source = OrganizationSourceFactory(organization=self.organization)
+        self.v1 = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v1', released=True)
+        self.v2 = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v2', released=True)
+        self.shared_concept = ConceptFactory(parent=self.source)
+        self.v1_only_concept = ConceptFactory(parent=self.source)
+        self.v2_only_concept = ConceptFactory(parent=self.source)
+        self.shared_concept.sources.add(self.v1, self.v2)
+        self.v1_only_concept.sources.add(self.v1)
+        self.v2_only_concept.sources.add(self.v2)
+
+        self.shared_mapping = MappingFactory(
+            parent=self.source, from_concept=self.shared_concept, to_concept=self.v1_only_concept)
+        self.v1_only_mapping = MappingFactory(
+            parent=self.source, from_concept=self.v1_only_concept, to_concept=self.shared_concept)
+        self.v2_only_mapping = MappingFactory(
+            parent=self.source, from_concept=self.v2_only_concept, to_concept=self.shared_concept)
+        self.shared_mapping.sources.add(self.v1, self.v2)
+        self.v1_only_mapping.sources.add(self.v1)
+        self.v2_only_mapping.sources.add(self.v2)
+
+    @staticmethod
+    def _captured_ids(task, source, partial_doc, exclude_members_of=None):
+        """Ids the task would write to, or None when the task skipped the write."""
+        with patch('core.common.tasks.batch_index_with_summary') as batch_index:
+            task(source.id, partial_doc, exclude_members_of=exclude_members_of)
+        if not batch_index.called:
+            return None
+        return set(batch_index.call_args[0][1].values_list('id', flat=True))
+
+    def _concept_ids(self, source, partial_doc, exclude_members_of=None):
+        return self._captured_ids(index_source_concepts, source, partial_doc, exclude_members_of)
+
+    def _mapping_ids(self, source, partial_doc, exclude_members_of=None):
+        return self._captured_ids(index_source_mappings, source, partial_doc, exclude_members_of)
+
+    def test_release_twice_writes_each_member_exactly_one_flag(self):
+        true_concepts = self._concept_ids(self.v2, {'is_in_latest_source_version': True})
+        false_concepts = self._concept_ids(
+            self.v1, {'is_in_latest_source_version': False}, exclude_members_of=self.v2.id)
+        self.assertEqual(true_concepts, {self.shared_concept.id, self.v2_only_concept.id})
+        self.assertEqual(false_concepts, {self.v1_only_concept.id})
+        self.assertFalse(true_concepts & false_concepts)
+
+        true_mappings = self._mapping_ids(self.v2, {'is_in_latest_source_version': True})
+        false_mappings = self._mapping_ids(
+            self.v1, {'is_in_latest_source_version': False}, exclude_members_of=self.v2.id)
+        self.assertEqual(true_mappings, {self.shared_mapping.id, self.v2_only_mapping.id})
+        self.assertEqual(false_mappings, {self.v1_only_mapping.id})
+        self.assertFalse(true_mappings & false_mappings)
+
+    def test_unrelease_writes_each_member_exactly_one_flag(self):
+        # v2 unreleased, v1 is the latest release: shared members stay True, v2-only members go False
+        self.v2.released = False
+        self.v2.save()
+        false_concepts = self._concept_ids(
+            self.v2, {'is_in_latest_source_version': False}, exclude_members_of=self.v1.id)
+        true_concepts = self._concept_ids(self.v1, {'is_in_latest_source_version': True})
+        self.assertEqual(false_concepts, {self.v2_only_concept.id})
+        self.assertEqual(true_concepts, {self.shared_concept.id, self.v1_only_concept.id})
+        self.assertFalse(true_concepts & false_concepts)
+
+    def test_replayed_flag_write_for_superseded_release_is_skipped(self):
+        v3 = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v3', released=True)
+        self.assertTrue(v3.is_latest_released)
+
+        self.assertIsNone(self._concept_ids(self.v2, {'is_in_latest_source_version': True}))
+        self.assertIsNone(self._mapping_ids(self.v2, {'is_in_latest_source_version': True}))
+        self.assertIsNone(self._concept_ids(
+            self.v1, {'is_in_latest_source_version': False}, exclude_members_of=self.v2.id))
+        self.assertEqual(
+            self._concept_ids(v3, {'is_in_latest_source_version': True}), set())
+
+    def test_current_release_flag_write_after_replay_check_still_runs(self):
+        self.assertEqual(
+            self._concept_ids(self.v2, {'is_in_latest_source_version': True}),
+            {self.shared_concept.id, self.v2_only_concept.id})
+
+    def test_flag_only_write_is_scripted_and_never_upserted(self):
+        with patch.object(BaseModel, 'batch_index_source_version_append') as scripted, \
+                patch.object(BaseModel, 'batch_index_partial') as upserted:
+            BaseModel.batch_index(Concept.objects.none(), ConceptDocument, partial_doc={
+                'is_in_latest_source_version': False})
+
+        upserted.assert_not_called()
+        scripted.assert_called_once()
+        self.assertIsNone(scripted.call_args[0][2])  # version
+        self.assertIs(scripted.call_args[0][3], False)  # flag
+
+    def test_other_partial_docs_are_plain_updates_without_upsert(self):
+        with patch.object(BaseModel, 'batch_index_partial_by_ids') as by_ids:
+            BaseModel.batch_index_partial(Concept.objects.none(), ConceptDocument, False, {'public_can_view': True})
+
+        get_actions = by_ids.call_args[0][2]
+        actions = list(get_actions([1]))
+        self.assertEqual(actions[0]['doc'], {'public_can_view': True})
+        self.assertNotIn('doc_as_upsert', actions[0])
+        self.assertNotIn('on_bulk_error', by_ids.call_args[1])  # default handler full-indexes 404s

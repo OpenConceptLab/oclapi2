@@ -1,12 +1,14 @@
 class ESScript:
-    # script: append the new source version to the list field only if not already present,
+    # script: append the source version to the list field only if not already present (when given),
     # and optionally set is_in_latest_source_version -- avoids recomputing the full document (names,
     # synonyms, mapped codes, embeddings, etc.) when only source-version membership has changed.
     # Use case: Source Version resources indexing
     APPEND_SOURCE_VERSION_SCRIPT = """
-        if (ctx._source.source_version == null) { ctx._source.source_version = []; }
-        if (!ctx._source.source_version.contains(params.version)) {
-            ctx._source.source_version.add(params.version);
+        if (params.containsKey('version')) {
+            if (ctx._source.source_version == null) { ctx._source.source_version = []; }
+            if (!ctx._source.source_version.contains(params.version)) {
+                ctx._source.source_version.add(params.version);
+            }
         }
         if (params.containsKey('is_in_latest_source_version')) {
             ctx._source.is_in_latest_source_version = params.is_in_latest_source_version;
