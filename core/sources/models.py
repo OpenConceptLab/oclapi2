@@ -537,7 +537,7 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         except AlreadyQueued:
             pass
 
-    def index_concepts_async(
+    def index_concepts_async(  # pylint: disable=too-many-arguments
             self, user, partial_doc=None, locales=None, exclude_locale=None, exclude_members_of=None):
         user = user or self.updated_by
 

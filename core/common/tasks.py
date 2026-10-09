@@ -831,7 +831,7 @@ def exclude_source_members(queryset, source_id):
     correlates on the join table's own row id rather than the resource id, so it leaves the wrong rows out.
     """
     through = queryset.model.sources.through
-    member_field = queryset.model._meta.model_name + '_id'
+    member_field = queryset.model._meta.model_name + '_id'  # pylint: disable=protected-access
     return queryset.exclude(id__in=through.objects.filter(source_id=source_id).values(member_field))
 
 
@@ -884,8 +884,8 @@ def update_concepts_locale_fields(queryset, single_batch=False, parallel=True):
 
 @app.task(ignore_result=True, base=QueueOnceCustomTask)
 def index_source_mappings(
-        source_id, partial_doc=None, single_batch=False, should_prefetch=True, should_select_related=True, parallel=True,
-        exclude_members_of=None
+        source_id, partial_doc=None, single_batch=False, should_prefetch=True,
+        should_select_related=True, parallel=True, exclude_members_of=None
 ):
     """
     Index source mappings, or partially update existing ES documents when `partial_doc` is supplied.
@@ -901,7 +901,8 @@ def index_source_mappings(
         select_related = [
             'parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'
         ] if should_select_related else []
-        queryset = exclude_source_members(source.mappings, exclude_members_of) if exclude_members_of else source.mappings
+        queryset = exclude_source_members(
+            source.mappings, exclude_members_of) if exclude_members_of else source.mappings
         try:
             kwargs = {'partial_doc': partial_doc} if partial_doc else {
                 'prefetch': prefetch, 'select_related': select_related}
