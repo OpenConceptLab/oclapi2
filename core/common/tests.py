@@ -1668,14 +1668,14 @@ class BaseModelTest(OCLTestCase):
         partial_mock.assert_not_called()
         full_mock.assert_not_called()
 
-    def test_batch_index_routes_plain_partial_doc(self):
+    def test_batch_index_routes_flag_only_partial_doc_to_scripted_append(self):
         queryset, document = Mock(), Mock()
         with patch.object(BaseModel, 'batch_index_source_version_append') as append_mock:
             with patch.object(BaseModel, 'batch_index_partial') as partial_mock:
                 with patch.object(BaseModel, 'batch_index_full') as full_mock:
                     BaseModel.batch_index(queryset, document, partial_doc={'is_in_latest_source_version': True})
-        partial_mock.assert_called_once_with(queryset, document, False, {'is_in_latest_source_version': True}, True)
-        append_mock.assert_not_called()
+        append_mock.assert_called_once_with(queryset, document, None, True, False, True)
+        partial_mock.assert_not_called()
         full_mock.assert_not_called()
 
     @override_settings(TEST_MODE=False)

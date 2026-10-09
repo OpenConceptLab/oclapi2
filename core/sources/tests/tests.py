@@ -2703,7 +2703,7 @@ class TasksTest(OCLTestCase):
             index_source_concepts_task_mock.apply_async.mock_calls,
             [
                 call(
-                    (source_v1.id, {'is_in_latest_source_version': False}),
+                    (source_v1.id, {'is_in_latest_source_version': False}), {'exclude_members_of': source_v2.id},
                     queue='indexing', persist_args=True, task_id=ANY
                 ),
                 call(
@@ -2716,7 +2716,7 @@ class TasksTest(OCLTestCase):
             index_source_mappings_task_mock.apply_async.mock_calls,
             [
                 call(
-                    (source_v1.id, {'is_in_latest_source_version': False}),
+                    (source_v1.id, {'is_in_latest_source_version': False}), {'exclude_members_of': source_v2.id},
                     queue='indexing', persist_args=True, task_id=ANY
                 ),
                 call(
@@ -2741,7 +2741,9 @@ class TasksTest(OCLTestCase):
         self.assertEqual(
             index_children_async_mock.mock_calls,
             [
-                call(source_v1, source_v2.created_by, {'is_in_latest_source_version': False}),
+                call(
+                    source_v1, source_v2.created_by, {'is_in_latest_source_version': False},
+                    exclude_members_of=source_v2.id),
                 call(
                     source_v2, source_v2.created_by,
                     {'_append_source_version': 'v2', 'is_in_latest_source_version': True}
@@ -2764,7 +2766,9 @@ class TasksTest(OCLTestCase):
         self.assertEqual(
             index_children_async_mock.mock_calls,
             [
-                call(source_v1, source_v2.created_by, {'is_in_latest_source_version': False}),
+                call(
+                    source_v1, source_v2.created_by, {'is_in_latest_source_version': False},
+                    exclude_members_of=source_v2.id),
                 call(source_v2, source_v2.created_by, {'is_in_latest_source_version': True})
             ]
         )
@@ -3007,7 +3011,8 @@ class TasksTest(OCLTestCase):
         # A read-only index (e.g. ES disk flood-stage): the append must fail after backing off, without falling
         # back to a full reindex that ES would reject the same way.
         from elasticsearch import Elasticsearch
-        source = OrganizationSourceFactory()
+        # released and latest: a True write is only applied while its version is the latest release
+        source = OrganizationSourceFactory(released=True)
         ConceptFactory(parent=source)
         ConceptFactory(parent=source)
         concept_ids = list(source.concepts.values_list('id', flat=True))
