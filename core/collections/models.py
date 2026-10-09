@@ -1472,6 +1472,19 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 exclude_refs += [*existing_exclude_refs.all()]
 
         index_concepts = index_mappings = []
+        previous_concept_ids = previous_mapping_ids = set()
+
+        if force_reevaluate and is_adding_all:
+            # from scratch: drop members and version locks, keep the expansion id
+            previous_concept_ids = set(self.concepts.values_list('id', flat=True))
+            previous_mapping_ids = set(self.mappings.values_list('id', flat=True))
+            self.concepts.clear()
+            self.mappings.clear()
+            self.explicit_collection_versions.clear()
+            self.explicit_source_versions.clear()
+            self.evaluated_collection_versions.clear()
+            self.evaluated_source_versions.clear()
+            self.unresolved_repo_versions = []
 
         # attempt_reevaluate is False for delete reference(s)
         should_reevaluate = force_reevaluate or (attempt_reevaluate and not self.is_auto_generated)
@@ -1527,7 +1540,8 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                     )
                     if not existing_evaluated_system_version:
                         existing_evaluated_system_version = self.evaluated_source_versions.filter(
-                            uri__startswith=drop_version(_system_version.uri)
+                            uri__startswith=drop_version(_system_version.uri),
+                            released=True, is_active=True, retired=False
                         ).order_by('-id').first()
                     if existing_evaluated_system_version:
                         _system_version = existing_evaluated_system_version
@@ -1607,7 +1621,27 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             self.save()
         self.dedupe_resources()
         if index:
-            self.index_resources(index_concepts, index_mappings)
+            member_concept_ids = set(self.concepts.values_list('id', flat=True))
+            member_mapping_ids = set(self.mappings.values_list('id', flat=True))
+            candidate_concept_ids = set(index_concepts)
+            candidate_mapping_ids = set(index_mappings)
+            self.index_resources(
+                list(candidate_concept_ids & member_concept_ids), list(candidate_mapping_ids & member_mapping_ids))
+            # rows that left the expansion (dedupe or re-evaluate) are re-indexed from the DB to drop the tags
+            self.full_index_resources(
+                list((candidate_concept_ids | previous_concept_ids) - member_concept_ids),
+                list((candidate_mapping_ids | previous_mapping_ids) - member_mapping_ids)
+            )
+
+    @staticmethod
+    def full_index_resources(concept_ids, mapping_ids):
+        for resource, ids in (('concept', concept_ids), ('mapping', mapping_ids)):
+            if ids:
+                filters = {'id__in': ids}
+                if get(settings, 'TEST_MODE', False):
+                    batch_index_resources(resource, filters)
+                else:
+                    batch_index_resources.apply_async((resource, filters), queue='indexing', permanent=False)
 
     def dedupe_resources(self):
         self.__dedupe_concepts()
