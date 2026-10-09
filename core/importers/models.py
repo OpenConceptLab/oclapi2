@@ -195,12 +195,14 @@ class BaseResourceImporter:
     def retire_resource(self, resource):
         """
         Retires a concept or mapping and keeps the version the retire saved as the instance, marked with the one it
-        superseded, as process() keeps what it saves. The retire clones the latest version, so both are left deferred
-        (_index=False) when the latest version was.
+        superseded, as process() keeps what it saves. Both are left deferred (_index=False) when the latest version
+        was.
         """
         prev_latest = resource.get_latest_version()
         resource.retire(
-            self.user, self.data.get('update_comment') or self.data.get('comment'), self.data.get('retire_reason'))
+            self.user, self.data.get('update_comment') or self.data.get('comment'), self.data.get('retire_reason'),
+            index=get(prev_latest, '_index', True)
+        )
         self.instance = resource.get_latest_version()
         if self.instance:
             self.instance.prev_latest_version_id = get(prev_latest, 'id')

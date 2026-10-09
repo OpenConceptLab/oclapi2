@@ -286,7 +286,6 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             from_source_id=self.from_source_id,
             from_source_url=self.from_source_url,
             from_source_version=self.from_source_version,
-            _index=self._index,
             sort_weight=self.sort_weight
         )
         if to_concept:
@@ -308,6 +307,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     @classmethod
     def create_initial_version(cls, mapping, **kwargs):
         initial_version = mapping.clone()
+        initial_version._index = mapping._index  # pylint: disable=protected-access
         initial_version.created_by = initial_version.updated_by = mapping.created_by
         initial_version.comment = mapping.comment
         initial_version.save(**kwargs)

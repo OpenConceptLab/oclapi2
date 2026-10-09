@@ -1532,6 +1532,41 @@ class ConceptTest(OCLTestCase):
             {'__all__': CONCEPT_IS_ALREADY_NOT_RETIRED}
         )
 
+    @patch.object(Concept, 'index', autospec=True)
+    def test_edit_and_retire_index_versions_cloned_from_deferred_rows(  # pylint: disable=protected-access
+            self, index_mock):
+        source = OrganizationSourceFactory(version=HEAD)
+        concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
+        })
+        rows = Concept.objects.filter(versioned_object_id=concept.id)
+
+        for action in ('edit', 'retire'):
+            rows.update(_index=False)  # as bulk imports leave them
+            concept.refresh_from_db()
+            prev_latest = concept.get_latest_version()
+            index_mock.reset_mock()
+
+            with self.captureOnCommitCallbacks(execute=True):
+                if action == 'edit':
+                    new_version = concept.clone()
+                    new_version.datatype = 'foobar'
+                    self.assertEqual(new_version.save_as_new_version(concept.created_by), {})
+                else:
+                    self.assertEqual(concept.retire(concept.created_by), {})
+
+            prev_latest.refresh_from_db()
+            latest = concept.get_latest_version()
+            self.assertNotEqual(latest.id, prev_latest.id)
+            self.assertTrue(latest._index)
+            self.assertTrue(prev_latest._index)
+            self.assertFalse(prev_latest.is_latest_version)
+            self.assertEqual(
+                {call.args[0].id for call in index_mock.call_args_list}, {latest.id, prev_latest.id})
+
+        self.assertTrue(concept.get_latest_version().retired)
+
     def test_concept_access_changes_with_source(self):
         source = OrganizationSourceFactory(version=HEAD, public_access=ACCESS_TYPE_NONE)
         concept = ConceptFactory(parent=source, public_access=ACCESS_TYPE_NONE)

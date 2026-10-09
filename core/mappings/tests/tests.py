@@ -1,3 +1,4 @@
+from unittest.mock import patch
 from uuid import UUID
 
 import factory
@@ -320,6 +321,42 @@ class MappingTest(OCLTestCase):
         self.assertEqual(
             persisted_mapping.version_url, persisted_mapping.uri
         )
+
+    @patch.object(Mapping, 'index_from_concept')
+    @patch.object(Mapping, 'index', autospec=True)
+    def test_edit_and_retire_index_versions_cloned_from_deferred_rows(  # pylint: disable=protected-access
+            self, index_mock, _):
+        source = OrganizationSourceFactory(version=HEAD)
+        mapping = Mapping.persist_new({
+            **factory.build(dict, FACTORY_CLASS=MappingFactory), 'from_concept': ConceptFactory(parent=source),
+            'to_concept': ConceptFactory(parent=source), 'parent_id': source.id
+        }, source.created_by)
+        rows = Mapping.objects.filter(versioned_object_id=mapping.id)
+
+        for action in ('edit', 'retire'):
+            rows.update(_index=False)  # as bulk imports leave them
+            mapping.refresh_from_db()
+            prev_latest = mapping.get_latest_version()
+            index_mock.reset_mock()
+
+            with self.captureOnCommitCallbacks(execute=True):
+                if action == 'edit':
+                    new_version = mapping.clone(mapping.created_by)
+                    new_version.extras = {'foo': 'bar'}
+                    self.assertEqual(new_version.save_as_new_version(mapping.created_by), {})
+                else:
+                    self.assertEqual(mapping.retire(mapping.created_by), {})
+
+            prev_latest.refresh_from_db()
+            latest = mapping.get_latest_version()
+            self.assertNotEqual(latest.id, prev_latest.id)
+            self.assertTrue(latest._index)
+            self.assertTrue(prev_latest._index)
+            self.assertFalse(prev_latest.is_latest_version)
+            self.assertEqual(
+                {call.args[0].id for call in index_mock.call_args_list}, {latest.id, prev_latest.id})
+
+        self.assertTrue(mapping.get_latest_version().retired)
 
     def test_get_serializer_class(self):
         self.assertEqual(Mapping.get_serializer_class(), MappingListSerializer)
