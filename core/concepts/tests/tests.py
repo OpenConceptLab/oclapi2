@@ -3129,7 +3129,8 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             concept2.errors,
             {
                 'names': [OPENMRS_FULLY_SPECIFIED_NAME_UNIQUE_PER_SOURCE_LOCALE +
-                          ': FullySpecifiedName1 (locale: en, preferred: no)']
+                          ': FullySpecifiedName1 (locale: en, preferred: no)' +
+                          f', conflicts with {source.mnemonic}:c1']
             }
         )
 
@@ -3219,7 +3220,88 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             concept2.errors,
             {
                 'names': [OPENMRS_FULLY_SPECIFIED_NAME_UNIQUE_PER_SOURCE_LOCALE +
-                          ': cerebral malaria (locale: en, preferred: yes)']
+                          ': cerebral malaria (locale: en, preferred: yes)' +
+                          f', conflicts with {source.mnemonic}:cerebral-malaria-existing']
+            }
+        )
+
+    def test_duplicate_fully_specified_name_per_source_should_fail_accent_insensitively(self):
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
+
+        def build_concept(mnemonic, name, locale='en'):
+            return Concept.persist_new(
+                {
+                    'mnemonic': mnemonic,
+                    'version': HEAD,
+                    'parent': source,
+                    'concept_class': 'Diagnosis',
+                    'datatype': 'None',
+                    'names': [
+                        ConceptNameFactory.build(
+                            name=name, locale=locale, locale_preferred=True, type='Fully Specified'
+                        ),
+                    ]
+                }
+            )
+
+        concept1 = build_concept('cafe-existing', 'Café')
+        self.assertEqual(concept1.errors, {})
+
+        for mnemonic, name in [('cafe-lower', 'cafe'), ('cafe-upper', 'CAFE'), ('cafe-upper-accent', 'CAFÉ')]:
+            concept = build_concept(mnemonic, name)
+            self.assertEqual(
+                concept.errors,
+                {
+                    'names': [OPENMRS_FULLY_SPECIFIED_NAME_UNIQUE_PER_SOURCE_LOCALE +
+                              f': {name} (locale: en, preferred: yes), conflicts with {source.mnemonic}:cafe-existing']
+                }
+            )
+            self.assertIsNone(concept.id)
+
+        concept_fr = build_concept('cafe-fr', 'cafe', 'fr')
+        self.assertEqual(concept_fr.errors, {})
+        self.assertIsNotNone(concept_fr.id)
+
+    def test_duplicate_preferred_name_per_source_should_fail_accent_insensitively(self):
+        source = OrganizationSourceFactory(custom_validation_schema=OPENMRS_VALIDATION_SCHEMA, version=HEAD)
+        concept1 = Concept.persist_new(
+            {
+                'mnemonic': 'concept1',
+                'version': HEAD,
+                'parent': source,
+                'concept_class': 'Diagnosis',
+                'datatype': 'None',
+                'names': [
+                    ConceptNameFactory.build(
+                        name='Déjà vu', locale='en', locale_preferred=True, type='Fully Specified'
+                    ),
+                ]
+            }
+        )
+        concept2 = Concept.persist_new(
+            {
+                'mnemonic': 'concept2',
+                'version': HEAD,
+                'parent': source,
+                'concept_class': 'Diagnosis',
+                'datatype': 'None',
+                'names': [
+                    ConceptNameFactory.build(
+                        name='deja vu', locale='en', locale_preferred=True, type='None'
+                    ),
+                    ConceptNameFactory.build(
+                        name='any name', locale='en', locale_preferred=False, type='Fully Specified'
+                    ),
+                ]
+            }
+        )
+
+        self.assertEqual(concept1.errors, {})
+        self.assertEqual(
+            concept2.errors,
+            {
+                'names': [OPENMRS_PREFERRED_NAME_UNIQUE_PER_SOURCE_LOCALE +
+                          f': deja vu (locale: en, preferred: yes), conflicts with {source.mnemonic}:concept1']
             }
         )
 
@@ -3284,7 +3366,8 @@ class OpenMRSConceptValidatorTest(OCLTestCase):
             concept2.errors,
             {
                 'names': [OPENMRS_PREFERRED_NAME_UNIQUE_PER_SOURCE_LOCALE +
-                          ': Concept Non Unique Preferred Name (locale: en, preferred: yes)']
+                          ': Concept Non Unique Preferred Name (locale: en, preferred: yes)' +
+                          f', conflicts with {source.mnemonic}:concept1']
             }
         )
 
