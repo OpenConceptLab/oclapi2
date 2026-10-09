@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 
 from celery.result import AsyncResult
@@ -1404,6 +1405,30 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             return self.version_export_path
         service = get_export_service()
         return service.get_last_key_from_path(self.get_version_export_path(suffix=None)) or self.version_export_path
+
+    def get_export_download_name(self, export_path):
+        """
+        Name a client saves the export under, set on the signed URL:
+        [owner-type]_[owner]_[repo-type]_[repo]_[repo-version]_[expansion]_[lastUpdated].zip
+        lastUpdated is read from the storage key, so the name matches the export's content. A key without one
+        right after this version's prefix gets no name (None), and the download keeps its storage name. Characters
+        that aren't safe in a filename become '-'.
+        """
+        # current (2026-09-30_123456) or legacy (20260930123456) key timestamp, anchored to the prefix because a key
+        # listed under it can be another version's (1.8.24.1's under 1.8.24's)
+        match = re.fullmatch(
+            re.escape(self.get_version_export_path(suffix=None)) + r'(\d{4})-?(\d{2})-?(\d{2})_?(\d{6})\.zip',
+            export_path)
+        if not match:
+            return None
+
+        parts = (get(self, 'expansion_uri') or self.uri).strip('/').split('/')
+        # the uri percent-encodes the version, HEAD's uri has none and an expansion uri follows it with 'expansions',
+        # so the version comes from the model
+        parts[4:6] = [self.version]
+        year, month, day, time_of_day = match.groups()
+        parts.append(f'{year}-{month}-{day}_{time_of_day}')
+        return '_'.join(re.sub(r'[^A-Za-z0-9._@-]+', '-', part) for part in parts) + '.zip'
 
     def has_export(self):
         service = get_export_service()
