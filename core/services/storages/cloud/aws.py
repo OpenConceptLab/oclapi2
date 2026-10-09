@@ -66,10 +66,8 @@ class S3(CloudStorageServiceInterface):
         return file_name_with_ext
 
     def url_for(self, file_path, filename=None):
-        if not file_path:
-            return None
         metadata = {'ResponseContentDisposition': content_disposition_header(True, filename)} if filename else None
-        return self._generate_signed_url(self.GET, file_path, metadata)
+        return self._generate_signed_url(self.GET, file_path, metadata) if file_path else None
 
     def public_url_for(self, file_path):
         url = f"http://{settings.AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com/{file_path}"

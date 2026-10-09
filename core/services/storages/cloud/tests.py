@@ -191,9 +191,6 @@ class S3Test(TestCase):
 
     @mock_aws
     def test_url_for_with_filename(self):
-        _conn = boto3.resource('s3', region_name='us-east-1')
-        _conn.create_bucket(Bucket='oclapi2-dev')
-
         _url = S3().url_for('some/path', filename='orgs_PIH_sources_PIH_1.8.24_2026-09-30_123456.zip')
 
         self.assertIn(
