@@ -20,10 +20,5 @@ def propagate_parent_attributes(sender, instance=None, created=False, **kwargs):
             updated_mappings = instance.mappings_set.exclude(
                 public_access=instance.public_access).update(public_access=instance.public_access)
 
-            partial_doc = {'public_can_view': instance.public_can_view}
-            if updated_concepts:
-                from core.concepts.documents import ConceptDocument
-                instance.batch_index(instance.concepts_set, ConceptDocument, partial_doc=partial_doc)
-            if updated_mappings:
-                from core.mappings.documents import MappingDocument
-                instance.batch_index(instance.mappings_set, MappingDocument, partial_doc=partial_doc)
+            if updated_concepts or updated_mappings:
+                instance._public_access_task = instance.index_public_access_async()  # pylint: disable=protected-access

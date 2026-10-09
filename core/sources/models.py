@@ -15,7 +15,7 @@ from core.common.checksums import VersionCompareMixin
 from core.common.constants import HEAD
 from core.common.models import ConceptContainerModel
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings, \
-    sync_source_concept_vectors, resolve_url_registry_entries
+    sync_source_concept_vectors, resolve_url_registry_entries, index_source_public_access
 from core.common.utils import to_camel_case
 from core.common.validators import validate_non_negative
 from core.concepts.models import ConceptName, Concept
@@ -543,6 +543,20 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             )
         except AlreadyQueued:
             pass
+
+    def index_public_access_async(self, user=None):
+        """
+        Queues the public_can_view re-index of this source's docs once the change is committed, marking the source
+        processing before the response goes out, and returns its Task. In TEST_MODE it runs inline: returns None.
+        """
+        if get(settings, 'TEST_MODE', False):
+            index_source_public_access(self.id)  # pylint: disable=no-value-for-parameter
+            return None
+        task = Task.new(queue='indexing', user=user or self.updated_by, name=index_source_public_access.__name__)
+        self.add_processing(task.id)
+        transaction.on_commit(lambda: index_source_public_access.apply_async(
+            (self.id, ), queue='indexing', persist_args=True, task_id=task.id))
+        return task
 
     def sync_concept_vectors_async(self, user=None, recheck=True, countdown=None):
         """

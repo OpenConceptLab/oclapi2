@@ -1719,17 +1719,42 @@ class BaseModelTest(OCLTestCase):
                 '_index': doc_instance._index._name,  # pylint: disable=protected-access
                 '_id': 10,
                 'doc': {'flag': True},
-                'doc_as_upsert': True
             },
             {
                 '_op_type': 'update',
                 '_index': doc_instance._index._name,  # pylint: disable=protected-access
                 '_id': 11,
                 'doc': {'flag': True},
-                'doc_as_upsert': True
             }
         ])
         self.assertEqual([call.kwargs for call in bulk_calls], [{'raise_on_error': False}])
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.common.models.parallel_bulk', return_value=[(False, {'update': {'_id': 11, 'status': 404}})])
+    def test_batch_index_partial_full_indexes_missing_docs_instead_of_upserting(self, _):
+        ids_queryset = MagicMock()
+        ids_queryset.__getitem__.side_effect = lambda s: [10, 11] if s == slice(0, 500, None) else []
+
+        queryset = Mock()
+        ordered_queryset = Mock()
+        ordered_queryset.values_list.return_value = ids_queryset
+        queryset.order_by.return_value = ordered_queryset
+        missing_queryset = Mock()
+        queryset.filter.return_value = missing_queryset
+
+        doc_instance = Mock()
+        doc_instance.django.auto_refresh = False
+        doc_instance.django.queryset_pagination = None
+        document = Mock(return_value=doc_instance)
+
+        with patch.object(BaseModel, 'batch_index_full') as batch_index_full_mock:
+            BaseModel.batch_index_partial(queryset, document, False, {'public_can_view': False})
+
+        queryset.filter.assert_called_once_with(id__in={11})
+        batch_index_full_mock.assert_called_once_with(
+            single_batch=False, queryset=missing_queryset, document=document, prefetch=[], select_related=[],
+            refresh=False
+        )
 
     @override_settings(TEST_MODE=False)
     @patch('core.common.models.parallel_bulk', return_value=[])

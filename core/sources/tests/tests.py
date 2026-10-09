@@ -24,6 +24,7 @@ from core.common.tasks import seed_children_to_new_version
 from core.common.tasks import update_source_active_concepts_count
 from core.common.tasks import update_source_active_mappings_count
 from core.common.tasks import update_validation_schema
+from core.common.tasks import index_source_public_access
 from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
@@ -129,6 +130,34 @@ class SourceViewsAPITest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         version.refresh_from_db()
         self.assertEqual(version.external_id, 'ext-1')
+
+    @patch('core.sources.models.Source.index_public_access_async')
+    def test_put_public_access_change_returns_202_with_reindex_queued(self, index_public_access_async_mock):
+        source = OrganizationSourceFactory(
+            created_by=self.admin, updated_by=self.admin, public_access=ACCESS_TYPE_VIEW)
+        concept = ConceptFactory(parent=source, public_access=ACCESS_TYPE_VIEW)
+
+        response = self.client.put(
+            source.uri, {'public_access': ACCESS_TYPE_NONE}, format='json',
+            HTTP_AUTHORIZATION=f"Token {self.admin_token}"
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data['public_access'], ACCESS_TYPE_NONE)
+        index_public_access_async_mock.assert_called_once_with()
+        concept.refresh_from_db()
+        self.assertEqual(concept.public_access, ACCESS_TYPE_NONE)
+
+    @patch('core.sources.models.Source.index_public_access_async')
+    def test_put_without_public_access_change_returns_200(self, index_public_access_async_mock):
+        source = OrganizationSourceFactory(created_by=self.admin, updated_by=self.admin)
+        ConceptFactory(parent=source)
+
+        response = self.client.put(
+            source.uri, {'name': 'renamed'}, format='json', HTTP_AUTHORIZATION=f"Token {self.admin_token}")
+
+        self.assertEqual(response.status_code, 200)
+        index_public_access_async_mock.assert_not_called()
 
     def test_version_delete_validation_error(self):
         source = OrganizationSourceFactory(created_by=self.admin, updated_by=self.admin)
@@ -2078,6 +2107,35 @@ class SourceTest(OCLTestCase):
         source = OrganizationSourceFactory()
         source.index_mappings_async(source.created_by)
 
+    @override_settings(TEST_MODE=False)
+    @patch('core.sources.models.index_source_public_access')
+    def test_index_public_access_async_marks_processing_and_queues_on_commit(self, mock_task):
+        mock_task.__name__ = 'index_source_public_access'
+        source = OrganizationSourceFactory()
+
+        with self.captureOnCommitCallbacks(execute=False) as callbacks:
+            task = source.index_public_access_async(source.created_by)
+
+        self.assertEqual(task.name, 'index_source_public_access')
+        self.assertEqual(task.queue, 'indexing')
+        source.refresh_from_db()
+        self.assertEqual(source._background_process_ids, [task.id])  # pylint: disable=protected-access
+        mock_task.apply_async.assert_not_called()
+
+        for callback in callbacks:
+            callback()
+        mock_task.apply_async.assert_called_once_with(
+            (source.id, ), queue='indexing', persist_args=True, task_id=task.id)
+
+    @patch('core.sources.models.index_source_public_access')
+    def test_index_public_access_async_runs_inline_in_test_mode(self, mock_task):
+        source = OrganizationSourceFactory()
+
+        self.assertIsNone(source.index_public_access_async())
+
+        mock_task.assert_called_once_with(source.id)
+        mock_task.apply_async.assert_not_called()
+
     @patch('core.sources.models.index_source_concepts')
     def test_index_concepts_async_swallows_already_queued(self, mock_task):
         mock_task.__name__ = 'index_source_concepts'
@@ -2310,6 +2368,31 @@ class SourceSignalsTest(OCLTestCase):
         mapping.refresh_from_db()
         self.assertEqual(mapping.public_access, ACCESS_TYPE_VIEW)
 
+    @patch('core.sources.models.Source.index_public_access_async')
+    def test_propagate_parent_attributes_queues_public_access_reindex(self, index_public_access_async_mock):
+        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_VIEW)
+        ConceptFactory(parent=source, public_access=ACCESS_TYPE_VIEW)
+
+        source.public_access = ACCESS_TYPE_NONE
+        source._should_update_public_access = True  # pylint: disable=protected-access
+        source.save()
+
+        index_public_access_async_mock.assert_called_once_with()
+        self.assertEqual(
+            source._public_access_task, index_public_access_async_mock.return_value)  # pylint: disable=protected-access
+
+    @patch('core.sources.models.Source.index_public_access_async')
+    def test_propagate_parent_attributes_skips_reindex_without_children_to_update(
+            self, index_public_access_async_mock):
+        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_VIEW)
+
+        source.public_access = ACCESS_TYPE_NONE
+        source._should_update_public_access = True  # pylint: disable=protected-access
+        source.save()
+
+        index_public_access_async_mock.assert_not_called()
+        self.assertFalse(hasattr(source, '_public_access_task'))
+
 
 class SourceCloneAPITest(OCLAPITestCase):
     def test_clone_api_returns_structured_errors_and_rolls_back(self):
@@ -2423,6 +2506,59 @@ class SourceValidationTest(OCLTestCase):
         source = Source(filters=[{'code': 'gender', 'operator': ['='], 'value': 'female', 'extra': 'nope'}])
         with self.assertRaises(ValidationError):
             source.clean_filters()
+
+
+class IndexSourcePublicAccessTaskTest(OCLTestCase):
+    @staticmethod
+    def run_task(source_id, task_id='public-access-task', retries=0):
+        """Runs the task body as a worker would, with this task id and retry count."""
+        index_source_public_access.push_request(id=task_id, retries=retries)
+        try:
+            return index_source_public_access.run(source_id)
+        finally:
+            index_source_public_access.pop_request()
+
+    @patch('core.sources.models.Source.batch_index')
+    def test_sets_public_can_view_on_concepts_and_mappings_while_processing(self, batch_index_mock):
+        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        processing_ids = []
+        batch_index_mock.side_effect = lambda *args, **kwargs: processing_ids.append(
+            Source.objects.get(id=source.id)._background_process_ids)  # pylint: disable=protected-access
+
+        self.run_task(source.id)
+
+        self.assertEqual(batch_index_mock.call_args_list, [
+            call(ANY, ConceptDocument, partial_doc={'public_can_view': False}),
+            call(ANY, MappingDocument, partial_doc={'public_can_view': False}),
+        ])
+        self.assertEqual(processing_ids, [['public-access-task'], ['public-access-task']])
+        source.refresh_from_db()
+        self.assertEqual(source._background_process_ids, [])  # pylint: disable=protected-access
+
+    @patch('core.sources.models.Source.batch_index', side_effect=BatchIndexingError('ES down', {}))
+    def test_stays_processing_when_it_will_be_retried(self, _):
+        source = OrganizationSourceFactory()
+
+        with self.assertRaises(BatchIndexingError):
+            self.run_task(source.id, retries=0)
+
+        source.refresh_from_db()
+        self.assertEqual(source._background_process_ids, ['public-access-task'])  # pylint: disable=protected-access
+
+    @patch('core.sources.models.Source.batch_index', side_effect=BatchIndexingError('ES down', {}))
+    def test_stops_processing_when_out_of_retries(self, _):
+        source = OrganizationSourceFactory()
+
+        with self.assertRaises(BatchIndexingError):
+            self.run_task(source.id, retries=index_source_public_access.max_retries)
+
+        source.refresh_from_db()
+        self.assertEqual(source._background_process_ids, [])  # pylint: disable=protected-access
+
+    @patch('core.sources.models.Source.batch_index')
+    def test_does_nothing_for_missing_source(self, batch_index_mock):
+        self.assertIsNone(self.run_task(0))
+        batch_index_mock.assert_not_called()
 
 
 class TasksTest(OCLTestCase):

@@ -535,6 +535,8 @@ class ConceptDictionaryUpdateMixin(ConceptDictionaryMixin):
             if serializer.is_valid():
                 self.object.get_checksums(recalculate=True)
                 serializer = self.get_detail_serializer(self.object)
+                if get(self.object, '_public_access_task'):
+                    success_status_code = status.HTTP_202_ACCEPTED
                 return Response(serializer.data, status=success_status_code)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
