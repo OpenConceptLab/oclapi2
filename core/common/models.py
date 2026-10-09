@@ -1,7 +1,6 @@
 import logging
 import re
 import time
-from datetime import datetime
 
 from celery.result import AsyncResult
 from celery_once import AlreadyQueued
@@ -1407,30 +1406,23 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         Name a client saves the export under, set on the signed URL:
         [owner-type]_[owner]_[repo-type]_[repo]_[repo-version]_[expansion]_[lastUpdated].zip
         lastUpdated is read from the storage key, so the name matches the export's content. A key without one
-        gets no name (None), and the download keeps its storage name. Characters that aren't safe in a filename
-        become '-'.
+        right after this version's prefix gets no name (None), and the download keeps its storage name. Characters
+        that aren't safe in a filename become '-'.
         """
-        prefix = self.get_version_export_path(suffix=None)
-        key_timestamp = export_path[len(prefix):].removesuffix('.zip') if export_path.startswith(prefix) else ''
-        for key_format in ('%Y-%m-%d_%H%M%S', '%Y%m%d%H%M%S'):
-            try:
-                last_update = datetime.strptime(key_timestamp, key_format).strftime('%Y-%m-%d_%H%M%S')
-                break
-            except ValueError:
-                continue
-        else:
+        # current (2026-09-30_123456) or legacy (20260930123456) key timestamp, anchored to the prefix because a key
+        # listed under it can be another version's (1.8.24.1's under 1.8.24's)
+        match = re.fullmatch(
+            re.escape(self.get_version_export_path(suffix=None)) + r'(\d{4})-?(\d{2})-?(\d{2})_?(\d{6})\.zip',
+            export_path)
+        if not match:
             return None
 
-        owner = self.parent
-        parts = [
-            f'{owner.get_url_kwarg()}s', owner.mnemonic,
-            f'{self.get_resource_url_kwarg()}s', self.mnemonic,
-            self.version,
-        ]
-        expansion = get(self, 'expansion.mnemonic')
-        if expansion:
-            parts.append(expansion)
-        parts.append(last_update)
+        parts = (get(self, 'expansion_uri') or self.uri).strip('/').split('/')
+        # the uri percent-encodes the version, HEAD's uri has none and an expansion uri follows it with 'expansions',
+        # so the version comes from the model
+        parts[4:6] = [self.version]
+        year, month, day, time_of_day = match.groups()
+        parts.append(f'{year}-{month}-{day}_{time_of_day}')
         return '_'.join(re.sub(r'[^A-Za-z0-9._@-]+', '-', part) for part in parts) + '.zip'
 
     def has_export(self):

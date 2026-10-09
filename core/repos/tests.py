@@ -175,12 +175,36 @@ class RepoExportDownloadNameTest(OCLTestCase):
 
         self.assertIsNone(source_v1.get_export_download_name('orgs/PIH/PIH_PIH_v1.8.24.zip'))
 
-    def test_date_like_version_is_not_read_as_the_timestamp(self):
+    def test_date_like_version(self):
         source_v1 = OrganizationSourceFactory(
             organization=OrganizationFactory(mnemonic='PIH'), mnemonic='PIH', version='1.20260930123456')
 
+        self.assertEqual(
+            source_v1.get_export_download_name('orgs/PIH/PIH_PIH_v1.20260930123456.2026-10-01_090000.zip'),
+            'orgs_PIH_sources_PIH_1.20260930123456_2026-10-01_090000.zip'
+        )
         self.assertIsNone(source_v1.get_export_download_name('orgs/PIH/PIH_PIH_v1.20260930123456.zip'))
         self.assertIsNone(source_v1.get_export_download_name('orgs/PIH/PIH_PIH_v1.20260930123456.1.zip'))
+
+    def test_key_of_another_version_gets_no_name(self):
+        source_v1 = OrganizationSourceFactory(
+            organization=OrganizationFactory(mnemonic='PIH'), mnemonic='PIH', version='1.8.24')
+
+        # get_export_path() lists keys by prefix, so 1.8.24's lookup can return 1.8.24.1's export
+        self.assertIsNone(source_v1.get_export_download_name('orgs/PIH/PIH_PIH_v1.8.24.1.2026-10-01_090000.zip'))
+
+    def test_mnemonics_named_expansions(self):
+        collection_v1 = OrganizationCollectionFactory(
+            organization=OrganizationFactory(mnemonic='expansions'), mnemonic='expansions', version='1.0')
+        expansion = ExpansionFactory(collection_version=collection_v1, mnemonic='expansions')
+        collection_v1.expansion_uri = expansion.uri
+        collection_v1.save()
+        export_path = collection_v1.get_version_export_path(suffix='2026-09-30_123456.zip')
+
+        self.assertEqual(
+            collection_v1.get_export_download_name(export_path),
+            'orgs_expansions_collections_expansions_1.0_expansions_2026-09-30_123456.zip'
+        )
 
     def test_unsafe_version_characters_become_hyphens(self):
         source_v1 = OrganizationSourceFactory(
