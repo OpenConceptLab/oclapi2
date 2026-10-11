@@ -9,6 +9,7 @@ from pydash import get, compact, has
 
 from core.common.checksums import ChecksumModel
 from core.common.constants import ISO_639_1, LATEST, HEAD, ALL
+from core.common.db_functions import ImmutableUnaccent
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel, ConceptContainerModel
 from core.common.tasks import process_hierarchy_for_new_concept, process_hierarchy_for_concept_version, \
@@ -185,8 +186,8 @@ class ConceptName(AbstractLocalizedText):
                           condition=Q(locale_preferred=True, retired=False)
                       ),
                       models.Index(
-                          MD5(Upper('name')), 'locale',
-                          name='concept_nam_md5_upper_loc_idx',
+                          MD5(Upper(ImmutableUnaccent('name'))), 'locale',
+                          name='concept_nam_md5_unacc_loc_idx',
                           condition=Q(retired=False)
                       ),
                   ]

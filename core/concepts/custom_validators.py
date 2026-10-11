@@ -4,6 +4,7 @@ from django.db.models.functions import MD5, Upper
 from pydash import get
 
 from core.common.constants import LOOKUP_CONCEPT_CLASSES
+from core.common.db_functions import ImmutableUnaccent
 from core.common.utils import clean_term
 from core.concepts.constants import (
     OPENMRS_MUST_HAVE_EXACTLY_ONE_PREFERRED_NAME,
@@ -94,38 +95,45 @@ class OpenMRSConceptValidator(BaseConceptValidator):
 
         names = [name for name in concept.saved_unsaved_names if getattr(name, attribute)]
         for name in names:
-            if self.no_other_record_has_same_name(name, versioned_object_id, filters):
+            conflicting_concept_id = self.get_conflicting_concept_id(name, versioned_object_id, filters)
+            if conflicting_concept_id is None:
                 continue
 
-            raise ValidationError({'names': [message_with_name_details(error_message, name)]})
+            message = message_with_name_details(error_message, name)
+            raise ValidationError(
+                {'names': [f"{message}, conflicts with {self.repo.mnemonic}:{conflicting_concept_id}"]})
 
-    def no_other_record_has_same_name(self, name, versioned_object_id, filters=None):
+    def get_conflicting_concept_id(self, name, versioned_object_id, filters=None):
         if not self.repo:
-            return True
+            return None
 
         if not filters:
             filters = {}
 
+        # Case and accent insensitive match; MD5 lookup uses concept_nam_md5_unacc_loc_idx.
+        normalized_name = Upper(ImmutableUnaccent(Value(name.name)))
         # Query the localized text row directly so all name constraints apply to the same related record.
-        return not ConceptName.objects.exclude(
+        conflicting_concept_ids = ConceptName.objects.exclude(
             concept__versioned_object_id=versioned_object_id
         ).exclude(
             type__in=(*LOCALES_SHORT, *LOCALES_SEARCH_INDEX_TERM, '', None)
         ).exclude(
             type__isnull=True
         ).alias(
-            name_upper_md5=MD5(Upper('name'))
+            normalized_name=Upper(ImmutableUnaccent('name')),
+            normalized_name_md5=MD5(Upper(ImmutableUnaccent('name')))
         ).filter(
             concept__parent=self.repo,
             concept__is_active=True,
             concept__retired=False,
             concept__is_latest_version=True,
             locale=name.locale,
-            name__iexact=name.name,
-            name_upper_md5=MD5(Upper(Value(name.name))),
+            normalized_name=normalized_name,
+            normalized_name_md5=MD5(normalized_name),
             retired=False,
             **filters
-        ).exists()
+        ).values_list('concept__mnemonic', flat=True)[:1]
+        return next(iter(conflicting_concept_ids), None)
 
     @staticmethod
     def short_name_cannot_be_marked_as_locale_preferred(concept):
