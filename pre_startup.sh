@@ -17,6 +17,11 @@ fi
 
 ./wait_for_it.sh ${REDIS_HOST}:${REDIS_PORT} -t 0
 
+# None of the commands below need the language model or encoder, so skip loading them in each one.
+# This runs in its own bash process (startup.sh), so the server started afterwards still loads them.
+export NO_LM=TRUE
+export NO_ENCODER=TRUE
+
 echo "Running DB migrations"
 python manage.py migrate
 echo "Importing base entities"
