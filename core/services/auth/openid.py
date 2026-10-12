@@ -183,7 +183,7 @@ class OpenIDAuthService(AbstractAuthService):
         return next((user for user in users if user.get('username') == username), None)
 
     @classmethod
-    def update_user_profile(cls, username, first_name, last_name, company, location):
+    def update_user_profile(cls, username, first_name, last_name, company, location):  # pylint: disable=too-many-arguments
         kc_user = cls.get_keycloak_user(username)
         if not kc_user:
             raise LookupError(f'{username} not found in Keycloak')

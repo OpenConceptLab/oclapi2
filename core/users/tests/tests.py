@@ -380,7 +380,7 @@ class KeycloakSyncTest(OCLTestCase):
                 patch('core.services.auth.openid.OpenIDAuthService.is_admin_configured', return_value=True), \
                 patch('core.services.auth.openid.OpenIDAuthService.update_user_profile') as push:
             user.first_name = 'New'
-            user._from_sso = True
+            user._from_sso = True  # pylint: disable=protected-access
             user.save()
         push.assert_not_called()
 
