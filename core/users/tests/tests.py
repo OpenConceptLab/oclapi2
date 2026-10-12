@@ -305,6 +305,106 @@ class UserProfileTest(OCLTestCase):
         self.assertFalse(user.has_perm(MAPPER_USE_PERMISSION))
 
 
+class KeycloakSyncTest(OCLTestCase):
+    def test_sync_adds_and_removes_groups_for_token_only_users_keeping_django_only_groups(self):
+        from core.common.tasks import sync_groups_from_keycloak
+        Group.objects.create(name='kc-a')
+        Group.objects.create(name='kc-b')
+        Group.objects.create(name='django-only')
+        added = UserProfileFactory(username='added')
+        removed = UserProfileFactory(username='removed')
+        removed.groups.set(Group.objects.filter(name__in=['kc-a', 'django-only']))
+
+        with patch('core.services.auth.core.AuthService.is_sso_enabled', return_value=True), \
+                patch('core.services.auth.openid.OpenIDAuthService.is_admin_configured', return_value=True), \
+                patch('core.services.auth.openid.OpenIDAuthService.get_group_memberships',
+                      return_value={'kc-a': {'added'}, 'kc-b': {'added'}, 'unknown': {'removed'}}):
+            self.assertEqual(sync_groups_from_keycloak(), 2)
+
+        self.assertEqual(sorted(added.groups.values_list('name', flat=True)), ['kc-a', 'kc-b'])
+        self.assertEqual(list(removed.groups.values_list('name', flat=True)), ['django-only'])
+
+    def test_sync_dry_run_changes_nothing(self):
+        from core.common.tasks import sync_groups_from_keycloak
+        Group.objects.create(name='kc-a')
+        user = UserProfileFactory(username='dry')
+
+        with patch('core.services.auth.core.AuthService.is_sso_enabled', return_value=True), \
+                patch('core.services.auth.openid.OpenIDAuthService.is_admin_configured', return_value=True), \
+                patch('core.services.auth.openid.OpenIDAuthService.get_group_memberships',
+                      return_value={'kc-a': {'dry'}}):
+            self.assertEqual(sync_groups_from_keycloak(dry_run=True), 1)
+
+        self.assertFalse(user.groups.exists())
+
+    def test_sync_aborts_when_keycloak_fails_or_has_no_matching_group(self):
+        from core.common.tasks import sync_groups_from_keycloak
+        group = Group.objects.create(name='kc-a')
+        user = UserProfileFactory(username='kept')
+        user.groups.add(group)
+
+        with patch('core.services.auth.core.AuthService.is_sso_enabled', return_value=True), \
+                patch('core.services.auth.openid.OpenIDAuthService.is_admin_configured', return_value=True):
+            with patch('core.services.auth.openid.OpenIDAuthService.get_group_memberships',
+                       side_effect=Exception('down')):
+                self.assertEqual(sync_groups_from_keycloak(), 0)
+            with patch('core.services.auth.openid.OpenIDAuthService.get_group_memberships', return_value={}):
+                self.assertEqual(sync_groups_from_keycloak(), 0)
+
+        self.assertEqual(list(user.groups.values_list('name', flat=True)), ['kc-a'])
+
+    def test_sync_is_noop_without_sso_or_admin_config(self):
+        from core.common.tasks import sync_groups_from_keycloak
+        with patch('core.services.auth.openid.OpenIDAuthService.get_group_memberships') as memberships:
+            self.assertEqual(sync_groups_from_keycloak(), 0)
+        memberships.assert_not_called()
+
+    def test_profile_save_pushes_changed_fields_to_keycloak(self):
+        user = UserProfileFactory(first_name='Old', last_name='Name', company='Co', location='Loc')
+
+        with patch('core.services.auth.core.AuthService.is_sso_enabled', return_value=True), \
+                patch('core.services.auth.openid.OpenIDAuthService.is_admin_configured', return_value=True), \
+                patch('core.services.auth.openid.OpenIDAuthService.update_user_profile') as push:
+            user.first_name = 'New'
+            user.save()
+            push.assert_called_once_with(user.username, 'New', 'Name', 'Co', 'Loc')
+            push.reset_mock()
+            user.email = 'x@y.com'
+            user.save()
+            push.assert_not_called()
+
+    def test_profile_save_from_keycloak_claims_is_not_pushed_back(self):
+        user = UserProfileFactory(first_name='Old')
+
+        with patch('core.services.auth.core.AuthService.is_sso_enabled', return_value=True), \
+                patch('core.services.auth.openid.OpenIDAuthService.is_admin_configured', return_value=True), \
+                patch('core.services.auth.openid.OpenIDAuthService.update_user_profile') as push:
+            user.first_name = 'New'
+            user._from_sso = True
+            user.save()
+        push.assert_not_called()
+
+    def test_profile_save_survives_keycloak_failure(self):
+        user = UserProfileFactory(first_name='Old')
+
+        with patch('core.services.auth.core.AuthService.is_sso_enabled', return_value=True), \
+                patch('core.services.auth.openid.OpenIDAuthService.is_admin_configured', return_value=True), \
+                patch('core.services.auth.openid.OpenIDAuthService.update_user_profile',
+                      side_effect=Exception('boom')):
+            user.first_name = 'New'
+            user.save()
+
+        user.refresh_from_db()
+        self.assertEqual(user.first_name, 'New')
+
+    def test_profile_save_not_pushed_without_sso(self):
+        user = UserProfileFactory(first_name='Old')
+        with patch('core.services.auth.openid.OpenIDAuthService.update_user_profile') as push:
+            user.first_name = 'New'
+            user.save()
+        push.assert_not_called()
+
+
 class TokenAuthenticationViewTest(OCLAPITestCase):
     def test_post(self):
         response = self.client.post('/users/login/', {})

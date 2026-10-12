@@ -85,6 +85,7 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         user.set_groups(claims.get('groups', []), _save=False)
 
         if user.is_dirty():
+            user._from_sso = True
             user.save()
             user.set_checksums()
 

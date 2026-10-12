@@ -456,6 +456,22 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
             referenced_object_url=following.url,
         )
 
+    def push_profile_to_keycloak(self):
+        from core.services.auth.core import AuthService
+        from core.services.auth.openid import OpenIDAuthService
+
+        dirty = self.get_dirty_fields()
+        if getattr(self, '_from_sso', False) or not any(
+                field in dirty for field in ('first_name', 'last_name', 'company', 'location')):
+            return
+        if not AuthService.is_sso_enabled() or not OpenIDAuthService.is_admin_configured():
+            return
+        try:
+            OpenIDAuthService.update_user_profile(
+                self.username, self.first_name, self.last_name, self.company, self.location)
+        except Exception as ex:  # pylint: disable=broad-except
+            logger.warning('Could not push profile of user %s to Keycloak: %s', self.id, ex)
+
     def set_groups(self, groups, verify=True, _save=True):
         if not verify or sorted(self.groups.values_list('name', flat=True)) != sorted(groups):
             self.groups.set(Group.objects.filter(name__in=groups))

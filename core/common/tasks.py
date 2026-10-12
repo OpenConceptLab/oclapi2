@@ -1220,3 +1220,45 @@ def collection_version_compare(
 def expansion_compare(expansion1_uri, expansion2_uri, is_changelog, verbosity, format_type='json'):
     from core.collections.models import Expansion
     return Expansion.run_diff(expansion1_uri, expansion2_uri, is_changelog, verbosity, format_type)
+
+
+def sync_groups_from_keycloak(dry_run=False):
+    """Replaces users' Keycloak-managed groups with their Keycloak membership; no-op if Keycloak can't be read."""
+    from django.contrib.auth.models import Group
+    from core.services.auth.core import AuthService
+    from core.services.auth.openid import OpenIDAuthService
+    from core.users.models import UserProfile
+
+    if not AuthService.is_sso_enabled() or not OpenIDAuthService.is_admin_configured():
+        return 0
+
+    try:
+        memberships = OpenIDAuthService.get_group_memberships()
+    except Exception as ex:  # pylint: disable=broad-except
+        logger.warning('Keycloak group sync aborted, could not read Keycloak: %s', ex)
+        return 0
+
+    managed = set(Group.objects.filter(name__in=memberships.keys()).values_list('name', flat=True))
+    if not managed:
+        logger.warning('Keycloak group sync aborted, no Keycloak group matches a Django group')
+        return 0
+
+    keycloak_usernames = set().union(*(memberships[name] for name in managed))
+    users = UserProfile.objects.filter(is_active=True).filter(
+        username__in=keycloak_usernames) | UserProfile.objects.filter(is_active=True, groups__name__in=managed)
+
+    changed = 0
+    for user in users.distinct():
+        current = set(user.groups.values_list('name', flat=True))
+        expected = (current - managed) | {name for name in managed if user.username in memberships[name]}
+        if current != expected:
+            changed += 1
+            logger.info('Keycloak group sync: user %s %s -> %s', user.id, sorted(current), sorted(expected))
+            if not dry_run:
+                user.set_groups(list(expected))
+    return changed
+
+
+@app.task(ignore_result=True)
+def sync_keycloak_groups():
+    return sync_groups_from_keycloak()
