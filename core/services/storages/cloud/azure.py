@@ -19,7 +19,8 @@ class BlobStorage(CloudStorageServiceInterface):
     def public_url_for(self, file_path):
         return f"https://{self.account_name}.blob.core.windows.net/{self.container_name}/{file_path}"
 
-    def url_for(self, file_path):
+    def url_for(self, file_path, filename=None):  # pylint: disable=unused-argument
+        # an unsigned blob URL can't carry a download name, so filename is ignored
         return self.public_url_for(file_path)
 
     def exists(self, key):

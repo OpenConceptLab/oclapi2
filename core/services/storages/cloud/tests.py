@@ -189,6 +189,17 @@ class S3Test(TestCase):
             'X-Amz-Expires=' in _url
         )
 
+    @mock_aws
+    def test_url_for_with_filename(self):
+        _url = S3().url_for('some/path', filename='orgs_PIH_sources_PIH_1.8.24_2026-09-30_123456.zip')
+
+        self.assertIn(
+            'response-content-disposition=attachment%3B%20filename%3D%22'
+            'orgs_PIH_sources_PIH_1.8.24_2026-09-30_123456.zip%22',
+            _url
+        )
+        self.assertIn('&X-Amz-Signature=', _url)
+
     def test_public_url_for(self):
         self.assertEqual(
             S3().public_url_for('some/path').replace('https://', 'http://'),
@@ -451,7 +462,23 @@ class MinIOTest(TestCase):
         # Assert that the URL is generated correctly
         self.assertEqual(url, "http://mock_url")
         mock_client.get_presigned_url.assert_called_once_with(method='GET', bucket_name="bucket",
-                                                              object_name=file_key)
+                                                              object_name=file_key, response_headers=None)
+
+    @patch("core.services.storages.cloud.minio.Minio")
+    def test_url_for_with_filename(self, mock_minio_client):
+        mock_client = mock_minio_client.return_value
+        mock_client.get_presigned_url = MagicMock(return_value="http://mock_url")
+
+        url = MinIO().url_for('test-file.zip', filename='orgs_PIH_sources_PIH_1.8.24_2026-09-30_123456.zip')
+
+        self.assertEqual(url, "http://mock_url")
+        mock_client.get_presigned_url.assert_called_once_with(
+            method='GET', bucket_name="bucket", object_name='test-file.zip',
+            response_headers={
+                'response-content-disposition':
+                    'attachment; filename="orgs_PIH_sources_PIH_1.8.24_2026-09-30_123456.zip"'
+            }
+        )
 
     @patch("core.services.storages.cloud.minio.Minio", Mock())
     def test_public_url_for(self):

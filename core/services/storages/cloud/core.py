@@ -21,9 +21,9 @@ class CloudStorageServiceInterface:
         Uploads base64 file content to file_name
         """
 
-    def url_for(self, file_path):
+    def url_for(self, file_path, filename=None):
         """
-        Returns signed url for file_path
+        Returns signed url for file_path; filename, if given, is the download name the response carries
         """
 
     def public_url_for(self, file_path):

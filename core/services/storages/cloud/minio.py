@@ -2,6 +2,7 @@ import base64
 import mimetypes
 from io import BytesIO
 
+from django.utils.http import content_disposition_header
 from minio import Minio, S3Error
 from minio.deleteobjects import DeleteObject
 from pydash import get
@@ -85,15 +86,19 @@ class MinIO(CloudStorageServiceInterface):
         except S3Error as e:
             raise Exception(f"Could not upload base64 file {file_name_with_ext} to MinIO. Error: {e}") from e  # pylint: disable=broad-exception-raised
 
-    def url_for(self, file_path):
+    def url_for(self, file_path, filename=None):
         """
         Generates a presigned URL for the given file using the external client so the
         signature is computed with the publicly accessible host (MINIO_EXTERNAL_ENDPOINT).
         Falls back to the internal client when no external endpoint is configured.
+        filename, if given, is the download name the response carries.
         """
+        response_headers = {
+            'response-content-disposition': content_disposition_header(True, filename)
+        } if filename else None
         try:
             return self._presign_client.get_presigned_url(
-                method='GET', bucket_name=self.bucket_name, object_name=file_path
+                method='GET', bucket_name=self.bucket_name, object_name=file_path, response_headers=response_headers
             ) if file_path else None
         except S3Error as e:
             raise Exception(f"Could not generate presigned URL for file {file_path}. Error: {e}") from e  # pylint: disable=broad-exception-raised
