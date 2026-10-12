@@ -794,7 +794,7 @@ class UserDetailViewTest(OCLAPITestCase):
 
         response = self.client.put(
             '/user/',
-            {'username': 'someone-else', 'company': 'Some Company'},
+            {'username': 'someone-else', 'company': 'Some Company', 'password': 'newpassword123'},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
@@ -804,6 +804,8 @@ class UserDetailViewTest(OCLAPITestCase):
         self.user.refresh_from_db()
         self.assertEqual(self.user.username, username)
         self.assertNotEqual(self.user.company, 'Some Company')
+        self.assertFalse(self.user.check_password('newpassword123'))
+        self.assertTrue(Token.objects.filter(key=self.token, user=self.user).exists())
         self.assertFalse(UserProfile.objects.filter(username='someone-else').exists())
 
     @patch('core.services.auth.core.AuthService.is_sso_enabled')
