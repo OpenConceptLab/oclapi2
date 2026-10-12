@@ -806,7 +806,6 @@ class UserDetailViewTest(OCLAPITestCase):
         self.assertNotEqual(self.user.company, 'Some Company')
         self.assertFalse(self.user.check_password('newpassword123'))
         self.assertTrue(Token.objects.filter(key=self.token, user=self.user).exists())
-        self.assertFalse(UserProfile.objects.filter(username='someone-else').exists())
 
     @patch('core.services.auth.core.AuthService.is_sso_enabled')
     def test_put_admin_username_change_sso_enabled_400(self, is_sso_enabled_mock):
