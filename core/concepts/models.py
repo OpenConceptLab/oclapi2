@@ -1570,12 +1570,12 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         def trim_to_max_results():
             build_result()
-            kept_concept_ids = {self.id} | set(
-                result['concepts'].exclude(id=self.id).order_by('id').values_list('id', flat=True)[:max_results - 1]
-            )
+            # the root always stays; mappings first, as in the hierarchy view
             kept_mapping_ids = set(
-                result['mappings'].order_by('id').values_list('id', flat=True)[
-                    :max(max_results - len(kept_concept_ids), 0)]
+                result['mappings'].order_by('id').values_list('id', flat=True)[:max(max_results - 1, 0)])
+            kept_concept_ids = {self.id} | set(
+                result['concepts'].exclude(id=self.id).order_by('id').values_list('id', flat=True)[
+                    :max(max_results - 1 - len(kept_mapping_ids), 0)]
             )
             concept_ids.intersection_update(kept_concept_ids)
             mapping_ids.intersection_update(kept_mapping_ids)
@@ -1664,14 +1664,15 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         collected = [1]  # the root
 
         def fit_to_budget(concept_ids, mappings):
-            room = max_results - collected[0]
+            # mappings first: clients list them as the concept's associations, and each one names its target
+            room = max(max_results - collected[0], 0)
             mappings_count = mappings.count()
-            collected[0] += min(len(concept_ids) + mappings_count, max(room, 0))
-            if len(concept_ids) + mappings_count > room:
+            total = len(concept_ids) + mappings_count
+            collected[0] += min(total, room)
+            if total > room:
                 stopped.append(True)
-                concept_ids = sorted(concept_ids)[:max(room, 0)]
-                mappings = Mapping.objects.filter(id__in=list(
-                    mappings.order_by('id').values_list('id', flat=True)[:max(room - len(concept_ids), 0)]))
+                mappings = mappings.filter(id__in=list(mappings.values_list('id', flat=True)[:room]))
+                concept_ids = sorted(concept_ids)[:room - min(mappings_count, room)]
             return concept_ids, mappings
 
         def iterate(level):
@@ -1696,6 +1697,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                     concept_ids = list(
                         cascaded_entries['concepts'].union(
                             cascaded_entries['hierarchy_concepts']).values_list('id', flat=True))
+                    if omit_concepts_criteria:  # count only the concepts the response keeps
+                        concept_ids = list(Concept.objects.filter(id__in=concept_ids).exclude(
+                            omit_concepts_criteria).values_list('id', flat=True))
                     mappings = cascaded_entries['mappings'].exclude(omit_mappings_criteria)
                     if max_results_strict and max_results is not None:
                         concept_ids, mappings = fit_to_budget(concept_ids, mappings)
@@ -1704,7 +1708,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                     cascaded_entries['mappings'] = mappings
 
                     concept.cascaded_entries = cascaded_entries
-                    concept_has_entries = has_entries(cascaded_entries)
+                    concept_has_entries = has_entries(cascaded_entries) or bool(stopped)  # trimmed, not empty
                     cascaded[concept.id] = concept_has_entries
                     concept.terminal = not concept_has_entries
                     if level == 1 and cascade_levels != ALL:  # last level, when cascadeLevels are finite

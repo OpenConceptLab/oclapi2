@@ -2024,6 +2024,39 @@ class ConceptTest(OCLTestCase):
         self.assertFalse(root.cascade_as_hierarchy(
             repo_version=source, max_results=100, max_results_strict=True).cascade_truncated)
 
+    def test_cascade_strict_max_results_keeps_mappings_over_concepts_reverse(self):
+        source = OrganizationSourceFactory()
+        answer = ConceptFactory(parent=source)
+        for _ in range(30):
+            MappingFactory(
+                from_concept=ConceptFactory(parent=source), to_concept=answer, parent=source, map_type='Q-AND-A')
+
+        result = answer.cascade(
+            repo_version=source, reverse=True, cascade_levels=1, max_results=40, max_results_strict=True)
+        self.assertEqual(result['mappings'].count(), 30)
+        self.assertEqual(result['concepts'].count(), 10)  # the root and 9 referring concepts
+        self.assertTrue(result['truncated'])
+
+        answer = Concept.objects.get(id=answer.id)
+        capped = answer.cascade_as_hierarchy(
+            repo_version=source, reverse=True, cascade_levels=1, max_results=40, max_results_strict=True)
+        self.assertEqual(capped.cascaded_entries['mappings'].count(), 30)
+        self.assertEqual(len(capped.cascaded_entries['concepts']), 9)
+        self.assertTrue(capped.cascade_truncated)
+
+    def test_cascade_as_hierarchy_trimmed_concept_is_not_terminal(self):
+        source = OrganizationSourceFactory()
+        root = ConceptFactory(parent=source)
+        child = ConceptFactory(parent=source)
+        MappingFactory(from_concept=root, to_concept=child, parent=source, map_type='Q-AND-A')
+        MappingFactory(
+            from_concept=child, to_concept=ConceptFactory(parent=source), parent=source, map_type='Q-AND-A')
+
+        capped = root.cascade_as_hierarchy(repo_version=source, max_results=3, max_results_strict=True)  # exact fit
+        trimmed = list(capped.cascaded_entries['concepts'])[0]
+        self.assertTrue(capped.cascade_truncated)
+        self.assertFalse(trimmed.terminal)  # it has descendants that were cut, so not a leaf
+
     def test_cascade_as_hierarchy(self):
         source = OrganizationSourceFactory()
         root = ConceptFactory(parent=source, mnemonic='root')
