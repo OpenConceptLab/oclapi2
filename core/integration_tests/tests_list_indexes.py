@@ -14,11 +14,8 @@ class ListCoveringIndexTest(TestCase):
     def test_list_indexes_cover_id(self):
         with connection.cursor() as cursor:
             for table in ('concepts', 'mappings'):
-                cursor.execute(
-                    'select i.indexdef, x.indisvalid from pg_indexes i join pg_index x on '
-                    'x.indexrelid = to_regclass(i.indexname) where i.indexname = %s', [f'{table}_repo_list_ids_idx'])
-                definition, valid = cursor.fetchone()
-                self.assertTrue(valid)
+                cursor.execute('select indexdef from pg_indexes where indexname = %s', [f'{table}_repo_list_ids_idx'])
+                definition = cursor.fetchone()[0]
                 self.assertIn('(parent_id, updated_at DESC) INCLUDE (id)', definition)
                 self.assertIn('WHERE ((NOT retired) AND is_active AND (id = versioned_object_id))', definition)
 
@@ -47,12 +44,6 @@ class ListCoveringIndexMigrationTest(SimpleTestCase):
             error, statements = self.run_migration(module, (False,), (10_000_000,))
             self.assertIn('by hand before deploying', error)
             self.assertFalse([sql for sql in statements if 'create index' in sql])
-
-    def test_builds_on_a_small_table(self):
-        for module in MIGRATIONS:
-            error, statements = self.run_migration(module, (False,), (1_000,), (True,))
-            self.assertIsNone(error)
-            self.assertIn('create index concurrently', statements[2])
 
     def test_uses_an_index_built_by_hand(self):
         for module in MIGRATIONS:

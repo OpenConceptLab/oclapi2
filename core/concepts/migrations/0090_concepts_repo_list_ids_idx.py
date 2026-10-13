@@ -12,10 +12,9 @@ from django.db import migrations
 
 TABLE = 'concepts'
 NEW_INDEX = 'concepts_repo_list_ids_idx'
-PREDICATE = 'not retired and is_active and id = versioned_object_id'
 CREATE_NEW_INDEX = (
     f'create index concurrently if not exists {NEW_INDEX} on {TABLE} (parent_id, updated_at desc) include (id) '
-    f'where {PREDICATE};'
+    'where not retired and is_active and id = versioned_object_id;'
 )
 MAX_ROWS_TO_BUILD_HERE = 3_000_000
 
