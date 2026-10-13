@@ -22,12 +22,13 @@ class ListCoveringIndexTest(TestCase):
                 self.assertIn('(parent_id, updated_at DESC) INCLUDE (id)', definition)
                 self.assertIn('WHERE ((NOT retired) AND is_active AND (id = versioned_object_id))', definition)
 
+                # the old index stays until EXPLAIN in production shows the new one in use (a later migration)
                 cursor.execute('select to_regclass(%s)', [f'{table}_repo_list_idx'])
-                self.assertIsNone(cursor.fetchone()[0])
+                self.assertIsNotNone(cursor.fetchone()[0])
 
 
 class ListCoveringIndexMigrationTest(SimpleTestCase):
-    """The migrations never build on a production-sized table, and never drop the old index for an invalid one."""
+    """The migrations never build on a production-sized table, and never accept an invalid index."""
     @staticmethod
     def run_migration(module, *answers):
         cursor = MagicMock()
@@ -36,7 +37,7 @@ class ListCoveringIndexMigrationTest(SimpleTestCase):
         schema_editor.connection.cursor.return_value.__enter__.return_value = cursor
         error = None
         try:
-            importlib.import_module(module).replace_index(None, schema_editor)
+            importlib.import_module(module).add_index(None, schema_editor)
         except RuntimeError as ex:
             error = str(ex)
         return error, [call.args[0] for call in cursor.execute.call_args_list]
@@ -45,24 +46,27 @@ class ListCoveringIndexMigrationTest(SimpleTestCase):
         for module in MIGRATIONS:
             error, statements = self.run_migration(module, (False,), (10_000_000,))
             self.assertIn('by hand before deploying', error)
-            self.assertFalse([sql for sql in statements if 'create index' in sql or 'drop index' in sql])
+            self.assertFalse([sql for sql in statements if 'create index' in sql])
 
     def test_builds_on_a_small_table(self):
         for module in MIGRATIONS:
             error, statements = self.run_migration(module, (False,), (1_000,), (True,))
             self.assertIsNone(error)
             self.assertIn('create index concurrently', statements[2])
-            self.assertIn('drop index concurrently', statements[-1])
 
     def test_uses_an_index_built_by_hand(self):
         for module in MIGRATIONS:
             error, statements = self.run_migration(module, (True,), (True,))
             self.assertIsNone(error)
             self.assertFalse([sql for sql in statements if 'create index' in sql])
-            self.assertIn('drop index concurrently', statements[-1])
 
-    def test_keeps_the_old_index_when_the_new_one_is_invalid(self):
+    def test_stops_on_an_invalid_index(self):
         for module in MIGRATIONS:
-            error, statements = self.run_migration(module, (True,), (False,))
+            error, _ = self.run_migration(module, (True,), (False,))
             self.assertIn('INVALID', error)
-            self.assertFalse([sql for sql in statements if 'drop index' in sql])
+
+    def test_never_drops_an_index_going_forward(self):
+        for module in MIGRATIONS:
+            for answers in (((False,), (1_000,), (True,)), ((True,), (True,)), ((True,), (False,))):
+                _, statements = self.run_migration(module, *answers)
+                self.assertFalse([sql for sql in statements if 'drop index' in sql])
