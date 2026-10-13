@@ -8,20 +8,15 @@ from core.users.models import UserProfile
 
 class LoadFixturesCommandTest(OCLTestCase):
     def test_keeps_an_existing_ocl_org(self):
-        org = Organization.objects.get(id=1)
-        org.name = 'Open Concept Lab'
-        org.text = '<p>About OCL</p>'
-        org.description = 'Shared reference content'
-        org.overview = {'background': {'image': 'https://example.org/banner.png'}}
-        org.save()
+        edits = {
+            'name': 'Open Concept Lab', 'text': '<p>About OCL</p>', 'description': 'Shared reference content',
+            'overview': {'background': {'image': 'https://example.org/banner.png'}},
+        }
+        Organization.objects.filter(id=1).update(**edits)
 
         call_command('load_fixtures', verbosity=0)
 
-        org.refresh_from_db()
-        self.assertEqual(org.name, 'Open Concept Lab')
-        self.assertEqual(org.text, '<p>About OCL</p>')
-        self.assertEqual(org.description, 'Shared reference content')
-        self.assertEqual(org.overview, {'background': {'image': 'https://example.org/banner.png'}})
+        self.assertEqual(Organization.objects.filter(id=1).values(*edits).get(), edits)
 
     def test_reloads_the_other_fixtures(self):
         Capability.objects.filter(id=1).update(description='changed')

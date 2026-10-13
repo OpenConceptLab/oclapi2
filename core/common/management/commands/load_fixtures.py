@@ -15,8 +15,6 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         fixtures = sorted(glob(os.path.join(FIXTURES_DIR, '*')))
-        # loaddata overwrites an existing row in full, which reset the OCL org's text, logo and overview
-        # to their defaults on every deploy (OpenConceptLab/ocl_issues#2911). Seed it on a new database only.
         if Organization.objects.filter(id=1).exists():
             fixtures.remove(OCL_ORG)
         call_command('loaddata', *fixtures, verbosity=options['verbosity'])
