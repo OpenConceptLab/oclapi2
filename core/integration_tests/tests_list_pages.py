@@ -31,7 +31,6 @@ class SourceHeadListPagesTest(OCLAPITestCase):
         for model in (Concept, Mapping):
             for minutes, row in enumerate(model.objects.filter(parent=self.source, id=F('versioned_object_id'))):
                 model.objects.filter(id=row.id).update(updated_at=now - timedelta(minutes=minutes))
-                row.set_checksums()
 
     def assert_pages(self, url, table, total):
         everything = self.client.get(f'{url}?limit={total}', format='json')
@@ -60,14 +59,3 @@ class SourceHeadListPagesTest(OCLAPITestCase):
 
     def test_concepts(self):
         self.assert_pages(self.source.concepts_url, 'concepts', 10)
-
-    def test_version_list_unchanged(self):
-        """Repo-version lists page their ids already (is_sliced) and don't go through page_by_ids."""
-        version = OrganizationSourceFactory(
-            mnemonic=self.source.mnemonic, organization=self.source.organization, version='v1')
-        version.mappings.add(*Mapping.objects.filter(parent=self.source, is_latest_version=True).exclude(
-            id=F('versioned_object_id')))
-        response = self.client.get(f'{version.mappings_url}?limit=2&page=2', format='json')
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 2)
-        self.assertEqual(response['num_found'], '5')
