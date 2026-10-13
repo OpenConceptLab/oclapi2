@@ -988,6 +988,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return self.sources.exclude(version=HEAD).order_by('-created_at').first()
 
     def get_source_version_before_creation(self):
+        if hasattr(self, '_latest_source_version') and not self._latest_source_version:
+            return None  # load_list_fields found no released version holding this row
         return self.sources.exclude(version=HEAD).filter(
             created_at__lte=self.created_at).order_by('-created_at').first()
 

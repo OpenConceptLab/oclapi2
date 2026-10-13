@@ -11,6 +11,8 @@ from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from mock import ANY
+from rest_framework.request import Request
+from rest_framework.test import APIRequestFactory
 
 from core.bundles.models import Bundle
 from core.sources.models import CloneLimitExceeded
@@ -4254,3 +4256,24 @@ class ConceptListQueryCountTest(OCLAPITestCase):
 
         for row, instance in zip(data, rows):
             self.assertEqual(row['latest_source_version'], 'v2' if instance.id in self.in_v2 else 'v1')
+
+    def test_revisions_in_no_released_version(self):
+        """Search results can hold revisions saved since the last release: no per-row lookup for those either."""
+        self.v1.concepts.clear()
+        self.v2.concepts.clear()
+        revisions = list(Concept.objects.filter(parent=self.source, is_latest_version=True).exclude(
+            id=F('versioned_object_id')).order_by('id'))
+        context = {'request': Request(APIRequestFactory().get('/'))}
+
+        def serialize(rows):  # fetched as search results are: by id, names prefetched
+            rows = list(
+                Concept.objects.filter(id__in=[row.id for row in rows]).prefetch_related('names').order_by('id'))
+            with CaptureQueriesContext(connection) as queries:
+                data = ConceptListSerializer(rows, many=True, context=context).data
+            return data, len(queries.captured_queries)
+
+        _, small_page_queries = serialize(revisions[:2])
+        data, page_queries = serialize(revisions)
+        self.assertEqual(page_queries, small_page_queries)
+        self.assertEqual(data, [ConceptListSerializer(row, context=context).data for row in revisions])
+        self.assertEqual({row['latest_source_version'] for row in data}, {None})
