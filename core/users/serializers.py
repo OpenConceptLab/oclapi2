@@ -273,6 +273,14 @@ class UserDetailSerializer(PrivateUserFieldsMixin, AbstractResourceSerializer):
 
         return None
 
+    def validate_username(self, value):
+        from core.services.auth.core import AuthService
+        # Under SSO, Keycloak owns usernames and OIDC sign-in matches accounts on them, so no caller can change one.
+        if AuthService.is_sso_enabled() and self.instance and value != self.instance.username:
+            raise serializers.ValidationError(
+                'Single Sign On is enabled in this environment. Cannot change username via API.')
+        return value
+
     def update(self, instance, validated_data):
         request_user = self.context['request'].user
         instance.email = validated_data.get('email', instance.email)

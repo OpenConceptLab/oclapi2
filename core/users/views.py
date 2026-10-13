@@ -463,10 +463,12 @@ class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.Updat
         return instance
 
     def put(self, request, *args, **kwargs):
-        obj = self.get_object()
-        obj.update_password(request.data.get('password'), request.data.get('hashed_password'))
-
         return self.partial_update(request, *args, **kwargs)
+
+    def perform_update(self, serializer):
+        # runs once the request is valid, so a refused update leaves the password and token alone
+        serializer.instance.update_password(self.request.data.get('password'), self.request.data.get('hashed_password'))
+        super().perform_update(serializer)
 
     def delete(self, request, *args, **kwargs):
         obj = self.get_object()

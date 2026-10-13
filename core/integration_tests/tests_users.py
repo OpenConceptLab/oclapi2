@@ -787,6 +787,73 @@ class UserDetailViewTest(OCLAPITestCase):
         self.assertTrue(self.user.check_password('newpassword123'))
         self.assertEqual(self.user.email, 'user@user.com')
 
+    @patch('core.services.auth.core.AuthService.is_sso_enabled')
+    def test_put_self_username_change_sso_enabled_400(self, is_sso_enabled_mock):
+        is_sso_enabled_mock.return_value = True
+        username = self.user.username
+
+        response = self.client.put(
+            '/user/',
+            {'username': 'someone-else', 'company': 'Some Company', 'password': 'newpassword123'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('username', response.data)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, username)
+        self.assertNotEqual(self.user.company, 'Some Company')
+        self.assertFalse(self.user.check_password('newpassword123'))
+        self.assertTrue(Token.objects.filter(key=self.token, user=self.user).exists())
+
+    @patch('core.services.auth.core.AuthService.is_sso_enabled')
+    def test_put_admin_username_change_sso_enabled_400(self, is_sso_enabled_mock):
+        is_sso_enabled_mock.return_value = True
+        username = self.user.username
+
+        response = self.client.put(
+            f'/users/{username}/',
+            {'username': 'someone-else'},
+            HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('username', response.data)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, username)
+
+    @patch('core.services.auth.core.AuthService.is_sso_enabled')
+    def test_put_unchanged_username_sso_enabled_200(self, is_sso_enabled_mock):
+        is_sso_enabled_mock.return_value = True
+
+        response = self.client.put(
+            '/user/',
+            {'username': self.user.username, 'company': 'Some Company'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.company, 'Some Company')
+
+    @patch('core.services.auth.core.AuthService.is_sso_enabled')
+    def test_put_username_change_sso_disabled_200(self, is_sso_enabled_mock):
+        is_sso_enabled_mock.return_value = False
+
+        response = self.client.put(
+            '/user/',
+            {'username': 'renamed-user'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, 'renamed-user')
+
     def test_delete_self_405(self):
         response = self.client.delete(
             f'/users/{self.superuser.username}/',
