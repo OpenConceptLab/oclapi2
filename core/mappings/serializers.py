@@ -7,7 +7,7 @@ from core.common.constants import MAPPING_LOOKUP_CONCEPTS, MAPPING_LOOKUP_SOURCE
     MAPPING_LOOKUP_TO_CONCEPT, MAPPING_LOOKUP_FROM_SOURCE, MAPPING_LOOKUP_TO_SOURCE, INCLUDE_EXTRAS_PARAM, \
     INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS, INCLUDE_VERBOSE_REFERENCES
 from core.common.fields import EncodedDecodedCharField
-from core.common.serializers import AbstractResourceSerializer
+from core.common.serializers import AbstractResourceSerializer, SourceChildPageSerializer
 from core.common.utils import get_truthy_values
 from core.concepts.serializers import ConceptDetailSerializer
 from core.mappings.models import Mapping
@@ -124,6 +124,7 @@ class MappingListSerializer(AbstractMappingSerializer):
 
     class Meta:
         model = Mapping
+        list_serializer_class = SourceChildPageSerializer
         fields = AbstractMappingSerializer.Meta.fields + (
             'external_id', 'retired', 'map_type', 'source', 'owner', 'owner_type',
             'from_concept_code', 'from_concept_name', 'from_concept_url',
@@ -145,6 +146,7 @@ class MappingVersionListSerializer(MappingListSerializer):
 
     class Meta:
         model = Mapping
+        list_serializer_class = SourceChildPageSerializer
         fields = MappingListSerializer.Meta.fields + (
             'previous_version_url', 'source_versions', 'collection_versions'
         )
@@ -252,6 +254,7 @@ class MappingDetailSerializer(MappingListSerializer):
 
     class Meta:
         model = Mapping
+        list_serializer_class = SourceChildPageSerializer
         fields = MappingListSerializer.Meta.fields + (
             'type', 'uuid', 'extras', 'created_on', 'updated_on', 'created_by',
             'updated_by', 'parent_id', 'public_can_view', 'latest_source_version'

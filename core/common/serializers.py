@@ -1,6 +1,7 @@
+from django.db.models.manager import BaseManager
 from pydash import get
 from rest_framework.fields import CharField, JSONField, SerializerMethodField, FloatField, ChoiceField
-from rest_framework.serializers import Serializer, Field, ValidationError, ModelSerializer
+from rest_framework.serializers import Serializer, Field, ValidationError, ModelSerializer, ListSerializer
 
 from core import settings
 from core.code_systems.constants import RESOURCE_TYPE as CODE_SYSTEM_RESOURCE_TYPE
@@ -223,6 +224,14 @@ class SearchResultSerializer(Serializer):  # pylint: disable=abstract-method
             for attr, value in highlight.items():
                 cleaned_highlight[attr] = value
         return cleaned_highlight
+
+
+class SourceChildPageSerializer(ListSerializer):  # pylint: disable=abstract-method
+    """Serializes a page of concepts or mappings, loading the per-row lookups for the whole page first."""
+    def to_representation(self, data):
+        instances = list(data.all() if isinstance(data, BaseManager) else data)
+        self.child.Meta.model.load_list_fields(instances)
+        return super().to_representation(instances)
 
 
 class AbstractResourceSerializer(ModelSerializer):

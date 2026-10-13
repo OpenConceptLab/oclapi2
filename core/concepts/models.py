@@ -220,6 +220,8 @@ class HierarchicalConcepts(models.Model):
 
 
 class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pylint: disable=too-many-public-methods
+    LIST_PREFETCHES = ('parent', 'created_by', 'updated_by')
+
     class Meta:
         db_table = 'concepts'
         unique_together = ('mnemonic', 'version', 'parent')
@@ -981,6 +983,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     @property
     def latest_source_version(self):
+        if hasattr(self, '_latest_source_version'):  # loaded for the whole page by load_list_fields
+            return self._latest_source_version
         return self.sources.exclude(version=HEAD).order_by('-created_at').first()
 
     def get_source_version_before_creation(self):

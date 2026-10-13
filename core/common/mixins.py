@@ -8,7 +8,7 @@ from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction, models
-from django.db.models import Q, F, QuerySet
+from django.db.models import Q, F, QuerySet, prefetch_related_objects
 from django.http import HttpResponseForbidden, Http404
 from django.shortcuts import redirect
 from django.urls import resolve, Resolver404
@@ -635,8 +635,41 @@ class SourceChildMixin(ChecksumModel):
     _counted = models.BooleanField(default=True, null=True, blank=True)
     _index = models.BooleanField(default=True)
 
+    # relations the list serializers read on every row, prefetched once per page by load_list_fields
+    LIST_PREFETCHES = ()
+
     class Meta:
         abstract = True
+
+    @classmethod
+    def load_list_fields(cls, instances):
+        """
+        Loads what the list serializers would otherwise query row by row, for a whole page at once:
+        LIST_PREFETCHES, the latest version's uri (version_url) and latest_source_version.
+        """
+        if not instances:
+            return
+        prefetch_related_objects(instances, *cls.LIST_PREFETCHES)
+
+        heads = [instance.id for instance in instances if instance.is_versioned_object]
+        latest_version_uris = dict(cls.objects.filter(
+            versioned_object_id__in=heads, is_active=True, is_latest_version=True
+        ).exclude(id=F('versioned_object_id')).order_by('versioned_object_id', '-created_at').distinct(
+            'versioned_object_id').values_list('versioned_object_id', 'uri')) if heads else {}
+
+        key = f'{cls._meta.model_name}_id'
+        latest_source_version_ids = dict(cls.sources.through.objects.filter(
+            **{f'{key}__in': [instance.id for instance in instances]}
+        ).exclude(source__version=HEAD).order_by(key, '-source__created_at').distinct(key).values_list(
+            key, 'source_id'))
+        source_versions = cls._meta.get_field('sources').related_model.objects.in_bulk(
+            set(latest_source_version_ids.values()))
+
+        for instance in instances:
+            # pylint: disable=protected-access
+            instance._latest_source_version = source_versions.get(latest_source_version_ids.get(instance.id))
+            if instance.id in latest_version_uris:
+                instance._latest_version_uri = latest_version_uris[instance.id]
 
     def calculate_uri(self):
         uri = self.parent.uri + self.resource_type.lower() + 's/' + str(self.mnemonic) + '/'
@@ -746,7 +779,7 @@ class SourceChildMixin(ChecksumModel):
     @property
     def version_url(self):
         if self.is_versioned_object:
-            return self.get_latest_version().uri
+            return getattr(self, '_latest_version_uri', None) or self.get_latest_version().uri
         return self.uri
 
     @property

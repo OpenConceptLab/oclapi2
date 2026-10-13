@@ -9,7 +9,7 @@ from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPIN
     INCLUDE_CHILD_CONCEPT_URLS, HEAD, INCLUDE_SUMMARY, INCLUDE_VERBOSE_REFERENCES, VERBOSE_PARAM, \
     INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE
 from core.common.fields import EncodedDecodedCharField
-from core.common.serializers import AbstractResourceSerializer
+from core.common.serializers import AbstractResourceSerializer, SourceChildPageSerializer
 from core.common.utils import to_parent_uri_from_kwargs, get_truthy_values
 from core.concepts.models import Concept, ConceptName
 
@@ -323,6 +323,7 @@ class ConceptListSerializer(ConceptAbstractSerializer):
 
     class Meta:
         model = Concept
+        list_serializer_class = SourceChildPageSerializer
         fields = ConceptAbstractSerializer.Meta.fields + (
             'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
@@ -339,6 +340,7 @@ class ConceptVersionListSerializer(ConceptListSerializer):
 
     class Meta:
         model = Concept
+        list_serializer_class = SourceChildPageSerializer
         fields = ConceptListSerializer.Meta.fields + (
             'previous_version_url', 'source_versions', 'collection_versions'
         )
@@ -485,6 +487,7 @@ class ConceptDetailSerializer(ConceptAbstractSerializer):
 
     class Meta:
         model = Concept
+        list_serializer_class = SourceChildPageSerializer
         fields = ConceptAbstractSerializer.Meta.fields + (
             'id', 'external_id', 'concept_class', 'datatype', 'url', 'retired', 'source',
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'names', 'descriptions',

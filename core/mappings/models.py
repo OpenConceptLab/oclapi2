@@ -20,6 +20,11 @@ from core.services.storages.postgres import PostgresQL
 
 
 class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
+    LIST_PREFETCHES = (
+        'from_concept__parent', 'to_concept__parent', 'from_source__organization', 'from_source__user',
+        'to_source__organization', 'to_source__user', 'created_by', 'updated_by'
+    )
+
     class Meta:
         db_table = 'mappings'
         unique_together = ('mnemonic', 'version', 'parent')
@@ -416,6 +421,8 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
     @property
     def latest_source_version(self):
+        if hasattr(self, '_latest_source_version'):  # loaded for the whole page by load_list_fields
+            return self._latest_source_version
         return self.sources.exclude(version=HEAD).order_by('-created_at').first()
 
     @classmethod
