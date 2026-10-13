@@ -306,8 +306,21 @@ class UserProfileTest(OCLTestCase):
 
 
 class KeycloakSyncTest(OCLTestCase):
-    def test_sync_adds_and_removes_groups_for_token_only_users_keeping_django_only_groups(self):
+    SSO = 'core.services.auth.core.AuthService.is_sso_enabled'
+    CONFIGURED = 'core.services.auth.openid.OpenIDAuthService.is_admin_configured'
+    MEMBERSHIPS = 'core.services.auth.openid.OpenIDAuthService.get_group_memberships'
+
+    @staticmethod
+    def member(username, sso_id=None):
+        return {'id': sso_id or f'id-{username}', 'username': username}
+
+    def sync(self, memberships, **kwargs):
         from core.common.tasks import sync_groups_from_keycloak
+        with patch(self.SSO, return_value=True), patch(self.CONFIGURED, return_value=True), \
+                patch(self.MEMBERSHIPS, return_value=memberships):
+            return sync_groups_from_keycloak(**kwargs)
+
+    def test_sync_adds_and_removes_groups_for_token_only_users_keeping_django_only_groups(self):
         Group.objects.create(name='kc-a')
         Group.objects.create(name='kc-b')
         Group.objects.create(name='django-only')
@@ -315,26 +328,36 @@ class KeycloakSyncTest(OCLTestCase):
         removed = UserProfileFactory(username='removed')
         removed.groups.set(Group.objects.filter(name__in=['kc-a', 'django-only']))
 
-        with patch('core.services.auth.core.AuthService.is_sso_enabled', return_value=True), \
-                patch('core.services.auth.openid.OpenIDAuthService.is_admin_configured', return_value=True), \
-                patch('core.services.auth.openid.OpenIDAuthService.get_group_memberships',
-                      return_value={'kc-a': {'added'}, 'kc-b': {'added'}, 'unknown': {'removed'}}):
-            self.assertEqual(sync_groups_from_keycloak(), 2)
+        summary = self.sync({
+            'kc-a': [self.member('added')], 'kc-b': [self.member('added')], 'unknown': [self.member('removed')]})
 
+        self.assertEqual(summary['changed'], 2)
+        self.assertEqual(summary['gained'], {'kc-a': 1, 'kc-b': 1})
+        self.assertEqual(summary['lost'], {'kc-a': 1})
         self.assertEqual(sorted(added.groups.values_list('name', flat=True)), ['kc-a', 'kc-b'])
         self.assertEqual(list(removed.groups.values_list('name', flat=True)), ['django-only'])
 
-    def test_sync_dry_run_changes_nothing(self):
-        from core.common.tasks import sync_groups_from_keycloak
+    def test_sync_matches_on_sso_id_and_falls_back_to_username_only_without_one(self):
         Group.objects.create(name='kc-a')
+        by_id = UserProfileFactory(username='Mixed-Case', sso_id='sub-1')
+        same_name_other_id = UserProfileFactory(username='someone', sso_id='sub-other')
+        never_signed_in = UserProfileFactory(username='legacy')
+
+        self.sync({'kc-a': [self.member('mixed-case', 'sub-1'), self.member('someone', 'sub-2'),
+                            self.member('legacy', 'sub-3')]})
+
+        self.assertEqual(list(by_id.groups.values_list('name', flat=True)), ['kc-a'])
+        self.assertFalse(same_name_other_id.groups.exists())
+        self.assertEqual(list(never_signed_in.groups.values_list('name', flat=True)), ['kc-a'])
+
+    def test_sync_dry_run_changes_nothing_and_reports_access_changes(self):
+        Group.objects.get_or_create(name=STAFF_GROUP)
         user = UserProfileFactory(username='dry')
 
-        with patch('core.services.auth.core.AuthService.is_sso_enabled', return_value=True), \
-                patch('core.services.auth.openid.OpenIDAuthService.is_admin_configured', return_value=True), \
-                patch('core.services.auth.openid.OpenIDAuthService.get_group_memberships',
-                      return_value={'kc-a': {'dry'}}):
-            self.assertEqual(sync_groups_from_keycloak(dry_run=True), 1)
+        summary = self.sync({STAFF_GROUP: [self.member('dry')]}, dry_run=True)
 
+        self.assertEqual(summary['changed'], 1)
+        self.assertEqual(summary['access_changes'], ['dry: staff=True superuser=False'])
         self.assertFalse(user.groups.exists())
 
     def test_sync_aborts_when_keycloak_fails_or_has_no_matching_group(self):
@@ -343,66 +366,118 @@ class KeycloakSyncTest(OCLTestCase):
         user = UserProfileFactory(username='kept')
         user.groups.add(group)
 
-        with patch('core.services.auth.core.AuthService.is_sso_enabled', return_value=True), \
-                patch('core.services.auth.openid.OpenIDAuthService.is_admin_configured', return_value=True):
-            with patch('core.services.auth.openid.OpenIDAuthService.get_group_memberships',
-                       side_effect=Exception('down')):
-                self.assertEqual(sync_groups_from_keycloak(), 0)
-            with patch('core.services.auth.openid.OpenIDAuthService.get_group_memberships', return_value={}):
-                self.assertEqual(sync_groups_from_keycloak(), 0)
+        with patch(self.SSO, return_value=True), patch(self.CONFIGURED, return_value=True):
+            with patch(self.MEMBERSHIPS, side_effect=Exception('down')):
+                self.assertEqual(sync_groups_from_keycloak()['changed'], 0)
+            with patch(self.MEMBERSHIPS, return_value={}):
+                self.assertEqual(sync_groups_from_keycloak()['changed'], 0)
 
         self.assertEqual(list(user.groups.values_list('name', flat=True)), ['kc-a'])
 
     def test_sync_is_noop_without_sso_or_admin_config(self):
         from core.common.tasks import sync_groups_from_keycloak
-        with patch('core.services.auth.openid.OpenIDAuthService.get_group_memberships') as memberships:
-            self.assertEqual(sync_groups_from_keycloak(), 0)
+        with patch(self.MEMBERSHIPS) as memberships:
+            self.assertEqual(sync_groups_from_keycloak()['changed'], 0)
         memberships.assert_not_called()
 
-    def test_profile_save_pushes_changed_fields_to_keycloak(self):
-        user = UserProfileFactory(first_name='Old', last_name='Name', company='Co', location='Loc')
+    def test_profile_save_enqueues_push_on_commit_for_changed_fields(self):
+        user = UserProfileFactory(first_name='Old')
 
-        with patch('core.services.auth.core.AuthService.is_sso_enabled', return_value=True), \
-                patch('core.services.auth.openid.OpenIDAuthService.is_admin_configured', return_value=True), \
-                patch('core.services.auth.openid.OpenIDAuthService.update_user_profile') as push:
-            user.first_name = 'New'
-            user.save()
-            push.assert_called_once_with(user.username, 'New', 'Name', 'Co', 'Loc')
+        with patch(self.SSO, return_value=True), \
+                patch('core.common.tasks.push_user_profile_to_keycloak.delay') as push:
+            with self.captureOnCommitCallbacks(execute=True):
+                user.first_name = 'New'
+                user.save()
+            push.assert_called_once_with(user.id)
             push.reset_mock()
-            user.email = 'x@y.com'
-            user.save()
+            with self.captureOnCommitCallbacks(execute=True):
+                user.email = 'x@y.com'
+                user.save()
             push.assert_not_called()
 
-    def test_profile_save_from_keycloak_claims_is_not_pushed_back(self):
+    def test_profile_save_from_sso_claims_is_not_pushed_back(self):
         user = UserProfileFactory(first_name='Old')
 
-        with patch('core.services.auth.core.AuthService.is_sso_enabled', return_value=True), \
-                patch('core.services.auth.openid.OpenIDAuthService.is_admin_configured', return_value=True), \
-                patch('core.services.auth.openid.OpenIDAuthService.update_user_profile') as push:
-            user.first_name = 'New'
-            user._from_sso = True  # pylint: disable=protected-access
-            user.save()
+        with patch(self.SSO, return_value=True), \
+                patch('core.common.tasks.push_user_profile_to_keycloak.delay') as push:
+            with self.captureOnCommitCallbacks(execute=True):
+                user.first_name = 'New'
+                user._from_sso = True  # pylint: disable=protected-access
+                user.save()
         push.assert_not_called()
-
-    def test_profile_save_survives_keycloak_failure(self):
-        user = UserProfileFactory(first_name='Old')
-
-        with patch('core.services.auth.core.AuthService.is_sso_enabled', return_value=True), \
-                patch('core.services.auth.openid.OpenIDAuthService.is_admin_configured', return_value=True), \
-                patch('core.services.auth.openid.OpenIDAuthService.update_user_profile',
-                      side_effect=Exception('boom')):
-            user.first_name = 'New'
-            user.save()
-
-        user.refresh_from_db()
-        self.assertEqual(user.first_name, 'New')
 
     def test_profile_save_not_pushed_without_sso(self):
         user = UserProfileFactory(first_name='Old')
-        with patch('core.services.auth.openid.OpenIDAuthService.update_user_profile') as push:
-            user.first_name = 'New'
-            user.save()
+        with patch('core.common.tasks.push_user_profile_to_keycloak.delay') as push:
+            with self.captureOnCommitCallbacks(execute=True):
+                user.first_name = 'New'
+                user.save()
         push.assert_not_called()
+
+    def test_push_task_updates_keycloak_from_the_current_row(self):
+        from core.common.tasks import push_user_profile_to_keycloak
+        user = UserProfileFactory(first_name='Latest')
+
+        with patch(self.CONFIGURED, return_value=True), \
+                patch('core.services.auth.openid.OpenIDAuthService.update_user_profile') as update:
+            push_user_profile_to_keycloak(user.id)
+            update.assert_called_once()
+            self.assertEqual(update.call_args[0][0].first_name, 'Latest')
+        with patch(self.CONFIGURED, return_value=False), \
+                patch('core.services.auth.openid.OpenIDAuthService.update_user_profile') as update:
+            push_user_profile_to_keycloak(user.id)
+            update.assert_not_called()
+
+
+class OpenIDAdminClientTest(OCLTestCase):
+    def test_paginate_fetches_until_a_short_page(self):
+        from core.services.auth.openid import OpenIDAuthService
+        size = OpenIDAuthService.PAGE_SIZE
+        pages = [[{'n': i} for i in range(size)], [{'n': 'last'}]]
+        with patch.object(OpenIDAuthService, '_admin_request') as request:
+            request.return_value.json.side_effect = pages
+            result = OpenIDAuthService._paginate('http://kc/groups')  # pylint: disable=protected-access
+        self.assertEqual(len(result), size + 1)
+        self.assertEqual(request.call_args_list[1].kwargs['params'], {'first': size, 'max': size})
+
+    def test_paginate_stops_after_exact_full_page_followed_by_empty_page(self):
+        from core.services.auth.openid import OpenIDAuthService
+        size = OpenIDAuthService.PAGE_SIZE
+        with patch.object(OpenIDAuthService, '_admin_request') as request:
+            request.return_value.json.side_effect = [[{'n': i} for i in range(size)], []]
+            result = OpenIDAuthService._paginate('http://kc/groups')  # pylint: disable=protected-access
+        self.assertEqual(len(result), size)
+        self.assertEqual(request.call_count, 2)
+
+    def test_service_token_is_kept_in_process_memory(self):
+        from core.services.auth.openid import OpenIDAuthService
+        OpenIDAuthService._service_token = None  # pylint: disable=protected-access
+        with patch('core.services.auth.openid.requests.post') as post:
+            post.return_value.json.return_value = {'access_token': 'abc', 'expires_in': 300}
+            self.assertEqual(OpenIDAuthService.get_service_token(), 'abc')
+            self.assertEqual(OpenIDAuthService.get_service_token(), 'abc')
+        post.assert_called_once()
+        OpenIDAuthService._service_token = None  # pylint: disable=protected-access
+
+    def test_group_memberships_carry_id_and_username(self):
+        from core.services.auth.openid import OpenIDAuthService
+        with patch.object(OpenIDAuthService, '_paginate', side_effect=[
+                [{'id': 'g1', 'name': 'preview'}], [{'id': 'u1', 'username': 'a', 'email': 'x'}]]):
+            memberships = OpenIDAuthService.get_group_memberships()
+        self.assertEqual(memberships, {'preview': [{'id': 'u1', 'username': 'a'}]})
+
+    def test_update_user_profile_merges_into_existing_representation_by_sso_id(self):
+        from core.services.auth.openid import OpenIDAuthService
+        user = UserProfileFactory(first_name='New', last_name='Name', company='Co', location='', sso_id='sub-1')
+        kc_user = {'id': 'sub-1', 'username': 'u', 'attributes': {'other': ['x'], 'location': ['Old']}}
+        with patch.object(OpenIDAuthService, '_admin_request') as request:
+            request.return_value.json.return_value = kc_user
+            OpenIDAuthService.update_user_profile(user)
+        put = request.call_args_list[-1]
+        self.assertEqual(put.args[0], 'PUT')
+        self.assertEqual(put.kwargs['json']['firstName'], 'New')
+        self.assertEqual(
+            put.kwargs['json']['attributes'], {'other': ['x'], 'company': ['Co'], 'location': []})
 
 
 class TokenAuthenticationViewTest(OCLAPITestCase):

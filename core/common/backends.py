@@ -62,6 +62,7 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         from core.users.models import UserProfile
         user = UserProfile.objects.create_user(
             claims.get('preferred_username'),
+            sso_id=claims.get('sub'),
             email=claims.get('email'),
             first_name=claims.get('given_name'),
             last_name=claims.get('family_name'),
@@ -78,6 +79,7 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
     def update_user(self, user, claims):
         user.first_name = claims.get('given_name') or user.first_name
         user.last_name = claims.get('family_name') or user.last_name
+        user.sso_id = claims.get('sub') or user.sso_id
         user.email = claims.get('email') or user.email
         user.company = claims.get('company', None) or user.company
         user.location = claims.get('location', None) or user.location
@@ -87,6 +89,7 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         if user.is_dirty():
             user._from_sso = True  # pylint: disable=protected-access
             user.save()
+            user._from_sso = False  # pylint: disable=protected-access
             user.set_checksums()
 
         return user

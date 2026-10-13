@@ -11,5 +11,9 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         dry_run = options['dry_run']
-        changed = sync_groups_from_keycloak(dry_run=dry_run)
-        self.stdout.write(f"{changed} user(s) {'would change' if dry_run else 'changed'}")
+        summary = sync_groups_from_keycloak(dry_run=dry_run)
+        self.stdout.write(f"{summary['changed']} user(s) {'would change' if dry_run else 'changed'}")
+        for name in sorted(set(summary['gained']) | set(summary['lost'])):
+            self.stdout.write(f"  {name}: +{summary['gained'].get(name, 0)} -{summary['lost'].get(name, 0)}")
+        for change in summary['access_changes']:
+            self.stdout.write(f'  access change: {change}')

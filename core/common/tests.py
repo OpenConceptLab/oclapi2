@@ -2688,6 +2688,7 @@ class OCLOIDCAuthenticationBackendTest(OCLTestCase):
         self.backend.create_user(self.claim)
         user_manager_mock.create_user.assert_called_once_with(
             'batman',
+            sso_id=self.claim.get('sub'),
             email='batman@gotham.com',
             first_name='Bruce',
             last_name='Wayne',

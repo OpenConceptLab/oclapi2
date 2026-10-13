@@ -1222,43 +1222,81 @@ def expansion_compare(expansion1_uri, expansion2_uri, is_changelog, verbosity, f
     return Expansion.run_diff(expansion1_uri, expansion2_uri, is_changelog, verbosity, format_type)
 
 
+def _record_group_change(summary, user, current, expected):
+    from core.users.constants import STAFF_GROUP, SUPERADMIN_GROUP
+
+    summary['changed'] += 1
+    for name in expected - current:
+        summary['gained'][name] = summary['gained'].get(name, 0) + 1
+    for name in current - expected:
+        summary['lost'][name] = summary['lost'].get(name, 0) + 1
+    is_superuser = SUPERADMIN_GROUP in expected
+    is_staff = is_superuser or STAFF_GROUP in expected
+    if (is_staff, is_superuser) != (user.is_staff, user.is_superuser):
+        summary['access_changes'].append(f'{user.username}: staff={is_staff} superuser={is_superuser}')
+    logger.info('Keycloak group sync: user %s %s -> %s', user.id, sorted(current), sorted(expected))
+
+
+def _users_of_keycloak_groups(memberships, managed):
+    from django.db.models import Q
+    from core.users.models import UserProfile
+
+    ids = {name: {member['id'] for member in memberships[name]} for name in managed}
+    usernames = {name: {member['username'] for member in memberships[name]} for name in managed}
+    users = UserProfile.objects.filter(
+        Q(sso_id__in=set().union(*ids.values())) |
+        Q(sso_id__isnull=True, username__in=set().union(*usernames.values())) |
+        Q(groups__name__in=managed), is_active=True
+    ).distinct()
+    return users, ids, usernames
+
+
 def sync_groups_from_keycloak(dry_run=False):
     """Replaces users' Keycloak-managed groups with their Keycloak membership; no-op if Keycloak can't be read."""
     from django.contrib.auth.models import Group
     from core.services.auth.core import AuthService
     from core.services.auth.openid import OpenIDAuthService
-    from core.users.models import UserProfile
 
-    if not AuthService.is_sso_enabled() or not OpenIDAuthService.is_admin_configured():
-        return 0
+    summary = {'changed': 0, 'gained': {}, 'lost': {}, 'access_changes': []}
+    if not (AuthService.is_sso_enabled() and OpenIDAuthService.is_admin_configured()):
+        return summary
 
     try:
         memberships = OpenIDAuthService.get_group_memberships()
     except Exception as ex:  # pylint: disable=broad-except
         logger.warning('Keycloak group sync aborted, could not read Keycloak: %s', ex)
-        return 0
+        return summary
 
-    managed = set(Group.objects.filter(name__in=memberships.keys()).values_list('name', flat=True))
+    managed = set(Group.objects.filter(name__in=memberships).values_list('name', flat=True))
     if not managed:
         logger.warning('Keycloak group sync aborted, no Keycloak group matches a Django group')
-        return 0
+        return summary
 
-    keycloak_usernames = set().union(*(memberships[name] for name in managed))
-    users = UserProfile.objects.filter(is_active=True).filter(
-        username__in=keycloak_usernames) | UserProfile.objects.filter(is_active=True, groups__name__in=managed)
+    users, ids, usernames = _users_of_keycloak_groups(memberships, managed)
 
-    changed = 0
-    for user in users.distinct():
+    for user in users:
         current = set(user.groups.values_list('name', flat=True))
-        expected = (current - managed) | {name for name in managed if user.username in memberships[name]}
+        expected = (current - managed) | {
+            name for name in managed if (user.sso_id in ids[name] if user.sso_id else user.username in usernames[name])}
         if current != expected:
-            changed += 1
-            logger.info('Keycloak group sync: user %s %s -> %s', user.id, sorted(current), sorted(expected))
+            _record_group_change(summary, user, current, expected)
             if not dry_run:
                 user.set_groups(list(expected))
-    return changed
+    return summary
 
 
 @app.task(ignore_result=True)
 def sync_keycloak_groups():
-    return sync_groups_from_keycloak()
+    sync_groups_from_keycloak()
+
+
+@app.task(ignore_result=True)
+def push_user_profile_to_keycloak(user_id):
+    from core.services.auth.openid import OpenIDAuthService
+    from core.users.models import UserProfile
+
+    if not OpenIDAuthService.is_admin_configured():
+        return
+    user = UserProfile.objects.filter(id=user_id).first()
+    if user:
+        OpenIDAuthService.update_user_profile(user)

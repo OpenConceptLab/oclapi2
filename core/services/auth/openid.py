@@ -1,9 +1,9 @@
 import base64
 import logging
+import time
 
 import requests
 from django.conf import settings
-from django.core.cache import cache
 from mozilla_django_oidc.contrib.drf import OIDCAuthentication
 
 from core.common.backends import OCLOIDCAuthenticationBackend
@@ -24,7 +24,8 @@ class OpenIDAuthService(AbstractAuthService):
     authentication_backend_class = OCLOIDCAuthenticationBackend
     USERS_URL = settings.OIDC_SERVER_INTERNAL_URL + f'/admin/realms/{settings.OIDC_REALM}/users'
     GROUPS_URL = settings.OIDC_SERVER_INTERNAL_URL + f'/admin/realms/{settings.OIDC_REALM}/groups'
-    SERVICE_TOKEN_CACHE_KEY = 'oidc_service_account_token'
+    _service_token = None
+    _service_token_expires_at = 0
     ADMIN_TIMEOUT = 15
     PAGE_SIZE = 200
     OIDP_ADMIN_TOKEN_URL = settings.OIDC_SERVER_INTERNAL_URL + '/realms/master/protocol/openid-connect/token'
@@ -151,9 +152,8 @@ class OpenIDAuthService(AbstractAuthService):
 
     @classmethod
     def get_service_token(cls):
-        token = cache.get(cls.SERVICE_TOKEN_CACHE_KEY)
-        if token:
-            return token
+        if cls._service_token and time.monotonic() < cls._service_token_expires_at:
+            return cls._service_token
         response = requests.post(
             settings.OIDC_OP_TOKEN_ENDPOINT,
             data={
@@ -165,9 +165,9 @@ class OpenIDAuthService(AbstractAuthService):
         )
         response.raise_for_status()
         data = response.json()
-        token = data['access_token']
-        cache.set(cls.SERVICE_TOKEN_CACHE_KEY, token, max(int(data.get('expires_in', 60)) - 30, 1))
-        return token
+        cls._service_token = data['access_token']
+        cls._service_token_expires_at = time.monotonic() + max(int(data.get('expires_in', 60)) - 30, 1)
+        return cls._service_token
 
     @classmethod
     def _admin_request(cls, method, url, **kwargs):
@@ -178,19 +178,23 @@ class OpenIDAuthService(AbstractAuthService):
         return response
 
     @classmethod
-    def get_keycloak_user(cls, username):
+    def get_keycloak_user(cls, user):
+        if user.sso_id:
+            return cls._admin_request('GET', f'{cls.USERS_URL}/{user.sso_id}').json()
+        username = user.username.lower()
         users = cls._admin_request('GET', cls.USERS_URL, params={'username': username, 'exact': 'true'}).json()
-        return next((user for user in users if user.get('username') == username), None)
+        return next((kc_user for kc_user in users if kc_user.get('username') == username), None)
 
     @classmethod
-    def update_user_profile(cls, username, first_name, last_name, company, location):  # pylint: disable=too-many-arguments
-        kc_user = cls.get_keycloak_user(username)
+    def update_user_profile(cls, user):
+        kc_user = cls.get_keycloak_user(user)
         if not kc_user:
-            raise LookupError(f'{username} not found in Keycloak')
+            raise LookupError(f'user {user.id} not found in Keycloak')
         attributes = kc_user.get('attributes') or {}
-        for key, value in (('company', company), ('location', location)):
+        for key in ('company', 'location'):
+            value = getattr(user, key)
             attributes[key] = [value] if value else []
-        kc_user.update({'firstName': first_name, 'lastName': last_name, 'attributes': attributes})
+        kc_user.update({'firstName': user.first_name, 'lastName': user.last_name, 'attributes': attributes})
         cls._admin_request('PUT', f"{cls.USERS_URL}/{kc_user['id']}", json=kc_user)
 
     @classmethod
@@ -207,8 +211,9 @@ class OpenIDAuthService(AbstractAuthService):
     def get_group_memberships(cls):
         memberships = {}
         for group in cls._paginate(cls.GROUPS_URL):
-            memberships[group['name']] = {
-                member['username'] for member in cls._paginate(f"{cls.GROUPS_URL}/{group['id']}/members")}
+            memberships[group['name']] = [
+                {'id': member['id'], 'username': member['username']}
+                for member in cls._paginate(f"{cls.GROUPS_URL}/{group['id']}/members")]
         return memberships
 
     @staticmethod
