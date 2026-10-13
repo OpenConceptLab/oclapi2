@@ -1571,9 +1571,12 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         def trim_to_max_results():
             build_result()
             kept_concept_ids = {self.id} | set(
-                result['concepts'].exclude(id=self.id).order_by('id').values_list('id', flat=True)[:max_results - 1])
+                result['concepts'].exclude(id=self.id).order_by('id').values_list('id', flat=True)[:max_results - 1]
+            )
             kept_mapping_ids = set(
-                result['mappings'].order_by('id').values_list('id', flat=True)[:max(max_results - len(kept_concept_ids), 0)])
+                result['mappings'].order_by('id').values_list('id', flat=True)[
+                    :max(max_results - len(kept_concept_ids), 0)]
+            )
             concept_ids.intersection_update(kept_concept_ids)
             mapping_ids.intersection_update(kept_mapping_ids)
             build_result()
@@ -1613,7 +1616,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         result['truncated'] = bool(stopped)
         return result
 
-    def cascade_as_hierarchy(  # pylint: disable=too-many-arguments,too-many-locals,unused-argument
+    def cascade_as_hierarchy(  # pylint: disable=too-many-arguments,too-many-locals,unused-argument,too-many-statements
             self, repo_version=None, source_mappings=True, source_to_concepts=True,
             map_types=None, exclude_map_types=None, return_map_types=ALL, equivalency_map_types=None,
             cascade_mappings=True, cascade_hierarchy=True, cascade_levels=ALL,
