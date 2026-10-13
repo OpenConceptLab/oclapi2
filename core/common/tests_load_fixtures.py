@@ -3,6 +3,7 @@ from django.core.management import call_command
 from core.capabilities.models import Capability
 from core.common.tests import OCLTestCase
 from core.orgs.models import Organization
+from core.users.models import UserProfile
 
 
 class LoadFixturesCommandTest(OCLTestCase):
@@ -28,6 +29,16 @@ class LoadFixturesCommandTest(OCLTestCase):
         call_command('load_fixtures', verbosity=0)
 
         self.assertEqual(Capability.objects.get(id=1).description, 'Number of map projects a user may create')
+
+    def test_startup_restores_a_demoted_ocladmin(self):
+        UserProfile.objects.filter(username='ocladmin').update(is_superuser=False, is_staff=False)
+
+        call_command('load_fixtures', verbosity=0)
+        call_command('setup_superuser')
+
+        ocladmin = UserProfile.objects.get(username='ocladmin')
+        self.assertTrue(ocladmin.is_superuser)
+        self.assertTrue(ocladmin.is_staff)
 
     def test_seeds_the_ocl_org_on_a_new_database(self):
         Organization.objects.filter(id=1).delete()
