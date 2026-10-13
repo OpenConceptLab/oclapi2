@@ -37,6 +37,7 @@ class Bundle:
         self.return_map_types = None
         self.equivalency_map_types = None
         self.entries = []
+        self.truncated = False
         self.requested_url = requested_url
         self.repo_version_url = None
         self.set_repo_version_url()
@@ -150,8 +151,9 @@ class Bundle:
             return_map_types=self.return_map_types,
             omit_if_exists_in=self.omit_if_exists_in,
             equivalency_map_types=self.equivalency_map_types,
-            include_self=self.include_self
+            include_self=self.include_self, max_results_strict=True
         )
+        self.truncated = bool(get(result, 'truncated'))
         self.concepts = get(result, 'concepts')
         self.mappings = get(result, 'mappings')
         self.set_total()
@@ -172,9 +174,10 @@ class Bundle:
             reverse=self.reverse,
             return_map_types=self.return_map_types,
             omit_if_exists_in=self.omit_if_exists_in,
-            equivalency_map_types=self.equivalency_map_types
+            equivalency_map_types=self.equivalency_map_types, max_results_strict=True
         )
 
+        self.truncated = self.root.cascade_truncated
         from core.concepts.serializers import ConceptMinimalSerializerRecursive
         self.entries = ConceptMinimalSerializerRecursive(
             self.root, context={'request': {'query_params': self.params}}).data

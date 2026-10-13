@@ -183,6 +183,25 @@ class ConceptViewsAPITest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 200)
 
+    def test_cascade_response_flags_truncation(self):
+        root = ConceptFactory(parent=self.source)
+        for _ in range(3):
+            MappingFactory(from_concept=root, to_concept=ConceptFactory(parent=self.source), parent=self.source)
+        url = f'{self.source.uri}concepts/{root.mnemonic}/cascade/?cascadeLevels=1'
+
+        for view, method in [('', 'cascade'), ('&view=hierarchy', 'cascade_as_hierarchy')]:
+            response = self.client.get(url + view, HTTP_AUTHORIZATION=f"Token {self.admin_token}")
+            self.assertEqual(response.status_code, 200)
+            self.assertFalse(response.data['truncated'])
+
+            original = getattr(Concept, method)
+            with patch.object(
+                    Concept, method, autospec=True,
+                    side_effect=lambda self, _original=original, **kw: _original(self, **{**kw, 'max_results': 2})):
+                response = self.client.get(url + view, HTTP_AUTHORIZATION=f"Token {self.admin_token}")
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.data['truncated'])
+
     def test_cascade_not_found_404(self):
         response = self.client.get(
             f'{self.source.uri}concepts/does-not-exist/cascade/',
@@ -1943,7 +1962,100 @@ class ConceptTest(OCLTestCase):
         self.assertEqual(result['concepts'].count() + result['mappings'].count(), 25)  # checked only between levels
 
         result = root.cascade(repo_version=source, max_results=10, max_results_strict=True)
-        self.assertEqual(result['concepts'].count() + result['mappings'].count(), 13)  # stops after the first child
+        self.assertEqual(result['concepts'].count() + result['mappings'].count(), 10)  # stops after the first child
+
+    def test_cascade_strict_max_results_caps_wide_first_level(self):
+        source = OrganizationSourceFactory()
+        root = ConceptFactory(parent=source)
+        for _ in range(8):
+            MappingFactory(
+                from_concept=root, to_concept=ConceptFactory(parent=source), parent=source, map_type='Q-AND-A')
+
+        result = root.cascade(repo_version=source, max_results=5, cascade_levels=1)
+        self.assertEqual(result['concepts'].count(), 9)  # first level is never capped when not strict
+
+        result = root.cascade(repo_version=source, max_results=5, cascade_levels=1, max_results_strict=True)
+        self.assertEqual(result['concepts'].count() + result['mappings'].count(), 5)
+        self.assertTrue(result['concepts'].filter(id=root.id).exists())
+        self.assertTrue(result['truncated'])
+
+    def test_cascade_strict_max_results_not_hit_returns_everything(self):
+        source = OrganizationSourceFactory()
+        root = ConceptFactory(parent=source)
+        for _ in range(2):
+            MappingFactory(
+                from_concept=root, to_concept=ConceptFactory(parent=source), parent=source, map_type='Q-AND-A')
+
+        result = root.cascade(repo_version=source, max_results=50, max_results_strict=True)
+        self.assertEqual(result['concepts'].count(), 3)
+        self.assertEqual(result['mappings'].count(), 2)
+        self.assertFalse(result['truncated'])
+
+    def test_cascade_as_hierarchy_strict_max_results(self):
+        source = OrganizationSourceFactory()
+        root = ConceptFactory(parent=source)
+        for _ in range(3):
+            child = ConceptFactory(parent=source)
+            MappingFactory(from_concept=root, to_concept=child, parent=source, map_type='Q-AND-A')
+            for _ in range(3):
+                MappingFactory(
+                    from_concept=child, to_concept=ConceptFactory(parent=source), parent=source, map_type='Q-AND-A')
+
+        def total(concept):
+            entries = concept.cascaded_entries
+            if not entries:
+                return 0
+            children = list(entries['concepts'])
+            return len(children) + entries['mappings'].count() + sum(total(child) for child in children)
+
+        unbounded = root.cascade_as_hierarchy(repo_version=source)
+        self.assertGreater(total(unbounded), 10)
+
+        root = Concept.objects.get(id=root.id)
+        capped = root.cascade_as_hierarchy(repo_version=source, max_results=10, max_results_strict=True)
+        self.assertLessEqual(total(capped) + 1, 10)
+
+        root = Concept.objects.get(id=root.id)
+        wide = root.cascade_as_hierarchy(repo_version=source, max_results=2, cascade_levels=1, max_results_strict=True)
+        self.assertLessEqual(total(wide) + 1, 2)
+        self.assertTrue(wide.cascade_truncated)
+
+        root = Concept.objects.get(id=root.id)
+        self.assertFalse(root.cascade_as_hierarchy(
+            repo_version=source, max_results=100, max_results_strict=True).cascade_truncated)
+
+    def test_cascade_strict_max_results_keeps_mappings_over_concepts_reverse(self):
+        source = OrganizationSourceFactory()
+        answer = ConceptFactory(parent=source)
+        for _ in range(30):
+            MappingFactory(
+                from_concept=ConceptFactory(parent=source), to_concept=answer, parent=source, map_type='Q-AND-A')
+
+        result = answer.cascade(
+            repo_version=source, reverse=True, cascade_levels=1, max_results=40, max_results_strict=True)
+        self.assertEqual(result['mappings'].count(), 30)
+        self.assertEqual(result['concepts'].count(), 10)  # the root and 9 referring concepts
+        self.assertTrue(result['truncated'])
+
+        answer = Concept.objects.get(id=answer.id)
+        capped = answer.cascade_as_hierarchy(
+            repo_version=source, reverse=True, cascade_levels=1, max_results=40, max_results_strict=True)
+        self.assertEqual(capped.cascaded_entries['mappings'].count(), 30)
+        self.assertEqual(len(capped.cascaded_entries['concepts']), 9)
+        self.assertTrue(capped.cascade_truncated)
+
+    def test_cascade_as_hierarchy_trimmed_concept_is_not_terminal(self):
+        source = OrganizationSourceFactory()
+        root = ConceptFactory(parent=source)
+        child = ConceptFactory(parent=source)
+        MappingFactory(from_concept=root, to_concept=child, parent=source, map_type='Q-AND-A')
+        MappingFactory(
+            from_concept=child, to_concept=ConceptFactory(parent=source), parent=source, map_type='Q-AND-A')
+
+        capped = root.cascade_as_hierarchy(repo_version=source, max_results=3, max_results_strict=True)  # exact fit
+        trimmed = list(capped.cascaded_entries['concepts'])[0]
+        self.assertTrue(capped.cascade_truncated)
+        self.assertFalse(trimmed.terminal)  # it has descendants that were cut, so not a leaf
 
     def test_cascade_as_hierarchy(self):
         source = OrganizationSourceFactory()

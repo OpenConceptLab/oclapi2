@@ -302,6 +302,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     # $cascade as hierarchy attributes
     cascaded_entries = None
+    cascade_truncated = False
     terminal = None
     _requested_locale = None
 
@@ -1515,8 +1516,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     ):
         """
         `max_results` is checked between levels, so one wide level can return far more. With
-        `max_results_strict` the walk stops as soon as the running total reaches `max_results`, even mid-level
-        ($clone uses it to know it is over its budget before writing anything).
+        `max_results_strict` the walk stops as soon as the running total reaches `max_results`, even mid-level,
+        and the result is trimmed to `max_results` ($clone uses it to know it is over its budget).
         """
         from core.mappings.models import Mapping
         empty_result = {'concepts': Concept.objects.none(), 'mappings': Mapping.objects.none()}
@@ -1550,12 +1551,35 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         cascaded = []
         stopped = []
+        concept_ids = {self.id}
+        mapping_ids = set()
 
-        def is_over_strict_limit(concept_ids, mapping_ids):
-            # the id lists are an upper bound (before omissions); count only when they say we might be over
-            return max_results_strict and max_results is not None and \
-                len(concept_ids) + len(mapping_ids) >= max_results and \
-                result['concepts'].count() + result['mappings'].count() >= max_results
+        def build_result():
+            result['concepts'] = Concept.objects.filter(id__in=concept_ids).exclude(omit_concepts_criteria)
+            result['mappings'] = Mapping.objects.filter(id__in=mapping_ids).exclude(
+                omit_mappings_criteria).order_by('map_type', 'sort_weight')
+
+        def is_over_strict_limit():
+            # the id sets are an upper bound (before omissions); count only when they say we might be over
+            if not max_results_strict or max_results is None or len(concept_ids) + len(mapping_ids) < max_results:
+                return False
+            if not (omit_concepts_criteria or omit_mappings_criteria):
+                return True
+            build_result()
+            return result['concepts'].count() + result['mappings'].count() >= max_results
+
+        def trim_to_max_results():
+            build_result()
+            # the root always stays; mappings first, as in the hierarchy view
+            kept_mapping_ids = set(
+                result['mappings'].order_by('id').values_list('id', flat=True)[:max(max_results - 1, 0)])
+            kept_concept_ids = {self.id} | set(
+                result['concepts'].exclude(id=self.id).order_by('id').values_list('id', flat=True)[
+                    :max(max_results - 1 - len(kept_mapping_ids), 0)]
+            )
+            concept_ids.intersection_update(kept_concept_ids)
+            mapping_ids.intersection_update(kept_mapping_ids)
+            build_result()
 
         def iterate(level):
             if stopped:
@@ -1576,35 +1600,33 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                                 return_map_types_criteria=return_map_types_criteria
                             )
                             cascaded.append(concept.versioned_object_id)
+                            concept_ids.update(
+                                res['concepts'].union(res['hierarchy_concepts']).values_list('id', flat=True))
+                            mapping_ids.update(res['mappings'].values_list('id', flat=True))
 
-                            concepts_qs = res['concepts'].union(res['hierarchy_concepts']).union(result['concepts'])
-                            concept_ids = list(concepts_qs.values_list('id', flat=True))
-                            result['concepts'] = Concept.objects.filter(
-                                id__in=concept_ids
-                            ).exclude(omit_concepts_criteria)
-
-                            mappings_qs = res['mappings'].union(result['mappings'])
-                            mapping_ids = list(mappings_qs.values_list('id', flat=True))
-                            result['mappings'] = Mapping.objects.filter(
-                                id__in=mapping_ids
-                            ).exclude(omit_mappings_criteria).order_by('map_type', 'sort_weight')
-
-                            if is_over_strict_limit(concept_ids, mapping_ids):
+                            if is_over_strict_limit():
                                 stopped.append(True)
+                                trim_to_max_results()
                                 return
 
+                        build_result()
                         iterate(level if level == ALL else level - 1)
 
         iterate(cascade_levels)
+        result['truncated'] = bool(stopped)
         return result
 
-    def cascade_as_hierarchy(  # pylint: disable=too-many-arguments,too-many-locals,unused-argument
+    def cascade_as_hierarchy(  # pylint: disable=too-many-arguments,too-many-locals,unused-argument,too-many-statements
             self, repo_version=None, source_mappings=True, source_to_concepts=True,
             map_types=None, exclude_map_types=None, return_map_types=ALL, equivalency_map_types=None,
             cascade_mappings=True, cascade_hierarchy=True, cascade_levels=ALL,
             include_retired=False, reverse=False, omit_if_exists_in=None,
-            include_self=True, _=None
+            include_self=True, max_results=1000, max_results_strict=False
     ):
+        """
+        With `max_results_strict` the walk stops once `max_results` entries are collected, trimming the last
+        concept's entries to fit; concepts left unvisited keep `terminal=None`.
+        """
         from core.mappings.models import Mapping
         self.cascaded_entries = {'concepts': Concept.objects.none(), 'mappings': Mapping.objects.none()}
 
@@ -1638,12 +1660,28 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             return entries is not None and (bool(len(entries['concepts'])) or entries['mappings'].exists())
 
         cascaded = {}
+        stopped = []
+        collected = [1]  # the root
+
+        def fit_to_budget(concept_ids, mappings):
+            # mappings first: clients list them as the concept's associations, and each one names its target
+            room = max(max_results - collected[0], 0)
+            mappings_count = mappings.count()
+            total = len(concept_ids) + mappings_count
+            collected[0] += min(total, room)
+            if total > room:
+                stopped.append(True)
+                mappings = mappings.filter(id__in=list(mappings.values_list('id', flat=True)[:room]))
+                concept_ids = sorted(concept_ids)[:room - min(mappings_count, room)]
+            return concept_ids, mappings
 
         def iterate(level):
             if level == ALL or level > 0:
                 new_level = self.current_level + 1
                 levels[new_level] = levels.get(new_level, [])
                 for concept in levels[self.current_level]:
+                    if stopped:
+                        break
                     if concept.id in cascaded:
                         concept.terminal = not cascaded[concept.id]
                         continue
@@ -1656,16 +1694,21 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                         reverse=reverse, is_collection=is_collection,
                         return_map_types_criteria=return_map_types_criteria
                     )
-                    cascaded_entries['concepts'] = list(
-                        set(list(cascaded_entries['hierarchy_concepts']) + list(cascaded_entries['concepts'])))
+                    concept_ids = list(
+                        cascaded_entries['concepts'].union(
+                            cascaded_entries['hierarchy_concepts']).values_list('id', flat=True))
+                    if omit_concepts_criteria:  # count only the concepts the response keeps
+                        concept_ids = list(Concept.objects.filter(id__in=concept_ids).exclude(
+                            omit_concepts_criteria).values_list('id', flat=True))
+                    mappings = cascaded_entries['mappings'].exclude(omit_mappings_criteria)
+                    if max_results_strict and max_results is not None:
+                        concept_ids, mappings = fit_to_budget(concept_ids, mappings)
+                    cascaded_entries['concepts'] = Concept.objects.filter(
+                        id__in=concept_ids).exclude(omit_concepts_criteria)
+                    cascaded_entries['mappings'] = mappings
 
                     concept.cascaded_entries = cascaded_entries
-                    concept.cascaded_entries['concepts'] = Concept.objects.filter(
-                        id__in=[_concept.id for _concept in concept.cascaded_entries['concepts']]
-                    ).exclude(omit_concepts_criteria)
-                    concept.cascaded_entries['mappings'] = concept.cascaded_entries['mappings'].exclude(
-                        omit_mappings_criteria)
-                    concept_has_entries = has_entries(cascaded_entries)
+                    concept_has_entries = has_entries(cascaded_entries) or bool(stopped)  # trimmed, not empty
                     cascaded[concept.id] = concept_has_entries
                     concept.terminal = not concept_has_entries
                     if level == 1 and cascade_levels != ALL:  # last level, when cascadeLevels are finite
@@ -1674,12 +1717,13 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                                 _concept.terminal = not cascaded[_concept.id]
 
                     levels[new_level] += cascaded_entries['concepts']
-                if not levels[new_level]:
+                if stopped or not levels[new_level]:
                     return
                 self.current_level += 1
                 iterate(level if level == ALL else level - 1)
 
         iterate(cascade_levels)
+        self.cascade_truncated = bool(stopped)
 
         return self
 

@@ -77,13 +77,14 @@ class BundleSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
                  'searchset', 'collection'], source='bundle_type')
     meta = BundleMetaSerializer(read_only=True, source='timestamp')
     total = IntegerField(read_only=True)
+    truncated = BooleanField(read_only=True)
     entry = JSONField(read_only=True, source='entries')
     requested_url = CharField(read_only=True)
     repo_version_url = CharField(read_only=True)
 
     class Meta:
         fields = (
-            'resourceType', 'type', 'meta', 'total', 'concepts', 'mappings', 'entry',
+            'resourceType', 'type', 'meta', 'total', 'truncated', 'concepts', 'mappings', 'entry',
             'requested_url', 'repo_version_url'
         )
 
