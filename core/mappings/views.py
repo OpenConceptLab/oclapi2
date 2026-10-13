@@ -68,6 +68,10 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
     def apply_filters(self, queryset):
         return queryset
 
+    def should_page_by_ids(self):
+        parent = get(self, 'parent_resource')
+        return 'source' in self.kwargs and bool(parent) and parent.is_head
+
     def is_sliced(self):
         result = super().is_sliced()
         if result:
