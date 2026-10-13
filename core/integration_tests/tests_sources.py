@@ -2553,6 +2553,7 @@ class SourceConceptsCloneViewTest(OCLAPITestCase):
                         'type': 'searchset',
                         'meta': ANY,
                         'total': None,
+                        'truncated': False,
                         'entry': [],
                         'requested_url': None,
                         'repo_version_url': self.concept.parent.uri + 'HEAD/'
