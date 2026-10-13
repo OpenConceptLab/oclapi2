@@ -419,12 +419,6 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     def is_existing_in_parent(self):
         return self.parent.mappings_set.filter(mnemonic__exact=self.mnemonic).exists()
 
-    @property
-    def latest_source_version(self):
-        if hasattr(self, '_latest_source_version'):  # loaded for the whole page by load_list_fields
-            return self._latest_source_version
-        return self.sources.exclude(version=HEAD).order_by('-created_at').first()
-
     @classmethod
     def create_new_version_for(cls, instance, data, user, cache=None):
         instance.populate_fields_from_relations(data, cache=cache, user=user)

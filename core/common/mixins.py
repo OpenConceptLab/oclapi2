@@ -647,15 +647,13 @@ class SourceChildMixin(ChecksumModel):
         Loads what the list serializers would otherwise query row by row, for a whole page at once:
         LIST_PREFETCHES, the latest version's uri (version_url) and latest_source_version.
         """
-        if not instances:
-            return
         prefetch_related_objects(instances, *cls.LIST_PREFETCHES)
 
         heads = [instance.id for instance in instances if instance.is_versioned_object]
         latest_version_uris = dict(cls.objects.filter(
             versioned_object_id__in=heads, is_active=True, is_latest_version=True
         ).exclude(id=F('versioned_object_id')).order_by('versioned_object_id', '-created_at').distinct(
-            'versioned_object_id').values_list('versioned_object_id', 'uri')) if heads else {}
+            'versioned_object_id').values_list('versioned_object_id', 'uri'))
 
         key = f'{cls._meta.model_name}_id'
         latest_source_version_ids = dict(cls.sources.through.objects.filter(
@@ -668,8 +666,7 @@ class SourceChildMixin(ChecksumModel):
         for instance in instances:
             # pylint: disable=protected-access
             instance._latest_source_version = source_versions.get(latest_source_version_ids.get(instance.id))
-            if instance.id in latest_version_uris:
-                instance._latest_version_uri = latest_version_uris[instance.id]
+            instance._latest_version_uri = latest_version_uris.get(instance.id)
 
     def calculate_uri(self):
         uri = self.parent.uri + self.resource_type.lower() + 's/' + str(self.mnemonic) + '/'
@@ -684,9 +681,9 @@ class SourceChildMixin(ChecksumModel):
 
     @property
     def latest_source_version(self):
-        if self.is_in_latest_source_version:
-            return self._cached_latest_source_version
-        return None
+        if hasattr(self, '_latest_source_version'):  # loaded for the whole page by load_list_fields
+            return self._latest_source_version
+        return self.sources.exclude(version=HEAD).order_by('-created_at').first()
 
     @cached_property
     def _cached_latest_source_version(self):
