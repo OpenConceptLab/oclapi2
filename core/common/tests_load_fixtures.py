@@ -30,8 +30,9 @@ class LoadFixturesCommandTest(OCLTestCase):
 
         self.assertEqual(Capability.objects.get(id=1).description, 'Number of map projects a user may create')
 
-    def test_startup_restores_a_demoted_ocladmin(self):
-        UserProfile.objects.filter(username='ocladmin').update(is_superuser=False, is_staff=False)
+    def test_startup_restores_a_demoted_or_deactivated_ocladmin(self):
+        UserProfile.objects.filter(username='ocladmin').update(
+            is_superuser=False, is_staff=False, is_active=False, verified=False)
 
         call_command('load_fixtures', verbosity=0)
         call_command('setup_superuser')
@@ -39,12 +40,14 @@ class LoadFixturesCommandTest(OCLTestCase):
         ocladmin = UserProfile.objects.get(username='ocladmin')
         self.assertTrue(ocladmin.is_superuser)
         self.assertTrue(ocladmin.is_staff)
+        self.assertTrue(ocladmin.is_active)
+        self.assertTrue(ocladmin.verified)
 
-    def test_seeds_the_ocl_org_on_a_new_database(self):
+    def test_seeds_the_ocl_org_and_ocladmin_on_a_new_database(self):
         Organization.objects.filter(id=1).delete()
+        UserProfile.objects.filter(id=1).delete()
 
         call_command('load_fixtures', verbosity=0)
 
-        org = Organization.objects.get(id=1)
-        self.assertEqual(org.mnemonic, 'OCL')
-        self.assertEqual(org.name, 'OCL')
+        self.assertEqual(Organization.objects.get(id=1).mnemonic, 'OCL')
+        self.assertTrue(UserProfile.objects.get(id=1, username='ocladmin').is_superuser)
