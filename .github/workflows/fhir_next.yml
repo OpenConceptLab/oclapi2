@@ -1,0 +1,184 @@
+name: FHIR next on staging
+
+# Deploys one ref of the FHIR branch (OpenConceptLab/ocl_online#451) to its own staging service, which shares
+# staging's database, Elasticsearch and Redis. It pushes only fhir-next* image tags and redeploys only that service:
+# never the :staging or :production tags, a release, or another service. Remove it once the branch has merged.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or commit to deploy"
+        required: true
+        default: "ocl_online/451-fhir-svcm"
+        type: string
+      accept_staging_skew:
+        description: "Deploy even if the ref and staging's build differ in migrations, documents.py or tasks.py"
+        required: false
+        default: false
+        type: boolean
+
+# The newest dispatch wins, even while an older one waits at the approval gate.
+concurrency:
+  group: fhir-next-staging
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: "us-east-2"
+  ECR_REPOSITORY: "oclapi2"
+  ECS_CLUSTER_STAGING_PRODUCTION: "ocl-staging-production"
+  ECS_SERVICE_FHIR_NEXT: "staging-fhir-next"
+  STAGING_API_URL: "https://api.staging.openconceptlab.org"
+  FHIR_NEXT_URL: "https://fhir-next.staging.openconceptlab.org"
+
+jobs:
+  guard:
+    name: Guard shared state
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      short: ${{ steps.resolve.outputs.short }}
+    steps:
+      - name: Checkout ref
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      - name: Resolve the ref to a commit
+        id: resolve
+        run: |
+          sha=$(git rev-parse --verify 'HEAD^{commit}')
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "short=${sha:0:8}" >> "$GITHUB_OUTPUT"
+      - name: Fail if the ref changes, or doesn't match staging's, migrations, documents.py or tasks.py
+        env:
+          ACCEPT_STAGING_SKEW: ${{ inputs.accept_staging_skew }}
+        run: |
+          # The service shares staging's DB and ES, and master's Celery workers run what it enqueues. So the ref must
+          # not change these files, and must match the build staging runs in them (staging can lag master).
+          shared='(^|/)migrations/|(^|/)documents\.py$|(^|/)tasks\.py$'
+          own=$(git diff --name-only origin/master...HEAD | grep -E "$shared" || true)
+          if [ -n "$own" ]; then
+            echo "::error::The ref changes files staging shares with master's code. Keep these changes out of it:"
+            echo "$own"
+            exit 1
+          fi
+          staging_build=$(curl --silent --fail --max-time 30 "$STAGING_API_URL/version/" | tr -d '"')
+          staging_sha=$(git rev-parse --verify "${staging_build##*-}^{commit}")
+          skew=$(git diff --name-only "$staging_sha" HEAD | grep -E "$shared" || true)
+          if [ -n "$skew" ] && [ "$ACCEPT_STAGING_SKEW" = "true" ]; then
+            echo "::warning::Deploying although the ref and staging's build $staging_build differ in: ${skew//$'\n'/ }"
+          elif [ -n "$skew" ]; then
+            echo "::error::The ref and staging's build $staging_build differ in these files. Merge origin/master into the ref if staging is ahead of it; if the ref is ahead, wait until staging runs master's change, or dispatch again with accept_staging_skew once you've judged the difference safe:"
+            echo "$skew"
+            exit 1
+          fi
+
+  build:
+    name: Build and push image
+    needs: [guard]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free Disk Space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          android: true
+          dotnet: true
+          haskell: true
+          tool-cache: false
+          docker-images: false
+          large-packages: false
+          swap-storage: false
+      - name: Checkout ref
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.guard.outputs.sha }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      # Built before any AWS credentials exist in this job.
+      - name: Build Docker image
+        uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
+        with:
+          context: .
+          load: true
+          tags: oclapi2:fhir-next-${{ needs.guard.outputs.short }}
+          build-args: SOURCE_COMMIT=${{ needs.guard.outputs.short }}
+          cache-from: |
+            type=gha
+            type=gha,scope=fhir-next
+          cache-to: type=gha,mode=min,scope=fhir-next
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+      - name: Push image to Amazon ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: fhir-next-${{ needs.guard.outputs.short }}
+        run: |
+          docker tag "oclapi2:$IMAGE_TAG" "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+  deploy:
+    name: Deploy to fhir-next.staging
+    needs: [guard, build]
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      # Moved only after approval: the service's task definition (owned by Terraform) runs :fhir-next, and any
+      # new deployment, a staging refresh's restart included, pulls whatever the tag points at.
+      - name: Point fhir-next at this build
+        env:
+          IMAGE_TAG: fhir-next-${{ needs.guard.outputs.short }}
+        run: |
+          read -r media_type digest <<< "$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
+            --image-ids imageTag="$IMAGE_TAG" --query 'imageDetails[0].[imageManifestMediaType,imageDigest]' --output text)"
+          current=$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids imageTag=fhir-next \
+            --query 'imageDetails[0].imageDigest' --output text 2>/dev/null || true)
+          if [ "$current" = "$digest" ]; then
+            echo "fhir-next already points at $IMAGE_TAG"
+          else
+            manifest=$(aws ecr batch-get-image --repository-name "$ECR_REPOSITORY" --image-ids imageTag="$IMAGE_TAG" \
+              --accepted-media-types "$media_type" --query 'images[0].imageManifest' --output text)
+            aws ecr put-image --repository-name "$ECR_REPOSITORY" --image-tag fhir-next --image-manifest "$manifest" \
+              --image-manifest-media-type "$media_type" --query 'image.imageId.imageDigest' --output text
+          fi
+      - name: Redeploy the service
+        run: |
+          aws ecs update-service --cluster "$ECS_CLUSTER_STAGING_PRODUCTION" --service "$ECS_SERVICE_FHIR_NEXT" \
+            --force-new-deployment --query 'service.[serviceName,taskDefinition,desiredCount]' --output text
+      - name: Wait for the service to be stable
+        run: |
+          # Each wait gives up after 10 minutes, and a first start on a host pulls the whole image.
+          for attempt in 1 2 3; do
+            if aws ecs wait services-stable --cluster "$ECS_CLUSTER_STAGING_PRODUCTION" --services "$ECS_SERVICE_FHIR_NEXT"; then
+              exit 0
+            fi
+            echo "Not stable after wait $attempt"
+          done
+          aws ecs describe-services --cluster "$ECS_CLUSTER_STAGING_PRODUCTION" --services "$ECS_SERVICE_FHIR_NEXT" \
+            --query 'services[0].events[:5].message' --output text
+          exit 1
+      - name: Check the served build
+        env:
+          SHORT_SHA: ${{ needs.guard.outputs.short }}
+        run: |
+          served=$(curl --silent --fail --max-time 30 "$FHIR_NEXT_URL/version/")
+          echo "Served: $served"
+          case "$served" in
+            *"-$SHORT_SHA\"") echo "fhir-next serves $SHORT_SHA" ;;
+            *) echo "::error::fhir-next serves $served, expected a build ending in $SHORT_SHA"; exit 1 ;;
+          esac
