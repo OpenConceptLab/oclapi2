@@ -173,6 +173,8 @@ class CodeSystemValidateCodeView(ConceptRetrieveUpdateDestroyView):
             else:
                 source = source.filter(is_latest_version=True).exclude(version=HEAD)
             source = get_viewable_repo(source, self.request.user)
+            if not source:
+                return queryset.none()
 
         if code:
             if not source:

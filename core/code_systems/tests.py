@@ -262,7 +262,7 @@ class CodeSystemTest(OCLTestCase):
 
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
-    def test_private_code_system_answers_as_missing_for_non_viewers(self):
+    def test_private_code_system_answers_as_missing_for_non_viewers(self):  # pylint: disable=too-many-locals
         private_org = OrganizationFactory()
         private_source = OrganizationSourceFactory(
             organization=private_org, canonical_url='/private/url', public_access=ACCESS_TYPE_NONE)
@@ -278,7 +278,14 @@ class CodeSystemTest(OCLTestCase):
         not_found = self.client.get(lookup_url.format('/unknown/url', concept.mnemonic))
         self.assertEqual(not_found.status_code, 400)
 
+        public_concept = ConceptFactory()
+        selector = (f'&org={public_concept.parent.organization.mnemonic}&source={public_concept.parent.mnemonic}'
+                    f'&concept={public_concept.mnemonic}')
         for headers in [{}, outsider]:
+            # without a code, a code system the requester can't view still answers as one that doesn't exist
+            for system_url in ['/private/url', '/unknown/url']:
+                response = self.client.get(f'/fhir/CodeSystem/$validate-code/?url={system_url}{selector}', **headers)
+                self.assertFalse(response.data['parameter'][0]['valueBoolean'], (system_url, headers))
             for url in [validate_url, f'{validate_url}&display={concept.display_name}']:
                 response = self.client.get(url, **headers)
                 self.assertEqual(response.status_code, 200, (url, headers))
