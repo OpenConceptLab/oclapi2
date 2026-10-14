@@ -61,7 +61,8 @@ from core.concepts.serializers import (
     ConceptDetailSerializer, ConceptListSerializer, ConceptDescriptionSerializer, ConceptNameSerializer,
     ConceptVersionDetailSerializer,
     ConceptVersionListSerializer, ConceptSummarySerializer, ConceptMinimalSerializer,
-    ConceptChildrenSerializer, ConceptParentsSerializer, ConceptLookupListSerializer, ConceptChecksumSerializer)
+    ConceptChildrenSerializer, ConceptParentsSerializer, ConceptLookupListSerializer, ConceptChecksumSerializer,
+    get_viewable_concepts)
 from core.mappings.serializers import MappingListSerializer
 from core.sources.clone_limits import clone_limit_error_detail, clone_lock, get_clone_budget
 from core.sources.models import CloneError, CloneLimitExceeded
@@ -605,7 +606,7 @@ class ConceptChildrenView(ConceptBaseView, ListWithHeadersMixin):
             raise Http404()
 
         self.check_object_permissions(self.request, instance)
-        return instance.child_concept_queryset()
+        return get_viewable_concepts(instance.child_concept_queryset(), self.request)
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
@@ -623,7 +624,7 @@ class ConceptParentsView(ConceptBaseView, ListWithHeadersMixin):
             raise Http404()
 
         self.check_object_permissions(self.request, instance)
-        return instance.parent_concept_queryset()
+        return get_viewable_concepts(instance.parent_concept_queryset(), self.request)
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)

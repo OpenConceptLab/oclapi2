@@ -169,6 +169,31 @@ class ParentConceptAccessTest(CrossRepoAccessBaseTest):
             self.assertEqual(
                 sorted(concept['id'] for concept in response.data['parent_concepts']), ['public', 'secret'])
 
+    def test_parents_and_children_lists_hide_private_concepts(self):
+        child = self.persist_child('listedchild', [self.private_concept.uri, self.public_concept.uri])
+        private_child = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'privchild',
+            'parent': self.private_source, 'public_access': ACCESS_TYPE_NONE,
+            'names': [ConceptNameFactory.build(locale='en', locale_preferred=True)],
+            'parent_concept_urls': [self.public_concept.uri]
+        }, self.member)
+        self.assertEqual(private_child.errors, {})
+
+        for user, parents, children in [
+                (None, ['public'], ['listedchild']),
+                (self.outsider, ['public'], ['listedchild']),
+                (self.member, ['public', 'secret'], ['listedchild', 'privchild']),
+                (self.admin, ['public', 'secret'], ['listedchild', 'privchild'])]:
+            headers = {'HTTP_AUTHORIZATION': 'Token ' + user.get_token()} if user else {}
+
+            response = self.client.get(child.uri + 'parents/', **headers)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(sorted(concept['id'] for concept in response.data), parents, user)
+
+            response = self.client.get(self.public_concept.uri + 'children/', **headers)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(sorted(concept['id'] for concept in response.data), children, user)
+
 
 class MappingTargetAccessTest(CrossRepoAccessBaseTest):
     def test_outsider_mapping_to_private_concept_is_external(self):
