@@ -1,3 +1,6 @@
+import importlib
+
+from django.apps import apps
 from django.utils import timezone
 
 from core.common.tests import OCLTestCase
@@ -109,3 +112,31 @@ class EventTest(OCLTestCase):
 
         self.user_event.clean_fields()
         self.assertEqual(self.user_event.public, False)
+
+
+class PrivateFollowEventsMigrationTest(OCLTestCase):
+    def test_migration_makes_follow_events_of_private_objects_private(self):
+        migration = importlib.import_module('core.events.migrations.0011_private_follow_events')
+        follower = UserProfileFactory()
+        private_org = OrganizationFactory(public_access='None')
+        public_org = OrganizationFactory()
+        private_source = OrganizationSourceFactory(organization=public_org, public_access='None')
+        public_source = OrganizationSourceFactory(organization=private_org)
+        private_concept = ConceptFactory(parent=private_source)
+        public_concept = ConceptFactory(parent=public_source)
+        urls = [
+            follower.url, private_org.url, public_org.url, private_source.url, public_source.url,
+            private_concept.url, public_concept.url, '/orgs/deleted-org/'
+        ]
+        events = {
+            (event_type, url): Event.objects.create(
+                object_url=follower.url, referenced_object_url=url, event_type=event_type, actor=follower)
+            for url in urls for event_type in ['Followed', 'Unfollowed', 'Created']
+        }
+
+        migration.make_follow_events_of_private_objects_private(apps, None)
+
+        private_urls = [private_org.url, private_source.url, private_concept.url]
+        for (event_type, url), event in events.items():
+            event.refresh_from_db()
+            self.assertEqual(event.public, event_type == 'Created' or url not in private_urls, (event_type, url))

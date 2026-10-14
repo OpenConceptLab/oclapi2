@@ -326,6 +326,25 @@ class UserProfileTest(OCLTestCase):
             for user in [None, AnonymousUser(), outsider]:
                 self.assertTrue(UserProfile.can_user_view(user, obj))
 
+    def test_follow_events_of_private_objects_are_private(self):
+        follower = UserProfileFactory()
+        followed_user = UserProfileFactory()
+        private_source = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        public_source = OrganizationSourceFactory()
+
+        for followed in [followed_user, private_source, public_source]:
+            follower.follow(followed)
+            follower.unfollow(followed)
+
+        self.assertEqual(
+            sorted(follower.events.values_list('event_type', 'referenced_object_url', 'public')),
+            sorted([
+                ('Followed', followed_user.url, True), ('Unfollowed', followed_user.url, True),
+                ('Followed', private_source.url, False), ('Unfollowed', private_source.url, False),
+                ('Followed', public_source.url, True), ('Unfollowed', public_source.url, True),
+            ])
+        )
+
 
 class TokenAuthenticationViewTest(OCLAPITestCase):
     def test_post(self):

@@ -455,6 +455,7 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
             event_type=Event.FOLLOWED,
             object_url=self.url,
             referenced_object_url=following.url,
+            public=self.can_user_view(None, following),  # private for objects the public can't view
         )
 
     def unfollow(self, following):
@@ -467,6 +468,7 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
             event_type=Event.UNFOLLOWED,
             object_url=self.url,
             referenced_object_url=following.url,
+            public=self.can_user_view(None, following),
         )
 
     def set_groups(self, groups, verify=True, _save=True):
