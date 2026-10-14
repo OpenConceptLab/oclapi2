@@ -681,7 +681,7 @@ def index_expansion_mappings(expansion_id, count=None, mapping_ids=None):  # pyl
 
 
 @app.task
-def make_hierarchy(concept_map):  # pragma: no cover
+def make_hierarchy(concept_map):  # pragma: no cover  # pylint: disable=too-many-locals
     from core.concepts.models import Concept, HierarchicalConcepts
 
     def chunks(values, size=5000):
