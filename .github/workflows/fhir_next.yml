@@ -61,9 +61,7 @@ jobs:
           sha=$(git rev-parse --verify 'HEAD^{commit}')
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "short=${sha:0:8}" >> "$GITHUB_OUTPUT"
-      - name: Fail if the ref changes, or doesn't match staging's, migrations, documents.py or tasks.py
-        env:
-          ACCEPT_STAGING_SKEW: ${{ inputs.accept_staging_skew }}
+      - name: Fail if the ref changes migrations, documents.py or tasks.py
         run: |
           # --no-renames lists a renamed file under its old path as well. A failed diff fails the step.
           changed=$(git diff --name-only --no-renames origin/master...HEAD)
@@ -73,6 +71,12 @@ jobs:
             echo "$own"
             exit 1
           fi
+      # The deploy job runs this step again after approval: staging may deploy another build while this run waits.
+      - &staging-skew
+        name: Fail if the ref and staging's build differ in migrations, documents.py or tasks.py
+        env:
+          ACCEPT_STAGING_SKEW: ${{ inputs.accept_staging_skew }}
+        run: |
           staging_build=$(curl --silent --fail --max-time 30 "$STAGING_API_URL/version/" | tr -d '"')
           staging_sha=$(git rev-parse --verify "${staging_build##*-}^{commit}")
           changed=$(git diff --name-only --no-renames "$staging_sha" HEAD)
@@ -150,21 +154,7 @@ jobs:
           ref: ${{ needs.guard.outputs.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Fail if the ref doesn't match staging's current build in migrations, documents.py or tasks.py
-        env:
-          ACCEPT_STAGING_SKEW: ${{ inputs.accept_staging_skew }}
-        run: |
-          staging_build=$(curl --silent --fail --max-time 30 "$STAGING_API_URL/version/" | tr -d '"')
-          staging_sha=$(git rev-parse --verify "${staging_build##*-}^{commit}")
-          changed=$(git diff --name-only --no-renames "$staging_sha" HEAD)
-          skew=$(grep -E "$SHARED_PATHS" <<< "$changed" || true)
-          if [ -n "$skew" ] && [ "$ACCEPT_STAGING_SKEW" = "true" ]; then
-            echo "::warning::Deploying although the ref and staging's build $staging_build differ in: ${skew//$'\n'/ }"
-          elif [ -n "$skew" ]; then
-            echo "::error::Staging now runs $staging_build, which differs from the ref in these files. Dispatch again once the ref matches, or with accept_staging_skew once you've judged the difference safe:"
-            echo "$skew"
-            exit 1
-          fi
+      - *staging-skew
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
@@ -210,8 +200,5 @@ jobs:
           SHORT_SHA: ${{ needs.guard.outputs.short }}
         run: |
           served=$(curl --silent --fail --max-time 30 "$FHIR_NEXT_URL/version/")
-          echo "Served: $served"
-          case "$served" in
-            *"-$SHORT_SHA\"") echo "fhir-next serves $SHORT_SHA" ;;
-            *) echo "::error::fhir-next serves $served, expected a build ending in $SHORT_SHA"; exit 1 ;;
-          esac
+          [[ $served == *"-$SHORT_SHA\"" ]] || { echo "::error::fhir-next serves $served, expected a build ending in $SHORT_SHA"; exit 1; }
+          echo "fhir-next serves $SHORT_SHA"
