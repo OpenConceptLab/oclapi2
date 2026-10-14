@@ -98,6 +98,10 @@ class CollectionVersionsAccessTest(PrivateRepoReadAccessBaseTest):
                     sorted(data['version_url'] for data in self.get(resource.uri + 'collection-versions/', user)),
                     expected, (user, resource))
 
+            entries = self.get(self.public_concept.uri + '$cascade/?verbose=true', user)['entry']
+            self.assertEqual(
+                [entry['collection_versions'] for entry in entries if entry['type'] == 'Mapping'], [expected], user)
+
 
 class FeedAccessTest(PrivateRepoReadAccessBaseTest):
     def test_source_feed_only_for_public_sources(self):

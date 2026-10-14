@@ -163,7 +163,8 @@ class MappingVersionListSerializer(MappingListSerializer):
         super().__init__(*args, **kwargs)
 
     def get_collection_versions(self, obj):
-        return obj.get_collection_versions(get(self, 'context.request.user'))
+        # a $cascade bundle passes its requester as `user`
+        return obj.get_collection_versions(get(self, 'context.request.user') or get(self, 'context.user'))
 
 
 class MappingChecksumSerializer(AbstractResourceSerializer):
@@ -330,4 +331,5 @@ class MappingVersionDetailSerializer(MappingDetailSerializer):
         )
 
     def get_collection_versions(self, obj):
-        return obj.get_collection_versions(get(self, 'context.request.user'))
+        # a $cascade bundle passes its requester as `user`
+        return obj.get_collection_versions(get(self, 'context.request.user') or get(self, 'context.user'))

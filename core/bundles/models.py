@@ -192,8 +192,9 @@ class Bundle:
             self.root, context={'request': {'query_params': self.params}}).data
 
     def set_entries(self):
-        self.entries += self.get_concept_serializer()(self.concepts, many=True).data
-        self.entries += self.get_mapping_serializer()(self.mappings, many=True).data
+        context = {'user': self.user}
+        self.entries += self.get_concept_serializer()(self.concepts, many=True, context=context).data
+        self.entries += self.get_mapping_serializer()(self.mappings, many=True, context=context).data
 
     def get_mapping_serializer(self):
         from core.mappings.models import Mapping
