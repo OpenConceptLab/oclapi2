@@ -18,7 +18,7 @@ from ..common.utils import get_truthy_values
 
 TRUTHY = get_truthy_values()
 PRIVATE_USER_FIELDS = (
-    'email', 'last_login', 'is_staff', 'is_superuser', 'auth_groups', 'permissions', 'capabilities')
+    'email', 'last_login', 'is_staff', 'is_superuser', 'auth_groups', 'permissions', 'capabilities', 'pins')
 
 
 def can_view_private_user_fields(request, user):
@@ -30,7 +30,7 @@ def can_view_private_user_fields(request, user):
 
 
 class PrivateUserFieldsMixin:
-    """Email, account flags and plan fields are only for the user themselves and staff."""
+    """Email, account flags, plan fields and pins are only for the user themselves and staff."""
     def to_representation(self, instance):
         data = super().to_representation(instance)
         if not can_view_private_user_fields(get(self, 'context.request'), instance):
@@ -245,9 +245,12 @@ class UserDetailSerializer(PrivateUserFieldsMixin, AbstractResourceSerializer):
         super().__init__(*args, **kwargs)
 
     def get_subscribed_orgs(self, obj):
+        """The user's orgs that the requester can view."""
         if self.include_subscribed_orgs:
+            from core.orgs.models import Organization
             from core.orgs.serializers import OrganizationListSerializer
-            return OrganizationListSerializer(obj.organizations.all(), many=True).data
+            orgs = Organization.get_visible_to(get(self, 'context.request.user'), obj.organizations.all())
+            return OrganizationListSerializer(orgs, many=True).data
 
         return None
 
@@ -267,7 +270,7 @@ class UserDetailSerializer(PrivateUserFieldsMixin, AbstractResourceSerializer):
         return CapabilitySerializer(obj.capabilities, many=True, context={'user': obj}).data
 
     def get_pins(self, obj):
-        if self.include_pins:
+        if self.include_pins and can_view_private_user_fields(get(self, 'context.request'), obj):
             from core.pins.serializers import PinSerializer
             return PinSerializer(obj.pins.prefetch_related('resource').all(), many=True).data
 

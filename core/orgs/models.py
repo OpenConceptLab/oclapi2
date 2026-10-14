@@ -1,6 +1,7 @@
 from django.contrib.contenttypes.fields import GenericRelation
 from django.core.validators import RegexValidator
 from django.db import models, transaction
+from pydash import get
 
 from core.client_configs.models import ClientConfig
 from core.common.checksums import ChecksumModel
@@ -78,6 +79,18 @@ class Organization(BaseResourceModel, SourceContainerMixin, ChecksumModel):
     @classmethod
     def get_public(cls):
         return cls.objects.filter(public_access=ACCESS_TYPE_VIEW)
+
+    @classmethod
+    def get_visible_to(cls, user, queryset=None):
+        """Limits `queryset` (default: all orgs) to the orgs `user` can view: public orgs and the user's own.
+        Staff can view all."""
+        queryset = cls.objects.all() if queryset is None else queryset
+        if get(user, 'is_superuser') or get(user, 'is_staff'):
+            return queryset
+        visible = cls.get_public()
+        if get(user, 'is_authenticated'):
+            visible = visible | cls.get_by_username(user.username)
+        return queryset.filter(id__in=visible.values('id'))
 
     def save(self, *args, force_insert=False, force_update=False, using=None, update_fields=None):
         """

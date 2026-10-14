@@ -810,6 +810,41 @@ class UserViewsAPITest(OCLAPITestCase):
             self.assertIn(
                 {'name': 'mapper.match_operations', 'limit': 100, 'used': 0}, response.data['capabilities'])
 
+    def test_user_subscribed_orgs_and_pins_only_as_visible_to_requester(self):
+        public_org = OrganizationFactory(mnemonic='visorgspublic')
+        private_org = OrganizationFactory(mnemonic='visorgsprivate', public_access=ACCESS_TYPE_NONE)
+        user = UserProfileFactory(username='visorgsuser', organizations=[public_org, private_org])
+        co_member = UserProfileFactory(username='visorgscomember', organizations=[private_org])
+        other_user = UserProfileFactory(username='visorgsother')
+        private_source = OrganizationSourceFactory(organization=private_org, public_access=ACCESS_TYPE_NONE)
+        user.pins.create(resource=private_source)
+        params = 'includeSubscribedOrgs=true&includePins=true'
+        url = f'/users/{user.username}/?{params}'
+
+        for requester, orgs in [(other_user, ['visorgspublic']), (co_member, ['visorgsprivate', 'visorgspublic'])]:
+            response = self.client.get(url, HTTP_AUTHORIZATION='Token ' + requester.get_token())
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(sorted(org['id'] for org in response.data['subscribed_orgs']), orgs)
+            self.assertNotIn('pins', response.data)
+
+        for token in [user.get_token(), self.admin_token]:
+            response = self.client.get(url, HTTP_AUTHORIZATION='Token ' + token)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                sorted(org['id'] for org in response.data['subscribed_orgs']), ['visorgsprivate', 'visorgspublic'])
+            self.assertEqual([pin['resource_uri'] for pin in response.data['pins']], [private_source.uri])
+
+        response = self.client.get(f'/users/?verbose=true&{params}')
+
+        self.assertEqual(response.status_code, 200)
+        users = {user['username']: user for user in response.data}
+        self.assertEqual([org['id'] for org in users[user.username]['subscribed_orgs']], ['visorgspublic'])
+        self.assertEqual([org['id'] for org in users[co_member.username]['subscribed_orgs']], [])
+        for user_data in users.values():
+            self.assertNotIn('pins', user_data)
+
     @patch('core.users.models.UserProfile.get_all_permissions', return_value=set())
     @patch('core.users.models.UserProfile.get_capability_usage', return_value=0)
     def test_user_detail_does_not_compute_plan_for_other_users(self, usage_mock, permissions_mock):
