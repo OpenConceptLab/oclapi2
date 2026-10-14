@@ -278,6 +278,27 @@ class UserEventsViewTest(OCLAPITestCase):
         for user in [member, staff]:
             self.assertEqual(get_followed_urls(user), sorted([private_org.url, private_source.url, public_org.url]))
 
+    def test_get_events_show_objects_only_to_requesters_who_can_view_them_now(self):
+        org = OrganizationFactory(mnemonic='turned-private-org')
+        source = OrganizationSourceFactory(organization=org, mnemonic='turned-private')
+        member = UserProfileFactory(username='turned-member')
+        org.members.add(member)
+        follower = UserProfileFactory(username='turned-follower')
+        follower.follow(source)
+        source.public_access = 'None'
+        source.save()
+
+        def get_referenced_objects(user=None):
+            headers = {'HTTP_AUTHORIZATION': f'Token {user.get_token()}'} if user else {}
+            response = self.client.get('/users/turned-follower/events/', **headers)
+            self.assertEqual(response.status_code, 200)
+            return [event['referenced_object'] for event in response.data]
+
+        # the event was public when recorded; the source it shows is live, so it's shown only to those who can view it
+        for user in [None, follower]:
+            self.assertEqual(get_referenced_objects(user), [None], user)
+        self.assertEqual([obj['url'] for obj in get_referenced_objects(member)], [source.url])
+
     def test_get_orgs_events(self):  # pylint:disable=too-many-statements,too-many-locals
         alfred = UserProfileFactory(username='alfred', first_name='Alfred', last_name='Pennyworth')
         bruce = UserProfileFactory(username='bruce', first_name='Bruce', last_name='Wayne')
