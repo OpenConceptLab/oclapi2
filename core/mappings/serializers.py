@@ -141,7 +141,7 @@ class MappingListSerializer(AbstractMappingSerializer):
 class MappingVersionListSerializer(MappingListSerializer):
     previous_version_url = CharField(read_only=True, source='prev_version_uri')
     source_versions = ListField(read_only=True)
-    collection_versions = ListField(read_only=True)
+    collection_versions = SerializerMethodField()
 
     class Meta:
         model = Mapping
@@ -161,6 +161,9 @@ class MappingVersionListSerializer(MappingListSerializer):
             self.fields.pop('collection_versions', None)
 
         super().__init__(*args, **kwargs)
+
+    def get_collection_versions(self, obj):
+        return obj.get_collection_versions(get(self, 'context.request.user'))
 
 
 class MappingChecksumSerializer(AbstractResourceSerializer):
@@ -318,10 +321,13 @@ class MappingVersionExportSerializer(ModelSerializer):
 class MappingVersionDetailSerializer(MappingDetailSerializer):
     previous_version_url = CharField(read_only=True, source='prev_version_uri')
     source_versions = ListField(read_only=True)
-    collection_versions = ListField(read_only=True)
+    collection_versions = SerializerMethodField()
 
     class Meta:
         model = Mapping
         fields = MappingDetailSerializer.Meta.fields + (
             'previous_version_url', 'source_versions', 'collection_versions',
         )
+
+    def get_collection_versions(self, obj):
+        return obj.get_collection_versions(get(self, 'context.request.user'))

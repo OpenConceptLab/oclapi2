@@ -335,7 +335,7 @@ class ConceptListSerializer(ConceptAbstractSerializer):
 class ConceptVersionListSerializer(ConceptListSerializer):
     previous_version_url = CharField(read_only=True, source='prev_version_uri')
     source_versions = ListField(read_only=True)
-    collection_versions = ListField(read_only=True)
+    collection_versions = SerializerMethodField()
 
     class Meta:
         model = Concept
@@ -361,6 +361,9 @@ class ConceptVersionListSerializer(ConceptListSerializer):
             pass
 
         super().__init__(*args, **kwargs)
+
+    def get_collection_versions(self, obj):
+        return obj.get_collection_versions(get(self, 'context.request.user'))
 
 
 class ConceptVersionCascadeSerializer(ConceptVersionListSerializer):
@@ -598,7 +601,7 @@ class ConceptVersionDetailSerializer(ModelSerializer):
     parent_concept_urls = ListField(read_only=True)
     child_concept_urls = ListField(read_only=True)
     source_versions = ListField(read_only=True)
-    collection_versions = ListField(read_only=True)
+    collection_versions = SerializerMethodField()
     references = SerializerMethodField()
     latest_source_version = CharField(
         source='latest_source_version.version', allow_null=True, allow_blank=True, read_only=True, required=False)
@@ -688,6 +691,9 @@ class ConceptVersionDetailSerializer(ModelSerializer):
             return ConceptDetailSerializer(
                 get_viewable_concepts(obj.parent_concepts.all(), get(self, 'context.request')), many=True).data
         return None
+
+    def get_collection_versions(self, obj):
+        return obj.get_collection_versions(get(self, 'context.request.user'))
 
 
 class ConceptHierarchySerializer(ModelSerializer):

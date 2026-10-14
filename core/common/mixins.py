@@ -745,8 +745,24 @@ class SourceChildMixin(ChecksumModel):
 
     @property
     def collection_versions(self):
-        return set(self.expansion_set.exclude(
-            collection_version__version=HEAD).values_list('collection_version__uri', flat=True))
+        return self.get_collection_versions()
+
+    def get_collection_versions(self, user=None):
+        """URIs of the released collection versions holding this resource that the user can view."""
+        expansions = self.filter_by_viewable_collection_version(
+            self.expansion_set.exclude(collection_version__version=HEAD), user)
+        return sorted(set(expansions.values_list('collection_version__uri', flat=True)))
+
+    @staticmethod
+    def filter_by_viewable_collection_version(expansions, user):
+        """Expansions of collection versions the user can view: public ones, their own and their orgs' (staff: all)."""
+        if get(user, 'is_staff'):
+            return expansions
+        criteria = ~Q(collection_version__public_access=ACCESS_TYPE_NONE)
+        if get(user, 'is_authenticated'):
+            criteria |= Q(collection_version__user_id=user.id) | Q(
+                collection_version__organization__members__id=user.id)
+        return expansions.filter(criteria)
 
     @property
     def versions(self):
