@@ -1283,16 +1283,16 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def get_unidirectional_mappings_for_collection(self, collection_url, collection_version=HEAD):
         from core.mappings.models import Mapping
         return Mapping.objects.filter(
-            from_concept__uri__icontains=drop_version(self.uri),
-            expansion_set__collection_version__uri__icontains=collection_url,
+            from_concept__uri__startswith=drop_version(self.uri),
+            expansion_set__collection_version__uri__startswith=collection_url,
             expansion_set__collection_version__version=collection_version
         )
 
     def get_indirect_mappings_for_collection(self, collection_url, collection_version=HEAD):
         from core.mappings.models import Mapping
         return Mapping.objects.filter(
-            to_concept__uri__icontains=drop_version(self.uri),
-            expansion_set__collection_version__uri__icontains=collection_url,
+            to_concept__uri__startswith=drop_version(self.uri),
+            expansion_set__collection_version__uri__startswith=collection_url,
             expansion_set__collection_version__version=collection_version
         )
 
