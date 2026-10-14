@@ -877,6 +877,12 @@ class CollectionReference(models.Model):
                          'reverse', 'omit_if_exists_in']:
                 if attr in self.cascade:
                     cascade_params[attr] = get(self.cascade, attr)
+            omit_if_exists_in = cascade_params.get('omit_if_exists_in')
+            if omit_if_exists_in:
+                # a repo the reference's creator can't view is ignored, as if the expression didn't resolve
+                repo, _ = ConceptContainerModel.resolve_expression_to_version(omit_if_exists_in)
+                if get(repo, 'id') and not repo.has_view_access(self.created_by):
+                    cascade_params.pop('omit_if_exists_in')
             map_types = get(self.cascade, 'map_types', None)
             exclude_map_types = get(self.cascade, 'exclude_map_types', None)
             return_map_types = get(self.cascade, 'return_map_types', None)

@@ -3,10 +3,13 @@ from django.db.models import F
 from mock import patch
 
 from core.bundles.models import Bundle
+from core.collections.models import CollectionReference
+from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLAPITestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
+from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
@@ -329,3 +332,45 @@ class MappingTargetAccessTest(CrossRepoAccessBaseTest):
         mapping.refresh_from_db()
         self.assertEqual(mapping.to_concept_id, linked_concept_id)
         self.assertEqual(mapping.to_source_id, linked_source_id)
+
+
+class OmitIfExistsInAccessTest(CrossRepoAccessBaseTest):
+    def setUp(self):
+        super().setUp()
+        self.omitted = ConceptFactory(parent=self.public_source, mnemonic='omitted')
+        self.mapping = MappingFactory(
+            parent=self.public_source, from_concept=self.public_concept, to_concept=self.omitted)
+        self.private_collection = OrganizationCollectionFactory(
+            organization=self.private_org, mnemonic='PrivColl', public_access=ACCESS_TYPE_NONE)
+        expansion = ExpansionFactory(collection_version=self.private_collection)
+        self.private_collection.expansion_uri = expansion.uri
+        self.private_collection.save()
+        expansion.concepts.add(self.omitted.get_latest_version())
+
+    def cascade(self, user, omit_if_exists_in):
+        headers = {'HTTP_AUTHORIZATION': 'Token ' + user.get_token()} if user else {}
+        response = self.client.get(
+            self.public_concept.uri + '$cascade/?omitIfExistsIn=' + omit_if_exists_in, **headers)
+        self.assertEqual(response.status_code, 200)
+        return sorted(entry['url'] for entry in response.data['entry'])
+
+    def test_cascade_ignores_omit_repo_the_requester_cannot_view(self):
+        everything = sorted([self.public_concept.uri, self.mapping.uri, self.omitted.uri])
+        self.assertEqual(self.cascade(None, '/orgs/PrivOrg/collections/NoSuchColl/'), everything)
+
+        for user in [None, self.outsider]:
+            self.assertEqual(self.cascade(user, self.private_collection.uri), everything, user)
+
+        for user in [self.member, self.admin]:
+            self.assertEqual(
+                self.cascade(user, self.private_collection.uri), sorted([self.public_concept.uri, self.mapping.uri]),
+                user)
+
+    def test_reference_ignores_omit_repo_its_creator_cannot_view(self):
+        for user, kept in [(self.outsider, False), (self.member, True), (self.admin, True), (None, False)]:
+            reference = CollectionReference(
+                expression=self.public_source.uri,
+                cascade={'method': 'sourcetoconcepts', 'omit_if_exists_in': self.private_collection.uri},
+                created_by=user)
+
+            self.assertEqual('omit_if_exists_in' in reference.get_concept_cascade_params(), kept, user)

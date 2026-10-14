@@ -547,7 +547,7 @@ class ConceptCascadeView(ConceptBaseView):
         self.set_parent_resource(False)
         bundle = Bundle(
             root=instance, params=self.request.query_params, verbose=self.is_verbose(),
-            repo_version=self.parent_resource, requested_url=self.request.get_full_path()
+            repo_version=self.parent_resource, requested_url=self.request.get_full_path(), user=self.request.user
         )
         bundle.cascade()
         return Response(BundleSerializer(bundle, context={'request': request}).data)
