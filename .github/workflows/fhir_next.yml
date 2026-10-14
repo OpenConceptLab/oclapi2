@@ -25,6 +25,11 @@ concurrency:
 permissions:
   contents: read
 
+# bash -eo pipefail: a failed command anywhere in a pipeline fails the step.
+defaults:
+  run:
+    shell: bash
+
 env:
   AWS_REGION: "us-east-2"
   ECR_REPOSITORY: "oclapi2"
@@ -32,6 +37,9 @@ env:
   ECS_SERVICE_FHIR_NEXT: "staging-fhir-next"
   STAGING_API_URL: "https://api.staging.openconceptlab.org"
   FHIR_NEXT_URL: "https://fhir-next.staging.openconceptlab.org"
+  # The service shares staging's DB and ES, and master's Celery workers run what it enqueues. So a ref must not change
+  # these files, and must match the build staging runs in them (staging can lag master).
+  SHARED_PATHS: '(^|/)migrations/|(^|/)documents\.py$|(^|/)tasks\.py$'
 
 jobs:
   guard:
@@ -46,6 +54,7 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
+          persist-credentials: false
       - name: Resolve the ref to a commit
         id: resolve
         run: |
@@ -56,10 +65,9 @@ jobs:
         env:
           ACCEPT_STAGING_SKEW: ${{ inputs.accept_staging_skew }}
         run: |
-          # The service shares staging's DB and ES, and master's Celery workers run what it enqueues. So the ref must
-          # not change these files, and must match the build staging runs in them (staging can lag master).
-          shared='(^|/)migrations/|(^|/)documents\.py$|(^|/)tasks\.py$'
-          own=$(git diff --name-only origin/master...HEAD | grep -E "$shared" || true)
+          # --no-renames lists a renamed file under its old path as well. A failed diff fails the step.
+          changed=$(git diff --name-only --no-renames origin/master...HEAD)
+          own=$(grep -E "$SHARED_PATHS" <<< "$changed" || true)
           if [ -n "$own" ]; then
             echo "::error::The ref changes files staging shares with master's code. Keep these changes out of it:"
             echo "$own"
@@ -67,7 +75,8 @@ jobs:
           fi
           staging_build=$(curl --silent --fail --max-time 30 "$STAGING_API_URL/version/" | tr -d '"')
           staging_sha=$(git rev-parse --verify "${staging_build##*-}^{commit}")
-          skew=$(git diff --name-only "$staging_sha" HEAD | grep -E "$shared" || true)
+          changed=$(git diff --name-only --no-renames "$staging_sha" HEAD)
+          skew=$(grep -E "$SHARED_PATHS" <<< "$changed" || true)
           if [ -n "$skew" ] && [ "$ACCEPT_STAGING_SKEW" = "true" ]; then
             echo "::warning::Deploying although the ref and staging's build $staging_build differ in: ${skew//$'\n'/ }"
           elif [ -n "$skew" ]; then
@@ -95,6 +104,7 @@ jobs:
         uses: actions/checkout@v3
         with:
           ref: ${{ needs.guard.outputs.sha }}
+          persist-credentials: false
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       # Built before any AWS credentials exist in this job.
@@ -132,6 +142,29 @@ jobs:
     runs-on: ubuntu-latest
     environment: staging
     steps:
+      # Staging may have deployed another build while this run waited for approval: compare again, before any AWS
+      # credentials exist in this job.
+      - name: Checkout ref
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.guard.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fail if the ref doesn't match staging's current build in migrations, documents.py or tasks.py
+        env:
+          ACCEPT_STAGING_SKEW: ${{ inputs.accept_staging_skew }}
+        run: |
+          staging_build=$(curl --silent --fail --max-time 30 "$STAGING_API_URL/version/" | tr -d '"')
+          staging_sha=$(git rev-parse --verify "${staging_build##*-}^{commit}")
+          changed=$(git diff --name-only --no-renames "$staging_sha" HEAD)
+          skew=$(grep -E "$SHARED_PATHS" <<< "$changed" || true)
+          if [ -n "$skew" ] && [ "$ACCEPT_STAGING_SKEW" = "true" ]; then
+            echo "::warning::Deploying although the ref and staging's build $staging_build differ in: ${skew//$'\n'/ }"
+          elif [ -n "$skew" ]; then
+            echo "::error::Staging now runs $staging_build, which differs from the ref in these files. Dispatch again once the ref matches, or with accept_staging_skew once you've judged the difference safe:"
+            echo "$skew"
+            exit 1
+          fi
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
