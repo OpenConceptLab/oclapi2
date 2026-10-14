@@ -267,6 +267,14 @@ class PinListViewTest(OCLAPITestCase):
             owner.uri + '?includePins=true', HTTP_AUTHORIZATION='Token ' + owner.get_token(), format='json')
         self.assertEqual([pin['resource_uri'] for pin in response.data['pins']], [public_source.uri])
 
+        # an update would return the resource, so it's refused; the owner can still delete the pin
+        pin_url = owner.uri + f'pins/{private_user_pin.id}/'
+        response = self.client.patch(
+            pin_url, {'order': 0}, HTTP_AUTHORIZATION='Token ' + owner.get_token(), format='json')
+        self.assertEqual(response.status_code, 404)
+        response = self.client.delete(pin_url, HTTP_AUTHORIZATION='Token ' + owner.get_token(), format='json')
+        self.assertEqual(response.status_code, 204)
+
     def test_post_201(self):
         source = OrganizationSourceFactory()
         org = OrganizationFactory()

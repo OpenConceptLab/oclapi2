@@ -3,7 +3,7 @@ from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.generics import ListAPIView, \
     RetrieveUpdateDestroyAPIView
-from rest_framework.permissions import IsAuthenticatedOrReadOnly, SAFE_METHODS
+from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 
 from core.common.constants import MAX_PINS_ALLOWED, INCLUDE_CREATOR_PINS
@@ -63,7 +63,8 @@ class PinBaseView(BaseAPIView):
         queryset = Pin.objects.filter(
             criteria
         ).select_related('organization', 'user').prefetch_related('resource')
-        if self.request.method in SAFE_METHODS:
+        # an update returns the pinned resource, so only a pin's owner deleting it skips the visibility filter
+        if self.request.method != 'DELETE':
             queryset = Pin.get_visible_to(queryset, self.request)
         return queryset
 
