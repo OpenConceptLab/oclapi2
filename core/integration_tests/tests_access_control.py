@@ -564,9 +564,7 @@ class CsvExportAccessTest(AccessTestMixin, OCLAPITestCase):
     def setUp(self):
         super().setUp()
         self.exports = {}
-        export_service = Mock(
-            upload_file=self.upload, exists=lambda key: key in self.exports,
-            url_for=lambda key: 'https://exports.test/' + key)
+        export_service = Mock(upload_file=self.upload, url_for=lambda key: 'https://exports.test/' + key)
         patcher = patch('core.common.utils.get_export_service', return_value=export_service)
         patcher.start()
         self.addCleanup(patcher.stop)

@@ -7,7 +7,7 @@ from core.common.constants import MAPPING_LOOKUP_CONCEPTS, MAPPING_LOOKUP_SOURCE
     MAPPING_LOOKUP_TO_CONCEPT, MAPPING_LOOKUP_FROM_SOURCE, MAPPING_LOOKUP_TO_SOURCE, INCLUDE_EXTRAS_PARAM, \
     INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS, INCLUDE_VERBOSE_REFERENCES
 from core.common.fields import EncodedDecodedCharField
-from core.common.serializers import AbstractResourceSerializer
+from core.common.serializers import AbstractResourceSerializer, CollectionVersionsMixin
 from core.common.utils import get_truthy_values
 from core.concepts.serializers import ConceptDetailSerializer
 from core.mappings.models import Mapping
@@ -138,7 +138,7 @@ class MappingListSerializer(AbstractMappingSerializer):
         )
 
 
-class MappingVersionListSerializer(MappingListSerializer):
+class MappingVersionListSerializer(CollectionVersionsMixin, MappingListSerializer):
     previous_version_url = CharField(read_only=True, source='prev_version_uri')
     source_versions = ListField(read_only=True)
     collection_versions = SerializerMethodField()
@@ -161,10 +161,6 @@ class MappingVersionListSerializer(MappingListSerializer):
             self.fields.pop('collection_versions', None)
 
         super().__init__(*args, **kwargs)
-
-    def get_collection_versions(self, obj):
-        # a $cascade bundle passes its requester as `user`
-        return obj.get_collection_versions(get(self, 'context.request.user') or get(self, 'context.user'))
 
 
 class MappingChecksumSerializer(AbstractResourceSerializer):
@@ -319,7 +315,7 @@ class MappingVersionExportSerializer(ModelSerializer):
         return obj.get_checksums()
 
 
-class MappingVersionDetailSerializer(MappingDetailSerializer):
+class MappingVersionDetailSerializer(CollectionVersionsMixin, MappingDetailSerializer):
     previous_version_url = CharField(read_only=True, source='prev_version_uri')
     source_versions = ListField(read_only=True)
     collection_versions = SerializerMethodField()
@@ -329,7 +325,3 @@ class MappingVersionDetailSerializer(MappingDetailSerializer):
         fields = MappingDetailSerializer.Meta.fields + (
             'previous_version_url', 'source_versions', 'collection_versions',
         )
-
-    def get_collection_versions(self, obj):
-        # a $cascade bundle passes its requester as `user`
-        return obj.get_collection_versions(get(self, 'context.request.user') or get(self, 'context.user'))

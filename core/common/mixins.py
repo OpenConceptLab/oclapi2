@@ -724,11 +724,7 @@ class SourceChildMixin(ChecksumModel):
     def source_versions(self):
         return self.sources.exclude(version=HEAD).values_list('uri', flat=True)
 
-    @property
-    def collection_versions(self):
-        return self.get_collection_versions()
-
-    def get_collection_versions(self, user=None):
+    def get_collection_versions(self, user):
         """URIs of the released collection versions holding this resource that the user can view."""
         expansions = self.filter_by_viewable_collection_version(
             self.expansion_set.exclude(collection_version__version=HEAD), user)

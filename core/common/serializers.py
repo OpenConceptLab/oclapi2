@@ -26,6 +26,12 @@ class TaskSerializer(Serializer):  # pylint: disable=abstract-method
     pass
 
 
+class CollectionVersionsMixin:  # pylint: disable=too-few-public-methods
+    def get_collection_versions(self, obj):
+        # a $cascade bundle passes its requester as `user`
+        return obj.get_collection_versions(get(self, 'context.request.user') or get(self, 'context.user'))
+
+
 class ReadSerializerMixin:
     """ Mixin for serializer which does not update or create resources. """
 

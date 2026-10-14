@@ -165,9 +165,6 @@ class CodeSystemValidateCodeView(ConceptRetrieveUpdateDestroyView):
                 url = IdentifierSerializer.convert_fhir_url_to_ocl_uri(url, 'sources')
                 source = Source.objects.filter(uri=url)
 
-            if not source:
-                return queryset.none()
-
             if version:
                 source = source.filter(version=version)
             else:

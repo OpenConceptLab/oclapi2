@@ -9,7 +9,7 @@ from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPIN
     INCLUDE_CHILD_CONCEPT_URLS, HEAD, INCLUDE_SUMMARY, INCLUDE_VERBOSE_REFERENCES, VERBOSE_PARAM, \
     INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE
 from core.common.fields import EncodedDecodedCharField
-from core.common.serializers import AbstractResourceSerializer
+from core.common.serializers import AbstractResourceSerializer, CollectionVersionsMixin
 from core.common.utils import to_parent_uri_from_kwargs, get_truthy_values
 from core.concepts.models import Concept, ConceptName
 
@@ -332,7 +332,7 @@ class ConceptListSerializer(ConceptAbstractSerializer):
         )
 
 
-class ConceptVersionListSerializer(ConceptListSerializer):
+class ConceptVersionListSerializer(CollectionVersionsMixin, ConceptListSerializer):
     previous_version_url = CharField(read_only=True, source='prev_version_uri')
     source_versions = ListField(read_only=True)
     collection_versions = SerializerMethodField()
@@ -361,10 +361,6 @@ class ConceptVersionListSerializer(ConceptListSerializer):
             pass
 
         super().__init__(*args, **kwargs)
-
-    def get_collection_versions(self, obj):
-        # a $cascade bundle passes its requester as `user`
-        return obj.get_collection_versions(get(self, 'context.request.user') or get(self, 'context.user'))
 
 
 class ConceptVersionCascadeSerializer(ConceptVersionListSerializer):
@@ -577,7 +573,7 @@ class ConceptVersionExportSerializer(ModelSerializer):
         return list(uris)
 
 
-class ConceptVersionDetailSerializer(ModelSerializer):
+class ConceptVersionDetailSerializer(CollectionVersionsMixin, ModelSerializer):
     type = CharField(source='resource_type')
     uuid = CharField(source='id')
     id = EncodedDecodedCharField(source='mnemonic')
@@ -692,10 +688,6 @@ class ConceptVersionDetailSerializer(ModelSerializer):
             return ConceptDetailSerializer(
                 get_viewable_concepts(obj.parent_concepts.all(), get(self, 'context.request')), many=True).data
         return None
-
-    def get_collection_versions(self, obj):
-        # a $cascade bundle passes its requester as `user`
-        return obj.get_collection_versions(get(self, 'context.request.user') or get(self, 'context.user'))
 
 
 class ConceptHierarchySerializer(ModelSerializer):

@@ -679,11 +679,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def get_viewable_parent_uris(uris, user, linked_uris=None):
         """Only parents in repos the user can view can be linked. Parents already linked are kept,
         and so are not-yet-existing ones pointing into a repo the user can view (linked later by the hierarchy task).
-        `linked_uris` can be a callable, so it's only evaluated when some parent isn't viewable."""
+        `linked_uris` is a callable returning those, called only when some parent isn't viewable."""
         from core.common.utils import to_parent_uri
         from core.sources.models import Source
-        if not uris:
-            return []
         viewable_uris = set()
         can_view_source = {}
         existing_uris = set()
@@ -704,8 +702,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             if repo_view_by_uri[repo_uri]:
                 viewable_uris.add(uri)
         if linked_uris and any(uri not in viewable_uris for uri in uris):
-            linked_uris = set(linked_uris() if callable(linked_uris) else linked_uris)
-            viewable_uris |= linked_uris
+            viewable_uris |= set(linked_uris())
         return [uri for uri in uris if uri in viewable_uris]
 
     def set_parent_concepts_from_uris(self, create_parent_version=True):

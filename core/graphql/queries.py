@@ -17,6 +17,7 @@ from core.common.constants import HEAD
 from core.common.search import get_visible_repo_criteria
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
+from core.concepts.serializers import get_viewable_concepts
 from core.mappings.models import Mapping
 from core.sources.models import Source
 
@@ -103,12 +104,6 @@ def build_mapping_prefetch(source_version: Source) -> Prefetch:
     )
 
     return Prefetch('mappings_from', queryset=mapping_qs, to_attr='graphql_mappings')
-
-
-def build_global_base_queryset(user):
-    """Active concepts across all repositories the user can view."""
-    queryset = Concept.objects.filter(is_active=True, retired=False)
-    return queryset if user.is_staff else Concept.apply_user_criteria(queryset, user)
 
 
 def build_global_mapping_prefetch(user) -> Prefetch:
@@ -514,7 +509,7 @@ class Query:
         else:
             # Global search across all repositories the user can view
             source_version = None
-            base_qs = build_global_base_queryset(user)
+            base_qs = get_viewable_concepts(Concept.objects.filter(is_active=True, retired=False), info.context)
             mapping_prefetch = build_global_mapping_prefetch(user)
 
         if concept_ids_param:
