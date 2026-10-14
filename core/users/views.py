@@ -620,7 +620,7 @@ class UserFollowingListView(AbstractFollowerFollowedView, ListAPIView):
     serializer_class = FollowingSerializer
 
     def get_queryset(self):
-        return self.get_object().following.filter()
+        return self.get_object().get_following_visible_to(self.request.user)
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         follower = self.get_object()

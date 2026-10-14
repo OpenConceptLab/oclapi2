@@ -12,6 +12,7 @@ from core.common.constants import ACCESS_TYPE_NONE, HEAD, OCL_ORG_ID, ACCESS_TYP
 from core.common.tasks import send_user_verification_email, send_user_reset_password_email
 from core.common.tests import OCLTestCase, OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.orgs.models import Organization
+from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.constants import USER_OBJECT_TYPE, OCL_SERVERS_GROUP, MAPPER_USE_PERMISSION, \
     MAPPER_AI_ASSISTANT_PERMISSION, MAPPER_SCISPACY_PERMISSION, STAFF_GROUP, SUPERADMIN_GROUP
@@ -303,6 +304,27 @@ class UserProfileTest(OCLTestCase):
         user = UserProfileFactory()
 
         self.assertFalse(user.has_perm(MAPPER_USE_PERMISSION))
+
+    def test_can_user_view(self):
+        from django.contrib.auth.models import AnonymousUser
+        from core.concepts.tests.factories import ConceptFactory
+        member, outsider, staff = UserProfileFactory(), UserProfileFactory(), UserProfileFactory(is_staff=True)
+        private_org = OrganizationFactory(public_access=ACCESS_TYPE_NONE)
+        private_org.members.add(member)
+        private_source = OrganizationSourceFactory(organization=private_org, public_access=ACCESS_TYPE_NONE)
+        private_concept = ConceptFactory(parent=private_source)
+        public_source = OrganizationSourceFactory(organization=private_org)
+
+        for obj in [private_org, private_source, private_concept]:
+            for user in [None, AnonymousUser(), outsider]:
+                self.assertFalse(UserProfile.can_user_view(user, obj))
+            self.assertFalse(outsider.can_view(obj))
+            for user in [member, staff]:
+                self.assertTrue(UserProfile.can_user_view(user, obj))
+                self.assertTrue(user.can_view(obj))
+        for obj in [public_source, member]:
+            for user in [None, AnonymousUser(), outsider]:
+                self.assertTrue(UserProfile.can_user_view(user, obj))
 
 
 class TokenAuthenticationViewTest(OCLAPITestCase):

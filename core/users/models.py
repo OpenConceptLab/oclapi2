@@ -423,15 +423,28 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
 
     def can_view(self, obj):
         """Whether this user can view a user, an org, a repo or content inside a repo."""
+        return self.can_user_view(self, obj)
+
+    @staticmethod
+    def can_user_view(user, obj):
+        """Whether `user` (anonymous or None for the public) can view a user, an org, a repo or content in a repo."""
         from core.orgs.models import Organization
-        if self.is_staff or isinstance(obj, UserProfile):
+        if getattr(user, 'is_staff', False) or isinstance(obj, UserProfile):
             return True
         if isinstance(obj, Organization):
-            return obj.public_can_view or obj.is_member(self)
+            return obj.public_can_view or bool(user and user.is_authenticated and obj.is_member(user))
         repo = obj if hasattr(obj, 'has_view_access') else (
             getattr(obj, 'collection_version', None) or getattr(obj, 'collection', None) or
             getattr(obj, 'parent', None))
-        return bool(repo and hasattr(repo, 'has_view_access') and repo.has_view_access(self))
+        return bool(repo and hasattr(repo, 'has_view_access') and repo.has_view_access(user))
+
+    def get_following_visible_to(self, viewer):
+        """This user's follows, without those of objects `viewer` can't view. The user and staff get them all."""
+        follows = self.following.prefetch_related('following')
+        if getattr(viewer, 'is_staff', False) or getattr(viewer, 'id', None) == self.id:
+            return follows
+        hidden_ids = [follow.id for follow in follows if not self.can_user_view(viewer, follow.following)]
+        return follows.exclude(id__in=hidden_ids) if hidden_ids else follows
 
     def follow(self, following):
         self.following.create(following_id=following.id, following_type=ContentType.objects.get_for_model(following))

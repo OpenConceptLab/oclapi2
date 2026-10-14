@@ -1270,6 +1270,39 @@ class UserFollowingListViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
 
+    def test_get_only_follows_the_requester_can_view(self):
+        private_org = OrganizationFactory(mnemonic='private-followed', public_access=ACCESS_TYPE_NONE)
+        private_source = OrganizationSourceFactory(organization=private_org, public_access=ACCESS_TYPE_NONE)
+        public_org = OrganizationFactory(mnemonic='public-followed')
+        member = UserProfileFactory(username='private-member')
+        private_org.members.add(member)
+        outsider = UserProfileFactory(username='private-outsider')
+        staff = UserProfileFactory(username='private-staff', is_staff=True)
+        for followed in [private_org, private_source, public_org]:
+            member.follow(followed)
+        all_urls = sorted([private_org.url, private_source.url, public_org.url])
+
+        def get_followed_urls(url, user=None):
+            headers = {'HTTP_AUTHORIZATION': 'Token ' + user.get_token()} if user else {}
+            response = self.client.get(url, **headers)
+            self.assertEqual(response.status_code, 200)
+            follows = response.data
+            if url.startswith('/users/?'):
+                follows = next(user for user in follows if user['username'] == member.username)['following']
+            elif 'includeFollowing' in url:
+                follows = follows['following']
+            return sorted(follow['object']['url'] for follow in follows)
+
+        following_url = f'/users/{member.username}/following/'
+        detail_url = f'/users/{member.username}/?includeFollowing=true'
+        list_url = '/users/?verbose=true&includeFollowing=true'
+        for url in [following_url, list_url]:
+            self.assertEqual(get_followed_urls(url), [public_org.url])
+        for url in [following_url, detail_url, list_url]:
+            self.assertEqual(get_followed_urls(url, outsider), [public_org.url])
+            self.assertEqual(get_followed_urls(url, member), all_urls)
+            self.assertEqual(get_followed_urls(url, staff), all_urls)
+
     def test_post(self):
         follower = UserProfileFactory(username='follower')
         followed = UserProfileFactory(username='followed')

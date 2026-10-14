@@ -204,7 +204,7 @@ class UserDetailSerializer(PrivateUserFieldsMixin, AbstractResourceSerializer):
     deactivated_at = serializers.DateTimeField(read_only=True)
     pins = serializers.SerializerMethodField()
     followers = FollowerSerializer(many=True, read_only=True)
-    following = FollowingSerializer(many=True, read_only=True)
+    following = serializers.SerializerMethodField()
 
     class Meta:
         model = UserProfile
@@ -272,6 +272,10 @@ class UserDetailSerializer(PrivateUserFieldsMixin, AbstractResourceSerializer):
             return PinSerializer(obj.pins.prefetch_related('resource').all(), many=True).data
 
         return None
+
+    def get_following(self, obj):
+        """Only follows of objects the requester can view."""
+        return FollowingSerializer(obj.get_following_visible_to(get(self, 'context.request.user')), many=True).data
 
     def validate_username(self, value):
         from core.services.auth.core import AuthService
