@@ -7,7 +7,8 @@ from core.common.constants import MAPPING_LOOKUP_CONCEPTS, MAPPING_LOOKUP_SOURCE
     MAPPING_LOOKUP_TO_CONCEPT, MAPPING_LOOKUP_FROM_SOURCE, MAPPING_LOOKUP_TO_SOURCE, INCLUDE_EXTRAS_PARAM, \
     INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS, INCLUDE_VERBOSE_REFERENCES
 from core.common.fields import EncodedDecodedCharField
-from core.common.serializers import AbstractResourceSerializer
+from core.common.serializers import AbstractResourceSerializer, SourceChildPageSerializer, \
+    SourceVersionFieldMixin, get_collection_in_scope
 from core.common.utils import get_truthy_values
 from core.concepts.serializers import ConceptDetailSerializer
 from core.mappings.models import Mapping
@@ -17,7 +18,7 @@ from core.sources.serializers import SourceListSerializer, SourceDetailSerialize
 TRUTHY = get_truthy_values()
 
 
-class AbstractMappingSerializer(AbstractResourceSerializer):
+class AbstractMappingSerializer(SourceVersionFieldMixin, AbstractResourceSerializer):
     from_concept = SerializerMethodField()
     to_concept = SerializerMethodField()
     from_source = SourceListSerializer()
@@ -64,7 +65,7 @@ class AbstractMappingSerializer(AbstractResourceSerializer):
 
         if not get(request, 'instance'):
             self.fields.pop('references', None)
-        if 'collection' in self.view_kwargs:
+        if 'collection' in self.view_kwargs and not get_collection_in_scope(get(kwargs, 'context')):
             self.fields.pop('latest_source_version', None)
 
         super().__init__(*args, **kwargs)
@@ -119,11 +120,11 @@ class MappingListSerializer(AbstractMappingSerializer):
     sort_weight = FloatField(required=False, allow_null=True)
     version_updated_on = DateTimeField(source='updated_at', read_only=True)
     version_updated_by = DateTimeField(source='updated_by.username', read_only=True)
-    latest_source_version = CharField(
-        source='latest_source_version.version', allow_null=True, allow_blank=True, read_only=True, required=False)
+    latest_source_version = SerializerMethodField()
 
     class Meta:
         model = Mapping
+        list_serializer_class = SourceChildPageSerializer
         fields = AbstractMappingSerializer.Meta.fields + (
             'external_id', 'retired', 'map_type', 'source', 'owner', 'owner_type',
             'from_concept_code', 'from_concept_name', 'from_concept_url',
@@ -145,6 +146,7 @@ class MappingVersionListSerializer(MappingListSerializer):
 
     class Meta:
         model = Mapping
+        list_serializer_class = SourceChildPageSerializer
         fields = MappingListSerializer.Meta.fields + (
             'previous_version_url', 'source_versions', 'collection_versions'
         )
@@ -247,11 +249,11 @@ class MappingDetailSerializer(MappingListSerializer):
     to_source = SourceDetailSerializer()
     created_on = DateTimeField(source='created_at', read_only=True)
     updated_on = DateTimeField(source='updated_at', read_only=True)
-    latest_source_version = CharField(
-        source='latest_source_version.version', allow_null=True, allow_blank=True, read_only=True, required=False)
+    latest_source_version = SerializerMethodField()
 
     class Meta:
         model = Mapping
+        list_serializer_class = SourceChildPageSerializer
         fields = MappingListSerializer.Meta.fields + (
             'type', 'uuid', 'extras', 'created_on', 'updated_on', 'created_by',
             'updated_by', 'parent_id', 'public_can_view', 'latest_source_version'
@@ -322,6 +324,7 @@ class MappingVersionDetailSerializer(MappingDetailSerializer):
 
     class Meta:
         model = Mapping
+        list_serializer_class = SourceChildPageSerializer
         fields = MappingDetailSerializer.Meta.fields + (
             'previous_version_url', 'source_versions', 'collection_versions',
         )

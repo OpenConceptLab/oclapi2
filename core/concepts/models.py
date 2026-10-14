@@ -220,6 +220,10 @@ class HierarchicalConcepts(models.Model):
 
 
 class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pylint: disable=too-many-public-methods
+    LIST_PREFETCHES = ('parent', 'created_by', 'updated_by', 'names')
+    FIELD_PREFETCHES = ('descriptions', )
+    LATEST_SOURCE_VERSION_FIELDS = ('latest_source_version', 'property')  # property: get_parent_source_version
+
     class Meta:
         db_table = 'concepts'
         unique_together = ('mnemonic', 'version', 'parent')
@@ -979,11 +983,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def is_existing_in_parent(self):
         return self.parent.concepts_set.filter(mnemonic__exact=self.mnemonic).exists()
 
-    @property
-    def latest_source_version(self):
-        return self.sources.exclude(version=HEAD).order_by('-created_at').first()
-
     def get_source_version_before_creation(self):
+        if hasattr(self, '_latest_source_version') and not self._latest_source_version:
+            return None  # load_list_fields found no released version holding this row
         return self.sources.exclude(version=HEAD).filter(
             created_at__lte=self.created_at).order_by('-created_at').first()
 

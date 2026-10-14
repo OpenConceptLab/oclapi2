@@ -4,9 +4,13 @@ import factory
 
 from celery.states import PENDING
 from django.core.cache import cache
+from django.db import connection
 from django.db.models import F
 from django.test import override_settings
+from django.test.utils import CaptureQueriesContext
 from mock import ANY
+from rest_framework.request import Request
+from rest_framework.test import APIRequestFactory
 
 from core.bundles.models import Bundle
 from core.sources.models import CloneLimitExceeded
@@ -16,7 +20,9 @@ from core.common.tests import OCLAPITestCase
 from core.concepts.constants import CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
+from core.concepts.serializers import ConceptListSerializer, ConceptDetailSerializer
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory, ConceptDescriptionFactory
+from core.integration_tests.test_utils import SourceChildListQueryCountMixin
 from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
@@ -4175,3 +4181,49 @@ class ConceptCloneViewTest(OCLAPITestCase):
             self.concept, self.concept.parent, self.clone_to_source, self.user, ANY, False,
             resource_budget=100, **parameters  # no group: the preview per-call budget (ocl_online#230)
         )
+
+
+class ConceptListQueryCountTest(SourceChildListQueryCountMixin, OCLAPITestCase):
+    """A page of concepts costs the same number of queries whatever its size, and serializes as row by row did."""
+    model = Concept
+    relation = 'concepts'
+    list_serializer = ConceptListSerializer
+    detail_serializer = ConceptDetailSerializer
+
+    def setUp(self):
+        super().setUp()
+        self.source = OrganizationSourceFactory()
+        for _ in range(4):
+            ConceptFactory(
+                parent=self.source,
+                names=[
+                    ConceptNameFactory.build(locale='en', locale_preferred=True), ConceptNameFactory.build(locale='fr')
+                ],
+                descriptions=[ConceptDescriptionFactory.build(locale='en')])
+        concepts = Concept.objects.filter(parent=self.source)
+        for concept in concepts:  # a GET calculates and saves missing checksums, one row at a time
+            concept.set_checksums()
+            for locale in [*concept.names.all(), *concept.descriptions.all()]:
+                locale.set_checksums()
+        self.set_released_versions(concepts)
+
+    def test_revisions_in_no_released_version(self):
+        """Search results can hold revisions saved since the last release: no per-row lookup for those either."""
+        self.v1.concepts.clear()
+        self.v2.concepts.clear()
+        revisions = list(Concept.objects.filter(parent=self.source, is_latest_version=True).exclude(
+            id=F('versioned_object_id')).order_by('id'))
+        context = {'request': Request(APIRequestFactory().get('/'))}
+
+        def serialize(rows):  # fetched as search results are: by id, names prefetched
+            rows = list(
+                Concept.objects.filter(id__in=[row.id for row in rows]).prefetch_related('names').order_by('id'))
+            with CaptureQueriesContext(connection) as queries:
+                data = ConceptListSerializer(rows, many=True, context=context).data
+            return data, len(queries.captured_queries)
+
+        _, small_page_queries = serialize(revisions[:2])
+        data, page_queries = serialize(revisions)
+        self.assertEqual(page_queries, small_page_queries)
+        self.assertEqual(data, [ConceptListSerializer(row, context=context).data for row in revisions])
+        self.assertEqual({row['latest_source_version'] for row in data}, {None})

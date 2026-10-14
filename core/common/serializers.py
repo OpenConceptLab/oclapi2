@@ -1,6 +1,7 @@
+from django.db.models.manager import BaseManager
 from pydash import get
 from rest_framework.fields import CharField, JSONField, SerializerMethodField, FloatField, ChoiceField
-from rest_framework.serializers import Serializer, Field, ValidationError, ModelSerializer
+from rest_framework.serializers import Serializer, Field, ValidationError, ModelSerializer, ListSerializer
 
 from core import settings
 from core.code_systems.constants import RESOURCE_TYPE as CODE_SYSTEM_RESOURCE_TYPE
@@ -223,6 +224,38 @@ class SearchResultSerializer(Serializer):  # pylint: disable=abstract-method
             for attr, value in highlight.items():
                 cleaned_highlight[attr] = value
         return cleaned_highlight
+
+
+def get_collection_in_scope(context):
+    """The collection (version) a concept or mapping view is scoped to, when the view has loaded it."""
+    if 'collection' in get(context, 'view.kwargs', {}):
+        instance = get(context, 'request.instance')
+        if get(instance, 'resource_type') == 'Collection':
+            return instance
+    return None
+
+
+class SourceVersionFieldMixin:
+    """
+    latest_source_version for concepts and mappings: the latest released source version holding the row or, listed
+    in a collection, the source version the row's references there resolved to (ocl_issues#2770).
+    """
+    def get_latest_source_version(self, obj):
+        collection = get_collection_in_scope(self.context)
+        if collection:
+            if not hasattr(obj, '_collection_source_version'):
+                obj.load_collection_source_versions([obj], collection)
+            return get(obj, '_collection_source_version.version')
+        return get(obj.latest_source_version, 'version')
+
+
+class SourceChildPageSerializer(ListSerializer):  # pylint: disable=abstract-method
+    """Serializes a page of concepts or mappings, loading the per-row lookups for the whole page first."""
+    def to_representation(self, data):
+        instances = list(data.all() if isinstance(data, BaseManager) else data)
+        self.child.Meta.model.load_list_fields(
+            instances, self.child.fields.keys(), get_collection_in_scope(self.context))
+        return super().to_representation(instances)
 
 
 class AbstractResourceSerializer(ModelSerializer):
