@@ -646,8 +646,8 @@ class SourceChildMixin(ChecksumModel):
 
     # relations the list serializers read on every row, prefetched once per page by load_list_fields
     LIST_PREFETCHES = ()
-    # relations a serializer field reads on every row, prefetched by load_list_fields when that field is serialized
-    FIELD_PREFETCHES = {}
+    # relations named like the serializer field that reads them; prefetched by load_list_fields when it's serialized
+    FIELD_PREFETCHES = ()
     # serializer fields that read latest_source_version
     LATEST_SOURCE_VERSION_FIELDS = ('latest_source_version', )
 
@@ -656,15 +656,9 @@ class SourceChildMixin(ChecksumModel):
 
     @classmethod
     def load_list_fields(cls, instances, fields, collection=None):
-        """
-        Loads what the list serializers would otherwise query row by row, for a whole page at once, and only what
-        the serialized fields read: prefetched relations, the latest and previous versions' uris, the source and
-        collection versions holding each row, latest_source_version and, in a collection, the row's references and
-        the source versions they resolved to.
-        """
+        """Loads, for a whole page at once, what the serialized fields would otherwise query row by row."""
         fields = set(fields)
-        prefetch_related_objects(instances, *cls.LIST_PREFETCHES, *(
-            lookup for field, lookups in cls.FIELD_PREFETCHES.items() if field in fields for lookup in lookups))
+        prefetch_related_objects(instances, *cls.LIST_PREFETCHES, *fields.intersection(cls.FIELD_PREFETCHES))
         loaders = {
             'version_url': cls.load_latest_version_uris,
             'previous_version_url': cls.load_previous_version_uris,
@@ -678,7 +672,7 @@ class SourceChildMixin(ChecksumModel):
         reads_latest_source_version = fields & set(cls.LATEST_SOURCE_VERSION_FIELDS)
         if collection:  # there latest_source_version shows the collection's resolved version instead
             reads_latest_source_version.discard('latest_source_version')
-            if 'references' in fields:
+            if fields & {'references', 'latest_source_version'}:
                 cls.load_collection_references(instances, collection)
             if 'latest_source_version' in fields:
                 cls.load_collection_source_versions(instances, collection)
@@ -752,7 +746,7 @@ class SourceChildMixin(ChecksumModel):
 
     @classmethod
     def load_collection_references(cls, instances, collection):
-        """Sets each row's _collection_references: (collection id, ids of its references in that collection)."""
+        """Sets each row's _collection_reference_ids: the ids of its references in that collection."""
         key = f'{cls._meta.model_name}_id'
         reference_ids = {}
         for row_id, reference_id in cls.references.through.objects.filter(
@@ -760,13 +754,11 @@ class SourceChildMixin(ChecksumModel):
         ).order_by('reference_id').values_list(key, 'reference_id'):
             reference_ids.setdefault(row_id, []).append(reference_id)
         for instance in instances:
-            # pylint: disable=protected-access
-            instance._collection_references = (collection.id, reference_ids.get(instance.id, []))
+            instance._collection_reference_ids = reference_ids.get(instance.id, [])  # pylint: disable=protected-access
 
     def get_collection_reference_ids(self, collection):
-        loaded = getattr(self, '_collection_references', None)
-        if loaded and loaded[0] == collection.id:
-            return loaded[1]
+        if hasattr(self, '_collection_reference_ids'):  # loaded for a whole page by load_list_fields
+            return self._collection_reference_ids
         return list(self.collection_references(collection).order_by('id').values_list('id', flat=True))
 
     @classmethod
@@ -775,9 +767,6 @@ class SourceChildMixin(ChecksumModel):
         Sets each row's _collection_source_version: the newest source version its references in this collection
         resolved to, as TBv3 shows a collection's rows, or None when they resolved to HEAD or to no source version.
         """
-        cls.load_collection_references(
-            [instance for instance in instances if get(instance, '_collection_references.0') != collection.id],
-            collection)
         reference_ids = {instance.id: instance.get_collection_reference_ids(collection) for instance in instances}
         references = cls._meta.get_field('references').related_model.objects.in_bulk(
             {reference_id for ids in reference_ids.values() for reference_id in ids})

@@ -221,7 +221,7 @@ class HierarchicalConcepts(models.Model):
 
 class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pylint: disable=too-many-public-methods
     LIST_PREFETCHES = ('parent', 'created_by', 'updated_by', 'names')
-    FIELD_PREFETCHES = {'descriptions': ('descriptions', )}
+    FIELD_PREFETCHES = ('descriptions', )
     LATEST_SOURCE_VERSION_FIELDS = ('latest_source_version', 'property')  # property: get_parent_source_version
 
     class Meta:
