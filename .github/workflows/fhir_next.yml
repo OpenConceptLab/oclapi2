@@ -1,4 +1,6 @@
 name: FHIR next on staging
+# Display only, so the approver sees what this run deploys; the deploy job's name adds the commit.
+run-name: "FHIR next on staging: ${{ inputs.ref }}${{ inputs.accept_staging_skew && ' (staging skew accepted)' || '' }}"
 
 # Deploys one ref of the FHIR branch (OpenConceptLab/ocl_online#451) to its own staging service, which shares
 # staging's database, Elasticsearch and Redis. It pushes only fhir-next* image tags and redeploys only that service:
@@ -38,7 +40,8 @@ env:
   STAGING_API_URL: "https://api.staging.openconceptlab.org"
   FHIR_NEXT_URL: "https://fhir-next.staging.openconceptlab.org"
   # The service shares staging's DB and ES, and master's Celery workers run what it enqueues. So a ref must not change
-  # these files, and must match the build staging runs in them (staging can lag master).
+  # these files, and must match the build staging runs in them (staging can lag master). That holds at deploy time
+  # only: after a staging deploy that changes them, dispatch again with master merged, or stop the service.
   SHARED_PATHS: '(^|/)migrations/|(^|/)documents\.py$|(^|/)tasks\.py$'
 
 jobs:
@@ -57,10 +60,13 @@ jobs:
           persist-credentials: false
       - name: Resolve the ref to a commit
         id: resolve
+        env:
+          REF: ${{ inputs.ref }}
         run: |
           sha=$(git rev-parse --verify 'HEAD^{commit}')
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "short=${sha:0:8}" >> "$GITHUB_OUTPUT"
+          echo "Deploys \`$REF\` at $sha: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/master...$sha" >> "$GITHUB_STEP_SUMMARY"
       - name: Fail if the ref changes migrations, documents.py or tasks.py
         run: |
           # --no-renames lists a renamed file under its old path as well. A failed diff fails the step.
@@ -94,8 +100,9 @@ jobs:
     needs: [guard]
     runs-on: ubuntu-latest
     steps:
+      # Pinned: this job later holds the AWS credentials.
       - name: Free Disk Space
-        uses: jlumbroso/free-disk-space@main
+        uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6 # v2.0.0
         with:
           android: true
           dotnet: true
@@ -111,7 +118,8 @@ jobs:
           persist-credentials: false
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      # Built before any AWS credentials exist in this job.
+      # Built before any AWS credentials exist in this job, and without the Actions cache: a ref's Dockerfile can name
+      # its own frontend, which would receive the cache token of the default branch that build.yml restores from.
       - name: Build Docker image
         uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
         with:
@@ -119,10 +127,6 @@ jobs:
           load: true
           tags: oclapi2:fhir-next-${{ needs.guard.outputs.short }}
           build-args: SOURCE_COMMIT=${{ needs.guard.outputs.short }}
-          cache-from: |
-            type=gha
-            type=gha,scope=fhir-next
-          cache-to: type=gha,mode=min,scope=fhir-next
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
@@ -141,34 +145,39 @@ jobs:
           docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 
   deploy:
-    name: Deploy to fhir-next.staging
+    name: Deploy ${{ needs.guard.outputs.short }} to fhir-next.staging
     needs: [guard, build]
     runs-on: ubuntu-latest
     environment: staging
     steps:
-      # Staging may have deployed another build while this run waited for approval: compare again, before any AWS
-      # credentials exist in this job.
       - name: Checkout ref
         uses: actions/checkout@v3
         with:
           ref: ${{ needs.guard.outputs.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - *staging-skew
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+      # A fhir-next task placed during a staging-api deploy can take the room the new API task needs, and staging's
+      # /version/ names the new build only once that deploy is done.
+      - name: Wait until no staging-api deploy is in progress
+        run: aws ecs wait services-stable --cluster "$ECS_CLUSTER_STAGING_PRODUCTION" --services staging-api
+      # Staging may have deployed another build while this run waited for approval: compare again.
+      - *staging-skew
       # Moved only after approval: the service's task definition (owned by Terraform) runs :fhir-next, and any
       # new deployment, a staging refresh's restart included, pulls whatever the tag points at.
       - name: Point fhir-next at this build
         env:
           IMAGE_TAG: fhir-next-${{ needs.guard.outputs.short }}
         run: |
-          read -r media_type digest <<< "$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
-            --image-ids imageTag="$IMAGE_TAG" --query 'imageDetails[0].[imageManifestMediaType,imageDigest]' --output text)"
+          details=$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids imageTag="$IMAGE_TAG" \
+            --query 'imageDetails[0].[imageManifestMediaType,imageDigest]' --output text)
+          read -r media_type digest <<< "$details"
+          [[ $digest == sha256:* ]] || { echo "::error::No image found for $IMAGE_TAG: $details"; exit 1; }
           current=$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids imageTag=fhir-next \
             --query 'imageDetails[0].imageDigest' --output text 2>/dev/null || true)
           if [ "$current" = "$digest" ]; then
