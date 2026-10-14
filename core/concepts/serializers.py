@@ -17,6 +17,14 @@ from core.concepts.models import Concept, ConceptName
 TRUTHY = get_truthy_values()
 
 
+def get_collection_uri_from_view(view, request):
+    """The URI of the collection in the view's URL, with /user/ resolved to the requester."""
+    kwargs = get(view, 'kwargs') or {}
+    if get(view, 'user_is_self'):
+        kwargs = {**kwargs, 'user': get(request, 'user.username')}
+    return to_parent_uri_from_kwargs(kwargs)
+
+
 def get_viewable_concepts(queryset, request):
     """Concepts from repos the requester can view."""
     user = get(request, 'user')
@@ -236,7 +244,7 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
         serializer_class = MappingMinimalSerializer if is_mapping_brief else MappingDetailSerializer
         is_collection = 'collection' in self.view_kwargs
         collection_version = self.view_kwargs.get('version', HEAD) if is_collection else None
-        parent_uri = to_parent_uri_from_kwargs(self.view_kwargs) if is_collection else None
+        parent_uri = get_collection_uri_from_view(get(context, 'view'), request) if is_collection else None
         if self.include_indirect_mappings:
             mappings = obj.get_bidirectional_mappings_for_collection(
                 parent_uri, collection_version
@@ -664,7 +672,8 @@ class ConceptVersionDetailSerializer(CollectionVersionsMixin, ModelSerializer):
         context = get(self, 'context')
         is_collection = 'collection' in self.view_kwargs
         collection_version = self.view_kwargs.get('version', HEAD) if is_collection else None
-        parent_uri = to_parent_uri_from_kwargs(self.view_kwargs) if is_collection else None
+        parent_uri = get_collection_uri_from_view(
+            get(context, 'view'), get(context, 'request')) if is_collection else None
         if self.include_indirect_mappings:
             mappings = obj.get_bidirectional_mappings_for_collection(
                 parent_uri, collection_version

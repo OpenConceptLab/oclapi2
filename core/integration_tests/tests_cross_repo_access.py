@@ -4,7 +4,7 @@ from mock import patch
 
 from core.bundles.models import Bundle
 from core.collections.models import CollectionReference
-from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
+from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory, UserCollectionFactory
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLAPITestCase
 from core.concepts.models import Concept
@@ -417,3 +417,23 @@ class CascadeRepoAccessTest(CrossRepoAccessBaseTest):
             {'source_uri': self.outsider_source.uri, 'parameters': {'reverse': True}},
             HTTP_AUTHORIZATION='Token ' + self.outsider_token, format='json')
         self.assertEqual(response.status_code, 404)
+
+
+class CollectionConceptMappingsTest(CrossRepoAccessBaseTest):
+    def test_concept_mappings_in_a_collection_through_the_current_user_route(self):
+        mapping = MappingFactory(
+            parent=self.public_source, from_concept=self.public_concept, to_concept=self.public_concept)
+        collection = UserCollectionFactory(user=self.outsider, mnemonic='MyColl')
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.concepts.add(self.public_concept.get_latest_version())
+        expansion.mappings.add(mapping.get_latest_version())
+
+        for url in [f'/users/{self.outsider.username}/collections/MyColl/', '/user/collections/MyColl/']:
+            for param in ['includeMappings', 'includeInverseMappings']:
+                response = self.client.get(
+                    f'{url}concepts/public/?{param}=true', HTTP_AUTHORIZATION='Token ' + self.outsider_token)
+
+                self.assertEqual(response.status_code, 200, (url, param))
+                self.assertEqual({data['url'] for data in response.data['mappings']}, {mapping.url}, (url, param))

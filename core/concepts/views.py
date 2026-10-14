@@ -45,7 +45,7 @@ from core.common.swagger_parameters import (
     match_brief_param, match_encoder_model_param, match_reranker_param, match_offset_param)
 from core.common.tasks import delete_concept, make_hierarchy
 from core.common.throttling import ThrottleUtil
-from core.common.utils import (to_parent_uri_from_kwargs, generate_temp_version, get_truthy_values, to_int,
+from core.common.utils import (generate_temp_version, get_truthy_values, to_int,
                                drop_version, get_falsy_values, parse_id, get_event_metadata)
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
@@ -62,7 +62,7 @@ from core.concepts.serializers import (
     ConceptVersionDetailSerializer,
     ConceptVersionListSerializer, ConceptSummarySerializer, ConceptMinimalSerializer,
     ConceptChildrenSerializer, ConceptParentsSerializer, ConceptLookupListSerializer, ConceptChecksumSerializer,
-    get_viewable_concepts)
+    get_viewable_concepts, get_collection_uri_from_view)
 from core.mappings.serializers import MappingListSerializer
 from core.sources.clone_limits import clone_limit_error_detail, clone_lock, get_clone_budget
 from core.sources.models import CloneError, CloneLimitExceeded
@@ -701,7 +701,7 @@ class ConceptMappingsView(ConceptBaseView, ListWithHeadersMixin):
         include_indirect_mappings = self.request.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM, 'false') in TRUTHY
         is_collection = 'collection' in self.kwargs
         collection_version = self.kwargs.get('version', HEAD) if is_collection else None
-        parent_uri = to_parent_uri_from_kwargs(self.kwargs) if is_collection else None
+        parent_uri = get_collection_uri_from_view(self, self.request) if is_collection else None
         if include_indirect_mappings:
             mappings_queryset = concept.get_bidirectional_mappings_for_collection(
                 parent_uri, collection_version
