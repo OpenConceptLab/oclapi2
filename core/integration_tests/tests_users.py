@@ -1346,6 +1346,12 @@ class UserFollowingListViewTest(OCLAPITestCase):
             self.assertEqual(get_followed_urls(url, member), all_urls)
             self.assertEqual(get_followed_urls(url, staff), all_urls)
 
+        # the user themselves too, once they lose access
+        private_org.members.remove(member)
+        for url in [following_url, detail_url, list_url]:
+            self.assertEqual(get_followed_urls(url, member), [public_org.url])
+            self.assertEqual(get_followed_urls(url, staff), all_urls)
+
     def test_post(self):
         follower = UserProfileFactory(username='follower')
         followed = UserProfileFactory(username='followed')
