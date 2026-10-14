@@ -1,0 +1,48 @@
+from django.core.management import call_command
+
+from core.capabilities.models import Capability
+from core.common.tests import OCLTestCase
+from core.orgs.models import Organization
+from core.users.models import UserProfile
+
+
+class LoadFixturesCommandTest(OCLTestCase):
+    def test_keeps_an_existing_ocl_org(self):
+        edits = {
+            'name': 'Open Concept Lab', 'text': '<p>About OCL</p>', 'description': 'Shared reference content',
+            'overview': {'background': {'image': 'https://example.org/banner.png'}},
+        }
+        Organization.objects.filter(id=1).update(**edits)
+
+        call_command('load_fixtures', verbosity=0)
+
+        self.assertEqual(Organization.objects.filter(id=1).values(*edits).get(), edits)
+
+    def test_reloads_the_other_fixtures(self):
+        Capability.objects.filter(id=1).update(description='changed')
+
+        call_command('load_fixtures', verbosity=0)
+
+        self.assertEqual(Capability.objects.get(id=1).description, 'Number of map projects a user may create')
+
+    def test_startup_restores_a_demoted_or_deactivated_ocladmin(self):
+        UserProfile.objects.filter(username='ocladmin').update(
+            is_superuser=False, is_staff=False, is_active=False, verified=False)
+
+        call_command('load_fixtures', verbosity=0)
+        call_command('setup_superuser')
+
+        ocladmin = UserProfile.objects.get(username='ocladmin')
+        self.assertTrue(ocladmin.is_superuser)
+        self.assertTrue(ocladmin.is_staff)
+        self.assertTrue(ocladmin.is_active)
+        self.assertTrue(ocladmin.verified)
+
+    def test_seeds_the_ocl_org_and_ocladmin_on_a_new_database(self):
+        Organization.objects.filter(id=1).delete()
+        UserProfile.objects.filter(id=1).delete()
+
+        call_command('load_fixtures', verbosity=0)
+
+        self.assertEqual(Organization.objects.get(id=1).mnemonic, 'OCL')
+        self.assertTrue(UserProfile.objects.get(id=1, username='ocladmin').is_superuser)

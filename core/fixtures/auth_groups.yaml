@@ -1,7 +1,7 @@
 # The Mapper-gating and authoring Django permissions (ocl_issues#2780/#2782/#2766, ocl_online#230). Plan groups granting
 # them are seeded by `manage.py seed_group_capabilities` from deployment config.
-# pk is pinned so re-running `loaddata core/fixtures/*` on every container start
-# (pre_startup.sh) updates these same rows instead of inserting duplicates on the
+# pk is pinned so reloading the fixtures on every container start (`manage.py
+# load_fixtures` in pre_startup.sh) updates these same rows instead of inserting duplicates on the
 # unique (content_type, codename) constraint - same reasoning as the group pks below,
 # but starting well above them: auth_permission already had 252 rows (max id 252,
 # confirmed against the dev database) and keeps growing as new models are added, unlike

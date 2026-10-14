@@ -174,6 +174,9 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
 
         return ConceptListSerializer
 
+    def should_page_by_ids(self):
+        return 'source' in self.kwargs and bool(get(self, 'parent_resource.is_head'))
+
     def is_sliced(self):
         result = super().is_sliced()
         if result:

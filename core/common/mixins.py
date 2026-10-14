@@ -43,7 +43,7 @@ MAX_UNPAGINATED_RESULTS = 1000  # `Compress` lists; above this, users.list_unpag
 class CustomPaginator:
     def __init__(  # pylint: disable=too-many-arguments
             self, request, total_count, queryset, page_size, is_sliced=False, max_score=None, search_scores=None,
-            highlights=None
+            highlights=None, page_by_ids=False
     ):
         self.request = request
         self.queryset = queryset
@@ -55,7 +55,12 @@ class CustomPaginator:
             bottom = (self.page_number - 1) * self.page_size
             top = bottom + self.page_size
             top = min(top, self.total)
-            self.queryset = self.queryset[bottom:top]
+            if page_by_ids and isinstance(self.queryset, QuerySet):
+                # select the page's ids first, so joins (select_related) run for the page's rows only,
+                # not for every row a deep page's OFFSET skips
+                self.queryset = self.queryset.filter(id__in=self.queryset.values('id')[bottom:top])
+            else:
+                self.queryset = self.queryset[bottom:top]
         if isinstance(self.queryset, QuerySet):
             self.queryset.count = None
         self.paginator = Paginator(self.queryset, self.page_size)
@@ -247,7 +252,8 @@ class ListWithHeadersMixin(ListModelMixin):
                 paginator = CustomPaginator(
                     request=request, queryset=sorted_list, page_size=self.limit, total_count=self.total_count,
                     is_sliced=self.is_sliced(), max_score=get(self, '_max_score'),
-                    search_scores=get(self, '_scores'), highlights=get(self, '_highlights')
+                    search_scores=get(self, '_scores'), highlights=get(self, '_highlights'),
+                    page_by_ids=self.should_page_by_ids()
                 )
                 headers = paginator.headers
                 results = paginator.current_page_results
@@ -264,6 +270,9 @@ class ListWithHeadersMixin(ListModelMixin):
         if not headers and not self.only_facets():
             response['num_found'] = len(sorted_list)
         return response
+
+    def should_page_by_ids(self):  # see CustomPaginator
+        return False
 
     def serialize_list(self, results, paginator=None):
         result_dict = self.get_serializer(results, many=True).data
