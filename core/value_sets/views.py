@@ -2,17 +2,16 @@ import logging
 
 from django.core.exceptions import ValidationError
 from rest_framework import status
-from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
 from core.bundles.serializers import FHIRBundleSerializer
-from core.code_systems.views import CodeSystemValidateCodeView
+from core.code_systems.views import CodeSystemValidateCodeView, get_viewable_repo
 from core.collections.models import Collection
 from core.collections.views import CollectionListView, CollectionRetrieveUpdateDestroyView, \
     CollectionVersionExpansionsView
-from core.common.constants import HEAD
+from core.common.constants import HEAD, LATEST
 from core.common.fhir_helpers import translate_fhir_query
-from core.concepts.views import ConceptRetrieveUpdateDestroyView
+from core.concepts.models import Concept
 from core.sources.models import Source
 from core.value_sets.serializers import ValueSetDetailSerializer, \
     ValueSetExpansionParametersSerializer, ValueSetExpansionSerializer
@@ -52,32 +51,37 @@ class ValueSetListView(CollectionListView):
 
 
 class ValueSetValidateCodeView(CodeSystemValidateCodeView):
-    INVALID_RESULT = {'parameter': [{'name': 'result', 'valueBoolean': False}]}
+    CONTAINER_PARAMS = ('user', 'org', 'source', 'collection', 'version')
 
-    def get_value_sets(self):
-        value_sets = []
-        url = self.get_parameters().get('url')
-        if url:
-            value_sets.append(Collection.objects.filter(
-                canonical_url=url, is_latest_version=True).exclude(version=HEAD).first())
-        collection = self.kwargs.get('collection')
-        if collection:
-            owner_filters = {'organization__mnemonic': self.kwargs['org']} if 'org' in self.kwargs else {
-                'user__username': self.kwargs.get('user')}
-            value_sets.append(Collection.get_version(collection, self.kwargs.get('version', HEAD), owner_filters))
-        return [value_set for value_set in value_sets if value_set]
-
-    def get_object(self, queryset=None):
-        """A value set the requester can't view gives the same answer as a code that isn't in it."""
-        if any(not value_set.has_view_access(self.request.user) for value_set in self.get_value_sets()):
-            return self.INVALID_RESULT
-        try:
-            return super().get_object(queryset)
-        except PermissionDenied:
-            return self.INVALID_RESULT
+    def get_route_value_set_versions(self):
+        """Ids of the route's collection versions the requester can view, narrowed by a `version` query param. The
+        owner-less route reads every collection with that id the requester can view."""
+        user = self.request.user
+        heads = Collection.objects.filter(
+            mnemonic=self.kwargs['collection'], version=HEAD).select_related('organization')
+        if 'org' in self.kwargs:
+            heads = heads.filter(organization__mnemonic=self.kwargs['org'])
+        elif 'user' in self.kwargs:
+            heads = heads.filter(user__username=self.kwargs['user'])
+        version = self.request.query_params.get('version')
+        version_ids = []
+        for head in heads:
+            has_private_access = bool(user.is_authenticated and head.has_parent_edit_access(user))
+            if not has_private_access and not head.public_can_view:
+                continue
+            versions = head.versions.only('id', 'public_access')
+            if version == LATEST:
+                versions = versions.filter(released=True)[:1]
+            elif version:
+                versions = versions.filter(version=version)
+            version_ids += [repo.id for repo in versions if has_private_access or repo.public_can_view]
+        return version_ids
 
     def get_queryset(self):
-        queryset = super(ConceptRetrieveUpdateDestroyView, self).get_queryset()
+        """Reads only the value sets the request names (`url` and the route's collection), never ones other query
+        params pick; a value set that doesn't resolve or the requester can't view reads nothing."""
+        params = {key: value for key, value in self.params.items() if key not in self.CONTAINER_PARAMS}
+        queryset = Concept.get_base_queryset(params)
 
         parameters = self.get_parameters()
 
@@ -88,28 +92,33 @@ class ValueSetValidateCodeView(CodeSystemValidateCodeView):
         system_version = parameters.get('systemVersion')
 
         if url:
-            collection = Collection.objects.filter(canonical_url=url).exclude(version=HEAD)\
-                .filter(is_latest_version=True)
+            collection = get_viewable_repo(
+                Collection.objects.filter(canonical_url=url, is_latest_version=True).exclude(version=HEAD),
+                self.request.user)
             if not collection:
                 return queryset.none()
-            queryset = queryset.filter(references__collection=collection.first())
+            queryset = queryset.filter(references__collection=collection)
+
+        if 'collection' in self.kwargs:
+            version_ids = self.get_route_value_set_versions()
+            if not version_ids:
+                return queryset.none()
+            queryset = queryset.filter(expansion_set__collection_version__in=version_ids)
 
         if code and system:
             concept_source = Source.objects.filter(canonical_url=system)
-            if not concept_source:
-                return queryset.none()
             if system_version:
                 concept_source = concept_source.filter(version=system_version)
             else:
                 concept_source = concept_source.filter(is_latest_version=True).exclude(version=HEAD)
-            if concept_source:
-                queryset = queryset.filter(sources=concept_source.first(), mnemonic=code)
-            else:
+            concept_source = get_viewable_repo(concept_source, self.request.user)
+            if not concept_source:
                 return queryset.none()
+            queryset = queryset.filter(sources=concept_source, mnemonic=code)
 
         if display:
             instance = queryset.first()
-            if display not in (instance.name, instance.display_name):
+            if not instance or display not in (instance.name, instance.display_name):
                 return queryset.none()
 
         return queryset
