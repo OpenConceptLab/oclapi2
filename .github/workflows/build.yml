@@ -4,9 +4,12 @@ on:
   push:
     branches: [ "master" ]
 
+# A newer push cancels the older run wherever it is: queued, running, or waiting at an approval gate.
+# The latest run is the only one left to approve, so an approval never deploys an image older than the
+# branch (OpenConceptLab/ocl_online#306).
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   AWS_REGION: "us-east-2"                     # set this to your preferred AWS region, e.g. us-west-1
