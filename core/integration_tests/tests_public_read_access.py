@@ -1,3 +1,6 @@
+from django.core.cache import cache
+from django.test import override_settings
+
 from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.feeds import FeedFilterMixin, MAX_LIMIT, DEFAULT_LIMIT
@@ -22,6 +25,36 @@ class PrivateRepoReadAccessBaseTest(OCLAPITestCase):
             parent=self.private_source, mnemonic='hidden', public_access=ACCESS_TYPE_NONE)
         self.public_source = OrganizationSourceFactory(organization=self.org, mnemonic='PublicRead')
         self.public_concept = ConceptFactory(parent=self.public_source, mnemonic='shown')
+
+
+@override_settings(CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}})
+class ConceptLookupAccessTest(PrivateRepoReadAccessBaseTest):
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+
+    def lookup(self, source, user=None):
+        headers = {'HTTP_AUTHORIZATION': 'Token ' + user.get_token()} if user else {}
+        return self.client.get(source.uri + 'concepts/lookup/', **headers)
+
+    def test_private_source_lookup_only_for_members(self):
+        response = self.lookup(self.private_source, self.member)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([concept['id'] for concept in response.data], ['hidden'])
+
+        # a member's response must not be served to others from the cache
+        for user in [None, self.outsider]:
+            response = self.lookup(self.private_source, user)
+
+            self.assertEqual(response.status_code, 404)
+
+    def test_public_source_lookup_for_anyone(self):
+        for user in [None, self.outsider, self.member]:
+            response = self.lookup(self.public_source, user)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual([concept['id'] for concept in response.data], ['shown'])
 
 
 class FeedAccessTest(PrivateRepoReadAccessBaseTest):
