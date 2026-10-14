@@ -23,7 +23,8 @@ from rest_framework.response import Response
 from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY, INCLUDE_RETIRED_PARAM, \
     SEARCH_STATS_ONLY, INCLUDE_SEARCH_STATS, UPDATED_BY_USERNAME_PARAM, CHECKSUM_STANDARD_HEADER, \
-    CHECKSUM_SMART_HEADER, SEARCH_LATEST_REPO_VERSION, SAME_STANDARD_CHECKSUM_ERROR, ACCESS_TYPE_VIEW
+    CHECKSUM_SMART_HEADER, SEARCH_LATEST_REPO_VERSION, SAME_STANDARD_CHECKSUM_ERROR, ACCESS_TYPE_VIEW, \
+    INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion, CanEditConceptDictionary
 from core.users.constants import LIST_UNPAGINATED_PERMISSION
@@ -181,9 +182,13 @@ class ListWithHeadersMixin(ListModelMixin):
         return key_body, cache.get(key_body) or None, key_headers, cache.get(key_headers) or None
 
     def __can_cache(self):
-        # facets/search-stats are header driven and change the response shape, but are not part of the cache key
+        # facets/search-stats are header driven and change the response shape, but are not part of the cache key;
+        # included parent/child concepts are filtered per requester, so they can't be shared
+        params = self.request.query_params
         return (self.is_repo_version_children_request_without_any_search() and
                 not self.should_include_facets() and not self.should_include_search_stats() and
+                params.get(INCLUDE_PARENT_CONCEPTS) not in TRUTHY and
+                params.get(INCLUDE_CHILD_CONCEPTS) not in TRUTHY and
                 get(self, 'parent_resource.is_latest_version', False))
 
     def list(self, request, *args, **kwargs):  # pylint:disable=too-many-locals,too-many-branches,too-many-statements

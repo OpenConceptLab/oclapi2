@@ -3308,6 +3308,26 @@ class ConceptListCacheTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, [{'id': 'FromCache'}])
 
+    def test_repo_version_concepts_with_hierarchy_includes_are_not_cached(self):
+        body_key, _ = self.source_v1.get_concepts_cache_keys()
+
+        for param in ['includeParentConcepts', 'includeChildConcepts']:
+            key = f'{body_key}?{param}=true'
+            url = f'/orgs/{self.org}/sources/MySource/v1/concepts/?{param}=true'
+
+            response = self.client.get(url)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data[0]['id'], 'MyConcept1')
+            self.assertIsNone(cache.get(key))
+
+            # the included concepts are filtered per requester, so a cached response is never served
+            cache.set(key, [{'id': 'FromCache'}])
+            response = self.client.get(url)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data[0]['id'], 'MyConcept1')
+
     def test_repo_version_concepts_facets_are_cached(self):
         body_key, _ = self.source_v1.get_concepts_cache_keys()
         facets_key = body_key + '?facetsOnly=true'
