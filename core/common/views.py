@@ -724,10 +724,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def get_scope_owner_criteria(self):
         """Private content in the requester's own scope (their user, or an org of theirs) is shown, but the owner and
         source filters match names in any case, and owner names that differ only in case are other owners: their
-        private content is excluded (concepts by exact owner name; for other documents, all private content is
-        excluded when such an owner exists). None when there's nothing to exclude."""
-        if (not self.is_source_child_document_model() or self.request.user.is_staff or 'collection' in self.kwargs or
-                not self.is_user_scope()):
+        private content is excluded (concepts by exact owner name; for other documents, such as mappings and repos,
+        all private content is excluded when such an owner exists). None when there's nothing to exclude."""
+        if (not (self.is_source_child_document_model() or self.is_concept_container_document_model() or
+                 self.is_repo_document_model()) or
+                self.request.user.is_staff or 'collection' in self.kwargs or not self.is_user_scope()):
             return None
         org = self.kwargs.get('org')
         owner = org or self.kwargs.get('user') or self.request.user.username

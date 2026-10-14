@@ -12,6 +12,8 @@ from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
+from core.sources.documents import SourceDocument
+from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.url_registry.factories import GlobalURLRegistryFactory
 from core.users.models import UserProfile
@@ -186,6 +188,27 @@ class RepoSearchOwnerCaseTest(SearchResolutionAccessBaseTest):
         self.assertEqual(search('concepts'), {'/orgs/resolveorg'})
         # mappings have no exact-case owner field: with such an owner, only public mappings are searched
         self.assertEqual(search('mappings'), set())
+
+
+class RepoListSearchOwnerCaseTest(SearchResolutionAccessBaseTest):
+    def test_repo_list_search_excludes_private_repos_of_owner_whose_name_differs_only_in_case(self):
+        own_org = OrganizationFactory(mnemonic='resolveorg', public_access=ACCESS_TYPE_NONE)
+        own_org.members.add(self.outsider)
+        own_source = OrganizationSourceFactory(organization=own_org, mnemonic='ResolveSource')
+        SourceDocument().update(Source.objects.filter(mnemonic='ResolveSource'), refresh=True)
+
+        response = self.client.get(
+            '/orgs/resolveorg/sources/?q=ResolveSource', HTTP_AUTHORIZATION='Token ' + self.outsider.get_token())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([source['url'] for source in response.data], [own_source.uri])
+
+    def test_org_names_are_unique_regardless_of_case(self):
+        response = self.client.post(
+            '/orgs/', {'id': 'RESOLVEORG', 'name': 'Twin'}, HTTP_AUTHORIZATION='Token ' + self.outsider.get_token(),
+            format='json')
+
+        self.assertEqual(response.status_code, 400)
 
 
 class ResolveReferenceAccessTest(SearchResolutionAccessBaseTest):
