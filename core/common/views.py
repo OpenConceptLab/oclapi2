@@ -128,7 +128,19 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             raise Http404()
 
         params = request.query_params.dict()
+        self.validate_pagination_params(request, params)
         self.limit = params.get(LIMIT_PARAM, None) or params.get(FHIR_LIMIT_PARAM, None) or LIST_DEFAULT_LIMIT
+
+    @staticmethod
+    def validate_pagination_params(request, params):
+        if request.method not in ('GET', 'HEAD'):
+            return
+        for name in (LIMIT_PARAM, 'page'):
+            value = params.get(name)
+            if value is None:
+                continue
+            if not re.fullmatch(r'[0-9]{1,9}', value.strip()) or int(value) < 1:
+                raise Http400({'error': f"'{name}' must be a positive integer, got '{value}'."})
 
     def get_object(self, queryset=None):  # pylint: disable=arguments-differ
         # Determine the base queryset to use.
