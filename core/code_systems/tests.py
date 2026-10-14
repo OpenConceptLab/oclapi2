@@ -7,6 +7,7 @@ from rest_framework.test import APIClient
 from core.code_systems.converter import CodeSystemConverter
 from core.code_systems.serializers import CodeSystemDetailSerializer
 from core.code_systems.views import CodeSystemLookupNotFoundError
+from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
@@ -258,6 +259,60 @@ class CodeSystemTest(OCLTestCase):
                 {'name': 'name', 'valueString': self.org_source.mnemonic},
                 {'name': 'version', 'valueString': self.org_source_v2.version},
                 {'name': 'display', 'valueString': self.concept_1.display_name}]}))
+
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    def test_private_code_system_answers_as_missing_for_non_viewers(self):
+        private_org = OrganizationFactory()
+        private_source = OrganizationSourceFactory(
+            organization=private_org, canonical_url='/private/url', public_access=ACCESS_TYPE_NONE)
+        concept = ConceptFactory(parent=private_source, names=1, names__name='private_concept_name')
+        Source.persist_new_version(OrganizationSourceFactory.build(
+            version='v1', mnemonic=private_source.mnemonic, organization=private_org,
+            public_access=ACCESS_TYPE_NONE), private_source.created_by)
+        member = UserProfileFactory()
+        private_org.members.add(member)
+        outsider = {'HTTP_AUTHORIZATION': 'Token ' + self.user_token}
+        validate_url = f'/fhir/CodeSystem/$validate-code/?url=/private/url&code={concept.mnemonic}'
+        lookup_url = '/fhir/CodeSystem/$lookup/?system={}&code={}'
+        not_found = self.client.get(lookup_url.format('/unknown/url', concept.mnemonic))
+        self.assertEqual(not_found.status_code, 400)
+
+        for headers in [{}, outsider]:
+            for url in [validate_url, f'{validate_url}&display={concept.display_name}']:
+                response = self.client.get(url, **headers)
+                self.assertEqual(response.status_code, 200, (url, headers))
+                self.assertFalse(response.data['parameter'][0]['valueBoolean'], (url, headers))
+            for code in [concept.mnemonic, 'missing']:
+                response = self.client.get(lookup_url.format('/private/url', code), **headers)
+                self.assertEqual(response.status_code, 400, (code, headers))
+                self.assertEqual(response.content, not_found.content, (code, headers))
+
+        member_headers = {'HTTP_AUTHORIZATION': 'Token ' + member.get_token()}
+        response = self.client.get(validate_url, **member_headers)
+        self.assertTrue(response.data['parameter'][0]['valueBoolean'])
+        response = self.client.get(lookup_url.format('/private/url', concept.mnemonic), **member_headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['parameter'][2]['valueString'], concept.display_name)
+
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    def test_private_code_system_does_not_hide_public_one_with_same_url(self):
+        private_source = UserSourceFactory(user=self.user, public_access=ACCESS_TYPE_NONE, canonical_url='/shared/url')
+        Source.persist_new_version(UserSourceFactory.build(
+            version='v1', mnemonic=private_source.mnemonic, user=self.user), private_source.created_by)
+        public_source = OrganizationSourceFactory(canonical_url='/shared/url')
+        concept = ConceptFactory(parent=public_source)
+        Source.persist_new_version(OrganizationSourceFactory.build(
+            version='v1', mnemonic=public_source.mnemonic, organization=public_source.organization),
+            public_source.created_by)
+
+        response = self.client.get(f'/fhir/CodeSystem/$lookup/?system=/shared/url&code={concept.mnemonic}')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['parameter'][0]['valueString'], public_source.mnemonic)
+
+        response = self.client.get(f'/fhir/CodeSystem/$validate-code/?url=/shared/url&code={concept.mnemonic}')
+        self.assertTrue(response.data['parameter'][0]['valueBoolean'])
 
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
