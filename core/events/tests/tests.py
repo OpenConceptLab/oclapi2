@@ -115,7 +115,7 @@ class EventTest(OCLTestCase):
 
 
 class PrivateFollowEventsMigrationTest(OCLTestCase):
-    def test_migration_makes_follow_events_of_private_objects_private(self):
+    def test_migration_makes_follow_events_of_private_objects_private(self):  # pylint: disable=too-many-locals
         migration = importlib.import_module('core.events.migrations.0011_private_follow_events')
         follower = UserProfileFactory()
         private_org = OrganizationFactory(public_access='None')
@@ -124,9 +124,13 @@ class PrivateFollowEventsMigrationTest(OCLTestCase):
         public_source = OrganizationSourceFactory(organization=private_org)
         private_concept = ConceptFactory(parent=private_source)
         public_concept = ConceptFactory(parent=public_source)
+        private_version = OrganizationSourceFactory(
+            organization=public_source.organization, mnemonic=public_source.mnemonic, version='v1',
+            public_access='None')
+        private_version.refresh_from_db()
         urls = [
             follower.url, private_org.url, public_org.url, private_source.url, public_source.url,
-            private_concept.url, public_concept.url, '/orgs/deleted-org/'
+            private_concept.url, public_concept.url, '/orgs/deleted-org/', private_version.uri
         ]
         events = {
             (event_type, url): Event.objects.create(
@@ -136,7 +140,7 @@ class PrivateFollowEventsMigrationTest(OCLTestCase):
 
         migration.make_follow_events_of_private_objects_private(apps, None)
 
-        private_urls = [private_org.url, private_source.url, private_concept.url]
+        private_urls = [private_org.url, private_source.url, private_concept.url, private_version.uri]
         for (event_type, url), event in events.items():
             event.refresh_from_db()
             self.assertEqual(event.public, event_type == 'Created' or url not in private_urls, (event_type, url))

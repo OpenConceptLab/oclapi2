@@ -21,8 +21,10 @@ def make_follow_events_of_private_objects_private(apps, schema_editor):  # pylin
 
     private_uris = get_private_uris(apps.get_model('orgs', 'Organization'), urls)
     for app_label, model_name in [('sources', 'Source'), ('collections', 'Collection')]:
-        private_uris |= get_private_uris(
-            apps.get_model(app_label, model_name), set(repo_uris.values()), version='HEAD')
+        model = apps.get_model(app_label, model_name)
+        # a followed repo version by its own access, anything else under a repo by its HEAD's
+        private_uris |= get_private_uris(model, urls)
+        private_uris |= get_private_uris(model, set(repo_uris.values()), version='HEAD')
 
     private_urls = [url for url in urls if url in private_uris or repo_uris.get(url) in private_uris]
     if private_urls:
