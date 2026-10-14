@@ -517,6 +517,29 @@ class UserListViewTest(OCLAPITestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual([user['username'] for user in response.data], ['ocladmin'])
 
+    def test_get_last_login_filters_only_for_staff(self):
+        old_login_user = UserProfileFactory(username='oldloginuser', last_login='2020-01-01T00:00:00Z')
+        recent_login_user = UserProfileFactory(username='recentloginuser', last_login='2024-01-01T00:00:00Z')
+        all_users = ['ocladmin', 'oldloginuser', 'recentloginuser']
+
+        for headers in [{}, {'HTTP_AUTHORIZATION': 'Token ' + old_login_user.get_token()}]:
+            for filter_param in ['lastLoginSince=2022-01-01', 'lastLoginBefore=2022-01-01']:
+                response = self.client.get(f'/users/?{filter_param}', format='json', **headers)
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(sorted(user['username'] for user in response.data), all_users)
+
+        headers = {'HTTP_AUTHORIZATION': 'Token ' + self.superuser.get_token()}
+        response = self.client.get('/users/?lastLoginSince=2022-01-01', format='json', **headers)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([user['username'] for user in response.data], [recent_login_user.username])
+
+        response = self.client.get('/users/?lastLoginBefore=2022-01-01', format='json', **headers)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([user['username'] for user in response.data], [old_login_user.username])
+
     def test_get_verbose_plan_fields_only_for_self_and_staff(self):
         regular_user = UserProfileFactory(username='planfieldsregular')
         other_user = UserProfileFactory(username='planfieldsother')
