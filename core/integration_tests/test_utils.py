@@ -8,6 +8,7 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from jsonpath_ng import parse
 
+from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.sources.tests.factories import OrganizationSourceFactory
 
 
@@ -76,13 +77,13 @@ class SourceChildListQueryCountMixin:
 
     def set_released_versions(self, rows):
         """
-        Newest head first by updated_at, so a page of 2 and a page of 4 hold the same kinds of rows.
+        Newest first by updated_at in creation order, so a page of 2 and a page of 4 hold the same kinds of rows.
         v1 holds every latest version row, v2 every other one; both hold the newest head as well.
         """
         self.heads = list(rows.filter(id=F('versioned_object_id')).order_by('id'))
         now = timezone.now()
-        for age, head in enumerate(reversed(self.heads)):
-            self.model.objects.filter(id=head.id).update(updated_at=now - timedelta(minutes=age))
+        for age, row in enumerate(rows.order_by('-id')):
+            self.model.objects.filter(id=row.id).update(updated_at=now - timedelta(minutes=age))
         versions = list(rows.exclude(id=F('versioned_object_id')).filter(is_latest_version=True).order_by('id'))
         self.v1 = OrganizationSourceFactory(
             mnemonic=self.source.mnemonic, organization=self.source.organization, version='v1')
@@ -108,3 +109,22 @@ class SourceChildListQueryCountMixin:
 
         for row, instance in zip(data, rows):
             self.assertEqual(row['latest_source_version'], 'v2' if instance.id in self.in_v2 else 'v1')
+
+    def test_collection_list(self):
+        """In a collection, rows show the source version their references resolved to (v1), not the latest one."""
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        collection.add_expressions(
+            {'expressions': [f'{self.v1.uri}{self.relation}/{head.mnemonic}/' for head in self.heads]},
+            collection.created_by)
+
+        url = getattr(collection, f'{self.relation}_url')
+        data, _ = self.assert_page(url, self.model.get_serializer_class(version=True))
+        self.assert_page(url, self.model.get_serializer_class(verbose=True, version=True), '&verbose=true')
+        self.assertEqual({row['latest_source_version'] for row in data}, {'v1'})
+
+    def test_global_list(self):
+        self.assert_page(f'/{self.relation}/', self.list_serializer)
+        self.assert_page(f'/{self.relation}/', self.detail_serializer, '&verbose=true')

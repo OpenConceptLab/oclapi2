@@ -9,7 +9,8 @@ from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPIN
     INCLUDE_CHILD_CONCEPT_URLS, HEAD, INCLUDE_SUMMARY, INCLUDE_VERBOSE_REFERENCES, VERBOSE_PARAM, \
     INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE
 from core.common.fields import EncodedDecodedCharField
-from core.common.serializers import AbstractResourceSerializer, SourceChildPageSerializer
+from core.common.serializers import AbstractResourceSerializer, SourceChildPageSerializer, \
+    SourceVersionFieldMixin, get_collection_in_scope
 from core.common.utils import to_parent_uri_from_kwargs, get_truthy_values
 from core.concepts.models import Concept, ConceptName
 
@@ -135,7 +136,7 @@ class ConceptDescriptionSerializer(ConceptLocaleSerializer):
         return ret
 
 
-class ConceptAbstractSerializer(AbstractResourceSerializer):
+class ConceptAbstractSerializer(SourceVersionFieldMixin, AbstractResourceSerializer):
     uuid = CharField(source='id', read_only=True)
     mappings = SerializerMethodField()
     mappings_payload = ListField(child=JSONField(), write_only=True, required=False, allow_empty=True)
@@ -204,7 +205,7 @@ class ConceptAbstractSerializer(AbstractResourceSerializer):
                 self.fields.pop('references', None)
             if get(params, 'onlyParentLess') not in TRUTHY and get(params, 'onlyHierarchyRoot') not in TRUTHY:
                 self.fields.pop('has_children', None)
-            if 'collection' in self.view_kwargs:
+            if 'collection' in self.view_kwargs and not get_collection_in_scope(get(kwargs, 'context')):
                 self.fields.pop('latest_source_version', None)
         except:  # pylint: disable=bare-except
             pass
@@ -317,8 +318,7 @@ class ConceptListSerializer(ConceptAbstractSerializer):
     version_created_by = DateTimeField(source='created_by.username', read_only=True)
     version_updated_on = DateTimeField(source='updated_at', read_only=True)
     version_updated_by = DateTimeField(source='updated_by.username', read_only=True)
-    latest_source_version = CharField(
-        source='latest_source_version.version', allow_null=True, allow_blank=True, read_only=True, required=False)
+    latest_source_version = SerializerMethodField()
     property = JSONField(source='summary_properties', read_only=True)
 
     class Meta:
@@ -357,7 +357,7 @@ class ConceptVersionListSerializer(ConceptListSerializer):
                 self.fields.pop('source_versions', None)
             if not self.include_collection_versions:
                 self.fields.pop('collection_versions', None)
-            if 'collection' in self.view_kwargs:
+            if 'collection' in self.view_kwargs and not get_collection_in_scope(get(kwargs, 'context')):
                 self.fields.pop('latest_source_version', None)
         except:  # pylint: disable=bare-except
             pass
@@ -481,8 +481,7 @@ class ConceptDetailSerializer(ConceptAbstractSerializer):
     url = CharField(required=False, source='versioned_object_url')
     updated_by = DateTimeField(source='updated_by.username', read_only=True)
     created_by = DateTimeField(source='created_by.username', read_only=True)
-    latest_source_version = CharField(
-        source='latest_source_version.version', allow_null=True, allow_blank=True, read_only=True, required=False)
+    latest_source_version = SerializerMethodField()
     property = JSONField(source='properties', read_only=True)
 
     class Meta:
@@ -576,7 +575,7 @@ class ConceptVersionExportSerializer(ModelSerializer):
         return list(uris)
 
 
-class ConceptVersionDetailSerializer(ModelSerializer):
+class ConceptVersionDetailSerializer(SourceVersionFieldMixin, ModelSerializer):
     type = CharField(source='resource_type')
     uuid = CharField(source='id')
     id = EncodedDecodedCharField(source='mnemonic')
@@ -603,8 +602,7 @@ class ConceptVersionDetailSerializer(ModelSerializer):
     source_versions = ListField(read_only=True)
     collection_versions = ListField(read_only=True)
     references = SerializerMethodField()
-    latest_source_version = CharField(
-        source='latest_source_version.version', allow_null=True, allow_blank=True, read_only=True, required=False)
+    latest_source_version = SerializerMethodField()
 
     def __init__(self, *args, **kwargs):
         request = get(kwargs, 'context.request')
@@ -633,7 +631,7 @@ class ConceptVersionDetailSerializer(ModelSerializer):
                 self.fields.pop('parent_concept_urls')
             if not get(request, 'instance'):
                 self.fields.pop('references', None)
-            if 'collection' in self.view_kwargs:
+            if 'collection' in self.view_kwargs and not get_collection_in_scope(get(kwargs, 'context')):
                 self.fields.pop('latest_source_version', None)
         except:  # pylint: disable=bare-except
             pass
@@ -642,6 +640,7 @@ class ConceptVersionDetailSerializer(ModelSerializer):
 
     class Meta:
         model = Concept
+        list_serializer_class = SourceChildPageSerializer
         fields = (
             'type', 'uuid', 'id', 'external_id', 'concept_class', 'datatype', 'display_name', 'display_locale',
             'names', 'descriptions', 'extras', 'retired', 'source', 'source_url', 'owner', 'owner_name', 'owner_url',

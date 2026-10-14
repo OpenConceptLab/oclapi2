@@ -646,24 +646,83 @@ class SourceChildMixin(ChecksumModel):
 
     # relations the list serializers read on every row, prefetched once per page by load_list_fields
     LIST_PREFETCHES = ()
+    # relations a serializer field reads on every row, prefetched by load_list_fields when that field is serialized
+    FIELD_PREFETCHES = {}
+    # serializer fields that read latest_source_version
+    LATEST_SOURCE_VERSION_FIELDS = ('latest_source_version', )
 
     class Meta:
         abstract = True
 
     @classmethod
-    def load_list_fields(cls, instances):
+    def load_list_fields(cls, instances, fields, collection=None):
         """
-        Loads what the list serializers would otherwise query row by row, for a whole page at once:
-        LIST_PREFETCHES, the latest version's uri (version_url) and latest_source_version.
+        Loads what the list serializers would otherwise query row by row, for a whole page at once, and only what
+        the serialized fields read: prefetched relations, the latest and previous versions' uris, the source and
+        collection versions holding each row, latest_source_version and, in a collection, the row's references and
+        the source versions they resolved to.
         """
-        prefetch_related_objects(instances, *cls.LIST_PREFETCHES)
+        fields = set(fields)
+        prefetch_related_objects(instances, *cls.LIST_PREFETCHES, *(
+            lookup for field, lookups in cls.FIELD_PREFETCHES.items() if field in fields for lookup in lookups))
+        loaders = {
+            'version_url': cls.load_latest_version_uris,
+            'previous_version_url': cls.load_previous_version_uris,
+            'source_versions': cls.load_source_versions,
+            'collection_versions': cls.load_collection_versions,
+        }
+        for field, loader in loaders.items():
+            if field in fields:
+                loader(instances)
 
+        reads_latest_source_version = fields & set(cls.LATEST_SOURCE_VERSION_FIELDS)
+        if collection:  # there latest_source_version shows the collection's resolved version instead
+            reads_latest_source_version.discard('latest_source_version')
+            if 'references' in fields:
+                cls.load_collection_references(instances, collection)
+            if 'latest_source_version' in fields:
+                cls.load_collection_source_versions(instances, collection)
+        if reads_latest_source_version:
+            cls.load_latest_source_versions(instances)
+
+    @classmethod
+    def load_latest_version_uris(cls, instances):
+        """Sets each HEAD row's _latest_version_uri (version_url) from one query for the page."""
         heads = [instance.id for instance in instances if instance.is_versioned_object]
         latest_version_uris = dict(cls.objects.filter(
             versioned_object_id__in=heads, is_active=True, is_latest_version=True
         ).exclude(id=F('versioned_object_id')).order_by('versioned_object_id', '-created_at').distinct(
             'versioned_object_id').values_list('versioned_object_id', 'uri'))
+        for instance in instances:
+            instance._latest_version_uri = latest_version_uris.get(instance.id)  # pylint: disable=protected-access
 
+    @classmethod
+    def load_source_versions(cls, instances):
+        """Sets each row's _source_versions: the uris of the released source versions holding it."""
+        key = f'{cls._meta.model_name}_id'
+        uris = {}
+        for row_id, uri in cls.sources.through.objects.filter(
+                **{f'{key}__in': [instance.id for instance in instances]}
+        ).exclude(source__version=HEAD).order_by('source__created_at').values_list(key, 'source__uri'):
+            uris.setdefault(row_id, []).append(uri)
+        for instance in instances:
+            instance._source_versions = uris.get(instance.id, [])  # pylint: disable=protected-access
+
+    @classmethod
+    def load_collection_versions(cls, instances):
+        """Sets each row's _collection_versions: the uris of the collection versions whose expansions hold it."""
+        key = f'{cls._meta.model_name}_id'
+        uris = {}
+        for row_id, uri in cls.expansion_set.through.objects.filter(
+                **{f'{key}__in': [instance.id for instance in instances]}
+        ).exclude(expansion__collection_version__version=HEAD).values_list(key, 'expansion__collection_version__uri'):
+            uris.setdefault(row_id, set()).add(uri)
+        for instance in instances:
+            instance._collection_versions = sorted(uris.get(instance.id, ()))  # pylint: disable=protected-access
+
+    @classmethod
+    def load_latest_source_versions(cls, instances):
+        """Sets each row's _latest_source_version: the latest released source version holding it."""
         key = f'{cls._meta.model_name}_id'
         latest_source_version_ids = dict(cls.sources.through.objects.filter(
             **{f'{key}__in': [instance.id for instance in instances]}
@@ -671,11 +730,67 @@ class SourceChildMixin(ChecksumModel):
             key, 'source_id'))
         source_versions = cls._meta.get_field('sources').related_model.objects.in_bulk(
             set(latest_source_version_ids.values()))
-
         for instance in instances:
             # pylint: disable=protected-access
             instance._latest_source_version = source_versions.get(latest_source_version_ids.get(instance.id))
-            instance._latest_version_uri = latest_version_uris.get(instance.id)
+
+    @classmethod
+    def load_previous_version_uris(cls, instances):
+        """Sets each row's _prev_version_uri, as prev_version_uri would query it, from one query for the page."""
+        siblings = {}
+        for row_id, versioned_object_id, created_at, uri in cls.objects.filter(
+                versioned_object_id__in={instance.versioned_object_id for instance in instances}, is_active=True
+        ).exclude(id=F('versioned_object_id')).values_list('id', 'versioned_object_id', 'created_at', 'uri'):
+            siblings.setdefault(versioned_object_id, []).append((created_at, row_id, uri))
+        for instance in instances:
+            previous = [
+                (created_at, uri) for created_at, row_id, uri in siblings.get(instance.versioned_object_id, [])
+                if row_id != instance.id and created_at <= instance.created_at
+            ]
+            # pylint: disable=protected-access
+            instance._prev_version_uri = max(previous, key=lambda version: version[0])[1] if previous else None
+
+    @classmethod
+    def load_collection_references(cls, instances, collection):
+        """Sets each row's _collection_references: (collection id, ids of its references in that collection)."""
+        key = f'{cls._meta.model_name}_id'
+        reference_ids = {}
+        for row_id, reference_id in cls.references.through.objects.filter(
+                **{f'{key}__in': [instance.id for instance in instances]}, reference__collection_id=collection.id
+        ).order_by('reference_id').values_list(key, 'reference_id'):
+            reference_ids.setdefault(row_id, []).append(reference_id)
+        for instance in instances:
+            # pylint: disable=protected-access
+            instance._collection_references = (collection.id, reference_ids.get(instance.id, []))
+
+    def get_collection_reference_ids(self, collection):
+        loaded = getattr(self, '_collection_references', None)
+        if loaded and loaded[0] == collection.id:
+            return loaded[1]
+        return list(self.collection_references(collection).order_by('id').values_list('id', flat=True))
+
+    @classmethod
+    def load_collection_source_versions(cls, instances, collection):
+        """
+        Sets each row's _collection_source_version: the newest source version its references in this collection
+        resolved to, as TBv3 shows a collection's rows, or None when they resolved to HEAD or to no source version.
+        """
+        cls.load_collection_references(
+            [instance for instance in instances if get(instance, '_collection_references.0') != collection.id],
+            collection)
+        reference_ids = {instance.id: instance.get_collection_reference_ids(collection) for instance in instances}
+        references = cls._meta.get_field('references').related_model.objects.in_bulk(
+            {reference_id for ids in reference_ids.values() for reference_id in ids})
+
+        resolved = {}
+        for instance in instances:
+            versions = compact(
+                references[reference_id]._get_resolved_system_version(resolved)  # pylint: disable=protected-access
+                for reference_id in reference_ids[instance.id]
+            )
+            newest = max(versions, key=lambda version: version.created_at, default=None)
+            # pylint: disable=protected-access
+            instance._collection_source_version = None if get(newest, 'version') == HEAD else newest
 
     def calculate_uri(self):
         uri = self.parent.uri + self.resource_type.lower() + 's/' + str(self.mnemonic) + '/'
@@ -766,12 +881,16 @@ class SourceChildMixin(ChecksumModel):
 
     @property
     def source_versions(self):
-        return self.sources.exclude(version=HEAD).values_list('uri', flat=True)
+        if hasattr(self, '_source_versions'):  # loaded for a whole page by load_list_fields
+            return self._source_versions
+        return list(self.sources.exclude(version=HEAD).order_by('created_at').values_list('uri', flat=True))
 
     @property
     def collection_versions(self):
-        return set(self.expansion_set.exclude(
-            collection_version__version=HEAD).values_list('collection_version__uri', flat=True))
+        if hasattr(self, '_collection_versions'):  # loaded for a whole page by load_list_fields
+            return self._collection_versions
+        return sorted(set(self.expansion_set.exclude(
+            collection_version__version=HEAD).values_list('collection_version__uri', flat=True)))
 
     @property
     def versions(self):
@@ -946,8 +1065,7 @@ class SourceChildMixin(ChecksumModel):
             self.save(update_fields=['_counted'])
 
     def collection_references_uris(self, collection):
-        ids = self.collection_references(collection).values_list('id', flat=True)
-        return [f"{collection.uri}references/{_id}/" for _id in ids]
+        return [f"{collection.uri}references/{_id}/" for _id in self.get_collection_reference_ids(collection)]
 
     def collection_references(self, collection):
         return self.references.filter(collection=collection)

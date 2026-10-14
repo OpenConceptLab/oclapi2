@@ -22,7 +22,8 @@ from core.services.storages.postgres import PostgresQL
 class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
     LIST_PREFETCHES = (
         'from_concept__parent', 'to_concept__parent', 'from_source__organization', 'from_source__user',
-        'to_source__organization', 'to_source__user', 'created_by', 'updated_by'
+        'to_source__organization', 'to_source__user', 'created_by', 'updated_by', 'from_concept__names',
+        'to_concept__names'
     )
 
     class Meta:
