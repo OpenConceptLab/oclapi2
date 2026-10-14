@@ -235,6 +235,31 @@ class UserEventsViewTest(OCLAPITestCase):
         ]
         self.assertIn(gotham_gazette_crime_repo.url, created_urls)
 
+    def test_get_following_events_without_followed_users_private_events(self):
+        followed = UserProfileFactory(username='followed')
+        follower = UserProfileFactory(username='follower')
+        member = UserProfileFactory(username='member')
+        staff = UserProfileFactory(username='staff', is_staff=True)
+        private_org = OrganizationFactory(mnemonic='private-org', public_access='None')
+        private_org.members.add(followed, member)
+        joined_private_org_event = EventFactory(
+            object_url=followed.url, referenced_object_url=private_org.url, actor=followed, event_type='Joined',
+            public=False)
+        for user in [follower, member, staff]:
+            user.follow(followed)
+
+        def get_event_ids(user, scopes):
+            response = self.client.get(
+                f'/users/{user.username}/events/?scopes={scopes}', HTTP_AUTHORIZATION=f'Token {user.get_token()}')
+            self.assertEqual(response.status_code, 200)
+            return [event['id'] for event in response.data]
+
+        self.assertNotIn(joined_private_org_event.id, get_event_ids(follower, 'following'))
+        self.assertNotIn(joined_private_org_event.id, get_event_ids(follower, 'all'))
+        self.assertNotIn(joined_private_org_event.id, get_event_ids(member, 'following'))
+        self.assertIn(joined_private_org_event.id, get_event_ids(member, 'orgs'))
+        self.assertIn(joined_private_org_event.id, get_event_ids(staff, 'following'))
+
     def test_get_orgs_events(self):  # pylint:disable=too-many-statements,too-many-locals
         alfred = UserProfileFactory(username='alfred', first_name='Alfred', last_name='Pennyworth')
         bruce = UserProfileFactory(username='bruce', first_name='Bruce', last_name='Wayne')
