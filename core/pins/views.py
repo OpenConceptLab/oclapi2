@@ -3,7 +3,7 @@ from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.generics import ListAPIView, \
     RetrieveUpdateDestroyAPIView
-from rest_framework.permissions import IsAuthenticatedOrReadOnly
+from rest_framework.permissions import IsAuthenticatedOrReadOnly, SAFE_METHODS
 from rest_framework.response import Response
 
 from core.common.constants import MAX_PINS_ALLOWED, INCLUDE_CREATOR_PINS
@@ -60,9 +60,12 @@ class PinBaseView(BaseAPIView):
         criteria = Q(**filters)
         if self.should_include_creator_pins() and 'org' not in self.kwargs:
             criteria |= Q(created_by_id=self.request.user.id, user_id__isnull=True)
-        return Pin.objects.filter(
+        queryset = Pin.objects.filter(
             criteria
         ).select_related('organization', 'user').prefetch_related('resource')
+        if self.request.method in SAFE_METHODS:
+            queryset = Pin.get_visible_to(queryset, self.request)
+        return queryset
 
 
 class PinListView(PinBaseView, ListAPIView):

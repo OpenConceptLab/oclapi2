@@ -270,9 +270,12 @@ class UserDetailSerializer(PrivateUserFieldsMixin, AbstractResourceSerializer):
         return CapabilitySerializer(obj.capabilities, many=True, context={'user': obj}).data
 
     def get_pins(self, obj):
-        if self.include_pins and can_view_private_user_fields(get(self, 'context.request'), obj):
+        request = get(self, 'context.request')
+        if self.include_pins and can_view_private_user_fields(request, obj):
+            from core.pins.models import Pin
             from core.pins.serializers import PinSerializer
-            return PinSerializer(obj.pins.prefetch_related('resource').all(), many=True).data
+            return PinSerializer(
+                Pin.get_visible_to(obj.pins.prefetch_related('resource').all(), request), many=True).data
 
         return None
 

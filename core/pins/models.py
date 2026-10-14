@@ -73,6 +73,18 @@ class Pin(OrderedModel):
 
         return None
 
+    @staticmethod
+    def get_visible_to(queryset, request):
+        """Limits `queryset` to the pins whose org (for org pins) and pinned resource the requester can view."""
+        from core.common.permissions import CanViewConceptDictionary
+        permission = CanViewConceptDictionary()
+
+        def can_view(obj):  # a user pin has no org; a pin whose resource is gone shows no resource
+            return obj is None or permission.has_object_permission(request, None, obj)
+
+        return queryset.filter(
+            id__in=[pin.id for pin in queryset if can_view(pin.organization) and can_view(pin.resource)])
+
     @property
     def parent(self):
         if self.organization_id:
