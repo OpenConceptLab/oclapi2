@@ -215,6 +215,12 @@ class ParentConceptAccessTest(CrossRepoAccessBaseTest):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(sorted(concept['id'] for concept in response.data), children, user)
 
+            # these lists aren't searchable: a search would list the repo's concepts instead
+            for url, expected in [(child.uri + 'parents/?q=secret', parents),
+                                  (self.public_concept.uri + 'children/?q=privchild', children)]:
+                response = self.client.get(url, **headers)
+                self.assertEqual(sorted(concept['id'] for concept in response.data), expected, (user, url))
+
 
 class MappingTargetAccessTest(CrossRepoAccessBaseTest):
     def test_outsider_mapping_to_private_concept_is_external(self):

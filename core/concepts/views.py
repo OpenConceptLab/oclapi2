@@ -595,6 +595,7 @@ class ConceptCloneView(ConceptCascadeView):
 
 
 class ConceptChildrenView(ConceptBaseView, ListWithHeadersMixin):
+    is_searchable = False  # a search would list the repo's concepts, not this concept's hierarchy
     serializer_class = ConceptChildrenSerializer
     default_qs_sort_attr = 'mnemonic'
 
@@ -614,6 +615,7 @@ class ConceptChildrenView(ConceptBaseView, ListWithHeadersMixin):
 
 
 class ConceptParentsView(ConceptBaseView, ListWithHeadersMixin):
+    is_searchable = False  # a search would list the repo's concepts, not this concept's hierarchy
     serializer_class = ConceptParentsSerializer
 
     def get_queryset(self):
