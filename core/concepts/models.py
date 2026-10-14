@@ -1341,15 +1341,17 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     def update_mappings(self):
         # Updates mappings where mapping.to_concept or mapping.from_concepts matches concept's mnemonic and parent
+        # only mappings whose last saver can view this concept's repo; others keep the external code, as on save
         from core.mappings.models import Mapping
         parent_uris = self.parent.identity_uris
+        can_view = self.parent.get_view_access_criteria('updated_by')
 
         Mapping.objects.filter(
-            to_concept_code=self.mnemonic, to_source_url__in=parent_uris, to_concept__isnull=True
+            can_view, to_concept_code=self.mnemonic, to_source_url__in=parent_uris, to_concept__isnull=True
         ).update(to_concept=self)
 
         Mapping.objects.filter(
-            from_concept_code=self.mnemonic, from_source_url__in=parent_uris, from_concept__isnull=True
+            can_view, from_concept_code=self.mnemonic, from_source_url__in=parent_uris, from_concept__isnull=True
         ).update(from_concept=self)
 
     @classmethod

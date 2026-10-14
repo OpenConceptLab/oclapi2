@@ -8,6 +8,7 @@ from core.common.tests import OCLAPITestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from core.orgs.tests.factories import OrganizationFactory
+from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
@@ -252,6 +253,55 @@ class MappingTargetAccessTest(CrossRepoAccessBaseTest):
         mapping = member_source.mappings.first()
         self.assertEqual(mapping.to_concept.versioned_object_id, self.private_concept.id)
         self.assertEqual(mapping.to_source_id, self.private_source.id)
+
+    def map_to(self, user, source, to_concept_url):
+        from_concept = ConceptFactory(parent=source)
+        response = self.client.post(
+            source.mappings_url,
+            {'map_type': 'SAME-AS', 'from_concept_url': from_concept.uri, 'to_concept_url': to_concept_url},
+            HTTP_AUTHORIZATION='Token ' + user.get_token(),
+            format='json'
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        return source.mappings.get(from_concept__versioned_object_id=from_concept.id, id=F('versioned_object_id'))
+
+    def test_concept_created_later_is_linked_only_to_mappings_whose_saver_can_view_it(self):
+        member_source = OrganizationSourceFactory(
+            organization=self.private_org, mnemonic='MemberMapSource', public_access=ACCESS_TYPE_NONE)
+        outsider_mapping = self.map_to(self.outsider, self.outsider_source, self.private_source.uri + 'concepts/later/')
+        member_mapping = self.map_to(self.member, member_source, self.private_source.uri + 'concepts/later/')
+        public_mapping = self.map_to(self.outsider, self.outsider_source, self.public_source.uri + 'concepts/later/')
+
+        for source in [self.private_source, self.public_source]:
+            response = self.client.post(
+                source.concepts_url, self.concept_payload('later'),
+                HTTP_AUTHORIZATION='Token ' + self.admin.get_token(), format='json')
+            self.assertEqual(response.status_code, 201, response.data)
+
+        outsider_mapping.refresh_from_db()
+        self.assertIsNone(outsider_mapping.to_concept_id)
+        self.assertEqual(outsider_mapping.to_concept_code, 'later')
+        for mapping, source in [(member_mapping, self.private_source), (public_mapping, self.public_source)]:
+            mapping.refresh_from_db()
+            self.assertEqual(mapping.to_concept.parent_id, source.id)
+
+    def test_source_created_later_is_linked_only_to_mappings_whose_saver_can_view_it(self):
+        member_source = OrganizationSourceFactory(
+            organization=self.private_org, mnemonic='MemberMapSource', public_access=ACCESS_TYPE_NONE)
+        outsider_mapping = self.map_to(self.outsider, self.outsider_source, '/orgs/PrivOrg/sources/NewPriv/concepts/x/')
+        member_mapping = self.map_to(self.member, member_source, '/orgs/PrivOrg/sources/NewPriv/concepts/x/')
+
+        errors = Source.persist_new(
+            OrganizationSourceFactory.build(
+                organization=self.private_org, mnemonic='NewPriv', public_access=ACCESS_TYPE_NONE),
+            self.member, parent_resource=self.private_org)
+        self.assertEqual(errors, {})
+        new_source = Source.objects.get(mnemonic='NewPriv', version='HEAD')
+
+        outsider_mapping.refresh_from_db()
+        self.assertIsNone(outsider_mapping.to_source_id)
+        member_mapping.refresh_from_db()
+        self.assertEqual(member_mapping.to_source_id, new_source.id)
 
     def test_edit_by_user_who_cannot_view_target_keeps_link(self):
         from_concept = ConceptFactory(parent=self.outsider_source, mnemonic='from')

@@ -1033,6 +1033,15 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         return bool(user and user.is_authenticated and self.has_parent_edit_access(user))
 
+    def get_view_access_criteria(self, user_field):
+        """has_view_access as a query on a UserProfile foreign key, e.g. the user who saved a row."""
+        if self.public_can_view:
+            return Q()
+        criteria = Q(**{f'{user_field}__is_staff': True})
+        if self.organization_id:
+            return criteria | Q(**{f'{user_field}__organizations__id': self.organization_id})
+        return criteria | Q(**{f'{user_field}_id': self.user_id})
+
     @staticmethod
     def get_version_url_kwarg():
         return 'version'

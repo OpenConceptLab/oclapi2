@@ -245,16 +245,18 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         from core.mappings.models import Mapping
         from core.mappings.documents import MappingDocument
 
+        # only mappings whose last saver can view this repo; others keep the external URL, as on save
         uris = self.identity_uris
+        can_view = self.get_view_access_criteria('updated_by')
 
         to_queryset = Mapping.objects.filter(to_source_url__in=uris)
         from_queryset = Mapping.objects.filter(from_source_url__in=uris)
 
-        to_queryset.filter(to_source_id__isnull=True).update(to_source=self)
-        from_queryset.filter(from_source_id__isnull=True).update(from_source=self)
+        to_queryset.filter(can_view, to_source_id__isnull=True).update(to_source=self)
+        from_queryset.filter(can_view, from_source_id__isnull=True).update(from_source=self)
 
         Mapping.batch_index(to_queryset.filter(to_source=self), MappingDocument)
-        Mapping.batch_index(from_queryset.filter(to_source=self), MappingDocument)
+        Mapping.batch_index(from_queryset.filter(from_source=self), MappingDocument)
 
     def is_hierarchy_root_belonging_to_self(self):
         hierarchy_root = self.hierarchy_root
