@@ -8,6 +8,9 @@ from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.search import ConceptFuzzySearch
 from core.concepts.tests.factories import ConceptFactory
+from core.mappings.documents import MappingDocument
+from core.mappings.models import Mapping
+from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.url_registry.factories import GlobalURLRegistryFactory
@@ -155,6 +158,34 @@ class MatchAccessTest(SearchResolutionAccessBaseTest):
             with self.assertRaises(StopSearch):
                 self.match(self.admin, self.private_source.uri, head_target_repo)
         self.assertEqual(search_mock.call_args[0][2]['source_version'], 'HEAD')
+
+
+class RepoSearchOwnerCaseTest(SearchResolutionAccessBaseTest):
+    def test_repo_search_excludes_private_content_of_owner_whose_name_differs_only_in_case(self):
+        self.patch_concept_es_mapping_for_ci()
+        own_org = OrganizationFactory(mnemonic='resolveorg', public_access=ACCESS_TYPE_NONE)
+        own_org.members.add(self.outsider)
+        own_source = OrganizationSourceFactory(
+            organization=own_org, mnemonic='ResolveSource', public_access=ACCESS_TYPE_NONE)
+        for source in [own_source, self.private_source]:
+            concept = ConceptFactory(parent=source, mnemonic='case-twin', public_access=ACCESS_TYPE_NONE)
+            source.concepts.add(concept.get_latest_version())
+            mapping = MappingFactory(
+                parent=source, from_concept=concept, to_concept=concept, public_access=ACCESS_TYPE_NONE)
+            source.mappings.add(mapping.get_latest_version())
+        ConceptDocument().update(Concept.objects.filter(mnemonic='case-twin'), refresh=True)
+        MappingDocument().update(Mapping.objects.filter(parent__mnemonic='ResolveSource'), refresh=True)
+
+        def search(resource):
+            response = self.client.get(
+                f'{own_source.uri}{resource}/?sortAsc=last_update&limit=100',
+                HTTP_AUTHORIZATION='Token ' + self.outsider.get_token())
+            self.assertEqual(response.status_code, 200)
+            return {result['url'].split('/sources/')[0] for result in response.data}
+
+        self.assertEqual(search('concepts'), {'/orgs/resolveorg'})
+        # mappings have no exact-case owner field: with such an owner, only public mappings are searched
+        self.assertEqual(search('mappings'), set())
 
 
 class ResolveReferenceAccessTest(SearchResolutionAccessBaseTest):

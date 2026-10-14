@@ -29,7 +29,7 @@ from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_
     CANONICAL_URL_REQUEST_PARAM, CHECKSUMS_PARAM, ACCESS_TYPE_NONE
 from core.common.exceptions import Http400
 from core.common.mixins import PathWalkerMixin
-from core.common.search import CustomESSearch
+from core.common.search import CustomESSearch, EXACT_OWNER_FIELD
 from core.common.serializers import RootSerializer
 from core.common.swagger_parameters import all_resource_query_param
 from core.common.throttling import ThrottleUtil
@@ -721,6 +721,27 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         return (not collection or collection.startswith('!')) and (not version or version.startswith('!'))
 
+    def get_scope_owner_criteria(self):
+        """Private content in the requester's own scope (their user, or an org of theirs) is shown, but the owner and
+        source filters match names in any case, and owner names that differ only in case are other owners: their
+        private content is excluded (concepts by exact owner name; for other documents, all private content is
+        excluded when such an owner exists). None when there's nothing to exclude."""
+        if (not self.is_source_child_document_model() or self.request.user.is_staff or 'collection' in self.kwargs or
+                not self.is_user_scope()):
+            return None
+        org = self.kwargs.get('org')
+        owner = org or self.kwargs.get('user') or self.request.user.username
+        public = Q('term', public_can_view=True)
+        if self.is_concept_document():
+            return public | Q('term', **{EXACT_OWNER_FIELD: owner})
+        if org:
+            from core.orgs.models import Organization
+            has_twin = Organization.objects.filter(mnemonic__iexact=org).exclude(mnemonic=org).exists()
+        else:
+            from core.users.models import UserProfile
+            has_twin = UserProfile.objects.filter(username__iexact=owner).exclude(username=owner).exists()
+        return public if has_twin else None
+
     def __apply_common_search_filters(self, ignore_retired_filter=False, force=False):
         results = None
         if not force and not self.should_perform_es_search():
@@ -758,9 +779,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if not ignore_retired_filter and self._should_exclude_retired_from_search_results():
             results = results.filter('term', retired=False)
 
-        include_private = self._should_include_private()
-        if not include_private:
-            results = results.filter(self.get_public_criteria())
+        visibility_criteria = self.get_scope_owner_criteria() if self._should_include_private() else (
+            self.get_public_criteria())
+        if visibility_criteria is not None:
+            results = results.filter(visibility_criteria)
         faceted_criterion = self.get_faceted_criterion()
         if faceted_criterion:
             results = results.filter(faceted_criterion)
