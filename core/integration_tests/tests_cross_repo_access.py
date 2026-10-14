@@ -173,6 +173,23 @@ class ParentConceptAccessTest(CrossRepoAccessBaseTest):
             self.assertEqual(
                 sorted(concept['id'] for concept in response.data['parent_concepts']), ['public', 'secret'])
 
+    def test_viewable_parent_uris_reads_linked_parents_only_when_a_parent_is_not_viewable(self):
+        def not_needed():
+            raise AssertionError('linked parents were read')
+
+        with self.assertNumQueries(0):
+            self.assertEqual(Concept.get_viewable_parent_uris([], self.outsider, not_needed), [])
+        self.assertEqual(
+            Concept.get_viewable_parent_uris([self.public_concept.uri], self.outsider, not_needed),
+            [self.public_concept.uri])
+        for linked, expected in [
+                ([self.private_concept.uri], [self.private_concept.uri, self.public_concept.uri]),
+                ([], [self.public_concept.uri])]:
+            self.assertEqual(
+                Concept.get_viewable_parent_uris(
+                    [self.private_concept.uri, self.public_concept.uri], self.outsider, lambda linked=linked: linked),
+                expected)
+
     def test_parents_and_children_lists_hide_private_concepts(self):
         child = self.persist_child('listedchild', [self.private_concept.uri, self.public_concept.uri])
         private_child = Concept.persist_new({
