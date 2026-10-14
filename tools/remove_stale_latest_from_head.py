@@ -21,6 +21,8 @@ import os
 import sys
 
 import psycopg2
+import psycopg2.extensions
+import psycopg2.extras
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import parallel_bulk
 
@@ -46,6 +48,9 @@ def es_client():
     else:
         urls = [f"{scheme}://{os.environ.get('ES_HOST', 'localhost')}:{os.environ.get('ES_PORT', '9200')}"]
     return Elasticsearch(hosts=urls, request_timeout=120, retry_on_timeout=True, max_retries=3)
+
+# lets Ctrl-C interrupt a query that is still running on the server
+psycopg2.extensions.set_wait_callback(psycopg2.extras.wait_select)
 
 
 def pg_connect():
