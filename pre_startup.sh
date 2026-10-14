@@ -25,7 +25,7 @@ export NO_ENCODER=TRUE
 echo "Running DB migrations"
 python manage.py migrate
 echo "Importing base entities"
-python manage.py loaddata core/fixtures/*
+python manage.py load_fixtures
 
 echo "Seeding default group capability limits"
 python manage.py seed_group_capabilities
