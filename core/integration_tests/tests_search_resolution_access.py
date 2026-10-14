@@ -4,7 +4,10 @@ from mock import patch
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.search import get_visible_repo_criteria
 from core.common.tests import OCLAPITestCase, PREVIEW_GROUP_NAME
+from core.concepts.documents import ConceptDocument
+from core.concepts.models import Concept
 from core.concepts.search import ConceptFuzzySearch
+from core.concepts.tests.factories import ConceptFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.url_registry.factories import GlobalURLRegistryFactory
@@ -35,9 +38,11 @@ class VisibleRepoCriteriaTest(SearchResolutionAccessBaseTest):
         member = get_visible_repo_criteria(self.member).to_dict()
         self.assertEqual(member['bool']['minimum_should_match'], 1)
         self.assertIn({'bool': {'must': [
-            {'term': {'owner_type': 'User'}}, {'term': {'owner': 'resolvemember'}}]}}, member['bool']['should'])
+            {'term': {'owner_type': 'User'}}, {'term': {'owner_text.keyword': 'resolvemember'}}]}},
+            member['bool']['should'])
         self.assertIn({'bool': {'must': [
-            {'term': {'owner_type': 'Organization'}}, {'terms': {'owner': ['resolveorg']}}]}}, member['bool']['should'])
+            {'term': {'owner_type': 'Organization'}}, {'terms': {'owner_text.keyword': ['ResolveOrg']}}]}},
+            member['bool']['should'])
 
         outsider = get_visible_repo_criteria(self.outsider).to_dict()
         self.assertEqual(len(outsider['bool']['should']), 2)
@@ -65,14 +70,13 @@ class MatchAccessTest(SearchResolutionAccessBaseTest):
         additional_filter_criterion = search_mock.call_args[0][8]
         self.assertEqual(additional_filter_criterion, get_visible_repo_criteria(self.outsider))
 
-    def match(self, user, target_repo_url, target_repo=None):
-        data = {'rows': [{'name': 'foo'}]}
+    def match(self, user, target_repo_url, target_repo=None, row=None, url='/concepts/$match/'):  # pylint: disable=too-many-arguments
+        data = {'rows': [row or {'name': 'foo'}]}
         if target_repo_url:
             data['target_repo_url'] = target_repo_url
         if target_repo:
             data['target_repo'] = target_repo
-        return self.client.post(
-            '/concepts/$match/', data, HTTP_AUTHORIZATION='Token ' + user.get_token(), format='json')
+        return self.client.post(url, data, HTTP_AUTHORIZATION='Token ' + user.get_token(), format='json')
 
     def test_match_target_repo_needs_view_access(self):
         preview = Group.objects.get(name=PREVIEW_GROUP_NAME)
@@ -101,6 +105,43 @@ class MatchAccessTest(SearchResolutionAccessBaseTest):
                     with self.assertRaises(StopSearch):
                         self.match(user, target_repo_url, target_repo)
                 self.assertEqual(search_mock.call_args[0][2], private_target_repo)
+
+    def test_match_target_repo_is_searched_by_its_stored_names(self):
+        self.member.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
+
+        with patch.object(ConceptFuzzySearch, 'search', side_effect=StopSearch) as search_mock:
+            with self.assertRaises(StopSearch):
+                self.match(
+                    self.member, None,
+                    {'owner': 'ResolveOrg', 'owner_type': 'org', 'source': 'ResolveSource', 'version': 'HEAD'})
+        self.assertEqual(
+            search_mock.call_args[0][2],
+            {'owner': 'ResolveOrg', 'owner_type': 'Organization', 'source': 'ResolveSource', 'source_version': 'HEAD'})
+
+    def test_match_tells_apart_owners_whose_names_differ_only_in_case(self):
+        self.patch_concept_es_mapping_for_ci()
+        self.outsider.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
+        own_org = OrganizationFactory(mnemonic='resolveorg', public_access=ACCESS_TYPE_NONE)
+        own_org.members.add(self.outsider)
+        own_source = OrganizationSourceFactory(
+            organization=own_org, mnemonic='ResolveSource', public_access=ACCESS_TYPE_NONE)
+        for source in [own_source, self.private_source]:
+            concept = ConceptFactory(parent=source, mnemonic='case-collision', public_access=ACCESS_TYPE_NONE)
+            source.concepts.add(concept.get_latest_version())
+        ConceptDocument().update(Concept.objects.filter(mnemonic='case-collision'), refresh=True)
+
+        for target_repo_url, target_repo in [
+                (own_source.uri, None),
+                (None, {'owner': 'resolveorg', 'owner_type': 'Organization', 'source': 'ResolveSource'})]:
+            response = self.match(
+                self.outsider, target_repo_url, target_repo, row={'id': 'case-collision'},
+                url='/concepts/$match/?limit=10')
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                {result['url'] for result in response.data[0]['results']},
+                {'/orgs/resolveorg/sources/ResolveSource/concepts/case-collision/'},
+                (target_repo_url, target_repo))
 
     def test_match_head_target_repo_with_bare_url_searches_head(self):
         # the HEAD version_url is the bare repo URL, which resolves to the latest released version

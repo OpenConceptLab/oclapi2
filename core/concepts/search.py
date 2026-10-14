@@ -3,7 +3,7 @@ from pydash import flatten, is_number, compact, get
 
 from core.common.constants import FACET_SIZE, HEAD
 from core.common.lexical_variants import LexicalVariantDictionary
-from core.common.search import CustomESFacetedSearch, CustomESSearch
+from core.common.search import CustomESFacetedSearch, CustomESSearch, EXACT_OWNER_FIELD
 from core.common.utils import get_embeddings, is_canonical_uri
 from core.concepts.models import Concept
 
@@ -124,6 +124,8 @@ class ConceptFuzzySearch:  # pragma: no cover
         ['concept_class', 'datatype', 0],
     ]
     fuzzy_fields = ['name', 'synonyms']
+    # `owner` and `source` are lowercase-normalized; names that differ only in case are different repos
+    exact_repo_fields = {'owner': EXACT_OWNER_FIELD, 'source': 'source_text.keyword'}
 
     @staticmethod
     def get_target_repo(repo_url):
@@ -436,7 +438,10 @@ class ConceptFuzzySearch:  # pragma: no cover
         must_clauses = []
         repo_params = repo_params or cls.get_target_repo_params(repo_url)
         for field, value in repo_params.items():
-            must_clauses.append(Q('match', **{field: value}))
+            if field in cls.exact_repo_fields:
+                must_clauses.append(Q('term', **{cls.exact_repo_fields[field]: value}))
+            else:
+                must_clauses.append(Q('match', **{field: value}))
         if not include_retired:
             must_clauses.append(Q('match', retired=False))
         for field in cls.filter_fields:

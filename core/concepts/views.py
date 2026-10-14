@@ -1173,11 +1173,19 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):  # pragma: no
                 raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')
             repo_params = ConceptFuzzySearch.get_repo_params(repo)
         elif target_repo_params:
-            repos = MetadataToConceptsListView.get_target_repos_from_params(target_repo_params)
-            if not repos.exists() or not all(target_repo.has_view_access(user) for target_repo in repos):
+            repos = list(MetadataToConceptsListView.get_target_repos_from_params(target_repo_params))
+            if not repos or not all(target_repo.has_view_access(user) for target_repo in repos):
                 raise Http400(f'Unable to resolve "target_repo": "{target_repo_params}"')
-            repo = repos.first()
-            repo_params = target_repo_params
+            repo = repos[0]
+            # search the repos that were checked, by their stored names: target_repo's own values may differ
+            # in case or key names (e.g. "version", "org"), which the search filters would read differently
+            repo_params = {'owner': repo.parent.mnemonic, 'source': repo.mnemonic}
+            owner_types = {target_repo.parent.resource_type for target_repo in repos}
+            if len(owner_types) == 1:
+                repo_params['owner_type'] = owner_types.pop()
+            version = get(target_repo_params, 'source_version') or get(target_repo_params, 'version')
+            if version:
+                repo_params['source_version'] = version
         else:
             raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')
         if is_semantic and not repo.has_semantic_match_algorithm:
