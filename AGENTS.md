@@ -25,6 +25,12 @@ For any code change, run targeted tests and pylint by default unless the user ex
 ## Commit & Pull Request Guidelines
 Structure commit subjects using Conventional Commits (`feat(core): add repoType filter`) or issue references such as `OpenConceptLab/ocl_issues#2252 repo facets`. Keep one logical change per commit so release tooling can tag accurately. Follow GitFlow branches—start work on `feature/<issue-id>-slug` from `develop`, reserve `hotfix/*` for production fixes, and merge back through PRs only. Every PR must describe the motivation, list verification steps (`docker exec oclapi2-api-1 python manage.py test…`, `docker exec oclapi2-api-1 pylint …`), link the tracked issue, attach evidence when API responses change, and call out migrations, indexing, or env var impacts before requesting review.
 
+## Migrations
+Every API container runs `python manage.py migrate` (`pre_startup.sh`) before it starts serving, and the load balancer's health check only waits so long. A slow migration can outlast that wait: the container is replaced mid-migration, and an interrupted `CREATE INDEX CONCURRENTLY` leaves an INVALID index behind. Building an index on `concepts` or `mappings` (millions of rows) takes minutes, so for an index on a large table:
+- write a non-atomic migration that runs `CREATE INDEX CONCURRENTLY IF NOT EXISTS`, refuses to build above a row threshold, and stops if the index is INVALID (example: OpenConceptLab/oclapi2#938);
+- build the index by hand on staging, then production, before deploying, and check `pg_index.indisvalid`;
+- drop an index it replaces in a later migration, once EXPLAIN in production shows the new one in use.
+
 ## Security & Configuration Tips
 Keep `vm.max_map_count=262144` set before starting Elasticsearch. For SSO, export `OIDC_SERVER_URL`, `OIDC_SERVER_INTERNAL_URL`, and `OIDC_REALM`; omitting them falls back to Django auth. Never commit secrets—use `.env` overrides or Docker compose profiles instead.
 
