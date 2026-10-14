@@ -542,9 +542,16 @@ class ConceptCascadeView(ConceptBaseView):
             omit_if_exists_in_param, equivalency_map_types_param
         ]
     )
+    def set_cascade_repo(self):
+        """The repo the cascade runs over, from the URL. Query params can pick the root concept from another repo,
+        so this one's view access is checked too."""
+        self.set_parent_resource(False)
+        if self.parent_resource and not self.parent_resource.has_view_access(self.request.user):
+            raise Http404()
+
     def get(self, request, **kwargs):  # pylint: disable=unused-argument
         instance = self.get_object()
-        self.set_parent_resource(False)
+        self.set_cascade_repo()
         bundle = Bundle(
             root=instance, params=self.request.query_params, verbose=self.is_verbose(),
             repo_version=self.parent_resource, requested_url=self.request.get_full_path(), user=self.request.user
@@ -565,7 +572,7 @@ class ConceptCloneView(ConceptCascadeView):
             }
         """
         clone_to_source = self.get_clone_to_source()
-        self.set_parent_resource(False)
+        self.set_cascade_repo()
         budget = get_clone_budget(request.user)
         parameters = dict(request.data.get('parameters') or {})
         parameters.pop('resource_budget', None)

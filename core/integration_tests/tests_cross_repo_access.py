@@ -397,3 +397,23 @@ class OmitIfExistsInAccessTest(CrossRepoAccessBaseTest):
                 created_by=user)
 
             self.assertEqual('omit_if_exists_in' in reference.get_concept_cascade_params(), kept, user)
+
+
+class CascadeRepoAccessTest(CrossRepoAccessBaseTest):
+    def test_cascade_and_clone_over_a_repo_the_requester_cannot_view_are_not_found(self):
+        MappingFactory(parent=self.private_source, from_concept=self.private_concept, to_concept=self.public_concept)
+        # the root concept comes from the query params, the repo to cascade over from the URL
+        url = (f'{self.private_concept.uri}$cascade/?org={self.public_source.organization.mnemonic}'
+               f'&source={self.public_source.mnemonic}&concept={self.public_concept.mnemonic}&reverse=true')
+
+        self.assertEqual(self.client.get(url).status_code, 404)
+        self.assertEqual(self.client.get(url, HTTP_AUTHORIZATION='Token ' + self.outsider_token).status_code, 404)
+        response = self.client.get(url, HTTP_AUTHORIZATION='Token ' + self.member.get_token())
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(self.private_concept.uri, str(response.data))
+
+        response = self.client.post(
+            url.replace('$cascade/', '$clone/'),
+            {'source_uri': self.outsider_source.uri, 'parameters': {'reverse': True}},
+            HTTP_AUTHORIZATION='Token ' + self.outsider_token, format='json')
+        self.assertEqual(response.status_code, 404)
