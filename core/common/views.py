@@ -721,6 +721,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         return (not collection or collection.startswith('!')) and (not version or version.startswith('!'))
 
+    def is_members_view(self):
+        """/user/orgs/<repos>/: lists across all the requester's orgs."""
+        return self.get_view_name() in ['Organization Collection List', 'Organization Source List',
+                                        'Organization Repo List', 'Organization Url Registry List']
+
     def get_scope_owner_criteria(self):
         """Private content in the requester's own scope (their user, or an org of theirs) is shown, but the owner and
         source filters match names in any case, and owner names that differ only in case are other owners: their
@@ -733,11 +738,16 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         org = self.kwargs.get('org')
         owner = org or self.kwargs.get('user') or self.request.user.username
         public = Q('term', public_can_view=True)
+        orgs = list(self.request.user.organizations.values_list('mnemonic', flat=True)) if (
+            self.is_members_view()) else ([org] if org else None)
         if self.is_concept_document():
             return public | Q('term', **{EXACT_OWNER_FIELD: owner})
-        if org:
+        if orgs is not None:
             from core.orgs.models import Organization
-            has_twin = Organization.objects.filter(mnemonic__iexact=org).exclude(mnemonic=org).exists()
+            twin_criteria = models.Q()
+            for mnemonic in orgs:
+                twin_criteria |= models.Q(mnemonic__iexact=mnemonic)
+            has_twin = bool(orgs) and Organization.objects.filter(twin_criteria).exclude(mnemonic__in=orgs).exists()
         else:
             from core.users.models import UserProfile
             has_twin = UserProfile.objects.filter(username__iexact=owner).exclude(username=owner).exists()
@@ -901,8 +911,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         is_authenticated = user.is_authenticated
         username = user.username
 
-        is_members_view = self.get_view_name() in ['Organization Collection List', 'Organization Source List',
-                                                   'Organization Repo List', 'Organization Url Registry List']
+        is_members_view = self.is_members_view()
         if self.is_owner_document_model():
             kwargs_filters = self.kwargs.copy()
             if self.user_is_self and is_authenticated:

@@ -197,11 +197,11 @@ class RepoListSearchOwnerCaseTest(SearchResolutionAccessBaseTest):
         own_source = OrganizationSourceFactory(organization=own_org, mnemonic='ResolveSource')
         SourceDocument().update(Source.objects.filter(mnemonic='ResolveSource'), refresh=True)
 
-        response = self.client.get(
-            '/orgs/resolveorg/sources/?q=ResolveSource', HTTP_AUTHORIZATION='Token ' + self.outsider.get_token())
+        for url in ['/orgs/resolveorg/sources/?q=ResolveSource', '/user/orgs/sources/?q=ResolveSource']:
+            response = self.client.get(url, HTTP_AUTHORIZATION='Token ' + self.outsider.get_token())
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual([source['url'] for source in response.data], [own_source.uri])
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual([source['url'] for source in response.data], [own_source.uri], url)
 
     def test_org_names_are_unique_regardless_of_case(self):
         response = self.client.post(
