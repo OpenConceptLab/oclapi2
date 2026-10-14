@@ -30,7 +30,7 @@ from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConce
 from core.users.constants import LIST_UNPAGINATED_PERMISSION
 from .checksums import ChecksumModel
 from .exceptions import Http403, UnpaginatedListLimitReached
-from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
+from .utils import write_csv_to_s3, get_query_params_from_url_string, compact_dict_by_values, \
     to_owner_uri, parse_updated_since_param, get_export_service, to_int, get_truthy_values, generate_temp_version, \
     canonical_url_to_url_and_version, decode_string, to_parent_kwargs_from_uri
 from ..concepts.constants import PERSIST_CLONE_ERROR
@@ -333,15 +333,10 @@ class ListWithHeadersMixin(ListModelMixin):
         return map(lambda o: o.id, self.object_list[0:100])
 
     def get_csv(self, request, queryset=None):
-        filename, url, prepare_new_file, is_member = None, None, True, False
-
-        parent = None  # TODO: fix this for parent (owner)
-
-        if parent:
-            prepare_new_file = False
-            user = request.query_params.get('user', None)
-            is_member = self._is_member(parent, user)
-
+        """
+        Builds the CSV from the view's own queryset, so the view's access checks apply, and stores it in a folder
+        of the requester's own: one requester's export is never served to another.
+        """
         try:
             path = request.__dict__.get('_request').path
             filename = '_'.join(compact(path.split('/'))).replace('.', '_')
@@ -351,27 +346,13 @@ class ListWithHeadersMixin(ListModelMixin):
         except Exception:  # pylint: disable=broad-except
             kwargs = {}
 
-        if filename and prepare_new_file:
-            url = get_csv_from_s3(filename, is_member)
-
-        if not url:
-            queryset = queryset or self._get_query_set_from_view(is_member)
-            data = self.get_csv_rows(queryset) if hasattr(self, 'get_csv_rows') else queryset.values()
-            url = write_csv_to_s3(data, is_member, **kwargs)
+        if queryset is None:
+            queryset = self.get_queryset()[0:CSV_DEFAULT_LIMIT]
+        data = self.get_csv_rows(queryset) if hasattr(self, 'get_csv_rows') else queryset.values()
+        requester = request.user.id if request.user.is_authenticated else 'anonymous'
+        url = write_csv_to_s3(data, requester, **kwargs)
 
         return Response({'url': url}, status=200)
-
-    @staticmethod
-    def _is_member(parent, requesting_user):
-        if not parent or type(parent).__name__ in ['UserProfile', 'Organization']:
-            return False
-
-        owner = parent.owner
-        return owner.members.filter(username=requesting_user).exists() if type(owner).__name__ == 'Organization' else \
-            requesting_user == parent.created_by
-
-    def _get_query_set_from_view(self, is_member):
-        return self.get_queryset() if is_member else self.get_queryset()[0:CSV_DEFAULT_LIMIT]
 
 
 class PathWalkerMixin:
