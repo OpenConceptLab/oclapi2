@@ -618,7 +618,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         for key, value in query_params.items():
             if key.startswith('extras.') and not key.startswith('extras.exists') and not key.startswith('extras.exact'):
                 parts = key.split('extras.')
-                value = value.replace('/', '\\/').replace('-', '_')
+                # escape `:` so the query_string value can only match this extras field
+                value = value.replace('\\', '\\\\').replace('/', '\\/').replace(':', '\\:').replace('-', '_')
                 result['extras.' + parts[1].replace('.', '__')] = f"*{value}*"
 
         return result

@@ -517,6 +517,26 @@ class UserListViewTest(OCLAPITestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual([user['username'] for user in response.data], ['ocladmin'])
 
+    def test_get_extras_filter_matches_only_the_extras_field(self):
+        regular_user = UserProfileFactory(username='extrasregularuser', extras={'xdept': 'xcardiology'})
+        member = UserProfileFactory(username='extrasprivatemember')
+        private_org = OrganizationFactory(mnemonic='extrasprivateorg', public_access=ACCESS_TYPE_NONE)
+        private_org.members.add(member)
+        UserProfileDocument().update([regular_user, member])
+        headers = {'HTTP_AUTHORIZATION': 'Token ' + regular_user.get_token()}
+
+        response = self.client.get('/users/', {'extras.xdept': 'cardio'}, format='json', **headers)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([user['username'] for user in response.data], ['extrasregularuser'])
+
+        for value in ['zzqq OR is_staff:true OR zzqq', 'zzqq OR org:extrasprivateorg OR zzqq',
+                      'zzqq OR is_staff\\:true OR zzqq']:
+            response = self.client.get('/users/', {'extras.xdept': value}, format='json', **headers)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data, [])
+
     def test_get_last_login_filters_only_for_staff(self):
         old_login_user = UserProfileFactory(username='oldloginuser', last_login='2020-01-01T00:00:00Z')
         recent_login_user = UserProfileFactory(username='recentloginuser', last_login='2024-01-01T00:00:00Z')
