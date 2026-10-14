@@ -9,6 +9,7 @@ class EventSerializer(serializers.ModelSerializer):
     actor = UserListSerializer(read_only=True)
     referenced_object = serializers.SerializerMethodField()
     object = serializers.SerializerMethodField()
+    description = serializers.SerializerMethodField()
 
     class Meta:
         model = Event
@@ -30,6 +31,10 @@ class EventSerializer(serializers.ModelSerializer):
         else:
             data = obj._referenced_object
         return data
+
+    def get_description(self, obj):
+        referenced_object = obj.referenced_object
+        return obj.event_type if referenced_object and not self.can_view(referenced_object) else obj.description
 
     def get_object(self, obj):
         resource_object = obj.object

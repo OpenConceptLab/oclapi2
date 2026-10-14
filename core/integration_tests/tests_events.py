@@ -288,16 +288,22 @@ class UserEventsViewTest(OCLAPITestCase):
         source.public_access = 'None'
         source.save()
 
-        def get_referenced_objects(user=None):
+        def get_events(user=None, params=''):
             headers = {'HTTP_AUTHORIZATION': f'Token {user.get_token()}'} if user else {}
-            response = self.client.get('/users/turned-follower/events/', **headers)
+            response = self.client.get(f'/users/turned-follower/events/{params}', **headers)
             self.assertEqual(response.status_code, 200)
-            return [event['referenced_object'] for event in response.data]
+            return response.data
 
         # the event was public when recorded; the source it shows is live, so it's shown only to those who can view it
         for user in [None, follower]:
-            self.assertEqual(get_referenced_objects(user), [None], user)
-        self.assertEqual([obj['url'] for obj in get_referenced_objects(member)], [source.url])
+            events = get_events(user)
+            self.assertEqual([event['referenced_object'] for event in events], [None], user)
+            self.assertEqual([event['description'] for event in events], ['Followed'], user)
+            # no CSV export, which would skip these checks
+            self.assertEqual(get_events(user, '?csv=true'), events, user)
+        events = get_events(member)
+        self.assertEqual([event['referenced_object']['url'] for event in events], [source.url])
+        self.assertNotEqual(events[0]['description'], 'Followed')
 
     def test_get_orgs_events(self):  # pylint:disable=too-many-statements,too-many-locals
         alfred = UserProfileFactory(username='alfred', first_name='Alfred', last_name='Pennyworth')
