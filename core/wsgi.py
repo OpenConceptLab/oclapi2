@@ -33,8 +33,15 @@ class FhirWSGIRequest(WSGIRequest):
             return
         charset = self.content_params.get('charset')
         # Django accepts any codec as the charset, but decoding the query with a non-text one (base64) fails later.
-        if charset and is_fhir_path(self.path) and not codecs.lookup(charset)._is_text_encoding:  # pylint: disable=protected-access
+        if charset and is_fhir_path(self.path) and not self._is_text_encoding(charset):
             self._mark_bad_content_type()
+
+    @staticmethod
+    def _is_text_encoding(charset):
+        try:
+            return codecs.lookup(charset)._is_text_encoding  # pylint: disable=protected-access
+        except LookupError:
+            return True  # Django ignores an unknown charset name, so the query decodes with the default
 
     def _mark_bad_content_type(self):
         self.fhir_content_type_error = True

@@ -178,6 +178,15 @@ class MediaTypeParsingFailureTest(TestCase):
 
         self.assert_bad_request_outcome(response)
 
+    def test_unknown_charset_name_is_ignored_as_django_does(self):
+        """An unknown charset name was never an error: Django ignores it and decodes with the default."""
+        client = APIClient(raise_request_exception=False)
+        with patch('django.test.client.WSGIRequest', application.request_class):
+            response = client.get('/fhir/metadata', content_type='application/fhir+json; charset=not-a-charset')
+
+        self.assertEqual(response.status_code, 200)
+
+
     def test_non_text_charset_with_query_is_a_400_json_outcome(self):
         """A failed charset is cleared and cannot break error rendering on an unknown path."""
         client = APIClient(raise_request_exception=False)
