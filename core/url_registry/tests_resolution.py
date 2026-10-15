@@ -1,20 +1,21 @@
 """
 The shared canonical resolver (ConceptContainerModel.resolve_reference_expression) with the URL registry toggle off
 and on: today's answers for its existing callers, the flags FHIR resolves with (repo_type, allow_head), reads that
-never write a registry entry. OpenConceptLab/ocl_online#451.
+never write a registry entry, and $resolveReference's ?namespace=. OpenConceptLab/ocl_online#451.
 """
 from mock import patch
 
 from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.constants import HEAD
-from core.common.tests import OCLTestCase
+from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.toggles.models import Toggle
 from core.url_registry.factories import GlobalURLRegistryFactory, OrganizationURLRegistryFactory
 from core.url_registry.models import URLRegistry
+from core.users.models import UserProfile
 
 REGISTRY_TOGGLE = 'URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE'
 ICD10 = 'http://hl7.org/fhir/sid/icd-10'
@@ -278,3 +279,56 @@ class URLRegistryReadsTest(ResolverCorpusMixin, OCLTestCase):
             self.assertIsNone(URLRegistry(url='http://example.org/nowhere', namespace=self.padam.uri).lookup_entry())
         save_mock.assert_not_called()
 
+
+class ResolveReferenceNamespaceTest(OCLAPITestCase):
+    """$resolveReference's ?namespace=: the namespace of every expression that doesn't name its own."""
+    def setUp(self):
+        super().setUp()
+        self.token = UserProfile.objects.get(username='ocladmin').get_token()
+        self.org_a = OrganizationFactory(mnemonic='org-a')
+        self.org_b = OrganizationFactory(mnemonic='org-b')
+        self.source_a = source(self.org_a, 'codes', canonical_url=ICD10)
+        self.source_a_v1 = source(self.org_a, 'codes', 'v1', released=True, canonical_url=ICD10)
+        self.source_b = source(self.org_b, 'codes', canonical_url=ICD10)
+        self.source_b_v1 = source(self.org_b, 'codes', 'v1', released=True, canonical_url=ICD10)
+        GlobalURLRegistryFactory(url=ICD10, namespace=self.org_a.uri)
+
+    def resolve(self, expressions, query=''):
+        response = self.client.post(
+            f'/$resolveReference/{query}', expressions, HTTP_AUTHORIZATION='Token ' + self.token, format='json')
+        self.assertEqual(response.status_code, 200)
+        return [item['result']['version_url'] if item['resolved'] else None for item in response.data]
+
+    def test_with_the_registry(self):
+        set_registry_toggle(True)
+        a_v1, b_v1 = self.source_a_v1.uri, self.source_b_v1.uri
+
+        self.assertEqual(self.resolve([{'url': ICD10}]), [a_v1])
+        self.assertEqual(self.resolve([{'url': ICD10}, ICD10], '?namespace=/orgs/org-b/'), [b_v1, b_v1])
+        self.assertEqual(
+            self.resolve([{'url': ICD10, 'namespace': '/orgs/org-a/'}, {'url': ICD10, 'namespace': None}],
+                         '?namespace=/orgs/org-b/'),
+            [a_v1, a_v1])
+        self.assertEqual(self.resolve([{'url': ICD10}], '?namespace='), [a_v1])
+
+    def test_one_expression_query_count(self):
+        """
+        A hot path: these counts may only fall. Without the registry: the token (3), the toggle, the repository, its
+        latest released version and the serializer (2); ?namespace= adds a toggle read. The registry adds the global
+        entry, its namespace owner and a Source check before the read; there ?namespace= also swaps the global entry
+        and its owner for the namespace owner and its own entry.
+        """
+        for registry, query, count in ((False, '', 8), (False, '?namespace=/orgs/org-b/', 9),
+                                       (True, '', 11), (True, '?namespace=/orgs/org-b/', 12)):
+            with self.subTest(registry=registry, query=query):
+                set_registry_toggle(registry)
+                with self.assertNumQueries(count):
+                    self.resolve([{'url': ICD10}], query)
+
+    def test_without_the_registry_the_parameter_is_not_used(self):
+        set_registry_toggle(False)
+        a_v1, b_v1 = self.source_a_v1.uri, self.source_b_v1.uri
+
+        self.assertEqual(self.resolve([{'url': ICD10}], '?namespace=/orgs/org-b/'), [a_v1])
+        self.assertEqual(self.resolve([{'url': ICD10}], '?namespace=/orgs/nobody/'), [a_v1])
+        self.assertEqual(self.resolve([{'url': ICD10, 'namespace': '/orgs/org-b/'}], '?namespace=/orgs/org-a/'), [b_v1])

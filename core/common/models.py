@@ -1446,15 +1446,15 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         ) or self.public_can_view or self.user_id == user.id or self.organization.members.filter(id=user.id).exists()
 
     @classmethod
-    def resolve_expression_to_version(cls, expression):
+    def resolve_expression_to_version(cls, expression, namespace=None):
+        """`namespace` is the namespace of an expression that doesn't name its own (a dict without the key, or a url)"""
         url = expression
-        namespace = None
         version = None
         instance = None
         resolved_registry_entry = None
         if isinstance(expression, dict) and get(expression, 'url'):
             url = expression['url']
-            namespace = expression.get('namespace', None)
+            namespace = expression.get('namespace', namespace)
             version = expression.get('version', None)
         if url:
             instance, resolved_registry_entry = cls.resolve_reference_expression(url, namespace, version)
