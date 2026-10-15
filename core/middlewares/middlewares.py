@@ -1,9 +1,7 @@
 import logging
 import time
 
-import requests
 from django.conf import settings
-from django.http import HttpResponseNotFound, HttpResponse
 from django.http.response import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
 from pydash import get
@@ -18,6 +16,8 @@ from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER, RESPONSE_
 from core.common.exceptions import DeactivatedAccountLoginRefused
 from core.common.throttling import ThrottleUtil
 from core.common.utils import set_current_user, set_request_url
+from core.fhir.base import is_fhir_path, is_outcome_response, outcome_response
+from core.fhir.outcomes import issue, operation_outcome, outcome_for_status
 from core.services.analytics_event_emitter import AnalyticsEventEmitter
 from core.services.auth.core import AuthService
 
@@ -132,13 +132,21 @@ class RequireAuthenticationMiddleware(BaseMiddleware):
             is_allowed = self.is_request_allowed(request)
         except DeactivatedAccountLoginRefused as ex:
             # a refused sign-in says why, rather than reading as anonymous access (ocl_online#339)
+            headers = {'WWW-Authenticate': 'Bearer realm="api"'}
+            if is_fhir_path(request.path):
+                return outcome_response(
+                    request, operation_outcome(issue('login', str(ex.detail))), ex.status_code, headers)
             response = JsonResponse({'detail': str(ex.detail)}, status=ex.status_code)
-            response['WWW-Authenticate'] = 'Bearer realm="api"'
+            response['WWW-Authenticate'] = headers['WWW-Authenticate']
             return response
 
         if is_allowed:
             return self.get_response(request)
 
+        if is_fhir_path(request.path):
+            return outcome_response(request, operation_outcome(issue(
+                'login', self.forbidden_response['detail'],
+                diagnostics=f"Upgrade: {self.forbidden_response['upgrade_url']}")), 403)
         return JsonResponse(self.forbidden_response, status=403)
 
     def is_request_allowed(self, request):
@@ -252,55 +260,32 @@ class RequireAuthenticationMiddleware(BaseMiddleware):
 
 class FhirMiddleware(BaseMiddleware):
     """
-    It is used to expose FHIR endpoints under FHIR subdomain only and convert content from xml to json.
-    If FHIR is not deployed under a dedicated subdomain then FHIR_SUBDOMAIN environment variable should be empty.
+    Keeps FHIR on the FHIR host when FHIR_SUBDOMAIN is set (FHIR resource paths 404 elsewhere, and other paths 404 on
+    the FHIR host), and answers a FHIR path's error that no FHIR view answered (an unrouted path, a crash outside
+    the view) with an OperationOutcome. A 5xx goes out as a 422.
     """
 
     def __call__(self, request):
-        absolute_uri = request.build_absolute_uri()
-
+        fhir_path = is_fhir_path(request.path)
         if settings.FHIR_SUBDOMAIN:
-            uri = absolute_uri.split('/')
-            domain = uri[2] if len(uri) > 2 else ''
-            is_fhir_domain = domain.startswith(settings.FHIR_SUBDOMAIN + '.')
-            resource_type = uri[5] if len(uri) > 5 else None
-            global_space = uri[3] if len(uri) > 3 else None
-            is_fhir_resource = (global_space == 'fhir' or resource_type == 'CodeSystem' or
-                                resource_type == 'ValueSet' or resource_type == 'ConceptMap')
+            on_fhir_host = request.get_host().startswith(settings.FHIR_SUBDOMAIN + '.')
+            if on_fhir_host and not fhir_path and request.path.strip('/').split('/')[0] != 'version':
+                return self.not_found(request, 'This path is not part of the FHIR API.')
+            if not on_fhir_host and fhir_path:
+                return self.not_found(request, 'The FHIR API is served on its own host.')
 
-            if is_fhir_domain:
-                if global_space != 'version' and not is_fhir_resource:
-                    return HttpResponseNotFound()
-            elif is_fhir_resource:
-                return HttpResponseNotFound()
-
-        if settings.FHIR_VALIDATOR_URL and ('/fhir/' in absolute_uri or '/CodeSystem/' in absolute_uri or
-                                            '/ValueSet/' in absolute_uri or '/ConceptMap' in absolute_uri):
-            accept_content_type = request.headers.get('Accept', '')
-            content_type = request.headers.get('Content-Type', '')
-
-            if content_type.startswith('application/xml') or content_type.startswith('application/fhir+xml'):
-                request.META['CONTENT_TYPE'] = "application/json"
-                if request.method in ['POST', 'PUT']:
-                    json_request = requests.post(settings.FHIR_VALIDATOR_URL +
-                                                 '/convert?version=4.0&type=xml&toType=json', data=request.body)
-                    request._body = json_request
-
-            if accept_content_type.startswith(
-                    'application/xml') or accept_content_type.startswith('application/fhir+xml'):
-                request.META['HTTP_ACCEPT'] = "application/json"
-
-            response = self.get_response(request)
-
-            if accept_content_type.startswith(
-                    'application/xml') or accept_content_type.startswith('application/fhir+xml'):
-                xml_response = requests.post(settings.FHIR_VALIDATOR_URL + '/convert?version=4.0&type=json&toType=xml',
-                                             data=response.content)
-                response = HttpResponse(xml_response, content_type=accept_content_type)
-        else:
-            response = self.get_response(request)
-
+        response = self.get_response(request)
+        if fhir_path and response.status_code >= 400 and not is_outcome_response(response):
+            headers = {key: response[key] for key in ('WWW-Authenticate', 'Retry-After', 'Allow') if key in response}
+            outcome = outcome_for_status(response.status_code)
+            if response.status_code == 404:  # nothing is routed there
+                outcome = operation_outcome(issue('not-found', f'Unknown FHIR path: {request.method} {request.path}'))
+            return outcome_response(request, outcome, response.status_code, headers)
         return response
+
+    @staticmethod
+    def not_found(request, message):
+        return outcome_response(request, operation_outcome(issue('not-found', message)), 404)
 
 
 class ThrottleHeadersMiddleware(MiddlewareMixin):

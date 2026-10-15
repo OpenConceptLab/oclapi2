@@ -13,6 +13,7 @@ from core.collections.views import CollectionListView, CollectionRetrieveUpdateD
 from core.common.constants import HEAD
 from core.common.fhir_helpers import translate_fhir_query
 from core.concepts.views import ConceptRetrieveUpdateDestroyView
+from core.fhir.base import FhirViewMixin
 from core.sources.models import Source
 from core.value_sets.serializers import ValueSetDetailSerializer, \
     ValueSetExpansionParametersSerializer, ValueSetExpansionSerializer
@@ -20,7 +21,7 @@ from core.value_sets.serializers import ValueSetDetailSerializer, \
 logger = logging.getLogger('oclapi')
 
 
-class ValueSetListView(CollectionListView):
+class ValueSetListView(FhirViewMixin, CollectionListView):
     serializer_class = ValueSetDetailSerializer
 
     @staticmethod
@@ -115,7 +116,7 @@ class ValueSetValidateCodeView(CodeSystemValidateCodeView):
         return queryset
 
 
-class ValueSetRetrieveUpdateView(CollectionRetrieveUpdateDestroyView):
+class ValueSetRetrieveUpdateView(FhirViewMixin, CollectionRetrieveUpdateDestroyView):
     serializer_class = ValueSetDetailSerializer
 
     def get_filter_params(self, default_version_to_head=True):
@@ -132,7 +133,7 @@ class ValueSetRetrieveUpdateView(CollectionRetrieveUpdateDestroyView):
         return ValueSetDetailSerializer(obj)
 
 
-class ValueSetExpandView(CollectionVersionExpansionsView):
+class ValueSetExpandView(FhirViewMixin, CollectionVersionExpansionsView):
     sync = True
 
     def get_serializer_class(self):

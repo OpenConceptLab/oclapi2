@@ -1,10 +1,13 @@
 import json
 
 from core.common.exceptions import Http400
+from core.fhir.base import CONTROL_PARAMETERS
 
 
 def translate_fhir_query(fhir_query_fields, query_params, queryset):
     remaining_query_params = query_params.copy()
+    for name in CONTROL_PARAMETERS:  # _format and the like choose the response format, they don't filter
+        remaining_query_params.pop(name, None)
     query_fields = fhir_query_fields.copy()
     url = remaining_query_params.get('url')
     if url and 'url' in query_fields:

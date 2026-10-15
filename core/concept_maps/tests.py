@@ -510,7 +510,10 @@ class ConceptMapTest(OCLTestCase):
 
         # check if bad request
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, {'version': 'Version 1.0 already exists for CodeSystem test2.'})
+        self.assertEqual(response.data['resourceType'], 'OperationOutcome')
+        self.assertEqual(
+            [(issue['code'], issue['expression'], issue['details']['text']) for issue in response.data['issue']],
+            [('invalid', ['version'], 'Version 1.0 already exists for CodeSystem test2.')])
 
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))

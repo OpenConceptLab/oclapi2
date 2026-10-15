@@ -6,11 +6,12 @@ from rest_framework.views import APIView
 
 from core import settings
 from core.common.throttling import ThrottleUtil
+from core.fhir.base import FhirViewMixin
 
 logger = logging.getLogger('oclapi')
 
 
-class CapabilityStatementView(APIView):
+class CapabilityStatementView(FhirViewMixin, APIView):
     permission_classes = (AllowAny,)
 
     def get_throttles(self):
@@ -18,10 +19,7 @@ class CapabilityStatementView(APIView):
 
     def get(self, request):
         mode = request.query_params.get('mode')
-        fhir_base_url = f"{settings.API_BASE_URL}/fhir"
-        if settings.FHIR_SUBDOMAIN:
-            #  TODO: it's not always right as 'api.' may not be a part of the API base url
-            fhir_base_url = fhir_base_url.replace('://api.', f"://{settings.FHIR_SUBDOMAIN}.", 1)
+        fhir_base_url = self.get_fhir_base_url()
         if mode == 'terminology':
             response = {
                 "resourceType": "TerminologyCapabilities",

@@ -420,8 +420,6 @@ DISABLE_VALIDATION = os.environ.get('DISABLE_VALIDATION', False)
 API_SUPERUSER_PASSWORD = os.environ.get('API_SUPERUSER_PASSWORD', 'Root123')  # password for ocladmin superuser
 API_SUPERUSER_TOKEN = os.environ.get('API_SUPERUSER_TOKEN', '891b4b17feab99f3ff7e5b5d04ccc5da7aa96da6')
 
-FHIR_VALIDATOR_URL = os.environ.get('FHIR_VALIDATOR_URL', None)
-
 # Redis
 REDIS_CONNECTION_OPTIONS = {
     'socket_timeout': 5.0,
