@@ -181,9 +181,13 @@ class OpenIDAuthService(AbstractAuthService):
     def get_keycloak_user(cls, user):
         if user.sso_id:
             return cls._admin_request('GET', f'{cls.USERS_URL}/{user.sso_id}').json()
-        username = user.username.lower()
-        users = cls._admin_request('GET', cls.USERS_URL, params={'username': username, 'exact': 'true'}).json()
-        return next((kc_user for kc_user in users if kc_user.get('username') == username), None)
+        from core.users.models import UserProfile
+        users = cls._admin_request('GET', cls.USERS_URL, params={'username': user.username, 'exact': 'true'}).json()
+        kc_user = next((kc_user for kc_user in users if kc_user.get('username') == user.username), None)
+        # a Keycloak user already linked to another account is never matched on username
+        if kc_user and not UserProfile.objects.filter(sso_id=kc_user['id']).exists():
+            return kc_user
+        return None
 
     @classmethod
     def update_user_profile(cls, user):

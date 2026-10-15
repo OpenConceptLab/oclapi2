@@ -79,7 +79,7 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
     def update_user(self, user, claims):
         user.first_name = claims.get('given_name') or user.first_name
         user.last_name = claims.get('family_name') or user.last_name
-        user.sso_id = claims.get('sub') or user.sso_id
+        user.sso_id = user.sso_id or claims.get('sub')
         user.email = claims.get('email') or user.email
         user.company = claims.get('company', None) or user.company
         user.location = claims.get('location', None) or user.location

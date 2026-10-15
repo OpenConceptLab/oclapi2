@@ -1242,7 +1242,11 @@ def _users_of_keycloak_groups(memberships, managed):
     from core.users.models import UserProfile
 
     ids = {name: {member['id'] for member in memberships[name]} for name in managed}
-    usernames = {name: {member['username'] for member in memberships[name]} for name in managed}
+    # a Keycloak user already linked to an account is never matched to another one on username
+    linked = set(UserProfile.objects.filter(
+        sso_id__in=set().union(*ids.values())).values_list('sso_id', flat=True))
+    usernames = {
+        name: {member['username'] for member in memberships[name] if member['id'] not in linked} for name in managed}
     users = UserProfile.objects.filter(
         Q(sso_id__in=set().union(*ids.values())) |
         Q(sso_id__isnull=True, username__in=set().union(*usernames.values())) |
