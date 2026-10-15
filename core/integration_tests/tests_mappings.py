@@ -5,9 +5,11 @@ from rest_framework.exceptions import ErrorDetail
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.tests import OCLAPITestCase
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
+from core.integration_tests.test_utils import SourceChildListQueryCountMixin
 from core.mappings.constants import SAME_AS
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
+from core.mappings.serializers import MappingListSerializer, MappingDetailSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import UserSourceFactory, OrganizationSourceFactory
@@ -1076,3 +1078,31 @@ class MappingListCacheTest(OCLAPITestCase):
         self.assertIsNone(cache.get(body_key))
         self.assertIsNone(cache.get(headers_key))
         self.assertIsNone(cache.get(body_key + '?q=123'))
+
+
+class MappingListQueryCountTest(SourceChildListQueryCountMixin, OCLAPITestCase):
+    """A page of mappings costs the same number of queries whatever its size, and serializes as row by row did."""
+    model = Mapping
+    relation = 'mappings'
+    list_serializer = MappingListSerializer
+    detail_serializer = MappingDetailSerializer
+
+    def setUp(self):
+        super().setUp()
+        self.source = OrganizationSourceFactory()
+        target = OrganizationSourceFactory()
+        for index in range(4):  # external, internal, external, internal
+            from_concept = ConceptFactory(parent=self.source, names=[ConceptNameFactory.build(locale_preferred=True)])
+            if index % 2:
+                to_concept = ConceptFactory(parent=target, names=[ConceptNameFactory.build(locale_preferred=True)])
+                MappingFactory(
+                    parent=self.source, from_concept=from_concept, from_source=self.source, to_concept=to_concept,
+                    to_source=target)
+            else:
+                MappingFactory(
+                    parent=self.source, from_concept=from_concept, from_source=self.source, to_concept=None,
+                    to_source=target, to_concept_code=f'X{index}', to_source_url=target.uri)
+        mappings = Mapping.objects.filter(parent=self.source)
+        for mapping in mappings:
+            mapping.set_checksums()  # a GET calculates and saves missing checksums, one row at a time
+        self.set_released_versions(mappings)

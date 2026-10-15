@@ -982,3 +982,18 @@ class CompressHeaderLimitTest(OCLAPITestCase):
     def test_without_header_unaffected(self):
         response = self.client.get('/orgs/', HTTP_AUTHORIZATION='Token ' + UserProfileFactory().get_token())
         self.assertEqual(response.status_code, 200)
+
+
+class PaginationParamsValidationTest(OCLAPITestCase):
+    def setUp(self):
+        self.headers = {'HTTP_AUTHORIZATION': 'Token ' + UserProfileFactory().get_token()}
+
+    def test_invalid_limit_or_page_returns_400(self):
+        for name in ('limit', 'page'):
+            for value in ('-1', '0', 'abc', '1.5', '', '99999999999999999999'):
+                response = self.client.get(f'/orgs/?{name}={value}', **self.headers)
+                self.assertEqual(response.status_code, 400, f'{name}={value}')
+                self.assertIn(f"'{name}'", response.data['error'])
+
+    def test_valid_limit_and_page_return_200(self):
+        self.assertEqual(self.client.get('/orgs/?limit=5&page=1', **self.headers).status_code, 200)

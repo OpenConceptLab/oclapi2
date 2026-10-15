@@ -683,6 +683,8 @@ class VersionedModel(BaseResourceModel):
 
     @property
     def prev_version_uri(self):
+        if hasattr(self, '_prev_version_uri'):  # loaded for a whole page by SourceChildMixin.load_list_fields
+            return self._prev_version_uri
         return get(self, 'prev_version.uri')
 
     @property

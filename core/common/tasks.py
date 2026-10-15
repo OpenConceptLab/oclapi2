@@ -15,7 +15,7 @@ from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage
 from django.core.management import call_command
 from django.core.paginator import Paginator
-from django.db.models import Exists, OuterRef
+from django.db.models import Exists, OuterRef, F
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django_elasticsearch_dsl.registries import registry
@@ -681,26 +681,72 @@ def index_expansion_mappings(expansion_id, count=None, mapping_ids=None):  # pyl
 
 
 @app.task
-def make_hierarchy(concept_map):  # pragma: no cover
-    from core.concepts.models import Concept
+def make_hierarchy(concept_map):  # pragma: no cover  # pylint: disable=too-many-locals
+    from core.concepts.models import Concept, HierarchicalConcepts
 
-    for parent_concept_uri, child_concept_urls in concept_map.items():
-        parent_concept = Concept.objects.filter(uri=parent_concept_uri).first()
-        if parent_concept:
-            parent_latest = parent_concept.get_latest_version()
-            if parent_latest:
-                for child_concept in Concept.objects.filter(uri__in=child_concept_urls):
-                    child_concept.parent_concepts.add(parent_latest)
-                    child_latest = child_concept.get_latest_version()
-                    if child_latest:
-                        child_latest.parent_concepts.add(parent_latest)
-                        logger.info('Added child %s to parent %s', child_concept.uri, parent_concept_uri)
-                    else:
-                        logger.info('Could not find child %s latest_version', child_concept.uri)
+    def chunks(values, size=5000):
+        values = list(values)
+        for index in range(0, len(values), size):
+            yield values[index:index + size]
+
+    def resolve(uris):
+        """uri -> (id, versioned_object_id); the lowest id wins for duplicate uris, like .first()"""
+        resolved = {}
+        for batch in chunks(uris):
+            for concept_id, versioned_object_id, uri in Concept.objects.filter(uri__in=batch).order_by(
+                    '-id').values_list('id', 'versioned_object_id', 'uri'):
+                resolved[uri] = (concept_id, versioned_object_id)
+        return resolved
+
+    def latest_versions(versioned_object_ids):
+        """versioned_object_id -> id of its newest active latest version, like Concept.get_latest_version()"""
+        latest = {}
+        for batch in chunks(versioned_object_ids):
+            for versioned_object_id, concept_id in Concept.objects.filter(
+                    versioned_object_id__in=batch, is_latest_version=True, is_active=True
+            ).exclude(id=F('versioned_object_id')).order_by('created_at').values_list('versioned_object_id', 'id'):
+                latest[versioned_object_id] = concept_id  # ascending created_at, so the newest wins
+        return latest
+
+    parents = resolve(concept_map.keys())
+    parent_latest = latest_versions({versioned_object_id for _, versioned_object_id in parents.values()})
+    children = resolve({
+        url for parent_uri, urls in concept_map.items()
+        if parent_uri in parents and parents[parent_uri][1] in parent_latest for url in urls})
+    child_latest = latest_versions({versioned_object_id for _, versioned_object_id in children.values()})
+
+    pairs = set()
+    for parent_uri, urls in concept_map.items():
+        if parent_uri not in parents:
+            logger.info('Could not find parent %s', parent_uri)
+            continue
+        parent_id = parent_latest.get(parents[parent_uri][1])
+        if not parent_id:
+            logger.info('Could not find parent %s latest_version', parent_uri)
+            continue
+        for url in urls:
+            if url not in children:
+                continue
+            child_id, child_versioned_object_id = children[url]
+            pairs.add((child_id, parent_id))
+            if child_versioned_object_id in child_latest:
+                pairs.add((child_latest[child_versioned_object_id], parent_id))
             else:
-                logger.info('Could not find parent %s latest_version', parent_concept_uri)
-        else:
-            logger.info('Could not find parent %s', parent_concept_uri)
+                logger.info('Could not find child %s latest_version', url)
+
+    if not pairs:
+        return
+    existing = set()
+    parent_id_set = {parent for _, parent in pairs}
+    for batch in chunks({child for child, _ in pairs}):
+        existing.update(
+            HierarchicalConcepts.objects.filter(
+                child_id__in=batch, parent_id__in=parent_id_set).values_list('child_id', 'parent_id'))
+    HierarchicalConcepts.objects.bulk_create(
+        [HierarchicalConcepts(child_id=child, parent_id=parent) for child, parent in pairs - existing],
+        batch_size=5000
+    )
+    logger.info('Added %s hierarchy links', len(pairs - existing))
 
 
 @app.task(ignore_result=True, base=QueueOnceCustomTask)

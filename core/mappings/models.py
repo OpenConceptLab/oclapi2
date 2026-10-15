@@ -20,6 +20,12 @@ from core.services.storages.postgres import PostgresQL
 
 
 class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
+    LIST_PREFETCHES = (
+        'from_concept__parent', 'to_concept__parent', 'from_source__organization', 'from_source__user',
+        'to_source__organization', 'to_source__user', 'created_by', 'updated_by', 'from_concept__names',
+        'to_concept__names'
+    )
+
     class Meta:
         db_table = 'mappings'
         unique_together = ('mnemonic', 'version', 'parent')
@@ -413,10 +419,6 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
 
     def is_existing_in_parent(self):
         return self.parent.mappings_set.filter(mnemonic__exact=self.mnemonic).exists()
-
-    @property
-    def latest_source_version(self):
-        return self.sources.exclude(version=HEAD).order_by('-created_at').first()
 
     @classmethod
     def create_new_version_for(cls, instance, data, user, cache=None):
