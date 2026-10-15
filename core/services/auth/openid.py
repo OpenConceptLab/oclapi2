@@ -212,6 +212,10 @@ class OpenIDAuthService(AbstractAuthService):
             first += cls.PAGE_SIZE
 
     @classmethod
+    def get_users(cls):
+        return cls._paginate(cls.USERS_URL)
+
+    @classmethod
     def get_group_memberships(cls):
         memberships = {}
         for group in cls._paginate(cls.GROUPS_URL):

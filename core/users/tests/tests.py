@@ -480,6 +480,43 @@ class OpenIDAdminClientTest(OCLTestCase):
             put.kwargs['json']['attributes'], {'other': ['x'], 'company': ['Co'], 'location': []})
 
 
+class BackfillSSOIdsTest(OCLTestCase):
+    def run_command(self, *args):
+        from io import StringIO
+        from django.core.management import call_command
+        out = StringIO()
+        with patch('core.services.auth.openid.OpenIDAuthService.get_users', return_value=[
+                {'id': 'kc-1', 'username': 'exact'}, {'id': 'kc-2', 'username': 'mixed'},
+                {'id': 'kc-3', 'username': 'taken'}]):
+            call_command('backfill_sso_ids', *args, stdout=out)
+        return out.getvalue()
+
+    def test_links_exact_matches_and_skips_the_rest(self):
+        exact = UserProfileFactory(username='exact')
+        mixed = UserProfileFactory(username='Mixed')
+        UserProfileFactory(username='other-owner', sso_id='kc-3')
+        taken = UserProfileFactory(username='taken')
+
+        output = self.run_command()
+
+        exact.refresh_from_db()
+        self.assertEqual(exact.sso_id, 'kc-1')
+        mixed.refresh_from_db()
+        taken.refresh_from_db()
+        self.assertIsNone(mixed.sso_id)
+        self.assertIsNone(taken.sso_id)
+        self.assertIn('1 account(s) linked, 3 skipped', output)
+        self.assertIn('skipped: Mixed', output)
+        self.assertIn('skipped: taken', output)
+
+    def test_dry_run_changes_nothing(self):
+        exact = UserProfileFactory(username='exact')
+        output = self.run_command('--dry-run')
+        exact.refresh_from_db()
+        self.assertIsNone(exact.sso_id)
+        self.assertIn('1 account(s) would be linked', output)
+
+
 class TokenAuthenticationViewTest(OCLAPITestCase):
     def test_post(self):
         response = self.client.post('/users/login/', {})

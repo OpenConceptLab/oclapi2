@@ -8,7 +8,7 @@ from mozilla_django_oidc.auth import OIDCAuthenticationBackend
 from pydash import get
 from redis import Sentinel
 
-from core.common.exceptions import DeactivatedAccountLoginRefused
+from core.common.exceptions import DeactivatedAccountLoginRefused, SSOIdentityMismatchRefused
 
 logger = logging.getLogger('oclapi')
 
@@ -97,7 +97,7 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
     def authenticate(self, request, **kwargs):
         try:
             return super().authenticate(request, **kwargs)
-        except DeactivatedAccountLoginRefused:
+        except (DeactivatedAccountLoginRefused, SSOIdentityMismatchRefused):
             # the refused identity's tokens were stored in the session before its account was looked up
             for key in ('oidc_access_token', 'oidc_id_token'):
                 request.session.pop(key, None)
@@ -105,7 +105,8 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
 
     def filter_users_by_claims(self, claims):
         """
-        Matches the account with the claims' username, exactly as Keycloak sends it. A deactivated account is never
+        Matches the account linked to the claims' Keycloak id (`sub`), else the one with the claims' username exactly
+        as Keycloak sends it, unless that account is linked to a different Keycloak user. A deactivated account is never
         matched on its username alone (ocl_online#339): it's reactivated when the claims carry its email, verified by
         Keycloak, and otherwise the sign-in is refused and the account left untouched. The username can't go to a new
         account either, since usernames are unique.
@@ -117,8 +118,14 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         if not username:
             return UserProfile.objects.none()
 
+        sub = claims.get('sub')
         # evaluated once, so the row checked here is the one the caller updates
-        users = UserProfile.objects.filter(username=username)
+        users = UserProfile.objects.filter(sso_id=sub) if sub else UserProfile.objects.none()
+        if not users:
+            users = UserProfile.objects.filter(username=username)
+            if users and sub and users[0].sso_id not in (None, sub):
+                logger.warning('OIDC sign-in refused: user %s is linked to another Keycloak user', users[0].id)
+                raise SSOIdentityMismatchRefused()
         user = users[0] if users else None
         if user and not user.is_active:
             if not self.has_verified_email_of(user, claims):
