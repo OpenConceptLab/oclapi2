@@ -15,7 +15,7 @@ from rest_framework.views import APIView
 from core.common.authentication import OCLAuthentication
 from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER, RESPONSE_TIME_HEADER, REQUEST_URL_HEADER, \
     REQUEST_METHOD_HEADER
-from core.common.exceptions import DeactivatedAccountLoginRefused
+from core.common.exceptions import DeactivatedAccountLoginRefused, SSOIdentityMismatchRefused
 from core.common.throttling import ThrottleUtil
 from core.common.utils import set_current_user, set_request_url
 from core.services.analytics_event_emitter import AnalyticsEventEmitter
@@ -130,7 +130,7 @@ class RequireAuthenticationMiddleware(BaseMiddleware):
         """Allow exempt and approved anonymous traffic, otherwise return 403."""
         try:
             is_allowed = self.is_request_allowed(request)
-        except DeactivatedAccountLoginRefused as ex:
+        except (DeactivatedAccountLoginRefused, SSOIdentityMismatchRefused) as ex:
             # a refused sign-in says why, rather than reading as anonymous access (ocl_online#339)
             response = JsonResponse({'detail': str(ex.detail)}, status=ex.status_code)
             response['WWW-Authenticate'] = 'Bearer realm="api"'
@@ -169,7 +169,7 @@ class RequireAuthenticationMiddleware(BaseMiddleware):
 
         try:
             auth_result = OCLAuthentication().authenticate(Request(request))
-        except DeactivatedAccountLoginRefused:
+        except (DeactivatedAccountLoginRefused, SSOIdentityMismatchRefused):
             raise
         except AuthenticationFailed:
             return user

@@ -515,6 +515,25 @@ class BackfillSSOIdsTest(OCLTestCase):
         exact.refresh_from_db()
         self.assertIsNone(exact.sso_id)
         self.assertIn('1 account(s) would be linked', output)
+        self.assertIn('would be linked: exact -> exact', output)
+
+    def test_links_a_mixed_case_account_without_a_case_twin_when_the_emails_match(self):
+        from io import StringIO
+        from django.core.management import call_command
+        legacy = UserProfileFactory(username='Legacy', email='Legacy@Example.org')
+        twin = UserProfileFactory(username='Twin', email='twin@example.org')
+        UserProfileFactory(username='twin', email='twin@example.org')
+        other = UserProfileFactory(username='Other', email='someone@example.org')
+        with patch('core.services.auth.openid.OpenIDAuthService.get_users', return_value=[
+                {'id': 'kc-l', 'username': 'legacy', 'email': 'legacy@example.org'},
+                {'id': 'kc-t', 'username': 'twin', 'email': 'twin@example.org'},
+                {'id': 'kc-o', 'username': 'other', 'email': 'other@example.org'}]):
+            call_command('backfill_sso_ids', stdout=StringIO())
+        for user in (legacy, twin, other):
+            user.refresh_from_db()
+        self.assertEqual(legacy.sso_id, 'kc-l')
+        self.assertIsNone(twin.sso_id)
+        self.assertIsNone(other.sso_id)
 
 
 class TokenAuthenticationViewTest(OCLAPITestCase):
