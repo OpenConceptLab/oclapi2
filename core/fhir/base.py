@@ -18,6 +18,7 @@ import typing
 import zlib
 from functools import lru_cache
 
+from django.core.exceptions import BadRequest, SuspiciousOperation
 from django.http import HttpResponse
 from fhir.resources.R4B import get_fhir_model_class
 from fhir_core.types import FhirBase
@@ -138,13 +139,20 @@ class FhirContentNegotiation(DefaultContentNegotiation):
         return next((parser for parser in parsers if media_type_matches(parser.media_type, content_type)), None)
 
     def select_renderer(self, request, renderers, format_suffix=None):
-        ranges = sorted(accepted_media_ranges(request), key=lambda item: (-quality(item), -_MediaType(item).precedence))
-        for media_range in ranges:
-            if quality(media_range) <= 0:
-                continue
-            for renderer in renderers:
+        """Each renderer takes its quality from its most specific match, including q=0 exclusions."""
+        ranges = sorted(enumerate(accepted_media_ranges(request)),
+                        key=lambda item: (-_MediaType(item[1]).precedence, -quality(item[1])))
+        candidates = []
+        for renderer in renderers:
+            for position, media_range in ranges:
                 if media_type_matches(renderer.media_type, media_range):
-                    return renderer, media_type_with_params(renderer.media_type, media_range)
+                    preference = (quality(media_range), _MediaType(media_range).precedence, -position)
+                    if preference[0] > 0:
+                        candidates.append((preference, renderer, media_range))
+                    break  # a less specific range cannot override this renderer's quality
+        if candidates:
+            _, renderer, media_range = max(candidates, key=lambda candidate: candidate[0])
+            return renderer, media_type_with_params(renderer.media_type, media_range)
         raise NotAcceptable(available_renderers=renderers)
 
 
@@ -480,13 +488,15 @@ class FhirParameters:
 
 
 def outcome_response(request, outcome, status_code, headers=None):
-    """An OperationOutcome as a plain Django response, for the middleware, in the format the request asks for."""
+    """A middleware outcome in the requested format, or a safe JSON 400 if the query cannot be parsed."""
     renderer = FhirJsonRenderer()
     try:
         renderer, _ = FhirContentNegotiation().select_renderer(
             request, [klass() for klass in FhirViewMixin.renderer_classes])
     except NotAcceptable:
         pass
+    except (BadRequest, SuspiciousOperation) as exc:
+        status_code, outcome, _ = outcomes.outcome_for_exception(exc)
     content_type = f'{renderer.media_type}; charset={renderer.charset}' if renderer.charset else renderer.media_type
     response = HttpResponse(
         renderer.render(outcome), status=outcomes.response_status(status_code), content_type=content_type)
@@ -527,11 +537,13 @@ class FhirViewMixin:
         return outcomes.exception_handler
 
     def finalize_response(self, request, response, *args, **kwargs):
-        """An error a view returns rather than raises (an empty 404, a {'detail': ...}) goes out as an outcome."""
-        if isinstance(response, Response) and response.status_code >= 400:
-            if not outcomes.is_outcome(response.data):
-                response.data = outcomes.outcome_for_status(response.status_code, response.data)
-            response.status_code = outcomes.response_status(response.status_code)
+        """Normalize returned outcomes at every status and depth, and wrap other error responses as outcomes."""
+        if isinstance(response, Response):
+            if response.status_code >= 400:
+                if not outcomes.is_outcome(response.data):
+                    response.data = outcomes.outcome_for_status(response.status_code, response.data)
+                response.status_code = outcomes.response_status(response.status_code)
+            response.data = outcomes.normalize_outcomes(response.data)
         return super().finalize_response(request, response, *args, **kwargs)
 
     def get_fhir_parameters(self):

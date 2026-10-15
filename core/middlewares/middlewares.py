@@ -4,6 +4,7 @@ import time
 from django.conf import settings
 from django.http.response import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
+from django.core.exceptions import SuspiciousOperation
 from pydash import get
 from request_logging.middleware import LoggingMiddleware
 from rest_framework.exceptions import AuthenticationFailed
@@ -22,6 +23,7 @@ from core.services.analytics_event_emitter import AnalyticsEventEmitter
 from core.services.auth.core import AuthService
 
 request_logger = logging.getLogger('request_logger')
+fhir_logger = logging.getLogger(__name__)
 MAX_BODY_LENGTH = 50000
 
 
@@ -268,7 +270,16 @@ class FhirErrorMiddleware(BaseMiddleware):
     replaced_headers = ('content-type', 'content-length', 'content-encoding')
 
     def __call__(self, request):
-        response = self.get_response(request)
+        try:
+            response = self.get_response(request)
+        except Exception as ex:  # pylint: disable=broad-exception-caught
+            # An error that escapes every inner converter (e.g. a logging handler re-reading an over-long query
+            # while reporting it): on a FHIR path it still goes out as an OperationOutcome, never a 5xx.
+            if not is_fhir_path(request.path):
+                raise
+            fhir_logger.exception('Unexpected %s answering a FHIR request', type(ex).__name__)
+            status = 400 if isinstance(ex, SuspiciousOperation) else 500
+            return outcome_response(request, outcome_for_status(status, None), 400 if status == 400 else 422)
         if response.status_code < 400 or not is_fhir_path(request.path) or is_outcome_response(response):
             return response
         if response.status_code == 404:  # nothing is routed there

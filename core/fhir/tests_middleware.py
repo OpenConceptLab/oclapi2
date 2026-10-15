@@ -8,6 +8,7 @@ from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 from django.http import HttpResponse, JsonResponse, HttpResponseNotFound
 from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
+from fhir.resources.R4B.operationoutcome import OperationOutcome
 from lxml import etree
 from rest_framework.test import APIClient
 
@@ -102,6 +103,25 @@ class FhirErrorMiddlewareTest(SimpleTestCase):
         self.assertIs(self.answer('/orgs/CIEL/sources/x/', not_found), not_found)
         ok = HttpResponse('ok')
         self.assertIs(self.answer('/fhir/CodeSystem/', ok), ok)
+
+
+@override_settings(DATA_UPLOAD_MAX_NUMBER_FIELDS=1000, FHIR_SUBDOMAIN=None, REQUIRE_AUTHENTICATION=False,
+                   DEBUG=False, DEBUG_PROPAGATE_EXCEPTIONS=False)
+class QueryParsingFailureTest(TestCase):
+    """Malformed query strings remain FHIR errors through the complete middleware stack."""
+
+    def test_too_many_query_fields_return_a_400_json_outcome(self):
+        """Both routed and unknown paths use safe JSON when the query cannot be parsed."""
+        query = '&'.join(['_format=xml'] + ['x='] * 1001)
+        client = APIClient(raise_request_exception=False)
+        for path in ('/fhir/missing', '/fhir/metadata'):
+            with self.subTest(path=path):
+                response = client.get(f'{path}?{query}', HTTP_ACCEPT='application/fhir+xml')
+
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response['Content-Type'], 'application/fhir+json')
+                OperationOutcome.model_validate_json(response.content)
+                self.assertEqual(outcome_issue(response), 'error|invalid|invalid-data')
 
 
 @override_settings(REQUIRE_AUTHENTICATION=True, APPROVED_ANONYMOUS_CLIENTS=[], APPROVED_ANONYMOUS_API_KEYS=[],

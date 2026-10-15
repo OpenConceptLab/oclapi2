@@ -8,6 +8,7 @@ from unittest.mock import patch, Mock
 
 from fhir.resources.R4B.bundle import Bundle
 from fhir.resources.R4B.codesystem import CodeSystem
+from fhir.resources.R4B.operationoutcome import OperationOutcome
 from django.utils import timezone
 from lxml import etree
 from rest_framework.test import APIClient
@@ -268,6 +269,33 @@ class FhirProtocolTest(OCLTestCase):
         self.assert_fhir_answer(response)
 
     # errors
+
+    def test_serializer_outcomes_are_normalized_in_reads_and_bundles(self):
+        """A real serializer failure keeps its diagnostic and gains issue codes in both wire formats."""
+        Source.objects.filter(pk__in=[self.source.pk, self.source_v1.pk]).update(text='{}')
+        paths = [
+            (f'/orgs/{self.org.mnemonic}/CodeSystem/proto/', OperationOutcome),
+            (f'/fhir/CodeSystem/?url={SYSTEM}', Bundle),
+        ]
+        for path, model in paths:
+            for media_type in ('application/fhir+json', 'application/fhir+xml'):
+                with self.subTest(path=path, media_type=media_type):
+                    response = self.client.get(path, HTTP_ACCEPT=media_type)
+
+                    self.assertEqual(response.status_code, 200)
+                    self.assertEqual(response['Content-Type'].split(';')[0], media_type)
+                    resource = (model.model_validate_xml(response.content) if media_type.endswith('xml')
+                                else model.model_validate_json(response.content))
+                    if model is Bundle:
+                        self.assertEqual(len(resource.entry), 1)
+                        resource = resource.entry[0].resource
+                    self.assertIsInstance(resource, OperationOutcome)
+                    issue = resource.issue[0]
+                    self.assertEqual(issue.code, 'processing')
+                    self.assertIn('Failed to represent', issue.details.text)
+                    self.assertIn('as CodeSystem', issue.details.text)
+                    self.assertEqual(issue.details.coding[0].system, TX_ISSUE_TYPE_SYSTEM)
+                    self.assertEqual(issue.details.coding[0].code, 'invalid-data')
 
     def test_errors_are_outcomes_with_a_tx_issue_type(self):
         cases = [

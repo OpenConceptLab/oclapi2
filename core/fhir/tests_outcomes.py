@@ -63,6 +63,30 @@ class TypedErrorTest(SimpleTestCase):
         self.assertEqual(outcomes.tx_issue_type_for('throttled'), 'too-costly')
 
 
+class OutcomeNormalizationTest(SimpleTestCase):
+    """Returned outcomes are normalized throughout the response without changing neighboring resources."""
+
+    def test_nested_outcomes_preserve_existing_codings_and_other_resources(self):
+        """An outcome inside another outcome still gains its missing code and structured details."""
+        coding = {'system': TX_ISSUE_TYPE_SYSTEM, 'code': 'invalid-code'}
+        nested = {'resourceType': 'OperationOutcome', 'id': 'nested', 'issue': [{'details': 'Nested failure'}]}
+        outer = {'resourceType': 'OperationOutcome', 'contained': [nested], 'issue': [
+            {'severity': 'error', 'code': 'code-invalid', 'details': {'coding': [coding], 'text': 'Unknown code'}}]}
+        code_system = {'resourceType': 'CodeSystem', 'status': 'active', 'content': 'not-present'}
+        bundle = {'resourceType': 'Bundle', 'type': 'collection', 'entry': [
+            {'resource': outer}, {'resource': code_system}]}
+
+        normalized = outcomes.normalize_outcomes(bundle)
+
+        result = normalized['entry'][0]['resource']
+        OperationOutcome.model_validate(result)
+        self.assertEqual(result['issue'], outer['issue'])
+        self.assertEqual(issue_summary(result['contained'][0]), ['error|processing|invalid-data|'])
+        self.assertEqual(result['contained'][0]['issue'][0]['details']['text'], 'Nested failure')
+        self.assertEqual(normalized['entry'][1]['resource'], code_system)
+        self.assertEqual(nested['issue'], [{'details': 'Nested failure'}])
+
+
 class ExceptionHandlerTest(SimpleTestCase):
     def handle(self, exc):
         response = outcomes.exception_handler(exc, {})

@@ -5,10 +5,11 @@ import uuid
 from decimal import Decimal
 from unittest.mock import patch
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 from django.http import HttpResponse, JsonResponse
 from fhir.resources.R4B.bundle import Bundle
 from fhir.resources.R4B.codesystem import CodeSystem, CodeSystemConcept
+from fhir.resources.R4B.operationoutcome import OperationOutcome
 from lxml import etree
 from rest_framework.exceptions import NotAcceptable, ParseError, UnsupportedMediaType
 from rest_framework.parsers import JSONParser
@@ -90,6 +91,32 @@ class NegotiationTest(SimpleTestCase):
         accept = 'application/fhir+json;q=0.5, application/xml+fhir;q=0.9'
 
         self.assertEqual(self.select(HTTP_ACCEPT=accept)[0], FhirXmlRenderer)
+
+    def test_explicit_exclusions_override_wildcards(self):
+        """A broader range cannot make an explicitly excluded renderer acceptable."""
+        cases = [
+            ('application/fhir+json;q=0, */*;q=1', JSONRenderer),
+            ('application/json+fhir;q=0, application/json;q=0, application/*;q=1', FhirXmlRenderer),
+        ]
+        for accept, expected in cases:
+            with self.subTest(accept=accept):
+                self.assertEqual(self.select(HTTP_ACCEPT=accept)[0], expected)
+
+    def test_most_specific_range_sets_each_renderers_quality(self):
+        """Specific ranges determine quality before renderers compete with one another."""
+        cases = [
+            'application/fhir+json;q=0.2, application/fhir+xml;q=0.5, application/json;q=0, */*;q=1',
+            'application/fhir+xml;q=0.5, application/*;q=0, */*;q=1',
+            '*/*;q=1, application/fhir+xml;q=1',
+        ]
+        for accept in cases:
+            with self.subTest(accept=accept):
+                self.assertEqual(self.select(HTTP_ACCEPT=accept)[0], FhirXmlRenderer)
+
+    def test_type_wildcard_exclusion_overrides_universal_wildcard(self):
+        """Reject the request when all available application renderers are excluded."""
+        with self.assertRaises(NotAcceptable):
+            self.select(HTTP_ACCEPT='application/*;q=0, */*;q=1')
 
     def test_a_malformed_quality_value_ranks_last(self):
         self.assertEqual(self.select(HTTP_ACCEPT='application/fhir+xml;q=high, application/fhir+json')[0],
@@ -589,6 +616,22 @@ class OutcomeResponseTest(SimpleTestCase):
 
         self.assertEqual(response['Content-Type'], 'application/fhir+json')
 
+    @override_settings(DATA_UPLOAD_MAX_NUMBER_FIELDS=1000)
+    def test_unparseable_query_uses_a_400_json_outcome(self):
+        """Error negotiation must not repeat a failed query parse or retain the original error status."""
+        query = '&'.join(['_format=xml'] + ['x='] * 1001)
+        response = base.outcome_response(
+            self.factory.get(f'/fhir/missing?{query}', HTTP_ACCEPT='application/fhir+xml'),
+            self.outcome, 404, {'Retry-After': '1'})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response['Content-Type'], 'application/fhir+json')
+        self.assertEqual(response['Retry-After'], '1')
+        outcome = OperationOutcome.model_validate_json(response.content)
+        self.assertEqual(outcome.issue[0].code, 'invalid')
+        self.assertEqual(outcome.issue[0].details.coding[0].system, outcomes.TX_ISSUE_TYPE_SYSTEM)
+        self.assertEqual(outcome.issue[0].details.coding[0].code, 'invalid-data')
+
     def test_is_outcome_response(self):
         self.assertTrue(base.is_outcome_response(base.outcome_response(
             self.factory.get('/fhir/x'), self.outcome, 404)))
@@ -616,8 +659,53 @@ class EchoView(FhirViewMixin, APIView):
             {'name': 'base', 'valueUri': self.get_fhir_base_url()}]})
 
 
+class ReturnedOutcomeView(FhirViewMixin, APIView):
+    """Return the legacy serializer error shape with a configurable HTTP status."""
+    permission_classes = (AllowAny,)
+    authentication_classes = ()
+    status_code = 200
+
+    def get(self, _request):
+        """Leave normalization to the production view mixin."""
+        return Response({'resourceType': 'OperationOutcome', 'issue': [
+            {'severity': 'error', 'details': 'Failed to serialize the resource.'}]}, status=self.status_code)
+
+
 class FhirViewMixinTest(SimpleTestCase):
     factory = APIRequestFactory()
+
+    def test_returned_outcomes_are_normalized_at_every_status(self):
+        """Successful and error statuses both retain the diagnostic in valid JSON and XML outcomes."""
+        for status, expected in ((200, 200), (201, 201), (400, 400), (503, 422)):
+            for media_type in ('application/fhir+json', 'application/fhir+xml'):
+                with self.subTest(status=status, media_type=media_type):
+                    response = ReturnedOutcomeView.as_view(status_code=status)(
+                        self.factory.get('/fhir/x', HTTP_ACCEPT=media_type))
+                    response.render()
+
+                    self.assertEqual(response.status_code, expected)
+                    self.assertEqual(response['Content-Type'].split(';')[0], media_type)
+                    outcome = (OperationOutcome.model_validate_xml(response.content) if media_type.endswith('xml')
+                               else OperationOutcome.model_validate_json(response.content))
+                    issue = outcome.issue[0]
+                    self.assertEqual(issue.code, 'processing')
+                    self.assertEqual(issue.details.text, 'Failed to serialize the resource.')
+                    self.assertEqual(issue.details.coding[0].system, outcomes.TX_ISSUE_TYPE_SYSTEM)
+                    self.assertEqual(issue.details.coding[0].code, 'invalid-data')
+
+    @override_settings(DATA_UPLOAD_MAX_NUMBER_FIELDS=1000)
+    def test_query_parsing_failure_in_a_view_is_a_400_json_outcome(self):
+        """A query rejected during initial negotiation is a client error, even when XML was requested."""
+        query = '&'.join(['x='] * 1001)
+        response = EchoView.as_view()(self.factory.get(f'/fhir/x?{query}', HTTP_ACCEPT='application/fhir+xml'))
+        response.render()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response['Content-Type'], 'application/fhir+json')
+        outcome = OperationOutcome.model_validate_json(response.content)
+        self.assertEqual(outcome.issue[0].code, 'invalid')
+        self.assertEqual(outcome.issue[0].details.coding[0].system, outcomes.TX_ISSUE_TYPE_SYSTEM)
+        self.assertEqual(outcome.issue[0].details.coding[0].code, 'invalid-data')
 
     def test_a_view_reads_its_parameters_the_same_way_from_get_and_post(self):
         get = EchoView.as_view()(self.factory.get('/fhir/x?code=1'))

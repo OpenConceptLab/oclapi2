@@ -9,7 +9,8 @@ request is answered with a 422 and the issue code `exception`, and logged.
 import logging
 from http import HTTPStatus
 
-from django.core.exceptions import ValidationError as DjangoValidationError, PermissionDenied as DjangoPermissionDenied
+from django.core.exceptions import BadRequest, SuspiciousOperation, ValidationError as DjangoValidationError, \
+    PermissionDenied as DjangoPermissionDenied
 from django.http import Http404
 from rest_framework import exceptions, status
 from rest_framework.response import Response
@@ -137,6 +138,16 @@ def with_tx_issue_types(outcome):
     return outcome
 
 
+def normalize_outcomes(data):
+    """Normalize every returned OperationOutcome, including resources nested in Bundle entries."""
+    if isinstance(data, dict):
+        data = {key: normalize_outcomes(value) for key, value in data.items()}
+        return with_tx_issue_types(data) if is_outcome(data) else data
+    if isinstance(data, (list, tuple)):
+        return [normalize_outcomes(value) for value in data]
+    return data
+
+
 def outcome_for_status(status_code, data=None):
     """An error response that isn't an OperationOutcome (an empty 404, a {'detail': ...} body) as one."""
     code = status_issue_code(status_code)
@@ -213,6 +224,8 @@ def outcome_for_exception(exc):
         outcome = operation_outcome(issue('not-found', str(getattr(exc, 'detail', exc)) or status_text(404)))
     elif isinstance(exc, DjangoPermissionDenied):
         status_code, outcome = 403, operation_outcome(issue('forbidden', str(exc) or status_text(403)))
+    elif isinstance(exc, (BadRequest, SuspiciousOperation)):
+        status_code, outcome = 400, operation_outcome(issue('invalid', 'The request could not be parsed.'))
     elif isinstance(exc, DjangoValidationError):
         detail = exc.message_dict if hasattr(exc, 'error_dict') else exc.messages
         status_code, outcome = 400, operation_outcome(*detail_issues(detail))
