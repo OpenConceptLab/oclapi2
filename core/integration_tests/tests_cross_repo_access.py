@@ -3,11 +3,15 @@ from django.db.models import F
 from mock import patch
 
 from core.bundles.models import Bundle
+from core.collections.models import CollectionReference
+from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory, UserCollectionFactory
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLAPITestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
+from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
+from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
@@ -169,6 +173,54 @@ class ParentConceptAccessTest(CrossRepoAccessBaseTest):
             self.assertEqual(
                 sorted(concept['id'] for concept in response.data['parent_concepts']), ['public', 'secret'])
 
+    def test_viewable_parent_uris_reads_linked_parents_only_when_a_parent_is_not_viewable(self):
+        def not_needed():
+            raise AssertionError('linked parents were read')
+
+        with self.assertNumQueries(0):
+            self.assertEqual(Concept.get_viewable_parent_uris([], self.outsider, not_needed), [])
+        self.assertEqual(
+            Concept.get_viewable_parent_uris([self.public_concept.uri], self.outsider, not_needed),
+            [self.public_concept.uri])
+        for linked, expected in [
+                ([self.private_concept.uri], [self.private_concept.uri, self.public_concept.uri]),
+                ([], [self.public_concept.uri])]:
+            self.assertEqual(
+                Concept.get_viewable_parent_uris(
+                    [self.private_concept.uri, self.public_concept.uri], self.outsider, lambda linked=linked: linked),
+                expected)
+
+    def test_parents_and_children_lists_hide_private_concepts(self):
+        child = self.persist_child('listedchild', [self.private_concept.uri, self.public_concept.uri])
+        private_child = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'privchild',
+            'parent': self.private_source, 'public_access': ACCESS_TYPE_NONE,
+            'names': [ConceptNameFactory.build(locale='en', locale_preferred=True)],
+            'parent_concept_urls': [self.public_concept.uri]
+        }, self.member)
+        self.assertEqual(private_child.errors, {})
+
+        for user, parents, children in [
+                (None, ['public'], ['listedchild']),
+                (self.outsider, ['public'], ['listedchild']),
+                (self.member, ['public', 'secret'], ['listedchild', 'privchild']),
+                (self.admin, ['public', 'secret'], ['listedchild', 'privchild'])]:
+            headers = {'HTTP_AUTHORIZATION': 'Token ' + user.get_token()} if user else {}
+
+            response = self.client.get(child.uri + 'parents/', **headers)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(sorted(concept['id'] for concept in response.data), parents, user)
+
+            response = self.client.get(self.public_concept.uri + 'children/', **headers)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(sorted(concept['id'] for concept in response.data), children, user)
+
+            # these lists aren't searchable: a search would list the repo's concepts instead
+            for url, expected in [(child.uri + 'parents/?q=secret', parents),
+                                  (self.public_concept.uri + 'children/?q=privchild', children)]:
+                response = self.client.get(url, **headers)
+                self.assertEqual(sorted(concept['id'] for concept in response.data), expected, (user, url))
+
 
 class MappingTargetAccessTest(CrossRepoAccessBaseTest):
     def test_outsider_mapping_to_private_concept_is_external(self):
@@ -228,6 +280,55 @@ class MappingTargetAccessTest(CrossRepoAccessBaseTest):
         self.assertEqual(mapping.to_concept.versioned_object_id, self.private_concept.id)
         self.assertEqual(mapping.to_source_id, self.private_source.id)
 
+    def map_to(self, user, source, to_concept_url):
+        from_concept = ConceptFactory(parent=source)
+        response = self.client.post(
+            source.mappings_url,
+            {'map_type': 'SAME-AS', 'from_concept_url': from_concept.uri, 'to_concept_url': to_concept_url},
+            HTTP_AUTHORIZATION='Token ' + user.get_token(),
+            format='json'
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        return source.mappings.get(from_concept__versioned_object_id=from_concept.id, id=F('versioned_object_id'))
+
+    def test_concept_created_later_is_linked_only_to_mappings_whose_saver_can_view_it(self):
+        member_source = OrganizationSourceFactory(
+            organization=self.private_org, mnemonic='MemberMapSource', public_access=ACCESS_TYPE_NONE)
+        outsider_mapping = self.map_to(self.outsider, self.outsider_source, self.private_source.uri + 'concepts/later/')
+        member_mapping = self.map_to(self.member, member_source, self.private_source.uri + 'concepts/later/')
+        public_mapping = self.map_to(self.outsider, self.outsider_source, self.public_source.uri + 'concepts/later/')
+
+        for source in [self.private_source, self.public_source]:
+            response = self.client.post(
+                source.concepts_url, self.concept_payload('later'),
+                HTTP_AUTHORIZATION='Token ' + self.admin.get_token(), format='json')
+            self.assertEqual(response.status_code, 201, response.data)
+
+        outsider_mapping.refresh_from_db()
+        self.assertIsNone(outsider_mapping.to_concept_id)
+        self.assertEqual(outsider_mapping.to_concept_code, 'later')
+        for mapping, source in [(member_mapping, self.private_source), (public_mapping, self.public_source)]:
+            mapping.refresh_from_db()
+            self.assertEqual(mapping.to_concept.parent_id, source.id)
+
+    def test_source_created_later_is_linked_only_to_mappings_whose_saver_can_view_it(self):
+        member_source = OrganizationSourceFactory(
+            organization=self.private_org, mnemonic='MemberMapSource', public_access=ACCESS_TYPE_NONE)
+        outsider_mapping = self.map_to(self.outsider, self.outsider_source, '/orgs/PrivOrg/sources/NewPriv/concepts/x/')
+        member_mapping = self.map_to(self.member, member_source, '/orgs/PrivOrg/sources/NewPriv/concepts/x/')
+
+        errors = Source.persist_new(
+            OrganizationSourceFactory.build(
+                organization=self.private_org, mnemonic='NewPriv', public_access=ACCESS_TYPE_NONE),
+            self.member, parent_resource=self.private_org)
+        self.assertEqual(errors, {})
+        new_source = Source.objects.get(mnemonic='NewPriv', version='HEAD')
+
+        outsider_mapping.refresh_from_db()
+        self.assertIsNone(outsider_mapping.to_source_id)
+        member_mapping.refresh_from_db()
+        self.assertEqual(member_mapping.to_source_id, new_source.id)
+
     def test_edit_by_user_who_cannot_view_target_keeps_link(self):
         from_concept = ConceptFactory(parent=self.outsider_source, mnemonic='from')
         response = self.client.post(
@@ -254,3 +355,85 @@ class MappingTargetAccessTest(CrossRepoAccessBaseTest):
         mapping.refresh_from_db()
         self.assertEqual(mapping.to_concept_id, linked_concept_id)
         self.assertEqual(mapping.to_source_id, linked_source_id)
+
+
+class OmitIfExistsInAccessTest(CrossRepoAccessBaseTest):
+    def setUp(self):
+        super().setUp()
+        self.omitted = ConceptFactory(parent=self.public_source, mnemonic='omitted')
+        self.mapping = MappingFactory(
+            parent=self.public_source, from_concept=self.public_concept, to_concept=self.omitted)
+        self.private_collection = OrganizationCollectionFactory(
+            organization=self.private_org, mnemonic='PrivColl', public_access=ACCESS_TYPE_NONE)
+        expansion = ExpansionFactory(collection_version=self.private_collection)
+        self.private_collection.expansion_uri = expansion.uri
+        self.private_collection.save()
+        expansion.concepts.add(self.omitted.get_latest_version())
+
+    def cascade(self, user, omit_if_exists_in):
+        headers = {'HTTP_AUTHORIZATION': 'Token ' + user.get_token()} if user else {}
+        response = self.client.get(
+            self.public_concept.uri + '$cascade/?omitIfExistsIn=' + omit_if_exists_in, **headers)
+        self.assertEqual(response.status_code, 200)
+        return sorted(entry['url'] for entry in response.data['entry'])
+
+    def test_cascade_ignores_omit_repo_the_requester_cannot_view(self):
+        everything = sorted([self.public_concept.uri, self.mapping.uri, self.omitted.uri])
+        self.assertEqual(self.cascade(None, '/orgs/PrivOrg/collections/NoSuchColl/'), everything)
+
+        for user in [None, self.outsider]:
+            self.assertEqual(self.cascade(user, self.private_collection.uri), everything, user)
+
+        for user in [self.member, self.admin]:
+            self.assertEqual(
+                self.cascade(user, self.private_collection.uri), sorted([self.public_concept.uri, self.mapping.uri]),
+                user)
+
+    def test_reference_ignores_omit_repo_its_creator_cannot_view(self):
+        for user, kept in [(self.outsider, False), (self.member, True), (self.admin, True), (None, False)]:
+            reference = CollectionReference(
+                expression=self.public_source.uri,
+                cascade={'method': 'sourcetoconcepts', 'omit_if_exists_in': self.private_collection.uri},
+                created_by=user)
+
+            self.assertEqual('omit_if_exists_in' in reference.get_concept_cascade_params(), kept, user)
+
+
+class CascadeRepoAccessTest(CrossRepoAccessBaseTest):
+    def test_cascade_and_clone_over_a_repo_the_requester_cannot_view_are_not_found(self):
+        MappingFactory(parent=self.private_source, from_concept=self.private_concept, to_concept=self.public_concept)
+        # the root concept comes from the query params, the repo to cascade over from the URL
+        url = (f'{self.private_concept.uri}$cascade/?org={self.public_source.organization.mnemonic}'
+               f'&source={self.public_source.mnemonic}&concept={self.public_concept.mnemonic}&reverse=true')
+
+        self.assertEqual(self.client.get(url).status_code, 404)
+        self.assertEqual(self.client.get(url, HTTP_AUTHORIZATION='Token ' + self.outsider_token).status_code, 404)
+        response = self.client.get(url, HTTP_AUTHORIZATION='Token ' + self.member.get_token())
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(self.private_concept.uri, str(response.data))
+
+        response = self.client.post(
+            url.replace('$cascade/', '$clone/'),
+            {'source_uri': self.outsider_source.uri, 'parameters': {'reverse': True}},
+            HTTP_AUTHORIZATION='Token ' + self.outsider_token, format='json')
+        self.assertEqual(response.status_code, 404)
+
+
+class CollectionConceptMappingsTest(CrossRepoAccessBaseTest):
+    def test_concept_mappings_in_a_collection_through_the_current_user_route(self):
+        mapping = MappingFactory(
+            parent=self.public_source, from_concept=self.public_concept, to_concept=self.public_concept)
+        collection = UserCollectionFactory(user=self.outsider, mnemonic='MyColl')
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.concepts.add(self.public_concept.get_latest_version())
+        expansion.mappings.add(mapping.get_latest_version())
+
+        for url in [f'/users/{self.outsider.username}/collections/MyColl/', '/user/collections/MyColl/']:
+            for param in ['includeMappings', 'includeInverseMappings']:
+                response = self.client.get(
+                    f'{url}concepts/public/?{param}=true', HTTP_AUTHORIZATION='Token ' + self.outsider_token)
+
+                self.assertEqual(response.status_code, 200, (url, param))
+                self.assertEqual({data['url'] for data in response.data['mappings']}, {mapping.url}, (url, param))

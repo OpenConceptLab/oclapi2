@@ -23,13 +23,14 @@ from rest_framework.response import Response
 from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY, INCLUDE_RETIRED_PARAM, \
     SEARCH_STATS_ONLY, INCLUDE_SEARCH_STATS, UPDATED_BY_USERNAME_PARAM, CHECKSUM_STANDARD_HEADER, \
-    CHECKSUM_SMART_HEADER, SEARCH_LATEST_REPO_VERSION, SAME_STANDARD_CHECKSUM_ERROR, ACCESS_TYPE_VIEW
+    CHECKSUM_SMART_HEADER, SEARCH_LATEST_REPO_VERSION, SAME_STANDARD_CHECKSUM_ERROR, ACCESS_TYPE_VIEW, \
+    INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion, CanEditConceptDictionary
 from core.users.constants import LIST_UNPAGINATED_PERMISSION
 from .checksums import ChecksumModel
 from .exceptions import Http403, UnpaginatedListLimitReached
-from .utils import write_csv_to_s3, get_csv_from_s3, get_query_params_from_url_string, compact_dict_by_values, \
+from .utils import write_csv_to_s3, get_query_params_from_url_string, compact_dict_by_values, \
     to_owner_uri, parse_updated_since_param, get_export_service, to_int, get_truthy_values, generate_temp_version, \
     canonical_url_to_url_and_version, decode_string, to_parent_kwargs_from_uri
 from ..concepts.constants import PERSIST_CLONE_ERROR
@@ -181,9 +182,13 @@ class ListWithHeadersMixin(ListModelMixin):
         return key_body, cache.get(key_body) or None, key_headers, cache.get(key_headers) or None
 
     def __can_cache(self):
-        # facets/search-stats are header driven and change the response shape, but are not part of the cache key
+        # facets/search-stats are header driven and change the response shape, but are not part of the cache key;
+        # included parent/child concepts are filtered per requester, so they can't be shared
+        params = self.request.query_params
         return (self.is_repo_version_children_request_without_any_search() and
                 not self.should_include_facets() and not self.should_include_search_stats() and
+                params.get(INCLUDE_PARENT_CONCEPTS) not in TRUTHY and
+                params.get(INCLUDE_CHILD_CONCEPTS) not in TRUTHY and
                 get(self, 'parent_resource.is_latest_version', False))
 
     def list(self, request, *args, **kwargs):  # pylint:disable=too-many-locals,too-many-branches,too-many-statements
@@ -328,15 +333,10 @@ class ListWithHeadersMixin(ListModelMixin):
         return map(lambda o: o.id, self.object_list[0:100])
 
     def get_csv(self, request, queryset=None):
-        filename, url, prepare_new_file, is_member = None, None, True, False
-
-        parent = None  # TODO: fix this for parent (owner)
-
-        if parent:
-            prepare_new_file = False
-            user = request.query_params.get('user', None)
-            is_member = self._is_member(parent, user)
-
+        """
+        Builds the CSV from the view's own queryset, so the view's access checks apply, and stores it in a folder
+        of the requester's own: one requester's export is never served to another.
+        """
         try:
             path = request.__dict__.get('_request').path
             filename = '_'.join(compact(path.split('/'))).replace('.', '_')
@@ -346,27 +346,13 @@ class ListWithHeadersMixin(ListModelMixin):
         except Exception:  # pylint: disable=broad-except
             kwargs = {}
 
-        if filename and prepare_new_file:
-            url = get_csv_from_s3(filename, is_member)
-
-        if not url:
-            queryset = queryset or self._get_query_set_from_view(is_member)
-            data = self.get_csv_rows(queryset) if hasattr(self, 'get_csv_rows') else queryset.values()
-            url = write_csv_to_s3(data, is_member, **kwargs)
+        if queryset is None:
+            queryset = self.get_queryset()[0:CSV_DEFAULT_LIMIT]
+        data = self.get_csv_rows(queryset) if hasattr(self, 'get_csv_rows') else queryset.values()
+        requester = request.user.id if request.user.is_authenticated else 'anonymous'
+        url = write_csv_to_s3(data, requester, **kwargs)
 
         return Response({'url': url}, status=200)
-
-    @staticmethod
-    def _is_member(parent, requesting_user):
-        if not parent or type(parent).__name__ in ['UserProfile', 'Organization']:
-            return False
-
-        owner = parent.owner
-        return owner.members.filter(username=requesting_user).exists() if type(owner).__name__ == 'Organization' else \
-            requesting_user == parent.created_by
-
-    def _get_query_set_from_view(self, is_member):
-        return self.get_queryset() if is_member else self.get_queryset()[0:CSV_DEFAULT_LIMIT]
 
 
 class PathWalkerMixin:
@@ -655,7 +641,7 @@ class SourceChildMixin(ChecksumModel):
         abstract = True
 
     @classmethod
-    def load_list_fields(cls, instances, fields, collection=None):
+    def load_list_fields(cls, instances, fields, collection=None, user=None):
         """Loads, for a whole page at once, what the serialized fields would otherwise query row by row."""
         fields = set(fields)
         prefetch_related_objects(instances, *cls.LIST_PREFETCHES, *fields.intersection(cls.FIELD_PREFETCHES))
@@ -663,11 +649,12 @@ class SourceChildMixin(ChecksumModel):
             'version_url': cls.load_latest_version_uris,
             'previous_version_url': cls.load_previous_version_uris,
             'source_versions': cls.load_source_versions,
-            'collection_versions': cls.load_collection_versions,
         }
         for field, loader in loaders.items():
             if field in fields:
                 loader(instances)
+        if 'collection_versions' in fields:
+            cls.load_collection_versions(instances, user)
 
         reads_latest_source_version = fields & set(cls.LATEST_SOURCE_VERSION_FIELDS)
         if collection:  # there latest_source_version shows the collection's resolved version instead
@@ -703,13 +690,14 @@ class SourceChildMixin(ChecksumModel):
             instance._source_versions = uris.get(instance.id, [])  # pylint: disable=protected-access
 
     @classmethod
-    def load_collection_versions(cls, instances):
-        """Sets each row's _collection_versions: the uris of the collection versions whose expansions hold it."""
+    def load_collection_versions(cls, instances, user):
+        """Sets each row's _collection_versions: the uris of the user-viewable collection versions holding it."""
         key = f'{cls._meta.model_name}_id'
         uris = {}
-        for row_id, uri in cls.expansion_set.through.objects.filter(
+        for row_id, uri in cls.filter_by_viewable_collection_version(cls.expansion_set.through.objects.filter(
                 **{f'{key}__in': [instance.id for instance in instances]}
-        ).exclude(expansion__collection_version__version=HEAD).values_list(key, 'expansion__collection_version__uri'):
+        ).exclude(expansion__collection_version__version=HEAD), user, 'expansion__').values_list(
+                key, 'expansion__collection_version__uri'):
             uris.setdefault(row_id, set()).add(uri)
         for instance in instances:
             instance._collection_versions = sorted(uris.get(instance.id, ()))  # pylint: disable=protected-access
@@ -874,12 +862,24 @@ class SourceChildMixin(ChecksumModel):
             return self._source_versions
         return list(self.sources.exclude(version=HEAD).order_by('created_at').values_list('uri', flat=True))
 
-    @property
-    def collection_versions(self):
+    def get_collection_versions(self, user):
+        """URIs of the released collection versions holding this resource that the user can view."""
         if hasattr(self, '_collection_versions'):  # loaded for a whole page by load_list_fields
             return self._collection_versions
-        return sorted(set(self.expansion_set.exclude(
-            collection_version__version=HEAD).values_list('collection_version__uri', flat=True)))
+        expansions = self.filter_by_viewable_collection_version(
+            self.expansion_set.exclude(collection_version__version=HEAD), user)
+        return sorted(set(expansions.values_list('collection_version__uri', flat=True)))
+
+    @staticmethod
+    def filter_by_viewable_collection_version(expansions, user, prefix=''):
+        """Expansions of collection versions the user can view: public ones, their own and their orgs' (staff: all)."""
+        if get(user, 'is_staff'):
+            return expansions
+        criteria = ~Q(**{f'{prefix}collection_version__public_access': ACCESS_TYPE_NONE})
+        if get(user, 'is_authenticated'):
+            criteria |= Q(**{f'{prefix}collection_version__user_id': user.id}) | Q(
+                **{f'{prefix}collection_version__organization__members__id': user.id})
+        return expansions.filter(criteria)
 
     @property
     def versions(self):

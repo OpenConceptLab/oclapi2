@@ -1,11 +1,15 @@
 import json
 import os
+import uuid
 from unittest import mock
 
 from django.test import override_settings
+from rest_framework.authtoken.models import Token
 
-from core.common.constants import HEAD
+from core.common.constants import ACCESS_TYPE_NONE, HEAD
 from core.common.tests import OCLTestCase
+from core.concepts.documents import ConceptDocument
+from core.concepts.models import Concept
 from core.concepts.tests.factories import (
     ConceptDescriptionFactory,
     ConceptFactory,
@@ -103,17 +107,36 @@ class ConceptsFromSourceQueryTests(OCLTestCase):
         self.concept1.extras = {**(self.concept1.extras or {}), 'is_set': False}
         self.concept1.save(update_fields=['extras'])
 
-    def _execute(self, query: str, variables: dict):
+    def _post(self, query: str, variables: dict, user=None):
+        auth_header = auth_header_for_token(Token.objects.get_or_create(user=user)[0]) if user else self.auth_header
         response = self.client.post(
             '/graphql/',
             data=json.dumps({'query': query, 'variables': variables}),
             content_type='application/json',
-            HTTP_AUTHORIZATION=self.auth_header,
+            HTTP_AUTHORIZATION=auth_header,
         )
-        payload = response.json()
+        return response.status_code, response.json()
+
+    def _execute(self, query: str, variables: dict, user=None):
+        status, payload = self._post(query, variables, user)
         if 'errors' in payload:
             self.fail(payload['errors'])
-        return response.status_code, payload['data']
+        return status, payload['data']
+
+    def _create_private_source(self, source_mnemonic='GQLPRIVATE', concept_name='Private concept'):
+        """A private org source with one concept and a mapping from the public concept1, and an org member."""
+        private_org = OrganizationFactory(mnemonic='GQLPRIVORG', public_access=ACCESS_TYPE_NONE)
+        private_source = OrganizationSourceFactory(
+            organization=private_org, mnemonic=source_mnemonic, version=HEAD, public_access=ACCESS_TYPE_NONE)
+        private_concept = ConceptFactory(
+            parent=private_source, mnemonic='gql-private-1', public_access=ACCESS_TYPE_NONE,
+            names=[ConceptNameFactory.build(name=concept_name, locale='en', locale_preferred=True)])
+        MappingFactory(
+            parent=private_source, from_concept=self.concept1, to_concept=private_concept, map_type='Narrower Than',
+            public_access=ACCESS_TYPE_NONE)
+        member, _ = create_user_with_token(username='graphql-private-member', super_user=self.super_user)
+        private_org.members.add(member)
+        return private_source, private_concept, member
 
     def tearDown(self):
         if self._old_async_flag is None:
@@ -557,3 +580,83 @@ class ConceptsFromSourceQueryTests(OCLTestCase):
         self.assertEqual(serialized.metadata.updated_by, retired_user.username)
         self.assertEqual(serialized.metadata.created_at, format_datetime_for_api(retired.created_at))
         self.assertEqual(serialized.metadata.updated_at, format_datetime_for_api(retired.updated_at))
+
+    def test_private_source_is_reported_as_not_found(self):
+        private_source, private_concept, member = self._create_private_source()
+        query = """
+        query ($org: String, $source: String, $conceptIds: [String!]) {
+          concepts(org: $org, source: $source, conceptIds: $conceptIds) {
+            totalCount
+            results { conceptId }
+          }
+        }
+        """
+        variables = {'org': 'GQLPRIVORG', 'source': private_source.mnemonic, 'conceptIds': [private_concept.mnemonic]}
+
+        _, missing = self._post(query, {**variables, 'source': 'NOSUCHSOURCE'})
+        _, private = self._post(query, variables)
+
+        self.assertIsNone(private['data'])
+        self.assertEqual(
+            [error['message'] for error in private['errors']],
+            [error['message'].replace('NOSUCHSOURCE', private_source.mnemonic) for error in missing['errors']])
+        for user in [member, self.super_user]:
+            _, data = self._execute(query, variables, user)
+            self.assertEqual(data['concepts']['totalCount'], 1)
+            self.assertEqual(data['concepts']['results'][0]['conceptId'], private_concept.mnemonic)
+
+    def test_global_concept_ids_lookup_lists_only_viewable_concepts_and_mappings(self):
+        _, private_concept, member = self._create_private_source()
+        query = """
+        query ($conceptIds: [String!]) {
+          concepts(conceptIds: $conceptIds) {
+            totalCount
+            results { conceptId mappings { mapType } }
+          }
+        }
+        """
+        variables = {'conceptIds': [self.concept1.mnemonic, private_concept.mnemonic]}
+
+        for user, concept_ids, map_types in [
+                (None, {self.concept1.mnemonic}, {'Same As'}),
+                (member, {self.concept1.mnemonic, private_concept.mnemonic}, {'Same As', 'Narrower Than'}),
+                (self.super_user, {self.concept1.mnemonic, private_concept.mnemonic}, {'Same As', 'Narrower Than'})]:
+            _, data = self._execute(query, variables, user)
+            results = data['concepts']['results']
+            self.assertEqual({result['conceptId'] for result in results}, concept_ids, user)
+            self.assertEqual(data['concepts']['totalCount'], len(results), user)
+            self.assertEqual(
+                {mapping['mapType'] for result in results for mapping in result['mappings']}, map_types, user)
+
+    @mock.patch('core.graphql.queries.fallback_db_search', side_effect=AssertionError('expected an ES search'))
+    def test_query_search_lists_and_counts_only_viewable_concepts(self, _fallback_mock):
+        self.patch_concept_es_mapping_for_ci()
+        token = f'zyq{uuid.uuid4().hex[:10]}'
+        public_concept = ConceptFactory(
+            parent=self.source, mnemonic='gql-public-1',
+            names=[ConceptNameFactory.build(name=f'{token} public', locale='en', locale_preferred=True)])
+        # a private source with the same name as the public one, in another org
+        _, private_concept, member = self._create_private_source(self.source.mnemonic, f'{token} private')
+        ConceptDocument().update(
+            Concept.objects.filter(mnemonic__in=[public_concept.mnemonic, private_concept.mnemonic]), refresh=True)
+        query = """
+        query ($org: String, $source: String, $text: String!) {
+          concepts(org: $org, source: $source, query: $text) {
+            totalCount
+            results { conceptId }
+          }
+        }
+        """
+
+        for user, concept_ids in [
+                (None, {public_concept.mnemonic}),
+                (member, {public_concept.mnemonic, private_concept.mnemonic}),
+                (self.super_user, {public_concept.mnemonic, private_concept.mnemonic})]:
+            _, data = self._execute(query, {'text': token}, user)
+            results = data['concepts']['results']
+            self.assertEqual({result['conceptId'] for result in results}, concept_ids, user)
+            self.assertEqual(data['concepts']['totalCount'], len(results), user)
+
+        _, data = self._execute(
+            query, {'org': self.organization.mnemonic, 'source': self.source.mnemonic, 'text': token})
+        self.assertEqual(data['concepts']['totalCount'], 1)

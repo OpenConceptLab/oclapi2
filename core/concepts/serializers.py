@@ -10,12 +10,20 @@ from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPIN
     INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE
 from core.common.fields import EncodedDecodedCharField
 from core.common.serializers import AbstractResourceSerializer, SourceChildPageSerializer, \
-    SourceVersionFieldMixin, get_collection_in_scope
+    SourceVersionFieldMixin, CollectionVersionsMixin, get_collection_in_scope
 from core.common.utils import to_parent_uri_from_kwargs, get_truthy_values
 from core.concepts.models import Concept, ConceptName
 
 
 TRUTHY = get_truthy_values()
+
+
+def get_collection_uri_from_view(view, request):
+    """The URI of the collection in the view's URL, with /user/ resolved to the requester."""
+    kwargs = get(view, 'kwargs') or {}
+    if get(view, 'user_is_self'):
+        kwargs = {**kwargs, 'user': get(request, 'user.username')}
+    return to_parent_uri_from_kwargs(kwargs)
 
 
 def get_viewable_concepts(queryset, request):
@@ -237,7 +245,7 @@ class ConceptAbstractSerializer(SourceVersionFieldMixin, AbstractResourceSeriali
         serializer_class = MappingMinimalSerializer if is_mapping_brief else MappingDetailSerializer
         is_collection = 'collection' in self.view_kwargs
         collection_version = self.view_kwargs.get('version', HEAD) if is_collection else None
-        parent_uri = to_parent_uri_from_kwargs(self.view_kwargs) if is_collection else None
+        parent_uri = get_collection_uri_from_view(get(context, 'view'), request) if is_collection else None
         if self.include_indirect_mappings:
             mappings = obj.get_bidirectional_mappings_for_collection(
                 parent_uri, collection_version
@@ -333,10 +341,10 @@ class ConceptListSerializer(ConceptAbstractSerializer):
         )
 
 
-class ConceptVersionListSerializer(ConceptListSerializer):
+class ConceptVersionListSerializer(CollectionVersionsMixin, ConceptListSerializer):
     previous_version_url = CharField(read_only=True, source='prev_version_uri')
     source_versions = ListField(read_only=True)
-    collection_versions = ListField(read_only=True)
+    collection_versions = SerializerMethodField()
 
     class Meta:
         model = Concept
@@ -575,7 +583,7 @@ class ConceptVersionExportSerializer(ModelSerializer):
         return list(uris)
 
 
-class ConceptVersionDetailSerializer(SourceVersionFieldMixin, ModelSerializer):
+class ConceptVersionDetailSerializer(CollectionVersionsMixin, SourceVersionFieldMixin, ModelSerializer):
     type = CharField(source='resource_type')
     uuid = CharField(source='id')
     id = EncodedDecodedCharField(source='mnemonic')
@@ -600,7 +608,7 @@ class ConceptVersionDetailSerializer(SourceVersionFieldMixin, ModelSerializer):
     parent_concept_urls = ListField(read_only=True)
     child_concept_urls = ListField(read_only=True)
     source_versions = ListField(read_only=True)
-    collection_versions = ListField(read_only=True)
+    collection_versions = SerializerMethodField()
     references = SerializerMethodField()
     latest_source_version = SerializerMethodField()
 
@@ -666,7 +674,8 @@ class ConceptVersionDetailSerializer(SourceVersionFieldMixin, ModelSerializer):
         context = get(self, 'context')
         is_collection = 'collection' in self.view_kwargs
         collection_version = self.view_kwargs.get('version', HEAD) if is_collection else None
-        parent_uri = to_parent_uri_from_kwargs(self.view_kwargs) if is_collection else None
+        parent_uri = get_collection_uri_from_view(
+            get(context, 'view'), get(context, 'request')) if is_collection else None
         if self.include_indirect_mappings:
             mappings = obj.get_bidirectional_mappings_for_collection(
                 parent_uri, collection_version

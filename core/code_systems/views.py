@@ -1,7 +1,7 @@
 import logging
 
 from django.db.models import F
-from rest_framework.exceptions import ValidationError, NotAuthenticated
+from rest_framework.exceptions import ValidationError, NotAuthenticated, PermissionDenied
 
 from core.bundles.serializers import FHIRBundleSerializer
 from core.code_systems.serializers import CodeSystemDetailSerializer, \
@@ -16,6 +16,16 @@ from core.sources.models import Source
 from core.sources.views import SourceListView, SourceRetrieveUpdateDestroyView
 
 logger = logging.getLogger('oclapi')
+
+
+def get_viewable_repo(repos, user):
+    """The first of these repo versions the user can view, skipping the rest as if they didn't exist. Its HEAD,
+    which governs access to its concepts, must be viewable too."""
+    for repo in repos.order_by('id'):
+        head = repo.head
+        if head and repo.has_view_access(user) and head.has_view_access(user):
+            return repo
+    return None
 
 
 class CodeSystemListView(SourceListView):
@@ -96,13 +106,21 @@ class CodeSystemListLookupView(ConceptRetrieveUpdateDestroyView):
                 else:
                     source = source.filter(is_latest_version=True).exclude(version=HEAD)
 
+                source = get_viewable_repo(source, self.request.user)
                 if source:
-                    queryset = queryset.filter(sources=source.first(), mnemonic=code)
+                    queryset = queryset.filter(sources=source, mnemonic=code)
                     if not queryset.exists():
                         raise CodeSystemLookupNotFoundError(code)
                     return queryset
 
         raise CodeSystemLookupNotFoundError()
+
+    def get_object(self, queryset=None):
+        """A code the requester can't view gives the same answer as a code system that doesn't exist."""
+        try:
+            return super().get_object(queryset)
+        except (NotAuthenticated, PermissionDenied) as ex:
+            raise CodeSystemLookupNotFoundError() from ex
 
     def get_serializer(self, instance=None):  # pylint: disable=arguments-differ
         if instance:
@@ -147,19 +165,19 @@ class CodeSystemValidateCodeView(ConceptRetrieveUpdateDestroyView):
                 url = IdentifierSerializer.convert_fhir_url_to_ocl_uri(url, 'sources')
                 source = Source.objects.filter(uri=url)
 
-            if not source:
-                return queryset.none()
-
             if version:
                 source = source.filter(version=version)
             else:
                 source = source.filter(is_latest_version=True).exclude(version=HEAD)
+            source = get_viewable_repo(source, self.request.user)
+            if not source:
+                return queryset.none()
 
         if code:
             if not source:
                 return queryset.none()
 
-            queryset = queryset.filter(sources=source.first(), mnemonic=code)
+            queryset = queryset.filter(sources=source, mnemonic=code)
 
         if display and queryset:
             instance = queryset.first()
@@ -187,7 +205,7 @@ class CodeSystemValidateCodeView(ConceptRetrieveUpdateDestroyView):
         if instance:
             try:
                 self.check_object_permissions(self.request, instance)
-            except NotAuthenticated:
+            except (NotAuthenticated, PermissionDenied):
                 return {
                     'parameter': [
                         {'name': 'result', 'valueBoolean': False}

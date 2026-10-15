@@ -60,9 +60,13 @@ class PinBaseView(BaseAPIView):
         criteria = Q(**filters)
         if self.should_include_creator_pins() and 'org' not in self.kwargs:
             criteria |= Q(created_by_id=self.request.user.id, user_id__isnull=True)
-        return Pin.objects.filter(
+        queryset = Pin.objects.filter(
             criteria
         ).select_related('organization', 'user').prefetch_related('resource')
+        # an update returns the pinned resource, so only a pin's owner deleting it skips the visibility filter
+        if self.request.method != 'DELETE':
+            queryset = Pin.get_visible_to(queryset, self.request)
+        return queryset
 
 
 class PinListView(PinBaseView, ListAPIView):

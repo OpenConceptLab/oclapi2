@@ -12,6 +12,7 @@ from core.common.constants import ACCESS_TYPE_NONE, HEAD, OCL_ORG_ID, ACCESS_TYP
 from core.common.tasks import send_user_verification_email, send_user_reset_password_email
 from core.common.tests import OCLTestCase, OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.orgs.models import Organization
+from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.constants import USER_OBJECT_TYPE, OCL_SERVERS_GROUP, MAPPER_USE_PERMISSION, \
     MAPPER_AI_ASSISTANT_PERMISSION, MAPPER_SCISPACY_PERMISSION, STAFF_GROUP, SUPERADMIN_GROUP
@@ -303,6 +304,46 @@ class UserProfileTest(OCLTestCase):
         user = UserProfileFactory()
 
         self.assertFalse(user.has_perm(MAPPER_USE_PERMISSION))
+
+    def test_can_user_view(self):
+        from django.contrib.auth.models import AnonymousUser
+        from core.concepts.tests.factories import ConceptFactory
+        member, outsider, staff = UserProfileFactory(), UserProfileFactory(), UserProfileFactory(is_staff=True)
+        private_org = OrganizationFactory(public_access=ACCESS_TYPE_NONE)
+        private_org.members.add(member)
+        private_source = OrganizationSourceFactory(organization=private_org, public_access=ACCESS_TYPE_NONE)
+        private_concept = ConceptFactory(parent=private_source)
+        public_source = OrganizationSourceFactory(organization=private_org)
+
+        for obj in [private_org, private_source, private_concept]:
+            for user in [None, AnonymousUser(), outsider]:
+                self.assertFalse(UserProfile.can_user_view(user, obj))
+            self.assertFalse(outsider.can_view(obj))
+            for user in [member, staff]:
+                self.assertTrue(UserProfile.can_user_view(user, obj))
+                self.assertTrue(user.can_view(obj))
+        for obj in [public_source, member]:
+            for user in [None, AnonymousUser(), outsider]:
+                self.assertTrue(UserProfile.can_user_view(user, obj))
+
+    def test_follow_events_of_private_objects_are_private(self):
+        follower = UserProfileFactory()
+        followed_user = UserProfileFactory()
+        private_source = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        public_source = OrganizationSourceFactory()
+
+        for followed in [followed_user, private_source, public_source]:
+            follower.follow(followed)
+            follower.unfollow(followed)
+
+        self.assertEqual(
+            sorted(follower.events.values_list('event_type', 'referenced_object_url', 'public')),
+            sorted([
+                ('Followed', followed_user.url, True), ('Unfollowed', followed_user.url, True),
+                ('Followed', private_source.url, False), ('Unfollowed', private_source.url, False),
+                ('Followed', public_source.url, True), ('Unfollowed', public_source.url, True),
+            ])
+        )
 
 
 class TokenAuthenticationViewTest(OCLAPITestCase):
@@ -768,6 +809,41 @@ class UserViewsAPITest(OCLAPITestCase):
             self.assertIn(MAPPER_USE_PERMISSION, response.data['permissions'])
             self.assertIn(
                 {'name': 'mapper.match_operations', 'limit': 100, 'used': 0}, response.data['capabilities'])
+
+    def test_user_subscribed_orgs_and_pins_only_as_visible_to_requester(self):
+        public_org = OrganizationFactory(mnemonic='visorgspublic')
+        private_org = OrganizationFactory(mnemonic='visorgsprivate', public_access=ACCESS_TYPE_NONE)
+        user = UserProfileFactory(username='visorgsuser', organizations=[public_org, private_org])
+        co_member = UserProfileFactory(username='visorgscomember', organizations=[private_org])
+        other_user = UserProfileFactory(username='visorgsother')
+        private_source = OrganizationSourceFactory(organization=private_org, public_access=ACCESS_TYPE_NONE)
+        user.pins.create(resource=private_source)
+        params = 'includeSubscribedOrgs=true&includePins=true'
+        url = f'/users/{user.username}/?{params}'
+
+        for requester, orgs in [(other_user, ['visorgspublic']), (co_member, ['visorgsprivate', 'visorgspublic'])]:
+            response = self.client.get(url, HTTP_AUTHORIZATION='Token ' + requester.get_token())
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(sorted(org['id'] for org in response.data['subscribed_orgs']), orgs)
+            self.assertNotIn('pins', response.data)
+
+        for token in [user.get_token(), self.admin_token]:
+            response = self.client.get(url, HTTP_AUTHORIZATION='Token ' + token)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                sorted(org['id'] for org in response.data['subscribed_orgs']), ['visorgsprivate', 'visorgspublic'])
+            self.assertEqual([pin['resource_uri'] for pin in response.data['pins']], [private_source.uri])
+
+        response = self.client.get(f'/users/?verbose=true&{params}')
+
+        self.assertEqual(response.status_code, 200)
+        users = {user['username']: user for user in response.data}
+        self.assertEqual([org['id'] for org in users[user.username]['subscribed_orgs']], ['visorgspublic'])
+        self.assertEqual([org['id'] for org in users[co_member.username]['subscribed_orgs']], [])
+        for user_data in users.values():
+            self.assertNotIn('pins', user_data)
 
     @patch('core.users.models.UserProfile.get_all_permissions', return_value=set())
     @patch('core.users.models.UserProfile.get_capability_usage', return_value=0)

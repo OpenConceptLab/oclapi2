@@ -228,6 +228,8 @@ class OrganizationImporter(BaseResourceImporter):
 
     def process(self):
         if not self.exists():
+            if Organization.objects.filter(mnemonic__iexact=self.data['mnemonic']).exists():
+                return FAILED  # org names are unique regardless of case
             org = Organization.objects.create(**self.data)
             org.members.add(org.created_by)
             if org:

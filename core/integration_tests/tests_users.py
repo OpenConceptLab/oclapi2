@@ -517,6 +517,49 @@ class UserListViewTest(OCLAPITestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual([user['username'] for user in response.data], ['ocladmin'])
 
+    def test_get_extras_filter_matches_only_the_extras_field(self):
+        regular_user = UserProfileFactory(username='extrasregularuser', extras={'xdept': 'xcardiology'})
+        member = UserProfileFactory(username='extrasprivatemember')
+        private_org = OrganizationFactory(mnemonic='extrasprivateorg', public_access=ACCESS_TYPE_NONE)
+        private_org.members.add(member)
+        UserProfileDocument().update([regular_user, member])
+        headers = {'HTTP_AUTHORIZATION': 'Token ' + regular_user.get_token()}
+
+        response = self.client.get('/users/', {'extras.xdept': 'cardio'}, format='json', **headers)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([user['username'] for user in response.data], ['extrasregularuser'])
+
+        for value in ['zzqq OR is_staff:true OR zzqq', 'zzqq OR org:extrasprivateorg OR zzqq',
+                      'zzqq OR is_staff\\:true OR zzqq']:
+            response = self.client.get('/users/', {'extras.xdept': value}, format='json', **headers)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data, [])
+
+    def test_get_last_login_filters_only_for_staff(self):
+        old_login_user = UserProfileFactory(username='oldloginuser', last_login='2020-01-01T00:00:00Z')
+        recent_login_user = UserProfileFactory(username='recentloginuser', last_login='2024-01-01T00:00:00Z')
+        all_users = ['ocladmin', 'oldloginuser', 'recentloginuser']
+
+        for headers in [{}, {'HTTP_AUTHORIZATION': 'Token ' + old_login_user.get_token()}]:
+            for filter_param in ['lastLoginSince=2022-01-01', 'lastLoginBefore=2022-01-01']:
+                response = self.client.get(f'/users/?{filter_param}', format='json', **headers)
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(sorted(user['username'] for user in response.data), all_users)
+
+        headers = {'HTTP_AUTHORIZATION': 'Token ' + self.superuser.get_token()}
+        response = self.client.get('/users/?lastLoginSince=2022-01-01', format='json', **headers)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([user['username'] for user in response.data], [recent_login_user.username])
+
+        response = self.client.get('/users/?lastLoginBefore=2022-01-01', format='json', **headers)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([user['username'] for user in response.data], [old_login_user.username])
+
     def test_get_verbose_plan_fields_only_for_self_and_staff(self):
         regular_user = UserProfileFactory(username='planfieldsregular')
         other_user = UserProfileFactory(username='planfieldsother')
@@ -1269,6 +1312,45 @@ class UserFollowingListViewTest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
+
+    def test_get_only_follows_the_requester_can_view(self):
+        private_org = OrganizationFactory(mnemonic='private-followed', public_access=ACCESS_TYPE_NONE)
+        private_source = OrganizationSourceFactory(organization=private_org, public_access=ACCESS_TYPE_NONE)
+        public_org = OrganizationFactory(mnemonic='public-followed')
+        member = UserProfileFactory(username='private-member')
+        private_org.members.add(member)
+        outsider = UserProfileFactory(username='private-outsider')
+        staff = UserProfileFactory(username='private-staff', is_staff=True)
+        for followed in [private_org, private_source, public_org]:
+            member.follow(followed)
+        all_urls = sorted([private_org.url, private_source.url, public_org.url])
+
+        def get_followed_urls(url, user=None):
+            headers = {'HTTP_AUTHORIZATION': 'Token ' + user.get_token()} if user else {}
+            response = self.client.get(url, **headers)
+            self.assertEqual(response.status_code, 200)
+            follows = response.data
+            if url.startswith('/users/?'):
+                follows = next(user for user in follows if user['username'] == member.username)['following']
+            elif 'includeFollowing' in url:
+                follows = follows['following']
+            return sorted(follow['object']['url'] for follow in follows)
+
+        following_url = f'/users/{member.username}/following/'
+        detail_url = f'/users/{member.username}/?includeFollowing=true'
+        list_url = '/users/?verbose=true&includeFollowing=true'
+        for url in [following_url, list_url]:
+            self.assertEqual(get_followed_urls(url), [public_org.url])
+        for url in [following_url, detail_url, list_url]:
+            self.assertEqual(get_followed_urls(url, outsider), [public_org.url])
+            self.assertEqual(get_followed_urls(url, member), all_urls)
+            self.assertEqual(get_followed_urls(url, staff), all_urls)
+
+        # the user themselves too, once they lose access
+        private_org.members.remove(member)
+        for url in [following_url, detail_url, list_url]:
+            self.assertEqual(get_followed_urls(url, member), [public_org.url])
+            self.assertEqual(get_followed_urls(url, staff), all_urls)
 
     def test_post(self):
         follower = UserProfileFactory(username='follower')

@@ -18,6 +18,7 @@ from core.events.serializers import EventSerializer
 
 class EventsView(BaseAPIView, ListWithHeadersMixin):
     is_searchable = False
+    allow_csv_export = False  # an export would skip the serializer's live-object checks
     permission_classes = (AllowAny,)
     default_qs_sort_attr = '-created_at'
     serializer_class = EventSerializer

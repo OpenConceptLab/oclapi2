@@ -27,6 +27,12 @@ class TaskSerializer(Serializer):  # pylint: disable=abstract-method
     pass
 
 
+class CollectionVersionsMixin:  # pylint: disable=too-few-public-methods
+    def get_collection_versions(self, obj):
+        # a $cascade bundle passes its requester as `user`
+        return obj.get_collection_versions(get(self, 'context.request.user') or get(self, 'context.user'))
+
+
 class ReadSerializerMixin:
     """ Mixin for serializer which does not update or create resources. """
 
@@ -254,7 +260,8 @@ class SourceChildPageSerializer(ListSerializer):  # pylint: disable=abstract-met
     def to_representation(self, data):
         instances = list(data.all() if isinstance(data, BaseManager) else data)
         self.child.Meta.model.load_list_fields(
-            instances, self.child.fields.keys(), get_collection_in_scope(self.context))
+            instances, self.child.fields.keys(), get_collection_in_scope(self.context),
+            get(self.context, 'request.user') or get(self.context, 'user'))
         return super().to_representation(instances)
 
 

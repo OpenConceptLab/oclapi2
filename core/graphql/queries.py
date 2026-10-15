@@ -14,8 +14,10 @@ from pydash import get
 from strawberry.exceptions import GraphQLError
 
 from core.common.constants import HEAD
+from core.common.search import get_visible_repo_criteria
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
+from core.concepts.serializers import get_viewable_concepts
 from core.mappings.models import Mapping
 from core.sources.models import Source
 
@@ -67,7 +69,8 @@ class ConceptSearchResult:
     )
 
 
-async def resolve_source_version(org: str, source: str, version: Optional[str]) -> Source:
+async def resolve_source_version(org: str, source: str, version: Optional[str], user) -> Source:
+    """The org's source version; one the user cannot view is reported as not found."""
     filters = {'organization__mnemonic': org}
     target_version = version or HEAD
     instance = await sync_to_async(Source.get_version)(source, target_version, filters)
@@ -75,7 +78,7 @@ async def resolve_source_version(org: str, source: str, version: Optional[str]) 
     if not instance and version is None:
         instance = await sync_to_async(Source.find_latest_released_version_by)({**filters, 'mnemonic': source})
 
-    if not instance:
+    if not instance or not await sync_to_async(instance.has_view_access)(user):
         raise GraphQLError(
             f"Source '{source}' with version '{version or 'HEAD'}' was not found for org '{org}'."
         )
@@ -103,13 +106,17 @@ def build_mapping_prefetch(source_version: Source) -> Prefetch:
     return Prefetch('mappings_from', queryset=mapping_qs, to_attr='graphql_mappings')
 
 
-def build_global_mapping_prefetch() -> Prefetch:
+def build_global_mapping_prefetch(user) -> Prefetch:
+    """Mappings from each concept, in repositories the user can view."""
+    mapping_qs = Mapping.objects.filter(
+        from_concept_id__isnull=False,
+        is_active=True,
+        retired=False,
+    )
+    if not user.is_staff:
+        mapping_qs = Mapping.apply_user_criteria(mapping_qs, user)
     mapping_qs = (
-        Mapping.objects.filter(
-            from_concept_id__isnull=False,
-            is_active=True,
-            retired=False,
-        )
+        mapping_qs
         .select_related('to_source', 'to_concept', 'to_concept__parent')
         .order_by('map_type', 'to_concept_code', 'to_concept__mnemonic')
         .distinct()
@@ -354,6 +361,7 @@ def concept_ids_from_es(
         query: str,
         source_version: Optional[Source],
         pagination: Optional[dict],
+        user,
 ) -> Optional[tuple[list[int], int]]:
     trimmed = query.strip()
     if not trimmed:
@@ -368,6 +376,9 @@ def concept_ids_from_es(
             else:
                 search = search.filter('term', source_version=source_version.version)
         search = search.filter('term', retired=False)
+        visible_repo_criteria = get_visible_repo_criteria(user)
+        if visible_repo_criteria:
+            search = search.filter(visible_repo_criteria)
 
         should_queries = [
             ES_Q('match', id={'query': trimmed, 'boost': 6, 'operator': 'AND'}),
@@ -425,14 +436,15 @@ async def concepts_for_ids(
     return await sync_to_async(list)(qs), total
 
 
-async def concepts_for_query(
+async def concepts_for_query(  # pylint: disable=too-many-arguments
         base_qs,
         query: str,
         source_version: Source,
         pagination: Optional[dict],
         mapping_prefetch: Prefetch,
+        user,
 ) -> tuple[List[Concept], int]:
-    es_result = await sync_to_async(concept_ids_from_es)(query, source_version, pagination)
+    es_result = await sync_to_async(concept_ids_from_es)(query, source_version, pagination, user)
     if es_result is not None:
         concept_ids, total = es_result
         if not concept_ids:
@@ -488,16 +500,17 @@ class Query:
             raise GraphQLError('Either conceptIds or query must be provided.')
 
         pagination = normalize_pagination(page, limit)
+        user = info.context.user
 
         if org and source:
-            source_version = await resolve_source_version(org, source, version)
+            source_version = await resolve_source_version(org, source, version, user)
             base_qs = build_base_queryset(source_version)
             mapping_prefetch = build_mapping_prefetch(source_version)
         else:
-            # Global search across all repositories
+            # Global search across all repositories the user can view
             source_version = None
-            base_qs = Concept.objects.filter(is_active=True, retired=False)
-            mapping_prefetch = build_global_mapping_prefetch()
+            base_qs = get_viewable_concepts(Concept.objects.filter(is_active=True, retired=False), info.context)
+            mapping_prefetch = build_global_mapping_prefetch(user)
 
         if concept_ids_param:
             concepts, total = await concepts_for_ids(base_qs, concept_ids_param, pagination, mapping_prefetch)
@@ -508,6 +521,7 @@ class Query:
                 source_version,
                 pagination,
                 mapping_prefetch,
+                user,
             )
 
         serialized = await sync_to_async(serialize_concepts)(concepts)

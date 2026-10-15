@@ -8,7 +8,7 @@ from core.common.constants import MAPPING_LOOKUP_CONCEPTS, MAPPING_LOOKUP_SOURCE
     INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS, INCLUDE_VERBOSE_REFERENCES
 from core.common.fields import EncodedDecodedCharField
 from core.common.serializers import AbstractResourceSerializer, SourceChildPageSerializer, \
-    SourceVersionFieldMixin, get_collection_in_scope
+    SourceVersionFieldMixin, CollectionVersionsMixin, get_collection_in_scope
 from core.common.utils import get_truthy_values
 from core.concepts.serializers import ConceptDetailSerializer
 from core.mappings.models import Mapping
@@ -139,10 +139,10 @@ class MappingListSerializer(AbstractMappingSerializer):
         )
 
 
-class MappingVersionListSerializer(MappingListSerializer):
+class MappingVersionListSerializer(CollectionVersionsMixin, MappingListSerializer):
     previous_version_url = CharField(read_only=True, source='prev_version_uri')
     source_versions = ListField(read_only=True)
-    collection_versions = ListField(read_only=True)
+    collection_versions = SerializerMethodField()
 
     class Meta:
         model = Mapping
@@ -317,10 +317,10 @@ class MappingVersionExportSerializer(ModelSerializer):
         return obj.get_checksums()
 
 
-class MappingVersionDetailSerializer(MappingDetailSerializer):
+class MappingVersionDetailSerializer(CollectionVersionsMixin, MappingDetailSerializer):
     previous_version_url = CharField(read_only=True, source='prev_version_uri')
     source_versions = ListField(read_only=True)
-    collection_versions = ListField(read_only=True)
+    collection_versions = SerializerMethodField()
 
     class Meta:
         model = Mapping

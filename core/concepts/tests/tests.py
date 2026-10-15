@@ -32,6 +32,7 @@ from core.concepts.tests.factories import ConceptNameFactory, ConceptFactory, Co
 from core.concepts.validators import ValidatorSpecifier
 from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
+from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
@@ -397,7 +398,6 @@ class ConceptViewsAPITest(OCLAPITestCase):
     def test_match_concepts_consumption_attributed_from_event_metadata(self, _filter_queryset_mock):
         from core.capabilities.models import UsageEvent
         from core.map_projects.tests.factories import MapProjectFactory
-        from core.orgs.tests.factories import OrganizationFactory
         user = UserProfileFactory()
         user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
         org = OrganizationFactory()
@@ -422,7 +422,6 @@ class ConceptViewsAPITest(OCLAPITestCase):
         # usage still charges the right user's quota, it just stays unattributed.
         from core.capabilities.models import UsageEvent
         from core.map_projects.tests.factories import MapProjectFactory
-        from core.orgs.tests.factories import OrganizationFactory
         user = UserProfileFactory()
         user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
         other_user = UserProfileFactory()
@@ -2760,9 +2759,17 @@ class ConceptTest(OCLTestCase):
         expansion = ExpansionFactory(collection_version=collection)
         expansion.mappings.add(mapping)
 
+        twin_mapping = MappingFactory(from_concept=concept1, to_concept=concept2, parent=source)
+        twin = OrganizationCollectionFactory(
+            organization=OrganizationFactory(mnemonic=collection.organization.mnemonic.upper()),
+            mnemonic=collection.mnemonic.upper())
+        ExpansionFactory(collection_version=twin).mappings.add(twin_mapping)
+
         results = concept1.get_unidirectional_mappings_for_collection(collection.uri)
 
         self.assertIn(mapping.id, results.values_list('id', flat=True))
+        # a collection whose URL differs only in case is another collection
+        self.assertNotIn(twin_mapping.id, results.values_list('id', flat=True))
 
     def test_get_indirect_mappings_for_collection(self):
         source = OrganizationSourceFactory()
@@ -2773,9 +2780,17 @@ class ConceptTest(OCLTestCase):
         expansion = ExpansionFactory(collection_version=collection)
         expansion.mappings.add(mapping)
 
+        twin_mapping = MappingFactory(from_concept=concept1, to_concept=concept2, parent=source)
+        twin = OrganizationCollectionFactory(
+            organization=OrganizationFactory(mnemonic=collection.organization.mnemonic.upper()),
+            mnemonic=collection.mnemonic.upper())
+        ExpansionFactory(collection_version=twin).mappings.add(twin_mapping)
+
         results = concept2.get_indirect_mappings_for_collection(collection.uri)
 
         self.assertIn(mapping.id, results.values_list('id', flat=True))
+        # a collection whose URL differs only in case is another collection
+        self.assertNotIn(twin_mapping.id, results.values_list('id', flat=True))
 
     def test_get_hierarchy_concept_urls_versioned(self):
         source = OrganizationSourceFactory()

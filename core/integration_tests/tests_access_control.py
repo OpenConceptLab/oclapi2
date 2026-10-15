@@ -1,3 +1,7 @@
+import csv
+import io
+import zipfile
+
 from mock import patch, Mock
 
 from core.client_configs.models import ClientConfig
@@ -9,13 +13,14 @@ from core.common.permissions import HasOwnership
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory, ConceptDescriptionFactory
-from core.map_projects.tests.factories import MapProjectFactory
+from core.map_projects.tests.factories import MapProjectFactory, AutomatchRunFactory
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
 from core.pins.models import Pin
 from core.sources.documents import SourceDocument
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
+from core.tasks.models import Task
 from core.url_registry.factories import GlobalURLRegistryFactory, OrganizationURLRegistryFactory, UserURLRegistryFactory
 from core.url_registry.models import URLRegistry
 from core.users.models import UserProfile
@@ -551,6 +556,70 @@ class UserOrganizationListAccessTest(AccessTestMixin, OCLAPITestCase):
         self.assertEqual(self.list_orgs(self.member.uri + 'orgs/', self.staff), all_orgs)
         self.assertEqual(
             self.list_orgs(self.member.uri + 'orgs/', self.other_member), all_orgs)
+
+
+class CsvExportAccessTest(AccessTestMixin, OCLAPITestCase):
+    """A ?csv=true export holds only rows the requester can list, and one requester's export is never served to
+    another."""
+    def setUp(self):
+        super().setUp()
+        self.exports = {}
+        export_service = Mock(upload_file=self.upload, url_for=lambda key: 'https://exports.test/' + key)
+        patcher = patch('core.common.utils.get_export_service', return_value=export_service)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def upload(self, key, file_path=None, **kwargs):  # pylint: disable=unused-argument
+        with open(file_path, 'rb') as file:
+            self.exports[key] = file.read()
+
+    def export(self, url, user, column):
+        """The `column` values of the CSV export at `url` for `user`."""
+        response = self.request('get', url, user)
+        self.assertEqual(response.status_code, 200)
+        with zipfile.ZipFile(io.BytesIO(self.exports[response.data['url'].removeprefix('https://exports.test/')])) \
+                as zip_file, zip_file.open(zip_file.namelist()[0]) as csv_file:
+            return sorted(row[column] for row in csv.DictReader(io.TextIOWrapper(csv_file, 'utf-8-sig')))
+
+    def test_org_list(self):
+        private_org = OrganizationFactory(public_access=ACCESS_TYPE_NONE)
+
+        self.assertIn(private_org.mnemonic, self.export('/orgs/?csv=true', self.staff, 'mnemonic'))
+        for url in ['/orgs/?csv=true', '/orgs/?csv=true&type=Organization']:
+            mnemonics = self.export(url, None, 'mnemonic')
+            self.assertIn(self.org.mnemonic, mnemonics)
+            self.assertNotIn(private_org.mnemonic, mnemonics)
+
+    def test_task_list(self):
+        Task.objects.create(name='csv-owner-task', created_by=self.owner)
+        url = self.owner.uri + 'tasks/?csv=true'
+
+        self.assertEqual(self.export(url, self.owner, 'name'), ['csv-owner-task'])
+        self.assertEqual(self.export(url, self.outsider, 'name'), [])
+
+    def test_map_project_list(self):
+        MapProjectFactory(user=self.owner, organization=None, public_access=ACCESS_TYPE_NONE, name='csv-project')
+        url = self.owner.uri + 'map-projects/?csv=true&verbose=true'
+
+        self.assertEqual(self.export(url, self.owner, 'name'), ['csv-project'])
+        self.assertEqual(self.export(url, None, 'name'), [])
+
+    def test_repo_concepts(self):
+        source = UserSourceFactory(user=self.owner, public_access=ACCESS_TYPE_NONE)
+        concept = ConceptFactory(parent=source, mnemonic='csv-concept')
+        url = source.concepts_url + '?csv=true&limit=1000'
+
+        self.assertEqual(self.export(url, self.owner, 'mnemonic'), [concept.mnemonic])
+        self.assertEqual(self.request('get', url, self.outsider).status_code, 403)
+
+    def test_auto_match_run_list_checks_the_project(self):
+        project = MapProjectFactory(user=self.owner, organization=None, public_access=ACCESS_TYPE_NONE)
+        run = AutomatchRunFactory(map_project=project)
+        url = f'{self.owner.uri}map-projects/{project.id}/auto-match-runs/?csv=true'
+
+        self.assertEqual(self.export(url, self.owner, 'id'), [str(run.id)])
+        self.assertEqual(self.request('get', url, self.outsider).status_code, 403)
+        self.assertEqual(self.request('get', url, None).status_code, 401)
 
 
 class OrganizationExtrasAccessTest(AccessTestMixin, OCLAPITestCase):

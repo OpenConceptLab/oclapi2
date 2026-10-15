@@ -11,8 +11,10 @@ TRUTHY = get_truthy_values()
 
 
 class Bundle:
-    def __init__(self, root, repo_version, params=None, verbose=False, requested_url=None):  # pylint: disable=too-many-arguments
+    def __init__(  # pylint: disable=too-many-arguments
+            self, root, repo_version, params=None, verbose=False, requested_url=None, user=None):
         params = params or {}
+        self.user = user
         self.repo_version = repo_version
         self.params = params
         self.verbose = verbose
@@ -96,7 +98,14 @@ class Bundle:
             self.reverse = self.params[CASCADE_DIRECTION_PARAM] in TRUTHY
 
     def set_omit_if_exists_in(self):
-        self.omit_if_exists_in = self.params.get(OMIT_IF_EXISTS_IN, None) or None
+        """A repo the user can't view is ignored, as if the expression didn't resolve."""
+        omit_if_exists_in = self.params.get(OMIT_IF_EXISTS_IN, None) or None
+        if omit_if_exists_in:
+            from core.common.models import ConceptContainerModel
+            repo, _ = ConceptContainerModel.resolve_expression_to_version(omit_if_exists_in)
+            if get(repo, 'id') and not repo.has_view_access(self.user):
+                omit_if_exists_in = None
+        self.omit_if_exists_in = omit_if_exists_in
 
     def set_include_self(self):
         if INCLUDE_SELF in self.params:
@@ -183,8 +192,9 @@ class Bundle:
             self.root, context={'request': {'query_params': self.params}}).data
 
     def set_entries(self):
-        self.entries += self.get_concept_serializer()(self.concepts, many=True).data
-        self.entries += self.get_mapping_serializer()(self.mappings, many=True).data
+        context = {'user': self.user}
+        self.entries += self.get_concept_serializer()(self.concepts, many=True, context=context).data
+        self.entries += self.get_mapping_serializer()(self.mappings, many=True, context=context).data
 
     def get_mapping_serializer(self):
         from core.mappings.models import Mapping
@@ -210,7 +220,8 @@ class Bundle:
             params=parameters,
             verbose=is_verbose,
             repo_version=clone_from_source,
-            requested_url=requested_url
+            requested_url=requested_url,
+            user=user
         )
         bundle.set_cascade_parameters()
         _parameters = {}

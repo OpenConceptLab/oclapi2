@@ -43,7 +43,8 @@ def cd_temp():
     return cwd
 
 
-def write_csv_to_s3(data, is_owner, **kwargs):  # pragma: no cover
+def write_csv_to_s3(data, requester, **kwargs):  # pragma: no cover
+    """Uploads `data` as a zipped CSV to the requester's own downloads folder and returns its URL."""
     cwd = cd_temp()
     csv_file = csv_file_for(data, **kwargs)
     csv_file.close()
@@ -51,7 +52,7 @@ def write_csv_to_s3(data, is_owner, **kwargs):  # pragma: no cover
     with zipfile.ZipFile(zip_file_name, 'w', zipfile.ZIP_DEFLATED) as zip_file:
         zip_file.write(csv_file.name)
 
-    key = get_downloads_path(is_owner) + zip_file.filename
+    key = f'downloads/reader/{requester}/' + zip_file.filename
     get_export_service().upload_file(
         key=key, file_path=os.path.abspath(zip_file.filename), binary=True,
         metadata={'ContentType': 'application/zip'}, headers={'content-type': 'application/zip'}
@@ -67,20 +68,6 @@ def compact_dict_by_values(_dict):
             copied_dict.pop(key)
 
     return copied_dict
-
-
-def get_downloads_path(is_owner):  # pragma: no cover
-    return 'downloads/creator/' if is_owner else 'downloads/reader/'
-
-
-def get_csv_from_s3(filename, is_owner):  # pragma: no cover
-    filename = get_downloads_path(is_owner) + filename + '.csv.zip'
-
-    export_service = get_export_service()
-    if export_service.exists(filename):
-        return export_service.url_for(filename)
-
-    return None
 
 
 def reverse_resource(resource, viewname, args=None, kwargs=None, **extra):

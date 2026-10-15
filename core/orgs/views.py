@@ -51,7 +51,7 @@ class OrganizationListView(BaseAPIView,
             username = get(self.request.user, 'username')
 
         if username:
-            self.queryset = self.get_visible(Organization.get_by_username(username))
+            self.queryset = Organization.get_visible_to(self.request.user, Organization.get_by_username(username))
         elif self.request.user.is_anonymous:
             self.queryset = Organization.get_public()
         elif self.request.user.is_superuser or self.request.user.is_staff:
@@ -69,16 +69,6 @@ class OrganizationListView(BaseAPIView,
             self.queryset = self.queryset.annotate(mem_count=Count('members')).filter(mem_count=0)
 
         return self.queryset.distinct()
-
-    def get_visible(self, queryset):
-        """Limits `queryset` to the orgs the requester can view: public orgs and the requester's own."""
-        user = self.request.user
-        if user.is_superuser or user.is_staff:
-            return queryset
-        visible = Organization.get_public()
-        if user.is_authenticated:
-            visible = visible | Organization.get_by_username(user.username)
-        return queryset.filter(id__in=visible.values('id'))
 
     def get_serializer_class(self):
         if self.request.method == 'GET' and self.is_verbose():

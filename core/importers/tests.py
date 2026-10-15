@@ -2087,6 +2087,14 @@ class ResourceImporterModelsTest(OCLTestCase):
         self.assertEqual(importer.delete(), PERMISSION_DENIED)
         self.assertTrue(Organization.objects.filter(mnemonic=org.mnemonic).exists())
 
+    def test_organization_importer_does_not_create_org_whose_name_differs_only_in_case(self):
+        OrganizationFactory(mnemonic='TwinOrg')
+        importer = OrganizationImporter({'id': 'twinorg', 'name': 'Twin'}, UserProfileFactory())
+        importer.parse()
+
+        self.assertEqual(importer.process(), FAILED)
+        self.assertFalse(Organization.objects.filter(mnemonic='twinorg').exists())
+
     def test_organization_importer_delete_not_found(self):
         importer = OrganizationImporter({'id': 'DoesNotExist'}, UserProfileFactory())
         self.assertEqual(importer.delete(), NOT_FOUND)

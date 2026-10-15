@@ -250,7 +250,7 @@ class QueryHelperTests(OCLTestCase):
         )
         with patch('core.graphql.queries.Source.get_version', return_value=self.source):
             success = async_to_sync(resolve_source_version)(
-                self.organization.mnemonic, self.source.mnemonic, None
+                self.organization.mnemonic, self.source.mnemonic, None, self.audit_user
             )
         self.assertEqual(success, self.source)
 
@@ -258,17 +258,17 @@ class QueryHelperTests(OCLTestCase):
             'core.graphql.queries.Source.find_latest_released_version_by', return_value=fallback_only
         ):
             resolved = async_to_sync(resolve_source_version)(
-                self.organization.mnemonic, fallback_only.mnemonic, None
+                self.organization.mnemonic, fallback_only.mnemonic, None, self.audit_user
             )
         self.assertEqual(resolved, fallback_only)
         with self.assertRaises(GraphQLError):
             async_to_sync(resolve_source_version)(
-                self.organization.mnemonic, 'missing-source', 'v-does-not-exist'
+                self.organization.mnemonic, 'missing-source', 'v-does-not-exist', self.audit_user
             )
 
         base_qs = build_base_queryset(self.source)
         mapping_prefetch = build_mapping_prefetch(self.source)
-        global_prefetch = build_global_mapping_prefetch()
+        global_prefetch = build_global_mapping_prefetch(self.audit_user)
         self.assertIsNotNone(mapping_prefetch)
         self.assertIsNotNone(global_prefetch)
 
@@ -287,7 +287,7 @@ class QueryHelperTests(OCLTestCase):
             'core.graphql.queries.Source.find_latest_released_version_by', return_value=None
         ):
             with self.assertRaises(GraphQLError):
-                async_to_sync(resolve_source_version)('ORG', 'SRC', None)
+                async_to_sync(resolve_source_version)('ORG', 'SRC', None, self.audit_user)
 
         self.assertIsNone(normalize_pagination(None, None))
         self.assertFalse(has_next(10, None))
@@ -387,7 +387,7 @@ class QueryHelperTests(OCLTestCase):
         self.assertIsNone(format_datetime_for_api(None))
 
     def test_concept_ids_from_es_paths(self):
-        ids, total = concept_ids_from_es('   ', self.source, None)
+        ids, total = concept_ids_from_es('   ', self.source, None, self.audit_user)
         self.assertEqual(ids, [])
         self.assertEqual(total, 0)
 
@@ -426,12 +426,12 @@ class QueryHelperTests(OCLTestCase):
             'core.graphql.queries.ConceptDocument.search',
             return_value=FakeSearch([self.concept1.id, self.concept2.id]),
         ):
-            ids, total = concept_ids_from_es('search text', self.source, {'start': 0, 'end': 1})
+            ids, total = concept_ids_from_es('search text', self.source, {'start': 0, 'end': 1}, self.audit_user)
         self.assertEqual(ids, [self.concept1.id])
         self.assertEqual(total, 2)
 
         with patch('core.graphql.queries.ConceptDocument.search', side_effect=Exception('boom')):
-            self.assertIsNone(concept_ids_from_es('text', self.source, None))
+            self.assertIsNone(concept_ids_from_es('text', self.source, None, self.audit_user))
 
     def test_fallback_and_concepts_queries(self):
         base_qs = build_base_queryset(self.source)
@@ -453,20 +453,20 @@ class QueryHelperTests(OCLTestCase):
 
         with patch('core.graphql.queries.concept_ids_from_es', return_value=([self.concept2.id], 1)):
             concepts, total = async_to_sync(concepts_for_query)(
-                base_qs, 'anything', self.source, None, mapping_prefetch
+                base_qs, 'anything', self.source, None, mapping_prefetch, self.audit_user
             )
         self.assertEqual(total, 1)
         self.assertEqual(concepts[0].id, self.concept2.id)
 
         with patch('core.graphql.queries.concept_ids_from_es', return_value=None):
             concepts, total = async_to_sync(concepts_for_query)(
-                base_qs, 'UTIL', self.source, normalize_pagination(1, 1), mapping_prefetch
+                base_qs, 'UTIL', self.source, normalize_pagination(1, 1), mapping_prefetch, self.audit_user
             )
         self.assertGreaterEqual(total, 1)
 
         with patch('core.graphql.queries.concept_ids_from_es', return_value=([], 2)):
             concepts, total = async_to_sync(concepts_for_query)(
-                base_qs, 'UTIL', self.source, None, mapping_prefetch
+                base_qs, 'UTIL', self.source, None, mapping_prefetch, self.audit_user
             )
         self.assertEqual(total, 2)
         self.assertEqual(concepts, [])
@@ -480,7 +480,7 @@ class QueryHelperTests(OCLTestCase):
         with self.assertRaises(GraphQLError):
             async_to_sync(Query().concepts)(info_invalid, query='test')
 
-        info_valid = SimpleNamespace(context=SimpleNamespace(auth_status='valid'))
+        info_valid = SimpleNamespace(context=SimpleNamespace(auth_status='valid', user=self.audit_user))
         with self.assertRaises(GraphQLError):
             async_to_sync(Query().concepts)(info_valid)
 

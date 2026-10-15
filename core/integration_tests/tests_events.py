@@ -172,11 +172,11 @@ class UserEventsViewTest(OCLAPITestCase):
         # 1. Mario's event of joining Gotham Gazette
         # 2. Penguin's event of joining Gotham
         # 3. Joker's event of joining Gotham
-        # 4. Bruce's follow of Gotham Gazette Crime Deptt
-        # 5. Bruce's follow of Gotham Gazette
-        # 6. Joker's event of following Bruce
-        # 7. OCL's event of creation of Gotham Gazette
-        self.assertEqual(len(response.data), 7)
+        # 4. Bruce's follow of Gotham Gazette
+        # 5. Joker's event of following Bruce
+        # 6. OCL's event of creation of Gotham Gazette
+        # Not Bruce's follow of the private Gotham Gazette Crime Deptt: that event is private
+        self.assertEqual(len(response.data), 6)
         self.assertEqual(response.data[0]['object']['url'], mario.url)
         self.assertEqual(response.data[0]['referenced_object']['url'], gotham_gazette.url)
         self.assertEqual(response.data[1]['object']['url'], penguin.url)
@@ -184,13 +184,11 @@ class UserEventsViewTest(OCLAPITestCase):
         self.assertEqual(response.data[2]['object']['url'], joker.url)
         self.assertEqual(response.data[2]['referenced_object']['url'], gotham.url)
         self.assertEqual(response.data[3]['object']['url'], bruce.url)
-        self.assertEqual(response.data[3]['referenced_object']['url'], gotham_gazette_crime_repo.url)
-        self.assertEqual(response.data[4]['object']['url'], bruce.url)
-        self.assertEqual(response.data[4]['referenced_object']['url'], gotham_gazette.url)
-        self.assertEqual(response.data[5]['object']['url'], joker.url)
-        self.assertEqual(response.data[5]['referenced_object']['url'], bruce.url)
-        self.assertEqual(response.data[6]['object']['url'], '/users/ocladmin/')
-        self.assertEqual(response.data[6]['referenced_object']['url'], gotham_gazette.url)
+        self.assertEqual(response.data[3]['referenced_object']['url'], gotham_gazette.url)
+        self.assertEqual(response.data[4]['object']['url'], joker.url)
+        self.assertEqual(response.data[4]['referenced_object']['url'], bruce.url)
+        self.assertEqual(response.data[5]['object']['url'], '/users/ocladmin/')
+        self.assertEqual(response.data[5]['referenced_object']['url'], gotham_gazette.url)
 
         response = self.client.get(
             '/users/bruce/events/?scopes=following',
@@ -201,12 +199,12 @@ class UserEventsViewTest(OCLAPITestCase):
         # 1. Mario's event of joining Gotham Gazette
         # 2. Penguin's event of joining Gotham
         # 3. Joker's event of joining Gotham
-        # 4. Bruce's follow of Gotham Gazette Crime Deptt
-        # 5. Bruce's follow of Gotham Gazette
-        # 6. Joker's event of following Bruce
-        # 7. OCL's event of creation of Gotham Gazette
-        # Not the private creation of Gotham Gazette Crime Deptt: Bruce can't view that repo
-        self.assertEqual(len(response.data), 7)
+        # 4. Bruce's follow of Gotham Gazette
+        # 5. Joker's event of following Bruce
+        # 6. OCL's event of creation of Gotham Gazette
+        # Not the private creation of Gotham Gazette Crime Deptt, nor Bruce's (private) follow of it:
+        # Bruce can't view that repo
+        self.assertEqual(len(response.data), 6)
         self.assertEqual(response.data[0]['object']['url'], mario.url)
         self.assertEqual(response.data[0]['referenced_object']['url'], gotham_gazette.url)
         self.assertEqual(response.data[1]['object']['url'], penguin.url)
@@ -214,13 +212,11 @@ class UserEventsViewTest(OCLAPITestCase):
         self.assertEqual(response.data[2]['object']['url'], joker.url)
         self.assertEqual(response.data[2]['referenced_object']['url'], gotham.url)
         self.assertEqual(response.data[3]['object']['url'], bruce.url)
-        self.assertEqual(response.data[3]['referenced_object']['url'], gotham_gazette_crime_repo.url)
-        self.assertEqual(response.data[4]['object']['url'], bruce.url)
-        self.assertEqual(response.data[4]['referenced_object']['url'], gotham_gazette.url)
-        self.assertEqual(response.data[5]['object']['url'], joker.url)
-        self.assertEqual(response.data[5]['referenced_object']['url'], bruce.url)
-        self.assertEqual(response.data[6]['object']['url'], '/users/ocladmin/')
-        self.assertEqual(response.data[6]['referenced_object']['url'], gotham_gazette.url)
+        self.assertEqual(response.data[3]['referenced_object']['url'], gotham_gazette.url)
+        self.assertEqual(response.data[4]['object']['url'], joker.url)
+        self.assertEqual(response.data[4]['referenced_object']['url'], bruce.url)
+        self.assertEqual(response.data[5]['object']['url'], '/users/ocladmin/')
+        self.assertEqual(response.data[5]['referenced_object']['url'], gotham_gazette.url)
 
         mario.follow(gotham_gazette_crime_repo)
         response = self.client.get(
@@ -234,6 +230,80 @@ class UserEventsViewTest(OCLAPITestCase):
             if event['object']['url'] == '/users/ocladmin/'
         ]
         self.assertIn(gotham_gazette_crime_repo.url, created_urls)
+
+    def test_get_following_events_without_followed_users_private_events(self):
+        followed = UserProfileFactory(username='followed')
+        follower = UserProfileFactory(username='follower')
+        member = UserProfileFactory(username='member')
+        staff = UserProfileFactory(username='staff', is_staff=True)
+        private_org = OrganizationFactory(mnemonic='private-org', public_access='None')
+        private_org.members.add(followed, member)
+        joined_private_org_event = EventFactory(
+            object_url=followed.url, referenced_object_url=private_org.url, actor=followed, event_type='Joined',
+            public=False)
+        for user in [follower, member, staff]:
+            user.follow(followed)
+
+        def get_event_ids(user, scopes):
+            response = self.client.get(
+                f'/users/{user.username}/events/?scopes={scopes}', HTTP_AUTHORIZATION=f'Token {user.get_token()}')
+            self.assertEqual(response.status_code, 200)
+            return [event['id'] for event in response.data]
+
+        self.assertNotIn(joined_private_org_event.id, get_event_ids(follower, 'following'))
+        self.assertNotIn(joined_private_org_event.id, get_event_ids(follower, 'all'))
+        self.assertNotIn(joined_private_org_event.id, get_event_ids(member, 'following'))
+        self.assertIn(joined_private_org_event.id, get_event_ids(member, 'orgs'))
+        self.assertIn(joined_private_org_event.id, get_event_ids(staff, 'following'))
+
+    def test_get_follow_events_of_private_objects(self):
+        private_org = OrganizationFactory(mnemonic='private-org', public_access='None')
+        private_source = OrganizationSourceFactory(organization=private_org, public_access='None')
+        public_org = OrganizationFactory(mnemonic='public-org')
+        member = UserProfileFactory(username='member')
+        private_org.members.add(member)
+        outsider = UserProfileFactory(username='outsider')
+        staff = UserProfileFactory(username='staff', is_staff=True)
+        for followed in [private_org, private_source, public_org]:
+            member.follow(followed)
+
+        def get_followed_urls(user=None):
+            headers = {'HTTP_AUTHORIZATION': f'Token {user.get_token()}'} if user else {}
+            response = self.client.get('/users/member/events/', **headers)
+            self.assertEqual(response.status_code, 200)
+            return sorted(event['referenced_object']['url'] for event in response.data)
+
+        self.assertEqual(get_followed_urls(), [public_org.url])
+        self.assertEqual(get_followed_urls(outsider), [public_org.url])
+        for user in [member, staff]:
+            self.assertEqual(get_followed_urls(user), sorted([private_org.url, private_source.url, public_org.url]))
+
+    def test_get_events_show_objects_only_to_requesters_who_can_view_them_now(self):
+        org = OrganizationFactory(mnemonic='turned-private-org')
+        source = OrganizationSourceFactory(organization=org, mnemonic='turned-private')
+        member = UserProfileFactory(username='turned-member')
+        org.members.add(member)
+        follower = UserProfileFactory(username='turned-follower')
+        follower.follow(source)
+        source.public_access = 'None'
+        source.save()
+
+        def get_events(user=None, params=''):
+            headers = {'HTTP_AUTHORIZATION': f'Token {user.get_token()}'} if user else {}
+            response = self.client.get(f'/users/turned-follower/events/{params}', **headers)
+            self.assertEqual(response.status_code, 200)
+            return response.data
+
+        # the event was public when recorded; the source it shows is live, so it's shown only to those who can view it
+        for user in [None, follower]:
+            events = get_events(user)
+            self.assertEqual([event['referenced_object'] for event in events], [None], user)
+            self.assertEqual([event['description'] for event in events], ['Followed'], user)
+            # no CSV export, which would skip these checks
+            self.assertEqual(get_events(user, '?csv=true'), events, user)
+        events = get_events(member)
+        self.assertEqual([event['referenced_object']['url'] for event in events], [source.url])
+        self.assertNotEqual(events[0]['description'], 'Followed')
 
     def test_get_orgs_events(self):  # pylint:disable=too-many-statements,too-many-locals
         alfred = UserProfileFactory(username='alfred', first_name='Alfred', last_name='Pennyworth')
@@ -407,7 +477,8 @@ class UserEventsViewTest(OCLAPITestCase):
             '/users/bruce/events/?scopes=all'
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 12)
+        # not Bruce's follow of the private Gotham Gazette Crime Unit: that event is private
+        self.assertEqual(len(response.data), 11)
         self.assertEqual(response.data[0]['object']['url'], mario.url)
         self.assertEqual(response.data[0]['referenced_object']['url'], gotham_gazette.url)
         self.assertEqual(response.data[1]['object']['url'], penguin.url)
@@ -421,17 +492,15 @@ class UserEventsViewTest(OCLAPITestCase):
         self.assertEqual(response.data[5]['object']['url'], bruce.url)
         self.assertEqual(response.data[5]['referenced_object']['url'], wayne_corp.url)
         self.assertEqual(response.data[6]['object']['url'], bruce.url)
-        self.assertEqual(response.data[6]['referenced_object']['url'], gotham_gazette_crime_repo.url)
-        self.assertEqual(response.data[7]['object']['url'], bruce.url)
-        self.assertEqual(response.data[7]['referenced_object']['url'], gotham_gazette.url)
-        self.assertEqual(response.data[8]['object']['url'], joker.url)
-        self.assertEqual(response.data[8]['referenced_object']['url'], bruce.url)
+        self.assertEqual(response.data[6]['referenced_object']['url'], gotham_gazette.url)
+        self.assertEqual(response.data[7]['object']['url'], joker.url)
+        self.assertEqual(response.data[7]['referenced_object']['url'], bruce.url)
+        self.assertEqual(response.data[8]['object']['url'], '/users/ocladmin/')
+        self.assertEqual(response.data[8]['referenced_object']['url'], gotham_gazette.url)
         self.assertEqual(response.data[9]['object']['url'], '/users/ocladmin/')
-        self.assertEqual(response.data[9]['referenced_object']['url'], gotham_gazette.url)
+        self.assertEqual(response.data[9]['referenced_object']['url'], gotham.url)
         self.assertEqual(response.data[10]['object']['url'], '/users/ocladmin/')
-        self.assertEqual(response.data[10]['referenced_object']['url'], gotham.url)
-        self.assertEqual(response.data[11]['object']['url'], '/users/ocladmin/')
-        self.assertEqual(response.data[11]['referenced_object']['url'], wayne_corp.url)
+        self.assertEqual(response.data[10]['referenced_object']['url'], wayne_corp.url)
 
         response = self.client.get(
             '/users/bruce/events/?scopes=all',  # all = orgs + following
@@ -439,8 +508,9 @@ class UserEventsViewTest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 200)
         bruce_all_events = response.data
-        # not the private creation of Gotham Gazette Crime Unit: Bruce follows it but can't view it
-        self.assertEqual(len(bruce_all_events), 15)
+        # not the private creation of Gotham Gazette Crime Unit, nor Bruce's (private) follow of it:
+        # Bruce follows it but can't view it
+        self.assertEqual(len(bruce_all_events), 14)
         self.assertEqual(response.data[0]['object']['url'], mario.url)
         self.assertEqual(response.data[0]['referenced_object']['url'], gotham_gazette.url)
         self.assertEqual(response.data[1]['object']['url'], penguin.url)
@@ -458,19 +528,17 @@ class UserEventsViewTest(OCLAPITestCase):
         self.assertEqual(response.data[7]['object']['url'], bruce.url)
         self.assertEqual(response.data[7]['referenced_object']['url'], bat_cave.url)
         self.assertEqual(response.data[8]['object']['url'], bruce.url)
-        self.assertEqual(response.data[8]['referenced_object']['url'], gotham_gazette_crime_repo.url)
-        self.assertEqual(response.data[9]['object']['url'], bruce.url)
-        self.assertEqual(response.data[9]['referenced_object']['url'], gotham_gazette.url)
-        self.assertEqual(response.data[10]['object']['url'], joker.url)
-        self.assertEqual(response.data[10]['referenced_object']['url'], bruce.url)
+        self.assertEqual(response.data[8]['referenced_object']['url'], gotham_gazette.url)
+        self.assertEqual(response.data[9]['object']['url'], joker.url)
+        self.assertEqual(response.data[9]['referenced_object']['url'], bruce.url)
+        self.assertEqual(response.data[10]['object']['url'], '/users/ocladmin/')
+        self.assertEqual(response.data[10]['referenced_object']['url'], gotham_gazette.url)
         self.assertEqual(response.data[11]['object']['url'], '/users/ocladmin/')
-        self.assertEqual(response.data[11]['referenced_object']['url'], gotham_gazette.url)
+        self.assertEqual(response.data[11]['referenced_object']['url'], gotham.url)
         self.assertEqual(response.data[12]['object']['url'], '/users/ocladmin/')
-        self.assertEqual(response.data[12]['referenced_object']['url'], gotham.url)
+        self.assertEqual(response.data[12]['referenced_object']['url'], bat_cave.url)
         self.assertEqual(response.data[13]['object']['url'], '/users/ocladmin/')
-        self.assertEqual(response.data[13]['referenced_object']['url'], bat_cave.url)
-        self.assertEqual(response.data[14]['object']['url'], '/users/ocladmin/')
-        self.assertEqual(response.data[14]['referenced_object']['url'], wayne_corp.url)
+        self.assertEqual(response.data[13]['referenced_object']['url'], wayne_corp.url)
 
         response = self.client.get(
             '/users/bruce/events/?scopes=orgs,following',

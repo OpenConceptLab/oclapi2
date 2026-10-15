@@ -2,12 +2,14 @@ from django.core.exceptions import ValidationError
 from mock import Mock
 
 from core.collections.tests.factories import OrganizationCollectionFactory
+from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
 from core.pins.models import Pin
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
+from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
 
@@ -221,6 +223,57 @@ class PinListViewTest(OCLAPITestCase):
             sorted([resource['resource_uri'] for resource in response.data]),
             sorted([source.uri, collection.uri])
         )
+
+    def test_get_200_only_pins_the_requester_can_view(self):
+        private_org = OrganizationFactory(public_access=ACCESS_TYPE_NONE)
+        public_org = OrganizationFactory()
+        owner = UserProfileFactory(organizations=[private_org, public_org])
+        private_source = OrganizationSourceFactory(organization=private_org, public_access=ACCESS_TYPE_NONE)
+        public_source = OrganizationSourceFactory(organization=public_org)
+        private_user_pin = owner.pins.create(resource=private_source)
+        owner.pins.create(resource=public_source)
+        owner.pins.create(resource=private_org)
+        public_org.pins.create(resource=private_source)
+        public_org.pins.create(resource=public_source)
+        private_org.pins.create(resource=public_source)
+        admin = UserProfile.objects.get(username='ocladmin')
+
+        def get_pin_uris(url, token=None):
+            headers = {'HTTP_AUTHORIZATION': 'Token ' + token} if token else {}
+            response = self.client.get(url, format='json', **headers)
+            self.assertEqual(response.status_code, 200)
+            return sorted(pin['resource_uri'] for pin in response.data)
+
+        for token in [None, UserProfileFactory().get_token()]:
+            self.assertEqual(get_pin_uris(owner.uri + 'pins/', token), [public_source.uri])
+            self.assertEqual(get_pin_uris(public_org.uri + 'pins/', token), [public_source.uri])
+            self.assertEqual(get_pin_uris(private_org.uri + 'pins/', token), [])
+            headers = {'HTTP_AUTHORIZATION': 'Token ' + token} if token else {}
+            response = self.client.get(
+                owner.uri + f'pins/{private_user_pin.id}/', format='json', **headers)
+            self.assertEqual(response.status_code, 404)
+
+        for token in [owner.get_token(), admin.get_token()]:
+            self.assertEqual(
+                get_pin_uris(owner.uri + 'pins/', token),
+                sorted([private_source.uri, public_source.uri, private_org.uri]))
+            self.assertEqual(
+                get_pin_uris(public_org.uri + 'pins/', token), sorted([private_source.uri, public_source.uri]))
+            self.assertEqual(get_pin_uris(private_org.uri + 'pins/', token), [public_source.uri])
+
+        private_org.members.remove(owner)
+        self.assertEqual(get_pin_uris(owner.uri + 'pins/', owner.get_token()), [public_source.uri])
+        response = self.client.get(
+            owner.uri + '?includePins=true', HTTP_AUTHORIZATION='Token ' + owner.get_token(), format='json')
+        self.assertEqual([pin['resource_uri'] for pin in response.data['pins']], [public_source.uri])
+
+        # an update would return the resource, so it's refused; the owner can still delete the pin
+        pin_url = owner.uri + f'pins/{private_user_pin.id}/'
+        response = self.client.patch(
+            pin_url, {'order': 0}, HTTP_AUTHORIZATION='Token ' + owner.get_token(), format='json')
+        self.assertEqual(response.status_code, 404)
+        response = self.client.delete(pin_url, HTTP_AUTHORIZATION='Token ' + owner.get_token(), format='json')
+        self.assertEqual(response.status_code, 204)
 
     def test_post_201(self):
         source = OrganizationSourceFactory()

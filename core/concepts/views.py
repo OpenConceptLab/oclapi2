@@ -6,6 +6,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import F, Q as DjangoQ
 from django.http import Http404
+from django.views.decorators.cache import cache_page
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from elasticsearch_dsl import Q
@@ -44,7 +45,7 @@ from core.common.swagger_parameters import (
     match_brief_param, match_encoder_model_param, match_reranker_param, match_offset_param)
 from core.common.tasks import delete_concept, make_hierarchy
 from core.common.throttling import ThrottleUtil
-from core.common.utils import (to_parent_uri_from_kwargs, generate_temp_version, get_truthy_values, to_int,
+from core.common.utils import (generate_temp_version, get_truthy_values, to_int,
                                drop_version, get_falsy_values, parse_id, get_event_metadata)
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
@@ -60,7 +61,8 @@ from core.concepts.serializers import (
     ConceptDetailSerializer, ConceptListSerializer, ConceptDescriptionSerializer, ConceptNameSerializer,
     ConceptVersionDetailSerializer,
     ConceptVersionListSerializer, ConceptSummarySerializer, ConceptMinimalSerializer,
-    ConceptChildrenSerializer, ConceptParentsSerializer, ConceptLookupListSerializer, ConceptChecksumSerializer)
+    ConceptChildrenSerializer, ConceptParentsSerializer, ConceptLookupListSerializer, ConceptChecksumSerializer,
+    get_viewable_concepts, get_collection_uri_from_view)
 from core.mappings.serializers import MappingListSerializer
 from core.sources.clone_limits import clone_limit_error_detail, clone_lock, get_clone_budget
 from core.sources.models import CloneError, CloneLimitExceeded
@@ -104,7 +106,28 @@ class ConceptBaseView(SourceChildCommonBaseView):
         self.kwargs['parent_resource'] = self.parent_resource = parent_resource
 
 
-# this is a cached view (expiry 24 hours)
+def cache_public_source_lookup(view_func):
+    """Caches lookups of public sources only: a cached response is served to anyone,
+    without the view's access check."""
+    cached_view_func = cache_page(timeout=60 * 60 * 24, key_prefix='cache_lookup')(view_func)
+
+    def wrapper(request, *args, **kwargs):
+        from core.sources.models import Source
+        owner_filters = None
+        if 'org' in kwargs:
+            owner_filters = {'organization__mnemonic': kwargs['org']}
+        elif 'user' in kwargs:
+            owner_filters = {'user__username': kwargs['user']}
+        source = Source.get_version(kwargs['source'], HEAD, owner_filters) if owner_filters and kwargs.get(
+            'source') else None
+        if source and source.public_can_view:
+            return cached_view_func(request, *args, **kwargs)
+        return view_func(request, *args, **kwargs)
+
+    return wrapper
+
+
+# this is a cached view for public sources (expiry 24 hours)
 # used for TermBrowser forms lookup values -- map-types/locales/datatypes/etc
 class ConceptLookupValuesView(ListAPIView, BaseAPIView):  # pragma: no cover
     serializer_class = ConceptLookupListSerializer
@@ -125,7 +148,7 @@ class ConceptLookupValuesView(ListAPIView, BaseAPIView):  # pragma: no cover
 
     def get_queryset(self):
         self.set_parent_resource()
-        if self.parent_resource:
+        if self.parent_resource and self.parent_resource.has_view_access(self.request.user):
             queryset = self.parent_resource.concepts_set.filter(id=F('versioned_object_id'))
             if self.is_verbose():
                 queryset = queryset.prefetch_related('names')
@@ -323,10 +346,11 @@ class ConceptCollectionMembershipView(ConceptBaseView, ListWithHeadersMixin):
         instance = self.get_object()
 
         from core.collections.models import Collection
-        return Collection.objects.filter(id__in=instance.expansion_set.filter(
+        expansions = Concept.filter_by_viewable_collection_version(instance.expansion_set.filter(
             collection_version__organization_id=instance.parent.organization_id,
             collection_version__user_id=instance.parent.user_id
-        ).values_list('collection_version_id', flat=True))
+        ), self.request.user)
+        return Collection.objects.filter(id__in=expansions.values_list('collection_version_id', flat=True))
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
@@ -518,12 +542,19 @@ class ConceptCascadeView(ConceptBaseView):
             omit_if_exists_in_param, equivalency_map_types_param
         ]
     )
+    def set_cascade_repo(self):
+        """The repo the cascade runs over, from the URL. Query params can pick the root concept from another repo,
+        so this one's view access is checked too."""
+        self.set_parent_resource(False)
+        if self.parent_resource and not self.parent_resource.has_view_access(self.request.user):
+            raise Http404()
+
     def get(self, request, **kwargs):  # pylint: disable=unused-argument
         instance = self.get_object()
-        self.set_parent_resource(False)
+        self.set_cascade_repo()
         bundle = Bundle(
             root=instance, params=self.request.query_params, verbose=self.is_verbose(),
-            repo_version=self.parent_resource, requested_url=self.request.get_full_path()
+            repo_version=self.parent_resource, requested_url=self.request.get_full_path(), user=self.request.user
         )
         bundle.cascade()
         return Response(BundleSerializer(bundle, context={'request': request}).data)
@@ -541,7 +572,7 @@ class ConceptCloneView(ConceptCascadeView):
             }
         """
         clone_to_source = self.get_clone_to_source()
-        self.set_parent_resource(False)
+        self.set_cascade_repo()
         budget = get_clone_budget(request.user)
         parameters = dict(request.data.get('parameters') or {})
         parameters.pop('resource_budget', None)
@@ -571,6 +602,7 @@ class ConceptCloneView(ConceptCascadeView):
 
 
 class ConceptChildrenView(ConceptBaseView, ListWithHeadersMixin):
+    is_searchable = False  # a search would list the repo's concepts, not this concept's hierarchy
     serializer_class = ConceptChildrenSerializer
     default_qs_sort_attr = 'mnemonic'
 
@@ -583,13 +615,14 @@ class ConceptChildrenView(ConceptBaseView, ListWithHeadersMixin):
             raise Http404()
 
         self.check_object_permissions(self.request, instance)
-        return instance.child_concept_queryset()
+        return get_viewable_concepts(instance.child_concept_queryset(), self.request)
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
 
 
 class ConceptParentsView(ConceptBaseView, ListWithHeadersMixin):
+    is_searchable = False  # a search would list the repo's concepts, not this concept's hierarchy
     serializer_class = ConceptParentsSerializer
 
     def get_queryset(self):
@@ -601,7 +634,7 @@ class ConceptParentsView(ConceptBaseView, ListWithHeadersMixin):
             raise Http404()
 
         self.check_object_permissions(self.request, instance)
-        return instance.parent_concept_queryset()
+        return get_viewable_concepts(instance.parent_concept_queryset(), self.request)
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
@@ -668,7 +701,7 @@ class ConceptMappingsView(ConceptBaseView, ListWithHeadersMixin):
         include_indirect_mappings = self.request.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM, 'false') in TRUTHY
         is_collection = 'collection' in self.kwargs
         collection_version = self.kwargs.get('version', HEAD) if is_collection else None
-        parent_uri = to_parent_uri_from_kwargs(self.kwargs) if is_collection else None
+        parent_uri = get_collection_uri_from_view(self, self.request) if is_collection else None
         if include_indirect_mappings:
             mappings_queryset = concept.get_bidirectional_mappings_for_collection(
                 parent_uri, collection_version
@@ -1151,11 +1184,19 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):  # pragma: no
                 raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')
             repo_params = ConceptFuzzySearch.get_repo_params(repo)
         elif target_repo_params:
-            repos = MetadataToConceptsListView.get_target_repos_from_params(target_repo_params)
-            if not repos.exists() or not all(target_repo.has_view_access(user) for target_repo in repos):
+            repos = list(MetadataToConceptsListView.get_target_repos_from_params(target_repo_params))
+            if not repos or not all(target_repo.has_view_access(user) for target_repo in repos):
                 raise Http400(f'Unable to resolve "target_repo": "{target_repo_params}"')
-            repo = repos.first()
-            repo_params = target_repo_params
+            repo = repos[0]
+            # search the repos that were checked, by their stored names: target_repo's own values may differ
+            # in case or key names (e.g. "version", "org"), which the search filters would read differently
+            repo_params = {'owner': repo.parent.mnemonic, 'source': repo.mnemonic}
+            owner_types = {target_repo.parent.resource_type for target_repo in repos}
+            if len(owner_types) == 1:
+                repo_params['owner_type'] = owner_types.pop()
+            version = get(target_repo_params, 'source_version') or get(target_repo_params, 'version')
+            if version:
+                repo_params['source_version'] = version
         else:
             raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')
         if is_semantic and not repo.has_semantic_match_algorithm:

@@ -218,8 +218,10 @@ class UserBaseView(BaseAPIView):
     def get_queryset(self):
         updated_since = parse_updated_since_param(self.request.query_params)
         updated_by = self.request.query_params.get(UPDATED_BY_USERNAME_PARAM, None)
-        last_login_since = self.request.query_params.get(LAST_LOGIN_SINCE_PARAM, None)
-        last_login_before = self.request.query_params.get(LAST_LOGIN_BEFORE_PARAM, None)
+        last_login_since = last_login_before = None
+        if self.request.user.is_staff:  # last login is staff-only account data
+            last_login_since = self.request.query_params.get(LAST_LOGIN_SINCE_PARAM, None)
+            last_login_before = self.request.query_params.get(LAST_LOGIN_BEFORE_PARAM, None)
         date_joined_since = self.request.query_params.get(DATE_JOINED_SINCE_PARAM, None)
         date_joined_before = self.request.query_params.get(DATE_JOINED_BEFORE_PARAM, None)
         if updated_since:
@@ -620,7 +622,7 @@ class UserFollowingListView(AbstractFollowerFollowedView, ListAPIView):
     serializer_class = FollowingSerializer
 
     def get_queryset(self):
-        return self.get_object().following.filter()
+        return self.get_object().get_following_visible_to(self.request.user)
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         follower = self.get_object()

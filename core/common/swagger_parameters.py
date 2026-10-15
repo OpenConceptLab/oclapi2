@@ -78,10 +78,12 @@ processing_param = openapi.Parameter(
 )
 
 last_login_before_param = openapi.Parameter(
-    LAST_LOGIN_BEFORE_PARAM, openapi.IN_QUERY, description='YYYY-MM-DD (optional)', type=openapi.TYPE_STRING)
+    LAST_LOGIN_BEFORE_PARAM, openapi.IN_QUERY, description='YYYY-MM-DD (optional, staff only)',
+    type=openapi.TYPE_STRING)
 
 last_login_since_param = openapi.Parameter(
-    LAST_LOGIN_SINCE_PARAM, openapi.IN_QUERY, description='YYYY-MM-DD (optional)', type=openapi.TYPE_STRING)
+    LAST_LOGIN_SINCE_PARAM, openapi.IN_QUERY, description='YYYY-MM-DD (optional, staff only)',
+    type=openapi.TYPE_STRING)
 
 date_joined_before_param = openapi.Parameter(
     DATE_JOINED_BEFORE_PARAM, openapi.IN_QUERY, description='YYYY-MM-DD (optional)', type=openapi.TYPE_STRING)

@@ -17,17 +17,23 @@ from core.common.constants import ES_REQUEST_TIMEOUT
 from core.common.utils import is_url_encoded_string
 
 
+# Exact-case owner field: `owner` is lowercase-normalized, and owner names that differ only in case belong to
+# different users or orgs.
+EXACT_OWNER_FIELD = 'owner_text.keyword'
+
+
 def get_visible_repo_criteria(user):
-    """ES filter for concepts/mappings in repos the user can view: public ones, their own and their orgs'.
+    """ES filter for concepts in repos the user can view: public ones, their own and their orgs'.
     None for staff, who can view everything."""
     if get(user, 'is_staff'):
         return None
     should = [Q('term', public_can_view=True)]
     if get(user, 'is_authenticated'):
-        should.append(Q('bool', must=[Q('term', owner_type='User'), Q('term', owner=user.username.lower())]))
-        org_mnemonics = [mnemonic.lower() for mnemonic in user.organizations.values_list('mnemonic', flat=True)]
+        should.append(Q('bool', must=[Q('term', owner_type='User'), Q('term', **{EXACT_OWNER_FIELD: user.username})]))
+        org_mnemonics = list(user.organizations.values_list('mnemonic', flat=True))
         if org_mnemonics:
-            should.append(Q('bool', must=[Q('term', owner_type='Organization'), Q('terms', owner=org_mnemonics)]))
+            should.append(Q('bool', must=[
+                Q('term', owner_type='Organization'), Q('terms', **{EXACT_OWNER_FIELD: org_mnemonics})]))
     return Q('bool', should=should, minimum_should_match=1)
 
 
