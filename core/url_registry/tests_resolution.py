@@ -11,6 +11,7 @@ from pydash import get
 from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.constants import HEAD
+from core.common.models import ConceptContainerModel
 from core.common.tasks import resolve_url_registry_entries
 from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.orgs.tests.factories import OrganizationFactory
@@ -392,15 +393,25 @@ class URLRegistryLinkTest(OCLAPITestCase):
     def test_deleting_a_repository_unlinks_its_entries_instead_of_deleting_them(self, _):
         """
         A hard delete of a repository (HEAD and versions) keeps every registry entry linked to it, global and
-        owner-scoped alike, unlinked; recreating the repository links them again
+        owner-scoped alike, unlinked; recreating the repository links them again. A delete that fails part-way
+        changes nothing, and retrying it finishes the job.
         """
         entries = [self.create_entry('/', self.OLD), self.create_entry(self.org.uri, self.OLD)]
         codes = self.create_source(self.OLD)
         source(self.org, 'codes', 'v1', released=True, canonical_url=self.OLD)
+        linked = (codes, ('codes', 'acme-registry'))
         for entry in entries:
-            self.assertEqual(self.linked_repo(entry), (codes, ('codes', 'acme-registry')))
+            self.assertEqual(self.linked_repo(entry), linked)
 
-        response = self.client.delete(codes, **self.auth)
+        with patch.object(ConceptContainerModel, 'delete_version_checksum_maps', side_effect=RuntimeError('fail')):
+            response = self.client.delete(codes, **self.auth)
+        self.assertEqual(response.status_code, 400, response.data)  # delete_source reports the failure
+        self.assertEqual(Source.objects.filter(mnemonic='codes', organization=self.org).count(), 2)
+        for entry in entries:
+            self.assertEqual(self.linked_repo(entry), linked)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.delete(codes, **self.auth)
         self.assertEqual(response.status_code, 204, response.data)
         self.assertFalse(Source.objects.filter(mnemonic='codes', organization=self.org).exists())
         for entry in entries:
@@ -409,11 +420,14 @@ class URLRegistryLinkTest(OCLAPITestCase):
 
         self.assertEqual(self.create_source(self.OLD), codes)
         for entry in entries:
-            self.assertEqual(self.linked_repo(entry), (codes, ('codes', 'acme-registry')))
+            self.assertEqual(self.linked_repo(entry), linked)
 
     @patch('core.common.models.delete_s3_objects')  # export files: no broker in tests
     def test_deleting_a_version_relinks_its_entry_to_what_it_resolves_to_now(self, _):
-        """An entry linked to a version row survives that version's delete and moves to the released sibling"""
+        """
+        An entry linked to a version row survives that version's delete and moves to the released sibling; a delete
+        that fails part-way leaves it where it was, and retrying it moves it
+        """
         source(self.org, 'codes', canonical_url=self.OLD)
         source(self.org, 'codes', 'v1', released=True, canonical_url=self.NEW, is_latest_version=False)
         source(self.org, 'codes', 'v2', released=True, canonical_url=self.NEW, is_latest_version=True)
@@ -421,8 +435,16 @@ class URLRegistryLinkTest(OCLAPITestCase):
         v1_url, v2_url = f'{self.org.uri}sources/codes/v1/', f'{self.org.uri}sources/codes/v2/'
         self.assertEqual(self.linked_repo(entry), (v1_url, ('codes', 'acme-registry')))
 
-        response = self.client.delete(v1_url, **self.auth)
+        with patch.object(ConceptContainerModel, 'delete_version_checksum_maps', side_effect=RuntimeError('fail')):
+            with self.assertRaises(RuntimeError):
+                self.client.delete(v1_url, **self.auth)
+        self.assertTrue(Source.objects.filter(uri=v1_url).exists())
+        self.assertEqual(self.linked_repo(entry), (v1_url, ('codes', 'acme-registry')))
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.delete(v1_url, **self.auth)
         self.assertEqual(response.status_code, 204, getattr(response, 'data', None))
+        self.assertFalse(Source.objects.filter(uri=v1_url).exists())
         self.assertEqual(self.entry_state(entry), (True, True))
         self.assertEqual(self.linked_repo(entry), (v2_url, ('codes', 'acme-registry')))
 

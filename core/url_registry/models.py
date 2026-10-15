@@ -133,9 +133,12 @@ class URLRegistry(BaseModel):
         entries = owner.url_registry_entries.filter(is_active=True) if owner else cls.get_active_global_entries()
         return entries.filter(url=url).first()
 
-    def unlink(self):
-        """Clears the cached repository, as before that repository is deleted"""
-        self._set_repo(None)
+    def reindex(self):
+        """Indexes the entry the way its save signal does, for a change made without a save"""
+        from django.apps import apps
+        signal_processor = get(apps.get_app_config('django_elasticsearch_dsl'), 'signal_processor')
+        if signal_processor:
+            signal_processor.handle_save(URLRegistry, self)
 
     def _set_repo(self, repo):
         """Points the entry at repo, or at nothing; saves (and so reindexes) only when that changes"""

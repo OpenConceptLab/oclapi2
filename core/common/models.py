@@ -928,6 +928,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         export_paths = self.get_export_paths_to_delete()
         deleted_urls = [self.url]
         deleted_ids = [self.id]
+        prev_version = None
         if self.is_head:
             other_versions = list(self.versions.exclude(id=self.id))
             for other_version in other_versions:
@@ -939,37 +940,51 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             prev_version = self.prev_version
             if not force and not prev_version:
                 raise ValidationError({'detail': CANNOT_DELETE_ONLY_VERSION})
+
+        # all or nothing: a failure leaves every row, and every registry entry's link, as it was
+        with transaction.atomic():
             if prev_version:
                 prev_version.is_latest_version = True
                 prev_version.save()
+            registry_entry_ids = self.unlink_url_registry_entries(deleted_ids)
+            if self.is_head:
+                self.versions.exclude(id=self.id).delete()
 
-        registry_entries = self.unlink_url_registry_entries(deleted_ids)
-        if self.is_head:
-            self.versions.exclude(id=self.id).delete()
+            self.delete_pins()
+            self.delete_following()
+            self.delete_version_changelogs(deleted_urls)
+            self.delete_version_checksum_maps(deleted_urls)
 
-        self.delete_pins()
-        self.delete_following()
-        self.delete_version_changelogs(deleted_urls)
-        self.delete_version_checksum_maps(deleted_urls)
+            super().delete(using=using, keep_parents=keep_parents)
+            if registry_entry_ids:
+                transaction.on_commit(lambda: self.relink_url_registry_entries(registry_entry_ids))
 
-        super().delete(using=using, keep_parents=keep_parents)
-        for entry in registry_entries:
-            entry.lookup_entry()
         self.delete_export_paths(export_paths, sync)
         self.post_delete_actions()
 
     def unlink_url_registry_entries(self, repo_ids):
         """
-        The registry entries linked to these rows of this repository, each unlinked (saved, so reindexed) before the
-        rows are deleted: url_registry_entries is a GenericRelation, which would delete them with the rows. The
-        caller re-resolves them (lookup_entry) once the rows are gone.
+        Unlinks the registry entries linked to these rows of this repository, in the database only (no save, so no
+        indexing inside the delete's transaction), so deleting the rows doesn't delete them through the
+        url_registry_entries relation (a GenericRelation). Returns their ids, for relink_url_registry_entries.
         """
         from core.url_registry.models import URLRegistry
-        entries = list(URLRegistry.objects.filter(
-            repo_type=ContentType.objects.get_for_model(self), repo_id__in=repo_ids))
-        for entry in entries:
-            entry.unlink()
-        return entries
+        entry_ids = list(URLRegistry.objects.filter(
+            repo_type=ContentType.objects.get_for_model(self), repo_id__in=repo_ids).values_list('id', flat=True))
+        if entry_ids:
+            URLRegistry.objects.filter(id__in=entry_ids).update(repo_type=None, repo_id=None)
+        return entry_ids
+
+    @staticmethod
+    def relink_url_registry_entries(entry_ids):
+        """
+        Once the delete has committed: each of these entries that still exists is re-resolved (lookup_entry, which
+        saves, and so reindexes, when it finds a repository) or else reindexed with no repository.
+        """
+        from core.url_registry.models import URLRegistry
+        for entry in URLRegistry.objects.filter(id__in=entry_ids):
+            if entry.lookup_entry() is None:
+                entry.reindex()
 
     @staticmethod
     def delete_version_changelogs(urls):
