@@ -11,6 +11,7 @@ from pydash import get
 from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.constants import HEAD
+from core.common.models import ConceptContainerModel
 from core.common.tasks import resolve_url_registry_entries
 from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.orgs.tests.factories import OrganizationFactory
@@ -424,6 +425,67 @@ class URLRegistryLinkTest(OCLAPITestCase):
         response = self.client.delete(v1_url, **self.auth)
         self.assertEqual(response.status_code, 204, getattr(response, 'data', None))
         self.assertEqual(self.entry_state(entry), (True, True))
+        self.assertEqual(self.linked_repo(entry), (v2_url, ('codes', 'acme-registry')))
+
+    def fail_once(self):
+        """A delete that fails part-way: after the entries are unlinked and, for a HEAD, its versions deleted"""
+        return patch.object(ConceptContainerModel, 'delete_version_checksum_maps', side_effect=RuntimeError('fail'))
+
+    @patch('core.common.models.delete_s3_objects')  # export files: no broker in tests
+    def test_a_failed_repository_delete_keeps_its_entries_and_a_retry_finishes_it(self, _):
+        entries = [self.create_entry('/', self.OLD), self.create_entry(self.org.uri, self.OLD)]
+        codes = self.create_source(self.OLD)
+        source(self.org, 'codes', 'v1', released=True, canonical_url=self.OLD)
+
+        with self.fail_once():
+            response = self.client.delete(codes, **self.auth)
+        self.assertEqual(response.status_code, 400, response.data)  # delete_source reports the failure
+        for entry in entries:
+            self.assertEqual(self.entry_state(entry), (True, True))
+
+        response = self.client.delete(codes, **self.auth)
+        self.assertEqual(response.status_code, 204, response.data)
+        for entry in entries:
+            self.assertEqual(self.entry_state(entry), (True, True))
+            self.assertEqual(self.linked_repo(entry), (None, (None, None)))
+
+        self.assertEqual(self.create_source(self.OLD), codes)
+        for entry in entries:
+            self.assertEqual(self.linked_repo(entry), (codes, ('codes', 'acme-registry')))
+
+    @patch('core.common.models.delete_s3_objects')  # export files: no broker in tests
+    def test_a_retried_repository_delete_relinks_entries_its_failed_attempt_unlinked(self, _):
+        """The retry finds the entries by the deleted rows' canonical URL and links them to what is left"""
+        entry = self.create_entry('/', self.OLD)
+        codes = self.create_source(self.OLD)
+        other = source(self.org, 'codes-2', canonical_url=self.OLD)
+        self.assertEqual(self.linked_repo(entry), (codes, ('codes', 'acme-registry')))
+
+        with self.fail_once():
+            self.assertEqual(self.client.delete(codes, **self.auth).status_code, 400)
+        self.assertEqual(self.entry_state(entry), (True, True))
+
+        self.assertEqual(self.client.delete(codes, **self.auth).status_code, 204)
+        self.assertEqual(URLRegistry.objects.get(id=entry[1]).repo_id, other.id)
+        self.assertEqual(self.linked_repo(entry), (other.uri, ('codes-2', 'acme-registry')))
+
+    @patch('core.common.models.delete_s3_objects')  # export files: no broker in tests
+    def test_a_failed_version_delete_keeps_its_entry_and_a_retry_moves_it(self, _):
+        source(self.org, 'codes', canonical_url=self.OLD)
+        source(self.org, 'codes', 'v1', released=True, canonical_url=self.NEW, is_latest_version=False)
+        v2 = source(self.org, 'codes', 'v2', released=True, canonical_url=self.NEW, is_latest_version=True)
+        entry = self.create_entry('/', self.NEW)
+        v1_url, v2_url = f'{self.org.uri}sources/codes/v1/', f'{self.org.uri}sources/codes/v2/'
+        self.assertEqual(self.linked_repo(entry), (v1_url, ('codes', 'acme-registry')))
+
+        with self.fail_once(), self.assertRaises(RuntimeError):
+            self.client.delete(v1_url, **self.auth)
+        self.assertEqual(self.entry_state(entry), (True, True))
+
+        response = self.client.delete(v1_url, **self.auth)
+        self.assertEqual(response.status_code, 204, getattr(response, 'data', None))
+        self.assertEqual(self.entry_state(entry), (True, True))
+        self.assertEqual(URLRegistry.objects.get(id=entry[1]).repo_id, v2.id)
         self.assertEqual(self.linked_repo(entry), (v2_url, ('codes', 'acme-registry')))
 
     def test_a_collection_created_after_its_entry_links_it(self):

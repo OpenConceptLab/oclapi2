@@ -928,6 +928,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         export_paths = self.get_export_paths_to_delete()
         deleted_urls = [self.url]
         deleted_ids = [self.id]
+        canonical_urls = {self.canonical_url}
         if self.is_head:
             other_versions = list(self.versions.exclude(id=self.id))
             for other_version in other_versions:
@@ -935,6 +936,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 export_paths += other_version.get_export_paths_to_delete()
                 deleted_urls.append(other_version.url)
                 deleted_ids.append(other_version.id)
+                canonical_urls.add(other_version.canonical_url)
         elif self.is_latest_version:
             prev_version = self.prev_version
             if not force and not prev_version:
@@ -943,7 +945,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 prev_version.is_latest_version = True
                 prev_version.save()
 
-        registry_entries = self.unlink_url_registry_entries(deleted_ids)
+        registry_entry_ids = self.unlink_url_registry_entries(deleted_ids)
         if self.is_head:
             self.versions.exclude(id=self.id).delete()
 
@@ -953,23 +955,34 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         self.delete_version_checksum_maps(deleted_urls)
 
         super().delete(using=using, keep_parents=keep_parents)
-        for entry in registry_entries:
-            entry.lookup_entry()
         self.delete_export_paths(export_paths, sync)
         self.post_delete_actions()
+        self.relink_url_registry_entries(registry_entry_ids, canonical_urls - {None, ''})
 
     def unlink_url_registry_entries(self, repo_ids):
         """
-        The registry entries linked to these rows of this repository, each unlinked (saved, so reindexed) before the
-        rows are deleted: url_registry_entries is a GenericRelation, which would delete them with the rows. The
-        caller re-resolves them (lookup_entry) once the rows are gone.
+        Unlinks (saved, so reindexed) the registry entries linked to these rows of this repository before the rows
+        are deleted: url_registry_entries is a GenericRelation, which would delete them with the rows. Returns
+        their ids for relink_url_registry_entries.
         """
         from core.url_registry.models import URLRegistry
         entries = list(URLRegistry.objects.filter(
             repo_type=ContentType.objects.get_for_model(self), repo_id__in=repo_ids))
         for entry in entries:
             entry.unlink()
-        return entries
+        return [entry.id for entry in entries]
+
+    @staticmethod
+    def relink_url_registry_entries(entry_ids, canonical_urls):
+        """
+        After a delete: every active entry that was linked to a deleted row, and every active entry naming one of the
+        deleted rows' canonical URLs, linked or not, is re-resolved (lookup_entry). A retry of a delete that failed
+        part-way so finds, by URL, the entries the failed attempt unlinked. The link is a cache that resolution never
+        reads, so a failure here only leaves it stale until the next delete, retry or write that relinks.
+        """
+        from core.url_registry.models import URLRegistry
+        for entry in URLRegistry.objects.filter(Q(id__in=entry_ids) | Q(url__in=canonical_urls), is_active=True):
+            entry.lookup_entry()
 
     @staticmethod
     def delete_version_changelogs(urls):
