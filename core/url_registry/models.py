@@ -107,18 +107,24 @@ class URLRegistry(BaseModel):
         repo = None
 
         if entry:
-            repo = entry.lookup_entry()
+            repo = entry.find_repo()
 
         return repo, entry
 
-    def lookup_entry(self):
+    def find_repo(self, repo_type=None):
+        """
+        The repository the entry points at now: the one with its url in its namespace (none without a namespace).
+        repo_type limits it to a Source or a Collection (find_repo_by_canonical_url). Reads only.
+        """
         namespace_owner = self.namespace_owner
-        if namespace_owner:
-            repo = namespace_owner.find_repo_by_canonical_url(self.url)
-            self._set_repo(repo)
-            return repo
+        return namespace_owner.find_repo_by_canonical_url(self.url, repo_type) if namespace_owner else None
 
-        return None
+    def lookup_entry(self):
+        """find_repo, then kept on the entry as `repo`: for an entry's create or update and a repository's canonical
+        URL change, never for a read"""
+        repo = self.find_repo()
+        self._set_repo(repo)
+        return repo
 
     @classmethod
     def get_entry(cls, url, owner=None):

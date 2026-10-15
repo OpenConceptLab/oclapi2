@@ -1461,7 +1461,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         return instance, resolved_registry_entry
 
     @classmethod
-    def resolve_reference_expression(cls, url, namespace=None, version=None):
+    def resolve_reference_expression(  # pylint: disable=too-many-arguments
+            cls, url, namespace=None, version=None, repo_type=None, allow_head=True):
         """
         resolves to repository version according to this process:
 
@@ -1485,6 +1486,16 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 is defined somewhere else in OCL)
         2. Else if relative URL provided:
             - Return the repository directly using the relative URL, or return 404 if not found
+
+        Resolving reads only: it never writes a registry entry.
+
+        Two flags make the answer stricter, for FHIR (core.fhir.resolve); their defaults keep the behaviour above:
+        - repo_type (Source or Collection): resolve only to a repository of that class. A canonical URL matches the
+          active, non-retired HEAD of a repository (its current canonical URL) in every step, so a registry entry whose
+          namespace holds no such repository resolves to nothing, and nothing else is tried. A named version must be
+          active. Unresolved is an unsaved repo_type.
+        - allow_head=False: with no version named, the latest released version or nothing, never HEAD. A version named
+          HEAD is still served.
         """
 
         resolution_url, version, is_canonical = cls.__get_resolution_url(url, version)
@@ -1501,36 +1512,43 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                     owner = SourceContainerMixin.get_object_from_namespace(namespace)
                     if owner:
                         registry_entry = owner.url_registry_entries.filter(is_active=True, url=resolution_url).first()
-                        instance = registry_entry.lookup_entry() if registry_entry else owner.find_repo_by_canonical_url(  # pylint: disable=line-too-long
-                            resolution_url)
+                        instance = registry_entry.find_repo(repo_type) if registry_entry else \
+                            owner.find_repo_by_canonical_url(resolution_url, repo_type)
 
                 if is_global_namespace or (not registry_entry and not instance):
                     registry_entry = URLRegistry.get_active_global_entries().filter(url=resolution_url).first()
                     if registry_entry:
-                        instance = registry_entry.lookup_entry()
+                        instance = registry_entry.find_repo(repo_type)
 
-                return cls.resolve_repo(instance, version, is_canonical, resolution_url), registry_entry
+                return cls.resolve_repo(
+                    instance, version, is_canonical, resolution_url, repo_type, allow_head), registry_entry
 
             criteria &= models.Q(canonical_url=resolution_url)
+            if repo_type:
+                criteria &= models.Q(version=HEAD)
             if namespace:
                 criteria &= models.Q(models.Q(user__uri=namespace) | models.Q(organization__uri=namespace))
         else:
             criteria &= models.Q(uri=(resolution_url if resolution_url.endswith('/') else resolution_url + '/'))
 
         from core.repos.models import Repository
-        return cls.resolve_repo(Repository.get(criteria), version, is_canonical, resolution_url), registry_entry
+        return cls.resolve_repo(
+            Repository.get(criteria, repo_type), version, is_canonical, resolution_url, repo_type, allow_head
+        ), registry_entry
 
     @classmethod
-    def resolve_repo(cls, instance, version, is_canonical, resolution_url):
+    def resolve_repo(  # pylint: disable=too-many-arguments
+            cls, instance, version, is_canonical, resolution_url, repo_type=None, allow_head=True):
         if instance:
             if version:
-                instance = instance.versions.filter(version=decode_string(version)).first()
+                versions = instance.active_versions if repo_type else instance.versions
+                instance = versions.filter(version=decode_string(version)).first()
             elif instance.is_head:
-                instance = instance.get_latest_released_version() or instance
+                instance = instance.get_latest_released_version() or (instance if allow_head else None)
 
         if not instance:
             from core.sources.models import Source
-            instance = Source()
+            instance = (repo_type or Source)()
 
         instance.is_fqdn = is_canonical
         instance.resolution_url = resolution_url

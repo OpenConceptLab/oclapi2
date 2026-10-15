@@ -17,7 +17,11 @@ class CountableRepoList(list):
 
 class Repository:
     @classmethod
-    def get(cls, criteria):
+    def get(cls, criteria, repo_type=None):
+        """The lowest-id repository matching criteria: a Source before a Collection, or only repo_type's."""
+        if repo_type:
+            return repo_type.objects.filter(criteria).first()
+
         repo = Source.objects.filter(criteria).first()
 
         if not repo:
