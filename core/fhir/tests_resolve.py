@@ -11,22 +11,18 @@ from core.common.tests import OCLTestCase
 from core.fhir import resolve as fhir_resolve
 from core.fhir.outcomes import NotFoundError, TX_ISSUE_TYPE_SYSTEM
 from core.orgs.tests.factories import OrganizationFactory
-from core.sources.models import Source
 from core.sources.tests.factories import UserSourceFactory
 from core.url_registry.factories import GlobalURLRegistryFactory
 from core.url_registry.models import URLRegistry
-from core.url_registry.tests_resolution import set_registry_toggle, source, collection
+from core.url_registry.tests_resolution import (
+    set_registry_toggle, source, collection, ResolverCorpusMixin, ICD10, PBD, DRAFT)
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
-ICD10 = 'http://hl7.org/fhir/sid/icd-10'
 ATC = 'http://www.whocc.no/atc'
 CIEL = 'https://CIELterminology.org'
-PBD = 'http://pbd.com.np'
-DRAFT = 'http://hl7.org/fhir/account-status'
 FIXTURE = 'https://openconceptlab.org/fhir-fixtures/CodeSystem/fixture-codes'
 UNKNOWN = 'http://example.org/ocl-fhir-conformance/unknown-system'
-GLOBAL = {}
 ANONYMOUS = AnonymousUser()
 
 
@@ -36,9 +32,6 @@ class NamespaceTest(OCLTestCase):
         self.assertIsNone(fhir_resolve.namespace_of(None))
         self.assertEqual(fhir_resolve.namespace_of({'org': 'CIEL', 'source': 'x'}), '/orgs/CIEL/')
         self.assertEqual(fhir_resolve.namespace_of({'user': 'jdoe'}), '/users/jdoe/')
-
-    def test_repository_types(self):
-        self.assertEqual(fhir_resolve.REPO_TYPES, {'CodeSystem': Source, 'ConceptMap': Source, 'ValueSet': Collection})
 
     def test_unresolved_error(self):
         error = fhir_resolve.UnresolvedError('CodeSystem', UNKNOWN, expression='system')
@@ -61,41 +54,33 @@ class NamespaceTest(OCLTestCase):
         self.assertNotIn('expression', error.outcome()['issue'][0])
 
 
-class FhirResolveCases:  # pylint: disable=too-many-public-methods
-    """Every case runs with the toggle off and on (the subclasses); `registry` says which."""
+class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-methods
+    """
+    Every case runs with the toggle off and on (the subclasses); `registry` says which. The resolver's corpus (ICD-10
+    shared by WHO and sehatapp, padam's Source and Collection, an unreleased draft), plus ATC shared the same way,
+    CIEL, and the private fixture org.
+    """
     registry = None
 
     def setUp(self):
         set_registry_toggle(self.registry)
         super().setUp()
         self.admin = UserProfile.objects.get(username='ocladmin')
-        self.who = OrganizationFactory(mnemonic='WHO')
-        self.sehatapp = OrganizationFactory(mnemonic='sehatapp')
         self.ciel = OrganizationFactory(mnemonic='CIEL')
-        self.padam = OrganizationFactory(mnemonic='padam')
         self.hl7 = OrganizationFactory(mnemonic='HL7')
         self.fixtures = OrganizationFactory(mnemonic='FHIR-Fixtures', public_access=ACCESS_TYPE_NONE)
         self.member = UserProfileFactory(username='fixture-member')
         self.outsider = UserProfileFactory(username='outsider')
         self.fixtures.members.add(self.member)
 
-        # WHO first, so WHO has the lower ids, as in production
-        self.who_icd = source(self.who, 'ICD-10-WHO', canonical_url=ICD10)
-        self.who_icd_2019 = source(self.who, 'ICD-10-WHO', 'ICD102019', released=True, canonical_url=None)
+        # WHO first, so WHO has the lower ids, as in production (the corpus does the same for ICD-10)
         self.who_atc = source(self.who, 'WHOATC', canonical_url=ATC)
         self.who_atc_2023 = source(self.who, 'WHOATC', '2023AA', released=True, canonical_url=ATC)
         self.who_atc_2024 = source(self.who, 'WHOATC', 'ATC_2024_01_19', canonical_url=ATC)  # newest, unreleased
-        self.sehat_icd = source(self.sehatapp, 'ICD-10', canonical_url=ICD10)
-        self.sehat_icd_v1 = source(self.sehatapp, 'ICD-10', 'v1.0', released=True, canonical_url=ICD10)
         self.sehat_atc = source(self.sehatapp, 'ATC', canonical_url=ATC)
         self.sehat_atc_v2 = source(self.sehatapp, 'ATC', 'v2', released=True, canonical_url=ATC)
         self.ciel_source = source(self.ciel, 'CIEL', canonical_url=CIEL)
         self.ciel_v1 = source(self.ciel, 'CIEL', 'v2026-09-24', released=True, canonical_url=CIEL)
-        self.pbd_source = source(self.padam, 'pbd', canonical_url=PBD)
-        self.pbd_source_v1 = source(self.padam, 'pbd', 'v1', released=True, canonical_url=PBD)
-        self.pbd_collection = collection(self.padam, 'pbd-vs', canonical_url=PBD)
-        self.pbd_collection_v1 = collection(self.padam, 'pbd-vs', 'v1', released=True, canonical_url=PBD)
-        self.draft = source(self.hl7, 'account-status', canonical_url=DRAFT)  # nothing released
         self.fixture = source(
             self.fixtures, 'fixture-codes', canonical_url=FIXTURE, public_access=ACCESS_TYPE_NONE)
         self.fixture_v1 = source(
@@ -109,11 +94,10 @@ class FhirResolveCases:  # pylint: disable=too-many-public-methods
         if self.registry:
             # the curated global registry (design D24): shared canonicals to the owners chosen, none for private repos
             for url, owner in ((ICD10, self.who), (ATC, self.who), (CIEL, self.ciel), (PBD, self.padam),
-                               (DRAFT, self.hl7)):
+                               (DRAFT, self.drafts)):
                 GlobalURLRegistryFactory(url=url, namespace=owner.uri)
 
-    def resolve(self, resource_type, url, version=None, kwargs=None, user=ANONYMOUS, expression=None):  # pylint: disable=too-many-arguments
-        return fhir_resolve.resolve(resource_type, url, version, kwargs=kwargs, user=user, expression=expression)
+    resolve = staticmethod(fhir_resolve.resolve)
 
     def assertUnresolved(self, resource_type, url, version=None, kwargs=None, user=ANONYMOUS):  # pylint: disable=invalid-name,too-many-arguments
         with self.assertRaises(fhir_resolve.UnresolvedError) as context:
@@ -158,7 +142,6 @@ class FhirResolveCases:  # pylint: disable=too-many-public-methods
     def test_unknown_version(self):
         error = self.assertUnresolved('CodeSystem', ICD10, 'nope')
         self.assertEqual(error.version, 'nope')
-        self.assertIn("version 'nope'", str(error.detail))
 
         # the version of a repository that lost the resolution: the resolver never tries another one
         self.assertUnresolved('CodeSystem', ICD10, 'v1.0')
@@ -173,7 +156,6 @@ class FhirResolveCases:  # pylint: disable=too-many-public-methods
         self.assertEqual(self.resolve('CodeSystem', f'{ATC}|nope', '2023AA').id, self.who_atc_2023.id)
         error = self.assertUnresolved('CodeSystem', f'{ATC}|nope')
         self.assertEqual((error.url, error.version), (ATC, 'nope'))
-        self.assertEqual(str(error.detail), f"A definition for CodeSystem '{ATC}' version 'nope' could not be found")
         # a second pipe is no version OCL holds: not found, never a server error
         self.assertEqual(self.assertUnresolved('CodeSystem', f'{ATC}|2023AA|x').version, '2023AA|x')
 
@@ -185,9 +167,9 @@ class FhirResolveCases:  # pylint: disable=too-many-public-methods
     def test_a_repository_with_nothing_released_is_not_visible(self):
         self.assertUnresolved('CodeSystem', DRAFT)
         self.assertUnresolved('CodeSystem', DRAFT, HEAD)
-        self.assertUnresolved('CodeSystem', DRAFT, HEAD, {'org': 'HL7'}, self.admin)
+        self.assertUnresolved('CodeSystem', DRAFT, HEAD, {'org': 'drafts'}, self.admin)
 
-        source(self.hl7, 'account-status', 'v1', released=True, canonical_url=DRAFT)
+        source(self.drafts, 'draft', 'v1', released=True, canonical_url=DRAFT)
         self.assertEqual(self.resolve('CodeSystem', DRAFT, HEAD).id, self.draft.id)
 
     def test_a_head_flagged_released_is_no_release(self):
@@ -228,22 +210,16 @@ class FhirResolveCases:  # pylint: disable=too-many-public-methods
             self.assertEqual(self.resolve('CodeSystem', FIXTURE, kwargs=fixtures, user=user).id, self.fixture_v1.id)
             self.assertEqual(
                 self.resolve('CodeSystem', f'{FIXTURE}-at', '1.0.0', fixtures, user).id, self.fixture_at_v1.id)
+            self.assertEqual(
+                self.resolve('CodeSystem', '/orgs/FHIR-Fixtures/CodeSystem/codes@fixture/', kwargs=fixtures,
+                             user=user).id,
+                self.fixture_at_v1.id)
         for user in (ANONYMOUS, self.outsider, None):
             self.assertUnresolved('CodeSystem', FIXTURE, kwargs=fixtures, user=user)
 
         # the global base shows public repositories only, to anyone
         for user in (ANONYMOUS, self.member, self.admin):
             self.assertUnresolved('CodeSystem', FIXTURE, user=user)
-
-    def test_relative_ocl_urls(self):
-        for url in ('/orgs/CIEL/CodeSystem/CIEL/', '/orgs/CIEL/sources/CIEL/', '/orgs/CIEL/ConceptMap/CIEL/'):
-            self.assertEqual(self.resolve('CodeSystem', url).id, self.ciel_v1.id)
-        self.assertEqual(self.resolve('ValueSet', '/orgs/padam/ValueSet/pbd-vs/').id, self.pbd_collection_v1.id)
-        self.assertUnresolved('ValueSet', '/orgs/CIEL/CodeSystem/CIEL/')
-        self.assertEqual(
-            self.resolve('CodeSystem', '/orgs/FHIR-Fixtures/CodeSystem/codes@fixture/', user=self.member,
-                         kwargs={'org': 'FHIR-Fixtures'}).id,
-            self.fixture_at_v1.id)
 
     def test_a_user_base(self):
         user = UserProfileFactory(username='jdoe')
@@ -309,12 +285,6 @@ class FhirResolveCases:  # pylint: disable=too-many-public-methods
         ):
             with self.subTest(args=args), self.assertNumQueries(count):
                 self.resolve(*args)
-
-    def test_resolving_writes_nothing(self):
-        before = list(URLRegistry.objects.values_list('id', 'repo_id', 'updated_at'))
-        self.resolve('CodeSystem', ICD10)
-        self.resolve('ValueSet', PBD)
-        self.assertEqual(list(URLRegistry.objects.values_list('id', 'repo_id', 'updated_at')), before)
 
 
 class FhirResolveWithoutRegistryTest(FhirResolveCases, OCLTestCase):

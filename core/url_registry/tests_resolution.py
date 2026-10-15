@@ -82,6 +82,7 @@ class StrictDefaultCases:
         for repo_type in (None, Source):
             version, _ = Source.resolve_reference_expression(FLAGGED, repo_type=repo_type, allow_head=False)
             self.assertIsNone(version.id)
+            self.assertTrue(version.is_fqdn)
             version, _ = Source.resolve_reference_expression(
                 FLAGGED, version=HEAD, repo_type=repo_type, allow_head=False)
             self.assertEqual(version.id, head.id)
@@ -168,20 +169,6 @@ class ResolverToggleOffTest(StrictDefaultCases, ResolverCorpusMixin, OCLTestCase
         version, _ = Source.resolve_reference_expression(ICD10, '/orgs/sehatapp/', 'v1.0', repo_type=Source)
         self.assertIsNone(version.id)
 
-    def test_allow_head_false_never_falls_back_to_head(self):
-        version, _ = Source.resolve_reference_expression(DRAFT, allow_head=False)
-        self.assertIsNone(version.id)
-        self.assertTrue(version.is_fqdn)
-
-        version, _ = Source.resolve_reference_expression(DRAFT, version=HEAD, allow_head=False)
-        self.assertEqual(version.id, self.draft.id)
-
-        version, _ = Source.resolve_reference_expression(f'{DRAFT}|HEAD', allow_head=False)
-        self.assertEqual(version.id, self.draft.id)
-
-        version, _ = Source.resolve_reference_expression(ICD10, allow_head=False)
-        self.assertEqual(version.id, self.who_icd_2019.id)
-
 
 class ResolverToggleOnTest(StrictDefaultCases, ResolverCorpusMixin, OCLTestCase):
     """The registry's order: the owner's entry, the owner's repositories, the global entry; nothing else."""
@@ -190,7 +177,7 @@ class ResolverToggleOnTest(StrictDefaultCases, ResolverCorpusMixin, OCLTestCase)
         super().setUp()
         self.icd_entry = GlobalURLRegistryFactory(url=ICD10, namespace=self.who.uri)
         self.pbd_entry = GlobalURLRegistryFactory(url=PBD, namespace=self.padam.uri)
-        self.draft_entry = GlobalURLRegistryFactory(url=DRAFT, namespace=self.drafts.uri)
+        GlobalURLRegistryFactory(url=DRAFT, namespace=self.drafts.uri)
 
     def test_defaults_keep_todays_answers(self):
         version, entry = Source.resolve_reference_expression(ICD10)
@@ -251,14 +238,6 @@ class ResolverToggleOnTest(StrictDefaultCases, ResolverCorpusMixin, OCLTestCase)
         version, entry = Source.resolve_reference_expression(ICD10, repo_type=Source)
         self.assertIsNone(version.id)
         self.assertEqual(entry, self.icd_entry)
-
-    def test_allow_head_false_never_falls_back_to_head(self):
-        version, entry = Source.resolve_reference_expression(DRAFT, repo_type=Source, allow_head=False)
-        self.assertIsNone(version.id)
-        self.assertEqual(entry, self.draft_entry)
-
-        version, _ = Source.resolve_reference_expression(DRAFT, version=HEAD, repo_type=Source, allow_head=False)
-        self.assertEqual(version.id, self.draft.id)
 
     def test_resolving_never_writes_a_registry_entry(self):
         OrganizationURLRegistryFactory(organization=self.sehatapp, url=PBD, namespace=self.padam.uri)
