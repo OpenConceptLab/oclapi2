@@ -1,0 +1,299 @@
+"""
+core.fhir.resolve: FHIR's canonical resolution through the shared resolver, with the URL registry toggle off and on.
+Shared canonicals (ICD-10, ATC), a Source and a Collection sharing one, a repository with nothing released, the
+fixture org's private namespace, unknown systems and versions, and HEAD. OpenConceptLab/ocl_online#451.
+"""
+from django.contrib.auth.models import AnonymousUser
+
+from core.collections.models import Collection
+from core.common.constants import ACCESS_TYPE_NONE, HEAD
+from core.common.tests import OCLTestCase
+from core.fhir import resolve as fhir_resolve
+from core.fhir.outcomes import NotFoundError, TX_ISSUE_TYPE_SYSTEM
+from core.orgs.tests.factories import OrganizationFactory
+from core.sources.models import Source
+from core.sources.tests.factories import UserSourceFactory
+from core.url_registry.factories import GlobalURLRegistryFactory
+from core.url_registry.models import URLRegistry
+from core.url_registry.tests_resolution import set_registry_toggle, source, collection
+from core.users.models import UserProfile
+from core.users.tests.factories import UserProfileFactory
+
+ICD10 = 'http://hl7.org/fhir/sid/icd-10'
+ATC = 'http://www.whocc.no/atc'
+CIEL = 'https://CIELterminology.org'
+PBD = 'http://pbd.com.np'
+DRAFT = 'http://hl7.org/fhir/account-status'
+FIXTURE = 'https://openconceptlab.org/fhir-fixtures/CodeSystem/fixture-codes'
+UNKNOWN = 'http://example.org/ocl-fhir-conformance/unknown-system'
+GLOBAL = {}
+ANONYMOUS = AnonymousUser()
+
+
+class NamespaceTest(OCLTestCase):
+    def test_namespace_is_the_base_url_owner(self):
+        self.assertIsNone(fhir_resolve.namespace_of({}))
+        self.assertIsNone(fhir_resolve.namespace_of(None))
+        self.assertEqual(fhir_resolve.namespace_of({'org': 'CIEL', 'source': 'x'}), '/orgs/CIEL/')
+        self.assertEqual(fhir_resolve.namespace_of({'user': 'jdoe'}), '/users/jdoe/')
+
+    def test_repository_types(self):
+        self.assertEqual(fhir_resolve.REPO_TYPES, {'CodeSystem': Source, 'ConceptMap': Source, 'ValueSet': Collection})
+
+    def test_unresolved_error(self):
+        error = fhir_resolve.UnresolvedError('CodeSystem', UNKNOWN, expression='system')
+        self.assertIsInstance(error, NotFoundError)
+        self.assertEqual(error.status_code, 404)
+        self.assertEqual(
+            error.outcome()['issue'],
+            [{
+                'severity': 'error', 'code': 'not-found',
+                'details': {
+                    'coding': [{'system': TX_ISSUE_TYPE_SYSTEM, 'code': 'not-found'}],
+                    'text': f"A definition for CodeSystem '{UNKNOWN}' could not be found"
+                },
+                'expression': ['system']
+            }])
+        self.assertEqual((error.resource_type, error.url, error.version), ('CodeSystem', UNKNOWN, None))
+
+        error = fhir_resolve.UnresolvedError('ValueSet', UNKNOWN, '1.0')
+        self.assertEqual(str(error.detail), f"A definition for ValueSet '{UNKNOWN}' version '1.0' could not be found")
+        self.assertNotIn('expression', error.outcome()['issue'][0])
+
+
+class FhirResolveCases:  # pylint: disable=too-many-public-methods
+    """Every case runs with the toggle off and on (the subclasses); `registry` says which."""
+    registry = None
+
+    def setUp(self):
+        set_registry_toggle(self.registry)
+        super().setUp()
+        self.admin = UserProfile.objects.get(username='ocladmin')
+        self.who = OrganizationFactory(mnemonic='WHO')
+        self.sehatapp = OrganizationFactory(mnemonic='sehatapp')
+        self.ciel = OrganizationFactory(mnemonic='CIEL')
+        self.padam = OrganizationFactory(mnemonic='padam')
+        self.hl7 = OrganizationFactory(mnemonic='HL7')
+        self.fixtures = OrganizationFactory(mnemonic='FHIR-Fixtures', public_access=ACCESS_TYPE_NONE)
+        self.member = UserProfileFactory(username='fixture-member')
+        self.outsider = UserProfileFactory(username='outsider')
+        self.fixtures.members.add(self.member)
+
+        # WHO first, so WHO has the lower ids, as in production
+        self.who_icd = source(self.who, 'ICD-10-WHO', canonical_url=ICD10)
+        self.who_icd_2019 = source(self.who, 'ICD-10-WHO', 'ICD102019', released=True, canonical_url=None)
+        self.who_atc = source(self.who, 'WHOATC', canonical_url=ATC)
+        self.who_atc_2023 = source(self.who, 'WHOATC', '2023AA', released=True, canonical_url=ATC)
+        self.who_atc_2024 = source(self.who, 'WHOATC', 'ATC_2024_01_19', canonical_url=ATC)  # newest, unreleased
+        self.sehat_icd = source(self.sehatapp, 'ICD-10', canonical_url=ICD10)
+        self.sehat_icd_v1 = source(self.sehatapp, 'ICD-10', 'v1.0', released=True, canonical_url=ICD10)
+        self.sehat_atc = source(self.sehatapp, 'ATC', canonical_url=ATC)
+        self.sehat_atc_v2 = source(self.sehatapp, 'ATC', 'v2', released=True, canonical_url=ATC)
+        self.ciel_source = source(self.ciel, 'CIEL', canonical_url=CIEL)
+        self.ciel_v1 = source(self.ciel, 'CIEL', 'v2026-09-24', released=True, canonical_url=CIEL)
+        self.pbd_source = source(self.padam, 'pbd', canonical_url=PBD)
+        self.pbd_source_v1 = source(self.padam, 'pbd', 'v1', released=True, canonical_url=PBD)
+        self.pbd_collection = collection(self.padam, 'pbd-vs', canonical_url=PBD)
+        self.pbd_collection_v1 = collection(self.padam, 'pbd-vs', 'v1', released=True, canonical_url=PBD)
+        self.draft = source(self.hl7, 'account-status', canonical_url=DRAFT)  # nothing released
+        self.fixture = source(
+            self.fixtures, 'fixture-codes', canonical_url=FIXTURE, public_access=ACCESS_TYPE_NONE)
+        self.fixture_v1 = source(
+            self.fixtures, 'fixture-codes', '1.0.0', released=True, canonical_url=FIXTURE,
+            public_access=ACCESS_TYPE_NONE)
+        self.fixture_at = source(
+            self.fixtures, 'codes@fixture', canonical_url=f'{FIXTURE}-at', public_access=ACCESS_TYPE_NONE)
+        self.fixture_at_v1 = source(
+            self.fixtures, 'codes@fixture', '1.0.0', released=True, canonical_url=f'{FIXTURE}-at',
+            public_access=ACCESS_TYPE_NONE)
+        if self.registry:
+            # the curated global registry (design D24): shared canonicals to the owners chosen, none for private repos
+            for url, owner in ((ICD10, self.who), (ATC, self.who), (CIEL, self.ciel), (PBD, self.padam),
+                               (DRAFT, self.hl7)):
+                GlobalURLRegistryFactory(url=url, namespace=owner.uri)
+
+    def resolve(self, resource_type, url, version=None, kwargs=None, user=ANONYMOUS, expression=None):  # pylint: disable=too-many-arguments
+        return fhir_resolve.resolve(resource_type, url, version, kwargs=kwargs, user=user, expression=expression)
+
+    def assertUnresolved(self, resource_type, url, version=None, kwargs=None, user=ANONYMOUS):  # pylint: disable=invalid-name,too-many-arguments
+        with self.assertRaises(fhir_resolve.UnresolvedError) as context:
+            self.resolve(resource_type, url, version, kwargs, user)
+        self.assertEqual(
+            (context.exception.resource_type, context.exception.url), (resource_type, url.partition('|')[0]))
+        return context.exception
+
+    def test_shared_canonicals_at_the_global_base(self):
+        version = self.resolve('CodeSystem', ICD10)
+        self.assertEqual(version.id, self.who_icd_2019.id)
+        self.assertEqual(version.canonical_url, ICD10)
+
+        # the latest released version, not the newest one
+        self.assertEqual(self.resolve('CodeSystem', ATC).id, self.who_atc_2023.id)
+        self.assertEqual(self.resolve('CodeSystem', CIEL).id, self.ciel_v1.id)
+
+    def test_shared_canonicals_at_an_owner_base(self):
+        sehatapp = {'org': 'sehatapp'}
+        self.assertEqual(self.resolve('CodeSystem', ICD10, kwargs=sehatapp).id, self.sehat_icd_v1.id)
+        self.assertEqual(self.resolve('CodeSystem', ATC, kwargs=sehatapp).id, self.sehat_atc_v2.id)
+        self.assertEqual(self.resolve('CodeSystem', ATC, kwargs={'org': 'WHO'}).id, self.who_atc_2023.id)
+
+    def test_resource_type(self):
+        self.assertEqual(self.resolve('CodeSystem', PBD).id, self.pbd_source_v1.id)
+        self.assertEqual(self.resolve('ConceptMap', PBD).id, self.pbd_source_v1.id)
+        version = self.resolve('ValueSet', PBD)
+        self.assertEqual(version.id, self.pbd_collection_v1.id)
+        self.assertIsInstance(version, Collection)
+
+        self.assertUnresolved('ValueSet', ICD10)
+        self.assertUnresolved('ValueSet', ICD10, kwargs={'org': 'sehatapp'})
+
+    def test_unknown_system(self):
+        error = self.assertUnresolved('CodeSystem', UNKNOWN)
+        self.assertEqual(error.status_code, 404)
+        self.assertIsNone(error.version)
+        self.assertUnresolved('CodeSystem', UNKNOWN, kwargs={'org': 'WHO'})
+        self.assertUnresolved('ValueSet', UNKNOWN)
+        self.assertUnresolved('CodeSystem', '')
+
+    def test_unknown_version(self):
+        error = self.assertUnresolved('CodeSystem', ICD10, 'nope')
+        self.assertEqual(error.version, 'nope')
+        self.assertIn("version 'nope'", str(error.detail))
+
+        # the version of a repository that lost the resolution: the resolver never tries another one
+        self.assertUnresolved('CodeSystem', ICD10, 'v1.0')
+        self.assertEqual(self.resolve('CodeSystem', ICD10, 'v1.0', {'org': 'sehatapp'}).id, self.sehat_icd_v1.id)
+
+    def test_named_version(self):
+        self.assertEqual(self.resolve('CodeSystem', ICD10, 'ICD102019').id, self.who_icd_2019.id)
+        # an unreleased version is served when named
+        self.assertEqual(self.resolve('CodeSystem', ATC, 'ATC_2024_01_19').id, self.who_atc_2024.id)
+        self.assertEqual(self.resolve('CodeSystem', f'{ATC}|2023AA').id, self.who_atc_2023.id)
+        # the version parameter wins over url|version, as in the resolver
+        self.assertEqual(self.resolve('CodeSystem', f'{ATC}|nope', '2023AA').id, self.who_atc_2023.id)
+        error = self.assertUnresolved('CodeSystem', f'{ATC}|nope')
+        self.assertEqual((error.url, error.version), (ATC, 'nope'))
+        self.assertEqual(str(error.detail), f"A definition for CodeSystem '{ATC}' version 'nope' could not be found")
+        # a second pipe is no version OCL holds: not found, never a server error
+        self.assertEqual(self.assertUnresolved('CodeSystem', f'{ATC}|2023AA|x').version, '2023AA|x')
+
+    def test_head_only_when_named(self):
+        self.assertEqual(self.resolve('CodeSystem', ICD10, HEAD).id, self.who_icd.id)
+        self.assertEqual(self.resolve('CodeSystem', f'{ICD10}|HEAD').id, self.who_icd.id)
+        self.assertNotEqual(self.resolve('CodeSystem', ICD10).version, HEAD)
+
+    def test_a_repository_with_nothing_released_is_not_visible(self):
+        self.assertUnresolved('CodeSystem', DRAFT)
+        self.assertUnresolved('CodeSystem', DRAFT, HEAD)
+        self.assertUnresolved('CodeSystem', DRAFT, HEAD, {'org': 'HL7'}, self.admin)
+
+        source(self.hl7, 'account-status', 'v1', released=True, canonical_url=DRAFT)
+        self.assertEqual(self.resolve('CodeSystem', DRAFT, HEAD).id, self.draft.id)
+
+    def test_fixture_namespace(self):
+        fixtures = {'org': 'FHIR-Fixtures'}
+        for user in (self.member, self.admin):
+            self.assertEqual(self.resolve('CodeSystem', FIXTURE, kwargs=fixtures, user=user).id, self.fixture_v1.id)
+            self.assertEqual(
+                self.resolve('CodeSystem', f'{FIXTURE}-at', '1.0.0', fixtures, user).id, self.fixture_at_v1.id)
+        for user in (ANONYMOUS, self.outsider, None):
+            self.assertUnresolved('CodeSystem', FIXTURE, kwargs=fixtures, user=user)
+
+        # the global base shows public repositories only, to anyone
+        for user in (ANONYMOUS, self.member, self.admin):
+            self.assertUnresolved('CodeSystem', FIXTURE, user=user)
+
+    def test_relative_ocl_urls(self):
+        for url in ('/orgs/CIEL/CodeSystem/CIEL/', '/orgs/CIEL/sources/CIEL/', '/orgs/CIEL/ConceptMap/CIEL/'):
+            self.assertEqual(self.resolve('CodeSystem', url).id, self.ciel_v1.id)
+        self.assertEqual(self.resolve('ValueSet', '/orgs/padam/ValueSet/pbd-vs/').id, self.pbd_collection_v1.id)
+        self.assertUnresolved('ValueSet', '/orgs/CIEL/CodeSystem/CIEL/')
+        self.assertEqual(
+            self.resolve('CodeSystem', '/orgs/FHIR-Fixtures/CodeSystem/codes@fixture/', user=self.member,
+                         kwargs={'org': 'FHIR-Fixtures'}).id,
+            self.fixture_at_v1.id)
+
+    def test_a_user_base(self):
+        user = UserProfileFactory(username='jdoe')
+        head = UserSourceFactory(user=user, mnemonic='mine', canonical_url='http://example.org/mine')
+        released = UserSourceFactory(
+            user=user, mnemonic='mine', version='1', released=True, canonical_url='http://example.org/mine')
+        self.assertEqual(self.resolve('CodeSystem', 'http://example.org/mine', kwargs={'user': 'jdoe'}).id, released.id)
+        self.assertEqual(
+            self.resolve('CodeSystem', 'http://example.org/mine', HEAD, kwargs={'user': 'jdoe'}).id, head.id)
+
+    def test_an_unknown_owner_base(self):
+        self.assertUnresolved('CodeSystem', ICD10, kwargs={'org': 'nobody'})
+        self.assertUnresolved('CodeSystem', ICD10, kwargs={'user': 'nobody'})
+
+    def test_a_deleted_repository(self):
+        self.ciel_source.is_active = False
+        self.ciel_source.save()
+        self.assertUnresolved('CodeSystem', CIEL)
+
+    def test_another_owners_canonical_at_an_owner_base(self):
+        """With the registry, an owner base falls through to the global entry; without it, an owner base is strict."""
+        if self.registry:
+            self.assertEqual(self.resolve('CodeSystem', CIEL, kwargs={'org': 'sehatapp'}).id, self.ciel_v1.id)
+        else:
+            self.assertUnresolved('CodeSystem', CIEL, kwargs={'org': 'sehatapp'})
+
+    def test_a_private_repository_that_resolves_hides_a_public_one(self):
+        """
+        Access is checked after resolving, and nothing else is tried: when the private copy of a shared canonical
+        resolves (the lower id without the registry, the global entry's namespace with it), the public copy is not
+        found at the global base, while each owner base still finds its own.
+        """
+        shared = 'http://example.org/shared-codes'
+        private = source(self.fixtures, 'shared', canonical_url=shared, public_access=ACCESS_TYPE_NONE)
+        private_v1 = source(self.fixtures, 'shared', 'v1', released=True, canonical_url=shared,
+                            public_access=ACCESS_TYPE_NONE)
+        source(self.hl7, 'shared', canonical_url=shared)
+        public_v1 = source(self.hl7, 'shared', 'v1', released=True, canonical_url=shared)
+        self.assertLess(private.id, public_v1.id)
+        if self.registry:
+            GlobalURLRegistryFactory(url=shared, namespace=self.fixtures.uri)
+
+        for user in (ANONYMOUS, self.member, self.admin):
+            self.assertUnresolved('CodeSystem', shared, user=user)
+        self.assertEqual(
+            self.resolve('CodeSystem', shared, kwargs={'org': 'FHIR-Fixtures'}, user=self.member).id, private_v1.id)
+        self.assertUnresolved('CodeSystem', shared, kwargs={'org': 'FHIR-Fixtures'}, user=self.outsider)
+        self.assertEqual(self.resolve('CodeSystem', shared, kwargs={'org': 'HL7'}).id, public_v1.id)
+
+    def test_query_counts(self):
+        """
+        A hot path: these counts may only fall. Without the registry: the toggle, the repository and its latest
+        released (or named) version; an owner base adds the owner, and a private repository its owner and the
+        caller's membership. The registry adds the entry and the owner of its namespace; at an owner base, the
+        owner's own entry instead of the global one, and the owner a second time.
+        """
+        extra = 2 if self.registry else 0
+        for count, args in (
+                (3 + extra, ('CodeSystem', ICD10)),
+                (3 + extra, ('CodeSystem', ICD10, 'ICD102019')),
+                (4 + extra, ('ValueSet', PBD, None, {'org': 'padam'})),
+                (6 + extra, ('CodeSystem', FIXTURE, None, {'org': 'FHIR-Fixtures'}, self.member)),
+        ):
+            with self.subTest(args=args), self.assertNumQueries(count):
+                self.resolve(*args)
+
+    def test_resolving_writes_nothing(self):
+        before = list(URLRegistry.objects.values_list('id', 'repo_id', 'updated_at'))
+        self.resolve('CodeSystem', ICD10)
+        self.resolve('ValueSet', PBD)
+        self.assertEqual(list(URLRegistry.objects.values_list('id', 'repo_id', 'updated_at')), before)
+
+
+class FhirResolveWithoutRegistryTest(FhirResolveCases, OCLTestCase):
+    registry = False
+
+
+class FhirResolveWithRegistryTest(FhirResolveCases, OCLTestCase):
+    registry = True
+
+    def test_an_unregistered_canonical_is_unresolved_at_the_global_base(self):
+        """The registry's rule: at the global base only a global entry resolves, whatever repositories hold."""
+        URLRegistry.objects.filter(url=ICD10).delete()
+        self.assertUnresolved('CodeSystem', ICD10)
+        self.assertEqual(self.resolve('CodeSystem', ICD10, kwargs={'org': 'WHO'}).id, self.who_icd_2019.id)
