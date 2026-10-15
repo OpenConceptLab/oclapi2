@@ -6,6 +6,7 @@ from celery.result import AsyncResult
 from celery_once import AlreadyQueued
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericRelation
+from django.contrib.contenttypes.models import ContentType
 from django.contrib.postgres.fields import ArrayField
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -926,13 +927,14 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     def delete(self, using=None, keep_parents=False, force=False, sync=False):  # pylint: disable=arguments-differ
         export_paths = self.get_export_paths_to_delete()
         deleted_urls = [self.url]
+        deleted_ids = [self.id]
         if self.is_head:
             other_versions = list(self.versions.exclude(id=self.id))
             for other_version in other_versions:
                 other_version.clear_cache()
                 export_paths += other_version.get_export_paths_to_delete()
                 deleted_urls.append(other_version.url)
-            self.versions.exclude(id=self.id).delete()
+                deleted_ids.append(other_version.id)
         elif self.is_latest_version:
             prev_version = self.prev_version
             if not force and not prev_version:
@@ -941,14 +943,33 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 prev_version.is_latest_version = True
                 prev_version.save()
 
+        registry_entries = self.unlink_url_registry_entries(deleted_ids)
+        if self.is_head:
+            self.versions.exclude(id=self.id).delete()
+
         self.delete_pins()
         self.delete_following()
         self.delete_version_changelogs(deleted_urls)
         self.delete_version_checksum_maps(deleted_urls)
 
         super().delete(using=using, keep_parents=keep_parents)
+        for entry in registry_entries:
+            entry.lookup_entry()
         self.delete_export_paths(export_paths, sync)
         self.post_delete_actions()
+
+    def unlink_url_registry_entries(self, repo_ids):
+        """
+        The registry entries linked to these rows of this repository, each unlinked (saved, so reindexed) before the
+        rows are deleted: url_registry_entries is a GenericRelation, which would delete them with the rows. The
+        caller re-resolves them (lookup_entry) once the rows are gone.
+        """
+        from core.url_registry.models import URLRegistry
+        entries = list(URLRegistry.objects.filter(
+            repo_type=ContentType.objects.get_for_model(self), repo_id__in=repo_ids))
+        for entry in entries:
+            entry.unlink()
+        return entries
 
     @staticmethod
     def delete_version_changelogs(urls):

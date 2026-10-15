@@ -376,6 +376,56 @@ class URLRegistryLinkTest(OCLAPITestCase):
             self.assertEqual(self.linked_repo(entry), (None, (None, None)))
         self.assertEqual(self.linked_repo(head_entry), head_link)
 
+    def entry_state(self, entry):
+        """(exists, active) for an entry, read from the database"""
+        row = URLRegistry.objects.filter(id=entry[1]).values_list('is_active', flat=True).first()
+        return row is not None, bool(row)
+
+    def create_source(self, canonical_url):
+        response = self.client.post(f'{self.org.uri}sources/', {
+            'id': 'codes', 'name': 'codes', 'short_code': 'codes', 'canonical_url': canonical_url,
+            'default_locale': 'en', 'supported_locales': 'en'}, format='json', **self.auth)
+        self.assertEqual(response.status_code, 201, response.data)
+        return f'{self.org.uri}sources/codes/'
+
+    @patch('core.common.models.delete_s3_objects')  # export files: no broker in tests
+    def test_deleting_a_repository_unlinks_its_entries_instead_of_deleting_them(self, _):
+        """
+        A hard delete of a repository (HEAD and versions) keeps every registry entry linked to it, global and
+        owner-scoped alike, unlinked; recreating the repository links them again
+        """
+        entries = [self.create_entry('/', self.OLD), self.create_entry(self.org.uri, self.OLD)]
+        codes = self.create_source(self.OLD)
+        source(self.org, 'codes', 'v1', released=True, canonical_url=self.OLD)
+        for entry in entries:
+            self.assertEqual(self.linked_repo(entry), (codes, ('codes', 'acme-registry')))
+
+        response = self.client.delete(codes, **self.auth)
+        self.assertEqual(response.status_code, 204, response.data)
+        self.assertFalse(Source.objects.filter(mnemonic='codes', organization=self.org).exists())
+        for entry in entries:
+            self.assertEqual(self.entry_state(entry), (True, True))
+            self.assertEqual(self.linked_repo(entry), (None, (None, None)))
+
+        self.assertEqual(self.create_source(self.OLD), codes)
+        for entry in entries:
+            self.assertEqual(self.linked_repo(entry), (codes, ('codes', 'acme-registry')))
+
+    @patch('core.common.models.delete_s3_objects')  # export files: no broker in tests
+    def test_deleting_a_version_relinks_its_entry_to_what_it_resolves_to_now(self, _):
+        """An entry linked to a version row survives that version's delete and moves to the released sibling"""
+        source(self.org, 'codes', canonical_url=self.OLD)
+        source(self.org, 'codes', 'v1', released=True, canonical_url=self.NEW, is_latest_version=False)
+        source(self.org, 'codes', 'v2', released=True, canonical_url=self.NEW, is_latest_version=True)
+        entry = self.create_entry('/', self.NEW)
+        v1_url, v2_url = f'{self.org.uri}sources/codes/v1/', f'{self.org.uri}sources/codes/v2/'
+        self.assertEqual(self.linked_repo(entry), (v1_url, ('codes', 'acme-registry')))
+
+        response = self.client.delete(v1_url, **self.auth)
+        self.assertEqual(response.status_code, 204, getattr(response, 'data', None))
+        self.assertEqual(self.entry_state(entry), (True, True))
+        self.assertEqual(self.linked_repo(entry), (v2_url, ('codes', 'acme-registry')))
+
     def test_a_collection_created_after_its_entry_links_it(self):
         entry = GlobalURLRegistryFactory(url=self.OLD, namespace=self.org.uri)
         source(self.org, 'codes', canonical_url=self.OLD.replace('codes', 'other'))

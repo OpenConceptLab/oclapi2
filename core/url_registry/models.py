@@ -133,6 +133,10 @@ class URLRegistry(BaseModel):
         entries = owner.url_registry_entries.filter(is_active=True) if owner else cls.get_active_global_entries()
         return entries.filter(url=url).first()
 
+    def unlink(self):
+        """Clears the cached repository, as before that repository is deleted"""
+        self._set_repo(None)
+
     def _set_repo(self, repo):
         """Points the entry at repo, or at nothing; saves (and so reindexes) only when that changes"""
         link = (ContentType.objects.get_for_model(repo).id, repo.id) if repo else (None, None)
