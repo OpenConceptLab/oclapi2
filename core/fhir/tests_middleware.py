@@ -166,6 +166,29 @@ class MediaTypeParsingFailureTest(TestCase):
 
                     self.assert_bad_request_outcome(response)
 
+    @override_settings(DATA_UPLOAD_MAX_NUMBER_FIELDS=1000)
+    def test_too_many_query_fields_with_charset_are_a_400_json_outcome(self):
+        """Query parsing in the production request's encoding setter remains a client error."""
+        query = '&'.join(['x='] * 1001)
+        client = APIClient(raise_request_exception=False)
+        with patch('django.test.client.WSGIRequest', application.request_class):
+            response = client.get(
+                f'/fhir/metadata?{query}', content_type='application/fhir+json; charset=utf-8',
+                HTTP_ACCEPT='application/fhir+xml')
+
+        self.assert_bad_request_outcome(response)
+
+    def test_non_text_charset_with_query_is_a_400_json_outcome(self):
+        """A failed charset is cleared and cannot break error rendering on an unknown path."""
+        client = APIClient(raise_request_exception=False)
+        with patch('django.test.client.WSGIRequest', application.request_class):
+            response = client.get(
+                '/fhir/missing?x=1', content_type='application/fhir+json; charset=base64',
+                HTTP_ACCEPT='application/fhir+xml')
+
+        self.assert_bad_request_outcome(response)
+        self.assertIsNone(response.wsgi_request.encoding)
+
 
 @override_settings(REQUIRE_AUTHENTICATION=True, APPROVED_ANONYMOUS_CLIENTS=[], APPROVED_ANONYMOUS_API_KEYS=[],
                    APPROVED_ANONYMOUS_IPS=[], MIDDLEWARE=[

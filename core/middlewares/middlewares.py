@@ -17,7 +17,7 @@ from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER, RESPONSE_
 from core.common.exceptions import DeactivatedAccountLoginRefused
 from core.common.throttling import ThrottleUtil
 from core.common.utils import set_current_user, set_request_url
-from core.fhir.base import is_fhir_path, is_outcome_response, outcome_response, response_json
+from core.fhir.base import FHIR_JSON, is_fhir_path, is_outcome_response, outcome_response, response_json
 from core.fhir.outcomes import issue, operation_outcome, outcome_for_status
 from core.services.analytics_event_emitter import AnalyticsEventEmitter
 from core.services.auth.core import AuthService
@@ -271,7 +271,8 @@ class FhirErrorMiddleware(BaseMiddleware):
 
     def __call__(self, request):
         if getattr(request, 'fhir_content_type_error', False):
-            return outcome_response(request, outcome_for_status(400), 400)
+            # Request construction failed: render safe JSON without parsing GET/POST or negotiating again.
+            return JsonResponse(outcome_for_status(400), status=400, content_type=FHIR_JSON)
         try:
             response = self.get_response(request)
         except Exception as ex:  # pylint: disable=broad-exception-caught
