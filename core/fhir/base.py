@@ -30,7 +30,7 @@ from rest_framework.parsers import BaseParser, FormParser, JSONParser, MultiPart
 from rest_framework.renderers import BaseRenderer, JSONRenderer
 from rest_framework.response import Response
 from rest_framework.utils.encoders import JSONEncoder
-from rest_framework.utils.mediatypes import _MediaType, media_type_matches
+from rest_framework.utils.mediatypes import _MediaType
 from rest_framework.versioning import AcceptHeaderVersioning
 
 from core.fhir import outcomes
@@ -102,13 +102,23 @@ def normalize_media_type(media_range):
     return MEDIA_TYPE_ALIASES.get(main, main) + separator + params
 
 
+def parse_media_type(media_type):
+    """Treat undecodable MIME parameters as a bad request, including unknown RFC 2231 encodings."""
+    try:
+        return _MediaType(media_type)
+    except (LookupError, ValueError) as exc:
+        raise BadRequest('The media type parameters could not be parsed.') from exc
+
+
 def accepted_media_ranges(request):
     """The media ranges a request accepts: its _format, else its Accept header."""
+    ranges = [item.strip() for item in request.META.get('HTTP_ACCEPT', '').split(',') if item.strip()]
+    for media_range in ranges:
+        parse_media_type(media_range)  # validate before _format and browser preference shortcuts
     for name in FORMAT_PARAMETERS:
         value = request.GET.get(name)
         if value:
             return [normalize_media_type(value)]
-    ranges = [item.strip() for item in request.META.get('HTTP_ACCEPT', '').split(',') if item.strip()]
     if any(item.startswith('text/html') for item in ranges) and not any('fhir' in item for item in ranges):
         return ['application/json']  # a browser: JSON as before, not the application/xml it lists after text/html
     return [normalize_media_type(item) for item in ranges] or ['*/*']
@@ -116,7 +126,7 @@ def accepted_media_ranges(request):
 
 def quality(media_range):
     try:
-        return float(_MediaType(media_range).params.get('q', 1))
+        return float(parse_media_type(media_range).params.get('q', 1))
     except ValueError:
         return 0.0
 
@@ -135,18 +145,21 @@ class FhirContentNegotiation(DefaultContentNegotiation):
     """
 
     def select_parser(self, request, parsers):
-        content_type = normalize_media_type(request.content_type or '')
-        return next((parser for parser in parsers if media_type_matches(parser.media_type, content_type)), None)
+        content_type = parse_media_type(normalize_media_type(request.content_type or ''))
+        return next((parser for parser in parsers if parse_media_type(parser.media_type).match(content_type)), None)
 
     def select_renderer(self, request, renderers, format_suffix=None):
         """Each renderer takes its quality from its most specific match, including q=0 exclusions."""
+        # Reject a malformed Content-Type before choosing XML, so every parsing failure can use safe JSON.
+        parse_media_type(request.META.get('CONTENT_TYPE', request.META.get('HTTP_CONTENT_TYPE', '')))
         ranges = sorted(enumerate(accepted_media_ranges(request)),
-                        key=lambda item: (-_MediaType(item[1]).precedence, -quality(item[1])))
+                        key=lambda item: (-parse_media_type(item[1]).precedence, -quality(item[1])))
         candidates = []
         for renderer in renderers:
             for position, media_range in ranges:
-                if media_type_matches(renderer.media_type, media_range):
-                    preference = (quality(media_range), _MediaType(media_range).precedence, -position)
+                parsed_range = parse_media_type(media_range)
+                if parse_media_type(renderer.media_type).match(parsed_range):
+                    preference = (quality(media_range), parsed_range.precedence, -position)
                     if preference[0] > 0:
                         candidates.append((preference, renderer, media_range))
                     break  # a less specific range cannot override this renderer's quality
@@ -168,7 +181,7 @@ class FhirVersioning(AcceptHeaderVersioning):
     invalid_version_message = f'This server speaks FHIR R4: fhirVersion={FHIR_VERSION}.'
 
     def version_of(self, media_type):
-        return _MediaType(media_type or '').params.get(self.version_param.lower())
+        return parse_media_type(media_type or '').params.get(self.version_param.lower())
 
     def determine_version(self, request, *args, **kwargs):
         content_version = self.version_of(request.content_type)
@@ -488,7 +501,7 @@ class FhirParameters:
 
 
 def outcome_response(request, outcome, status_code, headers=None):
-    """A middleware outcome in the requested format, or a safe JSON 400 if the query cannot be parsed."""
+    """A middleware outcome in the requested format, or safe JSON 400 for unparseable queries or MIME parameters."""
     renderer = FhirJsonRenderer()
     try:
         renderer, _ = FhirContentNegotiation().select_renderer(

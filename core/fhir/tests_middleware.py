@@ -15,6 +15,7 @@ from rest_framework.test import APIClient
 from core.common.exceptions import DeactivatedAccountLoginRefused
 from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
 from core.middlewares.middlewares import FhirErrorMiddleware, FhirMiddleware, RequireAuthenticationMiddleware
+from core.wsgi import application
 
 REQUIRE_AUTHENTICATION = 'core.middlewares.middlewares.RequireAuthenticationMiddleware'
 
@@ -122,6 +123,48 @@ class QueryParsingFailureTest(TestCase):
                 self.assertEqual(response['Content-Type'], 'application/fhir+json')
                 OperationOutcome.model_validate_json(response.content)
                 self.assertEqual(outcome_issue(response), 'error|invalid|invalid-data')
+
+
+@override_settings(FHIR_SUBDOMAIN=None, REQUIRE_AUTHENTICATION=False,
+                   DEBUG=False, DEBUG_PROPAGATE_EXCEPTIONS=False)
+class MediaTypeParsingFailureTest(TestCase):
+    """Malformed MIME parameters remain client errors through the complete middleware stack."""
+
+    def assert_bad_request_outcome(self, response):
+        """Malformed media types always use safe FHIR JSON, including when XML was requested."""
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response['Content-Type'], 'application/fhir+json')
+        OperationOutcome.model_validate_json(response.content)
+        self.assertEqual(outcome_issue(response), 'error|invalid|invalid-data')
+
+    def test_unknown_accept_encoding_on_unknown_path_is_a_400_json_outcome(self):
+        """An unrouted path must not fail again while negotiating its error response."""
+        response = APIClient(raise_request_exception=False).get(
+            '/fhir/missing', HTTP_ACCEPT="application/fhir+xml; foo*=bad''%41")
+
+        self.assert_bad_request_outcome(response)
+
+    def test_unknown_accept_encoding_on_routed_path_is_a_400_json_outcome(self):
+        """Initial view negotiation rejects the same malformed Accept as middleware negotiation."""
+        client = APIClient(raise_request_exception=False)
+        for path in ('/fhir/metadata', '/fhir/metadata?_format=xml'):
+            for accept in ("application/fhir+xml; foo*=bad''%41", "text/html; foo*=bad''%41, application/xml"):
+                with self.subTest(path=path, accept=accept):
+                    response = client.get(path, HTTP_ACCEPT=accept)
+
+                    self.assert_bad_request_outcome(response)
+
+    def test_unknown_content_type_encoding_on_post_is_a_400_json_outcome(self):
+        """Use the production request class so Content-Type parsing reaches the middleware stack."""
+        client = APIClient(raise_request_exception=False)
+        with patch('django.test.client.WSGIRequest', application.request_class):
+            for path in ('/fhir/missing', '/fhir/CodeSystem/$lookup'):
+                with self.subTest(path=path):
+                    response = client.post(
+                        path, b'{"resourceType":"Parameters"}',
+                        content_type="application/fhir+json; foo*=bad''%41", HTTP_ACCEPT='application/fhir+xml')
+
+                    self.assert_bad_request_outcome(response)
 
 
 @override_settings(REQUIRE_AUTHENTICATION=True, APPROVED_ANONYMOUS_CLIENTS=[], APPROVED_ANONYMOUS_API_KEYS=[],

@@ -270,6 +270,8 @@ class FhirErrorMiddleware(BaseMiddleware):
     replaced_headers = ('content-type', 'content-length', 'content-encoding')
 
     def __call__(self, request):
+        if getattr(request, 'fhir_content_type_error', False):
+            return outcome_response(request, outcome_for_status(400), 400)
         try:
             response = self.get_response(request)
         except Exception as ex:  # pylint: disable=broad-exception-caught
