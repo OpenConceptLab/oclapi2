@@ -193,6 +193,7 @@ REDOC_SETTINGS = {
 }
 
 MIDDLEWARE = [
+    'core.middlewares.middlewares.FhirErrorMiddleware',  # outermost: a FHIR path's error is an OperationOutcome
     'django.middleware.gzip.GZipMiddleware',
     'cid.middleware.CidMiddleware',
     'core.middlewares.middlewares.CustomLoggerMiddleware',
@@ -595,7 +596,8 @@ REPORTS_EMAIL = os.environ.get('REPORTS_EMAIL', 'admin@openconceptlab.org')
 
 if ENV and ENV != 'development':
     # Serving swagger static files (inserted after SecurityMiddleware)
-    MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
+    MIDDLEWARE.insert(MIDDLEWARE.index('django.middleware.gzip.GZipMiddleware') + 1,
+                      'whitenoise.middleware.WhiteNoiseMiddleware')
 
 EMAIL_SUBJECT_PREFIX = os.environ.get('EMAIL_SUBJECT_PREFIX', None)
 if not EMAIL_SUBJECT_PREFIX:

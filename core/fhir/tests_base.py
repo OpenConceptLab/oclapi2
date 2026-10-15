@@ -1,7 +1,10 @@
 import json
+from unittest.mock import patch
 
 from django.test import SimpleTestCase
 from django.http import HttpResponse, JsonResponse
+from fhir.resources.R4B.bundle import Bundle
+from fhir.resources.R4B.codesystem import CodeSystem, CodeSystemConcept
 from lxml import etree
 from rest_framework.exceptions import NotAcceptable, ParseError, UnsupportedMediaType
 from rest_framework.parsers import JSONParser
@@ -18,6 +21,38 @@ from core.fhir.base import FhirContentNegotiation, FhirJsonParser, FhirJsonRende
 
 FHIR = '{http://hl7.org/fhir}'
 BROWSER_ACCEPT = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
+
+
+def child_names(element):
+    return [etree.QName(child).localname for child in element]
+
+
+def assert_in_model_order(test, element, model_class):
+    """The element's children are elements of the R4B model, in the model's order (repeats kept together)."""
+    names, sequence = child_names(element), model_class.elements_sequence()
+    test.assertEqual([name for name in names if name not in sequence], [], 'elements the model does not define')
+    test.assertEqual(names, sorted(names, key=sequence.index))
+
+
+def released_code_system(**overrides):
+    """What CodeSystemDetailSerializer gives for a released source version, in its key order."""
+    return {
+        'resourceType': 'CodeSystem', 'url': 'http://example.org/cs', 'title': 'Codes', 'status': 'active',
+        'id': 'codes', 'language': 'en', 'count': 1, 'content': 'complete',
+        'property': [{'code': 'conceptclass', 'uri': 'http://testserver/orgs/OCL/sources/Classes/concepts',
+                      'description': 'Standard list of concept classes.', 'type': 'string'}],
+        'meta': {'lastUpdated': '2026-10-14T10:00:00.123456Z'}, 'version': 'v1',
+        'identifier': [{'system': 'http://testserver', 'value': '/orgs/X/CodeSystem/codes/', 'type': {
+            'text': 'Accession ID', 'coding': [{'system': 'http://hl7.org/fhir/v2/0203', 'code': 'ACSN'}]}}],
+        'name': 'codes', 'publisher': 'X', 'revisionDate': '2026-10-14T10:00:00Z', 'experimental': False,
+        'caseSensitive': True, 'compositional': False, 'versionNeeded': False,
+        'collectionReference': '/orgs/X/collections/c/', 'hierarchyMeaning': 'is-a',
+        'concept': [{'code': 'c1', 'display': 'One', 'designation': [{'language': 'en', 'value': 'One'}],
+                     'property': [{'code': 'conceptclass', 'valueString': 'Diagnosis'}]}],
+        'text': {'status': 'generated', 'div': '<div xmlns="http://www.w3.org/1999/xhtml">Codes</div>'},
+        'filters': [{'code': 'x'}],
+        **overrides,
+    }
 
 
 def renderers():
@@ -127,6 +162,9 @@ class VersioningTest(SimpleTestCase):
 
 
 class XmlTest(SimpleTestCase):
+    def assert_in_model_order(self, element, model_class):
+        assert_in_model_order(self, element, model_class)
+
     def test_a_valid_resource_round_trips_through_its_model(self):
         parameters = {'resourceType': 'Parameters', 'parameter': [
             {'name': 'result', 'valueBoolean': True}, {'name': 'display', 'valueString': 'Malaria'},
@@ -147,19 +185,20 @@ class XmlTest(SimpleTestCase):
         root = etree.fromstring(xml)
         self.assertEqual([child.tag for child in root], [f'{FHIR}id', f'{FHIR}status', f'{FHIR}content'])
 
-    def test_a_resource_its_model_refuses_is_written_element_by_element(self):
+    def test_a_resource_its_model_refuses_on_a_pattern_is_still_written_by_the_model(self):
         code_system = {
-            'resourceType': 'CodeSystem', 'id': 'my_codes@v1', 'url': 'http://x', 'status': 'active',
-            'content': 'complete', 'caseSensitive': True, 'count': 2,
-            'text': {'status': 'generated', 'div': '<div xmlns="http://www.w3.org/1999/xhtml"><p>Codes</p></div>'},
+            'resourceType': 'CodeSystem', 'concept': [
+                {'code': 'a', 'display': 'A', 'designation': [{'language': 'en', 'value': 'A'}]}, {'code': 'b'}],
+            'count': 2, 'caseSensitive': True, 'content': 'complete', 'status': 'active', 'url': 'http://x',
             'extension': [{'url': 'http://ext', 'valueString': 'x'}],
-            'concept': [{'code': 'a', 'display': 'A', 'designation': [{'language': 'en', 'value': 'A'}]},
-                        {'id': 'c2', 'code': 'b'}],
+            'text': {'status': 'generated', 'div': '<div xmlns="http://www.w3.org/1999/xhtml"><p>Codes</p></div>'},
+            'id': 'my_codes@v1',
         }
 
         root = etree.fromstring(base.to_xml(code_system))
 
         self.assertEqual(root.tag, f'{FHIR}CodeSystem')
+        self.assert_in_model_order(root, CodeSystem)
         self.assertEqual(root.find(f'{FHIR}id').get('value'), 'my_codes@v1')
         self.assertEqual(root.find(f'{FHIR}caseSensitive').get('value'), 'true')
         self.assertEqual(root.find(f'{FHIR}count').get('value'), '2')
@@ -169,18 +208,21 @@ class XmlTest(SimpleTestCase):
                                    f'{{http://www.w3.org/1999/xhtml}}p').text, 'Codes')
         concepts = root.findall(f'{FHIR}concept')
         self.assertEqual(len(concepts), 2)
+        self.assert_in_model_order(concepts[0], CodeSystemConcept)
         self.assertEqual(concepts[0].find(f'{FHIR}designation/{FHIR}language').get('value'), 'en')
-        self.assertEqual(concepts[1].get('id'), 'c2')
 
-    def test_a_contained_resource_and_a_narrative_that_is_not_xhtml_in_the_element_writer(self):
+    def test_contained_resources_and_narratives_that_are_not_xhtml(self):
         bundle = {'resourceType': 'Bundle', 'type': 'searchset', 'total': 1, 'unknownElement': 'x',
                   'entry': [{'resource': {'resourceType': 'CodeSystem', 'id': 'a_b', 'status': 'active',
                                           'text': {'status': 'generated', 'div': 'plain <text'}}},
                             {'resource': {'resourceType': 'ValueSet', 'id': 'v_1', 'status': 'active',
-                                          'text': {'status': 'generated', 'div': '<p>Not a div</p>'}}}]}
+                                          'text': {'status': 'generated', 'div': '<p>Not a div</p>'}}},
+                            {'resource': {'resourceType': 'NoSuchResource', 'id': 'x'}},
+                            {'resource': 'not a resource'}]}
 
         root = etree.fromstring(base.to_xml(bundle))
 
+        self.assertEqual(child_names(root), ['type', 'total', 'entry', 'entry'])  # the other two had nothing R4
         resource = root.find(f'{FHIR}entry/{FHIR}resource/{FHIR}CodeSystem')
         self.assertEqual(resource.find(f'{FHIR}id').get('value'), 'a_b')
         self.assertEqual(resource.find(f'{FHIR}text/{{http://www.w3.org/1999/xhtml}}div').text, 'plain <text')
@@ -218,6 +260,131 @@ class XmlTest(SimpleTestCase):
 
         self.assertEqual(parsed, {'resourceType': 'Parameters', 'parameter': [{'name': 'code', 'valueCode': '1'}]})
         self.assertEqual(etree.fromstring(FhirXmlRenderer().render(parsed)).tag, f'{FHIR}Parameters')
+
+
+class XmlElementOrderTest(SimpleTestCase):
+    """FHIR XML has a fixed element order: the R4B model's, whatever the serializer's key order."""
+
+    def assert_in_model_order(self, element, model_class):
+        assert_in_model_order(self, element, model_class)
+
+    def test_a_released_code_system_comes_out_in_fhir_element_order(self):
+        xml = base.to_xml(released_code_system())
+
+        root = etree.fromstring(xml)
+        self.assert_in_model_order(root, CodeSystem)
+        self.assertEqual(child_names(root)[:4], ['id', 'meta', 'language', 'text'])
+        for name in ('revisionDate', 'collectionReference', 'filters'):
+            self.assertNotIn(name, child_names(root))
+        concept = root.find(f'{FHIR}concept')
+        self.assert_in_model_order(concept, CodeSystemConcept)
+        self.assertEqual(base.from_xml(xml)['concept'][0]['display'], 'One')  # valid R4B XML
+
+    def test_a_search_bundle_holding_one_comes_out_in_fhir_element_order(self):
+        code_system = released_code_system(id='my_codes')  # an owner-base id the model refuses
+        bundle = {'resourceType': 'Bundle', 'meta': {'lastUpdated': '2026-10-14T10:00:00Z'}, 'type': 'searchset',
+                  'total': 1, 'entry': [{'resource': code_system}],
+                  'link': [{'relation': 'self', 'url': 'http://testserver/fhir/CodeSystem/?page=1'}]}
+
+        root = etree.fromstring(base.to_xml(bundle))
+
+        self.assertEqual(child_names(root), ['meta', 'type', 'total', 'link', 'entry'])
+        resource = root.find(f'{FHIR}entry/{FHIR}resource/{FHIR}CodeSystem')
+        self.assert_in_model_order(resource, CodeSystem)
+        self.assertEqual(child_names(resource)[:4], ['id', 'meta', 'language', 'text'])
+        self.assertEqual(resource.find(f'{FHIR}id').get('value'), 'my_codes')
+
+    def test_bundle_children_keep_the_model_order_with_an_id(self):
+        root = etree.fromstring(base.to_xml({
+            'resourceType': 'Bundle', 'entry': [{'resource': {'resourceType': 'CodeSystem', 'id': 'codes@1',
+                                                              'status': 'active', 'content': 'complete'}}],
+            'link': [{'relation': 'self', 'url': 'http://x'}], 'total': 1, 'type': 'searchset', 'id': 'b1',
+            'meta': {'lastUpdated': '2026-10-14T10:00:00Z'}}))
+
+        self.assertEqual(child_names(root), ['id', 'meta', 'type', 'total', 'link', 'entry'])
+
+    def test_keys_r4_does_not_define_are_dropped_at_every_depth(self):
+        code_system = {'resourceType': 'CodeSystem', 'id': 'a', 'status': 'active', 'content': 'complete',
+                       'contact': [{'name': 'Jo', 'my key': 'x', 'telecom': [{'value': 'a@b.c', 'oops': 1}]}],
+                       'concept': [{'code': 'a', 'concept_class': 'Misc'}]}
+
+        root = etree.fromstring(base.to_xml(code_system))
+
+        self.assertEqual(child_names(root.find(f'{FHIR}contact')), ['name', 'telecom'])
+        self.assertEqual(child_names(root.find(f'{FHIR}contact/{FHIR}telecom')), ['value'])
+        self.assertEqual(child_names(root.find(f'{FHIR}concept')), ['code'])
+
+    def test_each_dropped_key_is_logged_once(self):
+        base.LOGGED_DROPPED_ELEMENTS.clear()
+        with self.assertLogs('oclapi', level='WARNING') as logs:
+            base.to_xml(released_code_system())
+            base.to_xml(released_code_system())
+
+        dropped = [line for line in logs.output if 'does not define' in line]
+        self.assertEqual(len(dropped), 3, dropped)
+        self.assertTrue(any('CodeSystem.revisionDate' in line for line in dropped), dropped)
+
+    def test_values_of_the_wrong_shape_are_dropped(self):
+        outcome = {'resourceType': 'OperationOutcome', 'issue': [
+            {'severity': 'error', 'details': 'Failed to represent "/x" as CodeSystem', 'expression': 'code'}],
+            'text': ['not', 'a', 'narrative'], 'id': {'not': 'an id'}}
+
+        root = etree.fromstring(base.to_xml(outcome))
+
+        self.assertEqual(child_names(root), ['issue'])
+        self.assertEqual(child_names(root.find(f'{FHIR}issue')), ['severity', 'expression'])
+
+    def test_a_resource_the_model_cannot_write_falls_back_to_the_element_writer(self):
+        bundle = {'resourceType': 'Bundle', 'type': 'searchset', 'entry': [{'resource': {
+            'resourceType': 'CodeSystem', 'id': 'a', 'status': 'active', 'content': 'complete', 'experimental': False,
+            'text': {'status': 'generated', 'div': '<div xmlns="http://www.w3.org/1999/xhtml"><p>A</p></div>'},
+            'extension': [{'url': 'http://ext', 'valueString': 'x'}], 'concept': [{'id': 'c1', 'code': 'x'}]}}]}
+        with patch.object(Bundle, 'model_dump_xml', side_effect=ValueError('boom')), \
+                self.assertLogs('oclapi', level='ERROR'):
+            root = etree.fromstring(base.to_xml(bundle))
+
+        code_system = root.find(f'{FHIR}entry/{FHIR}resource/{FHIR}CodeSystem')
+        self.assertEqual(code_system.find(f'{FHIR}id').get('value'), 'a')
+        self.assertEqual(code_system.find(f'{FHIR}experimental').get('value'), 'false')
+        self.assertEqual(code_system.find(f'{FHIR}extension').get('url'), 'http://ext')
+        self.assertEqual(code_system.find(f'{FHIR}concept').get('id'), 'c1')
+        self.assertEqual(code_system.find(f'{FHIR}concept/{FHIR}code').get('value'), 'x')
+        self.assertEqual(code_system.find(f'{FHIR}text/{{http://www.w3.org/1999/xhtml}}div/'
+                                          f'{{http://www.w3.org/1999/xhtml}}p').text, 'A')
+
+
+class XmlCharactersTest(SimpleTestCase):
+    """Characters XML 1.0 forbids never stop a response: each becomes U+FFFD, the replacement character."""
+
+    def test_a_control_character_in_a_value_becomes_the_replacement_character(self):
+        parameters = {'resourceType': 'Parameters', 'parameter': [
+            {'name': 'display', 'valueString': 'Mal\x0baria\x00'},
+            {'name': 'name', 'valueString': 'Tab\tand\nnew line'}]}
+
+        with self.assertLogs('oclapi', level='WARNING') as logs:
+            xml = base.to_xml(parameters)
+
+        values = [element.get('value') for element in etree.fromstring(xml).iter(f'{FHIR}valueString')]
+        self.assertEqual(values, ['Mal\ufffdaria\ufffd', 'Tab\tand\nnew line'])
+        self.assertIn('2', logs.output[0])
+
+    def test_lone_surrogates_and_non_characters_in_text_and_narrative(self):
+        code_system = {'resourceType': 'CodeSystem', 'id': 'a', 'status': 'active', 'content': 'complete',
+                       'title': 'A\ud800B\uffffC', 'text': {'status': 'generated', 'div': 'x\x1fy'}}
+
+        with self.assertLogs('oclapi', level='WARNING'):
+            root = etree.fromstring(base.to_xml(code_system))
+
+        self.assertEqual(root.find(f'{FHIR}title').get('value'), 'A\ufffdB\ufffdC')
+        self.assertEqual(root.find(f'{FHIR}text/{{http://www.w3.org/1999/xhtml}}div').text, 'x\ufffdy')
+
+    def test_the_element_writer_is_safe_too(self):
+        with patch.object(CodeSystem, 'model_dump_xml', side_effect=ValueError('boom')), \
+                self.assertLogs('oclapi', level='WARNING'):
+            root = etree.fromstring(base.to_xml({'resourceType': 'CodeSystem', 'id': 'a', 'status': 'active',
+                                                 'content': 'complete', 'title': 'bad\x0b'}))
+
+        self.assertEqual(root.find(f'{FHIR}title').get('value'), 'bad\ufffd')
 
 
 class FhirParametersTest(SimpleTestCase):

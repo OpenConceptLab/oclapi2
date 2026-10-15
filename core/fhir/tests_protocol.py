@@ -5,6 +5,9 @@ the fhirVersion parameter, trailing slashes on operations, and errors as Operati
 import json
 from unittest.mock import patch, Mock
 
+from fhir.resources.R4B.bundle import Bundle
+from fhir.resources.R4B.codesystem import CodeSystem
+from django.utils import timezone
 from lxml import etree
 from rest_framework.test import APIClient
 
@@ -13,6 +16,7 @@ from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory
 from core.fhir import base
 from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
+from core.fhir.tests_base import assert_in_model_order, child_names
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
@@ -22,6 +26,7 @@ from core.users.tests.factories import UserProfileFactory
 FHIR = '{http://hl7.org/fhir}'
 SYSTEM = 'http://example.org/fhir/CodeSystem/proto'
 VALUE_SET = 'http://example.org/fhir/ValueSet/proto'
+RELEASED = 'http://example.org/fhir/CodeSystem/released'
 
 
 def parameters(**values):
@@ -153,6 +158,49 @@ class FhirProtocolTest(OCLTestCase):
         response = self.client.get('/fhir/metadata?_format=xml')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(etree.fromstring(response.content).tag, f'{FHIR}CapabilityStatement')
+
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    def released_source(self):
+        """A released source version with an owner-base id FHIR doesn't allow and a display with a control character."""
+        source = OrganizationSourceFactory(organization=self.org, mnemonic='rel_codes', canonical_url=RELEASED)
+        ConceptFactory(parent=source, mnemonic='r1', names=1, names__name='Mal\x0baria')
+        Source.persist_new_version(OrganizationSourceFactory.build(
+            version='v1', mnemonic='rel_codes', organization=self.org, canonical_url=RELEASED, released=True),
+            source.created_by)
+        # a release through the API sets the revision date (ConceptContainerModel.clean)
+        Source.objects.filter(mnemonic='rel_codes', version='v1').update(revision_date=timezone.now())
+
+    def test_xml_of_released_code_systems_is_in_fhir_element_order_and_json_is_unchanged(self):
+        self.released_source()
+
+        response = self.client.get(f'/fhir/CodeSystem/?url={RELEASED}')
+        self.assertIn('revisionDate', response.data['entry'][0]['resource'])
+
+        response = self.client.get(f'/fhir/CodeSystem/?url={RELEASED}&_format=xml')
+        self.assertEqual(response.status_code, 200)
+        root = etree.fromstring(response.content)
+        assert_in_model_order(self, root, Bundle)
+        self.assertLess(child_names(root).index('link'), child_names(root).index('entry'))
+        resource = root.find(f'{FHIR}entry/{FHIR}resource/{FHIR}CodeSystem')
+        assert_in_model_order(self, resource, CodeSystem)
+        self.assertEqual(resource.find(f'{FHIR}id').get('value'), 'rel_codes')
+
+        response = self.client.get(f'/orgs/{self.org.mnemonic}/CodeSystem/rel_codes/?_format=xml')
+        self.assertEqual(response.status_code, 200)
+        root = etree.fromstring(response.content)
+        assert_in_model_order(self, root, CodeSystem)
+        self.assertEqual(child_names(root)[:2], ['id', 'meta'])
+
+    def test_a_control_character_never_stops_an_xml_response(self):
+        self.released_source()
+        lookup = f'/fhir/CodeSystem/$lookup?system={RELEASED}&code=r1'
+
+        self.assertIn({'name': 'display', 'valueString': 'Mal\x0baria'}, self.client.get(lookup).data['parameter'])
+
+        response = self.client.get(lookup + '&_format=xml')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn({'name': 'display', 'valueString': 'Mal\ufffdaria'}, base.from_xml(response.content)['parameter'])
 
     def test_xml_in_and_out(self):
         body = parameters_xml(url=('Uri', SYSTEM), code=('Code', 'c1'), version=('String', 'v1'))

@@ -3,17 +3,26 @@ The FHIR view layer: what every FHIR view shares, whatever its operation.
 
 - Media types: FHIR JSON and XML in and out, with the aliases FHIR clients use, and `_format`.
 - The `fhirVersion` MIME parameter: R4 (4.0) is served and any other version is refused.
-- XML through fhir.resources' R4B models, which are wire-identical to R4 for the terminology resources.
+- XML through fhir.resources' R4B models, which are wire-identical to R4 for the terminology resources, so
+  elements always come out in FHIR's order.
 - One reader for operation parameters, from a GET query string or a POSTed Parameters resource.
 - The FHIR base URL of a request, from its own host.
 - Errors as OperationOutcome (core.fhir.outcomes), in views and in the middleware.
 """
+import gzip
 import json
 import logging
+import re
+import types
+import typing
+import zlib
+from functools import lru_cache
 
 from django.http import HttpResponse
 from fhir.resources.R4B import get_fhir_model_class
+from fhir_core.types import FhirBase
 from lxml import etree
+from pydantic import ValidationError
 from rest_framework.exceptions import NotAcceptable, ParseError, UnsupportedMediaType
 from rest_framework.negotiation import DefaultContentNegotiation
 from rest_framework.parsers import BaseParser, FormParser, JSONParser, MultiPartParser
@@ -51,6 +60,11 @@ FHIR_NS = 'http://hl7.org/fhir'
 XHTML_NS = 'http://www.w3.org/1999/xhtml'
 EXTENSION_ELEMENTS = ('extension', 'modifierExtension')
 EMPTY_VALUES = (None, '', {}, [])
+# What XML 1.0 can't hold: C0 controls other than tab, LF and CR, lone surrogates, U+FFFE and U+FFFF
+XML_FORBIDDEN_CHARACTERS = re.compile('[^\x09\x0a\x0d\x20-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]')
+REPLACEMENT_CHARACTER = '\ufffd'
+XML_NAME = re.compile(r'^[A-Za-z_][A-Za-z0-9_.-]*$')
+LOGGED_DROPPED_ELEMENTS = set()  # what the XML has left out so far: each kind is logged once per process
 
 
 def xml_parser():
@@ -181,28 +195,164 @@ def from_xml(content):
     return json.loads(resource.model_dump_json())
 
 
+def xml_safe(value):
+    """(value, how many characters were replaced): every character XML 1.0 forbids becomes U+FFFD."""
+    if isinstance(value, str):
+        return XML_FORBIDDEN_CHARACTERS.subn(REPLACEMENT_CHARACTER, value)
+    if isinstance(value, dict):
+        items = [(xml_safe(key), xml_safe(item)) for key, item in value.items()]
+        return {key: item for (key, _), (item, _) in items}, sum(left + right for (_, left), (_, right) in items)
+    if isinstance(value, (list, tuple)):
+        items = [xml_safe(item) for item in value]
+        return [item for item, _ in items], sum(count for _, count in items)
+    return value, 0
+
+
+def element_type(annotation):
+    """(the R4B model of a field's values, or None for a primitive; whether the field repeats)."""
+    repeats = False
+    while True:
+        origin = typing.get_origin(annotation)
+        if origin in (typing.Union, types.UnionType):
+            annotation = next(arg for arg in typing.get_args(annotation) if arg is not type(None))
+        elif origin is list:
+            repeats, annotation = True, typing.get_args(annotation)[0]
+        elif origin is typing.Annotated:
+            annotation = typing.get_args(annotation)[0]
+        else:
+            break
+    is_model = isinstance(annotation, type) and issubclass(annotation, FhirBase)
+    return (annotation.get_model_klass() if is_model else None), repeats
+
+
+@lru_cache(maxsize=None)
+def model_elements(model_class):
+    """An R4B model's elements by their JSON name: (field name, the model of its values or None, repeats)."""
+    return {field.alias or name: (name, *element_type(field.annotation))
+            for name, field in model_class.model_fields.items() if name != 'fhir_comments'}
+
+
+def resource_model(data):
+    """The R4B model of a FHIR JSON resource, or None when it isn't one."""
+    if not isinstance(data, dict) or not isinstance(data.get('resourceType'), str):
+        return None
+    try:
+        return get_fhir_model_class(data['resourceType'])
+    except ValueError:
+        return None
+
+
+def log_dropped(model_class, key, reason):
+    if (model_class.__name__, key, reason) not in LOGGED_DROPPED_ELEMENTS:
+        LOGGED_DROPPED_ELEMENTS.add((model_class.__name__, key, reason))
+        logger.warning('FHIR XML: %s.%s %s; the XML leaves it out', model_class.__name__, key, reason)
+
+
+def xhtml_markup(text):
+    """A narrative div as XHTML markup: the text itself when it is an XHTML div, else the text inside one."""
+    try:
+        if etree.fromstring(text, parser=xml_parser()).tag == f'{{{XHTML_NS}}}div':
+            return text
+    except etree.XMLSyntaxError:
+        pass
+    return etree.tostring(xhtml_div(text), encoding='unicode')
+
+
+def conform_value(value_model, value):
+    """One value of an element, conformed, or None when it doesn't have the element's shape."""
+    if value_model is None:
+        return None if isinstance(value, (dict, list)) else value
+    if not isinstance(value, dict):
+        return None
+    model_class = resource_model(value) if 'resourceType' in value else value_model  # a resource names its type
+    return conform(model_class, value) if model_class else None
+
+
+def conform(model_class, data):
+    """
+    FHIR JSON reduced to what the R4 model defines, at every depth. A key R4 doesn't define (OCL's revisionDate) and
+    a value of the wrong shape are left out, each kind logged once: that is the content's problem, not the wire
+    format's. The JSON response itself is not changed.
+    """
+    elements, result = model_elements(model_class), {}
+    for key, value in data.items():
+        if key == 'resourceType':
+            result[key] = value
+            continue
+        if key not in elements:
+            log_dropped(model_class, key, 'is an element R4 does not define')
+            continue
+        _, value_model, repeats = elements[key]
+        if isinstance(value, list) and not repeats:
+            log_dropped(model_class, key, 'does not repeat in R4')
+            continue
+        items = value if isinstance(value, list) else [value]
+        kept = [item for item in (conform_value(value_model, item) for item in items) if item is not None]
+        if len(kept) < len(items):
+            log_dropped(model_class, key, 'has values of a shape R4 does not allow')
+        if key == 'div' and kept:
+            kept = [xhtml_markup(kept[0])]
+        if kept:
+            result[key] = kept if repeats else kept[0]
+    return result
+
+
+def construct(model_class, data):
+    """
+    A model instance from conformed FHIR JSON, nested models included, built without validation, so the model
+    still writes its elements in FHIR's order. For what the model refuses only on a pattern, such as an OCL id
+    with '_' or '@', or a code with a trailing space.
+    """
+    elements, values = model_elements(model_class), {}
+    for key, value in data.items():
+        if key == 'resourceType':
+            continue
+        name, value_model, repeats = elements[key]
+        items = [construct_value(value_model, item) for item in (value if repeats else [value])]
+        values[name] = items if repeats else items[0]
+    return model_class.model_construct(**values)
+
+
+def construct_value(value_model, value):
+    if value_model is None:
+        return value if isinstance(value, bool) else str(value)  # the writer takes text, and booleans as they are
+    return construct(resource_model(value) or value_model, value)
+
+
 def to_xml(data):
     """
-    FHIR JSON -> FHIR XML. A resource its R4B model accepts is written by the model, in FHIR's element order. One it
-    refuses (an OCL id with '_' or '@', an element R4 doesn't have) is still answered, written element by element.
+    FHIR JSON -> FHIR XML, always through the R4B model, so in FHIR's element order. Keys R4 doesn't define are
+    left out; a resource the model refuses on a pattern is built without validation; characters XML 1.0 forbids
+    become U+FFFD. Data that isn't a FHIR resource is answered with an OperationOutcome.
     """
     if data is None:
         return b''
-    if not isinstance(data, dict) or not data.get('resourceType'):
+    model_class = resource_model(data)
+    if model_class is None:
         data = outcomes.operation_outcome(outcomes.issue('not-supported', 'This response has no FHIR XML form.'))
-    data = prune(data)
+        model_class = resource_model(data)
+    data, replaced = xml_safe(data)
+    if replaced:
+        logger.warning('FHIR XML: %s character(s) XML cannot hold became U+FFFD in a %s', replaced,
+                       data['resourceType'])
+    data = prune(conform(model_class, prune(data)))
     try:
-        return get_fhir_model_class(data['resourceType']).model_validate(data).model_dump_xml()
-    except Exception as ex:
-        logger.info('FHIR XML: %s written without its model (%s)', data['resourceType'], type(ex).__name__)
+        instance = model_class.model_validate(data)
+    except ValidationError:
+        instance = construct(model_class, data)
+    try:
+        return instance.model_dump_xml()
+    except Exception:
+        logger.exception('FHIR XML: the %s model could not write it; written element by element', model_class.__name__)
         root = etree.Element(f"{{{FHIR_NS}}}{data['resourceType']}", nsmap={None: FHIR_NS})
         write_xml_children(root, data, resource=True)
         return etree.tostring(root, xml_declaration=True, encoding='utf-8')
 
 
 def write_xml_children(element, obj, resource=False, extension=False):
+    """The last resort writer: element by element, in the data's own order."""
     for key, value in obj.items():
-        if key == 'resourceType' or key.startswith('_'):
+        if key == 'resourceType' or not XML_NAME.match(key):
             continue
         if not resource and (key == 'id' or (extension and key == 'url')) and not isinstance(value, (dict, list)):
             element.set(key, str(value))  # an element's id and an extension's url are XML attributes
@@ -336,17 +486,22 @@ def outcome_response(request, outcome, status_code, headers=None):
     return response
 
 
+def response_json(response):
+    """A response's JSON body, gunzipped if need be, or None."""
+    if 'json' not in response.get('Content-Type', '') or getattr(response, 'streaming', False):
+        return None
+    content = response.content
+    try:
+        if response.get('Content-Encoding') == 'gzip':
+            content = gzip.decompress(content)
+        return json.loads(content)
+    except (OSError, EOFError, zlib.error, ValueError):
+        return None
+
+
 def is_outcome_response(response):
     """Whether a response is already FHIR: an error from a FHIR view, rather than Django's or another view's."""
-    content_type = response.get('Content-Type', '')
-    if 'fhir' in content_type:
-        return True
-    if 'json' not in content_type:
-        return False
-    try:
-        return outcomes.is_outcome(json.loads(response.content))
-    except ValueError:
-        return False
+    return 'fhir' in response.get('Content-Type', '') or outcomes.is_outcome(response_json(response))
 
 
 class FhirViewMixin:

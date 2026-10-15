@@ -16,7 +16,7 @@ from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER, RESPONSE_
 from core.common.exceptions import DeactivatedAccountLoginRefused
 from core.common.throttling import ThrottleUtil
 from core.common.utils import set_current_user, set_request_url
-from core.fhir.base import is_fhir_path, is_outcome_response, outcome_response
+from core.fhir.base import is_fhir_path, is_outcome_response, outcome_response, response_json
 from core.fhir.outcomes import issue, operation_outcome, outcome_for_status
 from core.services.analytics_event_emitter import AnalyticsEventEmitter
 from core.services.auth.core import AuthService
@@ -258,11 +258,32 @@ class RequireAuthenticationMiddleware(BaseMiddleware):
         return remote_addr in approved_ips
 
 
+class FhirErrorMiddleware(BaseMiddleware):
+    """
+    The outermost middleware (first in MIDDLEWARE). On a FHIR path, an error response that isn't FHIR, from anywhere
+    in the stack (an unrouted path, a crash in a view or in another middleware, such as a sign-in provider that
+    can't be reached), goes out as an OperationOutcome, and a 5xx as a 422. The stack's headers are kept. Other
+    paths are left as they are.
+    """
+    replaced_headers = ('content-type', 'content-length', 'content-encoding')
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        if response.status_code < 400 or not is_fhir_path(request.path) or is_outcome_response(response):
+            return response
+        if response.status_code == 404:  # nothing is routed there
+            outcome = operation_outcome(issue('not-found', f'Unknown FHIR path: {request.method} {request.path}'))
+        else:  # a server error's own message isn't passed on
+            outcome = outcome_for_status(
+                response.status_code, response_json(response) if response.status_code < 500 else None)
+        headers = {key: value for key, value in response.items() if key.lower() not in self.replaced_headers}
+        return outcome_response(request, outcome, response.status_code, headers)
+
+
 class FhirMiddleware(BaseMiddleware):
     """
-    Keeps FHIR on the FHIR host when FHIR_SUBDOMAIN is set (FHIR resource paths 404 elsewhere, and other paths 404 on
-    the FHIR host), and answers a FHIR path's error that no FHIR view answered (an unrouted path, a crash outside
-    the view) with an OperationOutcome. A 5xx goes out as a 422.
+    Keeps FHIR on the FHIR host when FHIR_SUBDOMAIN is set: FHIR resource paths 404 elsewhere, and other paths 404 on
+    the FHIR host, each with an OperationOutcome.
     """
 
     def __call__(self, request):
@@ -274,14 +295,7 @@ class FhirMiddleware(BaseMiddleware):
             if not on_fhir_host and fhir_path:
                 return self.not_found(request, 'The FHIR API is served on its own host.')
 
-        response = self.get_response(request)
-        if fhir_path and response.status_code >= 400 and not is_outcome_response(response):
-            headers = {key: response[key] for key in ('WWW-Authenticate', 'Retry-After', 'Allow') if key in response}
-            outcome = outcome_for_status(response.status_code)
-            if response.status_code == 404:  # nothing is routed there
-                outcome = operation_outcome(issue('not-found', f'Unknown FHIR path: {request.method} {request.path}'))
-            return outcome_response(request, outcome, response.status_code, headers)
-        return response
+        return self.get_response(request)
 
     @staticmethod
     def not_found(request, message):

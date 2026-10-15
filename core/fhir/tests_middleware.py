@@ -1,14 +1,21 @@
 """The middleware's answers on FHIR paths are OperationOutcomes (OpenConceptLab/ocl_online#451)."""
+import gzip
 import json
+from unittest.mock import patch
 
+import requests
+from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 from django.http import HttpResponse, JsonResponse, HttpResponseNotFound
-from django.test import RequestFactory, SimpleTestCase, override_settings
+from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 from lxml import etree
+from rest_framework.test import APIClient
 
 from core.common.exceptions import DeactivatedAccountLoginRefused
 from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
-from core.middlewares.middlewares import FhirMiddleware, RequireAuthenticationMiddleware
+from core.middlewares.middlewares import FhirErrorMiddleware, FhirMiddleware, RequireAuthenticationMiddleware
+
+REQUIRE_AUTHENTICATION = 'core.middlewares.middlewares.RequireAuthenticationMiddleware'
 
 
 def outcome_issue(response):
@@ -47,6 +54,18 @@ class FhirMiddlewareTest(SimpleTestCase):
         for path in ('/fhir/CodeSystem/?url=http://x', '/orgs/CIEL/CodeSystem?url=http://x', '/version/'):
             self.assertEqual(self.answer(path, host='fhir.example.org').content, b'ok', path)
 
+
+
+class FhirErrorMiddlewareTest(SimpleTestCase):
+    """The outermost middleware: an error anywhere in the stack on a FHIR path goes out as an OperationOutcome."""
+    factory = RequestFactory()
+
+    def answer(self, path, response, **headers):
+        return FhirErrorMiddleware(lambda request: response)(self.factory.get(path, **headers))
+
+    def test_is_the_outermost_middleware(self):
+        self.assertEqual(settings.MIDDLEWARE[0], 'core.middlewares.middlewares.FhirErrorMiddleware')
+
     def test_an_error_no_fhir_view_answered_becomes_an_outcome(self):
         response = self.answer('/fhir/Patient/', HttpResponseNotFound(b'<h1>Not Found</h1>'))
 
@@ -55,17 +74,62 @@ class FhirMiddlewareTest(SimpleTestCase):
         self.assertEqual(
             json.loads(response.content)['issue'][0]['details']['text'], 'Unknown FHIR path: GET /fhir/Patient/')
 
-        response = self.answer('/fhir/CodeSystem/', JsonResponse({'error': 'Server Error (500)'}, status=500))
+        server_error = JsonResponse({'error': 'Server Error (500)'}, status=500)
+        server_error['Access-Control-Allow-Origin'] = '*'
+        response = self.answer('/fhir/CodeSystem/', server_error, HTTP_ACCEPT='application/fhir+xml')
 
         self.assertEqual(response.status_code, 422)
-        self.assertEqual(outcome_issue(response), 'error|exception|invalid-data')
+        self.assertEqual(response['Access-Control-Allow-Origin'], '*')  # the stack's headers are kept
+        issue = etree.fromstring(response.content).find('{http://hl7.org/fhir}issue/{http://hl7.org/fhir}code')
+        self.assertEqual(issue.get('value'), 'exception')
+
+    def test_a_json_error_keeps_its_message(self):
+        response = self.answer('/orgs/CIEL/CodeSystem/', JsonResponse({'detail': 'Slow down.'}, status=429))
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(json.loads(response.content)['issue'][0]['details']['text'], 'Slow down.')
 
     def test_answers_left_alone(self):
         outcome = JsonResponse({'resourceType': 'OperationOutcome', 'issue': []}, status=404)
         self.assertIs(self.answer('/fhir/CodeSystem/x', outcome), outcome)
 
+        compressed = HttpResponse(gzip.compress(json.dumps({'resourceType': 'OperationOutcome', 'issue': []}).encode()),
+                                  status=404, content_type='application/json')
+        compressed['Content-Encoding'] = 'gzip'
+        self.assertIs(self.answer('/fhir/CodeSystem/x', compressed), compressed)
+
         not_found = HttpResponseNotFound(b'<h1>Not Found</h1>')
         self.assertIs(self.answer('/orgs/CIEL/sources/x/', not_found), not_found)
+        ok = HttpResponse('ok')
+        self.assertIs(self.answer('/fhir/CodeSystem/', ok), ok)
+
+
+@override_settings(REQUIRE_AUTHENTICATION=True, APPROVED_ANONYMOUS_CLIENTS=[], APPROVED_ANONYMOUS_API_KEYS=[],
+                   APPROVED_ANONYMOUS_IPS=[], MIDDLEWARE=[
+                       *settings.MIDDLEWARE[:settings.MIDDLEWARE.index(
+                           'django.contrib.auth.middleware.AuthenticationMiddleware') + 1],
+                       REQUIRE_AUTHENTICATION,
+                       *[name for name in settings.MIDDLEWARE[settings.MIDDLEWARE.index(
+                           'django.contrib.auth.middleware.AuthenticationMiddleware') + 1:]
+                         if name != REQUIRE_AUTHENTICATION]])
+class OuterMiddlewareFailureTest(TestCase):
+    """An outer middleware failing on a FHIR path (the sign-in provider down) is not a 5xx."""
+
+    @patch('core.middlewares.middlewares.OCLAuthentication.authenticate',
+           side_effect=requests.exceptions.ConnectionError('sign-in provider unreachable'))
+    def test_an_outer_middleware_error_on_a_fhir_path_is_a_4xx_outcome(self, _authenticate):
+        client = APIClient(raise_request_exception=False)
+        with self.assertLogs('django.request', level='ERROR'):
+            response = client.get('/orgs/CIEL/CodeSystem/$lookup?system=http://x&code=1', HTTP_AUTHORIZATION='Bearer x')
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(outcome_issue(response), 'error|exception|invalid-data')
+
+        with self.assertLogs('django.request', level='ERROR'):
+            response = client.get('/orgs/CIEL/sources/', HTTP_AUTHORIZATION='Bearer x')
+
+        self.assertEqual(response.status_code, 500)  # other paths keep Django's answer
+        self.assertEqual(json.loads(response.content), {'error': 'Server Error (500)'})
 
 
 @override_settings(REQUIRE_AUTHENTICATION=True, APPROVED_ANONYMOUS_CLIENTS=[], APPROVED_ANONYMOUS_API_KEYS=[],
