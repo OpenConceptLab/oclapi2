@@ -372,6 +372,31 @@ class URLRegistryLinkTest(OCLAPITestCase):
             self.assertEqual(self.linked_repo(entry), (None, (None, None)))
         self.assertEqual(self.linked_repo(new_entry), (codes, ('codes', 'acme-registry')))
 
+    def test_a_version_given_an_entrys_canonical_links_it_and_loses_it_again(self):
+        """A version row that gains the canonical an unlinked entry names is what the registry's lookup finds"""
+        head_entry = self.create_entry(self.org.uri, self.OLD)
+        head = source(self.org, 'codes', canonical_url=self.OLD)
+        source(self.org, 'codes', 'v1', released=True, canonical_url=self.OLD)
+        head_link = (head.uri, ('codes', 'acme-registry'))
+        self.assertEqual(self.linked_repo(head_entry), head_link)  # a new version doesn't take HEAD's entry
+
+        new_entries = [self.create_entry('/', self.NEW), self.create_entry(self.org.uri, self.NEW)]
+        version_url = f'{head.uri}v1/'
+        response = self.client.put(version_url, {'canonical_url': self.NEW}, format='json', **self.auth)
+        self.assertEqual(response.status_code, 200, response.data)
+        for entry in new_entries:
+            self.assertEqual(self.linked_repo(entry), (version_url, ('codes', 'acme-registry')))
+        self.assertEqual(self.linked_repo(head_entry), head_link)
+
+        with patch.object(resolve_url_registry_entries, 'apply_async', side_effect=run_inline) as queued:
+            response = self.client.put(
+                version_url, {'canonical_url': 'https://example.org/acme/elsewhere'}, format='json', **self.auth)
+        self.assertEqual(response.status_code, 200, response.data)
+        queued.assert_called_once()
+        for entry in new_entries:
+            self.assertEqual(self.linked_repo(entry), (None, (None, None)))
+        self.assertEqual(self.linked_repo(head_entry), head_link)
+
     def test_a_collection_created_after_its_entry_links_it(self):
         entry = GlobalURLRegistryFactory(url=self.OLD, namespace=self.org.uri)
         source(self.org, 'codes', canonical_url=self.OLD.replace('codes', 'other'))
@@ -379,7 +404,7 @@ class URLRegistryLinkTest(OCLAPITestCase):
         entry.refresh_from_db()
         self.assertEqual(entry.repo, value_set)
 
-        # a version row never relinks an entry; a later repository with the same canonical doesn't take it over
+        # neither a new version row nor a later repository with the same canonical takes the entry over
         collection(self.org, 'codes-vs', 'v1', released=True, canonical_url=self.OLD)
         collection(self.org, 'codes-vs-2', canonical_url=self.OLD)
         entry.refresh_from_db()

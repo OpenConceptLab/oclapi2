@@ -1379,11 +1379,13 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     def link_url_registry_entries(self):
         """
-        For a HEAD created with, or given, a canonical URL: the active registry entries that name it in this
-        repository's namespace are pointed at what they resolve to now, so an entry made before its repository gets
-        it. The entries already linked to this repository are re-resolved by the resolve_url_registry_entries task.
+        For a repository row (HEAD or version) created with, or given, a canonical URL: the active registry entries
+        that name it in this repository's namespace are pointed at what they resolve to now (lookup_entry: the
+        namespace's lowest-id row with the URL, as the registry has always resolved), so an entry made before the row
+        that answers it gets it. The entries already linked to this row are re-resolved by the
+        resolve_url_registry_entries task.
         """
-        if not self.is_head or not self.canonical_url:
+        if not self.canonical_url:
             return
         from core.url_registry.models import URLRegistry
         for entry in URLRegistry.objects.filter(is_active=True, url=self.canonical_url, namespace=self.parent_url):
