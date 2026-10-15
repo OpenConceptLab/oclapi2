@@ -283,6 +283,7 @@ class URLRegistryReadsTest(ResolverCorpusMixin, OCLTestCase):
         self.assertEqual(self.entry.repo, self.pbd_source)
 
         self.entry.namespace = self.drafts.uri
+        self.entry.save()  # as the entry's update does, before its lookup_entry
         self.assertIsNone(self.entry.lookup_entry())
         self.entry.refresh_from_db()
         self.assertEqual(
@@ -487,6 +488,45 @@ class URLRegistryLinkTest(OCLAPITestCase):
         self.assertEqual(self.entry_state(entry), (True, True))
         self.assertEqual(URLRegistry.objects.get(id=entry[1]).repo_id, v2.id)
         self.assertEqual(self.linked_repo(entry), (v2_url, ('codes', 'acme-registry')))
+
+    def test_a_stale_entry_saves_only_its_link(self):
+        """Saving the cached link writes only the link columns, so a stale instance can't undo a concurrent edit"""
+        other = OrganizationFactory(mnemonic='acme-other')
+        codes = source(self.org, 'codes', canonical_url=self.OLD)
+        entry = self.create_entry('/', self.OLD)
+        stale = URLRegistry.objects.get(id=entry[1])
+        self.assertEqual(stale.repo, codes)
+
+        URLRegistry.objects.filter(id=stale.id).update(namespace=other.uri, name='redirected')
+        stale.unlink()
+        row = URLRegistry.objects.get(id=stale.id)
+        self.assertEqual(
+            (row.namespace, row.name, row.repo_type_id, row.repo_id), (other.uri, 'redirected', None, None))
+        self.assertEqual(self.linked_repo(entry), (None, (None, None)))
+
+        stale.lookup_entry()  # the stale namespace still finds codes; only the link is written
+        row = URLRegistry.objects.get(id=stale.id)
+        self.assertEqual((row.namespace, row.name, row.repo_id), (other.uri, 'redirected', codes.id))
+        self.assertEqual(self.linked_repo(entry), (codes.uri, ('codes', 'acme-registry')))
+
+    @patch('core.common.models.delete_s3_objects')  # export files: no broker in tests
+    def test_a_namespace_redirected_during_a_delete_is_kept_and_resolved(self, _):
+        """The entry is redirected to another namespace between the delete loading it and unlinking it"""
+        other = OrganizationFactory(mnemonic='acme-other')
+        source(self.org, 'codes', canonical_url=self.OLD)
+        other_codes = source(other, 'codes', canonical_url=self.OLD)
+        entry = self.create_entry('/', self.OLD)
+        unlink = URLRegistry.unlink
+
+        def unlink_after_a_concurrent_redirect(instance):
+            URLRegistry.objects.filter(id=instance.id).update(namespace=other.uri)
+            unlink(instance)
+
+        with patch.object(URLRegistry, 'unlink', autospec=True, side_effect=unlink_after_a_concurrent_redirect):
+            self.assertEqual(self.client.delete(f'{self.org.uri}sources/codes/', **self.auth).status_code, 204)
+        row = URLRegistry.objects.get(id=entry[1])
+        self.assertEqual((row.namespace, row.repo_id), (other.uri, other_codes.id))
+        self.assertEqual(self.linked_repo(entry), (other_codes.uri, ('codes', 'acme-other')))
 
     def test_a_collection_created_after_its_entry_links_it(self):
         entry = GlobalURLRegistryFactory(url=self.OLD, namespace=self.org.uri)

@@ -138,8 +138,11 @@ class URLRegistry(BaseModel):
         self._set_repo(None)
 
     def _set_repo(self, repo):
-        """Points the entry at repo, or at nothing; saves (and so reindexes) only when that changes"""
+        """
+        Points the entry at repo, or at nothing; saves (and so reindexes) only when that changes, and only the link's
+        own columns, so an instance read before a concurrent edit (a new namespace, say) can't undo it
+        """
         link = (ContentType.objects.get_for_model(repo).id, repo.id) if repo else (None, None)
         if (self.repo_type_id, self.repo_id) != link:
             self.repo = repo
-            self.save()
+            self.save(update_fields=['repo_type', 'repo_id', 'updated_at'])
