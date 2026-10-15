@@ -190,6 +190,38 @@ class FhirResolveCases:  # pylint: disable=too-many-public-methods
         source(self.hl7, 'account-status', 'v1', released=True, canonical_url=DRAFT)
         self.assertEqual(self.resolve('CodeSystem', DRAFT, HEAD).id, self.draft.id)
 
+    def test_a_head_flagged_released_is_no_release(self):
+        """HEAD's released flag neither makes HEAD the default nor makes a repository visible"""
+        flagged = 'http://example.org/flagged-head'
+        head = source(self.hl7, 'flagged', released=True, canonical_url=flagged)
+        if self.registry:
+            GlobalURLRegistryFactory(url=flagged, namespace=self.hl7.uri)
+        for version, kwargs, user in ((None, None, ANONYMOUS), (HEAD, None, ANONYMOUS),
+                                      (None, {'org': 'HL7'}, self.admin), (HEAD, {'org': 'HL7'}, self.admin)):
+            self.assertUnresolved('CodeSystem', flagged, version, kwargs, user)
+
+        released = source(self.hl7, 'flagged', 'v1', released=True, canonical_url=flagged)
+        self.assertEqual(self.resolve('CodeSystem', flagged).id, released.id)
+        self.assertEqual(self.resolve('CodeSystem', flagged, HEAD).id, head.id)
+
+    def test_a_relative_url_keeps_its_own_resource_type(self):
+        """An OCL path names a Source or a Collection by itself; a reference of the other type is not found"""
+        acme = OrganizationFactory(mnemonic='acme')
+        source(acme, 'codes')
+        codes = source(acme, 'codes', 'v1', released=True)
+        collection(acme, 'codes')
+        value_set = collection(acme, 'codes', 'v1', released=True)
+        for url in ('/orgs/acme/CodeSystem/codes/', '/orgs/acme/ConceptMap/codes/', '/orgs/acme/sources/codes/'):
+            self.assertEqual(self.resolve('CodeSystem', url).id, codes.id)
+            self.assertEqual(self.resolve('ConceptMap', url).id, codes.id)
+            self.assertUnresolved('ValueSet', url)
+        for url in ('/orgs/acme/ValueSet/codes/', '/orgs/acme/collections/codes/'):
+            self.assertEqual(self.resolve('ValueSet', url).id, value_set.id)
+            self.assertUnresolved('CodeSystem', url)
+            self.assertUnresolved('ConceptMap', url)
+        self.assertEqual(self.resolve('CodeSystem', '/orgs/acme/CodeSystem/codes/|v1').id, codes.id)
+        self.assertUnresolved('ValueSet', '/orgs/acme/CodeSystem/codes/|v1')
+
     def test_fixture_namespace(self):
         fixtures = {'org': 'FHIR-Fixtures'}
         for user in (self.member, self.admin):

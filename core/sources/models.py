@@ -697,8 +697,11 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             else:
                 self.__update_sequences(dirty_fields)
 
-        if self.id and 'canonical_url' in dirty_fields and self.active_url_registry_entries.exists():
-            resolve_url_registry_entries.apply_async((self.id, self.resource_type), queue='default', permanent=False)
+        if self.id and 'canonical_url' in dirty_fields:
+            if self.active_url_registry_entries.exists():
+                resolve_url_registry_entries.apply_async(
+                    (self.id, self.resource_type), queue='default', permanent=False)
+            self.link_url_registry_entries()
 
     def __update_sequences(self, dirty_fields=[]):  # pylint: disable=dangerous-default-value
         def should_update(is_seq, field):

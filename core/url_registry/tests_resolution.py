@@ -1,18 +1,23 @@
 """
 The shared canonical resolver (ConceptContainerModel.resolve_reference_expression) with the URL registry toggle off
 and on: today's answers for its existing callers, the flags FHIR resolves with (repo_type, allow_head), reads that
-never write a registry entry, and $resolveReference's ?namespace=. OpenConceptLab/ocl_online#451.
+never write a registry entry, the registry links kept on the write side instead, and $resolveReference's ?namespace=.
+OpenConceptLab/ocl_online#451.
 """
+from django.test import override_settings
 from mock import patch
+from pydash import get
 
 from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.constants import HEAD
+from core.common.tasks import resolve_url_registry_entries
 from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.toggles.models import Toggle
+from core.url_registry.documents import URLRegistryDocument
 from core.url_registry.factories import GlobalURLRegistryFactory, OrganizationURLRegistryFactory
 from core.url_registry.models import URLRegistry
 from core.users.models import UserProfile
@@ -21,6 +26,7 @@ REGISTRY_TOGGLE = 'URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE'
 ICD10 = 'http://hl7.org/fhir/sid/icd-10'
 PBD = 'http://pbd.com.np'
 DRAFT = 'https://example.org/draft'
+FLAGGED = 'https://example.org/flagged-head'
 
 
 def set_registry_toggle(on):
@@ -64,7 +70,28 @@ class ResolverCorpusMixin:
         self.draft = source(self.drafts, 'draft', canonical_url=DRAFT)
 
 
-class ResolverToggleOffTest(ResolverCorpusMixin, OCLTestCase):
+class StrictDefaultCases:
+    """With the toggle off and on (the toggle classes mix this in)."""
+    def test_a_head_flagged_released_is_never_the_strict_default(self):
+        """allow_head=False skips HEAD even when HEAD is flagged released; the default keeps today's answer"""
+        head = source(self.drafts, 'flagged', released=True, canonical_url=FLAGGED)
+        GlobalURLRegistryFactory(url=FLAGGED, namespace=self.drafts.uri)  # read only with the toggle on
+
+        version, _ = Source.resolve_reference_expression(FLAGGED)
+        self.assertEqual(version.id, head.id)
+        for repo_type in (None, Source):
+            version, _ = Source.resolve_reference_expression(FLAGGED, repo_type=repo_type, allow_head=False)
+            self.assertIsNone(version.id)
+            version, _ = Source.resolve_reference_expression(
+                FLAGGED, version=HEAD, repo_type=repo_type, allow_head=False)
+            self.assertEqual(version.id, head.id)
+
+        released = source(self.drafts, 'flagged', 'v1', released=True, canonical_url=FLAGGED)
+        version, _ = Source.resolve_reference_expression(FLAGGED, repo_type=Source, allow_head=False)
+        self.assertEqual(version.id, released.id)
+
+
+class ResolverToggleOffTest(StrictDefaultCases, ResolverCorpusMixin, OCLTestCase):
     """No registry: the lowest-id active repository with the canonical, Source before Collection."""
     def setUp(self):
         set_registry_toggle(False)
@@ -156,7 +183,7 @@ class ResolverToggleOffTest(ResolverCorpusMixin, OCLTestCase):
         self.assertEqual(version.id, self.who_icd_2019.id)
 
 
-class ResolverToggleOnTest(ResolverCorpusMixin, OCLTestCase):
+class ResolverToggleOnTest(StrictDefaultCases, ResolverCorpusMixin, OCLTestCase):
     """The registry's order: the owner's entry, the owner's repositories, the global entry; nothing else."""
     def setUp(self):
         set_registry_toggle(True)
@@ -265,19 +292,108 @@ class URLRegistryReadsTest(ResolverCorpusMixin, OCLTestCase):
         self.assertEqual(self.entry.find_repo(Collection), self.pbd_collection)
         self.assertIsNone(URLRegistry(url=PBD).find_repo())
 
-    def test_lookup_entry_still_keeps_the_repository_on_the_entry(self):
-        """The write path (an entry's create or update, a canonical URL change) is unchanged"""
+    def test_lookup_entry_keeps_the_link_and_saves_only_on_a_change(self):
+        """The write path: lookup_entry links the repository found, clears a link that no longer resolves, and saves
+        (so reindexes) only when the link changes"""
         with patch.object(URLRegistry, 'save', wraps=self.entry.save) as save_mock:
             self.assertEqual(self.entry.lookup_entry(), self.pbd_source)
             self.assertEqual(self.entry.lookup_entry(), self.pbd_source)
-
-        self.assertEqual(save_mock.call_count, 2)
+        self.assertEqual(save_mock.call_count, 1)
         self.entry.refresh_from_db()
         self.assertEqual(self.entry.repo, self.pbd_source)
+
+        self.entry.namespace = self.drafts.uri
+        self.assertIsNone(self.entry.lookup_entry())
+        self.entry.refresh_from_db()
+        self.assertEqual(
+            (self.entry.namespace, self.entry.repo_id, self.entry.repo_type_id), (self.drafts.uri, None, None))
 
         with patch.object(URLRegistry, 'save') as save_mock:
             self.assertIsNone(URLRegistry(url='http://example.org/nowhere', namespace=self.padam.uri).lookup_entry())
         save_mock.assert_not_called()
+
+
+def run_inline(args, **_):
+    """resolve_url_registry_entries.apply_async, run in the test's own transaction (tests have no broker)"""
+    return resolve_url_registry_entries(*args)
+
+
+@override_settings(ES_SYNC=True, ELASTICSEARCH_DSL_AUTOSYNC=True, ELASTICSEARCH_DSL_AUTO_REFRESH=True)
+class URLRegistryLinkTest(OCLAPITestCase):
+    """
+    An entry's cached repository is kept on the write side, since reads no longer write: a repository created after
+    its entry links it, and a canonical URL change clears the entries of the old URL and fills those of the new one,
+    in the registry API and in the registry's search index. Indexing is switched on here because a test that pauses
+    it leaves it paused (resume_indexing does nothing in TEST_MODE).
+    """
+    OLD, NEW = 'https://example.org/acme/codes', 'https://example.org/acme/codes-v2'
+
+    def setUp(self):
+        super().setUp()
+        self.auth = {'HTTP_AUTHORIZATION': 'Token ' + UserProfile.objects.get(username='ocladmin').get_token()}
+        self.org = OrganizationFactory(mnemonic='acme-registry')
+
+    def create_entry(self, base, url):
+        response = self.client.post(
+            f'{base}url-registry/', {'name': url, 'url': url, 'namespace': self.org.uri}, format='json', **self.auth)
+        self.assertEqual(response.status_code, 201, response.data)
+        return f"{base}url-registry/{response.data['id']}/", response.data['id']
+
+    def linked_repo(self, entry):
+        """The entry's repository in the registry API and in its search document (the repo and repoOwner facets)"""
+        path, entry_id = entry
+        response = self.client.get(path, **self.auth)
+        self.assertEqual(response.status_code, 200)
+        URLRegistryDocument._index.refresh()  # pylint: disable=protected-access
+        hits = URLRegistryDocument.search().filter('ids', values=[str(entry_id)]).execute()
+        self.assertEqual(len(hits), 1)
+        return get(response.data, 'repo.url'), (get(hits[0], 'repo'), get(hits[0], 'repo_owner'))
+
+    def test_a_repository_created_after_its_entries_links_them_and_a_canonical_change_moves_the_links(self):
+        old_entries = [self.create_entry('/', self.OLD), self.create_entry(self.org.uri, self.OLD)]
+        new_entry = self.create_entry(self.org.uri, self.NEW)
+        for entry in old_entries + [new_entry]:
+            self.assertEqual(self.linked_repo(entry), (None, (None, None)))
+
+        response = self.client.post(f'{self.org.uri}sources/', {
+            'id': 'codes', 'name': 'codes', 'short_code': 'codes', 'canonical_url': self.OLD,
+            'default_locale': 'en', 'supported_locales': 'en'}, format='json', **self.auth)
+        self.assertEqual(response.status_code, 201, response.data)
+        codes = f'{self.org.uri}sources/codes/'
+        for entry in old_entries:
+            self.assertEqual(self.linked_repo(entry), (codes, ('codes', 'acme-registry')))
+        self.assertEqual(self.linked_repo(new_entry), (None, (None, None)))
+
+        with patch.object(resolve_url_registry_entries, 'apply_async', side_effect=run_inline) as queued:
+            response = self.client.put(codes, {'canonical_url': self.NEW}, format='json', **self.auth)
+        self.assertEqual(response.status_code, 200, response.data)
+        queued.assert_called_once()  # the entries the repository was linked to, through the existing task
+        for entry in old_entries:
+            self.assertEqual(self.linked_repo(entry), (None, (None, None)))
+        self.assertEqual(self.linked_repo(new_entry), (codes, ('codes', 'acme-registry')))
+
+    def test_a_collection_created_after_its_entry_links_it(self):
+        entry = GlobalURLRegistryFactory(url=self.OLD, namespace=self.org.uri)
+        source(self.org, 'codes', canonical_url=self.OLD.replace('codes', 'other'))
+        value_set = collection(self.org, 'codes-vs', canonical_url=self.OLD)
+        entry.refresh_from_db()
+        self.assertEqual(entry.repo, value_set)
+
+        # a version row never relinks an entry; a later repository with the same canonical doesn't take it over
+        collection(self.org, 'codes-vs', 'v1', released=True, canonical_url=self.OLD)
+        collection(self.org, 'codes-vs-2', canonical_url=self.OLD)
+        entry.refresh_from_db()
+        self.assertEqual(entry.repo, value_set)
+
+    def test_entries_elsewhere_are_left_alone(self):
+        other = OrganizationFactory(mnemonic='acme-other')
+        entry = GlobalURLRegistryFactory(url=self.OLD, namespace=other.uri)
+        inactive = GlobalURLRegistryFactory(url=self.NEW, namespace=self.org.uri, is_active=False)
+        source(self.org, 'codes', canonical_url=self.OLD)
+        source(self.org, 'codes-2', canonical_url=self.NEW)
+        for unlinked in (entry, inactive):
+            unlinked.refresh_from_db()
+            self.assertIsNone(unlinked.repo_id)
 
 
 class ResolveReferenceNamespaceTest(OCLAPITestCase):

@@ -712,8 +712,12 @@ class VersionedModel(BaseResourceModel):
     def get_last_version(self):
         return self.active_versions.order_by('-created_at').first()
 
-    def get_latest_released_version(self):
-        return self.released_versions.filter(retired=False).order_by('-created_at').first()
+    def get_latest_released_version(self, exclude_head=False):
+        """The newest released version that isn't retired; exclude_head skips a HEAD flagged released"""
+        versions = self.released_versions.filter(retired=False)
+        if exclude_head:
+            versions = versions.exclude(version=HEAD)
+        return versions.order_by('-created_at').first()
 
     def get_prev_released_version(self):
         return self.released_versions.exclude(id=self.id).order_by('-created_at').first()
@@ -1373,6 +1377,18 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     def active_url_registry_entries(self):
         return self.url_registry_entries.filter(is_active=True)
 
+    def link_url_registry_entries(self):
+        """
+        For a HEAD created with, or given, a canonical URL: the active registry entries that name it in this
+        repository's namespace are pointed at what they resolve to now, so an entry made before its repository gets
+        it. The entries already linked to this repository are re-resolved by the resolve_url_registry_entries task.
+        """
+        if not self.is_head or not self.canonical_url:
+            return
+        from core.url_registry.models import URLRegistry
+        for entry in URLRegistry.objects.filter(is_active=True, url=self.canonical_url, namespace=self.parent_url):
+            entry.lookup_entry()
+
     @cached_property
     def version_export_path(self):
         last_update = self.last_child_update.strftime('%Y-%m-%d_%H%M%S')
@@ -1494,8 +1510,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
           active, non-retired HEAD of a repository (its current canonical URL) in every step, so a registry entry whose
           namespace holds no such repository resolves to nothing, and nothing else is tried. A named version must be
           active. Unresolved is an unsaved repo_type.
-        - allow_head=False: with no version named, the latest released version or nothing, never HEAD. A version named
-          HEAD is still served.
+        - allow_head=False: with no version named, the latest released version other than HEAD (even a HEAD flagged
+          released) or nothing. A version named HEAD is still served.
         """
 
         resolution_url, version, is_canonical = cls.__get_resolution_url(url, version)
@@ -1544,7 +1560,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 versions = instance.active_versions if repo_type else instance.versions
                 instance = versions.filter(version=decode_string(version)).first()
             elif instance.is_head:
-                instance = instance.get_latest_released_version() or (instance if allow_head else None)
+                instance = (instance.get_latest_released_version() or instance) if allow_head else \
+                    instance.get_latest_released_version(exclude_head=True)
 
         if not instance:
             from core.sources.models import Source

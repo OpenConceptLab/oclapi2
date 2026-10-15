@@ -120,8 +120,10 @@ class URLRegistry(BaseModel):
         return namespace_owner.find_repo_by_canonical_url(self.url, repo_type) if namespace_owner else None
 
     def lookup_entry(self):
-        """find_repo, then kept on the entry as `repo`: for an entry's create or update and a repository's canonical
-        URL change, never for a read"""
+        """
+        find_repo, kept on the entry as `repo` (cleared when nothing is found): for an entry's create or update and
+        for a repository's creation or canonical URL change, never for a read
+        """
         repo = self.find_repo()
         self._set_repo(repo)
         return repo
@@ -132,6 +134,8 @@ class URLRegistry(BaseModel):
         return entries.filter(url=url).first()
 
     def _set_repo(self, repo):
-        if repo:
+        """Points the entry at repo, or at nothing; saves (and so reindexes) only when that changes"""
+        link = (ContentType.objects.get_for_model(repo).id, repo.id) if repo else (None, None)
+        if (self.repo_type_id, self.repo_id) != link:
             self.repo = repo
             self.save()

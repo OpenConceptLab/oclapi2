@@ -13,8 +13,8 @@ with or without the URL registry), with FHIR's rules on top.
 Every failure is the same UnresolvedError, so it never tells a caller that a repository they can't see exists.
 """
 from core.collections.models import Collection
+from core.common.constants import HEAD
 from core.common.mixins import SourceContainerMixin
-from core.common.serializers import IdentifierSerializer
 from core.fhir.outcomes import NotFoundError
 from core.sources.models import Source
 
@@ -62,12 +62,22 @@ def resolve(resource_type, url, version=None, kwargs=None, user=None, expression
 
     repo_type = REPO_TYPES[resource_type]
     instance, _ = repo_type.resolve_reference_expression(
-        IdentifierSerializer.convert_fhir_url_to_ocl_uri(url, REPO_PATHS[resource_type]), namespace, version,
-        repo_type=repo_type, allow_head=False)
+        to_ocl_path(url), namespace, version, repo_type=repo_type, allow_head=False)
 
     if not instance.id or not is_visible(instance, namespace, user) or not has_release(instance):
         raise error
     return instance
+
+
+def to_ocl_path(url):
+    """
+    An OCL FHIR path (/orgs/{org}/CodeSystem/{id}/...) as the OCL path of the repository it names, by its own
+    resource type, so a reference to the other type finds nothing; anything else as it is.
+    """
+    parts = url.split('/')
+    if len(parts) > 3 and not parts[0] and parts[1] in ('orgs', 'users') and parts[3] in REPO_PATHS:
+        parts[3] = REPO_PATHS[parts[3]]
+    return '/'.join(parts)
 
 
 def is_visible(instance, namespace, user):
@@ -76,5 +86,7 @@ def is_visible(instance, namespace, user):
 
 
 def has_release(instance):
-    """Whether the repository of a version has a released version that isn't retired."""
-    return (instance.released and not instance.retired) or instance.released_versions.filter(retired=False).exists()
+    """Whether the repository of a version has a released version that isn't retired; HEAD's released flag isn't one"""
+    if instance.released and not instance.retired and not instance.is_head:
+        return True
+    return instance.released_versions.filter(retired=False).exclude(version=HEAD).exists()
