@@ -28,6 +28,7 @@ from rest_framework.negotiation import DefaultContentNegotiation
 from rest_framework.parsers import BaseParser, FormParser, JSONParser, MultiPartParser
 from rest_framework.renderers import BaseRenderer, JSONRenderer
 from rest_framework.response import Response
+from rest_framework.utils.encoders import JSONEncoder
 from rest_framework.utils.mediatypes import _MediaType, media_type_matches
 from rest_framework.versioning import AcceptHeaderVersioning
 
@@ -195,6 +196,11 @@ def from_xml(content):
     return json.loads(resource.model_dump_json())
 
 
+def json_values(data):
+    """The data as the JSON response carries it: DRF's encoder writes datetimes, dates, decimals and UUIDs."""
+    return json.loads(json.dumps(data, cls=JSONEncoder))
+
+
 def xml_safe(value):
     """(value, how many characters were replaced): every character XML 1.0 forbids becomes U+FFFD."""
     if isinstance(value, str):
@@ -245,7 +251,7 @@ def resource_model(data):
 def log_dropped(model_class, key, reason):
     if (model_class.__name__, key, reason) not in LOGGED_DROPPED_ELEMENTS:
         LOGGED_DROPPED_ELEMENTS.add((model_class.__name__, key, reason))
-        logger.warning('FHIR XML: %s.%s %s; the XML leaves it out', model_class.__name__, key, reason)
+        logger.warning('FHIR XML: %s.%s %s', model_class.__name__, key, reason)
 
 
 def xhtml_markup(text):
@@ -280,16 +286,17 @@ def conform(model_class, data):
             result[key] = value
             continue
         if key not in elements:
-            log_dropped(model_class, key, 'is an element R4 does not define')
+            log_dropped(model_class, key, 'is an element R4 does not define, so the XML leaves it out')
             continue
         _, value_model, repeats = elements[key]
-        if isinstance(value, list) and not repeats:
-            log_dropped(model_class, key, 'does not repeat in R4')
-            continue
+        if isinstance(value, list) and not repeats:  # OCL's ConceptMap.identifier is a list; R4 allows one
+            if len(value) > 1:
+                log_dropped(model_class, key, 'repeats, but not in R4, so the XML keeps only the first')
+            value = value[:1]
         items = value if isinstance(value, list) else [value]
         kept = [item for item in (conform_value(value_model, item) for item in items) if item is not None]
         if len(kept) < len(items):
-            log_dropped(model_class, key, 'has values of a shape R4 does not allow')
+            log_dropped(model_class, key, 'has values of a shape R4 does not allow, so the XML leaves them out')
         if key == 'div' and kept:
             kept = [xhtml_markup(kept[0])]
         if kept:
@@ -321,12 +328,14 @@ def construct_value(value_model, value):
 
 def to_xml(data):
     """
-    FHIR JSON -> FHIR XML, always through the R4B model, so in FHIR's element order. Keys R4 doesn't define are
-    left out; a resource the model refuses on a pattern is built without validation; characters XML 1.0 forbids
-    become U+FFFD. Data that isn't a FHIR resource is answered with an OperationOutcome.
+    FHIR JSON -> FHIR XML, always through the R4B model, so in FHIR's element order. It starts from the values the
+    JSON response carries. Keys R4 doesn't define are left out; a resource the model refuses on a pattern is built
+    without validation; characters XML 1.0 forbids become U+FFFD. Data that isn't a FHIR resource is answered with
+    an OperationOutcome.
     """
     if data is None:
         return b''
+    data = json_values(data)
     model_class = resource_model(data)
     if model_class is None:
         data = outcomes.operation_outcome(outcomes.issue('not-supported', 'This response has no FHIR XML form.'))

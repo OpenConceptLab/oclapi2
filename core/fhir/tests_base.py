@@ -1,4 +1,8 @@
+import datetime
 import json
+import re
+import uuid
+from decimal import Decimal
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
@@ -351,6 +355,94 @@ class XmlElementOrderTest(SimpleTestCase):
         self.assertEqual(code_system.find(f'{FHIR}concept/{FHIR}code').get('value'), 'x')
         self.assertEqual(code_system.find(f'{FHIR}text/{{http://www.w3.org/1999/xhtml}}div/'
                                           f'{{http://www.w3.org/1999/xhtml}}p').text, 'A')
+
+
+# FHIR's instant: a full date and time with seconds and a zone
+FHIR_INSTANT = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$')
+UPDATED = datetime.datetime(2026, 10, 14, 12, 34, 56, 123456, tzinfo=datetime.timezone.utc)
+
+
+def serialized_value_set(id_):
+    """What ValueSetDetailSerializer gives: meta.lastUpdated is the model's raw datetime."""
+    return {'resourceType': 'ValueSet', 'id': id_, 'version': 'v1', 'url': f'http://example.org/vs/{id_}',
+            'status': 'active', 'meta': {'lastUpdated': UPDATED}, 'date': UPDATED}
+
+
+def json_of(data):
+    """What the JSON response carries for the same data."""
+    return json.loads(FhirJsonRenderer().render(data))
+
+
+class XmlValuesTest(SimpleTestCase):
+    """XML carries the values the JSON response carries, on both the model and the unvalidated path."""
+
+    def last_updated(self, element):
+        return element.find(f'{FHIR}meta/{FHIR}lastUpdated').get('value')
+
+    def test_a_refused_value_set_writes_its_datetimes_as_the_json_does(self):
+        data = serialized_value_set('my_vs')  # an owner-base id the model refuses
+
+        root = etree.fromstring(base.to_xml(data))
+
+        expected = json_of(data)['meta']['lastUpdated']
+        self.assertEqual(self.last_updated(root), expected)
+        self.assertRegex(self.last_updated(root), FHIR_INSTANT)
+        self.assertEqual(root.find(f'{FHIR}date').get('value'), json_of(data)['date'])
+
+    def test_every_entry_of_a_bundle_holding_a_refused_one(self):
+        bundle = {'resourceType': 'Bundle', 'type': 'searchset', 'total': 2,
+                  'entry': [{'resource': serialized_value_set('good')}, {'resource': serialized_value_set('bad_id')}]}
+
+        root = etree.fromstring(base.to_xml(bundle))
+
+        expected = json_of(bundle)['entry'][0]['resource']['meta']['lastUpdated']
+        for resource in root.iterfind(f'{FHIR}entry/{FHIR}resource/{FHIR}ValueSet'):
+            self.assertEqual(self.last_updated(resource), expected)
+            self.assertRegex(self.last_updated(resource), FHIR_INSTANT)
+
+    def test_a_valid_resource_writes_the_same_instant(self):
+        data = serialized_value_set('good')
+
+        written = self.last_updated(etree.fromstring(base.to_xml(data)))
+
+        self.assertRegex(written, FHIR_INSTANT)
+        self.assertEqual(datetime.datetime.fromisoformat(written),
+                         datetime.datetime.fromisoformat(json_of(data)['meta']['lastUpdated']))
+
+    def test_other_python_values_are_written_as_json_writes_them(self):
+        code = uuid.UUID('12345678-1234-5678-1234-567812345678')
+        parameters = {'resourceType': 'Parameters', 'id': 'p_1', 'parameter': [
+            {'name': 'amount', 'valueDecimal': Decimal('1.50')}, {'name': 'when', 'valueDate': UPDATED.date()},
+            {'name': 'code', 'valueString': code}]}
+
+        values = [element.get('value') for element in etree.fromstring(base.to_xml(parameters)).iter()
+                  if element.get('value') and etree.QName(element).localname.startswith('value')]
+
+        self.assertEqual(values, ['1.5', '2026-10-14', str(code)])
+
+
+class XmlSingleElementTest(SimpleTestCase):
+    """A list for an element R4 allows once keeps its first item."""
+
+    def concept_map(self, identifiers):
+        return {'resourceType': 'ConceptMap', 'id': 'cm', 'status': 'active', 'identifier': identifiers}
+
+    def test_a_concept_map_keeps_its_identifier(self):
+        first = {'system': 'http://testserver', 'value': '/orgs/X/ConceptMap/cm/'}
+        for identifiers in ([first], [first, {'value': 'another'}]):
+            root = etree.fromstring(base.to_xml(self.concept_map(identifiers)))
+
+            self.assertEqual(len(root.findall(f'{FHIR}identifier')), 1, identifiers)
+            self.assertEqual(root.find(f'{FHIR}identifier/{FHIR}value').get('value'), '/orgs/X/ConceptMap/cm/')
+
+    def test_the_items_left_out_are_logged_once(self):
+        base.LOGGED_DROPPED_ELEMENTS.clear()
+        identifiers = [{'value': 'a'}, {'value': 'b'}, {'value': 'c'}]
+        with self.assertLogs('oclapi', level='WARNING') as logs:
+            base.to_xml(self.concept_map(identifiers))
+            base.to_xml(self.concept_map(identifiers))
+
+        self.assertEqual(len([line for line in logs.output if 'ConceptMap.identifier' in line]), 1, logs.output)
 
 
 class XmlCharactersTest(SimpleTestCase):

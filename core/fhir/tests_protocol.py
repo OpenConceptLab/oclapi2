@@ -3,6 +3,7 @@ The FHIR protocol through the real views (OpenConceptLab/ocl_online#451): FHIR J
 the fhirVersion parameter, trailing slashes on operations, and errors as OperationOutcome, never a 5xx.
 """
 import json
+from datetime import datetime
 from unittest.mock import patch, Mock
 
 from fhir.resources.R4B.bundle import Bundle
@@ -191,6 +192,22 @@ class FhirProtocolTest(OCLTestCase):
         root = etree.fromstring(response.content)
         assert_in_model_order(self, root, CodeSystem)
         self.assertEqual(child_names(root)[:2], ['id', 'meta'])
+
+    def test_xml_values_match_json_for_a_value_set_and_a_concept_map_at_an_owner_base(self):
+        OrganizationCollectionFactory(
+            organization=self.org, mnemonic='my_vs', canonical_url='http://example.org/vs/my_vs', version='v1',
+            is_latest_version=True)
+        for path in (f'/orgs/{self.org.mnemonic}/ValueSet/my_vs/', f'/orgs/{self.org.mnemonic}/ConceptMap/proto/'):
+            as_json = json.loads(self.client.get(path).content)
+            response = self.client.get(path + '?_format=xml')
+
+            self.assertEqual(response.status_code, 200, path)
+            root = etree.fromstring(response.content)
+            last_updated = root.find(f'{FHIR}meta/{FHIR}lastUpdated').get('value')
+            self.assertEqual(datetime.fromisoformat(last_updated),
+                             datetime.fromisoformat(as_json['meta']['lastUpdated']), path)
+            self.assertEqual(root.find(f'{FHIR}identifier/{FHIR}value').get('value'),
+                             as_json['identifier'][0]['value'], path)
 
     def test_a_control_character_never_stops_an_xml_response(self):
         self.released_source()
