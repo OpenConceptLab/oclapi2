@@ -1,6 +1,6 @@
 from mock.mock import patch, Mock
 
-from core.collections.models import CollectionReference, Collection
+from core.collections.models import CollectionReference, Collection, Expansion
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory, UserCollectionFactory
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLAPITestCase
@@ -689,6 +689,7 @@ class ValueSetTest(OCLAPITestCase):
         self.assertFalse(response.data['parameter'][0]['valueBoolean'])
 
     def test_expand(self):
+        """$expand reads the released version's stored expansion, by GET or POST, and a POST never makes another."""
         self.client.post(
             f'/users/{self.user.mnemonic}/ValueSet/',
             HTTP_AUTHORIZATION='Token ' + self.user_token,
@@ -696,7 +697,7 @@ class ValueSetTest(OCLAPITestCase):
                 'resourceType': 'ValueSet',
                 'id': 'c2',
                 'url': 'http://c2.com',
-                'status': 'draft',
+                'status': 'active',
                 'version': '1',
                 'name': 'collection1',
                 'description': 'This is a test collection',
@@ -717,10 +718,9 @@ class ValueSetTest(OCLAPITestCase):
             },
             format='json'
         )
+        expansions = list(Expansion.objects.values_list('id', flat=True))
 
-        ConceptDocument().update(self.concept_1.parent.concepts_set.all())
-
-        response = self.client.post(
+        posted = self.client.post(
             '/users/' + self.user.mnemonic + '/ValueSet/c2/$expand/',
             HTTP_AUTHORIZATION='Token ' + self.user_token,
             data={
@@ -734,76 +734,19 @@ class ValueSetTest(OCLAPITestCase):
             },
             format='json'
         )
-
-        resource = response.data
-
-        self.assertEqual(resource['resourceType'], 'ValueSet')
-        expansion = resource['expansion']
-        self.assertIsNotNone(expansion['timestamp'])
-        self.assertIn('/users/' + self.user.mnemonic + '/collections/c2/1/expansions', expansion['identifier'])
-        self.assertEqual(len(expansion['contains']), 1)
-        self.assertEqual(expansion['contains'][0]['code'], self.concept_1.mnemonic)
-
-    def text_get_expand(self):
-        self.client.post(
-            f'/users/{self.user.mnemonic}/ValueSet/',
-            HTTP_AUTHORIZATION='Token ' + self.user_token,
-            data={
-                'resourceType': 'ValueSet',
-                'id': 'c2',
-                'url': 'http://c2.com',
-                'status': 'draft',
-                'version': '1',
-                'name': 'collection1',
-                'description': 'This is a test collection',
-                'compose': {
-                    'include': [
-                        {
-                            'system': 'http://some/url',
-                            'version': self.org_source_v2.version,
-                            'concept': [
-                                {
-                                    'code': self.concept_1.mnemonic
-                                }
-                            ]
-                        }
-                    ]
-                }
-            },
-            format='json'
-        )
-
-        ConceptDocument().update(self.concept_1.parent.concepts_set.all())
-
-        self.client.post(
-            '/users/' + self.user.mnemonic + '/ValueSet/c2/$expand/',
-            HTTP_AUTHORIZATION='Token ' + self.user_token,
-            data={
-                'resourceType': 'Parameters',
-                'parameter': [
-                    {
-                        'name': 'filter',
-                        'valueString': self.concept_1.mnemonic
-                    }
-                ]
-            },
-            format='json'
-        )
-
         response = self.client.get(
-            '/users/' + self.user.mnemonic + '/ValueSet/c2/$expand/?filter=' + {self.concept_1.mnemonic},
-            HTTP_AUTHORIZATION='Token ' + self.user_token,
-            format='json'
-        )
+            f'/users/{self.user.mnemonic}/ValueSet/c2/$expand/', {'filter': self.concept_1.mnemonic},
+            HTTP_AUTHORIZATION='Token ' + self.user_token)
 
-        resource = response.data
-
-        self.assertEqual(resource['resourceType'], 'ValueSet')
-        expansion = resource['expansion']
-        self.assertIsNotNone(expansion['timestamp'])
-        self.assertIn('/users/' + self.user.mnemonic + '/collections/c2/1/expansions', expansion['identifier'])
-        self.assertEqual(len(expansion['contains']), 1)
-        self.assertEqual(expansion['contains'][0]['code'], self.concept_1.mnemonic)
+        for resource in (posted.data, response.data):
+            self.assertEqual(resource['resourceType'], 'ValueSet')
+            expansion = resource['expansion']
+            self.assertIsNotNone(expansion['timestamp'])
+            self.assertIn('/users/' + self.user.mnemonic + '/collections/c2/1/expansions', expansion['identifier'])
+            self.assertEqual(len(expansion['contains']), 1)
+            self.assertEqual(expansion['contains'][0]['code'], self.concept_1.mnemonic)
+        self.assertEqual(posted.content, response.content)
+        self.assertEqual(list(Expansion.objects.values_list('id', flat=True)), expansions)
 
     def test_unable_to_represent_as_fhir(self):
         instance = Collection(id='1', uri='/invalid/uri')

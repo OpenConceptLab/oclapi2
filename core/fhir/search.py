@@ -501,12 +501,14 @@ def page_size(query):
     return min(int(value), MAX_COUNT)
 
 
-def within_search_timeout(build):
+def within_search_timeout(build, too_costly=None):
     """
     build() within SEARCH_TIMEOUT_MS in all: each query it runs may take only the time the search has left, so a
     search of several queries is bounded as a whole. A query the database cancels, or one with no time left, makes the
-    search too costly (422). Inside a transaction (tests) the timeout would outlive the search, so it isn't set there.
+    search too costly (422): too_costly() says so, the search's own wording by default (an operation passes its own).
+    Inside a transaction (tests) the timeout would outlive the search, so it isn't set there.
     """
+    too_costly = too_costly or search_too_costly
     if connection.vendor != 'postgresql' or connection.in_atomic_block:
         return build()
     deadline = time.monotonic() + SEARCH_TIMEOUT_MS / 1000
@@ -528,7 +530,7 @@ def within_search_timeout(build):
         raise too_costly() from ex
 
 
-def too_costly():
+def search_too_costly():
     return outcomes.TooCostlyError(
         'The search would take too long to answer. Narrow it, for example with url, _id or version.')
 

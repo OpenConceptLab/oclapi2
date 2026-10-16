@@ -5,14 +5,13 @@ from rest_framework.fields import CharField, DateField, SerializerMethodField, C
     BooleanField, ListField, URLField
 
 from core.code_systems.serializers import CodeSystemConceptSerializer, TextField
-from core.collections.models import Collection, Expansion
+from core.collections.models import Collection
 from core.collections.parsers import CollectionReferenceParser
 from core.collections.serializers import CollectionCreateOrUpdateSerializer
 from core.common.constants import HEAD
 from core.common.fhir_helpers import delete_empty_fields
 from core.common.serializers import StatusField, IdentifierSerializer, ReadSerializerMixin
 from core.fhir.search import CanonicalUrlField, FhirRepositorySerializerMixin
-from core.parameters.serializers import ParametersSerializer
 from core.value_sets.constants import RESOURCE_TYPE
 
 logger = logging.getLogger('oclapi')
@@ -29,12 +28,6 @@ class ValueSetConceptSerializer(CodeSystemConceptSerializer):
         super().__init__(*args, **kwargs)
         self.fields.pop('definition')
         self.fields.pop('property')
-
-
-class ValueSetExpansionConceptSerializer(CodeSystemConceptSerializer):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.fields.pop('definition')
 
 
 class ValueSetComposeIncludeField(ReadSerializerMixin, serializers.Serializer):
@@ -279,52 +272,9 @@ class ValueSetDetailSerializer(FhirRepositorySerializerMixin, serializers.ModelS
         return {'lastUpdated': obj.updated_at}
 
 
-class ValueSetExpansionParametersSerializer(ParametersSerializer):
-    allowed_input_parameters = {
-        'url': 'valueUri',
-        'filter': 'valueString',
-        'date': 'valueDate',
-        'offset': 'valueInteger',
-        'count': 'valueInteger',
-        'activeOnly': 'valueBoolean',
-        'exclude-system': 'valueString',
-        'system-version': 'valueString'
-    }
+class ValueSetExpansionSerializer(ValueSetDetailSerializer):
+    """A value set version as $expand answers it: the read's ValueSet without compose. The view adds the expansion."""
 
-    def update(self, instance, validated_data):
-        pass
-
-    def create(self, validated_data):
-        pass
-
-
-class ValueSetExpansionField(serializers.Field):
-    default_count = 1000
-    default_offset = 0
-    timestamp = DateTimeField()
-
-    def to_internal_value(self, _):
-        return None
-
-    def to_representation(self, value):
-        return {
-            'identifier': value.uri,
-            'timestamp': self.timestamp.to_representation(value.created_at),
-            'total': value.concepts.count(),
-            'offset': self.default_offset,
-            'contains': ValueSetExpansionConceptSerializer(value.concepts.order_by('id')
-                                                           [self.default_offset:self.default_count], many=True).data
-        }
-
-
-class ValueSetExpansionSerializer(serializers.ModelSerializer):
-    resourceType = SerializerMethodField(method_name='get_resource_type')
-    expansion = ValueSetExpansionField(source='*')
-
-    class Meta:
-        model = Expansion
-        fields = ('resourceType', 'id', 'expansion')
-
-    @staticmethod
-    def get_resource_type(_):
-        return RESOURCE_TYPE
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields.pop(self.content_field)

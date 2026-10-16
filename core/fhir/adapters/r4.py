@@ -55,3 +55,27 @@ def validate_code_parameters(answer):
         (unknown_name, 'valueCanonical', unknown_system),
         ('issues', 'resource', {'resourceType': 'OperationOutcome', 'issue': issues} if issues else None),
     ])
+
+
+def expansion_value_set(resource, answer):
+    """
+    $expand's answer (core.fhir.ops.expand) as an R4 ValueSet: `resource`, the value set version as a read shows it
+    without its compose, with the expansion: the stored expansion's identifier and timestamp, total, offset, the inputs
+    echoed and each used-codesystem, then the page of members.
+    """
+    expansion = {
+        'identifier': answer['identifier'],
+        'timestamp': answer['timestamp'],
+        'total': answer['total'],
+        'offset': answer['offset'],
+        'parameter': [parameter(*item) for item in answer['parameters']] + [
+            parameter('used-codesystem', 'valueUri', system) for system in answer['used']],
+        'contains': [{
+            key: value for key, value in (
+                ('system', member['system']), ('version', member['version']), ('code', member['code']),
+                ('display', member['display']), ('inactive', member['inactive']),
+                ('designation', [{key: value for key, value in designation.items() if value is not None}
+                                 for designation in member['designations'] or []]),
+            ) if value not in (None, [])} for member in answer['contains']],
+    }
+    return {**resource, 'expansion': {key: value for key, value in expansion.items() if value not in (None, [])}}
