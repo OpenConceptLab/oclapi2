@@ -9,8 +9,9 @@ with or without the URL registry), with FHIR's rules on top.
   newest released version the caller is shown, never HEAD. A repository with nothing released isn't visible,
   whatever version is named.
 - Access, after resolving: at the global base public repositories only, at an owner base what the caller may view.
-  The version and its repository (HEAD) must both be viewable. A repository the caller can't see is not found, and
-  no other repository is tried.
+  The version and its repository (HEAD) must both be viewable. Without the URL registry, the global base's canonical
+  match considers only the repositories it shows, so a private copy of a canonical never hides a public one. Otherwise
+  (an owner base, a registry entry) a repository the caller can't see is not found, and no other repository is tried.
 
 Every failure is the same UnresolvedError, so it never tells a caller that a repository they can't see exists.
 """
@@ -69,7 +70,8 @@ def resolve(resource_type, url, version=None, kwargs=None, user=None, expression
 
     repo_type = REPO_TYPES[resource_type]
     instance, _ = repo_type.resolve_reference_expression(
-        to_ocl_path(url), namespace, version, repo_type=repo_type, allow_head=False)
+        to_ocl_path(url), namespace, version, repo_type=repo_type, allow_head=False,
+        heads=None if namespace else shown_heads(repo_type))
     if instance.id and not (version or piped_version) and not is_shown(instance, namespace, user):
         instance = latest_public_release(instance) or instance  # the newest release is private: the newest public one
 
@@ -81,6 +83,18 @@ def resolve(resource_type, url, version=None, kwargs=None, user=None, expression
 def is_shown(instance, namespace, user):
     """Whether a base shows the caller a repository version: it is visible there, and so is a release of it."""
     return is_visible(instance, namespace, user) and has_release(instance, namespace, user)
+
+
+def shown_heads(model):
+    """
+    Q for the HEAD rows the global base shows: public, with a live (released, not retired) public release. The
+    shared resolver's canonical match takes the first of them, without the URL registry. One EXISTS with the owner
+    matched inside it, as with_head, so the planner runs it as a semi-join on the few rows the canonical URL matches.
+    """
+    return Q(public_access__in=PUBLIC_ACCESS) & Exists(model.objects.filter(
+        mnemonic=OuterRef('mnemonic'), is_active=True, released=True, retired=False,
+        public_access__in=PUBLIC_ACCESS).exclude(version=HEAD).filter(
+        Q(organization_id=OuterRef('organization_id')) | Q(user_id=OuterRef('user_id'))))
 
 
 def latest_public_release(instance):

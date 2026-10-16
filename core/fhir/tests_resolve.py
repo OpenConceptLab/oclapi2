@@ -246,11 +246,11 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
         else:
             self.assertUnresolved('CodeSystem', CIEL, kwargs={'org': 'sehatapp'})
 
-    def test_a_private_repository_that_resolves_hides_a_public_one(self):
+    def test_a_private_copy_of_a_canonical_and_a_public_one(self):
         """
-        Access is checked after resolving, and nothing else is tried: when the private copy of a shared canonical
-        resolves (the lower id without the registry, the global entry's namespace with it), the public copy is not
-        found at the global base, while each owner base still finds its own.
+        Without the registry, the global base matches a canonical only among the repositories it shows, so the private
+        copy of a shared canonical (the lower id) never hides the public one. A registry entry is the curated answer:
+        when it names the private copy's namespace, nothing else is tried. Each owner base still finds its own.
         """
         shared = 'http://example.org/shared-codes'
         private = source(self.fixtures, 'shared', canonical_url=shared, public_access=ACCESS_TYPE_NONE)
@@ -263,7 +263,11 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
             GlobalURLRegistryFactory(url=shared, namespace=self.fixtures.uri)
 
         for user in (ANONYMOUS, self.member, self.admin):
-            self.assertUnresolved('CodeSystem', shared, user=user)
+            if self.registry:
+                self.assertUnresolved('CodeSystem', shared, user=user)
+            else:
+                self.assertEqual(self.resolve('CodeSystem', shared, user=user).id, public_v1.id)
+                self.assertEqual(self.resolve('CodeSystem', shared, 'v1', user=user).id, public_v1.id)
         self.assertEqual(
             self.resolve('CodeSystem', shared, kwargs={'org': 'FHIR-Fixtures'}, user=self.member).id, private_v1.id)
         self.assertUnresolved('CodeSystem', shared, kwargs={'org': 'FHIR-Fixtures'}, user=self.outsider)
