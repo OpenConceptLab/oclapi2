@@ -81,6 +81,8 @@ CODE_SYSTEM = 'the code system searched'
 TOKEN_SYSTEMS = {
     '_id': None, 'version': None, 'status': 'http://hl7.org/fhir/publication-status', 'language': 'urn:ietf:bcp:47',
     'code': CODE_SYSTEM}
+# what system| (any code of the system) means for a parameter with a system of its own
+ANY_CODE = {'status': EVERYTHING, 'language': Q(default_locale__isnull=False) & ~Q(default_locale='')}
 STATUSES = {
     'active': Q(released=True, retired=False), 'retired': Q(retired=True), 'draft': Q(released=False, retired=False)}
 
@@ -286,15 +288,20 @@ class Search:
 
     def by_token(self, name, system, code):
         """
-        A token parameter: code (any system), system|code, or |code (explicitly no system), against the system its
-        codes belong to (TOKEN_SYSTEMS). A parameter with no system takes |code as code; any other system is no match.
+        A token parameter: code (any system), system|code, system| (any code of that system) or |code (explicitly no
+        system), against the system its codes belong to (TOKEN_SYSTEMS). A parameter with no system takes |code as
+        code; any other system is no match.
         """
         handler, implicit = getattr(self, self.parameters[name]), TOKEN_SYSTEMS[name]
         if system is None or (system == '' and implicit is None):
             return handler(code)
-        if implicit == CODE_SYSTEM:
-            return canonical_q(self.model, system) & handler(code) if system else NOTHING
-        return handler(code) if system == implicit else NOTHING
+        if not system or implicit is None:
+            return NOTHING
+        if implicit == CODE_SYSTEM:  # system| is any code: any version of that code system
+            return canonical_q(self.model, system) & (handler(code) if code else EVERYTHING)
+        if system != implicit:
+            return NOTHING
+        return handler(code) if code else ANY_CODE[name]
 
     @staticmethod
     def by_string(field, modifier, value):
