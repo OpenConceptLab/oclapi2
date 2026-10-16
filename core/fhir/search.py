@@ -155,15 +155,19 @@ def date_range(value):
 
 def canonical_q(model, url):
     """
-    Rows whose canonical URL is `url`, their own or their repository's (HEAD's): a version released before its
-    repository had one has none of its own. The repositories are looked up first (one query), so the planner sees
-    plain conditions rather than a correlated subquery it can't estimate.
+    Rows whose canonical URL is `url` as CanonicalUrlField shows it: their own, or for a row with none (a version
+    released before its repository had one), their repository's (HEAD's). The repositories are looked up first (one
+    query), so the planner sees plain conditions rather than a correlated subquery it can't estimate.
     """
-    criterion = Q(canonical_url=url)
-    for mnemonic, organization_id, user_id in model.objects.filter(version=HEAD, canonical_url=url).values_list(
-            'mnemonic', 'organization_id', 'user_id'):
-        criterion |= Q(mnemonic=mnemonic, organization_id=organization_id, user_id=user_id)
-    return criterion
+    repositories = [Q(mnemonic=mnemonic, organization_id=organization_id, user_id=user_id)
+                    for mnemonic, organization_id, user_id in model.objects.filter(
+                        version=HEAD, canonical_url=url).values_list('mnemonic', 'organization_id', 'user_id')]
+    if not repositories:
+        return Q(canonical_url=url)
+    in_repository = Q()
+    for repository in repositories:
+        in_repository |= repository
+    return Q(canonical_url=url) | ((Q(canonical_url__isnull=True) | Q(canonical_url='')) & in_repository)
 
 
 def with_repository_canonical(queryset):

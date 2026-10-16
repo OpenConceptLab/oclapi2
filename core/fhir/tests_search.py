@@ -184,6 +184,20 @@ class CodeSystemSearchTest(SearchCorpusMixin, OCLTestCase):  # pylint: disable=t
         for user in (self.member, self.admin, self.jdoe):
             self.assertEqual(self.keys(self.search('CodeSystem', user=user)), self.PUBLIC_RELEASES, user.username)
 
+    def test_a_version_with_its_own_canonical_is_found_by_that_one_only(self):
+        """The repository's (HEAD's) canonical stands in only for a version with none, as CanonicalUrlField shows it."""
+        old = 'https://old.example.org/ciel'
+        Source.objects.filter(id=self.ciel_v1.id).update(canonical_url=old)
+        ConceptFactory(parent=self.ciel_source, mnemonic='1427', sources=[self.ciel_v1, self.ciel_v2])
+
+        self.assertEqual(self.keys(self.search('CodeSystem', url=CIEL)), [f'{CIEL}|v2'])
+        self.assertEqual(self.keys(self.search('CodeSystem', url=old)), [f'{old}|v1'])
+        self.assertEqual(self.keys(self.search('CodeSystem', system=old)), [f'{old}|v1'])
+        self.assertEqual(self.keys(self.search('CodeSystem', code=f'{CIEL}|1427')), [f'{CIEL}|v2'])
+        self.assertEqual(self.keys(self.search('CodeSystem', code=f'{old}|1427')), [f'{old}|v1'])
+        Source.objects.filter(id=self.ciel_v1.id).update(canonical_url='')  # an empty one is none
+        self.assertEqual(self.keys(self.search('CodeSystem', url=CIEL)), [f'{CIEL}|v1', f'{CIEL}|v2'])
+
     def test_url_matches_the_version_canonical_or_its_repository_canonical(self):
         bundle = self.search('CodeSystem', url=ICD10)
 
