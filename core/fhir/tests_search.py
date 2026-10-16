@@ -277,6 +277,34 @@ class CodeSystemSearchTest(SearchCorpusMixin, OCLTestCase):  # pylint: disable=t
         self.assertEqual(
             self.search('CodeSystem', identifier='/orgs/FHIR-Fixtures/CodeSystem/fixture-codes/')['total'], 0)
 
+    def test_a_stored_accession_without_a_value_leaves_the_generated_one(self):
+        """IdentifierSerializer.find_ocl_identifier needs an accession value; without one the generated id shows."""
+        api = settings.API_BASE_URL
+        for stored in ([{'system': 'urn:external', 'type': ACSN}],
+                       [{'system': 'urn:external', 'value': '', 'type': ACSN}],
+                       [{'system': 'urn:external', 'value': None, 'type': ACSN}]):
+            Source.objects.filter(id=self.who_icd_2019.id).update(identifier=stored)
+            resource = self.search('CodeSystem', url=ICD10, version='ICD102019')['entry'][0]['resource']
+            self.assertIn({'system': api, 'value': '/orgs/WHO/CodeSystem/ICD-10-WHO/'},
+                          [{'system': item.get('system'), 'value': item.get('value')}
+                           for item in resource['identifier']], stored)
+            for token in (f'{api}|', '/orgs/WHO/CodeSystem/ICD-10-WHO/', f'{api}|/orgs/WHO/CodeSystem/ICD-10-WHO/'):
+                self.assertIn(f'{ICD10}|ICD102019', self.keys(self.search('CodeSystem', identifier=token)), token)
+
+        # with a value, the stored one is shown instead; a coding's missing code and system show ACSN's defaults
+        path = '/orgs/WHO/CodeSystem/ICD-10-WHO/'
+        for coding in (ACSN['coding'][0], {}, {'code': 'ACSN'}):
+            Source.objects.filter(id=self.who_icd_2019.id).update(
+                identifier=[{'system': 'urn:external', 'value': path, 'type': {'coding': [coding]}}])
+            self.assertNotIn(f'{ICD10}|ICD102019', self.keys(self.search('CodeSystem', identifier=f'{api}|')), coding)
+            self.assertEqual(
+                self.keys(self.search('CodeSystem', identifier=f'urn:external|{path}')), [f'{ICD10}|ICD102019'])
+        # another type, or a coding whose code or system is null, is no accession
+        for coding in ({'code': 'MR'}, {'code': None}, {'code': 'ACSN', 'system': None}):
+            Source.objects.filter(id=self.who_icd_2019.id).update(
+                identifier=[{'system': 'urn:external', 'value': path, 'type': {'coding': [coding]}}])
+            self.assertIn(f'{ICD10}|ICD102019', self.keys(self.search('CodeSystem', identifier=f'{api}|')), coding)
+
     def test_identifier_system_is_matched_on_the_same_identifier(self):
         """
         |value is an identifier without a system; system| is any value of that system. Both are checked on one

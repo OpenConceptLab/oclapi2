@@ -69,8 +69,12 @@ PARAMETERS = {
         **COMMON_PARAMETERS, 'source-system': 'by_source', 'source-uri': 'by_source', 'target-system': 'by_target',
         'target-uri': 'by_target'},
 }
-# an OCL accession identifier, as IdentifierSerializer.find_ocl_identifier recognises one
-ACCESSION_TYPE = {'type': {'coding': [{'system': 'http://hl7.org/fhir/v2/0203', 'code': 'ACSN'}]}}
+# A stored OCL accession identifier, as IdentifierSerializer.find_ocl_identifier finds one in the serialized list: a
+# value that isn't empty, and a type coding that is ACSN of v2-0203. IdentifierTypeCodingSerializer shows a missing code
+# as ACSN and a missing system as v2-0203 (a null one as nothing).
+STORED_ACCESSION = (
+    'lax $[*] ? (@.value.type() == "string" && @.value != "" && exists(@.type.coding[*] ? ('
+    '(@.code == "ACSN" || !exists(@.code)) && (@.system == "http://hl7.org/fhir/v2/0203" || !exists(@.system)))))')
 STATUSES = {
     'active': Q(released=True, retired=False), 'retired': Q(retired=True), 'draft': Q(released=False, retired=False)}
 
@@ -317,7 +321,8 @@ class Search:
         criterion = held_identifier(system, value)
         if system not in (None, settings.API_BASE_URL):
             return criterion
-        generated = ~Q(identifier__contains=[ACCESSION_TYPE])
+        generated = Q(identifier__isnull=True) | ~Q(
+            Exact(JsonbTypeof('identifier'), 'array') & JsonPathExists('identifier', STORED_ACCESSION, {}))
         if value is None:
             return criterion | generated
         accession = re.fullmatch(r'/(orgs|users)/([^/]+)/([^/]+)/([^/]+)/?', value)
