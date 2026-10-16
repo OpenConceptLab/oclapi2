@@ -226,6 +226,18 @@ class CodeSystemSearchTest(SearchCorpusMixin, OCLTestCase):  # pylint: disable=t
             self.keys(self.search('CodeSystem', publisher='world health')), [f'{ICD10}|ICD102019'])
         self.assertEqual(self.keys(self.search('CodeSystem', **{'name:exact': 'CIEL'})), [f'{CIEL}|v1', f'{CIEL}|v2'])
 
+    def test_strings_ignore_accents_except_exact(self):
+        Source.objects.filter(id=self.ciel_v2.id).update(full_name='Édition française')
+
+        self.assertEqual(self.keys(self.search('CodeSystem', title='edition')), [f'{CIEL}|v2'])
+        self.assertEqual(self.keys(self.search('CodeSystem', title='ÉDITION')), [f'{CIEL}|v2'])
+        self.assertEqual(self.keys(self.search('CodeSystem', **{'title:contains': 'francaise'})), [f'{CIEL}|v2'])
+        self.assertEqual(self.keys(self.search('CodeSystem', **{'title:contains': 'FRANÇAISE'})), [f'{CIEL}|v2'])
+        self.assertEqual(self.keys(self.search('CodeSystem', **{'title:exact': 'Édition française'})), [f'{CIEL}|v2'])
+        self.assertEqual(self.search('CodeSystem', **{'title:exact': 'Edition francaise'})['total'], 0)
+        for wildcard in ('%', '_', 'É_ition'):  # LIKE's wildcards are plain characters
+            self.assertEqual(self.search('CodeSystem', **{'title:contains': wildcard})['total'], 0, wildcard)
+
     def test_a_comma_is_or_and_a_repeated_parameter_is_and(self):
         self.assertEqual(
             self.keys(self.search('CodeSystem', version='v1,v1.0')),

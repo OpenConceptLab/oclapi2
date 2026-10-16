@@ -6,7 +6,8 @@ FHIR search and read of CodeSystem, ValueSet and ConceptMap: SVCM's Query transa
   queryset form (visible_versions), a read checks is_visible and has_release on the version it finds.
 - Ids: at the global base every released version has an opaque, stable id, its database key; an owner base keeps the
   repository's mnemonic (so its versions share one), and a read there serves the latest release or the `version` named.
-- Search parameters: SVCM's, with :exact and :contains on the string ones (no modifier is starts-with, ignoring case).
+- Search parameters: SVCM's, with :exact and :contains on the string ones (no modifier is starts-with; both it and
+  :contains ignore case and accents, :exact neither).
   A comma separates alternatives, a repeated parameter must hold every time. Anything else is a 400 not-supported.
 - Paging: _count (at most MAX_COUNT, which is also the default) and page; Bundle.total is the full count, and every
   entry has a fullUrl and a search mode. The search runs once, for the ids of every match; the page's rows are then
@@ -26,7 +27,7 @@ from django.conf import settings
 from django.db import connection, transaction, OperationalError
 from django.db.models import BooleanField, Exists, Func, OuterRef, Q, Subquery, TextField, Value
 from django.db.models.functions import Coalesce
-from django.db.models.lookups import Exact
+from django.db.models.lookups import Exact, IContains, IStartsWith
 from django.utils import timezone
 from psycopg2 import errorcodes
 from rest_framework.fields import CharField
@@ -35,6 +36,7 @@ from rest_framework.response import Response
 from core.bundles.serializers import FHIRBundleSerializer
 from core.collections.models import Expansion
 from core.common.constants import HEAD
+from core.common.db_functions import ImmutableUnaccent
 from core.common.mixins import CustomPaginator
 from core.common.utils import to_int
 from core.concepts.models import Concept
@@ -52,9 +54,9 @@ PAGING_PARAMETERS = frozenset({'_count', 'page'})
 OPAQUE_ID = re.compile(r'[1-9][0-9]{0,17}')  # a database key, as str() writes it
 NOTHING = Q(pk__in=[])
 
-# string parameters: the field each searches, and the lookup of each modifier
+# string parameters: the field each searches, and the lookup of each modifier (:exact is the field's own equality)
 STRING_FIELDS = {'name': 'name', 'title': 'full_name', 'description': 'description', 'publisher': 'publisher'}
-STRING_LOOKUPS = {'': 'istartswith', 'exact': 'exact', 'contains': 'icontains'}
+STRING_LOOKUPS = {'': IStartsWith, 'exact': None, 'contains': IContains}
 # the other parameters, by resource type: the Search method each one's values go to
 COMMON_PARAMETERS = {
     '_id': 'by_id', '_lastUpdated': 'by_last_updated', 'url': 'by_url', 'version': 'by_version',
@@ -248,10 +250,21 @@ class Search:
     def criterion(self, name, modifier, value):
         """The Q for one alternative (still escaped) of a parameter's value."""
         if name in STRING_FIELDS:
-            return Q(**{f'{STRING_FIELDS[name]}__{STRING_LOOKUPS[modifier]}': unescape(value)})
+            return self.by_string(STRING_FIELDS[name], modifier, unescape(value))
         if name == 'identifier':
             return self.by_identifier(value)
         return getattr(self, self.parameters[name])(unescape(value))
+
+    @staticmethod
+    def by_string(field, modifier, value):
+        """
+        FHIR string search: :exact is the whole value, case and accents included; no modifier (starts with) and
+        :contains ignore case and accents, unaccenting both sides in the database (LIKE's wildcards are escaped).
+        """
+        lookup = STRING_LOOKUPS[modifier]
+        if lookup is None:
+            return Q(**{field: value})
+        return lookup(ImmutableUnaccent(field), ImmutableUnaccent(Value(value)))
 
     def by_id(self, value):
         """The opaque id at the global base, the mnemonic at an owner base."""
