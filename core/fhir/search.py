@@ -269,30 +269,29 @@ def held_identifier(system, value):
         'identifier', f'lax $[*] ? ({" && ".join(conditions)})', variables)
 
 
-def mapped(side, value, sources):
+def mapped(side, value, sources, namespace, user):
     """
     A ConceptMap version holding a live mapping whose group source (side 'from') or target ('to') shows `value`, as
-    ConceptMapGroupField builds groups: retired mappings aren't read; a group's system is the from or to source's
-    canonical URL, or for one without, its OCL URL as a ConceptMap path (/orgs/{org}/ConceptMap/{id}/), or the
-    mapping's own URL when it names no OCL source. A search over many mappings is bounded by SEARCH_TIMEOUT_MS.
+    ConceptMapGroupField builds groups: retired and deleted mappings aren't read; a group's system is the from or to
+    source's canonical URL when the caller is shown that source, else the URL the mapping stores (an OCL URL as a
+    ConceptMap path, /orgs/{org}/ConceptMap/{id}/). A search over many mappings is bounded by SEARCH_TIMEOUT_MS.
     OCL keeps no source or target value set on a ConceptMap, so source-uri and target-uri are read as the systems.
 
     `sources` are the ids of the sources with that canonical, listed first (sources_with), so the planner can read the
-    mappings by their source index. Only those the base shows the caller (viewable_rows) are listed: a canonical only
-    other sources have answers as one no source has, so how long the search takes doesn't depend on mappings the
-    caller isn't shown.
+    mappings by their source index. Only those the base shows the caller (viewable_rows) are listed, and a mapping
+    whose source isn't one the caller is shown by a canonical URL is matched by the URL it stores: a source the caller
+    isn't shown answers exactly as one OCL doesn't hold, and how long the search takes doesn't depend on it.
     """
     field = f'mapping__{side}_source'
-    shown = Q(**{f'{field}_id__in': sources}) | (Q(**{f'{field}_url': value}) & Q(**{f'{field}__isnull': True}))
+    unnamed = ~Exists(viewable_rows(Source, namespace, user).filter(id=OuterRef(f'{field}_id'), canonical_url__gt=''))
+    shown = Q(**{f'{field}_id__in': sources}) | (Q(**{f'{field}_url': value}) & unnamed)
     path = re.fullmatch(r'/(orgs|users)/([^/]+)/ConceptMap/([^/]+)/', value)
     if path:
         stored = reduce(or_, (Q(**{f'{field}_url__startswith': f'/{path[1]}/{path[2]}/{kind}/{path[3]}/'})
                               for kind in ('sources', 'collections', 'ConceptMap')))
-        without_canonical = Q(**{f'{field}__isnull': True}) | Q(**{f'{field}__canonical_url__isnull': True}) | Q(
-            **{f'{field}__canonical_url': ''})
-        shown |= stored & without_canonical
+        shown |= stored & unnamed
     return Exists(Mapping.sources.through.objects.filter(
-        source_id=OuterRef('id'), mapping__retired=False).filter(shown))
+        source_id=OuterRef('id'), mapping__retired=False, mapping__is_active=True).filter(shown))
 
 
 class Search:
@@ -485,11 +484,11 @@ class Search:
 
     def by_source(self, value):
         """A group's source is the system named."""
-        return mapped('from', value, self.found[('sources', value)])
+        return mapped('from', value, self.found[('sources', value)], self.namespace, self.user)
 
     def by_target(self, value):
         """A group's target is the system named."""
-        return mapped('to', value, self.found[('sources', value)])
+        return mapped('to', value, self.found[('sources', value)], self.namespace, self.user)
 
 
 def page_size(query):
@@ -501,12 +500,14 @@ def page_size(query):
     return min(int(value), MAX_COUNT)
 
 
-def within_search_timeout(build):
+def within_search_timeout(build, too_costly=None):
     """
     build() within SEARCH_TIMEOUT_MS in all: each query it runs may take only the time the search has left, so a
     search of several queries is bounded as a whole. A query the database cancels, or one with no time left, makes the
-    search too costly (422). Inside a transaction (tests) the timeout would outlive the search, so it isn't set there.
+    search too costly (422): too_costly() says so, the search's own wording by default (an operation passes its own).
+    Inside a transaction (tests) the timeout would outlive the search, so it isn't set there.
     """
+    too_costly = too_costly or search_too_costly
     if connection.vendor != 'postgresql' or connection.in_atomic_block:
         return build()
     deadline = time.monotonic() + SEARCH_TIMEOUT_MS / 1000
@@ -528,7 +529,7 @@ def within_search_timeout(build):
         raise too_costly() from ex
 
 
-def too_costly():
+def search_too_costly():
     return outcomes.TooCostlyError(
         'The search would take too long to answer. Narrow it, for example with url, _id or version.')
 
