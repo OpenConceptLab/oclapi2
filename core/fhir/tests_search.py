@@ -494,6 +494,39 @@ class ConceptMapSearchTest(SearchCorpusMixin, OCLTestCase):
             self.assertEqual(self.keys(self.search('ConceptMap', **{name: ICD10})), [f'{CIEL}|v2'], name)
             self.assertEqual(self.search('ConceptMap', **{name: CIEL})['total'], 0, name)
 
+    def test_retired_mappings_are_no_part_of_a_concept_map(self):
+        """A read leaves retired mappings out (ConceptMapGroupField), so source and target searches don't count them."""
+        loinc = source(self.misc, 'LOINC', canonical_url='http://loinc.org')
+        loinc_code = ConceptFactory(parent=loinc, mnemonic='1234-5')
+        MappingFactory(
+            parent=self.ciel_source, from_concept=ConceptFactory(parent=self.ciel_source), to_concept=loinc_code,
+            from_source=self.ciel_source, to_source=loinc, to_concept_code='1234-5', retired=True,
+            sources=[self.ciel_v2])
+        jdoe_code = ConceptFactory(parent=self.jdoe_codes, mnemonic='x1')
+        retired = MappingFactory(
+            parent=self.jdoe_codes, from_concept=jdoe_code, to_concept=loinc_code, from_source=self.jdoe_codes,
+            to_source=loinc, retired=True, sources=[self.jdoe_codes_v1])
+
+        for name in ('target-system', 'target-uri'):
+            self.assertEqual(self.search('ConceptMap', **{name: 'http://loinc.org'})['total'], 0, name)
+            self.assertEqual(self.keys(self.search('ConceptMap', **{name: ICD10})), [f'{CIEL}|v2'], name)
+        resource = self.read(f'/fhir/ConceptMap/{self.ciel_v2.id}')
+        self.assertEqual([group['target'] for group in resource['group']], [ICD10])
+        for name in ('source-system', 'source-uri'):
+            self.assertEqual(self.search('ConceptMap', **{name: 'https://example.org/my-codes'})['total'], 0, name)
+
+        type(retired).objects.filter(id=retired.id).update(retired=False)
+        self.assertEqual(
+            self.keys(self.search('ConceptMap', **{'source-system': 'https://example.org/my-codes'})),
+            ['https://example.org/my-codes|v1'])
+        self.assertEqual(self.keys(self.search('ConceptMap', **{'target-system': 'http://loinc.org'})),
+                         ['https://example.org/my-codes|v1'])
+
+    def read(self, path):
+        response = self.get(path)
+        self.assertEqual(response.status_code, 200, response.data)
+        return response.data
+
     def test_no_query_per_entry(self):
         with self.assertNumQueries(4):  # the target's repositories and their rows, the matches' ids, the page
             self.assertEqual(self.client.get('/fhir/ConceptMap/', {'target-system': ICD10}).data['total'], 1)

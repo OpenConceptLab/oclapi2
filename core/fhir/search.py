@@ -353,18 +353,19 @@ class Search:
         """
         A ConceptMap of the code system named, with mappings: OCL's ConceptMap is a source's mappings, so its source
         system is the source itself. OCL keeps no source or target value set on a ConceptMap, so source-uri and
-        target-uri are read as the code systems.
+        target-uri are read as the code systems. Retired mappings are no part of a ConceptMap (ConceptMapGroupField).
         """
-        return canonical_q(Source, value) & Exists(Mapping.sources.through.objects.filter(source_id=OuterRef('id')))
+        return canonical_q(Source, value) & Exists(Mapping.sources.through.objects.filter(
+            source_id=OuterRef('id'), mapping__retired=False))
 
     @staticmethod
     def by_target(value):
         """
-        A ConceptMap with a mapping to the code system named, a search bounded by SEARCH_TIMEOUT_MS. The code system's
-        rows are listed first, so the planner can read the mappings by their to_source_id index.
+        A ConceptMap with a mapping (not retired) to the code system named, a search bounded by SEARCH_TIMEOUT_MS. The
+        code system's rows are listed first, so the planner can read the mappings by their to_source_id index.
         """
         sources = list(Source.objects.filter(canonical_q(Source, value)).values_list('id', flat=True))
-        return Exists(Mapping.sources.through.objects.filter(source_id=OuterRef('id')).filter(
+        return Exists(Mapping.sources.through.objects.filter(source_id=OuterRef('id'), mapping__retired=False).filter(
             Q(mapping__to_source_id__in=sources) | Q(mapping__to_source_url=value)))
 
 
