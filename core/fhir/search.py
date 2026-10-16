@@ -14,7 +14,9 @@ FHIR search and read of CodeSystem, ValueSet and ConceptMap: SVCM's Query transa
 - Paging: _count (at most MAX_COUNT, which is also the default) and page; Bundle.total is the full count, and every
   entry has a fullUrl and a search mode. The search runs once, for the ids of every match; the page's rows are then
   read by id.
-- A search's queries are bounded by SEARCH_TIMEOUT_MS: one the database cancels makes the search too costly (422).
+- A search's queries are bounded together by SEARCH_TIMEOUT_MS: one the database cancels makes the search too costly
+  (422). A parameter takes at most MAX_ALTERNATIVES values and a search MAX_SEARCH_ALTERNATIVES (else a 400
+  too-costly), and the canonical URLs each parameter names are looked up in one query.
 - A search entry is the resource's summary, marked SUBSETTED: no concept, compose or group, which only a read returns.
   A CodeSystem is `complete` (with every concept, retired ones flagged) up to CONCEPT_LIMIT concepts, else
   `not-present`.
@@ -22,7 +24,9 @@ FHIR search and read of CodeSystem, ValueSet and ConceptMap: SVCM's Query transa
   the url parameter.
 """
 import json
+import math
 import re
+import time
 from datetime import datetime, timedelta
 from functools import reduce
 from operator import or_
@@ -91,6 +95,12 @@ TOKEN_SYSTEMS = {
 # what system| (any code of the system) means for a parameter with a system of its own
 ANY_CODE = {'status': EVERYTHING, 'language': Q(default_locale__isnull=False) & ~Q(default_locale='')}
 STATUSES = {'active': Q(released=True, retired=False), 'retired': Q(retired=True)}  # search shows no draft
+# the parameters whose values are canonical URLs, looked up before the search (Search.look_up), by what they're among
+LOOKUPS = {
+    'url': 'repositories', 'system': 'repositories', 'code': 'repositories', 'reference': 'referenced',
+    'source-system': 'sources', 'source-uri': 'sources', 'target-system': 'sources', 'target-uri': 'sources'}
+MAX_ALTERNATIVES = 20  # the values a search parameter takes: its alternatives and repeats together
+MAX_SEARCH_ALTERNATIVES = 50  # the values a search takes, every parameter's together
 
 # a FHIR date or dateTime search value: prefix, year, month, day, hour, minute, second, fraction, zone
 DATE = re.compile(
@@ -147,20 +157,38 @@ def date_range(value):
     return prefix or 'eq', start, end
 
 
-def canonical_q(model, url, rows=None):
+def canonical_q(url, repositories):
     """
     Rows whose canonical URL is `url` as CanonicalUrlField shows it: their own, or for a row with none (a version
-    released before its repository had one), their repository's (HEAD's). The repositories are looked up first (one
-    query) among `rows` (by default every row of `model`), so the planner sees plain conditions rather than a
-    correlated subquery it can't estimate.
+    released before its repository had one), their repository's (HEAD's). `repositories` are the (mnemonic,
+    organization_id, user_id) of the repositories whose HEAD has it, looked up first (repositories_with), so the
+    planner sees plain conditions rather than a correlated subquery it can't estimate.
     """
-    rows = model.objects if rows is None else rows
-    repositories = [Q(mnemonic=mnemonic, organization_id=organization_id, user_id=user_id)
-                    for mnemonic, organization_id, user_id in rows.filter(
-                        version=HEAD, canonical_url=url).values_list('mnemonic', 'organization_id', 'user_id')]
     if not repositories:
         return Q(canonical_url=url)
-    return Q(canonical_url=url) | ((Q(canonical_url__isnull=True) | Q(canonical_url='')) & reduce(or_, repositories))
+    return Q(canonical_url=url) | ((Q(canonical_url__isnull=True) | Q(canonical_url='')) & reduce(or_, (
+        Q(mnemonic=mnemonic, organization_id=organization_id, user_id=user_id)
+        for mnemonic, organization_id, user_id in repositories)))
+
+
+def repositories_with(rows, urls):
+    """
+    For each of `urls`, the (mnemonic, organization_id, user_id) of the repositories among `rows` whose HEAD has that
+    canonical URL: one query for them all.
+    """
+    found = {url: [] for url in urls}
+    for url, *repository in rows.filter(version=HEAD, canonical_url__in=urls).values_list(
+            'canonical_url', 'mnemonic', 'organization_id', 'user_id'):
+        found[url].append(tuple(repository))
+    return found
+
+
+def sources_with(rows, urls):
+    """For each of `urls`, the ids of the Source rows among `rows` with that canonical URL: one query for them all."""
+    found = {url: [] for url in urls}
+    for url, source_id in rows.filter(canonical_url__in=urls).values_list('canonical_url', 'id'):
+        found[url].append(source_id)
+    return found
 
 
 def with_repository_canonical(queryset):
@@ -249,13 +277,13 @@ def mapped(side, value, sources):
     mapping's own URL when it names no OCL source. A search over many mappings is bounded by SEARCH_TIMEOUT_MS.
     OCL keeps no source or target value set on a ConceptMap, so source-uri and target-uri are read as the systems.
 
-    The sources with that canonical are listed first, so the planner can read the mappings by their source index.
-    Only `sources`, those the base shows the caller (viewable_rows), are listed: a canonical only other sources have
-    answers as one no source has, so how long the search takes doesn't depend on mappings the caller isn't shown.
+    `sources` are the ids of the sources with that canonical, listed first (sources_with), so the planner can read the
+    mappings by their source index. Only those the base shows the caller (viewable_rows) are listed: a canonical only
+    other sources have answers as one no source has, so how long the search takes doesn't depend on mappings the
+    caller isn't shown.
     """
     field = f'mapping__{side}_source'
-    ids = list(sources.filter(canonical_url=value).values_list('id', flat=True))
-    shown = Q(**{f'{field}_id__in': ids}) | (Q(**{f'{field}_url': value}) & Q(**{f'{field}__isnull': True}))
+    shown = Q(**{f'{field}_id__in': sources}) | (Q(**{f'{field}_url': value}) & Q(**{f'{field}__isnull': True}))
     path = re.fullmatch(r'/(orgs|users)/([^/]+)/ConceptMap/([^/]+)/', value)
     if path:
         stored = reduce(or_, (Q(**{f'{field}_url__startswith': f'/{path[1]}/{path[2]}/{kind}/{path[3]}/'})
@@ -276,6 +304,7 @@ class Search:
         self.parameters = PARAMETERS[resource_type]
         self.namespace = namespace_of(kwargs)
         self.access = owner_access(kwargs, user)
+        self.found = {}  # (lookup, canonical URL): what look_up found for it
 
     def viewable_sources(self):
         """The Source rows the base shows the caller: what source-system, target-system and reference match."""
@@ -287,21 +316,57 @@ class Search:
         alternatives does. An empty value isn't a criterion; the format and paging parameters aren't criteria.
         """
         criteria = Q()
+        for name, modifier, repeats in self.parameters_of(query):
+            self.look_up(name, [item for alternatives in repeats for item in alternatives])
+            for alternatives in repeats:
+                if alternatives:
+                    criteria &= reduce(or_, [self.criterion(name, modifier, item) for item in alternatives])
+        return criteria
+
+    def parameters_of(self, query):
+        """
+        (name, modifier, each repeat's alternatives) for every search parameter of a query string, each supported and
+        within MAX_ALTERNATIVES values (alternatives and repeats together) and the search within
+        MAX_SEARCH_ALTERNATIVES, else a 400 too-costly naming the parameter. Checked before any query runs.
+        """
+        parameters, given, total = [], {}, 0
         for key, values in query.lists():
             if key in CONTROL_PARAMETERS or key in PAGING_PARAMETERS:
                 continue
             name, _, modifier = key.partition(':')
             self.check(key, name, modifier)
-            for value in values:
-                alternatives = [self.criterion(name, modifier, item) for item in split(value, ',') if item]
-                if alternatives:
-                    criteria &= reduce(or_, alternatives)
-        return criteria
+            repeats = [[item for item in split(value, ',') if item] for value in values]
+            count = sum(map(len, repeats))
+            given[name], total = given.get(name, 0) + count, total + count
+            if given[name] > MAX_ALTERNATIVES or total > MAX_SEARCH_ALTERNATIVES:
+                raise outcomes.TooCostlyError(
+                    f'A search takes at most {MAX_ALTERNATIVES} values of a parameter, its alternatives and repeats '
+                    f'together, and {MAX_SEARCH_ALTERNATIVES} in all.', expression=key, status_code=400)
+            parameters.append((name, modifier, repeats))
+        return parameters
 
     def check(self, key, name, modifier):
         modifiers = STRING_LOOKUPS if name in STRING_FIELDS else ('',) if name in self.parameters else ()
         if modifier not in modifiers:
             raise outcomes.NotSupportedError(f"The search parameter '{key}' is not supported.", expression=key)
+
+    def look_up(self, name, alternatives):
+        """
+        The canonical URLs a parameter's alternatives (still escaped) name, looked up together in one query, for its
+        criteria: the repositories with them (url, system, code's system), or among the sources the base shows the
+        caller, the repositories (reference) or the sources (source-system, source-uri, target-system, target-uri).
+        """
+        lookup = LOOKUPS.get(name)
+        urls = {token(item)[0] if name == 'code' else unescape(item) for item in alternatives} - {None, ''}
+        if not lookup or not urls:
+            return
+        if lookup == 'repositories':
+            found = repositories_with(self.model.objects, urls)
+        elif lookup == 'referenced':
+            found = repositories_with(self.viewable_sources(), urls)
+        else:
+            found = sources_with(self.viewable_sources(), urls)
+        self.found.update({(lookup, url): value for url, value in found.items()})
 
     def criterion(self, name, modifier, value):
         """The Q for one alternative (still escaped) of a parameter's value."""
@@ -325,7 +390,7 @@ class Search:
         if not system or implicit is None:
             return NOTHING
         if implicit == CODE_SYSTEM:  # system| is any code: a version of that code system with a concept
-            return canonical_q(self.model, system) & (handler(code) if code else defines_concept())
+            return self.by_url(system) & (handler(code) if code else defines_concept())
         if system != implicit:
             return NOTHING
         return handler(code) if code else ANY_CODE[name]
@@ -362,7 +427,7 @@ class Search:
         }[prefix]
 
     def by_url(self, value):
-        return canonical_q(self.model, value)
+        return canonical_q(value, self.found[('repositories', value)])
 
     @staticmethod
     def by_version(value):
@@ -410,19 +475,18 @@ class Search:
         those the base shows the caller. An uncorrelated IN, which the planner hashes once, rather than a correlated
         subquery.
         """
-        viewable = self.viewable_sources()
-        sources = viewable.filter(canonical_q(Source, value, viewable)).values('id')
+        sources = self.viewable_sources().filter(canonical_q(value, self.found[('referenced', value)])).values('id')
         return reduce(or_, (
             Q(expansion_uri__in=versions.through.objects.filter(source_id__in=sources).values('expansion__uri'))
             for versions in (Expansion.explicit_source_versions, Expansion.evaluated_source_versions)))
 
     def by_source(self, value):
         """A group's source is the system named."""
-        return mapped('from', value, self.viewable_sources())
+        return mapped('from', value, self.found[('sources', value)])
 
     def by_target(self, value):
         """A group's target is the system named."""
-        return mapped('to', value, self.viewable_sources())
+        return mapped('to', value, self.found[('sources', value)])
 
 
 def page_size(query):
@@ -436,21 +500,34 @@ def page_size(query):
 
 def within_search_timeout(build):
     """
-    build() with every query it runs bounded by SEARCH_TIMEOUT_MS; a query the database cancels makes the search too
-    costly (422). Inside a transaction (tests) the timeout would outlive the search, so it isn't set there.
+    build() within SEARCH_TIMEOUT_MS in all: each query it runs may take only the time the search has left, so a
+    search of several queries is bounded as a whole. A query the database cancels, or one with no time left, makes the
+    search too costly (422). Inside a transaction (tests) the timeout would outlive the search, so it isn't set there.
     """
     if connection.vendor != 'postgresql' or connection.in_atomic_block:
         return build()
+    deadline = time.monotonic() + SEARCH_TIMEOUT_MS / 1000
+
+    def within_time_left(execute, sql, params, many, context):
+        left = math.ceil((deadline - time.monotonic()) * 1000)
+        if left <= 0:
+            raise too_costly()
+        with context['connection'].connection.cursor() as cursor:  # the driver's own cursor, past this wrapper
+            cursor.execute('SET LOCAL statement_timeout = %s', [left])
+        return execute(sql, params, many, context)
+
     try:
-        with transaction.atomic():
-            with connection.cursor() as cursor:
-                cursor.execute('SET LOCAL statement_timeout = %s', [SEARCH_TIMEOUT_MS])
+        with transaction.atomic(), connection.execute_wrapper(within_time_left):
             return build()
     except OperationalError as ex:
         if getattr(ex.__cause__, 'pgcode', None) != errorcodes.QUERY_CANCELED:
             raise
-        raise outcomes.TooCostlyError(
-            'The search would take too long to answer. Narrow it, for example with url, _id or version.') from ex
+        raise too_costly() from ex
+
+
+def too_costly():
+    return outcomes.TooCostlyError(
+        'The search would take too long to answer. Narrow it, for example with url, _id or version.')
 
 
 def search_bundle(view):

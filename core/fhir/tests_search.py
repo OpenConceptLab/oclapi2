@@ -724,6 +724,57 @@ class ReferencedSourceAccessTest(SearchCorpusMixin, OCLTestCase):
                     'ConceptMap', base='/orgs/MOH', user=user, **{name: self.PRIVATE})), keys, (name, user))
 
 
+class SearchCostTest(SearchCorpusMixin, OCLTestCase):
+    """
+    A search's cost is bounded: the canonical URLs a parameter names are looked up together, in one query, and a
+    parameter takes at most MAX_ALTERNATIVES values (its alternatives and repeats together), a search at most
+    MAX_SEARCH_ALTERNATIVES; past either the search is too costly, a 400 naming the parameter.
+    """
+    def setUp(self):
+        super().setUp()
+        ConceptFactory(parent=self.ciel_source, mnemonic='c19', sources=[self.ciel_v2])
+        MappingFactory(parent=self.ciel_source, from_source=self.ciel_source, to_source=self.sehat_icd,
+                       sources=[self.ciel_v2])
+
+    @staticmethod
+    def alternatives(count, last):
+        return ','.join([f'https://example.org/unknown-{index}' for index in range(count - 1)] + [last])
+
+    def test_canonicals_are_looked_up_in_one_query_per_parameter(self):
+        for resource_type, name, url, total in (
+                ('CodeSystem', 'url', CIEL, 2), ('CodeSystem', 'system', ICD10, 2), ('ValueSet', 'url', CIEL_VS, 1),
+                ('ValueSet', 'reference', CIEL, 1), ('ConceptMap', 'source-system', CIEL, 1),
+                ('ConceptMap', 'target-uri', ICD10, 1)):
+            for count in (1, 20):
+                with self.assertNumQueries(3):  # the canonicals' repositories or sources, the matches' ids, the page
+                    response = self.client.get(f'/fhir/{resource_type}/', {name: self.alternatives(count, url)})
+                self.assertEqual(response.data['total'], total, (resource_type, name, count))
+        with self.assertNumQueries(4):  # one lookup for each parameter
+            response = self.client.get('/fhir/CodeSystem/', {
+                'url': self.alternatives(20, CIEL), 'code': ','.join(f'{CIEL}|c{index}' for index in range(20))})
+        self.assertEqual(self.keys(response.data), [f'{CIEL}|v2'])
+
+    def test_a_parameter_takes_at_most_20_values(self):
+        for params, expression in (
+                ({'url': self.alternatives(21, CIEL)}, 'url'),
+                ({'url': [self.alternatives(15, CIEL), self.alternatives(6, ICD10)]}, 'url'),  # repeats count too
+                ({'_id': ','.join(['1'] * 21)}, '_id'),
+                ({'name': ','.join(['a'] * 11), 'name:exact': ','.join(['b'] * 10)}, 'name:exact')):
+            with self.assertNumQueries(0):
+                response = self.client.get('/fhir/CodeSystem/', params)
+            issue = self.assertOutcome(response, 400, 'too-costly', 'too-costly')
+            self.assertEqual(issue['expression'], [expression], params)
+        self.assertEqual(self.search('CodeSystem', url=self.alternatives(20, CIEL))['total'], 2)
+
+    def test_a_search_takes_at_most_50_values(self):
+        params = {'url': self.alternatives(20, CIEL), 'system': self.alternatives(20, CIEL),
+                  'version': ','.join(f'v{index}' for index in range(10))}
+        self.assertEqual(self.search('CodeSystem', **params)['total'], 2)
+        params['_id'] = '1'
+        issue = self.assertOutcome(self.client.get('/fhir/CodeSystem/', params), 400, 'too-costly', 'too-costly')
+        self.assertEqual(issue['expression'], ['_id'])
+
+
 class VersionIdTest(SearchCorpusMixin, OCLTestCase):
     """
     Every released version has a stable meta.versionId, its opaque id, so an owner-base Bundle with several releases
@@ -982,6 +1033,18 @@ class SearchTimeoutTest(TransactionTestCase):
         with connection.cursor() as cursor:  # the timeout ended with the search
             cursor.execute('SHOW statement_timeout')
             self.assertEqual(cursor.fetchone()[0], '0')
+
+    def test_the_timeout_bounds_the_search_as_a_whole(self):
+        """Each query may take only the time the search has left, so queries that fit alone can still add up past it."""
+        def slow():
+            with connection.cursor() as cursor:
+                for _ in range(4):
+                    cursor.execute('SELECT pg_sleep(0.04)')
+
+        with patch('core.fhir.search.SEARCH_TIMEOUT_MS', 100):
+            with self.assertRaises(TooCostlyError):
+                fhir_search.within_search_timeout(slow)
+            self.assertEqual(fhir_search.within_search_timeout(lambda: 'answered'), 'answered')
 
     def test_other_database_errors_are_raised(self):
         def broken():
