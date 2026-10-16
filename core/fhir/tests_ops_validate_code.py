@@ -17,6 +17,7 @@ from core.orgs.tests.factories import OrganizationFactory
 from core.url_registry.factories import GlobalURLRegistryFactory
 
 DRAFT_ONLY = 'http://example.org/fhir/CodeSystem/head-only'
+GONE = 'http://example.org/fhir/CodeSystem/gone'
 DRAFT_UNRELEASED = 'http://example.org/fhir/CodeSystem/unreleased'
 
 
@@ -176,11 +177,59 @@ class ValidateCodeCases(OpsCorpusMixin):
             parameters[0]['valueCoding']['system'] = CIEL
             self.assertTrue(self.answer(self.post(operation, parameters, base=base))['result'], base)
         response = self.get('CIEL/$validate-code', base='/orgs/CIEL', url=ICD10, code='117053')
-        self.assertEqual(self.answer(response)['issues'], ['error|invalid|invalid-data|system|'])
+        self.assertEqual(self.answer(response)['issues'], ['error|invalid|invalid-data|url|'])
+        # an instance's url naming another system is a mismatch whatever the coding says (Codex F2.2)
+        answer = self.answer(self.post('CIEL/$validate-code', [
+            {'name': 'url', 'valueUri': ICD10}, {'name': 'coding', 'valueCoding': {'system': CIEL, 'code': '117053'}}],
+            base='/orgs/CIEL'))
+        self.assertEqual((answer['result'], answer['issues']), (False, ['error|invalid|invalid-data|url|']))
         # a coding without a system is of the url's code system
         answer = self.answer(self.post('$validate-code', [
             {'name': 'url', 'valueUri': CIEL}, {'name': 'coding', 'valueCoding': {'code': '117053'}}]))
         self.assertEqual((answer['result'], answer['system']), (True, CIEL))
+
+    def test_an_instance_and_another_version_named(self):
+        """
+        At the instance level, the id names the code system version: another version named (the version parameter, or
+        a coding's) is result false with an issue on it, never validated in the instance's version (Codex F2.1).
+        """
+        mismatch = 'error|invalid|invalid-data|{}|'
+        global_ciel_v1 = f'{self.ciel_v1.id}/$validate-code'
+        answer = self.answer(self.get(global_ciel_v1, code='999', version='v2'))
+        self.assertEqual((answer['result'], answer['issues']), (False, [mismatch.format('version')]))
+        owner_extra = [{'name': 'version', 'valueString': 'v1'}]
+        for base, operation, extra in (
+                ('/fhir', global_ciel_v1, []), ('/orgs/CIEL', 'CIEL/$validate-code', owner_extra)):
+            coding = {'name': 'coding', 'valueCoding': {'system': CIEL, 'code': '999', 'version': 'v2'}}
+            answer = self.answer(self.post(operation, [coding, *extra], base=base))
+            self.assertEqual((answer['result'], answer['issues']), (False, [mismatch.format('Coding.version')]), base)
+        # at the type level, a coding's version is the version it is validated in
+        answer = self.answer(self.post('$validate-code', [
+            {'name': 'url', 'valueUri': CIEL}, {'name': 'version', 'valueString': 'v1'},
+            {'name': 'coding', 'valueCoding': {'system': CIEL, 'code': '999', 'version': 'v2'}}]))
+        self.assertEqual((answer['result'], answer['issues']), (False, [mismatch.format('Coding.version')]))
+        # the instance's own version, named any of these ways, is validated
+        self.assertTrue(self.answer(self.get(global_ciel_v1, code='999', version='v1', url=f'{CIEL}|v1'))['result'])
+        self.assertTrue(self.answer(self.post('CIEL/$validate-code', [
+            {'name': 'coding', 'valueCoding': {'system': CIEL, 'code': '999', 'version': 'v1'}}],
+            base='/orgs/CIEL'))['result'])
+
+    def test_a_deleted_code_system_release(self):
+        """A deactivated release (is_active false) whose concept and expansion links remain is no version a member is
+        in, nor one to answer: the member is answered from what remains (Codex F2.3)."""
+        gone = source(OrganizationFactory(mnemonic='Gone'), 'gone', canonical_url=GONE)
+        gone_v1 = source(gone.organization, 'gone', 'v1', released=True, canonical_url=GONE)
+        self.fevers_v1.expansion.concepts.add(ConceptFactory(
+            parent=gone, mnemonic='G1', sources=[gone_v1], names=[name('G one', preferred=True)]))
+        self.assertEqual(self.answer(self.validate_in(url=FEVERS, system=GONE, code='G1'))['version'], 'v1')
+        gone_v1.is_active = False
+        gone_v1.save()
+        self.assertEqual(self.answer(self.validate_in(url=FEVERS, system=GONE, code='G1')), {
+            'result': True, 'system': GONE, 'code': 'G1', 'display': 'G one'})
+        answer = self.answer(self.validate_in(url=FEVERS, system=GONE, code='G1', systemVersion='v1'))
+        self.assertEqual((answer['result'], answer['issues']), (False, [
+            'error|code-invalid|not-in-vs|code|None_of_the_provided_codes_are_in_the_value_set_one',
+            'error|not-found|not-found|system|UNKNOWN_CODESYSTEM_VERSION']))
 
     def test_a_deleted_concept_version_is_not_valid(self):
         """Deleted (is_active false) concept versions are gone from code systems and value sets (Codex F1.4)."""
@@ -315,6 +364,21 @@ class ValidateCodeCases(OpsCorpusMixin):
         self.assertFalse(self.answer(response)['result'])
         self.assert_outcome(self.get('fevers/$validate-code', resource='ValueSet', system=CIEL, code='117053'),
                             404, 'not-found', 'not-found')
+
+    def test_a_value_set_instance_and_another_version_or_url_named(self):
+        """At the instance level the id names the value set version: a valueSetVersion or url naming another one is a
+        400, never answered from the instance (the ValueSet side of Codex F2.1 and F2.2)."""
+        global_fevers = f'{self.fevers_v1.id}/$validate-code'
+        for base, operation, params, expression in (
+                ('/fhir', global_fevers, {'valueSetVersion': 'v2'}, 'valueSetVersion'),
+                ('/fhir', global_fevers, {'url': 'https://example.org/another'}, 'url'),
+                ('/orgs/Acme', 'fevers/$validate-code', {'url': f'{FEVERS}|v2'}, 'url')):
+            response = self.get(operation, base=base, resource='ValueSet', system=CIEL, code='117053', **params)
+            self.assert_outcome(response, 400, 'invalid', 'invalid-data')
+            self.assertEqual(response.data['issue'][0]['expression'], [expression], (base, params))
+        response = self.get(global_fevers, resource='ValueSet', system=CIEL, code='117053', valueSetVersion='v1',
+                            url=FEVERS)
+        self.assertTrue(self.answer(response)['result'])
 
     def test_without_a_value_set_the_code_system_alone_answers(self):
         self.assertEqual(self.answer(self.validate_in(system=CIEL, code='999', systemVersion='v1'))['result'], True)

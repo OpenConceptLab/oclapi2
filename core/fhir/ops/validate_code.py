@@ -31,7 +31,8 @@ from core.common.constants import HEAD
 from core.concepts.models import Concept
 from core.fhir import outcomes
 from core.fhir.ops.concepts import (
-    coded_input, path, require, text, find_concept, display_of, has_name, fhir_code, code_q, is_system_of, system_of)
+    coded_input, path, require, text, find_concept, display_of, has_name, fhir_code, code_q, is_system_of, mismatch,
+    system_of)
 from core.fhir.ops.lookup import code_system_version
 from core.fhir.resolve import UnresolvedError, namespace_of, resolve, to_ocl_path, viewable_rows
 from core.fhir.search import read_version
@@ -143,11 +144,12 @@ def validate_code_system(parameters, kwargs, user, instance_id=None):
     if version is None:
         raise outcomes.InvalidError('url is required with a code: the code system to validate it in.',
                                     expression=coding.parameter or 'url')
-    if coding.system and not is_system_of(coding.system, version, None if instance_id else target.system):
-        return answer(coding, [issue(
-            coding, 'system', 'other-system', None,
-            f"The coding's system '{coding.system}' is not the code system '{system_of(version, target.system)}' it "
-            "is validated in")])
+    conflict = mismatch(parameters, coding, version, 'url', instance_id)
+    if conflict:
+        severity, code, tx_issue_type = KINDS['other-system']
+        return answer(coding, [outcomes.issue(
+            code, f'{conflict[1]}: the code is not validated', severity=severity, expression=conflict[0],
+            tx_issue_type=tx_issue_type)])
     return in_code_system(coding, version, text(parameters, 'displayLanguage'))
 
 
@@ -163,9 +165,9 @@ def member(value_set, coding, namespace, user):
     """
     (the concept, the version of its code system) of the code in the value set version's default expansion, or None:
     a concept with the code (not deleted), of the system (in systemVersion, if named), in a code system version the
-    caller is shown, released or not: the expansion defines the value set. The version answered is a release the caller
-    is shown that holds the concept: the one the expansion pins (explicit), else the one it evaluated, else the newest;
-    None without one, never HEAD or an unreleased version.
+    caller is shown (not deleted), released or not: the expansion defines the value set. The version answered is a
+    release the caller is shown that holds the concept: the one the expansion pins (explicit), else the one it
+    evaluated, else the newest; None without one, never HEAD or an unreleased version.
     The code's concepts are read first, by their code, then looked for in the expansion by its (expansion, concept)
     index, so the cost doesn't grow with the size of the value set.
     """
@@ -180,7 +182,8 @@ def member(value_set, coding, namespace, user):
     if not concept_ids:
         return None
     rows = Concept.sources.through.objects.filter(
-        Exists(viewable_rows(Source, namespace, user).filter(id=OuterRef('source_id'))), concept_id__in=concept_ids)
+        Exists(viewable_rows(Source, namespace, user).filter(id=OuterRef('source_id'))), concept_id__in=concept_ids,
+        source__is_active=True)
     if coding.version:
         rows = rows.filter(source__version=coding.version)
     def pinned(versions):
@@ -199,11 +202,22 @@ def member(value_set, coding, namespace, user):
 
 
 def value_set_version(parameters, kwargs, user, instance_id):
-    """The value set version the request names; a url that doesn't resolve is a 422 not-found."""
-    version = text(parameters, 'valueSetVersion')
+    """
+    The value set version the request names; a url that doesn't resolve is a 422 not-found. At the instance level the id
+    names it, and a url or valueSetVersion naming another one is a 400.
+    """
+    version, url = text(parameters, 'valueSetVersion'), text(parameters, 'url')
     if instance_id:
-        return read_version('ValueSet', instance_id, version, kwargs, user)
-    url = text(parameters, 'url')
+        value_set = read_version('ValueSet', instance_id, version, kwargs, user)
+        if url and not is_system_of(url, value_set):
+            raise outcomes.InvalidError(f"'{url}' is not the value set {instance_id} this $validate-code is on.",
+                                        expression='url')
+        for named, expression in ((version, 'valueSetVersion'), ((url or '').partition('|')[2], 'url')):
+            if named and named != value_set.version:
+                raise outcomes.InvalidError(
+                    f"Version '{named}' is not the version '{value_set.version}' of the value set {instance_id}.",
+                    expression=expression)
+        return value_set
     try:
         return resolve('ValueSet', url, version, kwargs, user)
     except UnresolvedError as ex:

@@ -18,7 +18,7 @@ from rest_framework import status
 
 from core.fhir import outcomes
 from core.fhir.ops.concepts import (
-    coded_input, require, find_concept, display_of, designations, fhir_code, is_system_of, path, system_of, text)
+    coded_input, require, find_concept, display_of, designations, fhir_code, mismatch, system_of, text)
 from core.fhir.resolve import UnresolvedError, resolve
 from core.fhir.search import read_version
 
@@ -36,18 +36,18 @@ def lookup(parameters, kwargs, user, instance_id=None):
     level), for `user`: {name, version, display, code, system, abstract, inactive, designations}.
     """
     coding = coded_input(parameters, 'system', 'version')
+    target = coding._replace(version=text(parameters, 'version') or coding.version)
     code = require(coding, 'code', 'code', '$lookup needs the code to look up.')
     if not instance_id:
         require(coding, 'system', 'system', '$lookup needs the system the code is from.')
     try:
-        version = code_system_version(coding, kwargs, user, instance_id)
+        version = code_system_version(target, kwargs, user, instance_id)
     except UnresolvedError as ex:
         raise outcomes.NotFoundError(
             str(ex.detail), tx_issue_type='not-found', status_code=status.HTTP_422_UNPROCESSABLE_ENTITY) from ex
-    if instance_id and coding.system and not is_system_of(coding.system, version):
-        raise outcomes.InvalidError(
-            f"'{coding.system}' is not the code system {instance_id} this $lookup is on.",
-            expression=path(coding, 'system'))
+    conflict = mismatch(parameters, coding, version, 'system', instance_id)
+    if conflict:
+        raise outcomes.InvalidError(f'{conflict[1]}: this $lookup is on {instance_id}.', expression=conflict[0])
     system = system_of(version, coding.system)
     concept = find_concept(version, code)
     if not concept:

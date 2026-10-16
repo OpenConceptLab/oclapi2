@@ -101,8 +101,8 @@ def system_of(version, named=None):
 
 def is_system_of(system, version, named=None):
     """
-    Whether a coding's system names a code system version: its canonical URL (or its repository's), the URL it was
-    resolved by (`named`), or an OCL path of its repository or of the version.
+    Whether a coding's system (or a value set url) names a repository version: its canonical URL (or its
+    repository's), the URL it was resolved by (`named`), or an OCL path of its repository or of the version.
     """
     url = system.partition('|')[0]
     canonicals = {version.canonical_url, getattr(version, 'repository_canonical_url', None),
@@ -112,6 +112,32 @@ def is_system_of(system, version, named=None):
     repository = to_parent_uri(to_ocl_path(url))
     repository = repository if repository.endswith('/') else f'{repository}/'
     return repository in {version.uri, '/'.join(version.uri.split('/')[:5]) + '/'}
+
+
+def mismatch(parameters, coding, version, system_name, instance_id):
+    """
+    (expression, message) of an input naming another code system or version than the one resolved, else None. At the
+    instance level, the id names it: the system parameter (`system_name`, url or system), the coding's system and any
+    version named (the version parameter, the coding's, a url|version) must all be its. At the type level, a Coding's
+    system and version must be those of the code system it is validated in, which url and version may name.
+    """
+    if instance_id:
+        systems = [(text(parameters, system_name), system_name), (coding.system, path(coding, 'system'))]
+        versions = [(text(parameters, 'version'), 'version'), (coding.version, path(coding, 'version'))]
+        named = None
+    elif coding.parameter:
+        systems, versions = [(coding.system, path(coding, 'system'))], [(coding.version, path(coding, 'version'))]
+        named = text(parameters, system_name) or coding.system
+    else:
+        return None
+    for system, expression in systems:
+        if system and not is_system_of(system, version, named):
+            return expression, f"'{system}' is not the code system '{system_of(version, named)}' it is about"
+        versions.append((system and system.partition('|')[2], expression))
+    for named_version, expression in versions:
+        if named_version and named_version != version.version:
+            return expression, f"Version '{named_version}' is not the version '{version.version}' it is about"
+    return None
 
 
 def find_concept(version, code):

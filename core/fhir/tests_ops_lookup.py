@@ -326,6 +326,34 @@ class LookupCases(OpsCorpusMixin):
                              base='/orgs/CIEL')
         self.assertEqual(response.status_code, 200, response.data)
 
+    def test_an_instance_and_another_version_or_system_named(self):
+        """
+        At the instance level, the id names the code system version: a version (the version parameter, or a coding's)
+        or a system parameter naming another one is a 400, never answered from the instance (Codex F2.1, F2.2).
+        """
+        global_ciel_v1 = f'{self.ciel_v1.id}/$lookup'
+        for base, operation, params, expression in (
+                ('/fhir', global_ciel_v1, {'code': '999', 'version': 'v2'}, 'version'),
+                ('/fhir', global_ciel_v1, {'code': '999', 'system': ICD10}, 'system'),
+                ('/orgs/CIEL', 'CIEL/$lookup', {'code': '117053', 'system': ICD10}, 'system')):
+            response = self.get(operation, base=base, **params)
+            self.assert_outcome(response, 400, 'invalid', 'invalid-data')
+            self.assertEqual(response.data['issue'][0]['expression'], [expression], (base, params))
+        for base, operation, extra, expression in (
+                ('/fhir', global_ciel_v1, [], 'Coding.version'),
+                ('/orgs/CIEL', 'CIEL/$lookup', [{'name': 'version', 'valueString': 'v1'}], 'Coding.version'),
+                ('/orgs/CIEL', 'CIEL/$lookup', [{'name': 'system', 'valueUri': ICD10}], 'system')):
+            coding = {'system': CIEL, 'code': '999', 'version': 'v2' if expression.endswith('version') else 'v1'}
+            response = self.post(operation, [{'name': 'coding', 'valueCoding': coding}, *extra], base=base)
+            self.assert_outcome(response, 400, 'invalid', 'invalid-data')
+            self.assertEqual(response.data['issue'][0]['expression'], [expression], (base, extra))
+        # the instance's own version, named any of these ways, is answered
+        response = self.get(global_ciel_v1, code='999', version='v1', system=f'{CIEL}|v1')
+        self.assertEqual(self.by_name(response)['version']['valueString'], 'v1')
+        response = self.post('CIEL/$lookup', [{'name': 'coding', 'valueCoding': {
+            'system': CIEL, 'code': '999', 'version': 'v1'}}], base='/orgs/CIEL')
+        self.assertEqual(self.by_name(response)['version']['valueString'], 'v1')
+
     def test_a_deleted_concept_version_is_not_found(self):
         """A concept version deleted (is_active false) is gone, a retired one stays (Codex F1.4)."""
         ConceptFactory(parent=self.ciel, mnemonic='555', sources=[self.ciel_v2], is_active=False,
