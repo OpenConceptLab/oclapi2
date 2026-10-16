@@ -5,13 +5,15 @@ with or without the URL registry), with FHIR's rules on top.
 - Resource type: CodeSystem and ConceptMap resolve to a Source, ValueSet to a Collection.
 - Namespace: the base URL's. /fhir/ is global; /orgs/{org}/ and /users/{user}/ are that owner's. It comes from the
   route, never from the request.
-- Version: the one named (the operation's version parameter, else url|version, else the version an OCL path names),
-  HEAD included. With none named, the newest released version the caller is shown, never HEAD. A repository with
-  nothing released isn't visible, whatever version is named.
+- Version: the one named (the operation's version parameter, else url|version, else the version an OCL path names;
+  a path naming one version with another named names none), HEAD included. With none named, the newest released
+  version the caller is shown, never HEAD. A repository with nothing released isn't visible, whatever version is
+  named.
 - Access, after resolving: at the global base public repositories only, at an owner base what the caller may view.
   The version and its repository (HEAD) must both be viewable. Without the URL registry, the global base's canonical
   match considers only the repositories it shows, so a private copy of a canonical never hides a public one. Otherwise
-  (an owner base, a registry entry) a repository the caller can't see is not found, and no other repository is tried.
+  (an owner base, a registry entry) a repository the caller can't see is not found, and no other repository is tried;
+  none of its versions is read.
 
 Every failure is the same UnresolvedError, so it never tells a caller that a repository they can't see exists.
 """
@@ -62,22 +64,39 @@ def resolve(resource_type, url, version=None, kwargs=None, user=None, expression
     """
     url = url or ''
     lookup_url, _, piped_version = url.partition('|')
-    named = version or piped_version or path_version(lookup_url)
-    error = UnresolvedError(resource_type, lookup_url, named, expression)
+    in_path, elsewhere = path_version(lookup_url), version or piped_version or None
+    error = UnresolvedError(resource_type, lookup_url, elsewhere or in_path, expression)
     namespace = namespace_of(kwargs)
-    if not lookup_url or '|' in piped_version or (
-            namespace and not SourceContainerMixin.get_object_from_namespace(namespace)):
+    # a second pipe, or a path naming one version with another named, names no version OCL holds
+    conflicting = '|' in piped_version or bool(in_path and elsewhere and in_path != elsewhere)
+    if not lookup_url or conflicting or (namespace and not SourceContainerMixin.get_object_from_namespace(namespace)):
         raise error
 
-    repo_type = REPO_TYPES[resource_type]
-    instance, _ = repo_type.resolve_reference_expression(
-        to_ocl_path(url), namespace, version, repo_type=repo_type, allow_head=False,
-        heads=None if namespace else shown_heads(repo_type))
-    if instance.id and not named and not is_shown(instance, namespace, user):
+    instance = shared_resolution(REPO_TYPES[resource_type], url, version, namespace, user)
+    if instance.id and not (elsewhere or in_path) and not is_shown(instance, namespace, user):
         instance = latest_public_release(instance) or instance  # the newest release is private: the newest public one
 
     if not instance.id or not is_shown(instance, namespace, user):
         raise error
+    return instance
+
+
+def shared_resolution(repo_type, url, version, namespace, user):
+    """
+    The shared resolver's answer, with FHIR's flags: no HEAD by default; at the global base only the HEADs it shows;
+    and a HEAD the caller isn't shown resolves to nothing before any version is read. The version found shares the
+    HEAD's check of the caller's right to the owner's private repositories, so it isn't asked twice.
+    """
+    heads = []
+
+    def head_shown(head):
+        heads.append(head)
+        return is_visible(head, namespace, user)
+    instance, _ = repo_type.resolve_reference_expression(
+        to_ocl_path(url), namespace, version, repo_type=repo_type, allow_head=False,
+        heads=None if namespace else shown_heads(repo_type), head_shown=head_shown)
+    if heads and hasattr(heads[0], 'fhir_may_view_private'):
+        instance.fhir_may_view_private = heads[0].fhir_may_view_private
     return instance
 
 

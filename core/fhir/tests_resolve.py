@@ -340,7 +340,9 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
                 (3 + extra, ('CodeSystem', ICD10)),
                 (3 + extra, ('CodeSystem', ICD10, 'ICD102019')),
                 (4 + extra, ('ValueSet', PBD, None, {'org': 'padam'})),
-                (6 + extra, ('CodeSystem', FIXTURE, None, {'org': 'FHIR-Fixtures'}, self.member)),
+                # the caller's right to the owner's private repositories is checked once, on HEAD; the registry finds
+                # HEAD through its owner, so its organization is already known
+                (6 + extra - bool(self.registry), ('CodeSystem', FIXTURE, None, {'org': 'FHIR-Fixtures'}, self.member)),
         ):
             with self.subTest(args=args), self.assertNumQueries(count):
                 self.resolve(*args)

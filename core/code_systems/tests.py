@@ -317,17 +317,17 @@ class CodeSystemTest(OCLTestCase):
             # without a code, a code system the requester can't view still answers as one that doesn't exist
             response = self.client.get(f'{base}/CodeSystem/$validate-code/?url={PRIVATE}{selector}', **headers)
             self.assertFalse(response.data['parameter'][0]['valueBoolean'], (base, headers))
-            hidden.append((f'/fhir/CodeSystem/$validate-code/?url={PRIVATE}{selector}', response))
+            hidden.append((f'{base}/CodeSystem/$validate-code/?url={PRIVATE}{selector}', headers, response))
             for code in [concept.mnemonic, 'missing']:
                 for url in [validate_url.format(base, PRIVATE, code),
                             validate_url.format(base, PRIVATE, code) + f'&display={concept.display_name}']:
                     response = self.client.get(url, **headers)
                     self.assertEqual(response.status_code, 200, (url, headers))
                     self.assertFalse(response.data['parameter'][0]['valueBoolean'], (url, headers))
-                    hidden.append((url.replace(base, '/fhir', 1), response))
+                    hidden.append((url, headers, response))
                 response = self.client.get(lookup_url.format(base, PRIVATE, code), **headers)
                 self.assertEqual(response.status_code, 422, (code, headers))
-                hidden.append((lookup_url.format('/fhir', PRIVATE, code), response))
+                hidden.append((lookup_url.format(base, PRIVATE, code), headers, response))
 
         response = self.client.get(validate_url.format(owner_base, PRIVATE, concept.mnemonic), **member_headers)
         self.assertTrue(response.data['parameter'][0]['valueBoolean'])
@@ -337,8 +337,8 @@ class CodeSystemTest(OCLTestCase):
 
         private_source.is_active = False  # now it doesn't exist
         private_source.save()
-        for url, response in hidden:
-            not_found = self.client.get(url)
+        for url, headers, response in hidden:  # each against the same request, at the same base, once it's missing
+            not_found = self.client.get(url, **headers)
             self.assertEqual((response.status_code, response.content), (not_found.status_code, not_found.content))
 
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))

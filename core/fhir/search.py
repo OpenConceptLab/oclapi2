@@ -53,7 +53,7 @@ from core.fhir import outcomes
 from core.fhir.base import CONTROL_PARAMETERS, fhir_base_url
 from core.fhir.resolve import (
     PUBLIC_ACCESS, REPO_TYPES, namespace_of, owner_access, visible_versions, viewable_rows, is_visible, has_release,
-    repository_rows, with_repository_access)
+    is_public, repository_rows, with_repository_access)
 from core.mappings.models import Mapping
 from core.sources.models import Source
 
@@ -589,7 +589,8 @@ def read_version(resource_type, resource_id, version, kwargs, user):  # pylint: 
         return instance and is_visible(instance, namespace, user) and has_release(instance, namespace, user)
 
     instance = with_repository_access(with_repository_canonical(versions)).first()
-    if latest and instance and not shown(instance):  # the latest is private: the latest public one, if shown
+    if latest and instance and not shown(instance) and is_public(instance.repository_public_access or ''):
+        # the latest is private, in a public repository: the latest public one
         instance = with_repository_access(with_repository_canonical(
             versions.filter(public_access__in=PUBLIC_ACCESS))).first()
     if not shown(instance):

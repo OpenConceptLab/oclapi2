@@ -6,8 +6,11 @@ code, wrong display, inactive, not in the value set); value set membership from 
 expansion; a value set that doesn't resolve is a 422 OperationOutcome; whatever the caller isn't shown answers as
 missing; a fixed number of queries. OpenConceptLab/ocl_online#451.
 """
+from django.db import connection
 from django.db.models import F
+from django.test.utils import CaptureQueriesContext
 
+from core.collections.models import Collection
 from core.collections.tests.factories import ExpansionFactory
 from core.common.tests import OCLTestCase
 from core.concepts.models import Concept
@@ -240,6 +243,42 @@ class ValidateCodeCases(OpsCorpusMixin):
                             valueSetVersion='HEAD')
         self.assert_outcome(response, 400, 'invalid', 'invalid-data')
         self.assertEqual(response.data['issue'][0]['expression'], ['valueSetVersion'])
+
+    def test_a_path_naming_a_version_and_another_version_named(self):
+        """
+        An OCL path naming one version with another named answers a private version in the path byte for byte as a
+        missing one: CodeSystem url and version, ValueSet url and valueSetVersion, and the system and systemVersion of
+        a code outside a value set; at /fhir/ and at an owner base for a non-member (adversarial A.1).
+        """
+        collection(self.acme, 'fevers', 'v2', released=True, canonical_url=FEVERS, public_access='None')
+        cs_path, vs_path = '/orgs/HL7/CodeSystem/newest/v2/', '/orgs/Acme/ValueSet/fevers/v2/'
+        requests = [
+            ('CodeSystem', {'url': cs_path, 'version': 'v1', 'code': 'N1'}),
+            ('ValueSet', {'url': vs_path, 'valueSetVersion': 'v1', 'system': CIEL, 'code': '117053'}),
+            ('ValueSet', {'url': FEVERS, 'system': cs_path, 'systemVersion': 'v1', 'code': 'N1'})]
+        bases = [('/fhir', None), ('/orgs/Acme', self.outsider), ('/orgs/HL7', None)]
+        hidden = [(base, user, resource, params, self.validate(resource, base, user, **params))
+                  for base, user in bases for resource, params in requests]
+        for version in (self.newest_private_v2, Collection.objects.get(mnemonic='fevers', version='v2')):
+            version.is_active = False
+            version.save()
+        for base, user, resource, params, response in hidden:
+            missing = self.validate(resource, base, user, **params)
+            self.assertEqual((response.status_code, response.content), (missing.status_code, missing.content),
+                             (base, resource, params))
+
+    def test_a_hidden_code_system_costs_what_a_missing_code_does_in_a_value_set(self):
+        """Membership reads only the concepts of code systems the caller is shown, so a hidden member, a hidden
+        non-member and a missing code cost the same queries and answer the same bytes (adversarial A.2)."""
+        ConceptFactory(parent=self.hiv, mnemonic='P2', sources=[self.hiv_v1], names=[name('Another', preferred=True)])
+        answers = []
+        for code in ('P1', 'P2', 'NOPE'):
+            with CaptureQueriesContext(connection) as context:
+                response = self.validate_in(url=FEVERS, system=HIV, code=code)
+            answers.append((len(context.captured_queries), response.status_code,
+                            response.content.replace(code.encode(), b'<code>')))
+        self.assertEqual(answers[0], answers[1])
+        self.assertEqual(answers[0], answers[2])
 
     def test_a_deleted_code_system_release(self):
         """A deactivated release (is_active false) whose concept and expansion links remain is no version a member is

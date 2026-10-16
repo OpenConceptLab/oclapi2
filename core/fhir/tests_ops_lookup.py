@@ -8,6 +8,8 @@ number of queries. OpenConceptLab/ocl_online#451.
 """
 import json
 
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
 from core.collections.tests.factories import ExpansionFactory
@@ -315,6 +317,50 @@ class LookupCases(OpsCorpusMixin):
         self.newest_private_v2.is_active = False
         self.newest_private_v2.save()
         self.assertEqual(self.lookup(system=path, code='N1').content, hidden.content)
+
+    def test_a_path_naming_a_version_and_another_version_named(self):
+        """
+        An OCL path naming one version with another named (version, url|version, HEAD, a coding's) names no version
+        OCL holds: a private version in the path answers byte for byte as a missing one, at /fhir/ and at an owner base
+        for a non-member (adversarial A.1).
+        """
+        path = '/orgs/HL7/CodeSystem/newest/v2/'
+        requests = [
+            ('get', {'system': path, 'version': 'v1', 'code': 'N1'}), ('get', {'system': f'{path}|v1', 'code': 'N1'}),
+            ('get', {'system': path, 'version': 'HEAD', 'code': 'N1'}),
+            ('post', [{'name': 'coding', 'valueCoding': {'system': path, 'version': 'v1', 'code': 'N1'}}])]
+        def ask(base, user, method, inputs):
+            if method == 'get':
+                return self.get('$lookup', base=base, user=user, **inputs)
+            return self.post('$lookup', inputs, base=base, user=user)
+        bases = [('/fhir', None), ('/orgs/HL7', None), ('/orgs/HL7', self.outsider)]
+        hidden = [(base, user, method, inputs, ask(base, user, method, inputs))
+                  for base, user in bases for method, inputs in requests]
+        self.newest_private_v2.is_active = False
+        self.newest_private_v2.save()
+        for base, user, method, inputs, response in hidden:
+            missing = ask(base, user, method, inputs)
+            self.assertEqual((response.status_code, response.content), (missing.status_code, missing.content),
+                             (base, method, inputs))
+            self.assertEqual(response.status_code, 422, (base, method, inputs))
+
+    def test_an_owner_base_costs_the_same_for_a_hidden_and_an_unknown_code_system(self):
+        """Anonymous, at an owner base: a private code system costs the queries an unknown one does (adversarial A.3).
+        For a signed-in non-member the membership check remains, and with the registry an owner-base match stops the
+        fall-through to the global entry: both are decision A.3's."""
+        if self.registry:
+            self.skipTest('with the registry, an owner-base match stops the fall-through (decision A.3)')
+        counts = {}
+        for name_, operation, params, status_code in (
+                ('hidden', '$lookup', {'system': HIV}, 422),
+                ('unknown', '$lookup', {'system': 'http://moh.example/fhir/CodeSystem/nope'}, 422),
+                ('hidden instance', 'hiv/$lookup', {}, 404), ('unknown instance', 'nope/$lookup', {}, 404)):
+            with CaptureQueriesContext(connection) as context:
+                response = self.get(operation, base='/orgs/MOH', code='P1', **params)
+            self.assertEqual(response.status_code, status_code, name_)
+            counts[name_] = len(context.captured_queries)
+        self.assertEqual(counts['hidden'], counts['unknown'])
+        self.assertEqual(counts['hidden instance'], counts['unknown instance'])
 
     def test_an_instance_and_a_coding_of_another_system(self):
         """At the instance level, a coding names the code system it is from: another one's code isn't looked up."""

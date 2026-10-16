@@ -167,13 +167,15 @@ def member(value_set, coding, namespace, user):
     caller is shown (not deleted), released or not: the expansion defines the value set. The version answered is a
     release the caller is shown that holds the concept: the one the expansion pins (explicit), else the one it
     evaluated, else the newest; None without one, never HEAD or an unreleased version.
-    The code's concepts are read first, by their code, then looked for in the expansion by its (expansion, concept)
-    index, so the cost doesn't grow with the size of the value set.
+    The code's concepts are read first, by their code and only in code systems the caller is shown (so what hidden ones
+    hold costs nothing), then looked for in the expansion by its (expansion, concept) index, so the cost doesn't grow
+    with the size of the value set.
     """
     if not value_set.expansion_uri:
         return None
     concept_ids = list(Concept.objects.filter(
-        code_q('mnemonic', coding.code), system_q('parent', coding.system), is_active=True).values_list(
+        code_q('mnemonic', coding.code), system_q('parent', coding.system),
+        Exists(viewable_rows(Source, namespace, user).filter(id=OuterRef('parent_id'))), is_active=True).values_list(
         'id', flat=True))
     if concept_ids:
         concept_ids = list(Expansion.concepts.through.objects.filter(
