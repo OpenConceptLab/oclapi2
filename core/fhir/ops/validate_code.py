@@ -165,15 +165,16 @@ def named_by(system, shown):
     """
     (Q for concepts, Q for their concept-source links) the system names, as a read names a code system version: by the
     version's own canonical URL, else its repository's (HEAD's); an OCL path names every version of its repository.
-    So a concept is the system's in a release with a canonical URL of its own (one of the `shown` versions) too, and
-    only the versions the system names are answered (as $expand reports a member: system|version).
+    So a concept is the system's when its repository is, or has a version the caller is shown (`shown`) with that
+    canonical URL of its own; and only the versions the system names are answered (as $expand reports a member).
+    The repositories are found among sources alone, so the concepts are still read by their code first.
     """
     if to_ocl_path(system).startswith('/'):
         return system_q('parent', system), Q()
-    own = Concept.sources.through.objects.filter(concept_id=OuterRef('id'), source__canonical_url=system).filter(
-        Exists(shown.filter(id=OuterRef('source_id'))))
+    renamed = shown.filter(canonical_url=system, mnemonic=OuterRef('parent__mnemonic')).filter(
+        Q(organization_id=OuterRef('parent__organization_id')) | Q(user_id=OuterRef('parent__user_id')))
     inherited = Q(source__canonical_url__isnull=True) | Q(source__canonical_url='')
-    return system_q('parent', system) | Exists(own), Q(source__canonical_url=system) | (
+    return system_q('parent', system) | Exists(renamed), Q(source__canonical_url=system) | (
         inherited & Q(concept__parent__canonical_url=system))
 
 
