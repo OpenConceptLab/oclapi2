@@ -192,6 +192,14 @@ def with_concepts_over_limit(queryset):
     return queryset.annotate(concepts_over_limit=Exists(links[CONCEPT_LIMIT:CONCEPT_LIMIT + 1]))
 
 
+def defines_concept(**filters):
+    """
+    A CodeSystem version with a concept (matching `filters`), as its read lists them: linked to the version and not
+    deleted. A retired concept counts; the read shows it flagged inactive.
+    """
+    return Exists(Concept.sources.through.objects.filter(source_id=OuterRef('id'), concept__is_active=True, **filters))
+
+
 class JsonPathExists(Func):  # pylint: disable=abstract-method
     """jsonb_path_exists(field, path, vars, silent): whether the path finds anything, an error being no match."""
     function = 'jsonb_path_exists'
@@ -303,8 +311,8 @@ class Search:
             return handler(code)
         if not system or implicit is None:
             return NOTHING
-        if implicit == CODE_SYSTEM:  # system| is any code: any version of that code system
-            return canonical_q(self.model, system) & (handler(code) if code else EVERYTHING)
+        if implicit == CODE_SYSTEM:  # system| is any code: a version of that code system with a concept
+            return canonical_q(self.model, system) & (handler(code) if code else defines_concept())
         if system != implicit:
             return NOTHING
         return handler(code) if code else ANY_CODE[name]
@@ -377,7 +385,7 @@ class Search:
     @staticmethod
     def by_code(value):
         """A CodeSystem that defines the code."""
-        return Exists(Concept.sources.through.objects.filter(source_id=OuterRef('id'), concept__mnemonic=value))
+        return defines_concept(concept__mnemonic=value)
 
     @staticmethod
     def by_language(value):

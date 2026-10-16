@@ -373,6 +373,19 @@ class CodeSystemSearchTest(SearchCorpusMixin, OCLTestCase):  # pylint: disable=t
         self.assertEqual(self.keys(self.search('CodeSystem', language='urn:ietf:bcp:47|')), sorted(
             [f'{CIEL}|v1', f'{ICD10}|ICD102019', f'{ICD10}|v1.0', 'https://example.org/my-codes|v1']))
 
+    def test_code_needs_a_concept_the_read_lists(self):
+        """
+        code searches concept.code, so code=<system>| is a release of that code system with a concept, and code=<code> a
+        release defining it. A concept counts as the read lists it: linked and not deleted; a retired one counts.
+        """
+        ConceptFactory(parent=self.who_icd, mnemonic='A00', retired=True, sources=[self.who_icd_2019])
+        ConceptFactory(parent=self.ciel_source, mnemonic='gone', is_active=False, sources=[self.ciel_v1])
+
+        self.assertEqual(self.keys(self.search('CodeSystem', code=f'{ICD10}|')), [f'{ICD10}|ICD102019'])
+        self.assertEqual(self.keys(self.search('CodeSystem', code=f'{ICD10}|A00')), [f'{ICD10}|ICD102019'])
+        self.assertEqual(self.search('CodeSystem', code=f'{CIEL}|')['total'], 0)
+        self.assertEqual(self.search('CodeSystem', code='gone')['total'], 0)
+
     def test_token_parameters_take_their_system(self):
         """
         R4 tokens: code, system|code, or |code (no system). status's system is publication-status, language's BCP 47,
@@ -393,8 +406,7 @@ class CodeSystemSearchTest(SearchCorpusMixin, OCLTestCase):  # pylint: disable=t
             ('status', '|active', []), ('status', 'http://example.org/other|active', []),
             ('status', f'{status}|', self.keys(self.search('CodeSystem'))), ('status', 'http://example.org/other|', []),
             ('language', f'{bcp47}|', self.keys(self.search('CodeSystem'))), ('language', 'urn:other|', []),
-            ('code', f'{CIEL}|', [f'{CIEL}|v1|a,b', f'{CIEL}|v2']),
-            ('code', f'{ICD10}|', [f'{ICD10}|ICD102019', icd_v1[0]]),
+            ('code', f'{CIEL}|', ciel_v2), ('code', f'{ICD10}|', icd_v1),  # releases with concepts only
             ('code', 'http://example.org/other|', []), ('version', 'urn:x|', []), ('_id', 'urn:x|', []),
             ('language', 'fr', ciel_v2), ('language', f'{bcp47}|fr', ciel_v2), ('language', '|fr', []),
             ('language', 'urn:other|fr', []),
