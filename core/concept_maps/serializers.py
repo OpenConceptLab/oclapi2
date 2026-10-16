@@ -48,7 +48,7 @@ class ConceptMapGroupField(serializers.Field):
     def to_representation(self, value):
         # limit to 1000 mappings by default
         # TODO: support graphQL to go around the limit
-        mappings = value.get_mappings_queryset().filter(retired=False).select_related(
+        mappings = value.get_active_mappings().select_related(  # neither retired nor deleted
             'from_source', 'to_source').order_by('id')[:1000]
         groups, elements = {}, {}
         for mapping in mappings:

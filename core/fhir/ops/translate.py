@@ -7,9 +7,9 @@ types as R5-shaped relationships. core.fhir.adapters.r4 writes the answer as an 
   map, at the release `conceptMapVersion` names, else (forward) the code's `version`. Resolution, versions and access
   are core.fhir.resolve's: a released version, the newest the caller is shown unless one is named; public only at
   /fhir/; at an owner base, private ones to those who may view them.
-- The matches: that version's live (not retired) mappings from the code (in reverse, to it) whose from side (in
-  reverse, to side) is shown as the code's system; with `targetsystem`, whose other side is shown as that system. Never
-  another repository's mappings, HEAD's or another release's.
+- The matches: that version's live (neither retired nor deleted) mappings from the code (in reverse, to it) whose from
+  side (in reverse, to side) is shown as the code's system; with `targetsystem`, whose other side is shown as that
+  system. Never another repository's mappings, HEAD's or another release's.
 - A side of a mapping is shown as its source's canonical URL, when the caller is shown that source and it has one; else
   as the URL the mapping stores (its source's OCL URL when it stores none), an OCL URL as a ConceptMap path
   (/orgs/{org}/ConceptMap/{id}/). So a source the caller isn't shown is named as a source OCL doesn't hold would be,
@@ -324,7 +324,7 @@ class Translation:
         sources = self.named_sources()[coding.system]
         return bool(value_set.expansion_uri and sources) and Expansion.concepts.through.objects.filter(
             expansion__uri=value_set.expansion_uri, concept__mnemonic__in=stored_codes(coding.code),
-            concept__parent_id__in=sources).exists()
+            concept__parent_id__in=sources, concept__is_active=True).exists()
 
     def matches(self, concept_map, named):
         """
@@ -335,9 +335,8 @@ class Translation:
         near, far = ('to', 'from') if request.reverse else ('from', 'to')
         sides = {near: request.coding.system, **({far: request.targetsystem} if request.targetsystem else {})}
         sources = self.named_sources()
-        mappings = concept_map.get_mappings_queryset().filter(
-            of_version(near, request.coding.version), retired=False,
-            **{f'{near}_concept_code__in': stored_codes(request.coding.code)})
+        mappings = concept_map.get_active_mappings().filter(  # neither retired nor deleted
+            of_version(near, request.coding.version), **{f'{near}_concept_code__in': stored_codes(request.coding.code)})
         for side, system in sides.items():
             mappings = mappings.filter(shown_as(side, system, sources[system], self.namespace, self.user))
         rows = with_side(mappings, far, self.namespace, self.user).order_by('id').values(

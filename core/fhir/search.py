@@ -272,8 +272,8 @@ def held_identifier(system, value):
 def mapped(side, value, sources):
     """
     A ConceptMap version holding a live mapping whose group source (side 'from') or target ('to') shows `value`, as
-    ConceptMapGroupField builds groups: retired mappings aren't read; a group's system is the from or to source's
-    canonical URL, or for one without, its OCL URL as a ConceptMap path (/orgs/{org}/ConceptMap/{id}/), or the
+    ConceptMapGroupField builds groups: retired and deleted mappings aren't read; a group's system is the from or to
+    source's canonical URL, or for one without, its OCL URL as a ConceptMap path (/orgs/{org}/ConceptMap/{id}/), or the
     mapping's own URL when it names no OCL source. A search over many mappings is bounded by SEARCH_TIMEOUT_MS.
     OCL keeps no source or target value set on a ConceptMap, so source-uri and target-uri are read as the systems.
 
@@ -292,7 +292,7 @@ def mapped(side, value, sources):
             **{f'{field}__canonical_url': ''})
         shown |= stored & without_canonical
     return Exists(Mapping.sources.through.objects.filter(
-        source_id=OuterRef('id'), mapping__retired=False).filter(shown))
+        source_id=OuterRef('id'), mapping__retired=False, mapping__is_active=True).filter(shown))
 
 
 class Search:

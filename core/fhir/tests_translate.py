@@ -19,10 +19,12 @@ from core.collections.models import Collection
 from core.collections.tests.factories import ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLTestCase
+from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
 from core.fhir.ops.translate import repository_paths
 from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
 from core.fhir.tests_search import source, collection
+from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.url_registry.factories import GlobalURLRegistryFactory
@@ -303,6 +305,20 @@ class TranslateMappingsTest(TranslateCorpusMixin, OCLTestCase):
                          [f'{CIEL}|113275|equivalent'])
         self.assertEqual(self.matches(self.answer(self.get(**reverse))), [])
 
+    def test_a_deleted_mapping_is_no_translation(self):
+        """A mapping version deleted (is_active false) though still in the release is read nowhere."""
+        deleted = self.mapping('SAME-AS', self.icd, 'D99', [self.ciel_v2], from_code='8000')
+        self.mapping('SAME-AS', self.icd, 'D98', [self.ciel_v2], from_code='8000')
+        Mapping.objects.filter(id=deleted.id).update(is_active=False)
+        self.assertEqual(self.matches(self.answer(self.get(system=CIEL, code='8000'))), [f'{ICD10}|D98|equivalent'])
+        for code in ('D99', 'D98'):
+            parameters = self.answer(self.get(system=ICD10, code=code, targetsystem=CIEL, reverse='true'))
+            self.assertEqual(self.matches(parameters), [] if code == 'D99' else [f'{CIEL}|8000|equivalent'], code)
+        group = next(group for group in APIClient().get(f'/fhir/ConceptMap/{self.ciel_v2.id}').data['group']
+                     if group['target'] == ICD10)
+        self.assertEqual([target['code'] for element in group['element'] if element['code'] == '8000'
+                          for target in element['target']], ['D98'])
+
     def test_not_same_as_alone_is_no_translation(self):
         """result is true only when some match isn't disjoint (R4: not unmatched or disjoint)."""
         self.mapping('NOT-SAME-AS', self.icd, 'Q00', [self.ciel_v2], from_code='5000')
@@ -581,6 +597,12 @@ class TranslateScopeTest(TranslateCorpusMixin, OCLTestCase):
                                           source=MIXED_VS))
         self.assertEqual(self.matches(parameters), [f'{CIEL}|113275|wider'])
 
+    def test_a_deleted_concept_is_no_member_of_a_scope(self):
+        Concept.objects.filter(parent=self.ciel_source, mnemonic='113275').update(is_active=False)  # every version
+        parameters = self.answer(self.get(system=CIEL, code='113275', source=CIEL_VS))
+        self.assertFalse(self.result(parameters))
+        self.assertEqual(self.matches(parameters), [])
+
     def test_a_scope_holds_codes_of_a_system_named_by_its_ocl_path(self):
         """SNOMED has no canonical URL: in a scope, as in a match, its system is its OCL path."""
         parameters = self.answer(self.get(url=CIEL, system=SNOMED_PATH, code='371374003', source=MIXED_VS))
@@ -752,3 +774,14 @@ class ConceptMapGroupTest(TranslateCorpusMixin, OCLTestCase):
             (ICD10, '7000', 'ND53.Y&XK70', 'equivalent')]))
         self.assertEqual(sorted(element['code'] for group in response.data['group'] if group['target'] == ICD10
                                 for element in group['element']), ['113275', '138405', '7000'])
+
+    def test_a_deleted_mapping_is_no_part_of_a_concept_map(self):
+        """The read leaves out a deleted mapping version still in the release, so the searches don't count it."""
+        loinc = source(self.who, 'LOINC', canonical_url='http://loinc.org')
+        deleted = self.mapping('SAME-AS', loinc, '1234-5', [self.ciel_v2], from_code='8001')
+        search = {'target-system': 'http://loinc.org'}
+        self.assertEqual(APIClient().get('/fhir/ConceptMap/', search).data['total'], 1)
+        Mapping.objects.filter(id=deleted.id).update(is_active=False)
+        self.assertEqual(APIClient().get('/fhir/ConceptMap/', search).data['total'], 0)
+        groups = APIClient().get(f'/fhir/ConceptMap/{self.ciel_v2.id}').data['group']
+        self.assertNotIn('http://loinc.org', [group['target'] for group in groups])
