@@ -338,6 +338,15 @@ class CodeSystemSearchTest(SearchCorpusMixin, OCLTestCase):  # pylint: disable=t
         self.assertEqual(
             self.keys(self.search('CodeSystem', _lastUpdated='2020,2022')), sorted([f'{CIEL}|v2', f'{ICD10}|v1.0']))
 
+    def test_last_updated_at_the_end_of_time(self):
+        """A value in year 9999 has no end to build (year 10000): its range runs on unbounded."""
+        for value, total in (('lt9999', 5), ('eb9999', 5), ('le9999', 5), ('le9999-12', 5), ('le9999-12-31', 5),
+                             ('le9999-12-31T23:59:59Z', 5), ('le9999-12-31T23:59:59.999999Z', 5), ('ne9999-12', 5),
+                             ('9999', 0), ('9999-12', 0), ('9999-12-31', 0), ('gt9999', 0), ('sa9999-12', 0),
+                             ('gt9999-12-31', 0), ('ge9999-12-31', 0), ('gt9999-12-31T23:59:59Z', 0)):
+            self.assertEqual(self.search('CodeSystem', _lastUpdated=value)['total'], total, value)
+        self.assertEqual(self.search('CodeSystem', _lastUpdated='le9999,lt2000')['total'], 5)  # an alternative too
+
     def test_code(self):
         concept = ConceptFactory(parent=self.ciel_source, mnemonic='1427', sources=[self.ciel_v2])
         self.assertEqual(self.keys(self.search('CodeSystem', code=concept.mnemonic)), [f'{CIEL}|v2'])

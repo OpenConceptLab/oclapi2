@@ -53,6 +53,7 @@ SUBSETTED = {'system': 'http://terminology.hl7.org/CodeSystem/v3-ObservationValu
 PAGING_PARAMETERS = frozenset({'_count', 'page'})
 OPAQUE_ID = re.compile(r'[1-9][0-9]{0,17}')  # a database key, as str() writes it
 NOTHING = Q(pk__in=[])
+EVERYTHING = Q(pk__isnull=False)  # unlike Q(), it holds as an alternative too (Q() | x is x)
 
 # string parameters: the field each searches, and the lookup of each modifier (:exact is the field's own equality)
 STRING_FIELDS = {'name': 'name', 'title': 'full_name', 'description': 'description', 'publisher': 'publisher'}
@@ -107,7 +108,10 @@ def zone_of(zone):
 
 
 def date_range(value):
-    """(prefix, start, end): the instants [start, end) a date search value covers at its precision, UTC by default."""
+    """
+    (prefix, start, end): the instants [start, end) a date search value covers at its precision, UTC by default. end is
+    None when it would fall past year 9999, which datetime can't hold: the range runs on unbounded.
+    """
     match = DATE.fullmatch(value)
     if not match:
         raise outcomes.InvalidError(f"'{value}' is not a supported FHIR date search value.", expression='_lastUpdated')
@@ -119,14 +123,17 @@ def date_range(value):
             int((fraction or '0')[:6].ljust(6, '0')), tzinfo=zone_of(zone))
     except ValueError as ex:
         raise outcomes.InvalidError(f"'{value}' is not a valid date.", expression='_lastUpdated') from ex
-    if fraction:
-        end = start + timedelta(microseconds=10 ** max(0, 6 - len(fraction)))
-    elif second or minute or day:
-        end = start + (timedelta(seconds=1) if second else timedelta(minutes=1) if minute else timedelta(days=1))
-    elif month:
-        end = start.replace(year=start.year + start.month // 12, month=start.month % 12 + 1)
-    else:
-        end = start.replace(year=start.year + 1)
+    try:
+        if fraction:
+            end = start + timedelta(microseconds=10 ** max(0, 6 - len(fraction)))
+        elif second or minute or day:
+            end = start + (timedelta(seconds=1) if second else timedelta(minutes=1) if minute else timedelta(days=1))
+        elif month:
+            end = start.replace(year=start.year + start.month // 12, month=start.month % 12 + 1)
+        else:
+            end = start.replace(year=start.year + 1)
+    except (ValueError, OverflowError):
+        end = None
     return prefix or 'eq', start, end
 
 
@@ -275,13 +282,15 @@ class Search:
     @staticmethod
     def by_last_updated(value):
         prefix, start, end = date_range(value)
+        before_end = Q(updated_at__lt=end) if end else EVERYTHING
+        after_end = Q(updated_at__gte=end) if end else NOTHING
         return {
-            'eq': Q(updated_at__gte=start, updated_at__lt=end),
-            'ne': Q(updated_at__lt=start) | Q(updated_at__gte=end),
-            'gt': Q(updated_at__gte=end), 'sa': Q(updated_at__gte=end),
+            'eq': Q(updated_at__gte=start) & before_end,
+            'ne': Q(updated_at__lt=start) | after_end,
+            'gt': after_end, 'sa': after_end,
             'ge': Q(updated_at__gte=start),
             'lt': Q(updated_at__lt=start), 'eb': Q(updated_at__lt=start),
-            'le': Q(updated_at__lt=end),
+            'le': before_end,
         }[prefix]
 
     def by_url(self, value):
