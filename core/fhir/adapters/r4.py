@@ -96,6 +96,9 @@ def expansion_value_set(resource, answer):
     without its compose, with the expansion: the stored expansion's identifier and timestamp, total, offset, the inputs
     echoed and each used-codesystem, then the page of members.
     """
+    def present(items):
+        return {key: value for key, value in items if value not in (None, [])}
+
     expansion = {
         'identifier': answer['identifier'],
         'timestamp': answer['timestamp'],
@@ -103,12 +106,10 @@ def expansion_value_set(resource, answer):
         'offset': answer['offset'],
         'parameter': [parameter(*item) for item in answer['parameters']] + [
             parameter('used-codesystem', 'valueUri', system) for system in answer['used']],
-        'contains': [{
-            key: value for key, value in (
-                ('system', member['system']), ('version', member['version']), ('code', member['code']),
-                ('display', member['display']), ('inactive', member['inactive']),
-                ('designation', [{key: value for key, value in designation.items() if value is not None}
-                                 for designation in member['designations'] or []]),
-            ) if value not in (None, [])} for member in answer['contains']],
+        'contains': [present((
+            ('system', member['system']), ('version', member['version']), ('code', member['code']),
+            ('display', member['display']), ('inactive', member['inactive']),
+            ('designation', [present(designation.items()) for designation in member['designations'] or []]),
+        )) for member in answer['contains']],
     }
-    return {**resource, 'expansion': {key: value for key, value in expansion.items() if value not in (None, [])}}
+    return {**resource, 'expansion': present(expansion.items())}

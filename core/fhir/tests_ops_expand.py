@@ -248,25 +248,10 @@ class ExpandCases(OpsCorpusMixin):
         self.assertEqual(answer['contains'][2], {'system': REST, 'code': 'batch'})
         self.assertEqual(answer['parameter'], used(REST, f'{CIEL}|v2'))
 
-    def test_a_code_stored_percent_encoded_is_answered_and_filtered_decoded(self):
-        """OCL stores a code with reserved or non-ASCII characters percent-encoded: it is answered as FHIR spells it,
-        and filter finds it by that spelling too, whole or by any word in it (Codex F1.2)."""
-        self.fevers_v1.expansion.concepts.add(
-            ConceptFactory(parent=self.ciel, mnemonic='ND53.Y%26XK70', sources=[self.ciel_v2],
-                           names=[name('Encoded', preferred=True)]),
-            ConceptFactory(parent=self.ciel, mnemonic=quote('café'), sources=[self.ciel_v2],
-                           names=[name('Coffee shop', preferred=True)]))
-        encoded = ['ND53.Y&XK70']
-        for text, codes in (('encoded', encoded), ('ND53.Y&XK70', encoded), ('XK70', encoded), ('xk', encoded),
-                            ('Y&XK', encoded), ('café', ['café']), ('CAF', ['café']), ('K70', [])):
-            expansion = self.expansion(self.expand(url=FEVERS, filter=text))
-            self.assertEqual([member['code'] for member in expansion.get('contains', [])], codes, text)
-            self.assertEqual(expansion['total'], len(codes), text)
-
     def test_a_filter_matches_the_words_of_a_code_as_fhir_spells_it(self):
         """filter matches a stored code by its decoded words, ignoring case, non-ASCII letters too: never by the
         characters of an escape, and a word starts after an encoded character only when that character, decoded, isn't
-        a word character (Codex F2.1)."""
+        a word character (Codex F1.2, F2.1)."""
         codes = {'ND53.Y%26XK70': 'Encoded', quote('café'): 'Coffee shop', quote('caféine'): 'Stimulant',
                  quote('été'): 'Summer', quote('QX–ZZ9'): 'Range', '50%off': 'Discount', '%FFyy': 'Replacement',
                  quote('cm.²'): 'Area'}
@@ -278,6 +263,9 @@ class ExpandCases(OpsCorpusMixin):
                 ('CAFÉ', ['café', 'caféine']), ('Café', ['café', 'caféine']), ('ÉTÉ', ['été']),  # case, non-ASCII too
                 ('CAFÉINE', ['caféine']), ('ine', []), ('té', []),  # é is a word character: no word starts after it
                 ('zz9', ['QX–ZZ9']), ('XK70', ['ND53.Y&XK70']),  # – and & are not
+                ('ND53.Y&XK70', ['ND53.Y&XK70']), ('xk', ['ND53.Y&XK70']), ('Y&XK', ['ND53.Y&XK70']),  # decoded, whole
+                ('encoded', ['ND53.Y&XK70']), ('K70', []),  # by a name; a word's middle
+                ('CAF', ['café', 'caféine']),
                 ('off', ['50%off']), ('yy', ['\ufffdyy']),  # a % that is no escape; a byte that is no character
                 ('²', []), ('cm', ['cm.²'])):  # \m, as for names: ² is no word character to Postgres
             with self.subTest(text):

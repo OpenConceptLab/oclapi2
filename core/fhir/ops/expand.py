@@ -114,10 +114,12 @@ def whole_number(parameters, name):
 def flag(parameters, name):
     """A boolean input (a boolean, or true or false as text), or None when it's absent; anything else is a 400."""
     value = parameters.get(name)
-    if value is None or value == '' or isinstance(value, bool):
-        return value if isinstance(value, bool) else None
-    if isinstance(value, str) and value.strip().lower() in ('true', 'false'):
-        return value.strip().lower() == 'true'
+    if value in (None, ''):
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and (lowered := value.strip().lower()) in ('true', 'false'):
+        return lowered == 'true'
     raise outcomes.InvalidError(f"'{name}' must be true or false, got '{value}'.", expression=name)
 
 
@@ -148,10 +150,6 @@ class Inputs:  # pylint: disable=too-few-public-methods
             ('offset', 'valueInteger', self.offset),
             ('count', 'valueInteger', None if count is None else self.count),
         ) if item[2] is not None]
-
-    @property
-    def words(self):
-        return WORD.findall(self.filter or '')
 
 
 def escapes(char):
@@ -243,8 +241,7 @@ def stored_expansion(value_set):
 def unresolved(reference):
     """The 422 not-found for the first reference an expansion couldn't resolve: a value set, else a code system."""
     url, version = reference.get('url') or '', reference.get('version') or None
-    message_id, message = UNRESOLVED['reference.valueset' if reference.get('type') == 'reference.valueset' else
-                                     'system'][bool(version)]
+    message_id, message = UNRESOLVED.get(reference.get('type'), UNRESOLVED['system'])[bool(version)]
     return outcomes.NotFoundError(message.format(url=url, version=version), tx_issue_type='not-found',
                                   message_id=message_id, status_code=422)
 
@@ -280,7 +277,8 @@ class Expander:
         members = self.members()
         if self.inputs.active_only:
             members = members.filter(retired=False)
-        for word in self.inputs.words:  # \m: a word starts here; \w characters need no escaping in a regex
+        # \m: a word starts here; \w characters need no escaping in a regex
+        for word in WORD.findall(self.inputs.filter or ''):
             members = members.filter(Q(code_has_word(word)) | Exists(ConceptName.objects.filter(
                 concept_id=OuterRef('id'), name__iregex=rf'\m{word}')))
         return members
@@ -323,13 +321,16 @@ class Expander:
         concepts = Concept.objects.filter(id__in=page).annotate(release=self.release()).select_related('parent').only(
             'id', 'mnemonic', 'retired', 'parent_id', 'parent__canonical_url', 'parent__uri',
             'parent__default_locale', 'parent__supported_locales').prefetch_related('names').order_by('id')
-        return [{
-            **dict(zip(('system', 'version'), code_system(
-                concept.parent.canonical_url, concept.parent.uri, concept.release))),
-            'code': fhir_code(concept.mnemonic), 'display': display_of(concept, self.inputs.language),
-            'inactive': concept.retired or None,
-            'designations': designations(concept) if self.inputs.designations else None,
-        } for concept in concepts]
+        members = []
+        for concept in concepts:
+            parent = concept.parent
+            system, version = code_system(parent.canonical_url, parent.uri, concept.release)
+            members.append({
+                'system': system, 'version': version, 'code': fhir_code(concept.mnemonic),
+                'display': display_of(concept, self.inputs.language), 'inactive': concept.retired or None,
+                'designations': designations(concept) if self.inputs.designations else None,
+            })
+        return members
 
     def answer(self):
         matching = self.matching()
