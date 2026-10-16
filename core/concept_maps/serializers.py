@@ -6,14 +6,14 @@ from rest_framework.fields import CharField, SerializerMethodField, \
     DateTimeField
 
 from core.common.fhir_helpers import delete_empty_fields
-from core.concept_maps.constants import RESOURCE_TYPE
+from core.concept_maps.constants import RESOURCE_TYPE, RELATIONSHIP_MAP_TYPES
 from core.common.constants import HEAD
 from core.common.serializers import StatusField, IdentifierSerializer
+from core.fhir.adapters import r4
+from core.fhir.ops.translate import fhir_code, relationship, side_system
 from core.fhir.search import CanonicalUrlField, FhirRepositorySerializerMixin
-from core.mappings.constants import SAME_AS
 from core.mappings.models import Mapping
 from core.mappings.serializers import MappingDetailSerializer
-from core.parameters.serializers import ParametersSerializer
 from core.sources.models import Source
 from core.sources.serializers import SourceCreateOrUpdateSerializer
 
@@ -21,14 +21,17 @@ logger = logging.getLogger('oclapi')
 
 
 class ConceptMapGroupField(serializers.Field):
+    """
+    A ConceptMap's groups, one per source and target system, each mapping an element target, with core.fhir.ops.
+    translate's systems and relationships, in R4 (equivalence). Writes store an equivalence as the map type it is.
+    """
+
     def to_internal_value(self, data):
         mappings = []
         for group in data:
             for element in group.get('element', []):
                 for target in element.get('target', []):
-                    map_type = target.get('equivalence')
-                    if map_type == 'equivalent':
-                        map_type = SAME_AS
+                    equivalence = target.get('equivalence')
                     mapping = {
                         'from_source_url': IdentifierSerializer.convert_fhir_url_to_ocl_uri(group.get('source'),
                                                                                             'sources'),
@@ -36,7 +39,7 @@ class ConceptMapGroupField(serializers.Field):
                                                                                           'sources'),
                         'from_concept_code': element.get('code'),
                         'to_concept_code': target.get('code'),
-                        'map_type': map_type
+                        'map_type': RELATIONSHIP_MAP_TYPES.get(r4.relationship(equivalence), equivalence)
                     }
                     mappings.append(mapping)
 
@@ -47,50 +50,30 @@ class ConceptMapGroupField(serializers.Field):
         # TODO: support graphQL to go around the limit
         mappings = value.get_mappings_queryset().filter(retired=False).select_related(
             'from_source', 'to_source').order_by('id')[:1000]
-        groups = {}
+        groups, elements = {}, {}
         for mapping in mappings:
             key = (mapping.from_source_url or '') + (mapping.to_source_url or '')
-            group = groups.get(key)
-            if not group:
-                if mapping.from_source and mapping.from_source.canonical_url:
-                    from_url = mapping.from_source.canonical_url
-                else:
-                    from_url = IdentifierSerializer.convert_ocl_uri_to_fhir_url(mapping.from_source_url, RESOURCE_TYPE)
-
-                if mapping.to_source and mapping.to_source.canonical_url:
-                    to_url = mapping.to_source.canonical_url
-                else:
-                    to_url = IdentifierSerializer.convert_ocl_uri_to_fhir_url(mapping.to_source_url, RESOURCE_TYPE)
-
-                group = {
-                    'source': from_url,
-                    'target': to_url
+            if key not in groups:
+                groups[key] = {
+                    'source': self.system(mapping.from_source, mapping.from_source_url),
+                    'target': self.system(mapping.to_source, mapping.to_source_url),
+                    'element': []
                 }
-                groups.update({key: group})
-            elements = group.get('element')
-            if not elements:
-                elements = []
-                group.update({'element': elements})
-            element = None
-            for candidate in elements:
-                if candidate.get('code') is mapping.from_concept_code:
-                    element = candidate
-                    break
-            if not element:
-                element = {
-                    'code': mapping.from_concept_code,
-                    'target': []
-                }
-                elements.append(element)
-            targets = element.get('target')
-            relationship = mapping.map_type
-            if mapping.map_type == SAME_AS:
-                relationship = 'equivalent'
-            targets.append({
-                'code': mapping.to_concept_code,
-                'equivalence': relationship
+            code = fhir_code(mapping.from_concept_code)
+            element = elements.get((key, code))
+            if element is None:
+                element = elements[(key, code)] = {'code': code, 'target': []}
+                groups[key]['element'].append(element)
+            element['target'].append({
+                'code': fhir_code(mapping.to_concept_code),
+                'equivalence': r4.equivalence(relationship(mapping.map_type))
             })
         return [*groups.values()]
+
+    @staticmethod
+    def system(source, url):
+        """A group's source or target: its source's canonical URL, else the URL the mapping stores (side_system)."""
+        return side_system(source.canonical_url if source else None, url)
 
 
 class ConceptMapDetailSerializer(FhirRepositorySerializerMixin, serializers.ModelSerializer):
@@ -247,27 +230,3 @@ class ConceptMapDetailSerializer(FhirRepositorySerializerMixin, serializers.Mode
         self._errors.update(errors)
 
         return source
-
-
-class ConceptMapParametersSerializer(ParametersSerializer):
-
-    def update(self, instance, validated_data):
-        pass
-
-    def create(self, validated_data):
-        pass
-
-    allowed_input_parameters = {
-            'url': 'valueUri',
-            'conceptMapVersion': 'valueString',
-            'code': 'valueCode',
-            'system': 'valueUri',
-            'version': 'valueString',
-            'source': 'valueUri',
-            'coding': 'valueCoding',
-            'codeableConcept': 'valueCodeableConcept',
-            'target': 'valueUri',
-            'targetsystem': 'valueUri',
-            # TODO: dependency?
-            'reverse': 'valueBoolean'
-        }
