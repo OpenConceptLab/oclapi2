@@ -5,6 +5,7 @@ an opaque id per released version at the global base, the mnemonic at an owner b
 :exact and :contains; _count, paging, the real total and a fullUrl on every entry; a CodeSystem read is complete up to
 the concept limit, else not-present. OpenConceptLab/ocl_online#451.
 """
+import time
 from datetime import datetime, timezone as dt_timezone
 from urllib.parse import parse_qs, urlsplit
 
@@ -1045,6 +1046,17 @@ class SearchTimeoutTest(TransactionTestCase):
             with self.assertRaises(TooCostlyError):
                 fhir_search.within_search_timeout(slow)
             self.assertEqual(fhir_search.within_search_timeout(lambda: 'answered'), 'answered')
+
+    def test_a_query_with_no_time_left_is_too_costly(self):
+        """A query that starts after the search's time is up isn't sent: the search is too costly already."""
+        def late():
+            time.sleep(0.06)
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT 1')
+
+        with patch('core.fhir.search.SEARCH_TIMEOUT_MS', 50):
+            with self.assertRaises(TooCostlyError):
+                fhir_search.within_search_timeout(late)
 
     def test_other_database_errors_are_raised(self):
         def broken():
