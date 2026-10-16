@@ -1,5 +1,3 @@
-from collections import OrderedDict
-
 from mock.mock import patch, Mock
 from rest_framework.test import APIClient
 
@@ -91,10 +89,9 @@ class ConceptMapTest(OCLTestCase):
                                      'element': [
                                          {'code': 'concept_B_1',
                                           'target': [{'code': 'concept_1', 'equivalence': 'equivalent'}]},
-                                         {'code': 'concept_B_2',
-                                          'target': [{'code': 'concept_2', 'equivalence': 'equivalent'}]},
-                                         {'code': 'concept_B_2',
-                                          'target': [{'code': 'concept_1', 'equivalence': 'equivalent'}]}]}])
+                                         {'code': 'concept_B_2',  # one element per code, each of its targets
+                                          'target': [{'code': 'concept_2', 'equivalence': 'equivalent'},
+                                                     {'code': 'concept_1', 'equivalence': 'equivalent'}]}]}])
 
     def test_private_can_view(self):
         # the global base shows public repositories only, whoever asks; the owner base shows the owner its own
@@ -524,75 +521,85 @@ class ConceptMapTest(OCLTestCase):
             [(issue['code'], issue['expression'], issue['details']['text']) for issue in response.data['issue']],
             [('invalid', ['version'], 'Version 1.0 already exists for CodeSystem test2.')])
 
+    def translate(self, base, token=True, **params):
+        """$translate at a base, as the user (or anonymously), after the user's PUT of their ConceptMap, released."""
+        if not Source.objects.filter(mnemonic=self.user_source.mnemonic, user=self.user, version='1.0').exists():
+            self.putConceptMap(status='active')
+        headers = {'HTTP_AUTHORIZATION': 'Token ' + self.user_token} if token else {}
+        return self.client.get(f'{base}/ConceptMap/$translate', params, **headers)
+
+    def assertTranslation(self, response, matches):  # pylint: disable=invalid-name
+        """result, a message only when there is no match, and each match: (code, system, equivalence)."""
+        self.assertEqual(response.status_code, 200, response.data)
+        parameters = response.data['parameter']
+        self.assertEqual(parameters[0], {'name': 'result', 'valueBoolean': bool(matches)})
+        self.assertEqual([item['name'] for item in parameters[1:]], ['match'] * len(matches) or ['message'])
+        found = [item['part'] for item in parameters[1:] if item['name'] == 'match']
+        self.assertEqual(
+            [(part[1]['valueCoding']['code'], part[1]['valueCoding']['system'], part[0]['valueCode'],
+              part[2]['valueUri']) for part in found],
+            [(*match, 'http://localhost/url|1.0') for match in matches])
+
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_translate_positive(self):
-        self.putConceptMap()
-
-        response = self.client.get(
-            f'/users/{self.user.mnemonic}/ConceptMap/$translate?'
-            f'system={self.org_source_B_v1.canonical_url}&code=concept_B_1',
-            HTTP_AUTHORIZATION='Token ' + self.user_token)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertDictEqual(
-            response.data,
-            {
-                'resourceType': 'Parameters',
-                'parameter': [
-                    OrderedDict([
-                        ('name', 'result'),
-                        ('valueBoolean', True)
-                    ]),
-                    OrderedDict([
-                        ('name', 'match'),
-                        (
-                            'part',
-                            [
-                                OrderedDict([
-                                    ('name', 'equivalence'),
-                                    ('valueCode', 'equivalent')
-                                ]),
-                                OrderedDict([
-                                    ('name', 'concept'),
-                                    ('valueCoding', OrderedDict([('system', '/some/url'), ('code', 'concept_1')]))
-                                ])
-                            ]
-                        )
-                    ]),
-                    OrderedDict([
-                        ('name', 'match'),
-                        (
-                            'part',
-                            [
-                                OrderedDict([
-                                    ('name', 'equivalence'),
-                                    ('valueCode', 'equivalent')
-                                ]),
-                                OrderedDict([
-                                    ('name', 'concept'),
-                                    ('valueCoding', OrderedDict([('system', '/some/url'), ('code', 'concept_1')]))
-                                ])
-                            ]
-                        )
-                    ])
-                ]
-            })
+        """The ConceptMap the user PUT, read back by $translate: the mapping its group wrote."""
+        self.assertTranslation(
+            self.translate(f'/users/{self.user.mnemonic}', url='http://localhost/url',
+                           system=self.org_source_B_v1.canonical_url, code='concept_B_1'),
+            [('concept_1', '/some/url', 'equivalent')])
 
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_public_translate_negative(self):
-        self.putConceptMap()
+        """The user's ConceptMap is private: anonymous, it is not found, and no code system has the mapping."""
+        response = self.translate(f'/users/{self.user.mnemonic}', token=False, url='http://localhost/url',
+                                  system=self.org_source_B_v1.canonical_url, code='concept_B_1')
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.data['issue'][0]['expression'], ['url'])
+        self.assertTranslation(self.translate(f'/users/{self.user.mnemonic}', token=False,
+                                              system=self.org_source_B_v1.canonical_url, code='concept_B_1'), [])
 
-        response = self.client.get(
-            f'/users/{self.user.mnemonic}/ConceptMap/$translate?'
-            f'system={self.org_source_B_v1.canonical_url}&code=concept_1')
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    def test_translate_negative(self):
+        self.assertTranslation(
+            self.translate(f'/users/{self.user.mnemonic}', url='http://localhost/url',
+                           system=self.org_source_B_v1.canonical_url, code='concept_1'), [])
 
-        self.assertEqual(response.status_code, 200)
-        self.assertDictEqual(response.data, {
-            'resourceType': 'Parameters',
-            'parameter': [OrderedDict(
-                [('name', 'result'), ('valueBoolean', False)])]})
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    def test_translate_with_url(self):
+        """The global base shows public repositories only: the user's private ConceptMap isn't found there."""
+        response = self.translate('/fhir', url='http://localhost/url', system=self.org_source_B_v1.canonical_url,
+                                  code='concept_B_1')
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.data['issue'][0]['code'], 'not-found')
+
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    def test_translate_with_url_negative(self):
+        response = self.translate(f'/users/{self.user.mnemonic}', url='http://unknown-concept-map/url',
+                                  system=self.org_source_B_v1.canonical_url, code='concept_B_1')
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.data['issue'][0]['expression'], ['url'])
+
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    def test_translate_with_target(self):
+        self.assertTranslation(
+            self.translate(f'/users/{self.user.mnemonic}', url='http://localhost/url',
+                           system=self.org_source_B_v1.canonical_url, code='concept_B_1',
+                           targetsystem=self.org_source.canonical_url),
+            [('concept_1', '/some/url', 'equivalent')])
+
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    def test_translate_with_target_negative(self):
+        self.assertTranslation(
+            self.translate(f'/users/{self.user.mnemonic}', url='http://localhost/url',
+                           system=self.org_source_B_v1.canonical_url, code='concept_B_1',
+                           targetsystem=self.org_source_B_v1.canonical_url), [])
 
     def newConceptMap(self, owner, identifier, version, group):
         if not owner:
@@ -618,7 +625,7 @@ class ConceptMapTest(OCLTestCase):
 
         }
 
-    def putConceptMap(self):
+    def putConceptMap(self, status='draft'):
         response = self.client.put(
             f'/users/{self.user.mnemonic}/ConceptMap/{self.user_source.mnemonic}/',
             HTTP_AUTHORIZATION='Token ' + self.user_token,
@@ -638,7 +645,7 @@ class ConceptMapTest(OCLTestCase):
                 'version': '1.0',
                 'name': 'test',
                 'id': self.user_source.mnemonic,
-                'status': 'draft',
+                'status': status,
                 'group': [{'source': self.org_source_B_v1.canonical_url,
                            'target': self.org_source.canonical_url,
                            'element': [
@@ -654,151 +661,36 @@ class ConceptMapTest(OCLTestCase):
 
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
-    def test_translate_negative(self):
-        self.putConceptMap()
+    def test_group_equivalence_is_the_map_type_relationship(self):
+        """
+        A group target's equivalence is its map type's relationship in R4 ($translate's table), and a written
+        equivalence is stored as the map type it is, so it reads back the same; one with no map type (relatedto,
+        inexact) is kept as it is.
+        One element per code, whatever the number of its targets.
+        """
+        written = ['equivalent', 'wider', 'narrower', 'disjoint', 'relatedto', 'equal', 'subsumes', 'specializes',
+                   'inexact', 'unmatched']
+        stored = ['SAME-AS', 'NARROWER-THAN', 'BROADER-THAN', 'NOT-SAME-AS', 'relatedto', 'SAME-AS', 'NARROWER-THAN',
+                  'BROADER-THAN', 'inexact', 'NOT-SAME-AS']
+        read = ['equivalent', 'wider', 'narrower', 'disjoint', 'relatedto', 'equivalent', 'wider', 'narrower',
+                'relatedto', 'disjoint']
+        group = [{'source': self.org_source_B_v1.canonical_url, 'target': self.org_source.canonical_url,
+                  'element': [{'code': 'concept_B_1', 'target': [
+                      {'code': f'concept_{index}', 'equivalence': equivalence}
+                      for index, equivalence in enumerate(written)]}]}]
+        response = self.client.post(
+            f'/users/{self.user.mnemonic}/ConceptMap/', HTTP_AUTHORIZATION='Token ' + self.user_token,
+            data={**self.newConceptMap(None, 'equivalences', '1.0', group), 'status': 'active'}, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        version = Source.objects.get(mnemonic='equivalences', version='1.0', user=self.user)
+        self.assertEqual(list(version.get_mappings_queryset().order_by('id').values_list('map_type', flat=True)),
+                         stored)
 
-        response = self.client.get(
-            f'/users/{self.user.mnemonic}/ConceptMap/$translate?'
-            f'system={self.org_source_B_v1.canonical_url}&code=concept_1',
-            HTTP_AUTHORIZATION='Token ' + self.user_token)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertDictEqual(response.data, {
-            'resourceType': 'Parameters',
-            'parameter': [OrderedDict(
-                [('name', 'result'), ('valueBoolean', False)]
-            )]})
-
-    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
-    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
-    def test_translate_with_url(self):
-        self.putConceptMap()
-
-        response = self.client.get(
-            '/fhir/ConceptMap/$translate?'
-            f'url=http://localhost/url&system={self.org_source_B_v1.canonical_url}&code=concept_B_1',
-            HTTP_AUTHORIZATION='Token ' + self.user_token)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertDictEqual(
-            response.data,
-            {
-                'resourceType': 'Parameters',
-                'parameter': [
-                    OrderedDict([
-                        ('name', 'result'),
-                        ('valueBoolean', True)
-                    ]),
-                    OrderedDict([
-                        ('name', 'match'),
-                        (
-                            'part',
-                            [
-                                OrderedDict([
-                                    ('name', 'equivalence'),
-                                    ('valueCode', 'equivalent')
-                                ]),
-                                OrderedDict([
-                                    ('name', 'concept'),
-                                    ('valueCoding', OrderedDict([('system', '/some/url'), ('code', 'concept_1')]))
-                                ])
-                            ]
-                        )
-                    ])
-                ]
-            })
-
-    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
-    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
-    def test_translate_with_url_negative(self):
-        # system/code alone would match mapping_1 (owned by org_source), but the ConceptMap
-        # identified by 'url' has no such mapping, so no match should be returned.
-        self.putConceptMap()
-
-        response = self.client.get(
-            '/fhir/ConceptMap/$translate?'
-            f'url=http://unknown-concept-map/url&system={self.org_source_B_v1.canonical_url}&code=concept_B_1',
-            HTTP_AUTHORIZATION='Token ' + self.user_token)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertDictEqual(response.data, {
-            'resourceType': 'Parameters',
-            'parameter': [OrderedDict(
-                [('name', 'result'), ('valueBoolean', False)]
-            )]})
-
-    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
-    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
-    def test_translate_with_target(self):
-        self.putConceptMap()
-
-        response = self.client.get(
-            f'/users/{self.user.mnemonic}/ConceptMap/$translate?'
-            f'system={self.org_source_B_v1.canonical_url}&code=concept_B_1'
-            f'&targetsystem={self.org_source.canonical_url}', HTTP_AUTHORIZATION='Token ' + self.user_token)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertDictEqual(
-            response.data,
-            {
-                'resourceType': 'Parameters',
-                'parameter': [
-                    OrderedDict([
-                        ('name', 'result'),
-                        ('valueBoolean', True)
-                    ]),
-                    OrderedDict([
-                        ('name', 'match'),
-                        (
-                            'part',
-                            [
-                                OrderedDict([
-                                    ('name', 'equivalence'),
-                                    ('valueCode', 'equivalent')
-                                ]),
-                                OrderedDict([
-                                    ('name', 'concept'),
-                                    ('valueCoding', OrderedDict([('system', '/some/url'), ('code', 'concept_1')]))
-                                ])
-                            ]
-                        )
-                    ]),
-                    OrderedDict([
-                        ('name', 'match'),
-                        (
-                            'part',
-                            [
-                                OrderedDict([
-                                    ('name', 'equivalence'),
-                                    ('valueCode', 'equivalent')
-                                ]),
-                                OrderedDict([
-                                    ('name', 'concept'),
-                                    ('valueCoding', OrderedDict([('system', '/some/url'), ('code', 'concept_1')]))
-                                ])
-                            ]
-                        )
-                    ])
-                ]
-            }
-        )
-
-    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
-    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
-    def test_translate_with_target_negative(self):
-        self.putConceptMap()
-
-        response = self.client.get(
-            f'/users/{self.user.mnemonic}/ConceptMap/$translate?'
-            f'system={self.org_source_B_v1.canonical_url}&code=concept_B_1'
-            f'&targetsystem={self.org_source_B_v1.canonical_url}',
-            HTTP_AUTHORIZATION='Token ' + self.user_token)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertDictEqual(response.data, {
-            'resourceType': 'Parameters',
-            'parameter': [OrderedDict(
-                [('name', 'result'), ('valueBoolean', False)])]})
+        resource = self.client.get(f'/users/{self.user.mnemonic}/ConceptMap/equivalences/',
+                                   HTTP_AUTHORIZATION='Token ' + self.user_token).data
+        [element] = resource['group'][0]['element']
+        self.assertEqual(element['code'], 'concept_B_1')
+        self.assertEqual([target['equivalence'] for target in element['target']], read)
 
     def test_unable_to_represent_as_fhir(self):
         instance = Source(id='1', uri='/invalid/uri')

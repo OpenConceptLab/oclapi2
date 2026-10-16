@@ -1,11 +1,25 @@
 """
-The FHIR R4 wire form of the version-neutral answers core.fhir.ops build, as R4 Parameters resources.
+The FHIR R4 wire form of the version-neutral (R5-shaped) answers core.fhir.ops build, as R4 Parameters resources.
 
 - $lookup: R4's outputs in R4's order (name, version, display, designation, property), with code, system and abstract
   after display, as FHIRsmith and the terminology ecosystem IG return them. inactive is a property.
 - $validate-code: result first, then message, display, code, system, version, inactive, the unknown system, and the
   issues as an OperationOutcome.
+- $translate: result, message, and each match's equivalence (a ConceptMap relationship as R4's equivalence), concept
+  and source.
 """
+from core.concept_maps.constants import (
+    EQUIVALENT, NOT_RELATED_TO, RELATED_TO, SOURCE_IS_BROADER, SOURCE_IS_NARROWER)
+
+# R5 relationship -> R4 equivalence, as HL7's R4/R5 ConceptMap conversion maps them: the target is wider than a source
+# that is narrower than it; not-related-to is disjoint
+EQUIVALENCES = {
+    EQUIVALENT: 'equivalent',
+    RELATED_TO: 'relatedto',
+    SOURCE_IS_NARROWER: 'wider',
+    SOURCE_IS_BROADER: 'narrower',
+    NOT_RELATED_TO: 'disjoint',
+}
 
 
 def parameter(name, value_type, value):
@@ -55,6 +69,25 @@ def validate_code_parameters(answer):
         (unknown_name, 'valueCanonical', unknown_system),
         ('issues', 'resource', {'resourceType': 'OperationOutcome', 'issue': issues} if issues else None),
     ])
+
+
+def equivalence(relationship_code):
+    """A relationship's R4 equivalence."""
+    return EQUIVALENCES[relationship_code]
+
+
+def translate_parameters(answer):
+    """$translate's answer (core.fhir.ops.translate) as R4 Parameters: result, message, and each match's parts."""
+    items = [{'name': 'result', 'valueBoolean': answer['result']}]
+    if answer.get('message'):
+        items.append({'name': 'message', 'valueString': answer['message']})
+    for match in answer['matches']:
+        items.append({'name': 'match', 'part': [
+            {'name': 'equivalence', 'valueCode': equivalence(match['relationship'])},
+            {'name': 'concept', 'valueCoding': match['concept']},
+            {'name': 'source', 'valueUri': match['source']},
+        ]})
+    return {'resourceType': 'Parameters', 'parameter': items}
 
 
 def expansion_value_set(resource, answer):
