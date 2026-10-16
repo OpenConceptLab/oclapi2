@@ -619,6 +619,50 @@ class TranslateScopeTest(TranslateCorpusMixin, OCLTestCase):
                                           source=MIXED_VS))
         self.assertEqual(self.matches(parameters), [f'{CIEL}|113275|wider'])
 
+    def test_a_code_system_scope_is_its_repository_whatever_names_it(self):
+        """
+        A code system scope is the code's own system when it names the same repository the caller is shown: by its
+        canonical URL, an OCL path (CodeSystem or sources form) or either's implicit value set (?fhir_vs).
+        """
+        ciel_names = (CIEL, f'{CIEL}?fhir_vs', '/orgs/CIEL/sources/CIEL/', '/orgs/CIEL/CodeSystem/CIEL/',
+                      '/orgs/CIEL/CodeSystem/CIEL/?fhir_vs')
+        for system in (CIEL, '/orgs/CIEL/CodeSystem/CIEL/'):
+            for scope in ciel_names:
+                parameters = self.answer(self.get(url=CIEL, system=system, code='113275', source=scope))
+                self.assertEqual(self.matches(parameters), CIEL_113275_V2, (system, scope))
+        icd_names = (ICD10, f'{ICD10}?fhir_vs', '/orgs/WHO/CodeSystem/ICD-10-WHO/', '/orgs/WHO/sources/ICD-10-WHO/')
+        for system in icd_names[2:]:
+            for scope in icd_names:
+                parameters = self.answer(self.get(system=system, code='O02.1', targetsystem=CIEL, reverse='true',
+                                                  target=scope))
+                self.assertEqual(self.matches(parameters), [f'{CIEL}|113275|wider'], (system, scope))
+        for params in ({'source': f'{ICD10}?fhir_vs'}, {'source': '/orgs/WHO/CodeSystem/ICD-10-WHO/'}):
+            parameters = self.answer(self.get(url=CIEL, system='/orgs/CIEL/CodeSystem/CIEL/', code='113275', **params))
+            self.assertFalse(self.result(parameters), params)
+            self.assertEqual(len(self.values(parameters, 'message')), 1, params)
+        for scope in (f'{UNKNOWN}?fhir_vs', '/orgs/WHO/CodeSystem/no-such-source/'):
+            self.assertOutcome(self.get(system=CIEL, code='113275', source=scope), 404, 'not-found', 'not-found',
+                               'source')
+
+    def test_a_scope_naming_a_system_the_caller_is_not_shown_answers_as_an_unknown_one(self):
+        """MOH's private source by path, its canonical as the scope: to those it isn't shown, as an unknown one."""
+        hidden, unknown = '/orgs/MOH/CodeSystem/private-codes/', '/orgs/MOH/CodeSystem/no-such-codes/'
+        other = 'http://moh.example/fhir/CodeSystem/no-such-codes'
+        for user in (None, self.outsider, self.moh_member, self.admin):
+            for scope_name, extra in (('source', {}), ('target', {'reverse': 'true', 'targetsystem': CIEL})):
+                for suffix in ('', '?fhir_vs'):
+                    answers = [
+                        json.loads(json.dumps(self.get(user=user, system=system, code='P1', **extra, **{
+                            scope_name: scope + suffix}).data).replace(system, 'SYSTEM').replace(scope, 'SCOPE'))
+                        for system, scope in ((hidden, PRIVATE), (unknown, other))]
+                    self.assertEqual(answers[0], answers[1], (user, scope_name, suffix))
+                    self.assertEqual(answers[0]['resourceType'], 'OperationOutcome', (user, scope_name, suffix))
+                    self.assertEqual(answers[0]['issue'][0]['expression'], [scope_name])
+        for scope in (PRIVATE, f'{PRIVATE}?fhir_vs', hidden):
+            parameters = self.answer(self.get(base='/orgs/MOH', user=self.moh_member, system=hidden, code='P1',
+                                              source=scope))
+            self.assertEqual(self.matches(parameters), [f'{CIEL}|113275|wider'], scope)
+
     def test_a_deleted_concept_is_no_member_of_a_scope(self):
         Concept.objects.filter(parent=self.ciel_source, mnemonic='113275').update(is_active=False)  # every version
         parameters = self.answer(self.get(system=CIEL, code='113275', source=CIEL_VS))

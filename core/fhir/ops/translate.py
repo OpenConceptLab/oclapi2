@@ -51,6 +51,7 @@ MATCH_LIMIT = 1000  # the most matches an answer lists
 UNSUPPORTED_PARAMETERS = ('conceptMap', 'dependency')
 OCL_PATH = re.compile(r'/(orgs|users)/([^/]+)/(?:sources|collections|CodeSystem|ConceptMap|ValueSet)/([^/]+)/?')
 SIDES = ('from', 'to')
+IMPLICIT_VALUE_SET = '?fhir_vs'  # {code system}?fhir_vs: every code of the code system
 
 Coding = namedtuple('Coding', 'system code version')
 Request = namedtuple('Request', 'coding url concept_map_version scope scope_name targetsystem reverse')
@@ -137,6 +138,20 @@ def shown_as(side, system, source_ids, namespace, user):
         return Q(**{f'{source}_id__in': source_ids}) | (Q(**{url: system}) & unnamed)
     stored = reduce(or_, (Q(**{f'{url}__startswith': path}) for path in paths))
     return Q(**{f'{source}_id__in': source_ids}) | (stored & unnamed)
+
+
+def scope_system(scope):
+    """The code system a scope names, if it is one: the scope itself, or the code system of an implicit value set."""
+    if scope and scope.endswith(IMPLICIT_VALUE_SET):
+        return scope[:-len(IMPLICIT_VALUE_SET)]
+    return scope
+
+
+def holds(value_set, code, sources):
+    """Whether a value set's default expansion holds the code as an active concept of one of the `sources`."""
+    return bool(value_set.expansion_uri and sources) and Expansion.concepts.through.objects.filter(
+        expansion__uri=value_set.expansion_uri, concept__mnemonic__in=stored_codes(code),
+        concept__parent_id__in=sources, concept__is_active=True).exists()
 
 
 def of_version(side, version):
@@ -263,10 +278,11 @@ class Translation:
         return f"No ConceptMap is available to translate from '{names[0]}' to '{names[1]}'"
 
     def named_sources(self):
-        """named_sources of the code's system and targetsystem, looked up once."""
+        """named_sources of the code's system, targetsystem and the code system its scope names, looked up once."""
         if self.sources is None:
-            request = self.request  # the systems in this order, whatever their URLs, so the statement's shape is too
-            systems = dict.fromkeys([request.coding.system, request.targetsystem or request.coding.system])
+            request, system = self.request, self.request.coding.system
+            # in this order, whatever their URLs, so the statement's shape is too
+            systems = dict.fromkeys([system, request.targetsystem or system, scope_system(request.scope) or system])
             self.sources = named_sources(systems, self.namespace, self.user)
         return self.sources
 
@@ -304,28 +320,33 @@ class Translation:
 
     def in_scope(self):
         """
-        Whether the code is in its scope (`source`; in reverse, `target`): its own code system (or that system's
-        implicit value set); a value set it is a member of (its default expansion), as a concept of a source the caller
-        is shown as the code's system (named_sources, as the matches are); not another code system. Neither one the
-        caller is shown is a 404 naming the parameter, as FHIRsmith answers a scope it can't find.
+        Whether the code is in its scope (`source`; in reverse, `target`): its own code system, or that system's
+        implicit value set, named any way named_sources reads (its canonical URL or an OCL path of a repository the
+        caller is shown); a value set it is a member of (its default expansion), as a concept of a source the caller is
+        shown as the code's system, as the matches are; not another code system. Neither one the caller is shown is a
+        404 naming the parameter, as FHIRsmith answers a scope it can't find.
         """
         scope, name, coding = self.request.scope, self.request.scope_name, self.request.coding
-        if scope in (coding.system, f'{coding.system}?fhir_vs'):
+        system = scope_system(scope)
+        if system == coding.system:
             return True
-        try:
-            value_set = self.resolve('ValueSet', scope, None, name)
-        except UnresolvedError:
+        named = self.named_sources()
+        if set(named[coding.system]) & set(named[system]):  # one repository the caller is shown, whatever names it
+            return True
+        if system == scope:  # not an implicit value set: a ValueSet, if one has that URL
             try:
-                self.resolve('CodeSystem', scope, None, name)
-            except UnresolvedError as ex:
-                raise outcomes.NotFoundError(
-                    f"The value set '{scope}' could not be found, so the scope of the translation cannot be "
-                    "determined", expression=name, tx_issue_type='not-found') from ex
-            return False
-        sources = self.named_sources()[coding.system]
-        return bool(value_set.expansion_uri and sources) and Expansion.concepts.through.objects.filter(
-            expansion__uri=value_set.expansion_uri, concept__mnemonic__in=stored_codes(coding.code),
-            concept__parent_id__in=sources, concept__is_active=True).exists()
+                value_set = self.resolve('ValueSet', scope, None, name)
+            except UnresolvedError:
+                pass
+            else:
+                return holds(value_set, coding.code, named[coding.system])
+        try:
+            self.resolve('CodeSystem', system, None, name)
+        except UnresolvedError as ex:
+            raise outcomes.NotFoundError(
+                f"The value set '{scope}' could not be found, so the scope of the translation cannot be "
+                "determined", expression=name, tx_issue_type='not-found') from ex
+        return False
 
     def matches(self, concept_map, named):
         """
