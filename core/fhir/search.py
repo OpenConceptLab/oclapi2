@@ -21,8 +21,11 @@ FHIR search and read of CodeSystem, ValueSet and ConceptMap: SVCM's Query transa
 """
 import json
 import re
-from datetime import datetime, timedelta, timezone as dt_timezone
+from datetime import datetime, timedelta
+from functools import partial, reduce
+from operator import or_
 
+from dateutil.relativedelta import relativedelta
 from django.conf import settings
 from django.db import connection, transaction, OperationalError
 from django.db.models import BooleanField, Exists, Func, OuterRef, Q, Subquery, TextField, Value
@@ -83,8 +86,7 @@ TOKEN_SYSTEMS = {
     'code': CODE_SYSTEM}
 # what system| (any code of the system) means for a parameter with a system of its own
 ANY_CODE = {'status': EVERYTHING, 'language': Q(default_locale__isnull=False) & ~Q(default_locale='')}
-STATUSES = {
-    'active': Q(released=True, retired=False), 'retired': Q(retired=True), 'draft': Q(released=False, retired=False)}
+STATUSES = {'active': Q(released=True, retired=False), 'retired': Q(retired=True)}  # search shows no draft
 
 # a FHIR date or dateTime search value: prefix, year, month, day, hour, minute, second, fraction, zone
 DATE = re.compile(
@@ -117,14 +119,6 @@ def unescape(value):
     return re.sub(r'\\(.)', r'\1', value)
 
 
-def zone_of(zone):
-    """A date search value's zone (Z or ±hh:mm), UTC when it has none."""
-    if not zone or zone == 'Z':
-        return dt_timezone.utc
-    offset = timedelta(hours=int(zone[1:3]), minutes=int(zone[4:6]))
-    return dt_timezone(offset if zone[0] == '+' else -offset)
-
-
 def date_range(value):
     """
     (prefix, start, end): the instants [start, end) a date search value covers at its precision, UTC by default. end is
@@ -133,23 +127,17 @@ def date_range(value):
     match = DATE.fullmatch(value)
     if not match:
         raise outcomes.InvalidError(f"'{value}' is not a supported FHIR date search value.", expression='_lastUpdated')
-    prefix, *parts, fraction, zone = match.groups()
-    year, month, day, hour, minute, second = parts
+    prefix, year, month, day, hour, minute, second, fraction, zone = match.groups()
     try:
         start = datetime(
             int(year), int(month or 1), int(day or 1), int(hour or 0), int(minute or 0), int(second or 0),
-            int((fraction or '0')[:6].ljust(6, '0')), tzinfo=zone_of(zone))
+            int((fraction or '0')[:6].ljust(6, '0')), tzinfo=datetime.strptime(zone or 'Z', '%z').tzinfo)
     except ValueError as ex:
         raise outcomes.InvalidError(f"'{value}' is not a valid date.", expression='_lastUpdated') from ex
+    unit = 'seconds' if second else 'minutes' if minute else 'days' if day else 'months' if month else 'years'
     try:
-        if fraction:
-            end = start + timedelta(microseconds=10 ** max(0, 6 - len(fraction)))
-        elif second or minute or day:
-            end = start + (timedelta(seconds=1) if second else timedelta(minutes=1) if minute else timedelta(days=1))
-        elif month:
-            end = start.replace(year=start.year + start.month // 12, month=start.month % 12 + 1)
-        else:
-            end = start.replace(year=start.year + 1)
+        end = start + (
+            timedelta(microseconds=10 ** max(0, 6 - len(fraction))) if fraction else relativedelta(**{unit: 1}))
     except (ValueError, OverflowError):
         end = None
     return prefix or 'eq', start, end
@@ -166,10 +154,7 @@ def canonical_q(model, url):
                         version=HEAD, canonical_url=url).values_list('mnemonic', 'organization_id', 'user_id')]
     if not repositories:
         return Q(canonical_url=url)
-    in_repository = Q()
-    for repository in repositories:
-        in_repository |= repository
-    return Q(canonical_url=url) | ((Q(canonical_url__isnull=True) | Q(canonical_url='')) & in_repository)
+    return Q(canonical_url=url) | ((Q(canonical_url__isnull=True) | Q(canonical_url='')) & reduce(or_, repositories))
 
 
 def with_repository_canonical(queryset):
@@ -242,6 +227,30 @@ def held_identifier(system, value):
         'identifier', f'lax $[*] ? ({" && ".join(conditions)})', variables)
 
 
+def mapped(side, value):
+    """
+    A ConceptMap version holding a live mapping whose group source (side 'from') or target ('to') shows `value`, as
+    ConceptMapGroupField builds groups: retired mappings aren't read; a group's system is the from or to source's
+    canonical URL, or for one without, its OCL URL as a ConceptMap path (/orgs/{org}/ConceptMap/{id}/), or the
+    mapping's own URL when it names no OCL source. A search over many mappings is bounded by SEARCH_TIMEOUT_MS.
+    OCL keeps no source or target value set on a ConceptMap, so source-uri and target-uri are read as the systems.
+
+    The sources with that canonical are listed first, so the planner can read the mappings by their source index.
+    """
+    field = f'mapping__{side}_source'
+    sources = list(Source.objects.filter(canonical_url=value).values_list('id', flat=True))
+    shown = Q(**{f'{field}_id__in': sources}) | (Q(**{f'{field}_url': value}) & Q(**{f'{field}__isnull': True}))
+    path = re.fullmatch(r'/(orgs|users)/([^/]+)/ConceptMap/([^/]+)/', value)
+    if path:
+        stored = reduce(or_, (Q(**{f'{field}_url__startswith': f'/{path[1]}/{path[2]}/{kind}/{path[3]}/'})
+                              for kind in ('sources', 'collections', 'ConceptMap')))
+        without_canonical = Q(**{f'{field}__isnull': True}) | Q(**{f'{field}__canonical_url__isnull': True}) | Q(
+            **{f'{field}__canonical_url': ''})
+        shown |= stored & without_canonical
+    return Exists(Mapping.sources.through.objects.filter(
+        source_id=OuterRef('id'), mapping__retired=False).filter(shown))
+
+
 class Search:
     """The criteria of one search's parameters, on the versions of a resource type at a base."""
 
@@ -265,10 +274,7 @@ class Search:
             for value in values:
                 alternatives = [self.criterion(name, modifier, item) for item in split(value, ',') if item]
                 if alternatives:
-                    either = Q()
-                    for alternative in alternatives:
-                        either |= alternative
-                    criteria &= either
+                    criteria &= reduce(or_, alternatives)
         return criteria
 
     def check(self, key, name, modifier):
@@ -384,48 +390,12 @@ class Search:
         uncorrelated IN, which the planner hashes once, rather than a correlated subquery.
         """
         sources = Source.objects.filter(canonical_q(Source, value)).values('id')
-        drawn_on = Q()
-        for versions in (Expansion.explicit_source_versions, Expansion.evaluated_source_versions):
-            drawn_on |= Q(expansion_uri__in=versions.through.objects.filter(source_id__in=sources).values(
-                'expansion__uri'))
-        return drawn_on
+        return reduce(or_, (
+            Q(expansion_uri__in=versions.through.objects.filter(source_id__in=sources).values('expansion__uri'))
+            for versions in (Expansion.explicit_source_versions, Expansion.evaluated_source_versions)))
 
-    @staticmethod
-    def by_source(value):
-        """
-        A ConceptMap with a group whose source is the code system named. OCL keeps no source or target value set on
-        a ConceptMap, so source-uri and target-uri are read as the code systems.
-        """
-        return mapped('from', value)
-
-    @staticmethod
-    def by_target(value):
-        """A ConceptMap with a group whose target is the code system named."""
-        return mapped('to', value)
-
-
-def mapped(side, value):
-    """
-    A ConceptMap version holding a live mapping whose group source (side 'from') or target ('to') shows `value`, as
-    ConceptMapGroupField builds groups: retired mappings aren't read; a group's system is the from or to source's
-    canonical URL, or for one without, its OCL URL as a ConceptMap path (/orgs/{org}/ConceptMap/{id}/), or the
-    mapping's own URL when it names no OCL source. A search over many mappings is bounded by SEARCH_TIMEOUT_MS.
-
-    The sources with that canonical are listed first, so the planner can read the mappings by their source index.
-    """
-    field = f'mapping__{side}_source'
-    sources = list(Source.objects.filter(canonical_url=value).values_list('id', flat=True))
-    shown = Q(**{f'{field}_id__in': sources}) | (Q(**{f'{field}_url': value}) & Q(**{f'{field}__isnull': True}))
-    path = re.fullmatch(r'/(orgs|users)/([^/]+)/ConceptMap/([^/]+)/', value)
-    if path:
-        stored = Q()
-        for kind in ('sources', 'collections', 'ConceptMap'):
-            stored |= Q(**{f'{field}_url__startswith': f'/{path[1]}/{path[2]}/{kind}/{path[3]}/'})
-        without_canonical = Q(**{f'{field}__isnull': True}) | Q(**{f'{field}__canonical_url__isnull': True}) | Q(
-            **{f'{field}__canonical_url': ''})
-        shown |= stored & without_canonical
-    return Exists(Mapping.sources.through.objects.filter(
-        source_id=OuterRef('id'), mapping__retired=False).filter(shown))
+    by_source = staticmethod(partial(mapped, 'from'))  # a group's source is the system named
+    by_target = staticmethod(partial(mapped, 'to'))  # a group's target is the system named
 
 
 def page_size(query):
@@ -456,14 +426,9 @@ def within_search_timeout(build):
             'The search would take too long to answer. Narrow it, for example with url, _id or version.') from ex
 
 
-def search(view, resource_type):
-    """The searchset Bundle a FHIR search view answers, in at most SEARCH_TIMEOUT_MS of database time."""
-    return within_search_timeout(lambda: search_bundle(view, resource_type))
-
-
-def search_bundle(view, resource_type):
+def search_bundle(view):
     """The searchset Bundle a FHIR search view answers: the base's matching versions, one page of them."""
-    request = view.request
+    request, resource_type = view.request, view.resource_type
     count = page_size(request.query_params)
     ids = list(visible_versions(resource_type, view.kwargs, request.user).filter(
         Search(resource_type, view.kwargs).criteria(request.query_params)).order_by('-id').values_list('id', flat=True))
@@ -485,23 +450,24 @@ def search_bundle(view, resource_type):
     return FHIRBundleSerializer(bundle, context={'paginator': paginator, 'request': request}).data
 
 
-def read(resource_type, resource_id, kwargs=None, user=None, version=None):  # pylint: disable=too-many-arguments
+def read(view):
     """
-    The repository version a FHIR read names: at the global base by its opaque id, at an owner base by its mnemonic,
-    the version `version` names (an OCL extension) or else the latest release. It must be one search lists:
-    released, never HEAD, visible to `user` there. Raises NotFoundError.
+    The repository version a FHIR read view names: at the global base by its opaque id, at an owner base by its
+    mnemonic, the version ?version= names (an OCL extension) or else the latest release. It must be one search lists:
+    released, never HEAD, visible to the requester there. Raises NotFoundError.
     """
-    namespace = namespace_of(kwargs)
+    resource_type, resource_id = view.resource_type, view.kwargs[view.lookup_field]
+    namespace = namespace_of(view.kwargs)
     versions = REPO_TYPES[resource_type].objects.filter(is_active=True, released=True).exclude(version=HEAD)
     if namespace is None:
         versions = versions.filter(id=int(resource_id)) if OPAQUE_ID.fullmatch(resource_id) else versions.none()
     else:
-        owner = {'organization__mnemonic': kwargs['org']} if kwargs.get('org') else {'user__username': kwargs['user']}
-        versions = versions.filter(mnemonic=resource_id, **owner)
+        versions = view.filter_queryset_by_owner(versions.filter(mnemonic=resource_id))
+        version = view.request.query_params.get('version')
         versions = versions.filter(version=version) if version else versions.filter(
             retired=False).order_by('-created_at')
     instance = with_repository_canonical(versions).first()
-    if not instance or not is_visible(instance, namespace, user) or not has_release(instance):
+    if not instance or not is_visible(instance, namespace, view.request.user) or not has_release(instance):
         raise outcomes.NotFoundError(f'{resource_type}/{resource_id} not found')
     return instance
 
@@ -518,7 +484,8 @@ class FhirSearchMixin(FhirRepositoryViewMixin):
     """GET on a resource type is its search."""
 
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        return Response(search(self, self.resource_type))
+        """The searchset Bundle, in at most SEARCH_TIMEOUT_MS of database time."""
+        return Response(within_search_timeout(lambda: search_bundle(self)))
 
     head = get
 
@@ -536,8 +503,7 @@ class FhirReadMixin(FhirRepositoryViewMixin):
     def get_object(self, queryset=None):
         if self.request.method not in ('GET', 'HEAD'):
             return super().get_object(queryset)
-        return read(self.resource_type, self.kwargs[self.lookup_field], self.kwargs, self.request.user,
-                    self.request.query_params.get('version'))
+        return read(self)
 
 
 class CanonicalUrlField(CharField):

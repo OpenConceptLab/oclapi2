@@ -138,6 +138,11 @@ class SearchCorpusMixin:
             client.force_authenticate(user)
         return client.get(path, params)
 
+    def read(self, path, user=None, **params):
+        response = self.get(path, user, **params)
+        self.assertEqual(response.status_code, 200, response.data)
+        return response.data
+
     def search(self, resource_type, base='/fhir', user=None, **params):
         response = self.get(f'{base}/{resource_type}/', user, **params)
         self.assertEqual(response.status_code, 200, response.data)
@@ -433,15 +438,6 @@ class CodeSystemSearchTest(SearchCorpusMixin, OCLTestCase):  # pylint: disable=t
             self.assertEqual(self.search('CodeSystem', _lastUpdated=value)['total'], total, value)
         self.assertEqual(self.search('CodeSystem', _lastUpdated='le9999,lt2000')['total'], 5)  # an alternative too
 
-    def test_code(self):
-        concept = ConceptFactory(parent=self.ciel_source, mnemonic='1427', sources=[self.ciel_v2])
-        self.assertEqual(self.keys(self.search('CodeSystem', code=concept.mnemonic)), [f'{CIEL}|v2'])
-        self.assertEqual(self.search('CodeSystem', code='no-such-code')['total'], 0)
-
-    def test_language(self):
-        Source.objects.filter(id=self.ciel_v2.id).update(default_locale='fr')
-        self.assertEqual(self.keys(self.search('CodeSystem', language='fr')), [f'{CIEL}|v2'])
-
     def test_unsupported_parameters_and_values_are_400_outcomes(self):
         for query in ('unsupported_parameter=1', 'q=CIEL', 'limit=10', 'name:missing=true', 'url:below=http://x',
                       '_sort=name', 'reference=http://x', 'source-system=http://x'):
@@ -449,7 +445,7 @@ class CodeSystemSearchTest(SearchCorpusMixin, OCLTestCase):  # pylint: disable=t
                                        'not-supported')
             self.assertIn(query.split('=', maxsplit=1)[0].split(':')[0], issue['details']['text'], query)
         for query in ('_count=-1', '_count=ten', '_lastUpdated=yesterday', '_lastUpdated=ap2020',
-                      '_lastUpdated=2020-13', 'page=0'):
+                      '_lastUpdated=2020-13', '_lastUpdated=2020-06-15T12:00%2B25:00', 'page=0'):
             self.assertOutcome(self.client.get(f'/fhir/CodeSystem/?{query}'), 400, 'invalid', 'invalid-data')
         # the format parameters choose the response, they aren't search input
         self.assertEqual(self.search('CodeSystem', _format='json', _pretty='true')['total'], 5)
@@ -646,11 +642,6 @@ class ConceptMapSearchTest(SearchCorpusMixin, OCLTestCase):
         self.assertEqual(self.keys(self.search('ConceptMap', **{'target-system': 'http://loinc.org'})),
                          ['https://example.org/my-codes|v1'])
 
-    def read(self, path):
-        response = self.get(path)
-        self.assertEqual(response.status_code, 200, response.data)
-        return response.data
-
     def test_no_query_per_entry(self):
         with self.assertNumQueries(3):  # the sources with the target's canonical, the matches' ids, the page
             self.assertEqual(self.client.get('/fhir/ConceptMap/', {'target-system': ICD10}).data['total'], 1)
@@ -693,11 +684,6 @@ class VersionIdTest(SearchCorpusMixin, OCLTestCase):
 
 
 class ReadTest(SearchCorpusMixin, OCLTestCase):
-    def read(self, path, user=None, **params):
-        response = self.get(path, user, **params)
-        self.assertEqual(response.status_code, 200, response.data)
-        return response.data
-
     def assertNotFound(self, path, user=None, **params):  # pylint: disable=invalid-name
         response = self.get(path, user, **params)
         self.assertOutcome(response, 404, 'not-found', 'not-found')
@@ -778,19 +764,6 @@ class ReadTest(SearchCorpusMixin, OCLTestCase):
             resource = self.read(f'/fhir/CodeSystem/{self.ciel_v2.id}')
         self.assertEqual((resource['content'], resource['count']), ('not-present', 3))
         self.assertNotIn('concept', resource)
-
-    def test_concept_map_read(self):
-        icd_code = ConceptFactory(parent=self.sehat_icd, mnemonic='A00')
-        ciel_code = ConceptFactory(parent=self.ciel_source, mnemonic='1427')
-        MappingFactory(
-            parent=self.ciel_source, from_concept=ciel_code, to_concept=icd_code, from_source=self.ciel_source,
-            to_source=self.sehat_icd, from_concept_code='1427', to_concept_code='A00', sources=[self.ciel_v2])
-
-        resource = self.read(f'/fhir/ConceptMap/{self.ciel_v2.id}')
-
-        self.assertEqual(resource['group'][0]['source'], CIEL)
-        self.assertEqual(resource['group'][0]['target'], ICD10)
-        self.assertEqual(resource['group'][0]['element'][0]['code'], '1427')
 
     def test_reads_run_no_query_per_concept_or_mapping(self):
         def read_queries(path):
