@@ -16,7 +16,7 @@ from lxml import etree
 from mock.mock import patch
 from rest_framework.test import APIClient
 
-from core.collections.models import Expansion
+from core.collections.models import Collection, Expansion
 from core.collections.tests.factories import ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLTestCase, OCLAPITransactionTestCase
@@ -290,40 +290,118 @@ class ExpandCases(OpsCorpusMixin):
 
     # what the caller isn't shown leaves no trace
 
-    def test_a_member_the_caller_is_not_shown_leaves_no_trace(self):
-        """An expansion with a hidden member answers byte for byte, and with the same statements, as one without it."""
-        def run(**params):
-            answers = []
-            for base, user in (('/fhir', None), ('/fhir', self.moh_member), ('/orgs/Acme', self.outsider)):
+    def sent(self, requests):
+        """{(method, path, params, caller): (status, bytes, statements run, ids and numbers normalised)}, for each of
+        requests' (method, path, params, callers)."""
+        answers = {}
+        for method, path, params, callers in requests:
+            for who, user in callers:
                 with CaptureQueriesContext(connection) as context:
-                    response = self.expand(base=base, user=user, url=FEVERS, **params)
-                answers.append((response.status_code, response.content,
-                                [query['sql'] for query in context.captured_queries]))
-            return answers
+                    if method == 'GET':
+                        response = self.client_for(user).get(path, params)
+                    else:
+                        response = self.client_for(user).post(
+                            path, json.dumps({'resourceType': 'Parameters', 'parameter': params}),
+                            content_type='application/fhir+json')
+                answers[(method, path, json.dumps(params), who)] = (
+                    response.status_code, response.content,
+                    [re.sub(r'\b\d+\b', 'N', query['sql']) for query in context.captured_queries])
+        return answers
 
-        inputs = ({}, {'count': '1', 'offset': '1'}, {'activeOnly': 'true'}, {'filter': 'private'}, {'count': '0'})
-        hidden = [run(**params) for params in inputs]
-        self.fevers_v1.expansion.concepts.remove(self.private_code)
-        for params, answers in zip(inputs, hidden):
-            self.assertEqual(answers, run(**params), params)
+    def assert_same_when_missing(self, hidden, missing, bytes_only=lambda key: False):
+        """The two worlds' answers are alike in status and bytes, and in the statements run, except for the requests
+        bytes_only(key) names (statements that resolve() itself runs differently, outside this operation)."""
+        self.assertEqual(hidden.keys(), missing.keys())
+        for key, (status, content, statements) in hidden.items():
+            self.assertEqual((status, content), missing[key][:2], key)
+            if not bytes_only(key):
+                self.assertEqual(statements, missing[key][2], key)
+
+    def test_a_member_the_caller_is_not_shown_leaves_no_trace(self):
+        """An expansion with a hidden member answers byte for byte, and with the same statements, as one without it:
+        in contains, total, used-codesystem and the versions reported, for any input that shapes the answer."""
+        late = ConceptFactory(parent=self.ciel, mnemonic='Z9', sources=[self.ciel_v2], names=[
+            name('Zed nine code', preferred=True), name('Zède', 'fr', True)])
+        expansion = self.fevers_v1.expansion
+        expansion.concepts.add(late)  # after the hidden member in id order: a page can run across it
+        expansion.explicit_source_versions.add(self.hiv_v1)  # its release, pinned
+        expansion.evaluated_source_versions.add(self.hiv_v1)
+        callers = [('anonymous', None), ('outsider', self.outsider), ('moh-member', self.moh_member),
+                   ('staff', self.admin)]
+        inputs = ({}, {'count': '1', 'offset': '1'}, {'count': '1', 'offset': '2'}, {'count': '2', 'offset': '2'},
+                  {'offset': '4'}, {'offset': '10'}, {'activeOnly': 'true'}, {'filter': 'private'}, {'filter': 'p1'},
+                  {'filter': 'private', 'count': '0'}, {'count': '0'},
+                  {'displayLanguage': 'fr', 'includeDesignations': 'true'}, {'includeDesignations': 'true'})
+        requests = [('GET', '/fhir/ValueSet/$expand', {'url': FEVERS, **params}, callers) for params in inputs] + [
+            ('GET', '/orgs/Acme/ValueSet/$expand', {'url': FEVERS, **params}, callers[:2]) for params in inputs] + [
+            ('POST', '/fhir/ValueSet/$expand', [{'name': 'url', 'valueUri': FEVERS}, {'name': 'count',
+                                                                                    'valueInteger': 1}], callers),
+            ('GET', f'/fhir/ValueSet/{self.fevers_v1.id}/$expand', {'offset': '2'}, callers),
+            ('GET', '/orgs/Acme/ValueSet/fevers/$expand', {'filter': 'p'}, callers[:2])]
+        hidden = self.sent(requests)
+        self.assertEqual(hidden[('GET', '/fhir/ValueSet/$expand', json.dumps({'url': FEVERS}), 'moh-member')][0], 200)
+        expansion.concepts.remove(self.private_code)
+        expansion.explicit_source_versions.remove(self.hiv_v1)
+        expansion.evaluated_source_versions.remove(self.hiv_v1)
+        self.assert_same_when_missing(hidden, self.sent(requests))
 
     def test_a_value_set_the_caller_is_not_shown_answers_as_a_missing_one(self):
-        private = collection(self.moh, 'hidden', 'v1', released=True, canonical_url='https://example.org/hidden',
-                             public_access=ACCESS_TYPE_NONE)
-        collection(self.moh, 'hidden', canonical_url='https://example.org/hidden', public_access=ACCESS_TYPE_NONE)
+        url = 'https://example.org/hidden'
+        private = collection(self.moh, 'hidden', 'v1', released=True, canonical_url=url, public_access=ACCESS_TYPE_NONE)
+        collection(self.moh, 'hidden', canonical_url=url, public_access=ACCESS_TYPE_NONE)
         private.expansion_uri = ExpansionFactory(mnemonic='autoexpand-v1', collection_version=private).uri
         private.save()
-        self.register('https://example.org/hidden', self.moh)
-        self.assertEqual(self.expand(base='/orgs/MOH', user=self.moh_member, url='https://example.org/hidden')
-                         .status_code, 200)
-        hidden = [self.expand(base=base, user=user, url='https://example.org/hidden')
-                  for base, user in (('/fhir', None), ('/fhir', self.moh_member), ('/orgs/MOH', self.outsider))]
-        private.is_active = False
-        private.save()
-        missing = self.expand(url='https://example.org/hidden')
-        self.assertEqual(issues_of(missing), ['error|not-found|not-found||Unable_to_resolve_value_Set_'])
-        for response in hidden:
-            self.assertEqual((response.status_code, response.content), (422, missing.content))
+        self.register(url, self.moh)
+        self.assertEqual(self.expand(base='/orgs/MOH', user=self.moh_member, url=url).status_code, 200)
+        everyone = [('anonymous', None), ('outsider', self.outsider), ('moh-member', self.moh_member),
+                    ('staff', self.admin)]
+        outside = everyone[:2]
+        by_path = {'url': '/orgs/MOH/ValueSet/hidden/'}
+        path_v1 = {'url': '/orgs/MOH/ValueSet/hidden/v1/'}  # resolve() reads the version's HEAD first, hidden or not
+        requests = [(method, f'{base}/ValueSet/$expand', params, callers) for base, callers in (
+            ('/fhir', everyone), ('/orgs/MOH', outside)) for method, params in (
+            ('GET', {'url': url}), ('GET', {'url': f'{url}|v1'}), ('GET', {'url': url, 'valueSetVersion': 'v1'}),
+            ('GET', {'url': url, 'valueSetVersion': 'HEAD'}), ('GET', {'url': url, 'valueSetVersion': 'v9'}),
+            ('GET', by_path), ('GET', path_v1), ('GET', {'url': url, 'filter': 'inf', 'count': '0'}),
+            ('POST', [{'name': 'url', 'valueUri': url}]),
+            ('POST', [{'name': 'url', 'valueString': url}, {'name': 'valueSetVersion', 'valueString': 'v1'}]))]
+        requests += [('GET', f'/fhir/ValueSet/{private.id}/$expand', params, everyone) for params in (
+            {}, {'valueSetVersion': 'HEAD'})] + [
+            ('POST', f'/fhir/ValueSet/{private.id}/$expand', [], everyone),
+            ('GET', '/orgs/MOH/ValueSet/hidden/$expand', {}, outside),
+            ('GET', '/orgs/MOH/ValueSet/hidden/$expand', {'valueSetVersion': 'HEAD'}, outside)]
+        hidden = self.sent(requests)
+        Collection.objects.filter(mnemonic='hidden').delete()
+        missing = self.sent(requests)
+        self.assertEqual(issues_of(self.expand(url=url)), ['error|not-found|not-found||Unable_to_resolve_value_Set_'])
+        for key, (status, _, _) in hidden.items():
+            self.assertIn(status, (404, 422), key)
+        # the same statements everywhere but where resolve() itself differs: for a caller who is signed in, at an owner
+        # base (a membership check, only when a private row is found), with the registry on at an owner base (its
+        # lookup is skipped for a private canonical), and for an OCL path naming a version (its HEAD is read first)
+        self.assert_same_when_missing(
+            hidden, missing, lambda key: key[1].startswith('/orgs/MOH') or key[2] == json.dumps(path_v1))
+
+    def test_a_private_version_of_a_value_set_answers_as_a_missing_one(self):
+        """The newest release is private: named, or by its id, it answers as a version that doesn't exist."""
+        v2 = collection(self.acme, 'fevers', 'v2', released=True, canonical_url=FEVERS, public_access=ACCESS_TYPE_NONE)
+        v2.expansion_uri = ExpansionFactory(mnemonic='autoexpand-v2', collection_version=v2).uri
+        v2.save()
+        everyone = [('anonymous', None), ('outsider', self.outsider), ('moh-member', self.moh_member),
+                    ('staff', self.admin)]
+        requests = [('GET', '/fhir/ValueSet/$expand', params, everyone) for params in (
+            {'url': FEVERS, 'valueSetVersion': 'v2'}, {'url': f'{FEVERS}|v2'},
+            {'url': '/orgs/Acme/ValueSet/fevers/v2/'})] + [
+            ('POST', '/fhir/ValueSet/$expand', [{'name': 'url', 'valueUri': FEVERS},
+                                                {'name': 'valueSetVersion', 'valueString': 'v2'}], everyone),
+            ('GET', f'/fhir/ValueSet/{v2.id}/$expand', {}, everyone),
+            ('GET', '/orgs/Acme/ValueSet/$expand', {'url': FEVERS, 'valueSetVersion': 'v2'}, everyone[:3])]
+        hidden = self.sent(requests)
+        Collection.objects.filter(id=v2.id).delete()
+        # an OCL path naming a version reads its HEAD first, and an owner base checks a signed-in caller's membership
+        # once a private row is found: statements resolve() itself runs differently, not this operation
+        self.assert_same_when_missing(hidden, self.sent(requests), lambda key: key[1].startswith('/orgs/Acme') or
+                                      '/fevers/v2/' in key[2])
 
     # errors
 
