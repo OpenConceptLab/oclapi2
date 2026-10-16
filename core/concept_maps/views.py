@@ -82,6 +82,24 @@ class ConceptMapTranslateView(MappingListView):
     def get_serializer_class(self):
         return ConceptMapParametersSerializer
 
+    # $translate answers with the translation of the mappings apply_filters names, and nothing else. The mapping
+    # list's shortcuts (a search, a sort or a faceted filter, facets, search stats, a CSV export) would answer in its
+    # place, and the search ones skip apply_filters, so each is off. Their parameters are ignored like any other this
+    # operation doesn't define.
+    allow_csv_export = False
+
+    def should_perform_es_search(self):
+        return False
+
+    def only_facets(self):
+        return False
+
+    def only_search_stats(self):
+        return False
+
+    def should_include_facets(self):
+        return False
+
     def verify_scope(self):
         """
         Override to not verify scope and allow POSTing for everyone

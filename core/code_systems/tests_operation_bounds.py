@@ -13,13 +13,17 @@ from urllib.parse import urlencode
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from mock.mock import patch, Mock
+from rest_framework.response import Response
 from rest_framework.test import APIClient
 
 from core.code_systems.serializers import ValidateCodeParametersSerializer
 from core.collections.models import CollectionReference
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
+from core.common.mixins import ListWithHeadersMixin
 from core.common.tests import OCLTestCase
+from core.common.views import BaseAPIView
 from core.concepts.tests.factories import ConceptFactory
+from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
@@ -38,6 +42,18 @@ ROW_READ = re.compile(r'^SELECT .+? FROM "(concepts|mappings)"(?: |$)')
 NAMED_ROWS = re.compile(
     r'"((concepts|mappings)"\."(mnemonic|from_concept_code|id|versioned_object_id)'
     r'|concepts_hierarchicalconcepts"\."(child_id|parent_id))" (= (\'|\d)|IN \((?!SELECT))')
+# The list views' own query parameters and headers, each of which would take a list shortcut (a search, a sort,
+# facets, search stats or a CSV export) past an operation's checks if the operation inherited it
+LIST_SHORTCUTS = [
+    ({'q': 'c1'}, {}),
+    ({'sortAsc': 'id'}, {}),
+    ({'sortDesc': 'id'}, {}),
+    ({'facetsOnly': 'true'}, {}),
+    ({'searchStatsOnly': 'true', 'q': 'c1'}, {}),
+    ({'csv': 'true'}, {}),
+    ({}, {'HTTP_INCLUDEFACETS': 'true'}),
+    ({'q': 'c1'}, {'HTTP_INCLUDESEARCHSTATS': 'true'}),
+]
 
 
 def row_reads(queries):
@@ -76,13 +92,13 @@ class FhirOperationBoundsTest(OCLTestCase):
         self.collection_v1.seed_references()
         self.client = APIClient()
 
-    def request(self, path, method, **inputs):
+    def request(self, path, method, headers=None, **inputs):
         """(response, the SQL it ran) for a GET with the inputs as a query, or a POST of them as Parameters. A POST
         as 'POST valueString' sends every input as valueString, as some clients do."""
         inputs = {name: value for name, value in inputs.items() if value is not None}
         with CaptureQueriesContext(connection) as context:
             if method == 'GET':
-                response = self.client.get(f'{path}?{urlencode(inputs)}' if inputs else path)
+                response = self.client.get(f'{path}?{urlencode(inputs)}' if inputs else path, **(headers or {}))
             else:
                 parameters = [{'name': name, ('valueString' if 'valueString' in method else VALUE_TYPES[name]): value}
                               for name, value in inputs.items()]
@@ -177,6 +193,46 @@ class FhirOperationBoundsTest(OCLTestCase):
 
                 self.assertEqual(unbounded_reads(queries), [], (system, code))
                 self.assertEqual(response.status_code, 200 if system and code else 400, (system, code))
+
+    def test_operations_take_no_list_shortcut(self):
+        """A search, sort, facets, search stats or CSV export never stands in for an operation's own checks."""
+        operations = [
+            ('/fhir/CodeSystem/$validate-code', {'url': SYSTEM, 'code': 'c1'}),
+            ('/fhir/ValueSet/$validate-code',
+             {'url': VALUE_SET, 'system': SYSTEM, 'systemVersion': 'v1', 'code': 'c1'}),
+            ('/fhir/ConceptMap/$translate', {'url': SYSTEM, 'system': SYSTEM, 'code': 'c1'}),
+            ('/fhir/CodeSystem/$lookup', {'system': SYSTEM, 'code': 'c1'}),
+        ]
+        shortcuts = {
+            (BaseAPIView, 'get_search_results_qs'): (Mapping.objects.none(), {}, None, {}),
+            (BaseAPIView, 'get_fuzzy_search_results_qs'): (Mapping.objects.none(), {}, None, {}),
+            (BaseAPIView, 'get_facets'): {},
+            (BaseAPIView, 'get_search_stats'): {},
+            (ListWithHeadersMixin, 'get_csv'): Response({'url': 'https://example.org/export.csv'}),
+        }
+        mocks = {name: Mock(return_value=value) for (_, name), value in shortcuts.items()}
+        patches = [patch.object(klass, name, mocks[name]) for klass, name in shortcuts]
+        for patcher in patches:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+        for (path, inputs), (params, headers) in product(operations, LIST_SHORTCUTS):
+            msg = (path, params, headers)
+            with self.subTest(msg):
+                expected, _ = self.request(path, 'GET', **inputs)
+                response, queries = self.request(path, 'GET', headers=headers, **inputs, **params)
+
+                self.assertEqual(unbounded_reads(queries), [], msg)
+                self.assertEqual(
+                    (response.status_code, json.loads(response.content)),
+                    (expected.status_code, json.loads(expected.content)), msg)
+
+                without_code = {name: value for name, value in inputs.items() if name != 'code'}
+                response, queries = self.request(path, 'GET', headers=headers, **without_code, **params)
+
+                self.assertEqual(unbounded_reads(queries), [], msg)
+                self.assertEqual(response.status_code, 400, msg)
+        self.assertEqual({name: mock.call_count for name, mock in mocks.items()}, dict.fromkeys(mocks, 0))
 
     def test_parameters_are_read_with_the_value_types_r4_allows(self):
         serializer = ValidateCodeParametersSerializer(data={'resourceType': 'Parameters', 'parameter': [
