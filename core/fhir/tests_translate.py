@@ -663,6 +663,57 @@ class TranslateScopeTest(TranslateCorpusMixin, OCLTestCase):
                                               source=scope))
             self.assertEqual(self.matches(parameters), [f'{CIEL}|113275|wider'], scope)
 
+    def test_a_value_set_path_names_a_value_set_not_its_namesake_code_system(self):
+        """
+        A ValueSet (or collections) path is a value set: a collection named as CIEL's source is, under CIEL, is no alias
+        of the source, so its members decide; a path naming no value set the caller is shown is a 404 naming the
+        parameter, forward and reverse, a private one as an unknown one.
+        """
+        for owner, mnemonic, code in ((self.ciel, 'CIEL', '113275'), (self.who, 'ICD-10-WHO', 'O02.1')):
+            concept = Concept.objects.filter(  # the scope corpus's
+                parent=self.ciel_source if owner == self.ciel else self.icd, mnemonic=code).first()
+            collection(owner, mnemonic, canonical_url=f'https://example.org/ValueSet/{mnemonic}')
+            value_set = collection(owner, mnemonic, 'v1', released=True,
+                                   canonical_url=f'https://example.org/ValueSet/{mnemonic}')
+            expansion = ExpansionFactory(collection_version=value_set)
+            expansion.concepts.set([concept])
+            Collection.objects.filter(id=value_set.id).update(expansion_uri=expansion.uri)
+        reverse = {'targetsystem': CIEL, 'reverse': 'true'}
+        for kind in ('ValueSet', 'collections'):
+            parameters = self.answer(self.get(system=CIEL, code='113275', source=f'/orgs/CIEL/{kind}/CIEL/'))
+            self.assertEqual(self.matches(parameters), CIEL_113275_V2, kind)
+            parameters = self.answer(self.get(system=ICD10, code='O02.1', target=f'/orgs/WHO/{kind}/ICD-10-WHO/',
+                                              **reverse))
+            self.assertEqual(self.matches(parameters), [f'{CIEL}|113275|wider'], kind)
+            for params in ({'system': CIEL, 'code': '138405', 'source': f'/orgs/CIEL/{kind}/CIEL/'},
+                           {'system': ICD10, 'code': 'O03', 'target': f'/orgs/WHO/{kind}/ICD-10-WHO/', **reverse}):
+                parameters = self.answer(self.get(**params))
+                self.assertFalse(self.result(parameters), params)
+                self.assertEqual(self.matches(parameters), [], params)
+            for params, name in (({'system': CIEL, 'code': '113275', 'source': f'/orgs/CIEL/{kind}/no-such-set/'},
+                                  'source'),
+                                 ({'system': ICD10, 'code': 'O02.1', 'target': f'/orgs/WHO/{kind}/no-such-set/',
+                                   **reverse}, 'target')):
+                self.assertOutcome(self.get(**params), 404, 'not-found', 'not-found', name)
+        collection(self.moh, 'private-set', canonical_url='http://moh.example/fhir/ValueSet/private',
+                   public_access=ACCESS_TYPE_NONE)
+        collection(self.moh, 'private-set', 'v1', released=True,
+                   canonical_url='http://moh.example/fhir/ValueSet/private', public_access=ACCESS_TYPE_NONE)
+        for user in (None, self.outsider, self.moh_member, self.admin):
+            for name, params in (('source', {'system': CIEL, 'code': '113275'}),
+                                 ('target', {'system': ICD10, 'code': 'O02.1', **reverse})):
+                answers = [self.get(user=user, **params, **{name: f'/orgs/MOH/ValueSet/{mnemonic}/'}).data
+                           for mnemonic in ('private-set', 'no-such-set')]
+                self.assertEqual(json.loads(json.dumps(answers[0]).replace('private-set', 'SET')),
+                                 json.loads(json.dumps(answers[1]).replace('no-such-set', 'SET')), (user, name))
+                self.assertEqual(answers[0]['issue'][0]['expression'], [name], (user, name))
+
+    def test_an_implicit_value_set_of_no_system_is_not_found(self):
+        self.assertOutcome(self.get(system=CIEL, code='113275', source='?fhir_vs'), 404, 'not-found', 'not-found',
+                           'source')
+        self.assertOutcome(self.get(system=ICD10, code='O02.1', targetsystem=CIEL, reverse='true', target='?fhir_vs'),
+                           404, 'not-found', 'not-found', 'target')
+
     def test_a_deleted_concept_is_no_member_of_a_scope(self):
         Concept.objects.filter(parent=self.ciel_source, mnemonic='113275').update(is_active=False)  # every version
         parameters = self.answer(self.get(system=CIEL, code='113275', source=CIEL_VS))

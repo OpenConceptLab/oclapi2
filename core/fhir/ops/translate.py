@@ -14,8 +14,9 @@ types as R5-shaped relationships. core.fhir.adapters.r4 writes the answer as an 
   as the URL the mapping stores (its source's OCL URL when it stores none), an OCL URL as a ConceptMap path
   (/orgs/{org}/ConceptMap/{id}/). So a source the caller isn't shown is named as a source OCL doesn't hold would be,
   and a system only such sources have answers as an unknown one. ConceptMapGroupField names groups the same way.
-  A system given as an OCL path (/orgs/{org}/CodeSystem/{id}/, or the sources or ConceptMap form) names that repository
-  if the caller is shown it, whether it has a canonical URL or not; the answer names it as above.
+  A system given as an OCL path of a source (/orgs/{org}/CodeSystem/{id}/, or the sources or ConceptMap form) names
+  that repository if the caller is shown it, whether it has a canonical URL or not; the answer names it as above. A
+  ValueSet or collections path names a value set, not a source.
 - Map types (design D27): case, spaces, hyphens, underscores and surrounding whitespace don't matter, so SAME-AS,
   SAME AS and Same As are one. The relationships are core.concept_maps.constants'; result is true when some match isn't
   not-related-to. A match's relationship reads from the code named to the match, so in reverse, where the code named
@@ -49,7 +50,9 @@ from core.sources.models import Source
 
 MATCH_LIMIT = 1000  # the most matches an answer lists
 UNSUPPORTED_PARAMETERS = ('conceptMap', 'dependency')
-OCL_PATH = re.compile(r'/(orgs|users)/([^/]+)/(?:sources|collections|CodeSystem|ConceptMap|ValueSet)/([^/]+)/?')
+# An OCL path of a source: its own (sources), or as FHIR names it (CodeSystem; ConceptMap, how OCL shows a source with
+# no canonical URL). A collections or ValueSet path names a value set, never a source's alias.
+OCL_PATH = re.compile(r'/(orgs|users)/([^/]+)/(?:sources|CodeSystem|ConceptMap)/([^/]+)/?')
 SIDES = ('from', 'to')
 IMPLICIT_VALUE_SET = '?fhir_vs'  # {code system}?fhir_vs: every code of the code system
 
@@ -321,13 +324,16 @@ class Translation:
     def in_scope(self):
         """
         Whether the code is in its scope (`source`; in reverse, `target`): its own code system, or that system's
-        implicit value set, named any way named_sources reads (its canonical URL or an OCL path of a repository the
-        caller is shown); a value set it is a member of (its default expansion), as a concept of a source the caller is
-        shown as the code's system, as the matches are; not another code system. Neither one the caller is shown is a
-        404 naming the parameter, as FHIRsmith answers a scope it can't find.
+        implicit value set, named any way named_sources reads (its canonical URL or a source's OCL path, of a repository
+        the caller is shown); a value set (a ValueSet or collections path is one) it is a member of (its default
+        expansion), as a concept of a source the caller is shown as the code's system, as the matches are; not another
+        code system. Neither one the caller is shown, nor ?fhir_vs of no system, is a 404 naming the parameter, as
+        FHIRsmith answers a scope it can't find.
         """
         scope, name, coding = self.request.scope, self.request.scope_name, self.request.coding
         system = scope_system(scope)
+        if not system:  # ?fhir_vs of no system
+            raise self.scope_not_found(scope, name)
         if system == coding.system:
             return True
         named = self.named_sources()
@@ -343,10 +349,14 @@ class Translation:
         try:
             self.resolve('CodeSystem', system, None, name)
         except UnresolvedError as ex:
-            raise outcomes.NotFoundError(
-                f"The value set '{scope}' could not be found, so the scope of the translation cannot be "
-                "determined", expression=name, tx_issue_type='not-found') from ex
+            raise self.scope_not_found(scope, name) from ex
         return False
+
+    @staticmethod
+    def scope_not_found(scope, name):
+        return outcomes.NotFoundError(
+            f"The value set '{scope}' could not be found, so the scope of the translation cannot be determined",
+            expression=name, tx_issue_type='not-found')
 
     def matches(self, concept_map, named):
         """
