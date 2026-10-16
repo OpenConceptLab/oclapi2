@@ -788,10 +788,7 @@ class TranslateAccessTest(TranslateCorpusMixin, OCLTestCase):
     """
 
     def test_a_system_the_caller_is_not_shown_answers_as_an_unknown_one(self):
-        """
-        The same answer, word for word but the system's name, and no mapping read. (resolve() runs one query more
-        for a repository it finds and then doesn't show.)
-        """
+        """The same answer, word for word but the system's name, and no mapping read."""
         for user in (None, self.outsider, self.moh_member, self.admin):
             private, private_sql = self.capture(system=PRIVATE, code='P1', user=user)
             unknown, unknown_sql = self.capture(system=UNKNOWN, code='P1', user=user)
@@ -800,6 +797,57 @@ class TranslateAccessTest(TranslateCorpusMixin, OCLTestCase):
             self.assertFalse(self.result(private), user)
             for sql in (private_sql, unknown_sql):
                 self.assertFalse([query for query in sql if '"mappings"' in query], user)
+
+    def test_every_input_naming_a_repository_the_caller_is_not_shown_runs_as_an_unknown_one(self):
+        """
+        At /fhir/, each input that names a repository (url, system, targetsystem in reverse, a code system or value
+        set scope, ?fhir_vs, an OCL path) answers the same bytes, after the same number of queries, whether it names
+        MOH's private repository or one OCL doesn't hold. (At an owner's base, a signed-in caller who isn't a member
+        runs two queries more for a private repository: its owner and their membership are read.)
+        """
+        private_set = 'http://moh.example/fhir/ValueSet/private-set'
+        collection(self.moh, 'private-set', canonical_url=private_set, public_access=ACCESS_TYPE_NONE)
+        collection(self.moh, 'private-set', 'v1', released=True, canonical_url=private_set,
+                   public_access=ACCESS_TYPE_NONE)
+        reverse = {'system': CIEL, 'code': '113275', 'reverse': 'true'}
+        for hidden, unknown in ((PRIVATE, UNKNOWN), (private_set, 'http://moh.example/fhir/ValueSet/no-such-set'),
+                                ('/orgs/MOH/CodeSystem/private-codes/', '/orgs/MOH/CodeSystem/no-such-codes/'),
+                                (PRIVATE_PATH, '/orgs/MOH/ConceptMap/no-such-codes/'),
+                                ('/orgs/MOH/ValueSet/private-set/', '/orgs/MOH/ValueSet/no-such-set/')):
+            for params in (lambda x: {'url': x, 'system': CIEL, 'code': '113275'},
+                           lambda x: {'system': x, 'code': 'P1'},
+                           lambda x: {**reverse, 'targetsystem': x},
+                           lambda x: {'system': CIEL, 'code': '113275', 'source': x},
+                           lambda x: {'system': CIEL, 'code': '113275', 'source': f'{x}?fhir_vs'},
+                           lambda x: {**reverse, 'targetsystem': CIEL, 'target': x}):
+                for user in (None, self.outsider, self.moh_member, self.admin):
+                    answers = []
+                    for value in (hidden, unknown):
+                        with CaptureQueriesContext(connection) as context:
+                            content = self.get(user=user, **params(value)).content.decode()
+                        answers.append((content.replace(value, 'VALUE'), len(context.captured_queries)))
+                    self.assertEqual(answers[0], answers[1], (hidden, params('VALUE'), user))
+
+    def test_a_newer_private_release_changes_no_byte_of_the_answer(self):
+        """
+        A public repository's newer private release changes nothing for those it isn't shown: the system's own map,
+        the map url names and a value set scope answer the same bytes before and after (A.5).
+        """
+        concept = ConceptFactory(parent=self.ciel_source, mnemonic='113275')
+        collection(self.ciel, 'ciel-set', canonical_url=CIEL_VS)
+        value_set = collection(self.ciel, 'ciel-set', 'v1', released=True, canonical_url=CIEL_VS)
+        expansion = ExpansionFactory(collection_version=value_set)
+        expansion.concepts.set([concept])
+        Collection.objects.filter(id=value_set.id).update(expansion_uri=expansion.uri)
+        requests = ({'system': CIEL, 'code': '138405'}, {'url': CIEL, 'system': CIEL, 'code': '138405'},
+                    {'system': CIEL, 'code': '113275', 'source': CIEL_VS})
+        users = (None, self.outsider)
+        before = [self.get(user=user, **params).content for params in requests for user in users]
+        for content in before:
+            self.assertTrue(self.result(json.loads(content)), content)
+        source(self.ciel, 'CIEL', 'v3', released=True, canonical_url=CIEL, public_access=ACCESS_TYPE_NONE)
+        collection(self.ciel, 'ciel-set', 'v2', released=True, canonical_url=CIEL_VS, public_access=ACCESS_TYPE_NONE)
+        self.assertEqual([self.get(user=user, **params).content for params in requests for user in users], before)
 
     def test_at_its_owner_base_to_those_who_may_view_it(self):
         for user, matches in ((None, []), (self.outsider, []), (self.moh_member, [f'{CIEL}|113275|wider']),
