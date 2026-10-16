@@ -14,24 +14,29 @@ version the request names. core.fhir.adapters.r4 writes the answer as an R4 Valu
 - Members: the expansion's concepts (not deleted) whose code system the caller is shown (core.fhir.resolve's
   viewable_rows), as ValueSet $validate-code counts them. A member of a code system the caller isn't shown leaves no
   trace: not in contains, total or used-codesystem, and no other statement runs.
-- Each member: its code system's canonical URL (else its OCL path as a CodeSystem), its code, its display (with
+- Each member: its code system (the canonical URL of the release it is reported in, else its repository's, else the
+  repository's OCL path as a CodeSystem), its code as FHIR spells it, its display (with
   displayLanguage, its preferred name in that language when it has one), inactive when retired, its names as
   designations with includeDesignations, and the version: a release the caller is shown that holds the concept, the
   one the expansion pins (explicit) first, then the one it evaluated, then the newest; none without one, never HEAD
   or an unreleased version (as $validate-code answers).
-- Inputs: activeOnly leaves retired concepts out; filter keeps the concepts whose code or one of whose names has a word
-  starting with each of the filter's words, ignoring case; offset and count page the members in a fixed order (count
-  at most MAX_COUNT, which is also the default); count=0 answers the total alone. total counts what activeOnly and
-  filter keep. The inputs that shaped the answer are echoed in expansion.parameter, then each code system the members
-  come from, with each version they are reported in, as used-codesystem. An inline valueSet or a context is a 400
-  not-supported: OCL expands the value sets it stores.
+- Inputs: activeOnly leaves retired concepts out; filter keeps the concepts whose code (as FHIR spells it) or one of
+  whose names has a word starting with each of the filter's words, ignoring case; offset and count page the members in
+  a fixed order (count at most MAX_COUNT, which is also the default); count=0 answers the total alone. total counts
+  what activeOnly and filter keep. The inputs that shaped the answer are echoed in expansion.parameter, then each code
+  system the members come from, with each version they are reported in, as used-codesystem. Every other R4 $expand
+  input is either one a stored expansion always satisfies (SATISFIED: OCL's expansions are flat, with no abstract or
+  post-coordinated codes, and have no definitions to leave out) or a 400 not-supported naming it (NOT_SUPPORTED): an
+  inline value set, a context, a date, code system versions and designations would each need an expansion computed
+  for the request, and OCL serves the ones it stores. Names that aren't $expand inputs are ignored, as _format is.
 - Cost: a fixed number of queries whatever the size of the expansion, the page read alone; all of them within
   SEARCH_TIMEOUT_MS together, past which the expansion is too costly (422).
 """
 import re
+from urllib.parse import quote
 
-from django.db.models import Case, Exists, IntegerField, OuterRef, Q, Subquery, Value, When
-from django.db.models.functions import Coalesce
+from django.db.models import Case, Exists, IntegerField, JSONField, OuterRef, Q, Subquery, Value, When
+from django.db.models.functions import Coalesce, JSONObject
 
 from core.collections.models import Expansion
 from core.common.constants import HEAD
@@ -46,10 +51,21 @@ from core.sources.models import Source
 
 MAX_COUNT = 1000  # the most members a page holds, and how many it holds when count isn't given
 WORD = re.compile(r'\w+')
-NOT_SUPPORTED = {
-    'valueSet': 'An inline valueSet is not supported: OCL expands the value sets it stores, named by url.',
+STORED = 'OCL serves the expansion it stores for the value set version'
+VERSIONS = f'Choosing code system versions is not supported: {STORED}, made from the versions used-codesystem names.'
+NOT_SUPPORTED = {  # R4 $expand inputs that need an expansion computed for the request
+    'valueSet': f'An inline valueSet is not supported: {STORED}, named by url.',
     'context': 'The context parameter is not supported.',
+    'contextDirection': 'The contextDirection parameter is not supported.',
+    'date': f'An expansion as of a date is not supported: {STORED}.',
+    'designation': 'Choosing designations is not supported: includeDesignations includes every name.',
+    'exclude-system': f'Excluding a code system is not supported: {STORED}.',
+    'system-version': VERSIONS,
+    'check-system-version': VERSIONS,
+    'force-system-version': VERSIONS,
 }
+INCLUDE_DEFINITION = 'includeDefinition'  # supported when false: OCL's expansions have no definitions
+SATISFIED = ('excludeNested', 'excludeNotForUI', 'excludePostCoordinated')  # booleans every stored expansion meets
 # a reference an expansion couldn't resolve, by its type: (message id, message) without and with a version named
 UNRESOLVED = {
     'reference.valueset': (
@@ -98,6 +114,11 @@ class Inputs:  # pylint: disable=too-few-public-methods
         for name, message in NOT_SUPPORTED.items():
             if name in parameters:
                 raise outcomes.NotSupportedError(message, expression=name)
+        if flag(parameters, INCLUDE_DEFINITION):
+            raise outcomes.NotSupportedError(
+                'Definitions are not included in an expansion.', expression=INCLUDE_DEFINITION)
+        for name in SATISFIED:
+            flag(parameters, name)  # either value is met; one that isn't a boolean is still a 400
         self.filter = text(parameters, 'filter')
         self.language = text(parameters, 'displayLanguage')
         self.designations = flag(parameters, 'includeDesignations')
@@ -117,6 +138,16 @@ class Inputs:  # pylint: disable=too-few-public-methods
     @property
     def words(self):
         return WORD.findall(self.filter or '')
+
+
+def code_starts_word(word):
+    """
+    The regex for a stored code (OCL percent-encodes reserved and non-ASCII characters) whose FHIR spelling has a word
+    starting with `word`: the word, or its own encoding, at the start of a word or right after an encoded character.
+    \\w characters need no escaping, and their encoding is letters, digits and %.
+    """
+    spellings = '|'.join(dict.fromkeys([word, quote(word)]))
+    return rf'(\m|%[0-9A-Fa-f]{{2}})({spellings})'
 
 
 def expand(parameters, kwargs, user, instance_id=None):
@@ -156,9 +187,15 @@ def unresolved(reference):
                                   message_id=message_id, status_code=422)
 
 
-def code_system(canonical_url, uri):
-    """A code system's canonical URL, else its OCL path as a CodeSystem (/orgs/{org}/CodeSystem/{id}/)."""
-    return canonical_url or IdentifierSerializer.convert_ocl_uri_to_fhir_url(uri, 'CodeSystem')
+def code_system(canonical_url, uri, release=None):
+    """
+    (system, version) of a member of the repository with this canonical URL and OCL path, reported in `release`
+    ({version, url}, or None): the release's own canonical URL, else the repository's, else its OCL path as a
+    CodeSystem (/orgs/{org}/CodeSystem/{id}/), as a read names the release; and the release's version.
+    """
+    release = release or {}
+    system = release.get('url') or canonical_url or IdentifierSerializer.convert_ocl_uri_to_fhir_url(uri, 'CodeSystem')
+    return system, release.get('version')
 
 
 class Expander:
@@ -182,15 +219,15 @@ class Expander:
         if self.inputs.active_only:
             members = members.filter(retired=False)
         for word in self.inputs.words:  # \m: a word starts here; \w characters need no escaping in a regex
-            pattern = rf'\m{word}'
-            members = members.filter(Q(mnemonic__iregex=pattern) | Exists(ConceptName.objects.filter(
-                concept_id=OuterRef('id'), name__iregex=pattern)))
+            members = members.filter(Q(mnemonic__iregex=code_starts_word(word)) | Exists(ConceptName.objects.filter(
+                concept_id=OuterRef('id'), name__iregex=rf'\m{word}')))
         return members
 
     def release(self):
         """
-        For a member: the version of the release it is reported in, a live release the caller is shown that holds the
-        concept: the expansion's explicit one first, then the one it evaluated, then the newest; None without one.
+        For a member: the release it is reported in, as {version, url (its own canonical URL)}: a live release the
+        caller is shown that holds the concept, the expansion's explicit one first, then the one it evaluated, then the
+        newest; None without one.
         Newest is by the source's id (a repository's releases' ids follow their creation), so the lookup of the newest
         stops at the concept's first link it finds.
         """
@@ -203,15 +240,16 @@ class Expander:
         pinned = holding.filter(Q(source_id__in=explicit) | Q(source_id__in=evaluated)).annotate(explicit=Case(
             When(source_id__in=explicit, then=Value(1)), default=Value(0), output_field=IntegerField())).order_by(
             '-explicit', '-source_id')
-        return Coalesce(*(Subquery(links.values('source__version')[:1])
-                          for links in (pinned, holding.order_by('-source_id'))))
+        return Coalesce(*(Subquery(links.annotate(
+            release=JSONObject(version='source__version', url='source__canonical_url')).values('release')[:1],
+            output_field=JSONField()) for links in (pinned, holding.order_by('-source_id'))), output_field=JSONField())
 
     def used(self):
         """Each code system the members come from, with each version they are reported in: system|version."""
         rows = self.members().annotate(release=self.release()).values_list(
             'parent__canonical_url', 'parent__uri', 'release').order_by().distinct()
-        return sorted({f'{code_system(url, uri)}|{version}' if version else code_system(url, uri)
-                       for url, uri, version in rows})
+        used = {code_system(url, uri, release) for url, uri, release in rows}
+        return sorted(f'{system}|{version}' if version else system for system, version in used)
 
     def page(self, matching):
         """
@@ -224,7 +262,8 @@ class Expander:
             'id', 'mnemonic', 'retired', 'parent_id', 'parent__canonical_url', 'parent__uri',
             'parent__default_locale', 'parent__supported_locales').prefetch_related('names').order_by('id')
         return [{
-            'system': code_system(concept.parent.canonical_url, concept.parent.uri), 'version': concept.release,
+            **dict(zip(('system', 'version'), code_system(
+                concept.parent.canonical_url, concept.parent.uri, concept.release))),
             'code': fhir_code(concept.mnemonic), 'display': display_of(concept, self.inputs.language),
             'inactive': concept.retired or None,
             'designations': designations(concept) if self.inputs.designations else None,

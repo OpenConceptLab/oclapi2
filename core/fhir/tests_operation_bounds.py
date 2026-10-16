@@ -320,6 +320,18 @@ class FhirOperationBoundsTest(OCLTestCase):
                         [member['code'] for member in response.data['expansion'].get('contains', [])], ['c1'], msg)
                     self.assertTrue(row_reads(queries), msg)  # the concepts it read were checked
 
+    def test_expand_inputs_it_refuses_read_nothing(self):
+        """An $expand input that would need an expansion computed for the request is a 400 before anything is read."""
+        for name in ('date', 'exclude-system', 'system-version', 'check-system-version', 'force-system-version',
+                     'designation', 'contextDirection', 'context', 'includeDefinition'):
+            for method in ('GET', 'POST valueString'):
+                response, queries = self.request(
+                    '/fhir/ValueSet/$expand', method, url=VALUE_SET,
+                    **{name: 'true' if name == 'includeDefinition' else SYSTEM})
+                self.assertEqual(response.status_code, 400, (name, method))
+                self.assertEqual(response.data['issue'][0]['expression'], [name], (name, method))
+                self.assertEqual(row_reads(queries), [], (name, method))
+
     def test_expand_takes_no_list_shortcut(self):
         """A search, sort, facets, search stats or CSV export never stands in for $expand's own reading."""
         shortcuts = {

@@ -8,6 +8,7 @@ trace; a fixed number of queries. OpenConceptLab/ocl_online#451.
 """
 import json
 import re
+from urllib.parse import quote
 
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
@@ -38,6 +39,8 @@ RETIRED = {'system': CIEL, 'version': 'v2', 'code': '103', 'display': 'HIV antib
 BATCH = {'system': REST, 'version': '4.0.1', 'code': 'batch'}
 PRIVATE = {'system': HIV, 'version': 'v1', 'code': 'P1', 'display': 'Private code'}
 USED = [f'{REST}|4.0.1', f'{CIEL}|v2']
+OLD_URL = 'http://example.org/fhir/CodeSystem/renamed-old'
+NEW_URL = 'http://example.org/fhir/CodeSystem/renamed'
 
 
 def used(*systems):
@@ -245,12 +248,35 @@ class ExpandCases(OpsCorpusMixin):
         self.assertEqual(answer['contains'][2], {'system': REST, 'code': 'batch'})
         self.assertEqual(answer['parameter'], used(REST, f'{CIEL}|v2'))
 
-    def test_a_code_stored_percent_encoded_is_answered_decoded(self):
-        self.fevers_v1.expansion.concepts.add(ConceptFactory(
-            parent=self.ciel, mnemonic='ND53.Y%26XK70', sources=[self.ciel_v2],
-            names=[name('Encoded', preferred=True)]))
-        self.assertEqual(self.expansion(self.expand(url=FEVERS, filter='encoded'))['contains'][0]['code'],
-                         'ND53.Y&XK70')
+    def test_a_code_stored_percent_encoded_is_answered_and_filtered_decoded(self):
+        """OCL stores a code with reserved or non-ASCII characters percent-encoded: it is answered as FHIR spells it,
+        and filter finds it by that spelling too, whole or by any word in it (Codex F1.2)."""
+        self.fevers_v1.expansion.concepts.add(
+            ConceptFactory(parent=self.ciel, mnemonic='ND53.Y%26XK70', sources=[self.ciel_v2],
+                           names=[name('Encoded', preferred=True)]),
+            ConceptFactory(parent=self.ciel, mnemonic=quote('café'), sources=[self.ciel_v2],
+                           names=[name('Coffee shop', preferred=True)]))
+        encoded = ['ND53.Y&XK70']
+        for text, codes in (('encoded', encoded), ('ND53.Y&XK70', encoded), ('XK70', encoded), ('xk', encoded),
+                            ('Y&XK', encoded), ('café', ['café']), ('CAF', ['café']), ('K70', [])):
+            expansion = self.expansion(self.expand(url=FEVERS, filter=text))
+            self.assertEqual([member['code'] for member in expansion.get('contains', [])], codes, text)
+            self.assertEqual(expansion['total'], len(codes), text)
+
+    def test_a_members_system_is_its_releases_own_canonical_url(self):
+        """A release with a canonical URL of its own names its members' system, else its repository's does, in contains
+        and in used-codesystem (Codex F1.3; search and read follow the same rule)."""
+        renamed = source(self.acme, 'renamed', canonical_url=NEW_URL)
+        old = source(self.acme, 'renamed', 'v1', released=True, canonical_url=OLD_URL)
+        plain = source(self.acme, 'renamed', 'v2', released=True, canonical_url=None)
+        for code, sources in (('R1', [old]), ('R2', [plain]), ('R3', [])):
+            self.fevers_v1.expansion.concepts.add(ConceptFactory(
+                parent=renamed, mnemonic=code, sources=sources, names=[name(f'Renamed {code}', preferred=True)]))
+        answer = self.expansion(self.expand(url=FEVERS, filter='renamed'))
+        self.assertEqual([(member['system'], member.get('version'), member['code']) for member in answer['contains']], [
+            (OLD_URL, 'v1', 'R1'), (NEW_URL, 'v2', 'R2'), (NEW_URL, None, 'R3')])
+        self.assertEqual([item['valueUri'] for item in answer['parameter'] if item['name'] == 'used-codesystem'],
+                         sorted([*USED, f'{OLD_URL}|v1', f'{NEW_URL}|v2', NEW_URL]))
 
     # what the caller isn't shown leaves no trace
 
@@ -309,6 +335,27 @@ class ExpandCases(OpsCorpusMixin):
             self.assertEqual(response.data['issue'][0]['expression'], [parameter['name']])
         response = self.post_expand([{'name': 'url', 'valueUri': FEVERS}, {'name': 'count', 'valueBoolean': True}])
         self.assert_outcome(response, 400, 'invalid', 'invalid-data')
+
+    def test_inputs_it_does_not_honour_are_refused(self):
+        """Every R4 $expand input either shapes the answer, is one a stored expansion always satisfies, or is a 400
+        not-supported naming it, GET and POST: none is ignored (Codex F1.1). Names that aren't $expand inputs are."""
+        refused = {
+            'date': ('valueDateTime', '2020-01-01'), 'exclude-system': ('valueCanonical', CIEL),
+            'system-version': ('valueCanonical', f'{CIEL}|v1'),
+            'check-system-version': ('valueCanonical', f'{CIEL}|v1'),
+            'force-system-version': ('valueCanonical', f'{CIEL}|v1'), 'designation': ('valueString', 'fr'),
+            'contextDirection': ('valueCode', 'incoming'), 'includeDefinition': ('valueBoolean', True)}
+        for name_, (value_type, value) in refused.items():
+            responses = (self.expand(url=FEVERS, **{name_: 'true' if value is True else value}),
+                         self.post_expand([{'name': 'url', 'valueUri': FEVERS}, {'name': name_, value_type: value}]))
+            for response in responses:
+                self.assert_outcome(response, 400, 'not-supported', 'not-supported')
+                self.assertEqual(response.data['issue'][0]['expression'], [name_], name_)
+        expected = self.expand(url=FEVERS).content
+        for params in ({'excludeNested': 'true'}, {'excludeNested': 'false'}, {'excludeNotForUI': 'true'},
+                       {'excludePostCoordinated': 'true'}, {'includeDefinition': 'false'}, {'q': 'anything'}):
+            self.assertEqual(self.expand(url=FEVERS, **params).content, expected, params)
+        self.assert_outcome(self.expand(url=FEVERS, excludeNested='perhaps'), 400, 'invalid', 'invalid-data')
 
     def test_an_expansion_that_cannot_be_served_is_a_422(self):
         expansion = self.fevers_v1.expansion
