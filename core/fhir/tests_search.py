@@ -8,6 +8,7 @@ the concept limit, else not-present. OpenConceptLab/ocl_online#451.
 from datetime import datetime, timezone as dt_timezone
 from urllib.parse import parse_qs, urlsplit
 
+from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 from django.db import connection, OperationalError
 from django.test import TransactionTestCase
@@ -35,6 +36,7 @@ ICD10_VS = 'http://sahra.tools/fhir/ValueSet/icd10-all'
 CIEL_VS = 'https://example.org/ValueSet/ciel-set'
 SUBSETTED = {'system': 'http://terminology.hl7.org/CodeSystem/v3-ObservationValue', 'code': 'SUBSETTED'}
 HL7_OID = {'system': 'urn:ietf:rfc:3986', 'value': 'urn:oid:2.16.840.1.113883.6.90'}
+ACSN = {'text': 'Accession ID', 'coding': [{'system': 'http://hl7.org/fhir/v2/0203', 'code': 'ACSN'}]}
 
 
 def source(owner, mnemonic, version=HEAD, **kwargs):
@@ -262,6 +264,50 @@ class CodeSystemSearchTest(SearchCorpusMixin, OCLTestCase):  # pylint: disable=t
         self.assertEqual(self.search('CodeSystem', identifier='/orgs/sehatapp/ValueSet/ICD-10/')['total'], 0)
         self.assertEqual(
             self.search('CodeSystem', identifier='/orgs/FHIR-Fixtures/CodeSystem/fixture-codes/')['total'], 0)
+
+    def test_identifier_system_is_matched_on_the_same_identifier(self):
+        """
+        |value is an identifier without a system; system| is any value of that system. Both are checked on one
+        identifier, as it's shown: a stored identifier without a system key shows API_BASE_URL's, a null or empty one
+        none; the generated accession identifier (API_BASE_URL) shows when no accession identifier is stored.
+        """
+        oid = 'urn:oid:2.16.840.1.113883.6.90'
+        Source.objects.filter(id=self.ciel_v2.id).update(identifier=[{'system': None, 'value': oid}])
+        Source.objects.filter(id=self.sehat_icd_v1.id).update(identifier=[{'system': '', 'value': oid}])
+        Source.objects.filter(id=self.ciel_v1.id).update(identifier=[{'value': oid}, {'system': 'urn:x', 'value': 'y'}])
+        Source.objects.filter(id=self.jdoe_codes_v1.id).update(identifier=[
+            {'system': 'https://fhir.openconceptlab.org', 'value': '/users/jdoe/CodeSystem/my-codes/', 'type': ACSN}])
+        api = settings.API_BASE_URL
+
+        self.assertEqual(
+            self.keys(self.search('CodeSystem', identifier=f'|{oid}')), sorted([f'{CIEL}|v2', f'{ICD10}|v1.0']))
+        self.assertEqual(self.keys(self.search('CodeSystem', identifier=oid)), sorted(
+            [f'{CIEL}|v1', f'{CIEL}|v2', f'{ICD10}|ICD102019', f'{ICD10}|v1.0']))
+        self.assertEqual(self.keys(self.search('CodeSystem', identifier=f'{api}|{oid}')), [f'{CIEL}|v1'])
+        self.assertEqual(self.search('CodeSystem', identifier=f'urn:x|{oid}')['total'], 0)  # not the same identifier
+        self.assertEqual(self.search('CodeSystem', identifier='|/orgs/sehatapp/CodeSystem/ICD-10/')['total'], 0)
+        self.assertEqual(self.search('CodeSystem', identifier='|')['total'], 0)
+
+        # system|: the generated accession identifiers too, for a repository with no stored identifier at all
+        Source.objects.filter(id=self.who_icd_2019.id).update(identifier={})
+        bundle = self.search('CodeSystem', identifier=f'{api}|')
+        self.assertEqual(
+            self.keys(bundle), sorted([f'{CIEL}|v1', f'{CIEL}|v2', f'{ICD10}|ICD102019', f'{ICD10}|v1.0']))
+        for entry in bundle['entry']:
+            self.assertIn(api, [identifier.get('system') for identifier in entry['resource']['identifier']])
+        # a stored accession identifier is shown instead of the generated one
+        self.assertEqual(
+            self.keys(self.search('CodeSystem', identifier='https://fhir.openconceptlab.org|')),
+            ['https://example.org/my-codes|v1'])
+        self.assertEqual(self.search('CodeSystem', identifier=f'{api}|/users/jdoe/CodeSystem/my-codes/')['total'], 0)
+        self.assertEqual(
+            self.keys(self.search('CodeSystem', identifier='/users/jdoe/CodeSystem/my-codes/')),
+            ['https://example.org/my-codes|v1'])
+        self.assertEqual(self.keys(self.search('CodeSystem', identifier='urn:x|')), [f'{CIEL}|v1'])
+
+        # identifiers that aren't a list aren't shown, so they aren't found either
+        Source.objects.filter(id=self.ciel_v1.id).update(identifier={'system': 'urn:x', 'value': 'y'})
+        self.assertEqual(self.search('CodeSystem', identifier='urn:x|')['total'], 0)
 
     def test_last_updated_and_its_prefixes(self):
         Source.objects.filter(id=self.ciel_v2.id).update(updated_at=at(2020))

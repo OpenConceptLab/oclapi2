@@ -18,13 +18,15 @@ FHIR search and read of CodeSystem, ValueSet and ConceptMap: SVCM's Query transa
 - A version released before its repository had a canonical URL has the repository's (HEAD's), in its `url` and for
   the url parameter.
 """
+import json
 import re
 from datetime import datetime, timedelta, timezone as dt_timezone
 
 from django.conf import settings
 from django.db import connection, transaction, OperationalError
-from django.db.models import Exists, OuterRef, Q, Subquery
+from django.db.models import BooleanField, Exists, Func, OuterRef, Q, Subquery, TextField, Value
 from django.db.models.functions import Coalesce
+from django.db.models.lookups import Exact
 from django.utils import timezone
 from psycopg2 import errorcodes
 from rest_framework.fields import CharField
@@ -64,6 +66,8 @@ PARAMETERS = {
         **COMMON_PARAMETERS, 'source-system': 'by_source', 'source-uri': 'by_source', 'target-system': 'by_target',
         'target-uri': 'by_target'},
 }
+# an OCL accession identifier, as IdentifierSerializer.find_ocl_identifier recognises one
+ACCESSION_TYPE = {'type': {'coding': [{'system': 'http://hl7.org/fhir/v2/0203', 'code': 'ACSN'}]}}
 STATUSES = {
     'active': Q(released=True, retired=False), 'retired': Q(retired=True), 'draft': Q(released=False, retired=False)}
 
@@ -172,6 +176,41 @@ def with_concepts_over_limit(queryset):
     return queryset.annotate(concepts_over_limit=Exists(links[CONCEPT_LIMIT:CONCEPT_LIMIT + 1]))
 
 
+class JsonPathExists(Func):  # pylint: disable=abstract-method
+    """jsonb_path_exists(field, path, vars, silent): whether the path finds anything, an error being no match."""
+    function = 'jsonb_path_exists'
+    output_field = BooleanField()
+
+    def __init__(self, field, path, variables):
+        super().__init__(field, Value(path), Value(json.dumps(variables)), Value(True))
+
+
+class JsonbTypeof(Func):  # pylint: disable=abstract-method
+    function = 'jsonb_typeof'
+    output_field = TextField()
+
+
+def held_identifier(system, value):
+    """
+    Rows holding an identifier shown as system|value, both checked on the same identifier: `system` None is any
+    system, '' none; `value` None is any value. IdentifierSerializer shows an identifier stored without a system key
+    under API_BASE_URL, and one with a null or empty system without one. Only a list of identifiers is shown; lax mode
+    reads a missing key as nothing (strict mode would make exists() unknown).
+    """
+    conditions, variables = [], {}
+    if value is not None:
+        conditions.append('@.value == $value')
+        variables['value'] = value
+    if system == '':
+        conditions.append('exists(@.system) && (@.system == null || @.system == "")')
+    elif system is not None:
+        no_key = ' || !exists(@.system)' if system == settings.API_BASE_URL else ''
+        conditions.append(f'(@.system == $system{no_key})')
+        variables['system'] = system
+    return Exact(JsonbTypeof('identifier'), 'array') & JsonPathExists(
+        'identifier', f'lax $[*] ? ({" && ".join(conditions)})', variables)
+
+
 class Search:
     """The criteria of one search's parameters, on the versions of a resource type at a base."""
 
@@ -245,17 +284,24 @@ class Search:
 
     def by_identifier(self, token):
         """
-        A token: system|value, a value with any system, or system| for any value. It matches an identifier the
-        repository holds, or the OCL accession identifier (/orgs/{org}/{type}/{id}/) every resource carries.
+        A token, matched on one identifier as it's shown: value (any system), system|value, |value (no system) or
+        system| (any value). Besides the identifiers a repository holds, every resource without a stored accession
+        identifier shows a generated one: system API_BASE_URL, value /{orgs|users}/{owner}/{type}/{id}/.
         """
         system, *value = split(token, '|')
-        system, value = (None, unescape(system)) if not value else (unescape(system), unescape('|'.join(value)))
-        identifier = {key: item for key, item in (('system', system), ('value', value)) if item}
-        criterion = Q(identifier__contains=[identifier]) if identifier else NOTHING
-        accession = re.fullmatch(r'/(orgs|users)/([^/]+)/([^/]+)/([^/]+)/?', value or '')
-        if accession and accession.group(3) == self.resource_type and system in (None, '', settings.API_BASE_URL):
+        system, value = (None, unescape(system)) if not value else (unescape(system), unescape('|'.join(value)) or None)
+        if system == '' and value is None:
+            return NOTHING
+        criterion = held_identifier(system, value)
+        if system not in (None, settings.API_BASE_URL):
+            return criterion
+        generated = ~Q(identifier__contains=[ACCESSION_TYPE])
+        if value is None:
+            return criterion | generated
+        accession = re.fullmatch(r'/(orgs|users)/([^/]+)/([^/]+)/([^/]+)/?', value)
+        if accession and accession.group(3) == self.resource_type:
             owner = 'organization__mnemonic' if accession.group(1) == 'orgs' else 'user__username'
-            criterion |= Q(**{owner: accession.group(2), 'mnemonic': accession.group(4)})
+            criterion |= Q(Q(**{owner: accession.group(2), 'mnemonic': accession.group(4)}) & generated)
         return criterion
 
     @staticmethod
