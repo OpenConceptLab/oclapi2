@@ -16,9 +16,12 @@ types as R5-shaped relationships. core.fhir.adapters.r4 writes the answer as an 
 - Map types (design D27): case, spaces, hyphens, underscores and surrounding whitespace don't matter, so SAME-AS,
   SAME AS and Same As are one. The relationships are core.concept_maps.constants'; result is true when some match isn't
   not-related-to. With no match, the answer says why (message).
-- `source`, the value set the code was chosen from, is a precondition: a code outside it has no translation, and one
-  that resolves to no value set (or code system) the caller is shown is not found. `target` narrows nothing: OCL's
-  ConceptMaps declare no target scope, so it selects no map (as FHIRsmith reads OCL's maps); `targetsystem` narrows.
+- The code's scope, `source` (the value set the code was chosen from; in reverse, which reverses the meaning of
+  source and target, `target`), is a precondition: a code outside it has no translation, and one that resolves to no
+  value set (or code system) the caller is shown is not found. The other scope narrows nothing: OCL's ConceptMaps
+  declare no scope, so it selects no map (as FHIRsmith reads OCL's maps); `targetsystem` narrows.
+- The code's `version` (or its coding's) keeps the mappings of that version of its system, and those of none
+  (from_source_version; in reverse, to_source_version).
   `conceptMap` (an inline map) and `dependency` aren't supported.
 - Cost: a fixed number of queries whatever the number of mappings (resolution, the sources the systems name, then
   the mappings, with whether the caller is shown their sources); at most MATCH_LIMIT matches.
@@ -45,7 +48,7 @@ OCL_PATH = re.compile(r'/(orgs|users)/([^/]+)/(?:sources|collections|CodeSystem|
 SIDES = ('from', 'to')
 
 Coding = namedtuple('Coding', 'system code version')
-Request = namedtuple('Request', 'coding url concept_map_version source targetsystem reverse')
+Request = namedtuple('Request', 'coding url concept_map_version scope scope_name targetsystem reverse')
 
 
 def map_type_key(map_type):
@@ -128,6 +131,14 @@ def shown_as(side, system, source_ids, namespace, user):
     return (stored | own) & unnamed
 
 
+def of_version(side, version):
+    """Q for mappings whose `side` is that version of its system, or names no version; None names no constraint."""
+    if not version:
+        return Q()
+    field = f'{side}_source_version'
+    return Q(**{field: version}) | Q(**{f'{field}__isnull': True}) | Q(**{field: ''})
+
+
 def with_side(queryset, side, namespace, user):
     """
     Each mapping annotated with whether the base shows the caller its `side`'s source ({side}_shown), and the canonical
@@ -194,8 +205,10 @@ def read_request(parameters):
     else:
         raise outcomes.InvalidError('$translate needs the code it translates: code and system, coding, or '
                                     'codeableConcept.', expression='code')
-    return Request(coding, text(parameters, 'url'), text(parameters, 'conceptMapVersion'), text(parameters, 'source'),
-                   text(parameters, 'targetsystem'), boolean(parameters, 'reverse'))
+    reverse = boolean(parameters, 'reverse')
+    scope_name = 'target' if reverse else 'source'  # R4: reverse reverses the meaning of source and target
+    return Request(coding, text(parameters, 'url'), text(parameters, 'conceptMapVersion'), text(parameters, scope_name),
+                   scope_name, text(parameters, 'targetsystem'), reverse)
 
 
 class Translation:
@@ -208,12 +221,12 @@ class Translation:
     def answer(self):
         """
         {'result', 'message', 'matches'}, each match {'relationship', 'concept': {system, code}, 'source'}. In
-        FHIRsmith's order: the ConceptMap url names, then the source scope, then the ConceptMap of the code's system.
+        FHIRsmith's order: the ConceptMap url names, then the code's scope, then the ConceptMap of the code's system.
         """
         request, coding = self.request, self.request.coding
         concept_map, named = self.named_concept_map() if request.url else (None, None)
-        if request.source and not self.in_source_scope():
-            return self.no_match(f"'{coding.system}#{coding.code}' is not in the value set '{request.source}', so no "
+        if request.scope and not self.in_scope():
+            return self.no_match(f"'{coding.system}#{coding.code}' is not in the value set '{request.scope}', so no "
                                  "ConceptMap can translate it")
         if not request.url:
             concept_map, named = self.code_system_map()
@@ -271,24 +284,24 @@ class Translation:
         """A ConceptMap version as a match's source names it: canonical URL (else the URL it was named by)|version."""
         return f"{instance.canonical_url or url.partition('|')[0]}|{instance.version}"
 
-    def in_source_scope(self):
+    def in_scope(self):
         """
-        Whether the code is in the `source` scope: its own code system (or that system's implicit value set); a value
-        set it is a member of (its default expansion); not another code system. Neither one the caller is shown is a
-        404, as FHIRsmith answers a scope it can't find.
+        Whether the code is in its scope (`source`; in reverse, `target`): its own code system (or that system's
+        implicit value set); a value set it is a member of (its default expansion); not another code system. Neither one
+        the caller is shown is a 404 naming the parameter, as FHIRsmith answers a scope it can't find.
         """
-        source, coding = self.request.source, self.request.coding
-        if source in (coding.system, f'{coding.system}?fhir_vs'):
+        scope, name, coding = self.request.scope, self.request.scope_name, self.request.coding
+        if scope in (coding.system, f'{coding.system}?fhir_vs'):
             return True
         try:
-            value_set = self.resolve('ValueSet', source, None, 'source')
+            value_set = self.resolve('ValueSet', scope, None, name)
         except UnresolvedError:
             try:
-                self.resolve('CodeSystem', source, None, 'source')
+                self.resolve('CodeSystem', scope, None, name)
             except UnresolvedError as ex:
                 raise outcomes.NotFoundError(
-                    f"The value set '{source}' could not be found, so the scope of the translation cannot be "
-                    "determined", expression='source', tx_issue_type='not-found') from ex
+                    f"The value set '{scope}' could not be found, so the scope of the translation cannot be "
+                    "determined", expression=name, tx_issue_type='not-found') from ex
             return False
         return bool(value_set.expansion_uri) and Expansion.concepts.through.objects.filter(
             expansion__uri=value_set.expansion_uri, concept__mnemonic__in=stored_codes(coding.code),
@@ -304,7 +317,8 @@ class Translation:
         sides = {near: request.coding.system, **({far: request.targetsystem} if request.targetsystem else {})}
         sources = named_sources(set(sides.values()), self.namespace, self.user)
         mappings = concept_map.get_mappings_queryset().filter(
-            retired=False, **{f'{near}_concept_code__in': stored_codes(request.coding.code)})
+            of_version(near, request.coding.version), retired=False,
+            **{f'{near}_concept_code__in': stored_codes(request.coding.code)})
         for side, system in sides.items():
             mappings = mappings.filter(shown_as(side, system, sources[system], self.namespace, self.user))
         rows = with_side(mappings, far, self.namespace, self.user).order_by('id').values(

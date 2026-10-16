@@ -8,6 +8,7 @@ answers as an unknown one; a fixed number of queries. OpenConceptLab/ocl_online#
 """
 import json
 from itertools import product
+from unittest import expectedFailure
 
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
@@ -37,6 +38,7 @@ UNKNOWN = 'http://example.org/ocl-fhir-conformance/unknown-system'
 FIXTURE = 'https://openconceptlab.org/fhir-fixtures/CodeSystem/fixture-codes'
 DAK = 'https://joe.aml'
 CIEL_VS = 'https://example.org/ValueSet/ciel-set'
+ICD10_VS = 'https://example.org/ValueSet/icd-set'
 SNOMED_PATH = '/orgs/IHTSDO/ConceptMap/SNOMED-CT/'  # a source with no canonical URL is named by its OCL path
 OMOP_PATH = '/orgs/OHDSI/ConceptMap/OMOP-Standard/'  # a mapping to a source OCL doesn't hold: the URL it stores
 PRIVATE_PATH = '/orgs/MOH/ConceptMap/private-codes/'
@@ -243,6 +245,41 @@ class TranslateMappingsTest(TranslateCorpusMixin, OCLTestCase):
                      if group['target'] == ICD10)
         read = {element['code']: element['target'][0]['equivalence'] for element in group['element']}
         self.assertEqual([read[f'old-{index}'] for index in range(len(stored))], list(stored.values()))
+
+    def test_the_code_system_version_names_the_mappings_of_that_version(self):
+        """
+        version (or the coding's version) narrows an explicit ConceptMap's mappings to those of that version of the
+        code's system, and the unversioned ones; in reverse, the version is the target side's.
+        """
+        maps = source(self.pih, 'version-map', canonical_url='https://pih.example/fhir/ConceptMap/versions')
+        maps_v1 = source(self.pih, 'version-map', 'v1', released=True, canonical_url=maps.canonical_url)
+        if self.registry:
+            GlobalURLRegistryFactory(url=maps.canonical_url, namespace=self.pih.uri)
+        for from_code, from_version, to_code, to_version in (
+                ('9000', 'v1', 'V1', None), ('9000', 'v2', 'V2', None), ('9000', None, 'ANY', None),
+                ('R2019', None, 'O55', 'ICD102019'), ('R2010', None, 'O55', '2010'), ('RANY', '', 'O55', '')):
+            self.mapping('SAME-AS', self.icd, to_code, [maps_v1], parent=maps, from_source=self.ciel_source,
+                         from_code=from_code, from_source_version=from_version, to_source_version=to_version)
+        forward = {'url': maps.canonical_url, 'system': CIEL, 'code': '9000'}
+        for version, codes in ((None, ['ANY', 'V1', 'V2']), ('v1', ['ANY', 'V1']), ('v2', ['ANY', 'V2']),
+                               ('v3', ['ANY'])):
+            expected = [f'{ICD10}|{code}|equivalent' for code in codes]
+            versioned = {'version': version} if version else {}
+            self.assertEqual(self.matches(self.answer(self.get(**forward, **versioned))), expected, version)
+            coding = {'system': CIEL, 'code': '9000', **({'version': version} if version else {})}
+            self.assertEqual(self.matches(self.answer(self.post([
+                {'name': 'url', 'valueUri': maps.canonical_url}, {'name': 'coding', 'valueCoding': coding}]))),
+                expected, version)
+        reverse = {'url': maps.canonical_url, 'system': ICD10, 'code': 'O55', 'reverse': 'true'}
+        for version, codes in ((None, ['R2010', 'R2019', 'RANY']), ('ICD102019', ['R2019', 'RANY']),
+                               ('2010', ['R2010', 'RANY'])):
+            expected = [f'{CIEL}|{code}|equivalent' for code in codes]
+            versioned = {'version': version} if version else {}
+            self.assertEqual(self.matches(self.answer(self.get(**reverse, **versioned))), expected, version)
+            coding = {'system': ICD10, 'code': 'O55', **({'version': version} if version else {})}
+            self.assertEqual(self.matches(self.answer(self.post([
+                {'name': 'url', 'valueUri': maps.canonical_url}, {'name': 'coding', 'valueCoding': coding},
+                {'name': 'reverse', 'valueBoolean': True}]))), expected, version)
 
     def test_not_same_as_alone_is_no_translation(self):
         """result is true only when some match isn't disjoint (R4: not unmatched or disjoint)."""
@@ -456,16 +493,21 @@ class TranslateBoundsTest(TranslateCorpusMixin, OCLTestCase):
 
 
 class TranslateScopeTest(TranslateCorpusMixin, OCLTestCase):
-    """source: the value set (or code system) the code was chosen from. target narrows nothing (FHIRsmith's reading)."""
+    """
+    source: the value set (or code system) the code was chosen from; in reverse, target is. The other narrows nothing
+    (FHIRsmith's reading).
+    """
 
     def setUp(self):
         super().setUp()
-        concept = ConceptFactory(parent=self.ciel_source, mnemonic='113275')
-        collection(self.ciel, 'ciel-set', canonical_url=CIEL_VS)
-        self.ciel_set = collection(self.ciel, 'ciel-set', 'v1', released=True, canonical_url=CIEL_VS)
-        expansion = ExpansionFactory(collection_version=self.ciel_set)
-        expansion.concepts.set([concept])
-        Collection.objects.filter(id=self.ciel_set.id).update(expansion_uri=expansion.uri)
+        for owner, mnemonic, url, code_system, code in ((self.ciel, 'ciel-set', CIEL_VS, self.ciel_source, '113275'),
+                                                        (self.who, 'icd-set', ICD10_VS, self.icd, 'O02.1')):
+            concept = ConceptFactory(parent=code_system, mnemonic=code)
+            collection(owner, mnemonic, canonical_url=url)
+            value_set = collection(owner, mnemonic, 'v1', released=True, canonical_url=url)
+            expansion = ExpansionFactory(collection_version=value_set)
+            expansion.concepts.set([concept])
+            Collection.objects.filter(id=value_set.id).update(expansion_uri=expansion.uri)
 
     def test_a_code_in_the_source_scope_is_translated(self):
         for scope in (CIEL, f'{CIEL}?fhir_vs', CIEL_VS):
@@ -488,6 +530,25 @@ class TranslateScopeTest(TranslateCorpusMixin, OCLTestCase):
         for target in (ICD10, CIEL_VS, UNKNOWN):
             self.assertEqual(self.matches(self.answer(self.get(system=CIEL, code='113275', target=target))),
                              CIEL_113275_V2, target)
+
+    def test_reverse_swaps_the_scopes(self):
+        """
+        reverse reverses the meaning of source and target (R4): the code named, now a target code, must be in the
+        target scope, and source, now the scope of the codes sought, narrows nothing, as target does forward.
+        """
+        reverse = {'system': ICD10, 'code': 'O02.1', 'targetsystem': CIEL, 'reverse': 'true'}
+        for scopes in ({'target': ICD10}, {'target': ICD10_VS}, {'target': f'{ICD10}?fhir_vs'}, {'source': CIEL_VS},
+                       {'source': CIEL}, {'source': UNKNOWN}, {'source': ICD10_VS},
+                       {'source': CIEL_VS, 'target': ICD10_VS}):
+            parameters = self.answer(self.get(**reverse, **scopes))
+            self.assertEqual(self.matches(parameters), [f'{CIEL}|113275|narrower'], scopes)
+        for scopes in ({'target': CIEL_VS}, {'target': CIEL}, {'source': ICD10_VS, 'target': CIEL_VS}):
+            parameters = self.answer(self.get(**reverse, **scopes))
+            self.assertFalse(self.result(parameters), scopes)
+            self.assertEqual(self.matches(parameters), [], scopes)
+            self.assertEqual(len(self.values(parameters, 'message')), 1, scopes)
+        for scope in (UNKNOWN, PRIVATE):
+            self.assertOutcome(self.get(**reverse, target=scope), 404, 'not-found', 'not-found', 'target')
 
     def test_svcm_shape(self):
         """SVCM's ITI-101 request: url, source, target, system and code."""
@@ -543,6 +604,18 @@ class TranslateAccessTest(TranslateCorpusMixin, OCLTestCase):
             other = PRIVATE if system == PRIVATE_PATH else PRIVATE_PATH
             self.assertEqual(self.matches(self.answer(self.get(
                 base=base, user=user, system=CIEL, code='113275', targetsystem=other))), [], (base, user))
+
+    @expectedFailure  # F1.2: until WP4+WP5's resolve() resolves a default to the newest release the caller is shown
+    def test_the_default_version_is_the_newest_release_the_caller_is_shown(self):
+        """
+        A newer private release doesn't hide the public one before it: without a version (and without url, or with
+        it), the newest release the caller may see is the ConceptMap.
+        """
+        source(self.ciel, 'CIEL', 'v3', released=True, canonical_url=CIEL, public_access=ACCESS_TYPE_NONE)
+        for params in ({'system': CIEL, 'code': '138405'}, {'url': CIEL, 'system': CIEL, 'code': '138405'}):
+            parameters = self.answer(self.get(**params))
+            self.assertEqual(self.matches(parameters), [f'{ICD10}|B20|equivalent'], params)
+            self.assertEqual(parameters['parameter'][1]['part'][2]['valueUri'], f'{CIEL}|v2', params)
 
     def test_a_reverse_from_a_source_the_caller_is_not_shown(self):
         """MOH's private map of P1 is no ConceptMap to those it isn't shown."""
