@@ -22,6 +22,7 @@ from core.collections.tests.factories import OrganizationCollectionFactory, Expa
 from core.common.mixins import ListWithHeadersMixin
 from core.common.tests import OCLTestCase
 from core.common.views import BaseAPIView
+from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
 from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
 from core.mappings.models import Mapping
@@ -29,6 +30,7 @@ from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
+from core.url_registry.tests_resolution import set_registry_toggle
 
 SYSTEM = 'http://example.org/fhir/CodeSystem/bounds'
 VALUE_SET = 'http://example.org/fhir/ValueSet/bounds'
@@ -70,6 +72,7 @@ class FhirOperationBoundsTest(OCLTestCase):
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def setUp(self):
+        set_registry_toggle(False)  # the operations resolve through core.fhir.resolve: no registry, as in production
         super().setUp()
         self.org = OrganizationFactory(mnemonic='BoundsOrg')
         self.source = OrganizationSourceFactory(organization=self.org, mnemonic='bounds', canonical_url=SYSTEM)
@@ -91,6 +94,8 @@ class FhirOperationBoundsTest(OCLTestCase):
         self.collection.add_references([CollectionReference(
             expression=self.concept.uri, collection=self.collection, code='c1', system=self.source.uri, version='v1')])
         self.collection_v1.seed_references()
+        self.collection_v1.expansion.concepts.add(  # as the release's expansion holds it: the code system release's c1
+            *Concept.objects.filter(sources=self.source_v1, mnemonic='c1'))
         self.client = APIClient()
 
     def request(self, path, method, headers=None, **inputs):
@@ -195,6 +200,39 @@ class FhirOperationBoundsTest(OCLTestCase):
 
                 self.assertEqual(unbounded_reads(queries), [], (system, code))
                 self.assertEqual(response.status_code, 200 if system and code else 400, (system, code))
+
+    def test_codings_and_instance_routes_read_only_the_named_code(self):
+        """The Coding inputs and the instance-level routes read only the code they name too; without one, a 400."""
+        operations = [
+            ('/fhir/CodeSystem/$lookup', None), ('/fhir/CodeSystem/$validate-code', None),
+            ('/fhir/ValueSet/$validate-code', VALUE_SET),
+            (f'/fhir/CodeSystem/{self.source_v1.id}/$lookup', None),
+            (f'/fhir/CodeSystem/{self.source_v1.id}/$validate-code', None),
+            (f'/orgs/{self.org.mnemonic}/ValueSet/boundsvs/$validate-code', None),
+        ]
+        inputs = [('coding', 'valueCoding', lambda coding: coding),
+                  ('codeableConcept', 'valueCodeableConcept', lambda coding: {'coding': [coding]})]
+        for (path, url), (name, value_type, wrap), code in product(operations, inputs, (None, 'c1')):
+            msg = (path, name, code)
+            with self.subTest(msg):
+                coding = {'system': SYSTEM, **({'code': code} if code else {})}
+                parameters = [{'name': name, value_type: wrap(coding)}]
+                if url:
+                    parameters.append({'name': 'url', 'valueUri': url})
+                with CaptureQueriesContext(connection) as context:
+                    response = self.client.post(
+                        path, json.dumps({'resourceType': 'Parameters', 'parameter': parameters}),
+                        content_type='application/fhir+json')
+
+                self.assertEqual(unbounded_reads(context.captured_queries), [], msg)
+                if code:
+                    self.assertEqual(response.status_code, 200, msg)
+                else:
+                    self.assert_required(response, name, msg)
+        for path in ('/fhir/CodeSystem/$lookup', '/fhir/CodeSystem/$validate-code'):
+            response, queries = self.request(path, 'GET', coding=f'{SYSTEM}|c1')  # a GET's Coding: system|code
+            self.assertEqual(unbounded_reads(queries), [], path)
+            self.assertEqual(response.status_code, 200, path)
 
     def test_operations_take_no_list_shortcut(self):
         """A search, sort, facets, search stats or CSV export never stands in for an operation's own checks."""

@@ -5,10 +5,12 @@ from core.collections.tests.factories import OrganizationCollectionFactory, Expa
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLAPITestCase
 from core.concepts.documents import ConceptDocument
+from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
+from core.url_registry.tests_resolution import set_registry_toggle
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 from core.value_sets.serializers import ValueSetDetailSerializer
@@ -18,6 +20,7 @@ class ValueSetTest(OCLAPITestCase):
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def setUp(self):
+        set_registry_toggle(False)  # the operations resolve through core.fhir.resolve: no registry, as in production
         super().setUp()
         self.org = OrganizationFactory()
         self.org_source = OrganizationSourceFactory(organization=self.org, canonical_url='http://some/url')
@@ -432,6 +435,15 @@ class ValueSetTest(OCLAPITestCase):
         self.assertEqual(len(resource['compose']['include'][1]['concept']), 1)
         self.assertEqual(resource['compose']['include'][1]['concept'][0]['code'], self.concept_2.mnemonic)
 
+    def release_system(self):
+        """FHIR shows code systems with a release: the org source's v2 is one."""
+        Source.objects.filter(id=self.org_source_v2.id).update(released=True)
+
+    def expand(self, collection, *concepts):
+        """The concepts, as the org source's v2 holds them, in the collection version's default expansion."""
+        collection.expansion.concepts.add(*Concept.objects.filter(
+            sources=self.org_source_v2, mnemonic__in=[concept.mnemonic for concept in concepts]))
+
     def test_validate_code(self):
         self.collection.add_references([
             CollectionReference(
@@ -444,6 +456,8 @@ class ValueSetTest(OCLAPITestCase):
             ),
         ])
         self.collection_v1.seed_references()
+        self.release_system()
+        self.expand(self.collection_v1, self.concept_1, self.concept_2)
 
         response = self.client.get(
             f'/orgs/{self.org.mnemonic}/ValueSet/{self.collection.mnemonic}/$validate-code/'
@@ -488,6 +502,8 @@ class ValueSetTest(OCLAPITestCase):
             ),
         ])
         self.collection_v1.seed_references()
+        self.release_system()
+        self.expand(self.collection_v1, self.concept_1, self.concept_2)
 
         response = self.client.get(
             f'/fhir/ValueSet/$validate-code/'
@@ -511,6 +527,8 @@ class ValueSetTest(OCLAPITestCase):
             ),
         ])
         self.collection_v1.seed_references()
+        self.release_system()
+        self.expand(self.collection_v1, self.concept_1, self.concept_2)
 
         response = self.client.post(
             '/fhir/ValueSet/$validate-code/',
@@ -554,34 +572,34 @@ class ValueSetTest(OCLAPITestCase):
         self.assertEqual(resource['parameter'][0]['valueBoolean'], False)
 
     def test_validate_code_private_value_set_only_for_members_and_staff(self):
-        self.collection.add_references([
-            CollectionReference(
-                expression=self.concept_1.uri, collection=self.collection, code=self.concept_1.mnemonic,
-                system=self.concept_1.parent.uri, version='v2'
-            ),
-        ])
-        self.collection_v1.seed_references()
+        """A private value set: at its owner's base for members and staff; anyone else, and anyone at the global base
+        (which shows public value sets only), is answered as for a value set that doesn't exist."""
+        self.release_system()
+        self.expand(self.collection_v1, self.concept_1)
         Collection.objects.filter(mnemonic='c1', organization=self.org).update(public_access=ACCESS_TYPE_NONE)
         member = UserProfileFactory()
         self.org.members.add(member)
         admin = UserProfile.objects.get(username='ocladmin')
         query = f'system=http://some/url&systemVersion={self.org_source_v2.version}&code={self.concept_1.mnemonic}'
-        urls = [
-            f'/orgs/{self.org.mnemonic}/ValueSet/{self.collection.mnemonic}/$validate-code/?{query}',
-            f'/fhir/ValueSet/$validate-code/?url=http://c1.com&{query}',
-        ]
+        route = f'/orgs/{self.org.mnemonic}/ValueSet/{self.collection.mnemonic}/$validate-code/?{query}'
+        by_url = f'/fhir/ValueSet/$validate-code/?url=http://c1.com&{query}'
 
-        for url in urls:
-            for headers, expected in [
-                    ({}, False),
-                    ({'HTTP_AUTHORIZATION': 'Token ' + self.user_token}, False),
-                    ({'HTTP_AUTHORIZATION': 'Token ' + member.get_token()}, True),
-                    ({'HTTP_AUTHORIZATION': 'Token ' + admin.get_token()}, True),
-            ]:
-                response = self.client.get(url, **headers)
-
-                self.assertEqual(response.status_code, 200, url)
-                self.assertEqual(response.data['parameter'][0]['valueBoolean'], expected, (url, headers))
+        for headers, expected in [
+                ({}, 404),
+                ({'HTTP_AUTHORIZATION': 'Token ' + self.user_token}, 404),
+                ({'HTTP_AUTHORIZATION': 'Token ' + member.get_token()}, True),
+                ({'HTTP_AUTHORIZATION': 'Token ' + admin.get_token()}, True),
+        ]:
+            response = self.client.get(route, **headers)
+            if expected is True:
+                self.assertEqual(response.status_code, 200, headers)
+                self.assertTrue(response.data['parameter'][0]['valueBoolean'], headers)
+            else:
+                self.assertEqual(response.status_code, expected, headers)
+                self.assertEqual(response.data['issue'][0]['code'], 'not-found')
+            response = self.client.get(by_url, **headers)
+            self.assertEqual(response.status_code, 422, headers)
+            self.assertEqual(response.data['issue'][0]['code'], 'not-found')
 
     def add_reference(self, collection, concept):
         if not collection.expansion_uri:
@@ -594,17 +612,32 @@ class ValueSetTest(OCLAPITestCase):
             ),
         ])
 
+    def released(self, collection, concept):
+        """A release of a collection, whose default expansion holds the concept."""
+        owner = {'user': collection.user} if collection.user_id else {'organization': collection.organization}
+        factory = UserCollectionFactory if collection.user_id else OrganizationCollectionFactory
+        release = factory(mnemonic=collection.mnemonic, version='v1', released=True,
+                          public_access=collection.public_access, **owner)
+        self.add_reference(release, concept)
+        self.expand(release, concept)
+        return release
+
     def test_validate_code_reads_only_value_sets_the_requester_can_view(self):
-        self.add_reference(self.collection, self.concept_1)
+        """
+        Only the value set the request names is read (`url`, or the route's), never one other query params pick; one
+        the requester can't view answers as one that doesn't exist. Without `url`, the global route checks the code
+        system alone.
+        """
+        self.release_system()
+        self.expand(self.collection_v1, self.concept_1)
         private_org = OrganizationFactory()
         member = UserProfileFactory()
         private_org.members.add(member)
-        private_collection = OrganizationCollectionFactory(
-            organization=private_org, mnemonic='priv', public_access=ACCESS_TYPE_NONE)
-        self.add_reference(private_collection, self.concept_2)
-        self.add_reference(OrganizationCollectionFactory(organization=private_org, mnemonic='pub'), self.concept_1)
+        priv = self.released(OrganizationCollectionFactory(
+            organization=private_org, mnemonic='priv', public_access=ACCESS_TYPE_NONE), self.concept_2)
+        self.released(OrganizationCollectionFactory(organization=private_org, mnemonic='pub'), self.concept_1)
         owner = UserProfileFactory()
-        self.add_reference(
+        upriv = self.released(
             UserCollectionFactory(user=owner, mnemonic='upriv', public_access=ACCESS_TYPE_NONE), self.concept_2)
         query = f'system=http://some/url&systemVersion={self.org_source_v2.version}&code='
         private_org_params = f'org={private_org.mnemonic}&collection=priv'
@@ -613,13 +646,20 @@ class ValueSetTest(OCLAPITestCase):
             for url in [
                     f'/orgs/{self.org.mnemonic}/ValueSet/c1/$validate-code/?{private_org_params}&{query}',
                     f'/orgs/{private_org.mnemonic}/ValueSet/pub/$validate-code/?collection=priv&{query}',
-                    f'/fhir/ValueSet/upriv/$validate-code/?{query}',
-                    f'/fhir/ValueSet/upriv/$validate-code/?user={owner.username}&{query}',
-                    f'/fhir/ValueSet/c1/$validate-code/?user={owner.username}&collection=upriv&{query}',
+                    f'/fhir/ValueSet/{self.collection_v1.id}/$validate-code/?user={owner.username}&collection=upriv&'
+                    f'{query}',
             ]:
                 response = self.client.get(url + self.concept_2.mnemonic, **headers)
                 self.assertEqual(response.status_code, 200, (url, headers))
                 self.assertFalse(response.data['parameter'][0]['valueBoolean'], (url, headers))
+            for url in [
+                    f'/orgs/{private_org.mnemonic}/ValueSet/priv/$validate-code/?{query}',
+                    f'/users/{owner.username}/ValueSet/upriv/$validate-code/?{query}',
+                    f'/fhir/ValueSet/{priv.id}/$validate-code/?{query}',
+                    f'/fhir/ValueSet/{upriv.id}/$validate-code/?user={owner.username}&{query}',
+            ]:
+                response = self.client.get(url + self.concept_2.mnemonic, **headers)
+                self.assertEqual(response.status_code, 404, (url, headers))
 
             # Without `url`, the global route checks the code system alone; other params don't pick a value set
             for concept in [self.concept_1, self.concept_2]:
@@ -627,15 +667,14 @@ class ValueSetTest(OCLAPITestCase):
                     f'/fhir/ValueSet/$validate-code/?{private_org_params}&{query}{concept.mnemonic}', **headers)
                 self.assertTrue(response.data['parameter'][0]['valueBoolean'], (concept.mnemonic, headers))
 
-        for url, headers in [
+        for url, user in [
                 (f'/orgs/{private_org.mnemonic}/ValueSet/priv/$validate-code/?{query}', member),
-                (f'/fhir/ValueSet/priv/$validate-code/?{query}', member),
-                (f'/fhir/ValueSet/upriv/$validate-code/?{query}', owner),
+                (f'/users/{owner.username}/ValueSet/upriv/$validate-code/?{query}', owner),
         ]:
-            response = self.client.get(
-                url + self.concept_2.mnemonic, HTTP_AUTHORIZATION='Token ' + headers.get_token())
+            response = self.client.get(url + self.concept_2.mnemonic, HTTP_AUTHORIZATION='Token ' + user.get_token())
             self.assertTrue(response.data['parameter'][0]['valueBoolean'], url)
-        response = self.client.get(f'/fhir/ValueSet/c1/$validate-code/?{query}{self.concept_1.mnemonic}')
+        response = self.client.get(f'/fhir/ValueSet/{self.collection_v1.id}/$validate-code/?{query}'
+                                   f'{self.concept_1.mnemonic}')
         self.assertTrue(response.data['parameter'][0]['valueBoolean'])
 
     def test_validate_code_with_display_for_code_not_in_value_set(self):

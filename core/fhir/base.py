@@ -27,12 +27,15 @@ from pydantic import ValidationError
 from rest_framework.exceptions import NotAcceptable, ParseError, UnsupportedMediaType
 from rest_framework.negotiation import DefaultContentNegotiation
 from rest_framework.parsers import BaseParser, FormParser, JSONParser, MultiPartParser
+from rest_framework.permissions import AllowAny
 from rest_framework.renderers import BaseRenderer, JSONRenderer
 from rest_framework.response import Response
 from rest_framework.utils.encoders import JSONEncoder
 from rest_framework.utils.mediatypes import _MediaType
 from rest_framework.versioning import AcceptHeaderVersioning
+from rest_framework.views import APIView
 
+from core.common.throttling import ThrottleUtil
 from core.fhir import outcomes
 
 logger = logging.getLogger('oclapi')
@@ -564,3 +567,24 @@ class FhirViewMixin:
 
     def get_fhir_base_url(self):
         return fhir_base_url(self.request, self.kwargs)
+
+
+class FhirOperationView(FhirViewMixin, APIView):
+    """
+    A FHIR operation that only reads, GET and POST alike, at the global base and at owner bases: `operation`'s answer
+    for the request's FhirParameters, base and user (and the resource the route kwarg `instance` names, at the instance
+    level), written by `adapter`. Throttled as OCL's other views are.
+    """
+    permission_classes = (AllowAny,)  # what an operation shows the caller is core.fhir.resolve's rule
+    operation = adapter = None
+    instance = None
+
+    def get_throttles(self):
+        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
+
+    def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        answer = self.operation(  # pylint: disable=not-callable
+            self.get_fhir_parameters(), self.kwargs, request.user, kwargs.get(self.instance))
+        return Response(self.adapter(answer))  # pylint: disable=not-callable
+
+    post = get

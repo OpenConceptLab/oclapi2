@@ -6,7 +6,6 @@ from rest_framework.test import APIClient
 
 from core.code_systems.converter import CodeSystemConverter
 from core.code_systems.serializers import CodeSystemDetailSerializer
-from core.code_systems.views import CodeSystemLookupNotFoundError
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLTestCase
 from core.concepts.models import Concept
@@ -14,17 +13,23 @@ from core.concepts.tests.factories import ConceptFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
+from core.url_registry.tests_resolution import set_registry_toggle
 from core.users.tests.factories import UserProfileFactory
+
+SYSTEM = 'http://some/url'
+PRIVATE = 'http://private.example/url'
+SHARED = 'http://shared.example/url'
 
 
 class CodeSystemTest(OCLTestCase):
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def setUp(self):
+        set_registry_toggle(False)  # the operations resolve through core.fhir.resolve: no registry, as in production
         super().setUp()
         self.org = OrganizationFactory()
 
-        self.org_source = OrganizationSourceFactory(organization=self.org, canonical_url='/some/url',
+        self.org_source = OrganizationSourceFactory(organization=self.org, canonical_url=SYSTEM,
                                                     full_name='source name')
         self.org_source_v1 = OrganizationSourceFactory.build(
             version='v1', mnemonic=self.org_source.mnemonic, organization=self.org_source.parent)
@@ -37,7 +42,7 @@ class CodeSystemTest(OCLTestCase):
 
         self.user = UserProfileFactory()
         self.user_token = self.user.get_token()
-        self.user_source = UserSourceFactory(user=self.user, public_access='None', canonical_url='/some/url')
+        self.user_source = UserSourceFactory(user=self.user, public_access='None', canonical_url=SYSTEM)
         self.user_source_v1 = UserSourceFactory.build(
             version='v1', mnemonic=self.user_source.mnemonic, user=self.user_source.parent, released=True)
         Source.persist_new_version(self.user_source_v1, self.user_source.created_by)
@@ -45,7 +50,7 @@ class CodeSystemTest(OCLTestCase):
         self.client = APIClient()
 
     def test_public_can_view(self):
-        response = self.client.get('/fhir/CodeSystem/?url=/some/url')
+        response = self.client.get(f'/fhir/CodeSystem/?url={SYSTEM}')
 
         self.assertEqual(len(response.data['entry']), 1)
         self.assertEqual(response.data['total'], 1)
@@ -65,7 +70,7 @@ class CodeSystemTest(OCLTestCase):
 
     def test_private_can_view(self):
         # the global base shows public repositories only, whoever asks; the owner base shows the owner its own
-        response = self.client.get('/fhir/CodeSystem/?url=/some/url', HTTP_AUTHORIZATION='Token ' + self.user_token)
+        response = self.client.get(f'/fhir/CodeSystem/?url={SYSTEM}', HTTP_AUTHORIZATION='Token ' + self.user_token)
 
         self.assertEqual(response.data['total'], 1)
         resource = response.data['entry'][0]['resource']
@@ -76,7 +81,7 @@ class CodeSystemTest(OCLTestCase):
         self.assertEqual(resource['version'], 'v2')
 
         response = self.client.get(
-            f'/users/{self.user.mnemonic}/CodeSystem/?url=/some/url', HTTP_AUTHORIZATION='Token ' + self.user_token)
+            f'/users/{self.user.mnemonic}/CodeSystem/?url={SYSTEM}', HTTP_AUTHORIZATION='Token ' + self.user_token)
 
         self.assertEqual(response.data['total'], 1)
         resource = response.data['entry'][0]['resource']
@@ -85,7 +90,7 @@ class CodeSystemTest(OCLTestCase):
             '/users/' + self.user.mnemonic + '/CodeSystem/' + self.user_source.mnemonic + '/'
         )
         self.assertEqual(resource['version'], 'v1')
-        self.assertEqual(self.client.get(f'/users/{self.user.mnemonic}/CodeSystem/?url=/some/url').data['total'], 0)
+        self.assertEqual(self.client.get(f'/users/{self.user.mnemonic}/CodeSystem/?url={SYSTEM}').data['total'], 0)
 
     def test_public_can_list(self):
         response = self.client.get('/fhir/CodeSystem/')
@@ -166,13 +171,30 @@ class CodeSystemTest(OCLTestCase):
         self.assertEqual(response.data['id'], self.org_source.mnemonic)
         self.assertEqual(response.data['version'], 'v2')
 
+    def valid(self, concept, **extra):
+        """$validate-code's answer for a valid code of the org source, at the version resolved (v2)."""
+        return {'resourceType': 'Parameters', 'parameter': [
+            {'name': 'result', 'valueBoolean': True},
+            {'name': 'display', 'valueString': concept.display_name},
+            {'name': 'code', 'valueCode': concept.mnemonic},
+            {'name': 'system', 'valueUri': SYSTEM},
+            {'name': 'version', 'valueString': 'v2'},
+            *extra.get('more', [])]}
+
+    def assert_issues(self, response, *issues):
+        """The answer is result false, with these issues (code, tx-issue-type, expression)."""
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['parameter'][0], {'name': 'result', 'valueBoolean': False})
+        outcome = next(item['resource'] for item in response.data['parameter'] if item['name'] == 'issues')
+        self.assertEqual([(item['code'], item['details']['coding'][0]['code'], item['expression'])
+                          for item in outcome['issue']], list(issues))
+
     def test_validate_code_for_code_system(self):
         response = self.client.get(f'/fhir/CodeSystem/$validate-code/'
                                    f'?url={self.org_source.canonical_url}&code={self.concept_1.mnemonic}')
 
         self.assertEqual(response.status_code, 200)
-        self.assertJSONEqual(json.dumps(response.data), json.dumps(
-            {'resourceType': 'Parameters', 'parameter': [{'name': 'result', 'valueBoolean': True}]}))
+        self.assertJSONEqual(json.dumps(response.data), json.dumps(self.valid(self.concept_1)))
 
     def test_validate_code_for_code_system_via_post(self):
         response = self.client.post(
@@ -188,28 +210,19 @@ class CodeSystemTest(OCLTestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertJSONEqual(json.dumps(response.data), json.dumps(
-            {'resourceType': 'Parameters', 'parameter': [{'name': 'result', 'valueBoolean': True}]}))
+        self.assertJSONEqual(json.dumps(response.data), json.dumps(self.valid(self.concept_1)))
 
     def test_validate_code_for_code_system_negative(self):
         response = self.client.get(f'/fhir/CodeSystem/$validate-code/'
                                    f'?url={self.org_source.canonical_url}&code=non_existing_code')
 
-        self.assertEqual(response.status_code, 200)
-        self.assertJSONEqual(json.dumps(response.data), json.dumps(
-            {'resourceType': 'Parameters', 'parameter': [
-                {'name': 'result', 'valueBoolean': False}
-            ]}))
+        self.assert_issues(response, ('code-invalid', 'invalid-code', ['code']))
 
     def test_validate_code_for_code_system_with_invalid_url_negative(self):
         response = self.client.get(f'/fhir/CodeSystem/$validate-code/'
                                    f'?url=non_existing_url&code=${self.concept_1.mnemonic}')
 
-        self.assertEqual(response.status_code, 200)
-        self.assertJSONEqual(json.dumps(response.data), json.dumps(
-            {'resourceType': 'Parameters', 'parameter': [
-                {'name': 'result', 'valueBoolean': False}
-            ]}))
+        self.assert_issues(response, ('not-found', 'not-found', ['system']))
 
     def test_validate_code_with_display_for_code_system(self):
         response = self.client.get(f'/fhir/CodeSystem/$validate-code/'
@@ -218,8 +231,7 @@ class CodeSystemTest(OCLTestCase):
                                    f'&display={self.concept_1.display_name}')
 
         self.assertEqual(response.status_code, 200)
-        self.assertJSONEqual(json.dumps(response.data), json.dumps(
-            {'resourceType': 'Parameters', 'parameter': [{'name': 'result', 'valueBoolean': True}]}))
+        self.assertJSONEqual(json.dumps(response.data), json.dumps(self.valid(self.concept_1)))
 
     def test_validate_code_with_display_for_code_system_negative(self):
         response = self.client.get(f'/fhir/CodeSystem/$validate-code/'
@@ -227,11 +239,7 @@ class CodeSystemTest(OCLTestCase):
                                    f'&code={self.concept_1.mnemonic}'
                                    f'&display=wrong_display')
 
-        self.assertEqual(response.status_code, 200)
-        self.assertJSONEqual(json.dumps(response.data), json.dumps(
-            {'resourceType': 'Parameters', 'parameter': [
-                {'name': 'result', 'valueBoolean': False}
-                ]}))
+        self.assert_issues(response, ('invalid', 'invalid-display', ['display']))
 
     def test_lookup_for_code_system(self):
         response = self.client.get(f'/fhir/CodeSystem/$lookup/'
@@ -241,97 +249,115 @@ class CodeSystemTest(OCLTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertJSONEqual(json.dumps(response.data), json.dumps(
             {'resourceType': 'Parameters', 'parameter': [
-                {'name': 'name', 'valueString': self.org_source.mnemonic},
+                {'name': 'name', 'valueString': Source.objects.get(id=self.org_source_v2.id).name},
                 {'name': 'version', 'valueString': self.org_source_v2.version},
-                {'name': 'display', 'valueString': self.concept_1.display_name}]}))
+                {'name': 'display', 'valueString': self.concept_1.display_name},
+                {'name': 'code', 'valueCode': self.concept_1.mnemonic},
+                {'name': 'system', 'valueUri': SYSTEM},
+                {'name': 'abstract', 'valueBoolean': False},
+                {'name': 'designation', 'part': [
+                    {'name': 'language', 'valueCode': 'en'},
+                    {'name': 'use', 'valueCoding': {'code': 'FULLY_SPECIFIED'}},
+                    {'name': 'value', 'valueString': 'concept_1_name'}]},
+                {'name': 'property', 'part': [
+                    {'name': 'code', 'valueCode': 'inactive'}, {'name': 'value', 'valueBoolean': False}]}]}))
 
     def test_lookup_for_empty_code_system(self):
         response = self.client.get('/fhir/CodeSystem/$lookup/?system=&code=')
 
         self.assertEqual(response.status_code, 400)
-        self.assertJSONEqual(json.dumps(response.data), json.dumps(CodeSystemLookupNotFoundError().detail))
+        self.assertEqual(response.data['issue'][0]['expression'], ['code'])
 
     def test_lookup_for_code_system_with_new_canonical(self):
-        self.org_source.canonical_url = '/new/url'
+        """A code system is found by its repository's current canonical URL, not by one a version recorded."""
+        self.org_source.canonical_url = 'http://new/url'
         Source.save(self.org_source)
-
-        response = self.client.get(f'/fhir/CodeSystem/$lookup/'
-                                   f'?system={self.org_source.canonical_url}'
-                                   f'&code={self.concept_1.mnemonic}')
-
-        self.assertEqual(response.status_code, 400)
-        self.assertJSONEqual(json.dumps(response.data), json.dumps(CodeSystemLookupNotFoundError().detail))
 
         response = self.client.get(f'/fhir/CodeSystem/$lookup/'
                                    f'?system={self.org_source_v1.canonical_url}'
                                    f'&code={self.concept_1.mnemonic}')
 
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.data['issue'][0]['code'], 'not-found')
+
+        response = self.client.get(f'/fhir/CodeSystem/$lookup/?system=http://new/url&code={self.concept_1.mnemonic}')
+
         self.assertEqual(response.status_code, 200)
-        self.assertJSONEqual(json.dumps(response.data), json.dumps(
-            {'resourceType': 'Parameters', 'parameter': [
-                {'name': 'name', 'valueString': self.org_source.mnemonic},
-                {'name': 'version', 'valueString': self.org_source_v2.version},
-                {'name': 'display', 'valueString': self.concept_1.display_name}]}))
+        self.assertEqual(response.data['parameter'][1], {'name': 'version', 'valueString': self.org_source_v2.version})
+        self.assertEqual(response.data['parameter'][2], {'name': 'display', 'valueString': self.concept_1.display_name})
 
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_private_code_system_answers_as_missing_for_non_viewers(self):  # pylint: disable=too-many-locals
+        """
+        A code system the requester can't view answers exactly as one that doesn't exist: at the global base, which
+        shows public code systems only, and at its owner's base to anyone but the owner's members and staff.
+        """
         private_org = OrganizationFactory()
         private_source = OrganizationSourceFactory(
-            organization=private_org, canonical_url='/private/url', public_access=ACCESS_TYPE_NONE)
+            organization=private_org, canonical_url=PRIVATE, public_access=ACCESS_TYPE_NONE)
         concept = ConceptFactory(parent=private_source, names=1, names__name='private_concept_name')
         Source.persist_new_version(OrganizationSourceFactory.build(
             version='v1', mnemonic=private_source.mnemonic, organization=private_org,
-            public_access=ACCESS_TYPE_NONE), private_source.created_by)
+            public_access=ACCESS_TYPE_NONE, released=True), private_source.created_by)
         member = UserProfileFactory()
         private_org.members.add(member)
         outsider = {'HTTP_AUTHORIZATION': 'Token ' + self.user_token}
-        validate_url = f'/fhir/CodeSystem/$validate-code/?url=/private/url&code={concept.mnemonic}'
-        lookup_url = '/fhir/CodeSystem/$lookup/?system={}&code={}'
-        not_found = self.client.get(lookup_url.format('/unknown/url', concept.mnemonic))
-        self.assertEqual(not_found.status_code, 400)
+        member_headers = {'HTTP_AUTHORIZATION': 'Token ' + member.get_token()}
+        owner_base = f'/orgs/{private_org.mnemonic}'
+        validate_url = '{}/CodeSystem/$validate-code/?url={}&code={}'
+        lookup_url = '{}/CodeSystem/$lookup/?system={}&code={}'
 
         public_concept = ConceptFactory()
         selector = (f'&org={public_concept.parent.organization.mnemonic}&source={public_concept.parent.mnemonic}'
                     f'&concept={public_concept.mnemonic}')
-        for headers in [{}, outsider]:
+        hidden = []
+        for base, headers in [('/fhir', {}), ('/fhir', outsider), ('/fhir', member_headers), (owner_base, {}),
+                              (owner_base, outsider)]:
             # without a code, a code system the requester can't view still answers as one that doesn't exist
-            for system_url in ['/private/url', '/unknown/url']:
-                response = self.client.get(f'/fhir/CodeSystem/$validate-code/?url={system_url}{selector}', **headers)
-                self.assertFalse(response.data['parameter'][0]['valueBoolean'], (system_url, headers))
-            for url in [validate_url, f'{validate_url}&display={concept.display_name}']:
-                response = self.client.get(url, **headers)
-                self.assertEqual(response.status_code, 200, (url, headers))
-                self.assertFalse(response.data['parameter'][0]['valueBoolean'], (url, headers))
+            response = self.client.get(f'{base}/CodeSystem/$validate-code/?url={PRIVATE}{selector}', **headers)
+            self.assertFalse(response.data['parameter'][0]['valueBoolean'], (base, headers))
+            hidden.append((f'/fhir/CodeSystem/$validate-code/?url={PRIVATE}{selector}', response))
             for code in [concept.mnemonic, 'missing']:
-                response = self.client.get(lookup_url.format('/private/url', code), **headers)
-                self.assertEqual(response.status_code, 400, (code, headers))
-                self.assertEqual(response.content, not_found.content, (code, headers))
+                for url in [validate_url.format(base, PRIVATE, code),
+                            validate_url.format(base, PRIVATE, code) + f'&display={concept.display_name}']:
+                    response = self.client.get(url, **headers)
+                    self.assertEqual(response.status_code, 200, (url, headers))
+                    self.assertFalse(response.data['parameter'][0]['valueBoolean'], (url, headers))
+                    hidden.append((url.replace(base, '/fhir', 1), response))
+                response = self.client.get(lookup_url.format(base, PRIVATE, code), **headers)
+                self.assertEqual(response.status_code, 422, (code, headers))
+                hidden.append((lookup_url.format('/fhir', PRIVATE, code), response))
 
-        member_headers = {'HTTP_AUTHORIZATION': 'Token ' + member.get_token()}
-        response = self.client.get(validate_url, **member_headers)
+        response = self.client.get(validate_url.format(owner_base, PRIVATE, concept.mnemonic), **member_headers)
         self.assertTrue(response.data['parameter'][0]['valueBoolean'])
-        response = self.client.get(lookup_url.format('/private/url', concept.mnemonic), **member_headers)
+        response = self.client.get(lookup_url.format(owner_base, PRIVATE, concept.mnemonic), **member_headers)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['parameter'][2]['valueString'], concept.display_name)
+
+        private_source.is_active = False  # now it doesn't exist
+        private_source.save()
+        for url, response in hidden:
+            not_found = self.client.get(url)
+            self.assertEqual((response.status_code, response.content), (not_found.status_code, not_found.content))
 
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_private_code_system_does_not_hide_public_one_with_same_url(self):
-        private_source = UserSourceFactory(user=self.user, public_access=ACCESS_TYPE_NONE, canonical_url='/shared/url')
+        private_source = UserSourceFactory(user=self.user, public_access=ACCESS_TYPE_NONE, canonical_url=SHARED)
         Source.persist_new_version(UserSourceFactory.build(
-            version='v1', mnemonic=private_source.mnemonic, user=self.user), private_source.created_by)
-        public_source = OrganizationSourceFactory(canonical_url='/shared/url')
+            version='v1', mnemonic=private_source.mnemonic, user=self.user, released=True), private_source.created_by)
+        public_source = OrganizationSourceFactory(canonical_url=SHARED)
         concept = ConceptFactory(parent=public_source)
         Source.persist_new_version(OrganizationSourceFactory.build(
-            version='v1', mnemonic=public_source.mnemonic, organization=public_source.organization),
+            version='v1', mnemonic=public_source.mnemonic, organization=public_source.organization, released=True),
             public_source.created_by)
 
-        response = self.client.get(f'/fhir/CodeSystem/$lookup/?system=/shared/url&code={concept.mnemonic}')
+        response = self.client.get(f'/fhir/CodeSystem/$lookup/?system={SHARED}&code={concept.mnemonic}')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['parameter'][0]['valueString'], public_source.mnemonic)
 
-        response = self.client.get(f'/fhir/CodeSystem/$validate-code/?url=/shared/url&code={concept.mnemonic}')
+        response = self.client.get(f'/fhir/CodeSystem/$validate-code/?url={SHARED}&code={concept.mnemonic}')
         self.assertTrue(response.data['parameter'][0]['valueBoolean'])
 
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))

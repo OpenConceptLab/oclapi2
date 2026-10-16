@@ -564,15 +564,23 @@ def read(view):
     mnemonic, the version ?version= names (an OCL extension) or else the latest release the requester is shown. It
     must be one search lists: released, never HEAD, visible to the requester there. Raises NotFoundError.
     """
-    resource_type, resource_id = view.resource_type, view.kwargs[view.lookup_field]
-    namespace, user = namespace_of(view.kwargs), view.request.user
+    return read_version(view.resource_type, view.kwargs[view.lookup_field], view.request.query_params.get('version'),
+                        view.kwargs, view.request.user)
+
+
+def read_version(resource_type, resource_id, version, kwargs, user):  # pylint: disable=too-many-arguments
+    """
+    read's rule for a resource `resource_id` names at the base `kwargs` names, for `user`: the id at the global base,
+    the mnemonic and `version` (else the latest release shown) at an owner base. For the instance-level operations too.
+    """
+    namespace = namespace_of(kwargs)
     versions = REPO_TYPES[resource_type].objects.filter(is_active=True, released=True).exclude(version=HEAD)
     latest = False
     if namespace is None:
         versions = versions.filter(id=int(resource_id)) if OPAQUE_ID.fullmatch(resource_id) else versions.none()
     else:
-        versions = view.filter_queryset_by_owner(versions.filter(mnemonic=resource_id))
-        version = view.request.query_params.get('version')
+        owner = {'user__username': kwargs['user']} if kwargs.get('user') else {'organization__mnemonic': kwargs['org']}
+        versions = versions.filter(mnemonic=resource_id, **owner)
         latest = not version
         versions = versions.filter(version=version) if version else versions.filter(
             retired=False).order_by('-created_at')
