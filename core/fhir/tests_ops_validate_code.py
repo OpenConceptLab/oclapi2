@@ -6,11 +6,18 @@ code, wrong display, inactive, not in the value set); value set membership from 
 expansion; a value set that doesn't resolve is a 422 OperationOutcome; whatever the caller isn't shown answers as
 missing; a fixed number of queries. OpenConceptLab/ocl_online#451.
 """
+from core.collections.tests.factories import ExpansionFactory
 from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory
 from core.fhir.outcomes import MESSAGE_ID_EXTENSION
 from core.fhir.tests_ops_lookup import (
     OpsCorpusMixin, name, CIEL, ICD10, HIV, REST, UNKNOWN, FEVERS, SHARED)
+from core.fhir.tests_search import source, collection
+from core.orgs.tests.factories import OrganizationFactory
+from core.url_registry.factories import GlobalURLRegistryFactory
+
+DRAFT_ONLY = 'http://example.org/fhir/CodeSystem/head-only'
+DRAFT_UNRELEASED = 'http://example.org/fhir/CodeSystem/unreleased'
 
 
 def issues_of(parameters):
@@ -146,6 +153,77 @@ class ValidateCodeCases(OpsCorpusMixin):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'<valueCanonical value="' + UNKNOWN.encode() + b'"/>', response.content)
         self.assertIn(b'<OperationOutcome', response.content)
+
+    def test_a_hidden_version_in_a_path_answers_as_a_missing_one(self):
+        """A private version named in an OCL path answers as an unknown version, exactly as a missing one (F1.1)."""
+        path = '/orgs/HL7/CodeSystem/newest/v2/'
+        hidden = self.validate(url=path, code='N1')
+        self.assertIn('x-caused-by-unknown-system', self.answer(hidden))
+        self.newest_private_v2.is_active = False
+        self.newest_private_v2.save()
+        self.assertEqual(self.validate(url=path, code='N1').content, hidden.content)
+
+    def test_a_coding_of_another_system_is_not_valid_in_this_one(self):
+        """The code system validated against is the url's (or the instance); a coding of another system is result
+        false, never that system's code taken for this one's (Codex F1.2)."""
+        mismatch = ['error|invalid|invalid-data|Coding.system|']
+        for base, operation, url in (('/orgs/CIEL', 'CIEL/$validate-code', None), ('/fhir', '$validate-code', CIEL)):
+            parameters = [{'name': 'coding', 'valueCoding': {'system': ICD10, 'code': '117053'}}]
+            if url:
+                parameters.append({'name': 'url', 'valueUri': url})
+            answer = self.answer(self.post(operation, parameters, base=base))
+            self.assertEqual((answer['result'], answer['system'], answer['issues']), (False, ICD10, mismatch), base)
+            parameters[0]['valueCoding']['system'] = CIEL
+            self.assertTrue(self.answer(self.post(operation, parameters, base=base))['result'], base)
+        response = self.get('CIEL/$validate-code', base='/orgs/CIEL', url=ICD10, code='117053')
+        self.assertEqual(self.answer(response)['issues'], ['error|invalid|invalid-data|system|'])
+        # a coding without a system is of the url's code system
+        answer = self.answer(self.post('$validate-code', [
+            {'name': 'url', 'valueUri': CIEL}, {'name': 'coding', 'valueCoding': {'code': '117053'}}]))
+        self.assertEqual((answer['result'], answer['system']), (True, CIEL))
+
+    def test_a_deleted_concept_version_is_not_valid(self):
+        """Deleted (is_active false) concept versions are gone from code systems and value sets (Codex F1.4)."""
+        deleted = ConceptFactory(parent=self.ciel, mnemonic='555', sources=[self.ciel_v2], is_active=False,
+                                 names=[name('Deleted', preferred=True)])
+        self.fevers_v1.expansion.concepts.add(deleted)
+        self.assertEqual(self.answer(self.validate(url=CIEL, code='555'))['issues'],
+                         ['error|code-invalid|invalid-code|code|Unknown_Code_in_Version'])
+        self.assertFalse(self.answer(self.validate_in(url=FEVERS, system=CIEL, code='555'))['result'])
+
+    def test_the_version_answered_is_the_one_the_expansion_pins(self):
+        """An expansion's explicit source version is the version answered, though a newer release holds the same
+        concept (Codex F1.3); then the version it evaluated; never a HEAD or unreleased version (F1.5)."""
+        pinned = collection(self.acme, 'pinned', 'v1', released=True, canonical_url='https://example.org/pinned')
+        collection(self.acme, 'pinned', canonical_url='https://example.org/pinned')
+        expansion = ExpansionFactory(mnemonic='autoexpand-v1', collection_version=pinned)
+        expansion.concepts.add(self.infectious)  # in CIEL v1 and v2
+        expansion.explicit_source_versions.add(self.ciel_v1)
+        expansion.evaluated_source_versions.add(self.ciel_v2)
+        pinned.expansion_uri = expansion.uri
+        pinned.save()
+        if self.registry:
+            GlobalURLRegistryFactory(url='https://example.org/pinned', namespace=self.acme.uri)
+        self.assertEqual(self.answer(self.validate_in(
+            url='https://example.org/pinned', system=CIEL, code='117053'))['version'], 'v1')
+
+    def test_a_member_from_a_code_system_with_no_release(self):
+        """A released value set's expansion defines its members, whatever the release state of their code systems;
+        the version is answered only when a release the caller is shown holds the concept (Codex F1.5)."""
+        drafts = OrganizationFactory(mnemonic='Drafts')
+        head_only = source(drafts, 'head-only', canonical_url=DRAFT_ONLY)
+        unreleased = source(drafts, 'unreleased', canonical_url=DRAFT_UNRELEASED)
+        unreleased_v1 = source(drafts, 'unreleased', 'v1', canonical_url=DRAFT_UNRELEASED)
+        expansion = self.fevers_v1.expansion
+        expansion.concepts.add(
+            ConceptFactory(parent=head_only, mnemonic='D1', names=[name('D one', preferred=True)]),
+            ConceptFactory(parent=unreleased, mnemonic='U1', sources=[unreleased_v1],
+                           names=[name('U one', preferred=True)]))
+        expansion.explicit_source_versions.add(unreleased_v1)
+        self.assertEqual(self.answer(self.validate_in(url=FEVERS, system=DRAFT_ONLY, code='D1')), {
+            'result': True, 'system': DRAFT_ONLY, 'code': 'D1', 'display': 'D one'})
+        self.assertEqual(self.answer(self.validate_in(url=FEVERS, system=DRAFT_UNRELEASED, code='U1')), {
+            'result': True, 'system': DRAFT_UNRELEASED, 'code': 'U1', 'display': 'U one'})
 
     def test_code_system_query_counts(self):
         count = 7 if self.registry else 5

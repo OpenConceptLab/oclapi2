@@ -8,14 +8,17 @@ valid, with what OCL knows about it. core.fhir.adapters.r4 writes the answer as 
   as one that doesn't exist.
 - CodeSystem: the code in the version `url` (and `version`) names: result, and the code, system, version used and
   display; `display` must be one of the concept's names (ignoring case); a retired concept is valid but flagged
-  inactive, with a warning. A code system that doesn't resolve answers result false with a not-found issue and
-  x-caused-by-unknown-system, as FHIRsmith does, with or without a code. Then a code is required (400), and a url.
+  inactive, with a warning. The code system is the instance, else url (and version), else a coding's system; a
+  coding of another system is result false (invalid-data). A code system that doesn't resolve answers result false
+  with a not-found issue and x-caused-by-unknown-system, as FHIRsmith does, with or without a code. Then a code is
+  required (400), and a url.
 - ValueSet: membership is the resolved version's default expansion: the code, from a concept whose code system is
-  `system` (and `systemVersion`), in a code system version the caller is shown. The version answered is the one the
-  expansion drew the concept from (else the newest release holding it). Not a member: result false (not-in-vs), with
-  what the code system itself says of the code (unknown system, unknown code, or its display). A value set that
-  doesn't resolve is a 422 not-found OperationOutcome. Without url (and not at the instance level), the code is checked
-  in its code system alone, as OCL has always answered.
+  `system` (and `systemVersion`), in a code system version the caller is shown, released or not. The version
+  answered is a release the caller is shown that holds the concept: the expansion's explicit version, else the one
+  it evaluated, else the newest; none without one (never HEAD or an unreleased version). Not a member: result false
+  (not-in-vs), with what the code system itself says of the code (unknown system, unknown code, or its display). A
+  value set that doesn't resolve is a 422 not-found OperationOutcome. Without url (and not at the instance level),
+  the code is checked in its code system alone, as OCL has always answered.
 - Issues carry FHIRsmith's message ids (operationoutcome-message-id) and expressions, so clients and the parity
   suite compare them by kind; `message` joins their texts.
 - Cost: a fixed number of queries whatever the size of the code system or value set.
@@ -28,7 +31,7 @@ from core.common.constants import HEAD
 from core.concepts.models import Concept
 from core.fhir import outcomes
 from core.fhir.ops.concepts import (
-    coded_input, path, require, text, find_concept, display_of, has_name, fhir_code, code_q, system_of)
+    coded_input, path, require, text, find_concept, display_of, has_name, fhir_code, code_q, is_system_of, system_of)
 from core.fhir.ops.lookup import code_system_version
 from core.fhir.resolve import UnresolvedError, namespace_of, resolve, to_ocl_path, viewable_rows
 from core.fhir.search import read_version
@@ -52,6 +55,7 @@ KINDS = {
     'wrong-display': ('error', 'invalid', 'invalid-display'),
     'inactive': ('warning', 'business-rule', 'code-comment'),
     'not-in-value-set': ('error', 'code-invalid', 'not-in-vs'),
+    'other-system': ('error', 'invalid', 'invalid-data'),
 }
 
 
@@ -124,17 +128,26 @@ def validate_code_system(parameters, kwargs, user, instance_id=None):
     the instance level), for `user`. A url that doesn't resolve answers before the code is required, as it always has.
     """
     coding = coded_input(parameters, 'url', 'version')
+    target = coding  # the code system validated against: the instance, else url (and version), else the coding's
+    if coding.parameter:
+        target = coding._replace(system=text(parameters, 'url') or coding.system,
+                                 version=text(parameters, 'version') or coding.version)
     version = None
-    if instance_id or coding.system:
+    if instance_id or target.system:
         try:
-            version = code_system_version(coding, kwargs, user, instance_id)
+            version = code_system_version(target, kwargs, user, instance_id)
         except UnresolvedError:
-            problem, unknown = unknown_system(coding, UNKNOWN_CODE_SYSTEM)
-            return answer(coding, [problem], version=coding.version, unknown=unknown)
+            problem, unknown = unknown_system(target, UNKNOWN_CODE_SYSTEM)
+            return answer(target, [problem], version=target.version, unknown=unknown)
     require(coding, 'code', 'code', 'A code to validate is required.')
     if version is None:
         raise outcomes.InvalidError('url is required with a code: the code system to validate it in.',
                                     expression=coding.parameter or 'url')
+    if coding.system and not is_system_of(coding.system, version, None if instance_id else target.system):
+        return answer(coding, [issue(
+            coding, 'system', 'other-system', None,
+            f"The coding's system '{coding.system}' is not the code system '{system_of(version, target.system)}' it "
+            "is validated in")])
     return in_code_system(coding, version, text(parameters, 'displayLanguage'))
 
 
@@ -149,15 +162,18 @@ def system_q(field, system):
 def member(value_set, coding, namespace, user):
     """
     (the concept, the version of its code system) of the code in the value set version's default expansion, or None:
-    a concept with the code, of the system (in systemVersion, if named), in a code system version the caller is
-    shown. The version is the one the expansion drew on, else the newest release holding the concept (None for HEAD).
+    a concept with the code (not deleted), of the system (in systemVersion, if named), in a code system version the
+    caller is shown, released or not: the expansion defines the value set. The version answered is a release the caller
+    is shown that holds the concept: the one the expansion pins (explicit), else the one it evaluated, else the newest;
+    None without one, never HEAD or an unreleased version.
     The code's concepts are read first, by their code, then looked for in the expansion by its (expansion, concept)
     index, so the cost doesn't grow with the size of the value set.
     """
     if not value_set.expansion_uri:
         return None
     concept_ids = list(Concept.objects.filter(
-        code_q('mnemonic', coding.code), system_q('parent', coding.system)).values_list('id', flat=True))
+        code_q('mnemonic', coding.code), system_q('parent', coding.system), is_active=True).values_list(
+        'id', flat=True))
     if concept_ids:
         concept_ids = list(Expansion.concepts.through.objects.filter(
             expansion__uri=value_set.expansion_uri, concept_id__in=concept_ids).values_list('concept_id', flat=True))
@@ -167,16 +183,19 @@ def member(value_set, coding, namespace, user):
         Exists(viewable_rows(Source, namespace, user).filter(id=OuterRef('source_id'))), concept_id__in=concept_ids)
     if coding.version:
         rows = rows.filter(source__version=coding.version)
-    evaluated = Expansion.evaluated_source_versions.through.objects.filter(
-        expansion__uri=value_set.expansion_uri, source_id=OuterRef('source_id'))
+    def pinned(versions):
+        return Exists(versions.through.objects.filter(
+            expansion__uri=value_set.expansion_uri, source_id=OuterRef('source_id')))
+    release = Q(source__released=True, source__retired=False) & ~Q(source__version=HEAD)
     row = rows.annotate(
-        evaluated=Exists(evaluated),
-        head=Case(When(source__version=HEAD, then=Value(1)), default=Value(0), output_field=IntegerField())).order_by(
-        '-evaluated', 'head', '-source__created_at', 'concept_id').values_list('concept_id', 'source__version').first()
+        release=Case(When(release, then=Value(1)), default=Value(0), output_field=IntegerField()),
+        explicit=pinned(Expansion.explicit_source_versions), evaluated=pinned(Expansion.evaluated_source_versions),
+    ).order_by('-release', '-explicit', '-evaluated', '-source__created_at', 'concept_id').values_list(
+        'concept_id', 'source__version', 'release').first()
     if not row:
         return None
     concept = Concept.objects.filter(id=row[0]).select_related('parent').prefetch_related('names').first()
-    return concept, None if row[1] == HEAD else row[1]
+    return concept, row[1] if row[2] else None
 
 
 def value_set_version(parameters, kwargs, user, instance_id):

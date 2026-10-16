@@ -305,6 +305,33 @@ class LookupCases(OpsCorpusMixin):
         response = self.get('$lookup', base='/orgs/HL7', user=self.admin, system=NEWEST_PRIVATE, code='N1')
         self.assertEqual(self.by_name(response)['version']['valueString'], 'v2')
 
+    def test_a_hidden_version_in_a_path_answers_as_a_missing_one(self):
+        """A private version named in an OCL path is not found, exactly as one that doesn't exist (Codex F1.1)."""
+        path = '/orgs/HL7/CodeSystem/newest/v2/'
+        hidden = self.lookup(system=path, code='N1')
+        self.assertEqual(hidden.status_code, 422, hidden.data)
+        self.assertEqual(self.by_name(self.lookup(system='/orgs/HL7/CodeSystem/newest/v1/', code='N1'))['version'],
+                         {'name': 'version', 'valueString': 'v1'})
+        self.newest_private_v2.is_active = False
+        self.newest_private_v2.save()
+        self.assertEqual(self.lookup(system=path, code='N1').content, hidden.content)
+
+    def test_an_instance_and_a_coding_of_another_system(self):
+        """At the instance level, a coding names the code system it is from: another one's code isn't looked up."""
+        response = self.post('CIEL/$lookup', [{'name': 'coding', 'valueCoding': {'system': ICD10, 'code': '117053'}}],
+                             base='/orgs/CIEL')
+        self.assert_outcome(response, 400, 'invalid', 'invalid-data')
+        self.assertEqual(response.data['issue'][0]['expression'], ['Coding.system'])
+        response = self.post('CIEL/$lookup', [{'name': 'coding', 'valueCoding': {'system': CIEL, 'code': '117053'}}],
+                             base='/orgs/CIEL')
+        self.assertEqual(response.status_code, 200, response.data)
+
+    def test_a_deleted_concept_version_is_not_found(self):
+        """A concept version deleted (is_active false) is gone, a retired one stays (Codex F1.4)."""
+        ConceptFactory(parent=self.ciel, mnemonic='555', sources=[self.ciel_v2], is_active=False,
+                       names=[name('Deleted', preferred=True)])
+        self.assert_outcome(self.lookup(system=CIEL, code='555'), 404, 'not-found', 'invalid-code')
+
     def test_a_fixed_number_of_queries(self):
         """Resolution (the toggle, the repository, its release; the registry adds its entry and namespace owner), the
         concept and its names, however many concepts the code system holds."""

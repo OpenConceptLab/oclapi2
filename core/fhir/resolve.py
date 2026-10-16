@@ -5,9 +5,9 @@ with or without the URL registry), with FHIR's rules on top.
 - Resource type: CodeSystem and ConceptMap resolve to a Source, ValueSet to a Collection.
 - Namespace: the base URL's. /fhir/ is global; /orgs/{org}/ and /users/{user}/ are that owner's. It comes from the
   route, never from the request.
-- Version: the one named (the operation's version parameter, else url|version), HEAD included. With none named, the
-  newest released version the caller is shown, never HEAD. A repository with nothing released isn't visible,
-  whatever version is named.
+- Version: the one named (the operation's version parameter, else url|version, else the version an OCL path names),
+  HEAD included. With none named, the newest released version the caller is shown, never HEAD. A repository with
+  nothing released isn't visible, whatever version is named.
 - Access, after resolving: at the global base public repositories only, at an owner base what the caller may view.
   The version and its repository (HEAD) must both be viewable. Without the URL registry, the global base's canonical
   match considers only the repositories it shows, so a private copy of a canonical never hides a public one. Otherwise
@@ -21,7 +21,7 @@ from django.db.models.functions import Coalesce
 from core.collections.models import Collection
 from core.common.constants import HEAD, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT
 from core.common.mixins import SourceContainerMixin
-from core.common.utils import normalize_public_access
+from core.common.utils import normalize_public_access, to_parent_uri
 from core.fhir.outcomes import NotFoundError
 from core.sources.models import Source
 
@@ -62,7 +62,8 @@ def resolve(resource_type, url, version=None, kwargs=None, user=None, expression
     """
     url = url or ''
     lookup_url, _, piped_version = url.partition('|')
-    error = UnresolvedError(resource_type, lookup_url, version or piped_version or None, expression)
+    named = version or piped_version or path_version(lookup_url)
+    error = UnresolvedError(resource_type, lookup_url, named, expression)
     namespace = namespace_of(kwargs)
     if not lookup_url or '|' in piped_version or (
             namespace and not SourceContainerMixin.get_object_from_namespace(namespace)):
@@ -72,12 +73,20 @@ def resolve(resource_type, url, version=None, kwargs=None, user=None, expression
     instance, _ = repo_type.resolve_reference_expression(
         to_ocl_path(url), namespace, version, repo_type=repo_type, allow_head=False,
         heads=None if namespace else shown_heads(repo_type))
-    if instance.id and not (version or piped_version) and not is_shown(instance, namespace, user):
+    if instance.id and not named and not is_shown(instance, namespace, user):
         instance = latest_public_release(instance) or instance  # the newest release is private: the newest public one
 
     if not instance.id or not is_shown(instance, namespace, user):
         raise error
     return instance
+
+
+def path_version(url):
+    """The version an OCL path names (/orgs/{org}/sources/{id}/{version}/, or as a CodeSystem path), or None."""
+    parts = to_parent_uri(to_ocl_path(url)).split('/')
+    if len(parts) > 5 and not parts[0] and parts[1] in ('orgs', 'users') and parts[3] in REPO_PATHS.values():
+        return parts[5] or None
+    return None
 
 
 def is_shown(instance, namespace, user):

@@ -15,8 +15,10 @@ from urllib.parse import quote, unquote
 
 from django.db.models import F, Q
 
+from core.common.utils import to_parent_uri
 from core.concepts.models import Concept
 from core.fhir import outcomes
+from core.fhir.resolve import to_ocl_path
 
 # A code, as an operation is given it; `parameter` is the Coding parameter it came in, None for separate parameters
 Coding = namedtuple('Coding', 'system code version display parameter')
@@ -97,11 +99,29 @@ def system_of(version, named=None):
     return version.canonical_url or getattr(version, 'repository_canonical_url', None) or named
 
 
+def is_system_of(system, version, named=None):
+    """
+    Whether a coding's system names a code system version: its canonical URL (or its repository's), the URL it was
+    resolved by (`named`), or an OCL path of its repository or of the version.
+    """
+    url = system.partition('|')[0]
+    canonicals = {version.canonical_url, getattr(version, 'repository_canonical_url', None),
+                  (named or '').partition('|')[0]}
+    if url in canonicals - {None, ''}:
+        return True
+    repository = to_parent_uri(to_ocl_path(url))
+    repository = repository if repository.endswith('/') else f'{repository}/'
+    return repository in {version.uri, '/'.join(version.uri.split('/')[:5]) + '/'}
+
+
 def find_concept(version, code):
-    """The code system version's concept with the code, retired or not, with its repository and names; else None."""
+    """
+    The code system version's concept with the code, retired or not (a deleted one, is_active false, is gone), with its
+    repository and names; else None.
+    """
     concepts = version.concepts_set.filter(id=F('versioned_object_id')) if version.is_head else \
         Concept.objects.filter(sources=version)
-    return concepts.filter(code_q('mnemonic', code)).select_related('parent').prefetch_related(
+    return concepts.filter(code_q('mnemonic', code), is_active=True).select_related('parent').prefetch_related(
         'names').order_by('id').first()
 
 

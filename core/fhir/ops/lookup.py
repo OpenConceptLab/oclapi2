@@ -18,7 +18,7 @@ from rest_framework import status
 
 from core.fhir import outcomes
 from core.fhir.ops.concepts import (
-    coded_input, require, find_concept, display_of, designations, fhir_code, system_of, text)
+    coded_input, require, find_concept, display_of, designations, fhir_code, is_system_of, path, system_of, text)
 from core.fhir.resolve import UnresolvedError, resolve
 from core.fhir.search import read_version
 
@@ -44,6 +44,10 @@ def lookup(parameters, kwargs, user, instance_id=None):
     except UnresolvedError as ex:
         raise outcomes.NotFoundError(
             str(ex.detail), tx_issue_type='not-found', status_code=status.HTTP_422_UNPROCESSABLE_ENTITY) from ex
+    if instance_id and coding.system and not is_system_of(coding.system, version):
+        raise outcomes.InvalidError(
+            f"'{coding.system}' is not the code system {instance_id} this $lookup is on.",
+            expression=path(coding, 'system'))
     system = system_of(version, coding.system)
     concept = find_concept(version, code)
     if not concept:

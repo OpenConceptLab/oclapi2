@@ -312,6 +312,22 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
             self.assertUnresolved('CodeSystem', url, 'v2', kwargs, user)
         self.assertEqual(self.resolve('CodeSystem', url, kwargs={'org': 'HL7'}, user=self.admin).id, private_v2.id)
 
+    def test_a_version_in_an_ocl_path_is_a_version_named(self):
+        """
+        /orgs/{org}/sources/{id}/{version}/ names that version, so a private one answers as a missing one: it never
+        falls back to the newest public release, as a request naming no version does (Codex F1.1).
+        """
+        source(self.hl7, 'newest')
+        public_v1 = source(self.hl7, 'newest', 'v1', released=True)
+        private_v2 = source(self.hl7, 'newest', 'v2', released=True, public_access=ACCESS_TYPE_NONE)
+        for path in ('/orgs/HL7/sources/newest/v2/', '/orgs/HL7/CodeSystem/newest/v2/',
+                     '/orgs/HL7/sources/newest/v2/concepts/c1/'):
+            error = self.assertUnresolved('CodeSystem', path)
+            self.assertEqual(error.version, 'v2')
+            self.assertEqual(self.resolve('CodeSystem', path, kwargs={'org': 'HL7'}, user=self.admin).id, private_v2.id)
+        self.assertEqual(self.resolve('CodeSystem', '/orgs/HL7/CodeSystem/newest/v1/').id, public_v1.id)
+        self.assertEqual(self.resolve('CodeSystem', '/orgs/HL7/CodeSystem/newest/').id, public_v1.id)
+
     def test_query_counts(self):
         """
         A hot path: these counts may only fall. Without the registry: the toggle, the repository and its latest
