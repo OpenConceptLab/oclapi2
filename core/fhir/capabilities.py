@@ -14,11 +14,12 @@ CapabilityStatement, TerminologyCapabilities and $versions Parameters.
   (core.fhir.resolve's visible_versions: released versions only, never HEAD; at /fhir/ the public ones of public
   repositories; at an owner base the owner's, private ones to those who may view them), by their canonical URL as a
   search shows it (the version's own, else its repository's), each with its versions, newest first, and the default:
-  the newest live release of its repository, the one the resolver serves without a version. A canonical URL two
-  repositories share has no default, since the resolver serves one of them. A version without a canonical URL isn't
-  listed. One query, bounded as a search's is (SEARCH_TIMEOUT_MS; past it the list is too costly, a 422).
+  the newest live release of its repository, the one the resolver serves without a version, where the resolver serves
+  it (under the repository's own canonical URL). A canonical URL two repositories share has no default, since the
+  resolver serves one of them. A version without a canonical URL isn't listed. One query, bounded as a search's is
+  (SEARCH_TIMEOUT_MS; past it the list is too costly, a 422).
 - The routed operations' contracts fill TerminologyCapabilities' blocks: $translate finds the map from the code's
-  system (core.fhir.ops.translate), so it needs none; $expand pages with offset and count (core.fhir.ops.expand).
+  system (core.fhir.ops.translate), so it needs none; $expand pages, with offset and count.
 """
 import re
 from functools import lru_cache
@@ -159,23 +160,26 @@ def versions(parameters, kwargs, user, instance=None):  # pylint: disable=unused
 
 def listed_versions(kwargs, user):
     """
-    The CodeSystem versions a search at the base shows the caller, newest first, as (canonical URL, version, retired,
-    repository): one query.
+    The CodeSystem versions a search at the base shows the caller, newest first, as (canonical URL as a search shows
+    it, the repository's canonical URL, version, retired, repository): one query.
     """
     rows = with_repository_canonical(visible_versions('CodeSystem', kwargs, user)).order_by('-created_at', '-id')
-    return [(own or repository_url, version, retired, repository)
+    return [(own or repository_url, repository_url, version, retired, tuple(repository))
             for own, repository_url, version, retired, *repository in rows.values_list(
                 'canonical_url', 'repository_canonical_url', 'version', 'retired', 'mnemonic', 'organization_id',
                 'user_id')]
 
 
 def code_systems(kwargs, user):
-    """[{url, versions, default}] for each canonical URL the base shows the caller, by URL (see the module's doc)."""
+    """
+    [{url, versions, default}] for each canonical URL the base shows the caller, by URL (see the module's doc). The
+    default is the newest live release of the one repository listed under the URL, marked when the resolver serves it
+    there: the URL is the repository's own (its HEAD's, which the resolver matches), and the release is listed under it.
+    """
     defaults, by_url = {}, {}
-    for url, version, retired, repository in listed_versions(kwargs, user):
-        repository = tuple(repository)
+    for url, repository_url, version, retired, repository in listed_versions(kwargs, user):
         if not retired:
-            defaults.setdefault(repository, (url, version))  # the newest live release
+            defaults.setdefault(repository, (repository_url, version))  # the newest live release
         if url:
             codes, repositories = by_url.setdefault(url, ([], set()))
             codes.append(version)
@@ -183,9 +187,10 @@ def code_systems(kwargs, user):
     listed = []
     for url in sorted(by_url):
         codes, repositories = by_url[url]
-        default = defaults.get(next(iter(repositories))) if len(repositories) == 1 else None
-        listed.append({'url': url, 'versions': unique(codes), 'default': default[1] if default and default[0] == url
-                       else None})
+        only = next(iter(repositories)) if len(repositories) == 1 else None
+        served_at, default = defaults.get(only, (None, None))
+        listed.append({'url': url, 'versions': unique(codes),
+                       'default': default if served_at == url and default in codes else None})
     return listed
 
 

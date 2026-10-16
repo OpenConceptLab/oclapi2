@@ -21,7 +21,7 @@ from core.common.tests import OCLTestCase, OCLAPITransactionTestCase
 from core.fhir import base, search
 from core.fhir.base import FhirOperationView
 from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
-from core.fhir.resolve import resolve
+from core.fhir.resolve import UnresolvedError, resolve
 from core.fhir.tests_ops_lookup import OpsCorpusMixin, CIEL, ICD10, REST, SHARED, NEWEST_PRIVATE, HIV
 from core.fhir.tests_search import source
 from core.orgs.tests.factories import OrganizationFactory
@@ -350,6 +350,27 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):
                     default = [version.rstrip('*') for version in versions if version.endswith('*')]
                     self.assertEqual([resolve('CodeSystem', uri, None, kwargs, user).version], default,
                                      (fhir_base, user, uri))
+
+    def test_the_default_is_marked_only_where_the_resolver_serves_it(self):
+        """
+        The resolver finds a repository by its canonical URL (its HEAD's), so a release with a canonical URL of its own
+        is listed under that URL, as a search finds it, but is no default there; and under the repository's URL the
+        default is marked only when it is listed there.
+        """
+        old, new = 'http://example.org/fhir/CodeSystem/renamed', 'http://example.org/fhir/CodeSystem/renamed-new'
+        source(self.acme, 'renamed', canonical_url=old)
+        source(self.acme, 'renamed', 'v1', released=True, canonical_url=None)
+        source(self.acme, 'renamed', 'v2', released=True, canonical_url=new)
+        source(self.acme, 'kept', canonical_url=old.replace('renamed', 'kept'))
+        source(self.acme, 'kept', 'v1', released=True, canonical_url=old.replace('renamed', 'kept'))
+        source(self.acme, 'kept', 'v2', released=True, canonical_url='http://example.org/fhir/CodeSystem/other')
+
+        self.assertEqual(self.code_systems('/orgs/Acme'), {
+            old: ['v1'], new: ['v2'], old.replace('renamed', 'kept'): ['v1'],
+            'http://example.org/fhir/CodeSystem/other': ['v2']})
+        self.assertEqual(resolve('CodeSystem', old, None, {'org': 'Acme'}).version, 'v2')  # listed under its own URL
+        with self.assertRaises(UnresolvedError):
+            resolve('CodeSystem', new, None, {'org': 'Acme'})
 
     def test_a_hidden_repository_answers_as_one_that_does_not_exist(self):
         """MOH's private repositories, to those who may not view them, and at /fhir/ to everyone: the same bytes and
