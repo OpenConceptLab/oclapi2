@@ -302,13 +302,16 @@ class Search:
         self.resource_type = resource_type
         self.model = REPO_TYPES[resource_type]
         self.parameters = PARAMETERS[resource_type]
-        self.namespace = namespace_of(kwargs)
+        self.namespace, self.user = namespace_of(kwargs), user
         self.access = owner_access(kwargs, user)
         self.found = {}  # (lookup, canonical URL): what look_up found for it
 
     def viewable_sources(self):
-        """The Source rows the base shows the caller: what source-system, target-system and reference match."""
-        return viewable_rows(Source, self.access)
+        """
+        The Source rows the base shows the caller, whoever owns them: what source-system, target-system and reference
+        match. At an owner base that's another owner's private source too, if the caller may view it themselves.
+        """
+        return viewable_rows(Source, self.namespace, self.user)
 
     def criteria(self, query):
         """

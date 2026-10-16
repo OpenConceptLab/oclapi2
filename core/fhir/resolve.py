@@ -151,13 +151,14 @@ def repository_rows(model, **filters):
             rows.filter(user_id=OuterRef('user_id'), organization_id__isnull=True))
 
 
-def with_head(model, **filters):
+def with_head(model, *conditions, **filters):
     """
-    For a subquery: whether the outer row's repository has an active HEAD matching `filters`. One EXISTS, the owner
-    matched inside it (an owner column is NULL on the other kind of row, and NULL equals nothing), which the planner
-    runs as one hashed semi-join; two EXISTS joined by OR it plans as an index scan costing far more.
+    For a subquery: whether the outer row's repository has an active HEAD matching `conditions` and `filters`. One
+    EXISTS, the owner matched inside it (an owner column is NULL on the other kind of row, and NULL equals nothing),
+    which the planner runs as one semi-join; two EXISTS joined by OR it plans as an index scan costing far more.
     """
-    return Exists(model.objects.filter(mnemonic=OuterRef('mnemonic'), version=HEAD, is_active=True, **filters).filter(
+    return Exists(model.objects.filter(
+        *conditions, mnemonic=OuterRef('mnemonic'), version=HEAD, is_active=True, **filters).filter(
         Q(organization_id=OuterRef('organization_id')) | Q(user_id=OuterRef('user_id'))))
 
 
@@ -185,18 +186,23 @@ def owner_access(kwargs, user):
         user.is_staff or (owner.is_member(user) if is_org else owner.id == user.id))
 
 
-def viewable_rows(model, access):
+def viewable_rows(model, namespace, user):
     """
-    The rows of `model`, HEAD and versions alike, whose repository a base shows a caller, by is_visible's rule: anywhere
-    a public row of a public repository (active HEAD); at an owner base also the owner's rows, to those who may view its
-    private repositories. `access` is owner_access's for that base and caller. For what a version refers to (a
-    mapping's source, the code systems an expansion drew on), so only repositories the caller is shown are matched.
+    The queryset form of is_visible(row, namespace, user) over every row of `model`, HEAD and versions alike: anywhere
+    a public row of a public repository (active HEAD); at an owner base also, whoever owns them, the rows `user` may
+    view by their own rights (all to staff, their orgs' and their own), with an active HEAD. For what a version refers
+    to (a mapping's source, the code systems an expansion drew on), so only repositories the caller is shown match.
+
+    A row and its HEAD share their owner, so "both public, or the caller's own" is "the row public or the caller's own,
+    and its HEAD public or the caller's own": one EXISTS, which the planner runs as a semi-join.
     """
-    owner, private = access
-    shown = Q(public_access__in=PUBLIC_ACCESS) & with_head(model, public_access__in=PUBLIC_ACCESS)
-    if owner and private:
-        shown |= Q(**owner) & with_head(model)
-    return model.objects.filter(shown)
+    public = Q(public_access__in=PUBLIC_ACCESS)
+    if namespace is None or not (user and user.is_authenticated):
+        return model.objects.filter(public, with_head(model, public))
+    if user.is_staff:
+        return model.objects.filter(with_head(model))
+    shown = public | Q(organization_id__in=user.organizations.values('id')) | Q(user_id=user.id)
+    return model.objects.filter(shown, with_head(model, shown))
 
 
 def visible_versions(resource_type, kwargs=None, user=None, access=None):

@@ -682,8 +682,9 @@ class ConceptMapSearchTest(SearchCorpusMixin, OCLTestCase):
 class ReferencedSourceAccessTest(SearchCorpusMixin, OCLTestCase):
     """
     source-system, target-system (and their -uri forms) and reference look a canonical up only among the sources the
-    base shows the caller; a mapping whose source is another one is matched only by the URL it stores. So the
-    canonical of a source the caller isn't shown answers exactly as one no source has: the same total, the same queries.
+    base shows the caller: public ones at /fhir/; at an owner base also, whoever owns them, those the caller may view.
+    A mapping whose source is another one is matched only by the URL it stores. So the canonical of a source the caller
+    isn't shown answers exactly as one no source has: the same total, the same queries.
     """
     PRIVATE = 'http://moh.example/fhir/CodeSystem/private'
     UNKNOWN = 'http://moh.example/fhir/CodeSystem/unknown'
@@ -693,19 +694,41 @@ class ReferencedSourceAccessTest(SearchCorpusMixin, OCLTestCase):
         self.private = source(self.moh, 'private-codes', canonical_url=self.PRIVATE, public_access=ACCESS_TYPE_NONE)
         self.private_v1 = source(self.moh, 'private-codes', 'v1', released=True, canonical_url=self.PRIVATE,
                                  public_access=ACCESS_TYPE_NONE)
-        code = ConceptFactory(parent=self.private, mnemonic='P1')
+        self.private_code = ConceptFactory(parent=self.private, mnemonic='P1')
         for _ in range(3):
-            MappingFactory(parent=self.private, from_source=self.private, to_source=self.private, from_concept=code,
-                           to_concept=code, sources=[self.private_v1])
+            MappingFactory(parent=self.private, from_source=self.private, to_source=self.private,
+                           from_concept=self.private_code, to_concept=self.private_code, sources=[self.private_v1])
         drawing = 'https://example.org/ValueSet/drawing'  # a public value set whose stored expansion drew on it
         collection(self.sehatapp, 'drawing', canonical_url=drawing)
         self.with_expansion(collection(self.sehatapp, 'drawing', 'v1', released=True, canonical_url=drawing),
                             explicit=[self.private_v1])
 
-    def answer(self, path, user, name, value):
+    def with_partner(self):
+        """
+        Partner's public ConceptMap maps to and from MOH's private source, and its public value set drew on it; a
+        member of both orgs, and a member of Partner only.
+        """
+        partner = OrganizationFactory(mnemonic='Partner')
+        self.both = UserProfileFactory(username='both-member')
+        self.partner_only = UserProfileFactory(username='partner-member')
+        partner.members.add(self.both, self.partner_only)
+        self.moh.members.add(self.both)
+        maps = source(partner, 'partner-map', canonical_url='https://example.org/partner-map')
+        maps_v1 = source(partner, 'partner-map', 'v1', released=True, canonical_url=maps.canonical_url)
+        own = ConceptFactory(parent=maps, mnemonic='X1')
+        MappingFactory(parent=maps, from_source=maps, to_source=self.private, from_concept=own,
+                       to_concept=self.private_code, sources=[maps_v1])
+        MappingFactory(parent=maps, from_source=self.private, to_source=maps, from_concept=self.private_code,
+                       to_concept=own, sources=[maps_v1])
+        collection(partner, 'partner-set', canonical_url='https://example.org/partner-set')
+        self.with_expansion(
+            collection(partner, 'partner-set', 'v1', released=True, canonical_url='https://example.org/partner-set'),
+            explicit=[self.private_v1])
+
+    def answer(self, path, user, name, value, base='/fhir'):  # pylint: disable=too-many-arguments
         """The total and the SQL of a search, with the value searched for written as URL."""
         with CaptureQueriesContext(connection) as context:
-            total = self.search(path, user=user, **{name: value})['total']
+            total = self.search(path, base=base, user=user, **{name: value})['total']
         return total, [query['sql'].replace(value, 'URL') for query in context.captured_queries]
 
     def test_a_source_the_caller_is_not_shown_answers_as_an_unknown_one(self):
@@ -723,6 +746,44 @@ class ReferencedSourceAccessTest(SearchCorpusMixin, OCLTestCase):
                                (self.admin, [f'{self.PRIVATE}|v1'])):
                 self.assertEqual(self.keys(self.search(
                     'ConceptMap', base='/orgs/MOH', user=user, **{name: self.PRIVATE})), keys, (name, user))
+
+    def test_across_owners_by_the_callers_own_rights(self):
+        """
+        At an owner base, another owner's private source is matched for a caller who may view it by their own rights
+        (staff, a member of its org). A member of the base's org only, or an anonymous caller, gets what an unknown
+        canonical gets. The global base stays public only, whoever asks.
+        """
+        self.with_partner()
+        for resource_type, name, key in (
+                ('ConceptMap', 'target-system', 'https://example.org/partner-map|v1'),
+                ('ConceptMap', 'source-system', 'https://example.org/partner-map|v1'),
+                ('ConceptMap', 'target-uri', 'https://example.org/partner-map|v1'),
+                ('ConceptMap', 'source-uri', 'https://example.org/partner-map|v1'),
+                ('ValueSet', 'reference', 'https://example.org/partner-set|v1')):
+            for user in (self.both, self.admin):
+                self.assertEqual(self.keys(self.search(
+                    resource_type, base='/orgs/Partner', user=user, **{name: self.PRIVATE})), [key], (name, user))
+                self.assertEqual(self.search(resource_type, user=user, **{name: self.PRIVATE})['total'], 0)
+            for user in (self.partner_only, None):
+                private = self.answer(resource_type, user, name, self.PRIVATE, '/orgs/Partner')
+                self.assertEqual(private, self.answer(resource_type, user, name, self.UNKNOWN, '/orgs/Partner'),
+                                 (name, user))
+                self.assertEqual(private[0], 0, (name, user))
+        # the caller's own rights are a subquery of the source lookup, not a query of their own
+        with self.assertNumQueries(5):  # the owner, the caller's membership of it, the sources, the matches, the page
+            self.search('ConceptMap', base='/orgs/Partner', user=self.both, **{'target-system': self.PRIVATE})
+
+    def test_the_source_filter_agrees_with_is_visible(self):
+        """viewable_rows is is_visible's queryset form, over every source row, HEAD and versions alike."""
+        self.with_partner()
+        for namespace in (None, '/orgs/Partner/', '/orgs/MOH/', '/orgs/FHIR-Fixtures/'):
+            for user in (AnonymousUser(), self.outsider, self.member, self.moh_member, self.partner_only, self.both,
+                         self.admin):
+                expected = {row.id for row in Source.objects.all() if fhir_resolve.is_visible(row, namespace, user)}
+                shown = set(fhir_resolve.viewable_rows(Source, namespace, user).values_list('id', flat=True))
+                self.assertEqual(shown, expected, (namespace, user))
+        self.assertIn(self.private.id, fhir_resolve.viewable_rows(Source, '/orgs/Partner/', self.both).values_list(
+            'id', flat=True))
 
 
 class SearchCostTest(SearchCorpusMixin, OCLTestCase):
