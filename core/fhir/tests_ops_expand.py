@@ -214,6 +214,16 @@ class ExpandCases(OpsCorpusMixin):
         staff = self.expansion(self.expand(base='/orgs/Acme', user=self.admin, url=DRAFTS))
         self.assertIn(f'{NEWEST_PRIVATE}|v2', [item['valueUri'] for item in staff['parameter']])
 
+    def test_head_is_expanded_only_when_named(self):
+        """HEAD's own stored expansion answers when valueSetVersion names HEAD; the default stays the release."""
+        head_expansion = ExpansionFactory(mnemonic='autoexpand-HEAD', collection_version=self.fevers)
+        head_expansion.concepts.add(self.infectious)
+        self.fevers.expansion_uri = head_expansion.uri
+        self.fevers.save()
+        response = self.expand(url=FEVERS, valueSetVersion='HEAD')
+        self.assertEqual((response.data['version'], self.expansion(response)['contains']), ('HEAD', [INFECTIOUS]))
+        self.assertEqual(self.expansion(self.expand(url=FEVERS))['total'], 3)
+
     def test_a_member_of_a_code_system_without_a_canonical_url_is_named_by_its_path(self):
         local = source(self.acme, 'local', canonical_url=None)
         local_v1 = source(self.acme, 'local', 'v1', released=True, canonical_url=None)
