@@ -60,6 +60,7 @@ FORMAT_PARAMETERS = ('_format', 'format')
 # Protocol parameters: they choose the response format, and are never operation or search input
 CONTROL_PARAMETERS = frozenset({'_format', 'format', '_pretty'})
 RESOURCE_TYPES = ('CodeSystem', 'ValueSet', 'ConceptMap')
+OWNER_BASE_PATHS = ('metadata', '$versions')  # what an owner base answers besides its resource types
 
 FHIR_NS = 'http://hl7.org/fhir'
 XHTML_NS = 'http://www.w3.org/1999/xhtml'
@@ -78,9 +79,13 @@ def xml_parser():
 
 
 def is_fhir_path(path):
-    """Whether a path is under a FHIR base: the global /fhir/, or a FHIR resource type at an owner base."""
+    """
+    Whether a path is under a FHIR base: the global /fhir/, or at an owner base a FHIR resource type, its metadata or
+    $versions.
+    """
     segments = path.strip('/').split('/')
-    return segments[0] == 'fhir' or (len(segments) >= 3 and segments[2] in RESOURCE_TYPES)
+    return segments[0] == 'fhir' or (len(segments) >= 3 and segments[2] in RESOURCE_TYPES) or (
+        len(segments) == 3 and segments[0] in ('orgs', 'users') and segments[2] in OWNER_BASE_PATHS)
 
 
 def fhir_base_url(request, kwargs=None):

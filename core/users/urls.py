@@ -1,6 +1,7 @@
 from django.urls import include, path
 
 from core.capabilities.views import UserCapabilityOverrideListView, UserCapabilityOverrideDetailView
+from core.fhir.views import CapabilityStatementView, VersionsView
 from core.orgs import views as org_views
 from core.tasks import views as task_views
 from . import views
@@ -60,6 +61,10 @@ urlpatterns = [
     path('<str:user>/map-projects/', include('core.map_projects.urls')),
 
     # TODO: require FHIR subdomain
+    path('<str:user>/metadata', CapabilityStatementView.as_view(), name='userprofile-fhir-metadata'),
+    path('<str:user>/metadata/', CapabilityStatementView.as_view(), name='userprofile-fhir-metadata-slash'),
+    path('<str:user>/$versions', VersionsView.as_view(), name='userprofile-fhir-versions'),
+    path('<str:user>/$versions/', VersionsView.as_view(), name='userprofile-fhir-versions-slash'),
     path('<str:user>/CodeSystem/', include('core.code_systems.urls'), name='code_systems_urls'),
     path('<str:user>/CodeSystem', include('core.code_systems.urls'), name='code_systems_urls_no_slash'),
     path('<str:user>/ValueSet/', include('core.value_sets.urls'), name='value_sets_urls'),

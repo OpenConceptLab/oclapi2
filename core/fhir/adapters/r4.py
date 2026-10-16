@@ -10,6 +10,7 @@ The FHIR R4 wire form of the version-neutral (R5-shaped) answers core.fhir.ops b
 """
 from core.concept_maps.constants import (
     EQUIVALENT, NOT_RELATED_TO, RELATED_TO, SOURCE_IS_BROADER, SOURCE_IS_NARROWER)
+from core.fhir.base import FHIR_RELEASE, prune
 
 # R5 relationship -> R4 equivalence, as HL7's R4/R5 ConceptMap conversion maps them: the target is wider than a source
 # that is narrower than it; not-related-to is disjoint
@@ -35,6 +36,85 @@ def parameters(items):
 
 def part_parameter(name, parts):
     return {'name': name, 'part': [parameter(*part) for part in parts if part[2] is not None]}
+
+
+# The metadata (core.fhir.capabilities) in R4: the service, SVCM 1.5.1's Terminology Repository, which the
+# CapabilityStatement instantiates, and the definitions of the operations and search parameters it lists
+SERVICE_NAME, SERVICE_TITLE = 'OCLTerminologyService', 'Open Concept Lab FHIR terminology service'
+PUBLISHER = 'Open Concept Lab'
+SVCM_TERMINOLOGY_REPOSITORY = (
+    'https://profiles.ihe.net/ITI/SVCM/CapabilityStatement/IHE.SVCM.TerminologyRepository|1.5.1')
+OPERATION_DEFINITION = 'http://hl7.org/fhir/OperationDefinition/'
+SYSTEM_OPERATION_DEFINITIONS = {'versions': 'CapabilityStatement-versions'}
+SEARCH_PARAMETER = 'http://hl7.org/fhir/SearchParameter/'
+SEARCH_PARAMETER_TYPES = {
+    '_id': 'token', '_lastUpdated': 'date', 'url': 'uri', 'version': 'token', 'status': 'token', 'identifier': 'token',
+    'name': 'string', 'title': 'string', 'description': 'string', 'publisher': 'string', 'system': 'uri',
+    'code': 'token', 'language': 'token', 'reference': 'uri', 'source-system': 'uri', 'source-uri': 'reference',
+    'target-system': 'uri', 'target-uri': 'reference'}
+# R4 defines these once for every resource, or for every conformance resource; the others per resource type
+SHARED_SEARCH_PARAMETERS = {
+    '_id': 'Resource-id', '_lastUpdated': 'Resource-lastUpdated',
+    **{name: f'conformance-{name}' for name in (
+        'url', 'version', 'status', 'identifier', 'name', 'title', 'description', 'publisher')}}
+
+
+def search_parameter(resource_type, name):
+    """A search parameter as a CapabilityStatement lists it: its name, R4 definition and type."""
+    definition = SHARED_SEARCH_PARAMETERS.get(name, f'{resource_type}-{name}')
+    return {'name': name, 'definition': SEARCH_PARAMETER + definition, 'type': SEARCH_PARAMETER_TYPES[name]}
+
+
+def operation(name, resource_type=None):
+    """An operation as a CapabilityStatement lists it: its name and R4 OperationDefinition."""
+    definition = f'{resource_type}-{name}' if resource_type else SYSTEM_OPERATION_DEFINITIONS[name]
+    return {'name': name, 'definition': OPERATION_DEFINITION + definition}
+
+
+def described(resource_type, metadata):
+    """What a CapabilityStatement and a TerminologyCapabilities both say of the service, in R4's element order."""
+    return {
+        'resourceType': resource_type, 'name': SERVICE_NAME, 'title': SERVICE_TITLE, 'status': 'active',
+        'date': metadata['date'], 'publisher': PUBLISHER, 'kind': 'instance', 'software': metadata['software'],
+        'implementation': {'description': SERVICE_TITLE, 'url': metadata['url']},
+    }
+
+
+def capability_statement(statement):
+    """The CapabilityStatement (core.fhir.capabilities.capability_statement) in R4: fhirVersion 4.0.1, SVCM."""
+    resource = described('CapabilityStatement', statement)
+    software, implementation = resource.pop('software'), resource.pop('implementation')
+    rest = {'mode': 'server', 'resource': [{
+        'type': item['type'],
+        'interaction': [{'code': code} for code in item['interactions']],
+        'searchParam': [search_parameter(item['type'], name) for name in item['search_parameters']],
+        'operation': [operation(name, item['type']) for name in item['operations']],
+    } for item in statement['resources']], 'operation': [operation(name) for name in statement['operations']]}
+    return {
+        **resource, 'instantiates': [SVCM_TERMINOLOGY_REPOSITORY], 'software': software,
+        'implementation': implementation, 'fhirVersion': FHIR_RELEASE, 'format': statement['formats'],
+        'rest': [prune(rest)],
+    }
+
+
+def terminology_capabilities(capabilities):
+    """
+    The TerminologyCapabilities (core.fhir.capabilities.terminology_capabilities) in R4: each code system's versions,
+    the default one marked isDefault, then the blocks of the operations routed.
+    """
+    return prune({
+        **described('TerminologyCapabilities', capabilities),
+        'codeSystem': [{'uri': item['url'], 'version': [
+            {'code': version, **({'isDefault': True} if version == item['default'] else {})}
+            for version in item['versions']]} for item in capabilities['code_systems']],
+        **{block: capabilities[block] for block in ('expansion', 'translation') if block in capabilities},
+    })
+
+
+def versions_parameters(answer):
+    """$versions' answer (core.fhir.capabilities.versions) as R4 Parameters: each version, then the default."""
+    return parameters([*(('version', 'valueCode', version) for version in answer['versions']),
+                       ('default', 'valueCode', answer['default'])])
 
 
 def lookup_parameters(answer):
