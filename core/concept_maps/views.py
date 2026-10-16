@@ -12,6 +12,7 @@ from core.concept_maps.constants import RESOURCE_TYPE
 from core.concept_maps.serializers import ConceptMapDetailSerializer, ConceptMapParametersSerializer
 from core.concepts.permissions import CanAccessParentDictionary
 from core.fhir.base import FhirViewMixin
+from core.fhir.outcomes import InvalidError
 from core.fhir.search import FhirSearchMixin, FhirReadMixin
 from core.mappings.constants import SAME_AS
 from core.mappings.views import MappingListView
@@ -95,22 +96,19 @@ class ConceptMapTranslateView(FhirViewMixin, MappingListView):
         system = params.get('system')
         targetsystem = params.get('targetsystem')
         # TODO: implement 'source' and 'target'
+        if not code:
+            raise InvalidError('A code to translate is required.', expression='code')
+        if not system:
+            raise InvalidError('system is required with a code: the code system the code is from.',
+                               expression='system')
+
         if url:
             queryset = queryset.filter(parent__canonical_url=url)
-            if not queryset:
-                return queryset
-
-        if code:
-            queryset = queryset.filter(from_concept_code=code)
-            if not queryset:
-                return queryset
-        if system:
-            system_url = IdentifierSerializer.convert_fhir_url_to_ocl_uri(system, 'sources')
-            queryset = queryset.filter(Q(from_source__canonical_url=system) |
-                                       Q(from_source_url=system_url) |
-                                       Q(from_source__uri=system_url))
-            if not queryset:
-                return queryset
+        queryset = queryset.filter(from_concept_code=code)
+        system_url = IdentifierSerializer.convert_fhir_url_to_ocl_uri(system, 'sources')
+        queryset = queryset.filter(Q(from_source__canonical_url=system) |
+                                   Q(from_source_url=system_url) |
+                                   Q(from_source__uri=system_url))
         if targetsystem:
             target_url = IdentifierSerializer.convert_fhir_url_to_ocl_uri(targetsystem, 'sources')
             queryset = queryset.filter(Q(to_source__canonical_url=targetsystem) |
