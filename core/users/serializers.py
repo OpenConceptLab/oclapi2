@@ -177,7 +177,10 @@ class FollowingSerializer(AbstractFollowerSerializer):
 class UserDetailSerializer(PrivateUserFieldsMixin, AbstractResourceSerializer):
     type = serializers.CharField(source='resource_type', read_only=True)
     uuid = serializers.CharField(source='id', read_only=True)
-    username = serializers.CharField(required=False)
+    username = serializers.CharField(required=False, validators=[
+        RegexValidator(regex=NAMESPACE_REGEX),
+        UniqueValidator(queryset=UserProfile.objects.all(), message='A user with this username already exists')
+    ])
     first_name = serializers.CharField(required=False, allow_blank=True)
     last_name = serializers.CharField(required=False, allow_blank=True)
     name = serializers.CharField(required=False)
