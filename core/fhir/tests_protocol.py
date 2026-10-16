@@ -197,6 +197,8 @@ class FhirProtocolTest(OCLTestCase):
 
     def test_xml_values_match_json_for_a_value_set_and_a_concept_map_at_an_owner_base(self):
         OrganizationCollectionFactory(
+            organization=self.org, mnemonic='my_vs', canonical_url='http://example.org/vs/my_vs', version='HEAD')
+        OrganizationCollectionFactory(
             organization=self.org, mnemonic='my_vs', canonical_url='http://example.org/vs/my_vs', version='v1',
             is_latest_version=True, released=True)
         for path in (f'/orgs/{self.org.mnemonic}/ValueSet/my_vs/', f'/orgs/{self.org.mnemonic}/ConceptMap/proto/'):

@@ -34,6 +34,8 @@ CIEL = 'https://CIELterminology.org'
 FIXTURE = 'https://openconceptlab.org/fhir-fixtures/CodeSystem/fixture-codes'
 ICD10_VS = 'http://sahra.tools/fhir/ValueSet/icd10-all'
 CIEL_VS = 'https://example.org/ValueSet/ciel-set'
+HIV = 'http://moh.example/fhir/CodeSystem/hiv'
+HIV_VS = 'http://moh.example/fhir/ValueSet/hiv'
 SUBSETTED = {'system': 'http://terminology.hl7.org/CodeSystem/v3-ObservationValue', 'code': 'SUBSETTED'}
 HL7_OID = {'system': 'urn:ietf:rfc:3986', 'value': 'urn:oid:2.16.840.1.113883.6.90'}
 ACSN = {'text': 'Accession ID', 'coding': [{'system': 'http://hl7.org/fhir/v2/0203', 'code': 'ACSN'}]}
@@ -59,7 +61,8 @@ class SearchCorpusMixin:
     ICD-10 shared by WHO (whose released version has no canonical of its own, as in production) and sehatapp (with a
     newer unreleased version); CIEL with a retired release and a live one, with concepts and mappings; repositories
     nothing visible comes from (nothing released, only a retired release, a HEAD flagged released); the private fixture
-    org with two releases; a user's repository; two value sets with stored expansions.
+    org with two releases; a user's repository; MOH's code system and value set, made private after a public release;
+    three value sets with stored expansions.
     """
     def setUp(self):
         super().setUp()
@@ -114,6 +117,14 @@ class SearchCorpusMixin:
         self.jdoe_codes_v1 = source(
             self.jdoe, 'my-codes', 'v1', released=True, canonical_url='https://example.org/my-codes')
 
+        # repositories made private after a public release: the release keeps its own public access, but its
+        # repository (HEAD) is private, so it's shown only at MOH's base, to MOH's members and staff
+        self.moh = OrganizationFactory(mnemonic='MOH')
+        self.moh_member = UserProfileFactory(username='moh-member')
+        self.moh.members.add(self.moh_member)
+        self.hiv = source(self.moh, 'hiv-codes', canonical_url=HIV, public_access=ACCESS_TYPE_NONE)
+        self.hiv_v1 = source(self.moh, 'hiv-codes', 'v1', released=True, canonical_url=None)  # the repository's
+
         # the value sets: sehatapp's draws on its ICD-10 v1.0, the CIEL one on CIEL's HEAD; the released version of
         # the ICD-10 one has no canonical of its own
         self.icd_vs = collection(self.sehatapp, 'icd10-all', canonical_url=ICD10_VS, full_name='All ICD-10 codes')
@@ -124,6 +135,9 @@ class SearchCorpusMixin:
         self.ciel_vs_v1 = collection(self.ciel, 'ciel-set', 'v1', released=True, canonical_url=CIEL_VS)
         self.with_expansion(self.ciel_vs_v1, evaluated=[self.ciel_source])
         self.ciel_vs_v2 = collection(self.ciel, 'ciel-set', 'v2', canonical_url=CIEL_VS)  # unreleased
+        self.hiv_vs = collection(self.moh, 'hiv-set', canonical_url=HIV_VS, public_access=ACCESS_TYPE_NONE)
+        self.hiv_vs_v1 = collection(self.moh, 'hiv-set', 'v1', released=True, canonical_url=HIV_VS)
+        self.with_expansion(self.hiv_vs_v1, explicit=[self.ciel_v2])
 
     @staticmethod
     def with_expansion(collection_version, explicit=(), evaluated=()):
@@ -165,6 +179,10 @@ class SearchCorpusMixin:
         self.assertEqual(issue['code'], code)
         self.assertIn({'system': TX_ISSUE_TYPE_SYSTEM, 'code': tx_issue_type}, issue['details']['coding'])
         return issue
+
+    def assertNotFound(self, path, user=None, **params):  # pylint: disable=invalid-name
+        response = self.get(path, user, **params)
+        self.assertOutcome(response, 404, 'not-found', 'not-found')
 
 
 class CodeSystemSearchTest(SearchCorpusMixin, OCLTestCase):  # pylint: disable=too-many-public-methods
@@ -696,10 +714,6 @@ class VersionIdTest(SearchCorpusMixin, OCLTestCase):
 
 
 class ReadTest(SearchCorpusMixin, OCLTestCase):
-    def assertNotFound(self, path, user=None, **params):  # pylint: disable=invalid-name
-        response = self.get(path, user, **params)
-        self.assertOutcome(response, 404, 'not-found', 'not-found')
-
     def test_global_read_by_opaque_id(self):
         for resource_type, version in (('CodeSystem', self.who_icd_2019), ('CodeSystem', self.ciel_v1),
                                        ('ConceptMap', self.ciel_v2), ('ValueSet', self.icd_vs_v1)):
@@ -802,12 +816,95 @@ class ReadTest(SearchCorpusMixin, OCLTestCase):
         self.assertEqual(response.status_code, 404)
 
 
+class RepositoryAccessTest(SearchCorpusMixin, OCLTestCase):
+    """
+    A version is shown only where its repository is too: its HEAD, which governs access to its concepts and mappings,
+    must be viewable as well as the version. MOH made hiv-codes and hiv-set private after releasing v1 public, so v1
+    is shown at MOH's base to MOH's members and staff, and nowhere else. A retired release counts only beside a live
+    one the caller is shown, and an owner-base read without a version serves the newest release the caller is shown.
+    """
+    def setUp(self):
+        super().setUp()
+        ConceptFactory(parent=self.hiv, mnemonic='H1', sources=[self.hiv_v1])
+        MappingFactory(parent=self.hiv, from_source=self.hiv, to_source=self.ciel_source, sources=[self.hiv_v1])
+        self.users = (None, self.outsider, self.member, self.moh_member, self.admin)
+        self.viewers = (self.moh_member, self.admin)
+
+    def test_search_shows_a_release_where_its_repository_is_shown(self):
+        hiv, hiv_set = [f'{HIV}|v1'], [f'{HIV_VS}|v1']
+        for user in self.users:
+            for base, shown in (('/fhir', False), ('/orgs/MOH', user in self.viewers)):
+                for resource_type, params, keys in (
+                        ('CodeSystem', {}, hiv), ('CodeSystem', {'url': HIV}, hiv), ('CodeSystem', {'code': 'H1'}, hiv),
+                        ('CodeSystem', {'code': f'{HIV}|'}, hiv), ('ConceptMap', {}, hiv),
+                        ('ConceptMap', {'url': HIV}, hiv), ('ValueSet', {}, hiv_set),
+                        ('ValueSet', {'url': HIV_VS}, hiv_set), ('ValueSet', {'reference': CIEL}, hiv_set)):
+                    bundle = self.search(resource_type, base=base, user=user, **params)
+                    found = [key for key in self.keys(bundle) if key in keys]
+                    self.assertEqual(found, keys if shown else [], (user, base, resource_type, params))
+                    if base == '/orgs/MOH':
+                        self.assertEqual(bundle['total'], len(found), (user, resource_type, params))
+
+    def test_read_serves_a_release_where_its_repository_is_shown(self):
+        for user in self.users:
+            for resource_type, version in (
+                    ('CodeSystem', self.hiv_v1), ('ConceptMap', self.hiv_v1), ('ValueSet', self.hiv_vs_v1)):
+                self.assertNotFound(f'/fhir/{resource_type}/{version.id}', user)
+            for path, url in (('/orgs/MOH/CodeSystem/hiv-codes/', HIV), ('/orgs/MOH/ConceptMap/hiv-codes/', HIV),
+                              ('/orgs/MOH/ValueSet/hiv-set/', HIV_VS)):
+                if user in self.viewers:
+                    resource = self.read(path, user)
+                    self.assertEqual((resource['version'], resource['url']), ('v1', url), (path, user))
+                else:
+                    self.assertNotFound(path, user)
+                    self.assertNotFound(path, user, version='v1')
+        self.assertEqual([concept['code'] for concept in self.read(
+            '/orgs/MOH/CodeSystem/hiv-codes/', self.moh_member)['concept']], ['H1'])
+
+    def test_a_retired_release_counts_beside_a_live_one_the_caller_is_shown(self):
+        url = 'http://moh.example/fhir/CodeSystem/mixed'
+        source(self.moh, 'mixed', canonical_url=url)
+        retired = source(self.moh, 'mixed', 'v1', released=True, retired=True, canonical_url=url)
+        source(self.moh, 'mixed', 'v2', released=True, canonical_url=url, public_access=ACCESS_TYPE_NONE)
+        for user in self.users:
+            shown = user in self.viewers
+            self.assertEqual(self.search('CodeSystem', user=user, url=url)['total'], 0, user)
+            self.assertNotFound(f'/fhir/CodeSystem/{retired.id}', user)
+            self.assertEqual(self.keys(self.search('CodeSystem', base='/orgs/MOH', user=user, url=url)),
+                             [f'{url}|v1', f'{url}|v2'] if shown else [], user)
+            if shown:
+                self.assertEqual(self.read('/orgs/MOH/CodeSystem/mixed/', user, version='v1')['status'], 'retired')
+            else:
+                self.assertNotFound('/orgs/MOH/CodeSystem/mixed/', user, version='v1')
+
+    def test_an_owner_read_serves_the_newest_release_the_caller_is_shown(self):
+        url = 'http://moh.example/fhir/CodeSystem/newest'
+        source(self.moh, 'newest', canonical_url=url)
+        source(self.moh, 'newest', 'v1', released=True, canonical_url=url)
+        source(self.moh, 'newest', 'v2', released=True, canonical_url=url, public_access=ACCESS_TYPE_NONE)
+        for user in self.users:
+            newest = 'v2' if user in self.viewers else 'v1'
+            self.assertEqual(self.read('/orgs/MOH/CodeSystem/newest/', user)['version'], newest, user)
+            listed = self.keys(self.search('CodeSystem', base='/orgs/MOH', user=user, _id='newest'))
+            self.assertIn(f'{url}|{newest}', listed, user)
+
+
 class VisibleVersionsTest(SearchCorpusMixin, OCLTestCase):
     """visible_versions is the queryset form of is_visible and has_release: they agree on every row."""
     def test_the_queryset_agrees_with_is_visible_and_has_release(self):
-        cases = [({}, user) for user in (AnonymousUser(), self.member, self.admin)] + [
-            ({'org': 'FHIR-Fixtures'}, user) for user in (AnonymousUser(), self.outsider, self.member, self.admin)] + [
-            ({'org': 'CIEL'}, AnonymousUser()), ({'org': 'misc'}, self.admin), ({'user': 'jdoe'}, AnonymousUser())]
+        # a retired public release beside a private live one; a private newest release; a deleted repository (HEAD)
+        source(self.moh, 'mixed', canonical_url='urn:mixed')
+        source(self.moh, 'mixed', 'v1', released=True, retired=True, canonical_url='urn:mixed')
+        source(self.moh, 'mixed', 'v2', released=True, canonical_url='urn:mixed', public_access=ACCESS_TYPE_NONE)
+        source(self.moh, 'newest', canonical_url='urn:newest')
+        source(self.moh, 'newest', 'v1', released=True, canonical_url='urn:newest')
+        source(self.moh, 'newest', 'v2', released=True, canonical_url='urn:newest', public_access=ACCESS_TYPE_NONE)
+        Source.objects.filter(id=self.jdoe_codes.id).update(is_active=False)
+        users = (AnonymousUser(), self.outsider, self.member, self.moh_member, self.admin)
+        cases = [({}, user) for user in users] + [
+            ({'org': org}, user) for org in ('FHIR-Fixtures', 'MOH') for user in users] + [
+            ({'org': 'CIEL'}, AnonymousUser()), ({'org': 'misc'}, self.admin), ({'user': 'jdoe'}, AnonymousUser()),
+            ({'user': 'jdoe'}, self.jdoe)]
         for kwargs, user in cases:
             for resource_type in ('CodeSystem', 'ValueSet'):
                 model = fhir_resolve.REPO_TYPES[resource_type]
@@ -815,9 +912,11 @@ class VisibleVersionsTest(SearchCorpusMixin, OCLTestCase):
                 expected = {
                     row.id for row in model.objects.filter(is_active=True, released=True).exclude(version=HEAD)
                     if (namespace is None or row.parent.uri == namespace) and
-                    fhir_resolve.is_visible(row, namespace, user) and fhir_resolve.has_release(row)}
+                    fhir_resolve.is_visible(row, namespace, user) and fhir_resolve.has_release(row, namespace, user)}
                 visible = set(fhir_resolve.visible_versions(resource_type, kwargs, user).values_list('id', flat=True))
                 self.assertEqual(visible, expected, (kwargs, user, resource_type))
+        self.assertIn(self.hiv_v1.id, fhir_resolve.visible_versions(
+            'CodeSystem', {'org': 'MOH'}, self.moh_member).values_list('id', flat=True))
 
 
 class SearchTimeoutTest(TransactionTestCase):

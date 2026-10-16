@@ -2,10 +2,12 @@
 FHIR search and read of CodeSystem, ValueSet and ConceptMap: SVCM's Query transactions (ITI-95, ITI-96, ITI-100).
 
 - What a base shows is core.fhir.resolve's rule: released versions only, never HEAD; at the global base /fhir/ the
-  public ones, whoever asks; at an owner base the owner's, private ones to those who may view them. Search uses its
-  queryset form (visible_versions), a read checks is_visible and has_release on the version it finds.
+  public ones of public repositories (HEAD), whoever asks; at an owner base the owner's, private ones to those who may
+  view them. Search uses its queryset form (visible_versions), a read checks is_visible and has_release on the version
+  it finds.
 - Ids: at the global base every released version has an opaque, stable id, its database key; an owner base keeps the
-  repository's mnemonic (so its versions share one), and a read there serves the latest release or the `version` named.
+  repository's mnemonic (so its versions share one), and a read there serves the latest release the requester is
+  shown, or the `version` named.
 - Search parameters: SVCM's, with :exact and :contains on the string ones (no modifier is starts-with; both it and
   :contains ignore case and accents, :exact neither).
   A comma separates alternatives, a repeated parameter must hold every time. Anything else is a 400 not-supported.
@@ -45,7 +47,9 @@ from core.common.utils import to_int
 from core.concepts.models import Concept
 from core.fhir import outcomes
 from core.fhir.base import CONTROL_PARAMETERS, fhir_base_url
-from core.fhir.resolve import REPO_TYPES, namespace_of, visible_versions, is_visible, has_release, repository_rows
+from core.fhir.resolve import (
+    PUBLIC_ACCESS, REPO_TYPES, namespace_of, visible_versions, is_visible, has_release, repository_rows,
+    with_repository_access)
 from core.mappings.models import Mapping
 from core.sources.models import Source
 
@@ -461,21 +465,30 @@ def search_bundle(view):
 def read(view):
     """
     The repository version a FHIR read view names: at the global base by its opaque id, at an owner base by its
-    mnemonic, the version ?version= names (an OCL extension) or else the latest release. It must be one search lists:
-    released, never HEAD, visible to the requester there. Raises NotFoundError.
+    mnemonic, the version ?version= names (an OCL extension) or else the latest release the requester is shown. It
+    must be one search lists: released, never HEAD, visible to the requester there. Raises NotFoundError.
     """
     resource_type, resource_id = view.resource_type, view.kwargs[view.lookup_field]
-    namespace = namespace_of(view.kwargs)
+    namespace, user = namespace_of(view.kwargs), view.request.user
     versions = REPO_TYPES[resource_type].objects.filter(is_active=True, released=True).exclude(version=HEAD)
+    latest = False
     if namespace is None:
         versions = versions.filter(id=int(resource_id)) if OPAQUE_ID.fullmatch(resource_id) else versions.none()
     else:
         versions = view.filter_queryset_by_owner(versions.filter(mnemonic=resource_id))
         version = view.request.query_params.get('version')
+        latest = not version
         versions = versions.filter(version=version) if version else versions.filter(
             retired=False).order_by('-created_at')
-    instance = with_repository_canonical(versions).first()
-    if not instance or not is_visible(instance, namespace, view.request.user) or not has_release(instance):
+
+    def shown(instance):
+        return instance and is_visible(instance, namespace, user) and has_release(instance, namespace, user)
+
+    instance = with_repository_access(with_repository_canonical(versions)).first()
+    if latest and instance and not shown(instance):  # the latest is private: the latest public one, if shown
+        instance = with_repository_access(with_repository_canonical(
+            versions.filter(public_access__in=PUBLIC_ACCESS))).first()
+    if not shown(instance):
         raise outcomes.NotFoundError(f'{resource_type}/{resource_id} not found')
     return instance
 

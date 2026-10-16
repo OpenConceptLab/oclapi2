@@ -269,6 +269,29 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
         self.assertUnresolved('CodeSystem', shared, kwargs={'org': 'FHIR-Fixtures'}, user=self.outsider)
         self.assertEqual(self.resolve('CodeSystem', shared, kwargs={'org': 'HL7'}).id, public_v1.id)
 
+    def test_a_public_release_of_a_private_repository(self):
+        """
+        A repository's HEAD must be viewable for its releases to be: a release made public before its repository was
+        made private resolves only at its owner's base, for those who may view the owner's private repositories.
+        """
+        url = 'http://moh.example/fhir/CodeSystem/hiv'
+        moh = OrganizationFactory(mnemonic='MOH')
+        moh_member = UserProfileFactory(username='moh-member')
+        moh.members.add(moh_member)
+        source(moh, 'hiv', canonical_url=url, public_access=ACCESS_TYPE_NONE)
+        release = source(moh, 'hiv', 'v1', released=True, canonical_url=url)
+        if self.registry:
+            GlobalURLRegistryFactory(url=url, namespace=moh.uri)
+
+        for user in (ANONYMOUS, self.outsider, moh_member, self.admin):
+            for reference in (url, f'{url}|v1', '/orgs/MOH/CodeSystem/hiv/'):
+                self.assertUnresolved('CodeSystem', reference, user=user)
+        for user in (ANONYMOUS, self.outsider):
+            self.assertUnresolved('CodeSystem', url, kwargs={'org': 'MOH'}, user=user)
+        for user in (moh_member, self.admin):
+            for reference in (url, f'{url}|v1', '/orgs/MOH/CodeSystem/hiv/'):
+                self.assertEqual(self.resolve('CodeSystem', reference, kwargs={'org': 'MOH'}, user=user).id, release.id)
+
     def test_query_counts(self):
         """
         A hot path: these counts may only fall. Without the registry: the toggle, the repository and its latest
