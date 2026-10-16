@@ -24,7 +24,7 @@ FHIR search and read of CodeSystem, ValueSet and ConceptMap: SVCM's Query transa
 import json
 import re
 from datetime import datetime, timedelta
-from functools import partial, reduce
+from functools import reduce
 from operator import or_
 
 from dateutil.relativedelta import relativedelta
@@ -48,8 +48,8 @@ from core.concepts.models import Concept
 from core.fhir import outcomes
 from core.fhir.base import CONTROL_PARAMETERS, fhir_base_url
 from core.fhir.resolve import (
-    PUBLIC_ACCESS, REPO_TYPES, namespace_of, visible_versions, is_visible, has_release, repository_rows,
-    with_repository_access)
+    PUBLIC_ACCESS, REPO_TYPES, namespace_of, owner_access, visible_versions, viewable_rows, is_visible, has_release,
+    repository_rows, with_repository_access)
 from core.mappings.models import Mapping
 from core.sources.models import Source
 
@@ -147,14 +147,16 @@ def date_range(value):
     return prefix or 'eq', start, end
 
 
-def canonical_q(model, url):
+def canonical_q(model, url, rows=None):
     """
     Rows whose canonical URL is `url` as CanonicalUrlField shows it: their own, or for a row with none (a version
     released before its repository had one), their repository's (HEAD's). The repositories are looked up first (one
-    query), so the planner sees plain conditions rather than a correlated subquery it can't estimate.
+    query) among `rows` (by default every row of `model`), so the planner sees plain conditions rather than a
+    correlated subquery it can't estimate.
     """
+    rows = model.objects if rows is None else rows
     repositories = [Q(mnemonic=mnemonic, organization_id=organization_id, user_id=user_id)
-                    for mnemonic, organization_id, user_id in model.objects.filter(
+                    for mnemonic, organization_id, user_id in rows.filter(
                         version=HEAD, canonical_url=url).values_list('mnemonic', 'organization_id', 'user_id')]
     if not repositories:
         return Q(canonical_url=url)
@@ -239,7 +241,7 @@ def held_identifier(system, value):
         'identifier', f'lax $[*] ? ({" && ".join(conditions)})', variables)
 
 
-def mapped(side, value):
+def mapped(side, value, sources):
     """
     A ConceptMap version holding a live mapping whose group source (side 'from') or target ('to') shows `value`, as
     ConceptMapGroupField builds groups: retired mappings aren't read; a group's system is the from or to source's
@@ -248,10 +250,12 @@ def mapped(side, value):
     OCL keeps no source or target value set on a ConceptMap, so source-uri and target-uri are read as the systems.
 
     The sources with that canonical are listed first, so the planner can read the mappings by their source index.
+    Only `sources`, those the base shows the caller (viewable_rows), are listed: a canonical only other sources have
+    answers as one no source has, so how long the search takes doesn't depend on mappings the caller isn't shown.
     """
     field = f'mapping__{side}_source'
-    sources = list(Source.objects.filter(canonical_url=value).values_list('id', flat=True))
-    shown = Q(**{f'{field}_id__in': sources}) | (Q(**{f'{field}_url': value}) & Q(**{f'{field}__isnull': True}))
+    ids = list(sources.filter(canonical_url=value).values_list('id', flat=True))
+    shown = Q(**{f'{field}_id__in': ids}) | (Q(**{f'{field}_url': value}) & Q(**{f'{field}__isnull': True}))
     path = re.fullmatch(r'/(orgs|users)/([^/]+)/ConceptMap/([^/]+)/', value)
     if path:
         stored = reduce(or_, (Q(**{f'{field}_url__startswith': f'/{path[1]}/{path[2]}/{kind}/{path[3]}/'})
@@ -264,13 +268,18 @@ def mapped(side, value):
 
 
 class Search:
-    """The criteria of one search's parameters, on the versions of a resource type at a base."""
+    """The criteria of one search's parameters, on the versions of a resource type at a base, for a caller."""
 
-    def __init__(self, resource_type, kwargs):
+    def __init__(self, resource_type, kwargs, user=None):
         self.resource_type = resource_type
         self.model = REPO_TYPES[resource_type]
         self.parameters = PARAMETERS[resource_type]
         self.namespace = namespace_of(kwargs)
+        self.access = owner_access(kwargs, user)
+
+    def viewable_sources(self):
+        """The Source rows the base shows the caller: what source-system, target-system and reference match."""
+        return viewable_rows(Source, self.access)
 
     def criteria(self, query):
         """
@@ -395,19 +404,25 @@ class Search:
     def by_language(value):
         return Q(default_locale=value)
 
-    @staticmethod
-    def by_reference(value):
+    def by_reference(self, value):
         """
-        A ValueSet whose stored default expansion draws on a version of the code system (canonical URL) named. An
-        uncorrelated IN, which the planner hashes once, rather than a correlated subquery.
+        A ValueSet whose stored default expansion draws on a version of the code system (canonical URL) named, among
+        those the base shows the caller. An uncorrelated IN, which the planner hashes once, rather than a correlated
+        subquery.
         """
-        sources = Source.objects.filter(canonical_q(Source, value)).values('id')
+        viewable = self.viewable_sources()
+        sources = viewable.filter(canonical_q(Source, value, viewable)).values('id')
         return reduce(or_, (
             Q(expansion_uri__in=versions.through.objects.filter(source_id__in=sources).values('expansion__uri'))
             for versions in (Expansion.explicit_source_versions, Expansion.evaluated_source_versions)))
 
-    by_source = staticmethod(partial(mapped, 'from'))  # a group's source is the system named
-    by_target = staticmethod(partial(mapped, 'to'))  # a group's target is the system named
+    def by_source(self, value):
+        """A group's source is the system named."""
+        return mapped('from', value, self.viewable_sources())
+
+    def by_target(self, value):
+        """A group's target is the system named."""
+        return mapped('to', value, self.viewable_sources())
 
 
 def page_size(query):
@@ -442,8 +457,9 @@ def search_bundle(view):
     """The searchset Bundle a FHIR search view answers: the base's matching versions, one page of them."""
     request, resource_type = view.request, view.resource_type
     count = page_size(request.query_params)
-    ids = list(visible_versions(resource_type, view.kwargs, request.user).filter(
-        Search(resource_type, view.kwargs).criteria(request.query_params)).order_by('-id').values_list('id', flat=True))
+    search = Search(resource_type, view.kwargs, request.user)
+    ids = list(visible_versions(resource_type, access=search.access).filter(
+        search.criteria(request.query_params)).order_by('-id').values_list('id', flat=True))
     paginator, entries = None, []
     if count:
         page = to_int(request.GET.get('page', '1'), 1)

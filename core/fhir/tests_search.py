@@ -12,6 +12,7 @@ from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 from django.db import connection, OperationalError
 from django.test import TransactionTestCase
+from django.test.utils import CaptureQueriesContext
 from mock import patch
 from rest_framework.test import APIClient
 
@@ -675,6 +676,52 @@ class ConceptMapSearchTest(SearchCorpusMixin, OCLTestCase):
     def test_no_query_per_entry(self):
         with self.assertNumQueries(3):  # the sources with the target's canonical, the matches' ids, the page
             self.assertEqual(self.client.get('/fhir/ConceptMap/', {'target-system': ICD10}).data['total'], 1)
+
+
+class ReferencedSourceAccessTest(SearchCorpusMixin, OCLTestCase):
+    """
+    source-system, target-system (and their -uri forms) and reference look a canonical up only among the sources the
+    base shows the caller; a mapping whose source is another one is matched only by the URL it stores. So the
+    canonical of a source the caller isn't shown answers exactly as one no source has: the same total, the same queries.
+    """
+    PRIVATE = 'http://moh.example/fhir/CodeSystem/private'
+    UNKNOWN = 'http://moh.example/fhir/CodeSystem/unknown'
+
+    def setUp(self):
+        super().setUp()
+        self.private = source(self.moh, 'private-codes', canonical_url=self.PRIVATE, public_access=ACCESS_TYPE_NONE)
+        self.private_v1 = source(self.moh, 'private-codes', 'v1', released=True, canonical_url=self.PRIVATE,
+                                 public_access=ACCESS_TYPE_NONE)
+        code = ConceptFactory(parent=self.private, mnemonic='P1')
+        for _ in range(3):
+            MappingFactory(parent=self.private, from_source=self.private, to_source=self.private, from_concept=code,
+                           to_concept=code, sources=[self.private_v1])
+        drawing = 'https://example.org/ValueSet/drawing'  # a public value set whose stored expansion drew on it
+        collection(self.sehatapp, 'drawing', canonical_url=drawing)
+        self.with_expansion(collection(self.sehatapp, 'drawing', 'v1', released=True, canonical_url=drawing),
+                            explicit=[self.private_v1])
+
+    def answer(self, path, user, name, value):
+        """The total and the SQL of a search, with the value searched for written as URL."""
+        with CaptureQueriesContext(connection) as context:
+            total = self.search(path, user=user, **{name: value})['total']
+        return total, [query['sql'].replace(value, 'URL') for query in context.captured_queries]
+
+    def test_a_source_the_caller_is_not_shown_answers_as_an_unknown_one(self):
+        for user in (None, self.outsider, self.admin):
+            for resource_type, name in (('ConceptMap', 'source-system'), ('ConceptMap', 'target-system'),
+                                        ('ConceptMap', 'source-uri'), ('ConceptMap', 'target-uri'),
+                                        ('ValueSet', 'reference')):
+                private = self.answer(resource_type, user, name, self.PRIVATE)
+                self.assertEqual(private, self.answer(resource_type, user, name, self.UNKNOWN), (user, name))
+                self.assertEqual(private[0], 0, (user, name))
+
+    def test_at_its_owner_base_to_those_who_may_view_it(self):
+        for name in ('source-system', 'target-system'):
+            for user, keys in ((None, []), (self.outsider, []), (self.moh_member, [f'{self.PRIVATE}|v1']),
+                               (self.admin, [f'{self.PRIVATE}|v1'])):
+                self.assertEqual(self.keys(self.search(
+                    'ConceptMap', base='/orgs/MOH', user=user, **{name: self.PRIVATE})), keys, (name, user))
 
 
 class VersionIdTest(SearchCorpusMixin, OCLTestCase):

@@ -185,19 +185,33 @@ def owner_access(kwargs, user):
         user.is_staff or (owner.is_member(user) if is_org else owner.id == user.id))
 
 
-def visible_versions(resource_type, kwargs=None, user=None):
+def viewable_rows(model, access):
+    """
+    The rows of `model`, HEAD and versions alike, whose repository a base shows a caller, by is_visible's rule: anywhere
+    a public row of a public repository (active HEAD); at an owner base also the owner's rows, to those who may view its
+    private repositories. `access` is owner_access's for that base and caller. For what a version refers to (a
+    mapping's source, the code systems an expansion drew on), so only repositories the caller is shown are matched.
+    """
+    owner, private = access
+    shown = Q(public_access__in=PUBLIC_ACCESS) & with_head(model, public_access__in=PUBLIC_ACCESS)
+    if owner and private:
+        shown |= Q(**owner) & with_head(model)
+    return model.objects.filter(shown)
+
+
+def visible_versions(resource_type, kwargs=None, user=None, access=None):
     """
     The queryset form of is_visible and has_release, for search: the active released versions, never HEAD, that the
     base `kwargs` names shows `user`. A row is in it exactly when is_visible(row, namespace, user) and
     has_release(row, namespace, user): at the global base public versions of public repositories (HEAD), whoever asks;
     at an owner base the owner's, private ones only to those who may view them (staff, the org's members, the user).
-    An owner base whose owner doesn't exist shows nothing.
+    An owner base whose owner doesn't exist shows nothing. `access`, owner_access's, saves looking it up again.
 
     A retired release counts only beside a live one the caller is shown; retired releases are so few that they're
     checked on their own, which keeps the planner on a plain scan of the table.
     """
     model = REPO_TYPES[resource_type]
-    owner, private = owner_access(kwargs, user)
+    owner, private = access or owner_access(kwargs, user)
     if owner is None:
         return model.objects.none()
     access = {} if private else {'public_access__in': PUBLIC_ACCESS}
