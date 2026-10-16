@@ -6,6 +6,7 @@ from django.http import Http404
 from pydash import get
 
 from core.bundles.serializers import FHIRBundleSerializer
+from core.code_systems.views import FhirParameterRequiredError
 from core.common.constants import HEAD
 from core.common.fhir_helpers import translate_fhir_query
 from core.common.permissions import CanViewConceptDictionary
@@ -104,22 +105,19 @@ class ConceptMapTranslateView(MappingListView):
         system = params.get('system')
         targetsystem = params.get('targetsystem')
         # TODO: implement 'source' and 'target'
+        if not code:
+            raise FhirParameterRequiredError('A code to translate is required.', expression='code')
+        if not system:
+            raise FhirParameterRequiredError(
+                'system is required with a code: the code system the code is from.', expression='system')
+
         if url:
             queryset = queryset.filter(parent__canonical_url=url)
-            if not queryset:
-                return queryset
-
-        if code:
-            queryset = queryset.filter(from_concept_code=code)
-            if not queryset:
-                return queryset
-        if system:
-            system_url = IdentifierSerializer.convert_fhir_url_to_ocl_uri(system, 'sources')
-            queryset = queryset.filter(Q(from_source__canonical_url=system) |
-                                       Q(from_source_url=system_url) |
-                                       Q(from_source__uri=system_url))
-            if not queryset:
-                return queryset
+        queryset = queryset.filter(from_concept_code=code)
+        system_url = IdentifierSerializer.convert_fhir_url_to_ocl_uri(system, 'sources')
+        queryset = queryset.filter(Q(from_source__canonical_url=system) |
+                                   Q(from_source_url=system_url) |
+                                   Q(from_source__uri=system_url))
         if targetsystem:
             target_url = IdentifierSerializer.convert_fhir_url_to_ocl_uri(targetsystem, 'sources')
             queryset = queryset.filter(Q(to_source__canonical_url=targetsystem) |

@@ -81,6 +81,29 @@ class CodeSystemLookupNotFoundError(ValidationError):
         )
 
 
+class FhirParameterRequiredError(ValidationError):
+    """A 400 OperationOutcome for an operation input that is required, naming it in `expression`."""
+    def __init__(self, message: str, expression: str):
+        super().__init__(
+            detail={
+                "resourceType": "OperationOutcome",
+                "id": "exception",
+                "text": {
+                    "status": "additional",
+                    "div": f'<div xmlns="http://www.w3.org/1999/xhtml">{message}</div>',
+                },
+                "issue": [
+                    {
+                        "severity": "error",
+                        "code": "invalid",
+                        "details": {"text": message},
+                        "expression": [expression],
+                    }
+                ],
+            }
+        )
+
+
 class CodeSystemListLookupView(ConceptRetrieveUpdateDestroyView):
     serializer_class = ParametersSerializer
 
@@ -151,6 +174,8 @@ class CodeSystemValidateCodeView(ConceptRetrieveUpdateDestroyView):
         return [CanViewParentDictionaryAsGuest(), ]
 
     def get_queryset(self):
+        """The concept with the code in the code system `url` names. A code system that doesn't resolve, or that the
+        requester can't view, reads nothing; without a code, or with a code but no url, the request is a 400."""
         queryset = super().get_queryset()
 
         parameters = self.get_parameters()
@@ -173,15 +198,17 @@ class CodeSystemValidateCodeView(ConceptRetrieveUpdateDestroyView):
             if not source:
                 return queryset.none()
 
-        if code:
-            if not source:
-                return queryset.none()
+        if not code:
+            raise FhirParameterRequiredError('A code to validate is required.', expression='code')
+        if not source:
+            raise FhirParameterRequiredError(
+                'url is required with a code: the code system to validate it in.', expression='url')
 
-            queryset = queryset.filter(sources=source, mnemonic=code)
+        queryset = queryset.filter(sources=source, mnemonic=code)
 
-        if display and queryset:
+        if display:
             instance = queryset.first()
-            if display not in (instance.name, instance.display_name):
+            if not instance or display not in (instance.name, instance.display_name):
                 return queryset.none()
 
         return queryset

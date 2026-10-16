@@ -4,6 +4,10 @@ from rest_framework.fields import CharField, SerializerMethodField, BooleanField
 from core.common.constants import HEAD
 from core.common.serializers import ReadSerializerMixin
 
+# The R4 value types of operation inputs that are read from a valueString too: some clients send a code or a URI
+# as a plain string.
+STRING_TOLERANT_VALUE_TYPES = ('valueCode', 'valueUri')
+
 
 class ParameterCodingSerializer(ReadSerializerMixin, serializers.Serializer):
     system = CharField()
@@ -60,8 +64,11 @@ class ParametersSerializer(ReadSerializerMixin, serializers.Serializer):
 
         for parameter in data.get('parameter', []):
             name = parameter.get('name', None)
-            if name:
-                value = parameter.get(self.allowed_input_parameters.get(name, None), None)
+            value_type = self.allowed_input_parameters.get(name, None) if name else None
+            if value_type:
+                value = parameter.get(value_type, None)
+                if value is None and value_type in STRING_TOLERANT_VALUE_TYPES:
+                    value = parameter.get('valueString', None)
                 if value:
                     parameters[name] = value
 
