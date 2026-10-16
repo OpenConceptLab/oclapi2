@@ -42,6 +42,17 @@ class DeactivatedAccountLoginRefused(AuthenticationFailed):
         )
 
 
+class SSOIdentityMismatchRefused(AuthenticationFailed):
+    """Raised when a Keycloak sign-in's username matches an account already linked to a different Keycloak user."""
+    default_code = 'sso_identity_mismatch'
+
+    def __init__(self):
+        super().__init__(
+            'This username belongs to an OCL account linked to a different sign-in identity. '
+            f'Contact {settings.COMMUNITY_EMAIL} for help.'
+        )
+
+
 class BatchIndexingError(Exception):
     """
     Raised once a batched ES indexing run has attempted every batch and one or more failed (ocl_online#241).
