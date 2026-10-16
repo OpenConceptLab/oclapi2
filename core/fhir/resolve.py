@@ -6,7 +6,8 @@ with or without the URL registry), with FHIR's rules on top.
 - Namespace: the base URL's. /fhir/ is global; /orgs/{org}/ and /users/{user}/ are that owner's. It comes from the
   route, never from the request.
 - Version: the one named (the operation's version parameter, else url|version), HEAD included. With none named, the
-  latest released version, never HEAD. A repository with nothing released isn't visible, whatever version is named.
+  newest released version the caller is shown, never HEAD. A repository with nothing released isn't visible,
+  whatever version is named.
 - Access, after resolving: at the global base public repositories only, at an owner base what the caller may view.
   The version and its repository (HEAD) must both be viewable. A repository the caller can't see is not found, and
   no other repository is tried.
@@ -69,10 +70,31 @@ def resolve(resource_type, url, version=None, kwargs=None, user=None, expression
     repo_type = REPO_TYPES[resource_type]
     instance, _ = repo_type.resolve_reference_expression(
         to_ocl_path(url), namespace, version, repo_type=repo_type, allow_head=False)
+    if instance.id and not (version or piped_version) and not is_shown(instance, namespace, user):
+        instance = latest_public_release(instance) or instance  # the newest release is private: the newest public one
 
-    if not instance.id or not is_visible(instance, namespace, user) or not has_release(instance, namespace, user):
+    if not instance.id or not is_shown(instance, namespace, user):
         raise error
     return instance
+
+
+def is_shown(instance, namespace, user):
+    """Whether a base shows the caller a repository version: it is visible there, and so is a release of it."""
+    return is_visible(instance, namespace, user) and has_release(instance, namespace, user)
+
+
+def latest_public_release(instance):
+    """The newest live public release of a version's repository, resolved as the version was, or None."""
+    owner = {'organization_id': instance.organization_id} if instance.organization_id else {'user_id': instance.user_id}
+    latest = type(instance).objects.filter(
+        mnemonic=instance.mnemonic, is_active=True, released=True, retired=False, public_access__in=PUBLIC_ACCESS,
+        **owner).exclude(version=HEAD).order_by('-created_at').first()
+    if latest:
+        latest.repository_public_access = repository_access(instance)
+        latest.is_fqdn, latest.resolution_url = instance.is_fqdn, instance.resolution_url
+        if instance.is_fqdn and not latest.canonical_url:
+            latest.canonical_url = instance.resolution_url
+    return latest
 
 
 def to_ocl_path(url):

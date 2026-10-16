@@ -292,6 +292,22 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
             for reference in (url, f'{url}|v1', '/orgs/MOH/CodeSystem/hiv/'):
                 self.assertEqual(self.resolve('CodeSystem', reference, kwargs={'org': 'MOH'}, user=user).id, release.id)
 
+    def test_the_default_version_is_the_newest_release_the_caller_is_shown(self):
+        """
+        A newest release that is private doesn't hide an older public one at the global base, or from those who may
+        not view the owner's private repositories at its base; those who may get the newest. A named one is as named.
+        """
+        url = 'http://example.org/newest-private'
+        source(self.hl7, 'newest', canonical_url=url)
+        public_v1 = source(self.hl7, 'newest', 'v1', released=True, canonical_url=url)
+        private_v2 = source(self.hl7, 'newest', 'v2', released=True, canonical_url=url, public_access=ACCESS_TYPE_NONE)
+        if self.registry:
+            GlobalURLRegistryFactory(url=url, namespace=self.hl7.uri)
+        for kwargs, user in ((None, ANONYMOUS), (None, self.admin), ({'org': 'HL7'}, self.outsider)):
+            self.assertEqual(self.resolve('CodeSystem', url, kwargs=kwargs, user=user).id, public_v1.id)
+            self.assertUnresolved('CodeSystem', url, 'v2', kwargs, user)
+        self.assertEqual(self.resolve('CodeSystem', url, kwargs={'org': 'HL7'}, user=self.admin).id, private_v2.id)
+
     def test_query_counts(self):
         """
         A hot path: these counts may only fall. Without the registry: the toggle, the repository and its latest
