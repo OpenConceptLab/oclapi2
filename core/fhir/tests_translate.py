@@ -526,8 +526,8 @@ class TranslateCostTest(TranslateCorpusMixin, OCLTestCase):
 
     def test_query_counts(self):
         """
-        Resolution (the registry toggle, the repository, its newest release), then the mappings, with whether the
-        caller is shown their sources. url resolves the ConceptMap the same way.
+        Resolution (the registry toggle, the repository, its newest release), the sources the systems name, then the
+        mappings, with whether the caller is shown their sources. url resolves the ConceptMap the same way.
         """
         for count in (1, 20):
             for index in range(count):
@@ -536,11 +536,11 @@ class TranslateCostTest(TranslateCorpusMixin, OCLTestCase):
                            {'system': CIEL, 'code': f'n{count}', 'targetsystem': ICD10},
                            {'url': CIEL, 'system': CIEL, 'code': f'n{count}'},
                            {'system': ICD10, 'code': f'N{count}-0', 'reverse': 'true', 'targetsystem': CIEL}):
-                with self.subTest(count=count, params=params), self.assertNumQueries(4):
+                with self.subTest(count=count, params=params), self.assertNumQueries(5):
                     self.assertTrue(self.result(self.answer(self.get(**params))))
         with self.assertNumQueries(2):  # the toggle, no repository: no ConceptMap, no mappings read
             self.answer(self.get(system=UNKNOWN, code='1'))
-        with self.assertNumQueries(5):  # + the owner
+        with self.assertNumQueries(6):  # + the owner
             self.answer(self.get(base='/orgs/CIEL', system=CIEL, code='n1'))
 
 

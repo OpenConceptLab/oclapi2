@@ -20,8 +20,8 @@ types as R5-shaped relationships. core.fhir.adapters.r4 writes the answer as an 
   that resolves to no value set (or code system) the caller is shown is not found. `target` narrows nothing: OCL's
   ConceptMaps declare no target scope, so it selects no map (as FHIRsmith reads OCL's maps); `targetsystem` narrows.
   `conceptMap` (an inline map) and `dependency` aren't supported.
-- Cost: a fixed number of queries whatever the number of mappings (resolution, then the mappings, with whether the
-  caller is shown their sources); at most MATCH_LIMIT matches.
+- Cost: a fixed number of queries whatever the number of mappings (resolution, the sources the systems name, then
+  the mappings, with whether the caller is shown their sources); at most MATCH_LIMIT matches.
 """
 import re
 from collections import namedtuple
@@ -84,37 +84,58 @@ def stored_codes(code):
     return list(dict.fromkeys([code, quote(code, safe=''), quote(code)]))
 
 
-def shown_as(side, system):
-    """
-    Q for mappings whose `side` ('from' or 'to') is shown as `system` (side_system), on a queryset annotated by
-    with_sides. An OCL path names the repositories without a canonical URL shown by it.
-    """
+def repository_path(system):
+    """The OCL URL prefix of the repository an OCL path names (/orgs/{org}/sources/{id}/); None for a canonical."""
     path = OCL_PATH.fullmatch(system)
+    return f'/{path[1]}/{path[2]}/sources/{path[3]}/' if path else None
+
+
+def named_sources(systems, namespace, user):
+    """
+    For each system, the ids of the Source rows the base shows the caller that side_system shows as it, in one query:
+    those with it as their canonical URL; for an OCL path, the repository's rows without one. A literal list, so the
+    planner reads the mappings by their own indexes.
+    """
+    paths = {system: repository_path(system) for system in systems}
+    no_canonical = Q(canonical_url__isnull=True) | Q(canonical_url='')
+    rows = viewable_rows(Source, namespace, user).filter(reduce(or_, (
+        Q(uri__startswith=path) & no_canonical if path else Q(canonical_url=system) for system, path in paths.items())))
+    named = {system: [] for system in systems}
+    for source_id, canonical, uri in rows.values_list('id', 'canonical_url', 'uri'):
+        for system, path in paths.items():
+            if (uri.startswith(path) and not canonical) if path else canonical == system:
+                named[system].append(source_id)
+    return named
+
+
+def shown_as(side, system, source_ids, namespace, user):
+    """
+    Q for mappings whose `side` ('from' or 'to') side_system shows as `system`: their source is one of `source_ids`
+    (named_sources'); or it isn't one the caller is shown by a canonical URL, and the URL they store (their source's
+    OCL URL when they store none) names the system. The subquery runs only on the mappings whose URL does.
+    """
+    source, url = f'{side}_source', f'{side}_source_url'
+    unnamed = ~Exists(viewable_rows(Source, namespace, user).filter(
+        id=OuterRef(f'{source}_id'), canonical_url__gt=''))
+    path = repository_path(system)
     if not path:
-        return Q(**{f'{side}_canonical': system}) | Q(
-            **{f'{side}_canonical__isnull': True, f'{side}_source_url': system})
-    owner, mnemonic = f'/{path[1]}/{path[2]}/', path[3]
-    stored = reduce(or_, (Q(**{f'{side}_source_url__startswith': f'{owner}{kind}/{mnemonic}/'})
+        return Q(**{f'{source}_id__in': source_ids}) | (Q(**{url: system}) & unnamed)
+    stored = reduce(or_, (Q(**{f'{url}__startswith': path.replace('/sources/', f'/{kind}/')})
                           for kind in ('sources', 'collections', 'ConceptMap')))
-    own = Q(**{f'{side}_source_url__isnull': True, f'{side}_shown': True,
-               f'{side}_source__uri__startswith': f'{owner}sources/{mnemonic}/'})
-    return Q(**{f'{side}_canonical__isnull': True}) & (stored | own)
+    own = (Q(**{f'{url}__isnull': True}) | Q(**{url: ''})) & Q(**{f'{source}_id__in': source_ids})
+    return (stored | own) & unnamed
 
 
-def with_sides(queryset, namespace, user):
+def with_side(queryset, side, namespace, user):
     """
-    Each mapping annotated, for each side, with whether the base shows the caller its source ({side}_shown) and the
-    canonical URL it is then shown by ({side}_canonical, None for none), from correlated subqueries the planner runs
-    only on the mappings found.
+    Each mapping annotated with whether the base shows the caller its `side`'s source ({side}_shown), and the canonical
+    URL that side is then shown by ({side}_canonical, None for none): subqueries run only on the mappings listed.
     """
-    shown = viewable_rows(Source, namespace, user)
-    annotations = {}
-    for side in SIDES:
-        annotations[f'{side}_shown'] = Exists(shown.filter(id=OuterRef(f'{side}_source_id')))
-    queryset = queryset.annotate(**annotations)
+    queryset = queryset.annotate(**{f'{side}_shown': Exists(viewable_rows(Source, namespace, user).filter(
+        id=OuterRef(f'{side}_source_id')))})
     return queryset.annotate(**{f'{side}_canonical': Case(When(
         Q(**{f'{side}_shown': True, f'{side}_source__canonical_url__gt': ''}),
-        then=F(f'{side}_source__canonical_url')), default=None) for side in SIDES})
+        then=F(f'{side}_source__canonical_url')), default=None)})
 
 
 def text(parameters, name, required=False):
@@ -272,16 +293,19 @@ class Translation:
             concept__parent__canonical_url=coding.system).exists()
 
     def matches(self, concept_map, named):
-        """(the matches, whether there were more than MATCH_LIMIT): one query, in mapping order, each match once."""
+        """
+        (the matches, whether there were more than MATCH_LIMIT), in mapping order, each match once: the sources the
+        systems name, then the mappings.
+        """
         request = self.request
         near, far = ('to', 'from') if request.reverse else ('from', 'to')
-        codes = stored_codes(request.coding.code)
-        mappings = with_sides(concept_map.get_mappings_queryset().filter(
-            retired=False, **{f'{near}_concept_code__in': codes}), self.namespace, self.user)
-        mappings = mappings.filter(shown_as(near, request.coding.system))
-        if request.targetsystem:
-            mappings = mappings.filter(shown_as(far, request.targetsystem))
-        rows = mappings.order_by('id').values(
+        sides = {near: request.coding.system, **({far: request.targetsystem} if request.targetsystem else {})}
+        sources = named_sources(set(sides.values()), self.namespace, self.user)
+        mappings = concept_map.get_mappings_queryset().filter(
+            retired=False, **{f'{near}_concept_code__in': stored_codes(request.coding.code)})
+        for side, system in sides.items():
+            mappings = mappings.filter(shown_as(side, system, sources[system], self.namespace, self.user))
+        rows = with_side(mappings, far, self.namespace, self.user).order_by('id').values(
             'map_type', f'{far}_concept_code', f'{far}_source_url', f'{far}_source__uri', f'{far}_shown',
             f'{far}_canonical')[:MATCH_LIMIT + 1]
         matches = {}
