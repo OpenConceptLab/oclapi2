@@ -84,10 +84,13 @@ def stored_codes(code):
     return list(dict.fromkeys([code, quote(code, safe=''), quote(code)]))
 
 
-def repository_path(system):
-    """The OCL URL prefix of the repository an OCL path names (/orgs/{org}/sources/{id}/); None for a canonical."""
+def repository_paths(system, kinds=('sources',)):
+    """
+    The OCL URL prefixes of the repository an OCL path names (/orgs/{org}/{kind}/{id}/ for each kind), or None for a
+    canonical URL.
+    """
     path = OCL_PATH.fullmatch(system)
-    return f'/{path[1]}/{path[2]}/sources/{path[3]}/' if path else None
+    return [f'/{path[1]}/{path[2]}/{kind}/{path[3]}/' for kind in kinds] if path else None
 
 
 def named_sources(systems, namespace, user):
@@ -96,7 +99,7 @@ def named_sources(systems, namespace, user):
     those with it as their canonical URL; for an OCL path, the repository's rows without one. A literal list, so the
     planner reads the mappings by their own indexes.
     """
-    paths = {system: repository_path(system) for system in systems}
+    paths = {system: (repository_paths(system) or [None])[0] for system in systems}
     no_canonical = Q(canonical_url__isnull=True) | Q(canonical_url='')
     rows = viewable_rows(Source, namespace, user).filter(reduce(or_, (
         Q(uri__startswith=path) & no_canonical if path else Q(canonical_url=system) for system, path in paths.items())))
@@ -117,11 +120,10 @@ def shown_as(side, system, source_ids, namespace, user):
     source, url = f'{side}_source', f'{side}_source_url'
     unnamed = ~Exists(viewable_rows(Source, namespace, user).filter(
         id=OuterRef(f'{source}_id'), canonical_url__gt=''))
-    path = repository_path(system)
-    if not path:
+    paths = repository_paths(system, ('sources', 'collections', 'ConceptMap'))
+    if not paths:
         return Q(**{f'{source}_id__in': source_ids}) | (Q(**{url: system}) & unnamed)
-    stored = reduce(or_, (Q(**{f'{url}__startswith': path.replace('/sources/', f'/{kind}/')})
-                          for kind in ('sources', 'collections', 'ConceptMap')))
+    stored = reduce(or_, (Q(**{f'{url}__startswith': path}) for path in paths))
     own = (Q(**{f'{url}__isnull': True}) | Q(**{url: ''})) & Q(**{f'{source}_id__in': source_ids})
     return (stored | own) & unnamed
 
