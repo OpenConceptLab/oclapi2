@@ -3,6 +3,7 @@ from mock.mock import patch, Mock
 from rest_framework.exceptions import ValidationError
 
 from core.collections.models import Collection
+from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.tests import OCLAPITestCase
 from core.importers.importer import ResourceImporter
 from core.importers.models import CREATED, UPDATED, PERMISSION_DENIED
@@ -105,6 +106,71 @@ class FHIRCreateOwnerTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+
+@patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+@patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+class FHIRUpdateOwnerTest(OCLAPITestCase):
+    """
+    A FHIR PUT or PATCH needs what a POST needs: staff, the owner, or a member of the owning org. A ConceptMap PUT to an
+    id that doesn't exist creates it, so it's refused to anyone else, and the answer for a missing id is the answer for
+    an existing one.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.org = OrganizationFactory(mnemonic='OtherOrg')
+        self.member = UserProfileFactory(username='othermember')
+        self.org.members.add(self.member)
+        self.outsider = UserProfileFactory(username='otheroutsider')
+        for mnemonic in ('existing-cs', 'existing-cm'):
+            OrganizationSourceFactory(organization=self.org, mnemonic=mnemonic, public_access='None')
+            OrganizationSourceFactory(
+                organization=self.org, mnemonic=mnemonic, version='1.0', released=True, public_access='None')
+        OrganizationCollectionFactory(organization=self.org, mnemonic='existing-vs', public_access='None')
+        OrganizationCollectionFactory(
+            organization=self.org, mnemonic='existing-vs', version='1.0', released=True, public_access='None')
+
+    def write(self, method, user, resource_type, mnemonic):
+        resource = fhir_resource(resource_type, mnemonic, f'http://example.com/{mnemonic}')
+        resource['version'] = '2.0'
+        auth = {'HTTP_AUTHORIZATION': 'Token ' + user.get_token()} if user else {}
+        return getattr(self.client, method)(
+            f'/orgs/{self.org.mnemonic}/{resource_type}/{mnemonic}/', resource, format='json', **auth)
+
+    def repositories(self):
+        return sorted(f'{repo.mnemonic}|{repo.version}' for model in (Source, Collection)
+                      for repo in model.objects.filter(organization=self.org))
+
+    def test_others_create_and_change_nothing(self):
+        before = self.repositories()
+        for resource_type, existing in (('CodeSystem', 'existing-cs'), ('ValueSet', 'existing-vs'),
+                                        ('ConceptMap', 'existing-cm')):
+            for method in ('put', 'patch'):
+                for user in (None, self.outsider):
+                    answers = [self.write(method, user, resource_type, mnemonic).status_code
+                               for mnemonic in (existing, 'missing')]
+                    self.assertIn(answers[0], (401, 403), (resource_type, method, user))
+                    self.assertEqual(answers[1], answers[0], (resource_type, method, user))
+        self.assertEqual(self.repositories(), before)
+
+    def test_a_concept_map_put_checks_ownership_before_it_creates(self):
+        """The create itself checks ownership, whatever looked the owner up."""
+        with patch('core.common.mixins.SubResourceMixin.get_object_for_path', Mock(return_value=self.org)):
+            for method in ('put', 'patch'):
+                self.assertEqual(self.write(method, self.outsider, 'ConceptMap', 'missing').status_code, 403, method)
+        self.assertFalse(Source.objects.filter(mnemonic='missing').exists())
+
+    def test_a_member_may_create_a_concept_map_by_put(self):
+        response = self.write('put', self.member, 'ConceptMap', 'created')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(
+            [repo for repo in self.repositories() if repo.startswith('created|')], ['created|2.0', 'created|HEAD'])
+        self.assertEqual(self.write('put', self.member, 'CodeSystem', 'missing').status_code, 404)
+        self.assertEqual(self.client.delete(
+            f'/orgs/{self.org.mnemonic}/ConceptMap/missing/',
+            HTTP_AUTHORIZATION='Token ' + self.member.get_token()).status_code, 404)
 
 
 class BulkImportOwnerAccessTest(OCLAPITestCase):

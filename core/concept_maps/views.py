@@ -6,7 +6,7 @@ from django.http import Http404
 from pydash import get
 
 from core.common.constants import HEAD
-from core.common.permissions import CanViewConceptDictionary
+from core.common.permissions import CanViewConceptDictionary, HasOwnership
 from core.common.serializers import IdentifierSerializer
 from core.concept_maps.constants import RESOURCE_TYPE
 from core.concept_maps.serializers import ConceptMapDetailSerializer, ConceptMapParametersSerializer
@@ -45,10 +45,18 @@ class ConceptMapRetrieveUpdateView(FhirViewMixin, FhirReadMixin, SourceRetrieveU
         return queryset.exclude(version=HEAD)
 
     def get_object(self, queryset=None):
-        """A write to a ConceptMap that doesn't exist gets None; a read of one is a 404 (FhirReadMixin)."""
+        """
+        A PUT or PATCH to a ConceptMap that doesn't exist gets None, which creates it, so it needs what a POST needs:
+        staff, the owner, or a member of the owning org (HasOwnership on the owner). Anyone else is refused as they are
+        for an existing one. Any other request for one is a 404 (a read's from FhirReadMixin).
+        """
         try:
             return super().get_object(queryset)
         except Http404:
+            if self.request.method not in ('PUT', 'PATCH'):
+                raise
+            if not HasOwnership().has_object_permission(self.request, self, self.parent_resource):
+                self.permission_denied(self.request)
             return None
 
     def get_detail_serializer(self, obj):
