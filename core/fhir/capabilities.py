@@ -10,14 +10,13 @@ CapabilityStatement, TerminologyCapabilities and $versions Parameters.
 - The search parameters are the search's own (core.fhir.search's PARAMETERS and STRING_FIELDS).
 - The FHIR versions are those the fhirVersion MIME parameter negotiates (core.fhir.base): R4, 4.0.
 - The software is the OCL API and its version; the base URL is the request's.
-- TerminologyCapabilities lists the code systems a CodeSystem search at the base shows the caller
-  (core.fhir.resolve's visible_versions: released versions only, never HEAD; at /fhir/ the public ones of public
-  repositories; at an owner base the owner's, private ones to those who may view them), by their canonical URL as a
-  search shows it (the version's own, else its repository's), each with its versions, newest first, and the default:
-  the newest live release of its repository, the one the resolver serves without a version, where the resolver serves
-  it (under the repository's own canonical URL). A canonical URL two repositories share has no default, since the
-  resolver serves one of them. A version without a canonical URL isn't listed. One query, bounded as a search's is
-  (SEARCH_TIMEOUT_MS; past it the list is too costly, a 422).
+- TerminologyCapabilities lists the code systems the operations serve the caller at the base, as resolve() serves
+  them were the repositories the caller isn't shown missing (core.fhir.resolve's served_heads and served_versions),
+  so a hidden repository changes nothing in it. Each is listed by the identifier the resolver finds it by: its
+  canonical URL (its HEAD's; the repository the resolver picks for it, with the URL registry when the toggle is on),
+  else its OCL path as a CodeSystem; with the released versions served by name, newest first, and the default, the
+  one served without a version. A fixed number of queries, bounded as a search's are (SEARCH_TIMEOUT_MS; past it the
+  list is too costly, a 422).
 - The routed operations' contracts fill TerminologyCapabilities' blocks: $translate finds the map from the code's
   system (core.fhir.ops.translate), so it needs none; $expand pages, with offset and count.
 """
@@ -28,12 +27,12 @@ from django.urls import URLResolver, get_resolver
 from django.utils import timezone
 
 from core import __version__
+from core.common.utils import decode_string
 from core.fhir import outcomes
 from core.fhir.base import (
     RESOURCE_TYPES, FhirOperationView, FhirVersioning, FhirViewMixin, fhir_base_url)
-from core.fhir.resolve import visible_versions
-from core.fhir.search import (
-    PARAMETERS, STRING_FIELDS, FhirReadMixin, FhirSearchMixin, with_repository_canonical, within_search_timeout)
+from core.fhir.resolve import served_heads, served_versions
+from core.fhir.search import PARAMETERS, STRING_FIELDS, FhirReadMixin, FhirSearchMixin, within_search_timeout
 
 SOFTWARE = {'name': 'OCL API', 'version': __version__}
 STARTED = timezone.now().replace(microsecond=0).isoformat()  # what the statements describe was deployed then
@@ -158,39 +157,24 @@ def versions(parameters, kwargs, user, instance=None):  # pylint: disable=unused
             'default': FhirVersioning.default_version}
 
 
-def listed_versions(kwargs, user):
-    """
-    The CodeSystem versions a search at the base shows the caller, newest first, as (canonical URL as a search shows
-    it, the repository's canonical URL, version, retired, repository): one query.
-    """
-    rows = with_repository_canonical(visible_versions('CodeSystem', kwargs, user)).order_by('-created_at', '-id')
-    return [(own or repository_url, repository_url, version, retired, tuple(repository))
-            for own, repository_url, version, retired, *repository in rows.values_list(
-                'canonical_url', 'repository_canonical_url', 'version', 'retired', 'mnemonic', 'organization_id',
-                'user_id')]
-
-
 def code_systems(kwargs, user):
     """
-    [{url, versions, default}] for each canonical URL the base shows the caller, by URL (see the module's doc). The
-    default is the newest live release of the one repository listed under the URL, marked when the resolver serves it
-    there: the URL is the repository's own (its HEAD's, which the resolver matches), and the release is listed under it.
+    [{url, versions, default}] for each code system the base serves the caller (core.fhir.resolve's served_heads: the
+    repository resolve() picks for each identifier, were the repositories the caller isn't shown missing), by its
+    identifier: the released versions it serves by name, newest first, and the one it serves without a version (the
+    newest live one the caller is shown, as resolve() picks it). A repository serving no live release isn't listed.
     """
-    defaults, by_url = {}, {}
-    for url, repository_url, version, retired, repository in listed_versions(kwargs, user):
-        if not retired:
-            defaults.setdefault(repository, (repository_url, version))  # the newest live release
-        if url:
-            codes, repositories = by_url.setdefault(url, ([], set()))
-            codes.append(version)
-            repositories.add(repository)
+    heads = served_heads(kwargs, user)
+    served = served_versions(kwargs, user, heads.values())
     listed = []
-    for url in sorted(by_url):
-        codes, repositories = by_url[url]
-        only = next(iter(repositories)) if len(repositories) == 1 else None
-        served_at, default = defaults.get(only, (None, None))
-        listed.append({'url': url, 'versions': unique(codes),
-                       'default': default if served_at == url and default in codes else None})
+    for identifier in sorted(heads):
+        head = heads[identifier]
+        rows = served[(head.mnemonic, head.organization_id, head.user_id)]
+        default = next((version for version, retired in rows if not retired), None)
+        if default is None:
+            continue
+        codes = [version for version, _ in rows if decode_string(version) == version]  # as the resolver reads one
+        listed.append({'url': identifier, 'versions': codes, 'default': default if default in codes else None})
     return listed
 
 

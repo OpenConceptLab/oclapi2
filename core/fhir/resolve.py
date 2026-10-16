@@ -16,16 +16,26 @@ with or without the URL registry), with FHIR's rules on top.
   none of its versions is read.
 
 Every failure is the same UnresolvedError, so it never tells a caller that a repository they can't see exists.
+
+served_heads and served_versions are the set form of the resolver's choices for code systems, for
+TerminologyCapabilities: which repository each identifier names, and which of its versions a caller is served.
 """
+from collections import namedtuple
+
 from django.db.models import Exists, OuterRef, Q, Subquery
 from django.db.models.functions import Coalesce
+from rest_framework.exceptions import ValidationError
 
 from core.collections.models import Collection
 from core.common.constants import HEAD, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT
 from core.common.mixins import SourceContainerMixin
-from core.common.utils import normalize_public_access, to_parent_uri
+from core.common.serializers import IdentifierSerializer
+from core.common.utils import is_canonical_uri, normalize_public_access, to_parent_uri
 from core.fhir.outcomes import NotFoundError
+from core.orgs.models import Organization
 from core.sources.models import Source
+from core.toggles.models import Toggle
+from core.url_registry.models import URLRegistry
 
 REPO_TYPES = {'CodeSystem': Source, 'ConceptMap': Source, 'ValueSet': Collection}
 REPO_PATHS = {'CodeSystem': 'sources', 'ConceptMap': 'sources', 'ValueSet': 'collections'}
@@ -291,3 +301,133 @@ def visible_versions(resource_type, kwargs=None, user=None, access=None):
     retired_beside_live = releases.filter(retired=True).filter(
         Exists(org_live.exclude(version=HEAD)) | Exists(user_live.exclude(version=HEAD)))
     return releases.filter(Q(retired=False) | Q(id__in=retired_beside_live.values('id')))
+
+
+REGISTRY_TOGGLE = 'URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE'  # whether the resolver consults the URL registry
+ServedHead = namedtuple(
+    'ServedHead', 'id mnemonic organization_id user_id canonical_url uri organization_uri user_uri')
+
+
+def is_looked_up_as_written(url):
+    """
+    Whether the resolver looks a canonical URL up as it is written (resolve_reference_expression's reading of a url):
+    one it takes for canonical (':'), with no |version or ?query part, that isn't an OCL path.
+    """
+    return bool(url) and is_canonical_uri(url) and '|' not in url and '?' not in url and to_ocl_path(url) == url
+
+
+def ocl_path(uri):
+    """
+    A repository's OCL path as a CodeSystem (/orgs/{org}/CodeSystem/{id}/), as $expand names the system of a member
+    without a canonical URL, if the resolver reads it back to the repository (`uri`), naming no version; else None.
+    """
+    try:
+        path = IdentifierSerializer.convert_ocl_uri_to_fhir_url(uri, 'CodeSystem')
+    except ValidationError:
+        return None
+    if is_canonical_uri(path) or '|' in path or '?' in path or path_version(path):
+        return None
+    return path if to_parent_uri(to_ocl_path(path)) == uri else None
+
+
+def in_namespace(head, namespace):
+    """Whether a HEAD is the repository of the owner a registry entry's namespace names (get_object_from_namespace)."""
+    if namespace and '/orgs/' in namespace:
+        return head.organization_uri == namespace
+    if namespace and '/users/' in namespace:
+        return head.user_uri == namespace
+    return False
+
+
+def registry_entries(owner):
+    """(the owner's, the global registry's) active entries, each {url: namespace}: one query."""
+    scope = Q(organization__isnull=True, user__isnull=True)
+    if owner:
+        scope |= Q(**{owner_field(owner): owner.id})
+    own, shared = {}, {}
+    for url, namespace, organization_id, user_id in URLRegistry.objects.filter(is_active=True).filter(
+            scope).values_list('url', 'namespace', 'organization_id', 'user_id'):
+        (shared if organization_id is None and user_id is None else own)[url] = namespace
+    return own, shared
+
+
+def owner_field(owner):
+    return 'organization_id' if isinstance(owner, Organization) else 'user_id'
+
+
+def served_heads(kwargs, user):  # pylint: disable=too-many-locals
+    """
+    {identifier: ServedHead} for each code system the base `kwargs` names serves `user` by an identifier, with the HEAD
+    of the repository resolve() picks for it, as resolve_reference_expression picks it, were the repositories the
+    caller isn't shown not there: a repository the caller can't see answers as a missing one, so it changes nothing
+    here. Whether that repository then serves the caller a version is served_versions'. The steps, for Sources:
+    - A canonical URL (one the resolver looks up as written) is matched on active HEADs that aren't retired. Without
+      the URL registry: at /fhir/ the lowest-id HEAD the global base shows (shown_heads); at an owner base the owner's
+      lowest-id one. With it: at an owner base the owner's registry entry for the URL if it has one (the lowest-id HEAD
+      in its namespace, and nothing else tried), else the owner's lowest-id HEAD, else the global registry's entry; at
+      /fhir/ the global registry's entry alone.
+    - A repository whose HEAD has no canonical URL the resolver looks up as written is served by its OCL path as a
+      CodeSystem; at an owner base, the owner's repositories.
+    A fixed number of queries: the owner, the toggle, the registry's entries (with it on), the HEADs.
+    """
+    namespace = namespace_of(kwargs)
+    owner = SourceContainerMixin.get_object_from_namespace(namespace) if namespace else None
+    if namespace and not owner:
+        return {}
+    registry = Toggle.get(REGISTRY_TOGGLE)
+    own_entries, global_entries = registry_entries(owner) if registry else ({}, {})
+    heads = viewable_rows(Source, namespace, user).filter(version=HEAD, is_active=True, retired=False)
+    if owner:
+        heads = heads.filter(Q(**{owner_field(owner): owner.id}) | Q(canonical_url__in=[*own_entries, *global_entries]))
+    elif not registry:
+        heads = heads.filter(shown_heads(Source))
+    by_url = {}  # the HEADs with each canonical URL, lowest id first
+    for row in heads.order_by('id').values_list(
+            'id', 'mnemonic', 'organization_id', 'user_id', 'canonical_url', 'uri', 'organization__uri', 'user__uri'):
+        by_url.setdefault(row[4], []).append(ServedHead(*row))
+
+    def owns(head):
+        return owner is None or getattr(head, owner_field(owner)) == owner.id
+
+    def lowest(url, holds=owns):
+        return next((head for head in by_url.get(url, ()) if holds(head)), None)
+
+    def in_entry(entry_namespace):
+        return lambda head: in_namespace(head, entry_namespace)
+
+    if not registry:  # the scope is the base's already: /fhir/'s shown HEADs, or the owner's
+        picks = {url: lowest(url) for url in by_url}
+    elif not owner:
+        picks = {url: lowest(url, in_entry(entry_namespace)) for url, entry_namespace in global_entries.items()}
+    else:
+        picks = {url: lowest(url, in_entry(own_entries[url])) if url in own_entries else (
+            lowest(url) or (lowest(url, in_entry(global_entries[url])) if url in global_entries else None))
+            for url in {*own_entries, *by_url, *global_entries}}
+    served = {url: head for url, head in picks.items() if head and is_looked_up_as_written(url)}
+    for url, rows in by_url.items():
+        if not is_looked_up_as_written(url):
+            for head in filter(owns, rows):
+                path = ocl_path(head.uri)
+                if path:
+                    served[path] = head
+    return served
+
+
+def served_versions(kwargs, user, heads):
+    """
+    {(mnemonic, organization_id, user_id): [(version, retired)], newest first} for the repositories of `heads`: their
+    active released versions, never HEAD, that the base shows the caller (viewable_rows, the queryset form of
+    is_visible, which a version resolve() serves by name must pass). One query.
+    """
+    repositories = {(head.mnemonic, head.organization_id, head.user_id) for head in heads}
+    found = {repository: [] for repository in repositories}
+    if not repositories:
+        return found
+    rows = viewable_rows(Source, namespace_of(kwargs), user).filter(
+        is_active=True, released=True, mnemonic__in={mnemonic for mnemonic, _, _ in repositories}).exclude(
+        version=HEAD).order_by('-created_at', '-id').values_list(
+        'mnemonic', 'organization_id', 'user_id', 'version', 'retired')
+    for mnemonic, organization_id, user_id, version, retired in rows:
+        if (mnemonic, organization_id, user_id) in found:
+            found[(mnemonic, organization_id, user_id)].append((version, retired))
+    return found
