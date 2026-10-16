@@ -37,6 +37,10 @@ app.conf.CELERYBEAT_SCHEDULE = {
         'task': 'core.common.tasks.rerun_indexing_job',
         'schedule': timedelta(minutes=15),
     },
+    'sync-keycloak-groups': {
+        'task': 'core.common.tasks.sync_keycloak_groups',
+        'schedule': timedelta(minutes=15),
+    },
 }
 app.config_from_object('django.conf:settings', namespace='CELERY')
 app.autodiscover_tasks(lambda: settings.INSTALLED_APPS)

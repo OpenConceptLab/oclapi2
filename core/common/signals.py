@@ -18,6 +18,8 @@ def propagate_owner_status(sender, instance=None, created=False, **kwargs):  # p
     if created and instance.__class__ == Organization and instance.id != 1:
         instance.record_create_event()
     if not created and instance:
+        if isinstance(instance, UserProfile):
+            instance.push_profile_to_keycloak()
         updated_sources = 0
         updated_collections = 0
         updated_sources += instance.source_set.exclude(

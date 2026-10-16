@@ -73,6 +73,7 @@ from core.users.constants import CORE_USER_GROUP, GUEST_GROUP
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 from .backends import OCLOIDCAuthenticationBackend
+from .exceptions import SSOIdentityMismatchRefused
 from .checksums import Checksum
 from .serializers import IdentifierSerializer
 from .validators import URIValidator
@@ -2635,6 +2636,7 @@ class OCLOIDCAuthenticationBackendTest(OCLTestCase):
         self.backend.create_user(self.claim)
         user_manager_mock.create_user.assert_called_once_with(
             'batman',
+            sso_id=self.claim.get('sub'),
             email='batman@gotham.com',
             first_name='Bruce',
             last_name='Wayne',
@@ -2682,6 +2684,38 @@ class OCLOIDCAuthenticationBackendTest(OCLTestCase):
         self.assertEqual(users.first(), batman)
 
         self.assertEqual(self.backend.filter_users_by_claims({**self.claim, 'preferred_username': None}).count(), 0)
+
+    def test_filter_users_by_claims_matches_the_account_linked_to_sub_even_after_a_username_change(self):
+        batman = UserProfileFactory(username='old-batman', sso_id='sub-1')
+        UserProfileFactory(username='batman')
+
+        users = self.backend.filter_users_by_claims({**self.claim, 'sub': 'sub-1'})
+
+        self.assertEqual(list(users), [batman])
+
+    def test_filter_users_by_claims_refuses_account_linked_to_a_different_sub(self):
+        batman = UserProfileFactory(username='batman', sso_id='sub-1')
+
+        with self.assertRaises(SSOIdentityMismatchRefused):
+            self.backend.filter_users_by_claims({**self.claim, 'sub': 'sub-2'})
+
+        batman.refresh_from_db()
+        self.assertEqual(batman.sso_id, 'sub-1')
+
+    def test_filter_users_by_claims_links_unlinked_account_on_username(self):
+        batman = UserProfileFactory(username='batman')
+
+        users = self.backend.filter_users_by_claims({**self.claim, 'sub': 'sub-1'})
+        self.backend.update_user(users[0], {**self.claim, 'sub': 'sub-1'})
+
+        batman.refresh_from_db()
+        self.assertEqual(batman.sso_id, 'sub-1')
+
+    def test_update_user_keeps_a_stored_sso_id(self):
+        user = Mock(sso_id='sub-1')
+        user.is_dirty.return_value = False
+        self.backend.update_user(user, {**self.claim, 'sub': 'sub-2'})
+        self.assertEqual(user.sso_id, 'sub-1')
 
     def test_filter_users_by_claims_matches_username_exactly(self):
         """Keycloak sends usernames in lowercase, and a mixed-case account is never matched, active or not"""

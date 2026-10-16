@@ -1,4 +1,6 @@
 import base64
+import logging
+import time
 
 import requests
 from django.conf import settings
@@ -6,6 +8,9 @@ from mozilla_django_oidc.contrib.drf import OIDCAuthentication
 
 from core.common.backends import OCLOIDCAuthenticationBackend
 from core.services.auth.core import AbstractAuthService
+
+
+logger = logging.getLogger('oclapi')
 
 
 class OpenIDAuthService(AbstractAuthService):
@@ -18,6 +23,11 @@ class OpenIDAuthService(AbstractAuthService):
     authentication_class = OIDCAuthentication
     authentication_backend_class = OCLOIDCAuthenticationBackend
     USERS_URL = settings.OIDC_SERVER_INTERNAL_URL + f'/admin/realms/{settings.OIDC_REALM}/users'
+    GROUPS_URL = settings.OIDC_SERVER_INTERNAL_URL + f'/admin/realms/{settings.OIDC_REALM}/groups'
+    _service_token = None
+    _service_token_expires_at = 0
+    ADMIN_TIMEOUT = 15
+    PAGE_SIZE = 200
     OIDP_ADMIN_TOKEN_URL = settings.OIDC_SERVER_INTERNAL_URL + '/realms/master/protocol/openid-connect/token'
 
     @staticmethod
@@ -135,6 +145,84 @@ class OpenIDAuthService(AbstractAuthService):
     @staticmethod
     def get_admin_headers(**kwargs):
         return {'Authorization': f'Bearer {OpenIDAuthService.get_admin_token(**kwargs)}'}
+
+    @staticmethod
+    def is_admin_configured():
+        return bool(settings.OIDC_ADMIN_CLIENT_ID and settings.OIDC_ADMIN_CLIENT_SECRET)
+
+    @classmethod
+    def get_service_token(cls):
+        if cls._service_token and time.monotonic() < cls._service_token_expires_at:
+            return cls._service_token
+        response = requests.post(
+            settings.OIDC_OP_TOKEN_ENDPOINT,
+            data={
+                'grant_type': 'client_credentials',
+                'client_id': settings.OIDC_ADMIN_CLIENT_ID,
+                'client_secret': settings.OIDC_ADMIN_CLIENT_SECRET,
+            },
+            timeout=cls.ADMIN_TIMEOUT,
+        )
+        response.raise_for_status()
+        data = response.json()
+        cls._service_token = data['access_token']
+        cls._service_token_expires_at = time.monotonic() + max(int(data.get('expires_in', 60)) - 30, 1)
+        return cls._service_token
+
+    @classmethod
+    def _admin_request(cls, method, url, **kwargs):
+        response = requests.request(
+            method, url, headers={'Authorization': f'Bearer {cls.get_service_token()}'},
+            timeout=cls.ADMIN_TIMEOUT, **kwargs)
+        response.raise_for_status()
+        return response
+
+    @classmethod
+    def get_keycloak_user(cls, user):
+        if user.sso_id:
+            return cls._admin_request('GET', f'{cls.USERS_URL}/{user.sso_id}').json()
+        from core.users.models import UserProfile
+        users = cls._admin_request('GET', cls.USERS_URL, params={'username': user.username, 'exact': 'true'}).json()
+        kc_user = next((kc_user for kc_user in users if kc_user.get('username') == user.username), None)
+        # a Keycloak user already linked to another account is never matched on username
+        if kc_user and not UserProfile.objects.filter(sso_id=kc_user['id']).exists():
+            return kc_user
+        return None
+
+    @classmethod
+    def update_user_profile(cls, user):
+        kc_user = cls.get_keycloak_user(user)
+        if not kc_user:
+            raise LookupError(f'user {user.id} not found in Keycloak')
+        attributes = kc_user.get('attributes') or {}
+        for key in ('company', 'location'):
+            value = getattr(user, key)
+            attributes[key] = [value] if value else []
+        kc_user.update({'firstName': user.first_name, 'lastName': user.last_name, 'attributes': attributes})
+        cls._admin_request('PUT', f"{cls.USERS_URL}/{kc_user['id']}", json=kc_user)
+
+    @classmethod
+    def _paginate(cls, url):
+        first, results = 0, []
+        while True:
+            page = cls._admin_request('GET', url, params={'first': first, 'max': cls.PAGE_SIZE}).json()
+            results.extend(page)
+            if len(page) < cls.PAGE_SIZE:
+                return results
+            first += cls.PAGE_SIZE
+
+    @classmethod
+    def get_users(cls):
+        return cls._paginate(cls.USERS_URL)
+
+    @classmethod
+    def get_group_memberships(cls):
+        memberships = {}
+        for group in cls._paginate(cls.GROUPS_URL):
+            memberships[group['name']] = [
+                {'id': member['id'], 'username': member['username']}
+                for member in cls._paginate(f"{cls.GROUPS_URL}/{group['id']}/members")]
+        return memberships
 
     @staticmethod
     def create_user(_):

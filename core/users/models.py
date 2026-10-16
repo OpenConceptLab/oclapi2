@@ -62,6 +62,7 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
     last_name = models.CharField(max_length=100, blank=True)
     organizations = models.ManyToManyField('orgs.Organization', related_name='members')
     company = models.TextField(null=True, blank=True)
+    sso_id = models.CharField(max_length=64, null=True, blank=True, unique=True)
     location = models.TextField(null=True, blank=True)
     preferred_locale = models.TextField(null=True, blank=True)
     website = models.TextField(null=True, blank=True)
@@ -471,6 +472,16 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
             referenced_object_url=following.url,
             public=self.can_user_view(None, following),
         )
+
+    def push_profile_to_keycloak(self):
+        from core.services.auth.core import AuthService
+        dirty = self.get_dirty_fields()
+        if getattr(self, '_from_sso', False) or not any(
+                field in dirty for field in ('first_name', 'last_name', 'company', 'location')):
+            return
+        if AuthService.is_sso_enabled():
+            from core.common.tasks import push_user_profile_to_keycloak
+            transaction.on_commit(lambda: push_user_profile_to_keycloak.delay(self.id))
 
     def set_groups(self, groups, verify=True, _save=True):
         if not verify or sorted(self.groups.values_list('name', flat=True)) != sorted(groups):
