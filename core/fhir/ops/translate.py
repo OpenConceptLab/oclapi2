@@ -28,8 +28,9 @@ types as R5-shaped relationships. core.fhir.adapters.r4 writes the answer as an 
 - The code's `version` (or its coding's) keeps the mappings of that version of its system, and those of none
   (from_source_version; in reverse, to_source_version).
   `conceptMap` (an inline map) and `dependency` aren't supported.
-- Cost: a fixed number of queries whatever the number of mappings (resolution, the sources the systems name, then
-  the mappings, with whether the caller is shown their sources); at most MATCH_LIMIT matches.
+- Cost: a fixed number of queries whatever the number of mappings (resolution, the sources the systems name, the ids
+  of the release's mappings of the code, then those mappings, with whether the caller is shown their sources); at
+  most MATCH_LIMIT matches. The view bounds the statements as a search's are (too long is too costly, a 422).
 """
 import re
 from collections import namedtuple
@@ -41,11 +42,13 @@ from django.core.exceptions import ValidationError
 from django.db.models import Case, Exists, F, OuterRef, Q, When
 
 from core.collections.models import Expansion
+from core.concepts.models import Concept
 from core.common.serializers import IdentifierSerializer
 from core.concept_maps.constants import (
     MAP_TYPE_RELATIONSHIPS, NOT_RELATED_TO, RELATED_TO, RESOURCE_TYPE, REVERSED_RELATIONSHIPS)
 from core.fhir import outcomes
 from core.fhir.resolve import UnresolvedError, namespace_of, resolve, viewable_rows
+from core.mappings.models import Mapping
 from core.sources.models import Source
 
 MATCH_LIMIT = 1000  # the most matches an answer lists
@@ -146,10 +149,18 @@ def scope_system(scope):
 
 
 def holds(value_set, code, sources):
-    """Whether a value set's default expansion holds the code as an active concept of one of the `sources`."""
+    """
+    Whether a value set's default expansion holds the code as an active concept of one of the `sources`: from the
+    code's concepts, each looked up in the expansion, rather than from the expansion's members.
+    """
     return bool(value_set.expansion_uri and sources) and Expansion.concepts.through.objects.filter(
-        expansion__uri=value_set.expansion_uri, concept__mnemonic__in=stored_codes(code),
-        concept__parent_id__in=sources, concept__is_active=True).exists()
+        expansion__uri=value_set.expansion_uri, concept_id__in=Concept.objects.filter(
+            mnemonic__in=stored_codes(code), parent_id__in=sources, is_active=True).values('id')).exists()
+
+
+def too_costly():
+    return outcomes.TooCostlyError(
+        'The translation would take too long to answer. Narrow it, for example with url, version or targetsystem.')
 
 
 def of_version(side, version):
@@ -346,30 +357,38 @@ class Translation:
             f"The value set '{scope}' could not be found, so the scope of the translation cannot be determined",
             expression=name, tx_issue_type='not-found')
 
-    def matches(self, concept_map, named):
+    def match_ids(self, concept_map, near, far):
         """
-        (the matches, whether there were more than MATCH_LIMIT), in mapping order, each match once: the sources the
-        systems name, then the mappings.
+        The ids of the release's live mappings of the code whose sides are shown as the systems, sorted: in no order and
+        with no limit, so the planner reads the code's mappings by the code (and the source lists) and checks each
+        against the release; ordered and limited, it would walk the release in id order.
         """
         request = self.request
-        near, far = ('to', 'from') if request.reverse else ('from', 'to')
         sides = {near: request.coding.system, **({far: request.targetsystem} if request.targetsystem else {})}
-        sources = self.named_sources
         mappings = concept_map.get_active_mappings().filter(  # neither retired nor deleted
             of_version(near, request.coding.version), **{f'{near}_concept_code__in': stored_codes(request.coding.code)})
         for side, system in sides.items():
-            mappings = mappings.filter(shown_as(side, system, sources[system], self.namespace, self.user))
-        rows = with_side(mappings, far, self.namespace, self.user).order_by('id').values(
-            'map_type', f'{far}_concept_code', f'{far}_source_url', f'{far}_source__uri', f'{far}_shown',
-            f'{far}_canonical')[:MATCH_LIMIT + 1]
+            mappings = mappings.filter(shown_as(side, system, self.named_sources[system], self.namespace, self.user))
+        return sorted(mappings.values_list('id', flat=True))
+
+    def matches(self, concept_map, named):
+        """
+        (the matches, whether there were more than MATCH_LIMIT), in mapping order, each match once: the sources the
+        systems name, the mappings' ids, then the first MATCH_LIMIT + 1 of those mappings.
+        """
+        near, far = ('to', 'from') if self.request.reverse else ('from', 'to')
+        ids = self.match_ids(concept_map, near, far)
+        rows = with_side(Mapping.objects.filter(id__in=ids[:MATCH_LIMIT + 1]), far, self.namespace, self.user).order_by(
+            'id').values('map_type', f'{far}_concept_code', f'{far}_source_url', f'{far}_source__uri', f'{far}_shown',
+                         f'{far}_canonical')
         matches = {}
         for row in rows:
             system = side_system(row[f'{far}_canonical'], row[f'{far}_source_url'],
                                  row[f'{far}_source__uri'] if row[f'{far}_shown'] else None)
-            match = (system, fhir_code(row[f'{far}_concept_code']), relationship(row['map_type'], request.reverse))
+            match = (system, fhir_code(row[f'{far}_concept_code']), relationship(row['map_type'], self.request.reverse))
             matches.setdefault(match, {
                 'relationship': match[2], 'concept': {'system': match[0], 'code': match[1]}, 'source': named})
-        return list(matches.values())[:MATCH_LIMIT], len(rows) > MATCH_LIMIT
+        return list(matches.values())[:MATCH_LIMIT], len(ids) > MATCH_LIMIT
 
 
 def translate(parameters, kwargs, user):

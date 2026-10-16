@@ -7,6 +7,7 @@ written as R4 equivalence; systems by canonical URL; source, targetsystem and re
 answers as an unknown one; a fixed number of queries. OpenConceptLab/ocl_online#451.
 """
 import json
+import re
 from itertools import product
 from unittest import expectedFailure
 
@@ -18,7 +19,7 @@ from rest_framework.test import APIClient
 from core.collections.models import Collection
 from core.collections.tests.factories import ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE
-from core.common.tests import OCLTestCase
+from core.common.tests import OCLTestCase, OCLAPITransactionTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
 from core.fhir.ops.translate import repository_paths
@@ -568,7 +569,8 @@ class TranslateBoundsTest(TranslateCorpusMixin, OCLTestCase):
                                                           else self.TYPES[name]): value}
                                           for name, value in inputs.items()])
             reads = [query['sql'] for query in context.captured_queries if ' FROM "mappings"' in query['sql']]
-            self.assertTrue(all('"mappings"."from_concept_code" IN (\'138405\'' in sql for sql in reads), msg)
+            self.assertTrue(all('"mappings"."from_concept_code" IN (\'138405\'' in sql
+                                or re.search(r'"mappings"\."id" IN \(\d', sql) for sql in reads), msg)
             if not code or not system:
                 self.assertOutcome(response, 400, 'invalid', 'invalid-data', 'system' if code else 'code')
                 self.assertEqual(reads, [], msg)
@@ -853,8 +855,9 @@ class TranslateCostTest(TranslateCorpusMixin, OCLTestCase):
 
     def test_query_counts(self):
         """
-        Resolution (the registry toggle, the repository, its newest release), the sources the systems name, then the
-        mappings, with whether the caller is shown their sources. url resolves the ConceptMap the same way.
+        Resolution (the registry toggle, the repository, its newest release), the sources the systems name, the ids of
+        the release's mappings of the code, then those mappings, with whether the caller is shown their sources. url
+        resolves the ConceptMap the same way.
         """
         for count in (1, 20):
             for index in range(count):
@@ -863,34 +866,112 @@ class TranslateCostTest(TranslateCorpusMixin, OCLTestCase):
                            {'system': CIEL, 'code': f'n{count}', 'targetsystem': ICD10},
                            {'url': CIEL, 'system': CIEL, 'code': f'n{count}'},
                            {'system': ICD10, 'code': f'N{count}-0', 'reverse': 'true', 'targetsystem': CIEL}):
-                with self.subTest(count=count, params=params), self.assertNumQueries(5):
+                with self.subTest(count=count, params=params), self.assertNumQueries(6):
                     self.assertTrue(self.result(self.answer(self.get(**params))))
         with self.assertNumQueries(2):  # the toggle, no repository: no ConceptMap, no mappings read
             self.answer(self.get(system=UNKNOWN, code='1'))
-        with self.assertNumQueries(6):  # + the owner
+        with self.assertNumQueries(7):  # + the owner
             self.answer(self.get(base='/orgs/CIEL', system=CIEL, code='n1'))
+        with self.assertNumQueries(5):  # no mapping of the code: nothing more to read
+            self.answer(self.get(system=CIEL, code='no-such-code'))
 
 
 class ConceptMapGroupTest(TranslateCorpusMixin, OCLTestCase):
     """
-    A ConceptMap read's groups use $translate's relationships and codes (ConceptMapGroupField). The read names a target
-    by its source's canonical URL whoever asks; $translate names one the caller isn't shown by the URL it stores.
+    A ConceptMap read's groups use $translate's relationships, codes and systems (ConceptMapGroupField): a side is named
+    by its source's canonical URL when the caller is shown that source, else by the URL the mapping stores.
     """
+
+    def read(self, path, user=None):
+        client = APIClient()
+        if user:
+            client.force_authenticate(user)
+        response = client.get(path)
+        self.assertEqual(response.status_code, 200, response.data)
+        return response.data
+
+    @staticmethod
+    def targets(resource):
+        return sorted((group['source'], group['target'], element['code'], target['code'], target['equivalence'])
+                      for group in resource['group'] for element in group['element'] for target in element['target'])
 
     def test_group_targets(self):
         self.mapping('SAME-AS', self.icd, 'ND53.Y%26XK70', [self.ciel_v2], from_code='7000')
-        response = APIClient().get(f'/fhir/ConceptMap/{self.ciel_v2.id}')
-        self.assertEqual(response.status_code, 200, response.data)
-        targets = sorted(
-            (group['target'], element['code'], target['code'], target['equivalence'])
-            for group in response.data['group'] for element in group['element'] for target in element['target'])
-        self.assertEqual(targets, sorted([
-            (ICD10, '113275', 'O02.1', 'narrower'), (SNOMED_PATH, '113275', '371374003', 'equivalent'),
-            (ICD10, '113275', 'O03', 'disjoint'), (OMOP_PATH, '113275', '4154112', 'relatedto'),
-            (PRIVATE, '113275', 'P1', 'relatedto'), (ICD10, '138405', 'B20', 'equivalent'),
-            (ICD10, '7000', 'ND53.Y&XK70', 'equivalent')]))
-        self.assertEqual(sorted(element['code'] for group in response.data['group'] if group['target'] == ICD10
-                                for element in group['element']), ['113275', '138405', '7000'])
+        for path, user, private in ((f'/fhir/ConceptMap/{self.ciel_v2.id}', None, PRIVATE_PATH),
+                                    (f'/fhir/ConceptMap/{self.ciel_v2.id}', self.moh_member, PRIVATE_PATH),
+                                    ('/orgs/CIEL/ConceptMap/CIEL/', None, PRIVATE_PATH),
+                                    ('/orgs/CIEL/ConceptMap/CIEL/', self.outsider, PRIVATE_PATH),
+                                    ('/orgs/CIEL/ConceptMap/CIEL/', self.moh_member, PRIVATE),
+                                    ('/orgs/CIEL/ConceptMap/CIEL/', self.admin, PRIVATE)):
+            resource = self.read(path, user)
+            self.assertEqual(self.targets(resource), sorted([
+                (CIEL, ICD10, '113275', 'O02.1', 'narrower'), (CIEL, SNOMED_PATH, '113275', '371374003', 'equivalent'),
+                (CIEL, ICD10, '113275', 'O03', 'disjoint'), (CIEL, OMOP_PATH, '113275', '4154112', 'relatedto'),
+                (CIEL, private, '113275', 'P1', 'relatedto'), (CIEL, ICD10, '138405', 'B20', 'equivalent'),
+                (CIEL, ICD10, '7000', 'ND53.Y&XK70', 'equivalent')]), (path, user))
+            self.assertEqual(sorted(element['code'] for group in resource['group'] if group['target'] == ICD10
+                                    for element in group['element']), ['113275', '138405', '7000'], (path, user))
+            self.assertEqual(len(resource['group']), len({(group['source'], group['target'])
+                                                          for group in resource['group']}), (path, user))
+
+    def test_a_side_the_caller_is_not_shown_reads_as_an_unknown_one(self):
+        """
+        A mapping into MOH's private source reads exactly as one into a source OCL doesn't hold that stores the same
+        URL; one from it, the same.
+        """
+        maps = source(self.pih, 'unknown-map', canonical_url='https://pih.example/fhir/ConceptMap/unknown')
+        maps_v1 = source(self.pih, 'unknown-map', 'v1', released=True, canonical_url=maps.canonical_url)
+        hidden_map = source(self.pih, 'hidden-map', canonical_url='https://pih.example/fhir/ConceptMap/hidden')
+        hidden_v1 = source(self.pih, 'hidden-map', 'v1', released=True, canonical_url=hidden_map.canonical_url)
+        for parent, release, linked in ((maps, maps_v1, None), (hidden_map, hidden_v1, self.private)):
+            self.mapping('Q-AND-A', linked, 'P1', [release], parent=parent, from_source=self.ciel_source,
+                         to_source_url=self.private.uri)
+            mapping = self.mapping('Q-AND-A', self.ciel_source, '113275', [release], parent=parent,
+                                   from_source=self.ciel_source, from_code='P2')
+            Mapping.objects.filter(id=mapping.id).update(from_source=linked, from_source_url=self.private.uri)
+        for user in (None, self.outsider, self.moh_member):
+            unknown, hidden = (self.targets(self.read(f'/fhir/ConceptMap/{release.id}', user))
+                               for release in (maps_v1, hidden_v1))
+            self.assertEqual(hidden, unknown, user)
+            self.assertEqual(hidden, sorted([(CIEL, PRIVATE_PATH, '113275', 'P1', 'relatedto'),
+                                             (PRIVATE_PATH, CIEL, 'P2', '113275', 'relatedto')]), user)
+
+    def test_the_searches_answer_a_side_the_caller_is_not_shown_as_an_unknown_one(self):
+        """
+        source-system and target-system, by canonical URL or by OCL path, match a mapping linked to a source the caller
+        isn't shown exactly as one into a source OCL doesn't hold that stores the same kind of URL: the same total, and
+        the same statements.
+        """
+        secret_url = 'http://moh.example/fhir/CodeSystem/secret'
+        secret = source(self.moh, 'secret-codes', canonical_url=secret_url, public_access=ACCESS_TYPE_NONE)
+        source(self.moh, 'secret-codes', 'v1', released=True, canonical_url=secret_url, public_access=ACCESS_TYPE_NONE)
+        unknown_url = 'http://moh.example/fhir/CodeSystem/no-such-codes'
+        for mnemonic, linked, url in (('by-hidden-canonical', secret, secret_url),
+                                      ('by-unknown-canonical', None, unknown_url),
+                                      ('by-hidden-path', secret, secret.uri),
+                                      ('by-unknown-path', None, '/orgs/MOH/sources/no-such-codes/')):
+            parent = source(self.pih, mnemonic, canonical_url=f'https://pih.example/fhir/ConceptMap/{mnemonic}')
+            release = source(self.pih, mnemonic, 'v1', released=True, canonical_url=parent.canonical_url)
+            self.mapping('SAME-AS', linked, 'P9', [release], parent=parent, from_source=self.ciel_source,
+                         from_code='9999', to_source_url=url)
+            mapping = self.mapping('SAME-AS', self.ciel_source, '9999', [release], parent=parent,
+                                   from_source=self.ciel_source, from_code='P9')
+            Mapping.objects.filter(id=mapping.id).update(from_source=linked, from_source_url=url)
+        for hidden, unknown in ((secret_url, unknown_url),
+                                ('/orgs/MOH/ConceptMap/secret-codes/', '/orgs/MOH/ConceptMap/no-such-codes/')):
+            for name in ('target-system', 'source-system'):
+                answers = [self.search_answer(name, value, mnemonic)
+                           for value, mnemonic in ((hidden, 'secret-codes'), (unknown, 'no-such-codes'))]
+                self.assertEqual(answers[0], answers[1], (name, hidden))
+                self.assertEqual(answers[0][0], 1, (name, hidden))
+
+    @staticmethod
+    def search_answer(name, value, mnemonic):
+        """A search's total and its SQL, with the value, the repository id and the page's row ids written as such."""
+        with CaptureQueriesContext(connection) as context:
+            bundle = APIClient().get('/fhir/ConceptMap/', {name: value}).data
+        return bundle['total'], [re.sub(r'IN \(\d+\)', 'IN (ID)', query['sql'].replace(value, 'VALUE').replace(
+            mnemonic, 'ID')) for query in context.captured_queries]
 
     def test_a_deleted_mapping_is_no_part_of_a_concept_map(self):
         """The read leaves out a deleted mapping version still in the release, so the searches don't count it."""
@@ -902,3 +983,26 @@ class ConceptMapGroupTest(TranslateCorpusMixin, OCLTestCase):
         self.assertEqual(APIClient().get('/fhir/ConceptMap/', search).data['total'], 0)
         groups = APIClient().get(f'/fhir/ConceptMap/{self.ciel_v2.id}').data['group']
         self.assertNotIn('http://loinc.org', [group['target'] for group in groups])
+
+
+class TranslateTimeoutTest(OCLAPITransactionTestCase):
+    """$translate's statements are bounded as a search's are: one the database cancels is too costly (422)."""
+
+    def test_a_cancelled_statement_is_too_costly(self):
+        set_registry_toggle(False)
+        org = OrganizationFactory(mnemonic='CIEL')
+        source(org, 'CIEL', canonical_url=CIEL)
+        source(org, 'CIEL', 'v1', released=True, canonical_url=CIEL)
+
+        def slow(*_):
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT pg_sleep(1)')
+
+        with patch('core.fhir.search.SEARCH_TIMEOUT_MS', 50), patch(
+                'core.fhir.ops.translate.Translation.matches', slow):
+            response = APIClient().get('/fhir/ConceptMap/$translate', {'system': CIEL, 'code': '1'})
+        self.assertEqual(response.status_code, 422, response.data)
+        issue = response.data['issue'][0]
+        self.assertEqual(issue['code'], 'too-costly')
+        self.assertIn({'system': TX_ISSUE_TYPE_SYSTEM, 'code': 'too-costly'}, issue['details']['coding'])
+        self.assertIn('translation', issue['details']['text'])

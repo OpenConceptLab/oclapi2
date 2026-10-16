@@ -10,7 +10,8 @@ from core.concept_maps.constants import RESOURCE_TYPE, RELATIONSHIP_MAP_TYPES
 from core.common.constants import HEAD
 from core.common.serializers import StatusField, IdentifierSerializer
 from core.fhir.adapters import r4
-from core.fhir.ops.translate import fhir_code, relationship, side_system
+from core.fhir.ops.translate import fhir_code, relationship, side_system, with_side
+from core.fhir.resolve import namespace_of
 from core.fhir.search import CanonicalUrlField, FhirRepositorySerializerMixin
 from core.mappings.models import Mapping
 from core.mappings.serializers import MappingDetailSerializer
@@ -23,7 +24,8 @@ logger = logging.getLogger('oclapi')
 class ConceptMapGroupField(serializers.Field):
     """
     A ConceptMap's groups, one per source and target system, each mapping an element target, with core.fhir.ops.
-    translate's systems and relationships, in R4 (equivalence). Writes store an equivalence as the map type it is.
+    translate's systems (for the caller, at the read's base) and relationships, in R4 (equivalence). Writes store an
+    equivalence as the map type it is.
     """
 
     def to_internal_value(self, data):
@@ -46,34 +48,38 @@ class ConceptMapGroupField(serializers.Field):
         return {'mappings': mappings}
 
     def to_representation(self, value):
-        # limit to 1000 mappings by default
+        """
+        At most 1,000 live mappings, grouped by the systems they are shown as: each side named as $translate names it
+        (side_system), its source's canonical URL when the caller is shown that source at the read's base, else the URL
+        the mapping stores. Whether a source is shown is a subquery of the one statement.
+        """
         # TODO: support graphQL to go around the limit
-        mappings = value.get_active_mappings().select_related(  # neither retired nor deleted
-            'from_source', 'to_source').order_by('id')[:1000]
+        request, view = self.context.get('request'), self.context.get('view')
+        namespace, user = namespace_of(getattr(view, 'kwargs', None)), getattr(request, 'user', None)
+        mappings = value.get_active_mappings()  # neither retired nor deleted
+        for side in ('from', 'to'):
+            mappings = with_side(mappings, side, namespace, user)
+        rows = mappings.order_by('id').values(
+            'map_type', 'from_concept_code', 'to_concept_code', *(
+                f'{side}_{field}' for side in ('from', 'to')
+                for field in ('source_url', 'source__uri', 'shown', 'canonical')))[:1000]
         groups, elements = {}, {}
-        for mapping in mappings:
-            key = (mapping.from_source_url or '') + (mapping.to_source_url or '')
+        for row in rows:
+            key = tuple(side_system(row[f'{side}_canonical'], row[f'{side}_source_url'],
+                                    row[f'{side}_source__uri'] if row[f'{side}_shown'] else None)
+                        for side in ('from', 'to'))
             if key not in groups:
-                groups[key] = {
-                    'source': self.system(mapping.from_source, mapping.from_source_url),
-                    'target': self.system(mapping.to_source, mapping.to_source_url),
-                    'element': []
-                }
-            code = fhir_code(mapping.from_concept_code)
+                groups[key] = {'source': key[0], 'target': key[1], 'element': []}
+            code = fhir_code(row['from_concept_code'])
             element = elements.get((key, code))
             if element is None:
                 element = elements[(key, code)] = {'code': code, 'target': []}
                 groups[key]['element'].append(element)
             element['target'].append({
-                'code': fhir_code(mapping.to_concept_code),
-                'equivalence': r4.equivalence(relationship(mapping.map_type))
+                'code': fhir_code(row['to_concept_code']),
+                'equivalence': r4.equivalence(relationship(row['map_type']))
             })
         return [*groups.values()]
-
-    @staticmethod
-    def system(source, url):
-        """A group's source or target: its source's canonical URL, else the URL the mapping stores (side_system)."""
-        return side_system(source.canonical_url if source else None, url)
 
 
 class ConceptMapDetailSerializer(FhirRepositorySerializerMixin, serializers.ModelSerializer):

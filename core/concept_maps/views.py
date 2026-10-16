@@ -11,8 +11,8 @@ from core.common.throttling import ThrottleUtil
 from core.concept_maps.serializers import ConceptMapDetailSerializer
 from core.fhir.adapters import r4
 from core.fhir.base import FhirViewMixin
-from core.fhir.ops.translate import translate
-from core.fhir.search import FhirSearchMixin, FhirReadMixin
+from core.fhir.ops.translate import too_costly, translate
+from core.fhir.search import FhirSearchMixin, FhirReadMixin, within_search_timeout
 from core.sources.views import SourceListView, SourceRetrieveUpdateDestroyView
 
 logger = logging.getLogger('oclapi')
@@ -26,7 +26,7 @@ class ConceptMapListView(FhirViewMixin, FhirSearchMixin, SourceListView):
         return self.serializer_class
 
     def get_detail_serializer(self, obj):
-        return self.serializer_class(obj)
+        return self.serializer_class(obj, context=self.get_serializer_context())
 
 
 class ConceptMapRetrieveUpdateView(FhirViewMixin, FhirReadMixin, SourceRetrieveUpdateDestroyView):
@@ -58,7 +58,7 @@ class ConceptMapRetrieveUpdateView(FhirViewMixin, FhirReadMixin, SourceRetrieveU
             return None
 
     def get_detail_serializer(self, obj):
-        return ConceptMapDetailSerializer(obj)
+        return ConceptMapDetailSerializer(obj, context=self.get_serializer_context())
 
 
 class ConceptMapTranslateView(FhirViewMixin, APIView):
@@ -69,6 +69,9 @@ class ConceptMapTranslateView(FhirViewMixin, APIView):
         return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        return Response(r4.translate_parameters(translate(self.get_fhir_parameters(), self.kwargs, request.user)))
+        """The answer, its statements bounded as a search's are (a cancelled one is too costly)."""
+        return Response(within_search_timeout(
+            lambda: r4.translate_parameters(translate(self.get_fhir_parameters(), self.kwargs, request.user)),
+            too_costly=too_costly))
 
     post = get
