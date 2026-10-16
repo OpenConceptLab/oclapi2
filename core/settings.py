@@ -193,6 +193,7 @@ REDOC_SETTINGS = {
 }
 
 MIDDLEWARE = [
+    'core.middlewares.middlewares.FhirErrorMiddleware',  # outermost: a FHIR path's error is an OperationOutcome
     'django.middleware.gzip.GZipMiddleware',
     'cid.middleware.CidMiddleware',
     'core.middlewares.middlewares.CustomLoggerMiddleware',
@@ -420,8 +421,6 @@ DISABLE_VALIDATION = os.environ.get('DISABLE_VALIDATION', False)
 API_SUPERUSER_PASSWORD = os.environ.get('API_SUPERUSER_PASSWORD', 'Root123')  # password for ocladmin superuser
 API_SUPERUSER_TOKEN = os.environ.get('API_SUPERUSER_TOKEN', '891b4b17feab99f3ff7e5b5d04ccc5da7aa96da6')
 
-FHIR_VALIDATOR_URL = os.environ.get('FHIR_VALIDATOR_URL', None)
-
 # Redis
 REDIS_CONNECTION_OPTIONS = {
     'socket_timeout': 5.0,
@@ -597,7 +596,8 @@ REPORTS_EMAIL = os.environ.get('REPORTS_EMAIL', 'admin@openconceptlab.org')
 
 if ENV and ENV != 'development':
     # Serving swagger static files (inserted after SecurityMiddleware)
-    MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
+    MIDDLEWARE.insert(MIDDLEWARE.index('django.middleware.gzip.GZipMiddleware') + 1,
+                      'whitenoise.middleware.WhiteNoiseMiddleware')
 
 EMAIL_SUBJECT_PREFIX = os.environ.get('EMAIL_SUBJECT_PREFIX', None)
 if not EMAIL_SUBJECT_PREFIX:

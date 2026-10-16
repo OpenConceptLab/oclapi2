@@ -1,6 +1,6 @@
 import json
 
-from fhir.resources.codesystem import CodeSystem
+from fhir.resources.R4B.codesystem import CodeSystem
 from mock.mock import patch, Mock
 from rest_framework.test import APIClient
 
