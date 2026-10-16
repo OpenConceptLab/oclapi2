@@ -10,7 +10,7 @@ from core.common.serializers import IdentifierSerializer
 from core.concepts.permissions import CanViewParentDictionaryAsGuest
 from core.concepts.views import ConceptRetrieveUpdateDestroyView
 from core.fhir.base import FhirViewMixin
-from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
+from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM, InvalidError
 from core.fhir.search import FhirSearchMixin, FhirReadMixin
 from core.parameters.serializers import ParametersSerializer
 from core.sources.models import Source
@@ -132,6 +132,8 @@ class CodeSystemValidateCodeView(FhirViewMixin, ConceptRetrieveUpdateDestroyView
         return [CanViewParentDictionaryAsGuest(), ]
 
     def get_queryset(self):
+        """The concept with the code in the code system `url` names. A code system that doesn't resolve, or that the
+        requester can't view, reads nothing; without a code, or with a code but no url, the request is a 400."""
         queryset = super().get_queryset()
 
         parameters = self.get_parameters()
@@ -154,15 +156,16 @@ class CodeSystemValidateCodeView(FhirViewMixin, ConceptRetrieveUpdateDestroyView
             if not source:
                 return queryset.none()
 
-        if code:
-            if not source:
-                return queryset.none()
+        if not code:
+            raise InvalidError('A code to validate is required.', expression='code')
+        if not source:
+            raise InvalidError('url is required with a code: the code system to validate it in.', expression='url')
 
-            queryset = queryset.filter(sources=source, mnemonic=code)
+        queryset = queryset.filter(sources=source, mnemonic=code)
 
-        if display and queryset:
+        if display:
             instance = queryset.first()
-            if display not in (instance.name, instance.display_name):
+            if not instance or display not in (instance.name, instance.display_name):
                 return queryset.none()
 
         return queryset

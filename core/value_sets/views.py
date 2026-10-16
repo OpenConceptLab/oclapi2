@@ -11,6 +11,7 @@ from core.collections.views import CollectionListView, CollectionRetrieveUpdateD
 from core.common.constants import HEAD, LATEST
 from core.concepts.models import Concept
 from core.fhir.base import FhirViewMixin
+from core.fhir.outcomes import InvalidError
 from core.fhir.search import FhirSearchMixin, FhirReadMixin
 from core.sources.models import Source
 from core.value_sets.serializers import ValueSetDetailSerializer, \
@@ -59,7 +60,8 @@ class ValueSetValidateCodeView(CodeSystemValidateCodeView):
 
     def get_queryset(self):
         """Reads only the value sets the request names (`url` and the route's collection), never ones other query
-        params pick; a value set that doesn't resolve or the requester can't view reads nothing."""
+        params pick; a value set that doesn't resolve or the requester can't view reads nothing. Without a code, or
+        with a code but no system, the request is a 400."""
         params = {key: value for key, value in self.params.items() if key not in self.CONTAINER_PARAMS}
         queryset = Concept.get_base_queryset(params)
 
@@ -85,16 +87,21 @@ class ValueSetValidateCodeView(CodeSystemValidateCodeView):
                 return queryset.none()
             queryset = queryset.filter(expansion_set__collection_version__in=version_ids)
 
-        if code and system:
-            concept_source = Source.objects.filter(canonical_url=system)
-            if system_version:
-                concept_source = concept_source.filter(version=system_version)
-            else:
-                concept_source = concept_source.filter(is_latest_version=True).exclude(version=HEAD)
-            concept_source = get_viewable_repo(concept_source, self.request.user)
-            if not concept_source:
-                return queryset.none()
-            queryset = queryset.filter(sources=concept_source, mnemonic=code)
+        if not code:
+            raise InvalidError('A code to validate is required.', expression='code')
+        if not system:
+            raise InvalidError('system is required with a code: the code system the code is from.',
+                               expression='system')
+
+        concept_source = Source.objects.filter(canonical_url=system)
+        if system_version:
+            concept_source = concept_source.filter(version=system_version)
+        else:
+            concept_source = concept_source.filter(is_latest_version=True).exclude(version=HEAD)
+        concept_source = get_viewable_repo(concept_source, self.request.user)
+        if not concept_source:
+            return queryset.none()
+        queryset = queryset.filter(sources=concept_source, mnemonic=code)
 
         if display:
             instance = queryset.first()
