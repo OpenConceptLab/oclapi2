@@ -6,8 +6,11 @@ code, wrong display, inactive, not in the value set); value set membership from 
 expansion; a value set that doesn't resolve is a 422 OperationOutcome; whatever the caller isn't shown answers as
 missing; a fixed number of queries. OpenConceptLab/ocl_online#451.
 """
+from django.db.models import F
+
 from core.collections.tests.factories import ExpansionFactory
 from core.common.tests import OCLTestCase
+from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
 from core.fhir.outcomes import MESSAGE_ID_EXTENSION
 from core.fhir.tests_ops_lookup import (
@@ -213,6 +216,30 @@ class ValidateCodeCases(OpsCorpusMixin):
         self.assertTrue(self.answer(self.post('CIEL/$validate-code', [
             {'name': 'coding', 'valueCoding': {'system': CIEL, 'code': '999', 'version': 'v1'}}],
             base='/orgs/CIEL'))['result'])
+
+    def test_an_owner_instance_serves_head_when_named(self):
+        """At an owner base, CodeSystem/{id}/$validate-code and ValueSet/{id}/$validate-code serve HEAD when it is
+        named, as the type level does (design D6); a global id names a release, so HEAD there conflicts (Codex F3.1)."""
+        ConceptFactory(parent=self.ciel, mnemonic='H1', names=[name('In HEAD only', preferred=True)])
+        answer = self.answer(self.get('CIEL/$validate-code', base='/orgs/CIEL', code='H1', version='HEAD'))
+        self.assertEqual((answer['result'], answer['version']), (True, 'HEAD'))
+        self.assertFalse(self.answer(self.get('CIEL/$validate-code', base='/orgs/CIEL', code='H1'))['result'])
+        answer = self.answer(self.get(f'{self.ciel_v1.id}/$validate-code', code='999', version='HEAD'))
+        self.assertEqual((answer['result'], answer['issues']), (False, ['error|invalid|invalid-data|version|']))
+
+        head_expansion = ExpansionFactory(mnemonic='autoexpand-HEAD', collection_version=self.fevers)
+        head_expansion.concepts.add(Concept.objects.get(mnemonic='H1', id=F('versioned_object_id')))
+        self.fevers.expansion_uri = head_expansion.uri
+        self.fevers.save()
+        answer = self.answer(self.get('fevers/$validate-code', base='/orgs/Acme', resource='ValueSet', system=CIEL,
+                                      code='H1', valueSetVersion='HEAD'))
+        self.assertEqual((answer['result'], answer['display']), (True, 'In HEAD only'))
+        self.assertFalse(self.answer(self.get(
+            'fevers/$validate-code', base='/orgs/Acme', resource='ValueSet', system=CIEL, code='H1'))['result'])
+        response = self.get(f'{self.fevers_v1.id}/$validate-code', resource='ValueSet', system=CIEL, code='H1',
+                            valueSetVersion='HEAD')
+        self.assert_outcome(response, 400, 'invalid', 'invalid-data')
+        self.assertEqual(response.data['issue'][0]['expression'], ['valueSetVersion'])
 
     def test_a_deleted_code_system_release(self):
         """A deactivated release (is_active false) whose concept and expansion links remain is no version a member is

@@ -354,6 +354,28 @@ class LookupCases(OpsCorpusMixin):
             'system': CIEL, 'code': '999', 'version': 'v1'}}], base='/orgs/CIEL')
         self.assertEqual(self.by_name(response)['version']['valueString'], 'v1')
 
+    def test_an_owner_instance_serves_head_when_named(self):
+        """
+        At an owner base, CodeSystem/{id}/$lookup serves HEAD when version=HEAD names it, as the type level does
+        (design D6), with HEAD's visibility rule; a global id names a release, so HEAD there is a conflict (Codex F3.1).
+        """
+        ConceptFactory(parent=self.ciel, mnemonic='H1', names=[name('In HEAD only', preferred=True)])
+        response = self.get('CIEL/$lookup', base='/orgs/CIEL', code='H1', version='HEAD')
+        self.assertEqual(response.status_code, 200, response.data)
+        answer = self.by_name(response)
+        self.assertEqual((answer['version']['valueString'], answer['display']['valueString']), ('HEAD', 'In HEAD only'))
+        self.assert_outcome(self.get('CIEL/$lookup', base='/orgs/CIEL', code='H1'), 404, 'not-found', 'invalid-code')
+        response = self.get('hiv/$lookup', base='/orgs/MOH', user=self.moh_member, code='P1', version='HEAD')
+        self.assertEqual(self.by_name(response)['version']['valueString'], 'HEAD')
+        hidden = self.get('hiv/$lookup', base='/orgs/MOH', user=self.outsider, code='P1', version='HEAD')
+        self.assertEqual(hidden.status_code, 404)
+        self.hiv.is_active = False
+        self.hiv.save()
+        self.assertEqual(self.get('hiv/$lookup', base='/orgs/MOH', code='P1', version='HEAD').content, hidden.content)
+        response = self.get(f'{self.ciel_v1.id}/$lookup', code='999', version='HEAD')
+        self.assert_outcome(response, 400, 'invalid', 'invalid-data')
+        self.assertEqual(response.data['issue'][0]['expression'], ['version'])
+
     def test_a_deleted_concept_version_is_not_found(self):
         """A concept version deleted (is_active false) is gone, a retired one stays (Codex F1.4)."""
         ConceptFactory(parent=self.ciel, mnemonic='555', sources=[self.ciel_v2], is_active=False,

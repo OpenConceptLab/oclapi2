@@ -18,15 +18,15 @@ from rest_framework import status
 
 from core.fhir import outcomes
 from core.fhir.ops.concepts import (
-    coded_input, require, find_concept, display_of, designations, fhir_code, mismatch, system_of, text)
+    coded_input, require, find_concept, display_of, designations, fhir_code, instance_version, mismatch, system_of,
+    text)
 from core.fhir.resolve import UnresolvedError, resolve
-from core.fhir.search import read_version
 
 
 def code_system_version(coding, kwargs, user, instance_id=None):
     """The code system version a $lookup or $validate-code names: the instance, else the coding's system and version."""
     if instance_id:
-        return read_version('CodeSystem', instance_id, coding.version, kwargs, user)
+        return instance_version('CodeSystem', instance_id, coding.version, kwargs, user)
     return resolve('CodeSystem', coding.system, coding.version, kwargs, user)
 
 

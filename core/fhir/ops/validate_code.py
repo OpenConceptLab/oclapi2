@@ -31,11 +31,10 @@ from core.common.constants import HEAD
 from core.concepts.models import Concept
 from core.fhir import outcomes
 from core.fhir.ops.concepts import (
-    coded_input, path, require, text, find_concept, display_of, has_name, fhir_code, code_q, is_system_of, mismatch,
-    system_of)
+    coded_input, path, require, text, find_concept, display_of, has_name, fhir_code, code_q, instance_version,
+    is_system_of, mismatch, system_of)
 from core.fhir.ops.lookup import code_system_version
 from core.fhir.resolve import UnresolvedError, namespace_of, resolve, to_ocl_path, viewable_rows
-from core.fhir.search import read_version
 from core.sources.models import Source
 
 UNKNOWN_CODE_SYSTEM = 'x-caused-by-unknown-system'  # how CodeSystem $validate-code names an unknown system
@@ -208,7 +207,7 @@ def value_set_version(parameters, kwargs, user, instance_id):
     """
     version, url = text(parameters, 'valueSetVersion'), text(parameters, 'url')
     if instance_id:
-        value_set = read_version('ValueSet', instance_id, version, kwargs, user)
+        value_set = instance_version('ValueSet', instance_id, version, kwargs, user)
         if url and not is_system_of(url, value_set):
             raise outcomes.InvalidError(f"'{url}' is not the value set {instance_id} this $validate-code is on.",
                                         expression='url')
