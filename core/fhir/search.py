@@ -52,7 +52,7 @@ from core.concepts.models import Concept
 from core.fhir import outcomes
 from core.fhir.base import CONTROL_PARAMETERS, fhir_base_url
 from core.fhir.resolve import (
-    PUBLIC_ACCESS, REPO_TYPES, namespace_of, owner_access, visible_versions, viewable_rows, is_visible, has_release,
+    PUBLIC_ACCESS, REPO_TYPES, namespace_of, owner_access, visible_versions, viewable_rows, is_public, is_shown,
     repository_rows, with_repository_access)
 from core.mappings.models import Mapping
 from core.sources.models import Source
@@ -565,27 +565,34 @@ def read(view):
     mnemonic, the version ?version= names (an OCL extension) or else the latest release the requester is shown. It
     must be one search lists: released, never HEAD, visible to the requester there. Raises NotFoundError.
     """
-    resource_type, resource_id = view.resource_type, view.kwargs[view.lookup_field]
-    namespace, user = namespace_of(view.kwargs), view.request.user
+    return read_version(view.resource_type, view.kwargs[view.lookup_field], view.request.query_params.get('version'),
+                        view.kwargs, view.request.user)
+
+
+def read_version(resource_type, resource_id, version, kwargs, user):
+    """
+    read's rule for a resource `resource_id` names at the base `kwargs` names, for `user`: the id at the global base,
+    the mnemonic and `version` (else the latest release shown) at an owner base. For the instance-level operations too.
+    """
+    namespace = namespace_of(kwargs)
     versions = REPO_TYPES[resource_type].objects.filter(is_active=True, released=True).exclude(version=HEAD)
     latest = False
     if namespace is None:
         versions = versions.filter(id=int(resource_id)) if OPAQUE_ID.fullmatch(resource_id) else versions.none()
     else:
-        versions = view.filter_queryset_by_owner(versions.filter(mnemonic=resource_id))
-        version = view.request.query_params.get('version')
+        owner = {'user__username': kwargs['user']} if kwargs.get('user') else {'organization__mnemonic': kwargs['org']}
+        versions = versions.filter(mnemonic=resource_id, **owner)
         latest = not version
         versions = versions.filter(version=version) if version else versions.filter(
             retired=False).order_by('-created_at')
 
-    def shown(instance):
-        return instance and is_visible(instance, namespace, user) and has_release(instance, namespace, user)
-
     instance = with_repository_access(with_repository_canonical(versions)).first()
-    if latest and instance and not shown(instance):  # the latest is private: the latest public one, if shown
+    if latest and instance and not is_shown(instance, namespace, user) and is_public(
+            instance.repository_public_access or ''):
+        # the latest is private, in a public repository: the latest public one
         instance = with_repository_access(with_repository_canonical(
             versions.filter(public_access__in=PUBLIC_ACCESS))).first()
-    if not shown(instance):
+    if not instance or not is_shown(instance, namespace, user):
         raise outcomes.NotFoundError(f'{resource_type}/{resource_id} not found')
     return instance
 

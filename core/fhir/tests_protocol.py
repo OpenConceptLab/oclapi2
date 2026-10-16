@@ -13,6 +13,7 @@ from django.utils import timezone
 from lxml import etree
 from rest_framework.test import APIClient
 
+from core.code_systems.views import CodeSystemValidateCodeView
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory
@@ -23,6 +24,7 @@ from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
+from core.url_registry.tests_resolution import set_registry_toggle
 from core.users.tests.factories import UserProfileFactory
 
 FHIR = '{http://hl7.org/fhir}'
@@ -48,6 +50,7 @@ class FhirProtocolTest(OCLTestCase):
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def setUp(self):
+        set_registry_toggle(False)  # the operations resolve through core.fhir.resolve: no registry, as in production
         super().setUp()
         self.org = OrganizationFactory(mnemonic='ProtoOrg')
         self.source = OrganizationSourceFactory(
@@ -61,7 +64,8 @@ class FhirProtocolTest(OCLTestCase):
         self.collection = OrganizationCollectionFactory(
             organization=self.org, mnemonic='protovs', canonical_url=VALUE_SET, version='HEAD')
         self.collection_v1 = OrganizationCollectionFactory(
-            organization=self.org, mnemonic='protovs', canonical_url=VALUE_SET, version='v1', is_latest_version=True)
+            organization=self.org, mnemonic='protovs', canonical_url=VALUE_SET, version='v1', is_latest_version=True,
+            released=True)
         expansion = ExpansionFactory(mnemonic='e1', collection_version=self.collection_v1, parameters={})
         self.collection_v1.expansion_uri = expansion.uri
         self.collection_v1.save()
@@ -302,7 +306,7 @@ class FhirProtocolTest(OCLTestCase):
 
     def test_errors_are_outcomes_with_a_tx_issue_type(self):
         cases = [
-            ('/fhir/CodeSystem/$lookup?system=http://example.org/unknown&code=1', 400),
+            ('/fhir/CodeSystem/$lookup?system=http://example.org/unknown&code=1', 422),
             ('/fhir/CodeSystem/?unsupported_parameter=1', 400),
             ('/fhir/CodeSystem/no-such-code-system/', 404),
             ('/fhir/Patient/', 404),
@@ -324,7 +328,8 @@ class FhirProtocolTest(OCLTestCase):
 
     def test_a_crash_outside_the_view_handler_is_a_4xx_outcome(self):
         client = APIClient(raise_request_exception=False)
-        with self.assertLogs('django.request', level='ERROR'):
+        with self.assertLogs('django.request', level='ERROR'), patch.object(
+                CodeSystemValidateCodeView, 'delete', create=True, new=lambda *args, **kwargs: None):
             response = client.delete('/fhir/CodeSystem/$validate-code')  # the view returns None: a 500 in Django
 
         self.assertEqual(response.status_code, 422)

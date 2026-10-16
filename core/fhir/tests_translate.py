@@ -9,7 +9,6 @@ answers as an unknown one; a fixed number of queries. OpenConceptLab/ocl_online#
 import json
 import re
 from itertools import product
-from unittest import expectedFailure
 
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
@@ -829,7 +828,6 @@ class TranslateAccessTest(TranslateCorpusMixin, OCLTestCase):
                 self.assertEqual(self.matches(self.answer(self.get(
                     base=base, user=user, system=CIEL, code='113275', targetsystem=PRIVATE))), [], (base, user))
 
-    @expectedFailure  # F1.2: until WP4+WP5's resolve() resolves a default to the newest release the caller is shown
     def test_the_default_version_is_the_newest_release_the_caller_is_shown(self):
         """
         A newer private release doesn't hide the public one before it: without a version (and without url, or with
