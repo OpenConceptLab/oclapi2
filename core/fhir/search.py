@@ -393,22 +393,39 @@ class Search:
     @staticmethod
     def by_source(value):
         """
-        A ConceptMap of the code system named, with mappings: OCL's ConceptMap is a source's mappings, so its source
-        system is the source itself. OCL keeps no source or target value set on a ConceptMap, so source-uri and
-        target-uri are read as the code systems. Retired mappings are no part of a ConceptMap (ConceptMapGroupField).
+        A ConceptMap with a group whose source is the code system named. OCL keeps no source or target value set on
+        a ConceptMap, so source-uri and target-uri are read as the code systems.
         """
-        return canonical_q(Source, value) & Exists(Mapping.sources.through.objects.filter(
-            source_id=OuterRef('id'), mapping__retired=False))
+        return mapped('from', value)
 
     @staticmethod
     def by_target(value):
-        """
-        A ConceptMap with a mapping (not retired) to the code system named, a search bounded by SEARCH_TIMEOUT_MS. The
-        code system's rows are listed first, so the planner can read the mappings by their to_source_id index.
-        """
-        sources = list(Source.objects.filter(canonical_q(Source, value)).values_list('id', flat=True))
-        return Exists(Mapping.sources.through.objects.filter(source_id=OuterRef('id'), mapping__retired=False).filter(
-            Q(mapping__to_source_id__in=sources) | Q(mapping__to_source_url=value)))
+        """A ConceptMap with a group whose target is the code system named."""
+        return mapped('to', value)
+
+
+def mapped(side, value):
+    """
+    A ConceptMap version holding a live mapping whose group source (side 'from') or target ('to') shows `value`, as
+    ConceptMapGroupField builds groups: retired mappings aren't read; a group's system is the from or to source's
+    canonical URL, or for one without, its OCL URL as a ConceptMap path (/orgs/{org}/ConceptMap/{id}/), or the
+    mapping's own URL when it names no OCL source. A search over many mappings is bounded by SEARCH_TIMEOUT_MS.
+
+    The sources with that canonical are listed first, so the planner can read the mappings by their source index.
+    """
+    field = f'mapping__{side}_source'
+    sources = list(Source.objects.filter(canonical_url=value).values_list('id', flat=True))
+    shown = Q(**{f'{field}_id__in': sources}) | (Q(**{f'{field}_url': value}) & Q(**{f'{field}__isnull': True}))
+    path = re.fullmatch(r'/(orgs|users)/([^/]+)/ConceptMap/([^/]+)/', value)
+    if path:
+        stored = Q()
+        for kind in ('sources', 'collections', 'ConceptMap'):
+            stored |= Q(**{f'{field}_url__startswith': f'/{path[1]}/{path[2]}/{kind}/{path[3]}/'})
+        without_canonical = Q(**{f'{field}__isnull': True}) | Q(**{f'{field}__canonical_url__isnull': True}) | Q(
+            **{f'{field}__canonical_url': ''})
+        shown |= stored & without_canonical
+    return Exists(Mapping.sources.through.objects.filter(
+        source_id=OuterRef('id'), mapping__retired=False).filter(shown))
 
 
 def page_size(query):

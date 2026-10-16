@@ -588,6 +588,36 @@ class ConceptMapSearchTest(SearchCorpusMixin, OCLTestCase):
             self.assertEqual(self.keys(self.search('ConceptMap', **{name: ICD10})), [f'{CIEL}|v2'], name)
             self.assertEqual(self.search('ConceptMap', **{name: CIEL})['total'], 0, name)
 
+    def test_source_system_is_the_mappings_source_as_the_read_shows_it(self):
+        """
+        group.source is each live mapping's from_source canonical, or for a source without one its OCL path as a
+        ConceptMap; group.target the same for to_source. A container's own canonical isn't its source system.
+        """
+        uncanonical = source(self.misc, 'local-codes')
+        local = ConceptFactory(parent=uncanonical, mnemonic='L1')
+        icd_code = ConceptFactory(parent=self.sehat_icd, mnemonic='B01')
+        mine = ConceptFactory(parent=self.jdoe_codes, mnemonic='m1')
+        for from_source, from_concept in ((self.sehat_icd, icd_code), (uncanonical, local)):
+            MappingFactory(
+                parent=self.jdoe_codes, from_concept=from_concept, to_concept=mine, from_source=from_source,
+                to_source=self.jdoe_codes, from_source_url=from_source.uri, to_source_url=self.jdoe_codes.uri,
+                sources=[self.jdoe_codes_v1])
+        my_codes = 'https://example.org/my-codes|v1'
+        groups = self.read(f'/fhir/ConceptMap/{self.jdoe_codes_v1.id}')['group']
+        self.assertEqual(
+            sorted(group['source'] for group in groups), sorted([ICD10, '/orgs/misc/ConceptMap/local-codes/']))
+
+        for name in ('source-system', 'source-uri'):
+            self.assertEqual(self.keys(self.search('ConceptMap', **{name: ICD10})), [my_codes], name)
+            self.assertEqual(
+                self.keys(self.search('ConceptMap', **{name: '/orgs/misc/ConceptMap/local-codes/'})), [my_codes], name)
+            self.assertEqual(self.search('ConceptMap', **{name: 'https://example.org/my-codes'})['total'], 0, name)
+            self.assertEqual(self.keys(self.search('ConceptMap', **{name: CIEL})), [f'{CIEL}|v2'], name)
+        self.assertEqual(
+            self.keys(self.search('ConceptMap', **{'target-system': 'https://example.org/my-codes'})), [my_codes])
+        # a target with a canonical is shown by it, not by its OCL path
+        self.assertEqual(self.search('ConceptMap', **{'target-system': '/users/jdoe/ConceptMap/my-codes/'})['total'], 0)
+
     def test_retired_mappings_are_no_part_of_a_concept_map(self):
         """A read leaves retired mappings out (ConceptMapGroupField), so source and target searches don't count them."""
         loinc = source(self.misc, 'LOINC', canonical_url='http://loinc.org')
@@ -622,7 +652,7 @@ class ConceptMapSearchTest(SearchCorpusMixin, OCLTestCase):
         return response.data
 
     def test_no_query_per_entry(self):
-        with self.assertNumQueries(4):  # the target's repositories and their rows, the matches' ids, the page
+        with self.assertNumQueries(3):  # the sources with the target's canonical, the matches' ids, the page
             self.assertEqual(self.client.get('/fhir/ConceptMap/', {'target-system': ICD10}).data['total'], 1)
 
 
