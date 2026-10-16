@@ -3,9 +3,10 @@ ConceptMap $translate (SVCM ITI-101, FHIR R4's $translate), version-neutral: wha
 types as R5-shaped relationships. core.fhir.adapters.r4 writes the answer as an R4 Parameters resource.
 
 - The ConceptMap: the one `url` (and `conceptMapVersion`) names; else the code system the code comes from, `system`
-  and `version` resolved as a CodeSystem, whose own mappings are its map (in reverse, `targetsystem`, the system of
-  the codes sought). Resolution, versions and access are core.fhir.resolve's: a released version, the newest the caller
-  is shown unless one is named; public only at /fhir/; at an owner base, private ones to those who may view them.
+  resolved as a CodeSystem (in reverse, `targetsystem`, the system of the codes sought), whose own mappings are its
+  map, at the release `conceptMapVersion` names, else (forward) the code's `version`. Resolution, versions and access
+  are core.fhir.resolve's: a released version, the newest the caller is shown unless one is named; public only at
+  /fhir/; at an owner base, private ones to those who may view them.
 - The matches: that version's live (not retired) mappings from the code (in reverse, to it) whose from side (in
   reverse, to side) is shown as the code's system; with `targetsystem`, whose other side is shown as that system. Never
   another repository's mappings, HEAD's or another release's.
@@ -279,13 +280,14 @@ class Translation:
     def code_system_map(self):
         """
         Without url: (the version of the code system the codes come from, how a match's source names it), whose own
-        mappings are its map; (None, None) when there is none the caller is shown.
+        mappings are its map: the release conceptMapVersion names, else (forward) the code's version, else the newest
+        the caller is shown; (None, None) when there is none.
         """
         request = self.request
         if request.reverse:
-            url, version = request.targetsystem, None
-        else:
-            url, version = request.coding.system, request.coding.version
+            url, version = request.targetsystem, request.concept_map_version
+        else:  # conceptMapVersion names the map's release, else the code's version
+            url, version = request.coding.system, request.concept_map_version or request.coding.version
         if not url:
             return None, None
         try:

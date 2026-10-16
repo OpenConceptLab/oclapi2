@@ -282,6 +282,27 @@ class TranslateMappingsTest(TranslateCorpusMixin, OCLTestCase):
                 {'name': 'url', 'valueUri': maps.canonical_url}, {'name': 'coding', 'valueCoding': coding},
                 {'name': 'reverse', 'valueBoolean': True}]))), expected, version)
 
+    def test_concept_map_version_names_the_release_of_the_implicit_map(self):
+        """
+        Without url, conceptMapVersion names the release of the code system's map (in reverse, targetsystem's),
+        whatever version names the code's own system version.
+        """
+        older = sorted([f'{ICD10}|A00|equivalent', f'{ICD10}|O02.1|narrower'])
+        for params in ({'conceptMapVersion': 'v1'}, {'conceptMapVersion': 'v1', 'version': 'v2'}):
+            parameters = self.answer(self.get(system=CIEL, code='113275', **params))
+            self.assertEqual(self.matches(parameters), older, params)
+            self.assertEqual(parameters['parameter'][1]['part'][2], {'name': 'source', 'valueUri': f'{CIEL}|v1'},
+                             params)
+        self.assertEqual(self.matches(self.answer(self.get(system=CIEL, code='113275', conceptMapVersion='v2'))),
+                         CIEL_113275_V2)
+        parameters = self.answer(self.get(system=CIEL, code='113275', conceptMapVersion='v9'))
+        self.assertFalse(self.result(parameters))
+        self.assertEqual(len(self.values(parameters, 'message')), 1)
+        reverse = {'system': ICD10, 'code': 'A00', 'targetsystem': CIEL, 'reverse': 'true'}
+        self.assertEqual(self.matches(self.answer(self.get(**reverse, conceptMapVersion='v1'))),
+                         [f'{CIEL}|113275|equivalent'])
+        self.assertEqual(self.matches(self.answer(self.get(**reverse))), [])
+
     def test_not_same_as_alone_is_no_translation(self):
         """result is true only when some match isn't disjoint (R4: not unmatched or disjoint)."""
         self.mapping('NOT-SAME-AS', self.icd, 'Q00', [self.ciel_v2], from_code='5000')
