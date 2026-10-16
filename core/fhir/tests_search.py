@@ -428,7 +428,7 @@ class ConceptMapSearchTest(SearchCorpusMixin, OCLTestCase):
             self.assertEqual(self.search('ConceptMap', **{name: CIEL})['total'], 0, name)
 
     def test_no_query_per_entry(self):
-        with self.assertNumQueries(3):  # the target's repositories, the count, the page
+        with self.assertNumQueries(4):  # the target's repositories and their rows, the matches' ids, the page
             self.assertEqual(self.client.get('/fhir/ConceptMap/', {'target-system': ICD10}).data['total'], 1)
 
 

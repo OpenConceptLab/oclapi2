@@ -9,7 +9,8 @@ FHIR search and read of CodeSystem, ValueSet and ConceptMap: SVCM's Query transa
 - Search parameters: SVCM's, with :exact and :contains on the string ones (no modifier is starts-with, ignoring case).
   A comma separates alternatives, a repeated parameter must hold every time. Anything else is a 400 not-supported.
 - Paging: _count (at most MAX_COUNT, which is also the default) and page; Bundle.total is the full count, and every
-  entry has a fullUrl and a search mode.
+  entry has a fullUrl and a search mode. The search runs once, for the ids of every match; the page's rows are then
+  read by id.
 - A search's queries are bounded by SEARCH_TIMEOUT_MS: one the database cancels makes the search too costly (422).
 - A search entry is the resource's summary, marked SUBSETTED: no concept, compose or group, which only a read returns.
   A CodeSystem is `complete` (with every concept, retired ones flagged) up to CONCEPT_LIMIT concepts, else
@@ -33,6 +34,7 @@ from core.bundles.serializers import FHIRBundleSerializer
 from core.collections.models import Expansion
 from core.common.constants import HEAD
 from core.common.mixins import CustomPaginator
+from core.common.utils import to_int
 from core.concepts.models import Concept
 from core.fhir import outcomes
 from core.fhir.base import CONTROL_PARAMETERS, fhir_base_url
@@ -289,8 +291,11 @@ class Search:
 
     @staticmethod
     def by_target(value):
-        """A ConceptMap with a mapping to the code system named (a search bounded by SEARCH_TIMEOUT_MS)."""
-        sources = Source.objects.filter(canonical_q(Source, value)).values('id')
+        """
+        A ConceptMap with a mapping to the code system named, a search bounded by SEARCH_TIMEOUT_MS. The code system's
+        rows are listed first, so the planner can read the mappings by their to_source_id index.
+        """
+        sources = list(Source.objects.filter(canonical_q(Source, value)).values_list('id', flat=True))
         return Exists(Mapping.sources.through.objects.filter(source_id=OuterRef('id')).filter(
             Q(mapping__to_source_id__in=sources) | Q(mapping__to_source_url=value)))
 
@@ -332,22 +337,21 @@ def search_bundle(view, resource_type):
     """The searchset Bundle a FHIR search view answers: the base's matching versions, one page of them."""
     request = view.request
     count = page_size(request.query_params)
-    versions = visible_versions(resource_type, view.kwargs, request.user).filter(
-        Search(resource_type, view.kwargs).criteria(request.query_params)).order_by('-id')
+    ids = list(visible_versions(resource_type, view.kwargs, request.user).filter(
+        Search(resource_type, view.kwargs).criteria(request.query_params)).order_by('-id').values_list('id', flat=True))
     paginator, entries = None, []
     if count:
-        versions = with_repository_canonical(versions)
+        page = to_int(request.GET.get('page', '1'), 1)
+        rows = with_repository_canonical(REPO_TYPES[resource_type].objects.filter(
+            id__in=ids[(page - 1) * count:page * count])).order_by('-id')
         if resource_type == 'CodeSystem':
-            versions = with_concepts_over_limit(versions)
+            rows = with_concepts_over_limit(rows)
         paginator = CustomPaginator(
-            request=request, total_count=None, queryset=versions, page_size=count, page_by_ids=True)
-        total = paginator.total_count
+            request=request, total_count=len(ids), queryset=list(rows), page_size=count, is_sliced=True)
         resources = view.get_serializer(paginator.current_page_results, many=True).data
         entries = FHIRBundleSerializer.convert_to_entry(
             resources, f'{fhir_base_url(request, view.kwargs)}/{resource_type}')
-    else:
-        total = versions.count()
-    bundle = {'meta': {'lastUpdated': timezone.now()}, 'type': 'searchset', 'total': total}
+    bundle = {'meta': {'lastUpdated': timezone.now()}, 'type': 'searchset', 'total': len(ids)}
     if entries:
         bundle['entry'] = entries
     return FHIRBundleSerializer(bundle, context={'paginator': paginator, 'request': request}).data
