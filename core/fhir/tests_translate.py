@@ -164,6 +164,12 @@ class TranslateCorpusMixin:
         self.assertEqual(len(results), 1, parameters)
         return results[0]
 
+    def capture(self, **params):
+        """The answer, and the SQL it ran."""
+        with CaptureQueriesContext(connection) as context:
+            parameters = self.answer(self.get(**params))
+        return parameters, [query['sql'] for query in context.captured_queries]
+
     def assertOutcome(  # pylint: disable=invalid-name,too-many-arguments
             self, response, status, code, tx_code, expression=None):
         self.assertEqual(response.status_code, status, response.data)
@@ -595,11 +601,6 @@ class TranslateScopeTest(TranslateCorpusMixin, OCLTestCase):
         Collection.objects.filter(id=mixed.id).update(expansion_uri=expansion.uri)
         self.mapping('SAME-AS', self.icd, 'S371', [self.ciel_v2], from_source=self.snomed, from_code='371374003')
 
-    def capture(self, **params):
-        with CaptureQueriesContext(connection) as context:
-            parameters = self.answer(self.get(**params))
-        return parameters, [query['sql'] for query in context.captured_queries]
-
     def test_a_scope_holds_only_the_codes_of_systems_the_caller_is_shown(self):
         """
         A public value set holding a private source's code says nothing about it to those who can't view the source: a
@@ -784,12 +785,6 @@ class TranslateAccessTest(TranslateCorpusMixin, OCLTestCase):
     and a mapping into a source they aren't shown names it as a mapping into a source OCL doesn't hold would: by the
     URL it stores, never by the source's canonical URL.
     """
-
-    def capture(self, **params):
-        """The answer, and the SQL it ran."""
-        with CaptureQueriesContext(connection) as context:
-            parameters = self.answer(self.get(**params))
-        return parameters, [query['sql'] for query in context.captured_queries]
 
     def test_a_system_the_caller_is_not_shown_answers_as_an_unknown_one(self):
         """

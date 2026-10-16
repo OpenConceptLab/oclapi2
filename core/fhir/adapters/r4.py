@@ -14,30 +14,11 @@ EQUIVALENCES = {
     SOURCE_IS_BROADER: 'narrower',
     NOT_RELATED_TO: 'disjoint',
 }
-# R4 equivalence -> R5 relationship, the other way. R5 says noMap for R4's unmatched; OCL has no such mapping, so it is
-# not-related-to, as disjoint is
-RELATIONSHIPS = {
-    'equivalent': EQUIVALENT,
-    'equal': EQUIVALENT,
-    'relatedto': RELATED_TO,
-    'inexact': RELATED_TO,
-    'wider': SOURCE_IS_NARROWER,
-    'subsumes': SOURCE_IS_NARROWER,
-    'narrower': SOURCE_IS_BROADER,
-    'specializes': SOURCE_IS_BROADER,
-    'disjoint': NOT_RELATED_TO,
-    'unmatched': NOT_RELATED_TO,
-}
 
 
 def equivalence(relationship_code):
     """A relationship's R4 equivalence."""
     return EQUIVALENCES[relationship_code]
-
-
-def relationship(equivalence_code):
-    """An R4 equivalence's relationship, or None for what isn't one."""
-    return RELATIONSHIPS.get(equivalence_code)
 
 
 def translate_parameters(answer):

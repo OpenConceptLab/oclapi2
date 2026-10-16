@@ -33,7 +33,7 @@ types as R5-shaped relationships. core.fhir.adapters.r4 writes the answer as an 
 """
 import re
 from collections import namedtuple
-from functools import reduce
+from functools import cached_property, reduce
 from operator import or_
 from urllib.parse import quote, unquote
 
@@ -53,7 +53,6 @@ UNSUPPORTED_PARAMETERS = ('conceptMap', 'dependency')
 # An OCL path of a source: its own (sources), or as FHIR names it (CodeSystem; ConceptMap, how OCL shows a source with
 # no canonical URL). A collections or ValueSet path names a value set, never a source's alias.
 OCL_PATH = re.compile(r'/(orgs|users)/([^/]+)/(?:sources|CodeSystem|ConceptMap)/([^/]+)/?')
-SIDES = ('from', 'to')
 IMPLICIT_VALUE_SET = '?fhir_vs'  # {code system}?fhir_vs: every code of the code system
 
 Coding = namedtuple('Coding', 'system code version')
@@ -137,17 +136,13 @@ def shown_as(side, system, source_ids, namespace, user):
     unnamed = ~Exists(viewable_rows(Source, namespace, user).filter(
         id=OuterRef(f'{source}_id'), canonical_url__gt=''))
     paths = repository_paths(system, ('sources', 'collections', 'ConceptMap'))
-    if not paths:
-        return Q(**{f'{source}_id__in': source_ids}) | (Q(**{url: system}) & unnamed)
-    stored = reduce(or_, (Q(**{f'{url}__startswith': path}) for path in paths))
+    stored = reduce(or_, (Q(**{f'{url}__startswith': path}) for path in paths)) if paths else Q(**{url: system})
     return Q(**{f'{source}_id__in': source_ids}) | (stored & unnamed)
 
 
 def scope_system(scope):
     """The code system a scope names, if it is one: the scope itself, or the code system of an implicit value set."""
-    if scope and scope.endswith(IMPLICIT_VALUE_SET):
-        return scope[:-len(IMPLICIT_VALUE_SET)]
-    return scope
+    return scope.removesuffix(IMPLICIT_VALUE_SET) if scope else scope
 
 
 def holds(value_set, code, sources):
@@ -243,7 +238,6 @@ class Translation:
     def __init__(self, parameters, kwargs, user):
         self.request = read_request(parameters)
         self.kwargs, self.user, self.namespace = kwargs, user, namespace_of(kwargs)
-        self.sources = None  # named_sources', once looked up
 
     def answer(self):
         """
@@ -273,21 +267,17 @@ class Translation:
         return {'result': False, 'message': message, 'matches': []}
 
     def no_concept_map(self):
-        request = self.request
-        if request.reverse:
-            names = request.targetsystem or '(unspecified)', request.coding.system
-        else:
-            names = request.coding.system, request.targetsystem or '(unspecified)'
-        return f"No ConceptMap is available to translate from '{names[0]}' to '{names[1]}'"
+        names = [self.request.coding.system, self.request.targetsystem or '(unspecified)']
+        source, target = names[::-1] if self.request.reverse else names
+        return f"No ConceptMap is available to translate from '{source}' to '{target}'"
 
+    @cached_property
     def named_sources(self):
         """named_sources of the code's system, targetsystem and the code system its scope names, looked up once."""
-        if self.sources is None:
-            request, system = self.request, self.request.coding.system
-            # in this order, whatever their URLs, so the statement's shape is too
-            systems = dict.fromkeys([system, request.targetsystem or system, scope_system(request.scope) or system])
-            self.sources = named_sources(systems, self.namespace, self.user)
-        return self.sources
+        request, system = self.request, self.request.coding.system
+        # in this order, whatever their URLs, so the statement's shape is too
+        systems = dict.fromkeys([system, request.targetsystem or system, scope_system(request.scope) or system])
+        return named_sources(systems, self.namespace, self.user)
 
     def resolve(self, resource_type, url, version, expression):
         return resolve(resource_type, url, version, self.kwargs, self.user, expression)
@@ -308,9 +298,7 @@ class Translation:
             url, version = request.targetsystem, request.concept_map_version
         else:  # conceptMapVersion names the map's release, else the code's version
             url, version = request.coding.system, request.concept_map_version or request.coding.version
-        if not url:
-            return None, None
-        try:
+        try:  # resolve() raises before any query for no url (reverse without targetsystem)
             instance = self.resolve('CodeSystem', url, version, 'system')
         except UnresolvedError:
             return None, None
@@ -336,7 +324,7 @@ class Translation:
             raise self.scope_not_found(scope, name)
         if system == coding.system:
             return True
-        named = self.named_sources()
+        named = self.named_sources
         if set(named[coding.system]) & set(named[system]):  # one repository the caller is shown, whatever names it
             return True
         if system == scope:  # not an implicit value set: a ValueSet, if one has that URL
@@ -366,7 +354,7 @@ class Translation:
         request = self.request
         near, far = ('to', 'from') if request.reverse else ('from', 'to')
         sides = {near: request.coding.system, **({far: request.targetsystem} if request.targetsystem else {})}
-        sources = self.named_sources()
+        sources = self.named_sources
         mappings = concept_map.get_active_mappings().filter(  # neither retired nor deleted
             of_version(near, request.coding.version), **{f'{near}_concept_code__in': stored_codes(request.coding.code)})
         for side, system in sides.items():

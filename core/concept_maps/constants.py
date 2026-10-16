@@ -17,19 +17,16 @@ MAP_TYPE_RELATIONSHIPS = {
     'BROADER-THAN': SOURCE_IS_BROADER,
     'NOT-SAME-AS': NOT_RELATED_TO,
     # Before WP6 a FHIR ConceptMap write stored an R4 equivalence other than equivalent as the map type, verbatim:
-    # each is the relationship HL7's R4/R5 conversion gives it (unmatched, R5's noMap, is not-related-to). R5's
-    # relationship codes are themselves.
+    # each is the relationship HL7's R4/R5 conversion gives it (unmatched, R5's noMap, is not-related-to; relatedto
+    # and inexact are the default). R5's relationship codes are themselves, related-to the default.
     'EQUIVALENT': EQUIVALENT,
     'EQUAL': EQUIVALENT,
     'WIDER': SOURCE_IS_NARROWER,
     'SUBSUMES': SOURCE_IS_NARROWER,
     'NARROWER': SOURCE_IS_BROADER,
     'SPECIALIZES': SOURCE_IS_BROADER,
-    'RELATEDTO': RELATED_TO,
-    'INEXACT': RELATED_TO,
     'DISJOINT': NOT_RELATED_TO,
     'UNMATCHED': NOT_RELATED_TO,
-    'RELATED-TO': RELATED_TO,
     'SOURCE-IS-NARROWER-THAN-TARGET': SOURCE_IS_NARROWER,
     'SOURCE-IS-BROADER-THAN-TARGET': SOURCE_IS_BROADER,
     'NOT-RELATED-TO': NOT_RELATED_TO,

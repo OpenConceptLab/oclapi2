@@ -39,7 +39,7 @@ class ConceptMapGroupField(serializers.Field):
                                                                                           'sources'),
                         'from_concept_code': element.get('code'),
                         'to_concept_code': target.get('code'),
-                        'map_type': RELATIONSHIP_MAP_TYPES.get(r4.relationship(equivalence), equivalence)
+                        'map_type': RELATIONSHIP_MAP_TYPES.get(relationship(equivalence), equivalence)
                     }
                     mappings.append(mapping)
 
