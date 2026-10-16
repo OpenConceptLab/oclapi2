@@ -42,7 +42,7 @@ from core.capacity.constants import (
 from core.capacity.logs import emit
 from core.capacity.threads import RedisThread
 from core.common.utils import get_event_metadata
-from core.users.constants import CORE_USER_GROUP, EARLY_ACCESS_GROUP
+from core.users.constants import CORE_USER_GROUP, EARLY_ACCESS_GROUP, PRO_GROUP
 
 _NOW_MS = """
 if redis.replicate_commands then redis.replicate_commands() end
@@ -248,13 +248,13 @@ def get_not_after_ms():
 
 
 def get_tier(user):
-    """The user's highest plan tier, as capabilities resolve it: staff > core > early_access > preview."""
+    """The user's highest plan tier, as capabilities resolve it: staff > core > early_access (also pro) > preview."""
     if user.is_staff or user.is_superuser:
         return TIER_STAFF
     groups = set(user.groups.values_list('name', flat=True))
     if CORE_USER_GROUP in groups:
         return TIER_CORE
-    if EARLY_ACCESS_GROUP in groups:
+    if EARLY_ACCESS_GROUP in groups or PRO_GROUP in groups:
         return TIER_EARLY_ACCESS
     return TIER_PREVIEW
 
