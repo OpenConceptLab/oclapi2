@@ -32,7 +32,7 @@ from core.capacity.models import CapacityConfig
 from core.capacity.threads import RedisThread
 from core.common.tests import OCLTestCase, OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.common.utils import get_event_metadata
-from core.users.constants import CORE_USER_GROUP, EARLY_ACCESS_GROUP
+from core.users.constants import CORE_USER_GROUP, EARLY_ACCESS_GROUP, PRO_GROUP
 from core.users.tests.factories import UserProfileFactory
 
 
@@ -239,6 +239,7 @@ class CapacityHelpersTest(OCLTestCase):
         self.assertEqual(get_tier(make_user(is_superuser=True)), 'staff')
         self.assertEqual(get_tier(make_user(CORE_USER_GROUP)), 'core')
         self.assertEqual(get_tier(make_user(EARLY_ACCESS_GROUP)), 'early_access')
+        self.assertEqual(get_tier(make_user(PRO_GROUP)), 'early_access')
         self.assertEqual(get_tier(make_user(PREVIEW_GROUP_NAME)), 'preview')
         self.assertEqual(get_tier(make_user()), 'preview')
         user = make_user(PREVIEW_GROUP_NAME)
