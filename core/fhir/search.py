@@ -75,6 +75,12 @@ PARAMETERS = {
 STORED_ACCESSION = (
     'lax $[*] ? (@.value.type() == "string" && @.value != "" && exists(@.type.coding[*] ? ('
     '(@.code == "ACSN" || !exists(@.code)) && (@.system == "http://hl7.org/fhir/v2/0203" || !exists(@.system)))))')
+# token parameters, by the system their codes belong to: None for none defined (|v is then v), CODE_SYSTEM for the
+# CodeSystem itself (code=<its url>|<code>). identifier is a token too, with its own rules (by_identifier).
+CODE_SYSTEM = 'the code system searched'
+TOKEN_SYSTEMS = {
+    '_id': None, 'version': None, 'status': 'http://hl7.org/fhir/publication-status', 'language': 'urn:ietf:bcp:47',
+    'code': CODE_SYSTEM}
 STATUSES = {
     'active': Q(released=True, retired=False), 'retired': Q(retired=True), 'draft': Q(released=False, retired=False)}
 
@@ -96,6 +102,12 @@ def split(value, separator):
             start = index + 1
         index += 1
     return parts + [value[start:]]
+
+
+def token(value):
+    """(system, code) of a token search value, unescaped: system None without a '|', '' for an explicit none."""
+    system, *code = split(value, '|')
+    return (None, unescape(system)) if not code else (unescape(system), unescape('|'.join(code)))
 
 
 def unescape(value):
@@ -264,7 +276,21 @@ class Search:
             return self.by_string(STRING_FIELDS[name], modifier, unescape(value))
         if name == 'identifier':
             return self.by_identifier(value)
+        if name in TOKEN_SYSTEMS:
+            return self.by_token(name, *token(value))
         return getattr(self, self.parameters[name])(unescape(value))
+
+    def by_token(self, name, system, code):
+        """
+        A token parameter: code (any system), system|code, or |code (explicitly no system), against the system its
+        codes belong to (TOKEN_SYSTEMS). A parameter with no system takes |code as code; any other system is no match.
+        """
+        handler, implicit = getattr(self, self.parameters[name]), TOKEN_SYSTEMS[name]
+        if system is None or (system == '' and implicit is None):
+            return handler(code)
+        if implicit == CODE_SYSTEM:
+            return canonical_q(self.model, system) & handler(code) if system else NOTHING
+        return handler(code) if system == implicit else NOTHING
 
     @staticmethod
     def by_string(field, modifier, value):
@@ -308,14 +334,14 @@ class Search:
     def by_status(value):
         return STATUSES.get(value, NOTHING)
 
-    def by_identifier(self, token):
+    def by_identifier(self, value):
         """
         A token, matched on one identifier as it's shown: value (any system), system|value, |value (no system) or
         system| (any value). Besides the identifiers a repository holds, every resource without a stored accession
         identifier shows a generated one: system API_BASE_URL, value /{orgs|users}/{owner}/{type}/{id}/.
         """
-        system, *value = split(token, '|')
-        system, value = (None, unescape(system)) if not value else (unescape(system), unescape('|'.join(value)) or None)
+        system, value = token(value)
+        value = value or None
         if system == '' and value is None:
             return NOTHING
         criterion = held_identifier(system, value)

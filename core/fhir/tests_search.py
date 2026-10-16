@@ -349,6 +349,40 @@ class CodeSystemSearchTest(SearchCorpusMixin, OCLTestCase):  # pylint: disable=t
         Source.objects.filter(id=self.ciel_v1.id).update(identifier={'system': 'urn:x', 'value': 'y'})
         self.assertEqual(self.search('CodeSystem', identifier='urn:x|')['total'], 0)
 
+    def test_token_parameters_take_their_system(self):
+        """
+        R4 tokens: code, system|code, or |code (no system). status's system is publication-status, language's BCP 47,
+        code's the code system itself; version and _id have none, so |v is v, and any system finds nothing.
+        """
+        status, bcp47 = 'http://hl7.org/fhir/publication-status', 'urn:ietf:bcp:47'
+        Source.objects.filter(id=self.ciel_v2.id).update(default_locale='fr')
+        Source.objects.filter(id=self.ciel_v1.id).update(version='v1|a,b')
+        ConceptFactory(parent=self.ciel_source, mnemonic='1427', sources=[self.ciel_v2])
+        ConceptFactory(parent=self.sehat_icd, mnemonic='1427', sources=[self.sehat_icd_v1])
+        active = sorted([f'{CIEL}|v2', f'{ICD10}|ICD102019', f'{ICD10}|v1.0', 'https://example.org/my-codes|v1'])
+        ciel_v2, icd_v1, ciel_v1 = [f'{CIEL}|v2'], [f'{ICD10}|v1.0'], [f'{CIEL}|v1|a,b']
+        pk = str(self.sehat_icd_v1.id)
+        cases = [
+            ('status', 'active', active), ('status', f'{status}|active', active),
+            ('status', f'{status}|retired', ciel_v1),
+            ('status', f'{status}|active,{status}|retired', self.keys(self.search('CodeSystem'))),
+            ('status', '|active', []), ('status', 'http://example.org/other|active', []), ('status', f'{status}|', []),
+            ('language', 'fr', ciel_v2), ('language', f'{bcp47}|fr', ciel_v2), ('language', '|fr', []),
+            ('language', 'urn:other|fr', []),
+            ('code', '1427', sorted(ciel_v2 + icd_v1)), ('code', f'{CIEL}|1427', ciel_v2),
+            ('code', f'{ICD10}|1427', icd_v1),
+            ('code', f'{CIEL}|1427,{ICD10}|1427', sorted(ciel_v2 + icd_v1)), ('code', '|1427', []),
+            ('code', 'http://example.org/other|1427', []), ('code', f'{CIEL}|A00', []),
+            ('version', 'v1.0', icd_v1), ('version', '|v1.0', icd_v1), ('version', 'urn:x|v1.0', []),
+            ('version', r'v1\|a\,b', ciel_v1), ('version', r'|v1\|a\,b', ciel_v1), ('version', 'v1|a', []),
+            ('_id', pk, icd_v1), ('_id', f'|{pk}', icd_v1), ('_id', f'urn:x|{pk}', []),
+        ]
+        for name, value, keys in cases:
+            self.assertEqual(self.keys(self.search('CodeSystem', **{name: value})), keys, f'{name}={value}')
+        owner = [('_id', 'CIEL', 2), ('_id', '|CIEL', 2), ('_id', 'urn:x|CIEL', 0)]
+        for name, value, total in owner:
+            self.assertEqual(self.search('CodeSystem', base='/orgs/CIEL', **{name: value})['total'], total, value)
+
     def test_last_updated_and_its_prefixes(self):
         Source.objects.filter(id=self.ciel_v2.id).update(updated_at=at(2020))
         Source.objects.filter(id=self.sehat_icd_v1.id).update(updated_at=at(2022))
@@ -493,6 +527,14 @@ class ValueSetSearchTest(SearchCorpusMixin, OCLTestCase):
 
     def test_unsupported(self):
         self.assertOutcome(self.client.get('/fhir/ValueSet/?system=http://x'), 400, 'not-supported', 'not-supported')
+
+    def test_status_takes_its_system(self):
+        for resource_type in ('ValueSet', 'ConceptMap'):
+            bare = self.search(resource_type, status='active')['total']
+            self.assertGreater(bare, 0)
+            qualified = self.search(resource_type, status='http://hl7.org/fhir/publication-status|active')
+            self.assertEqual(qualified['total'], bare, resource_type)
+            self.assertEqual(self.search(resource_type, status='urn:x|active')['total'], 0, resource_type)
 
     def test_no_query_per_entry(self):
         with self.assertNumQueries(2):
