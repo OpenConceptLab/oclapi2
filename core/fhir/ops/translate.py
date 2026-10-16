@@ -14,6 +14,8 @@ types as R5-shaped relationships. core.fhir.adapters.r4 writes the answer as an 
   as the URL the mapping stores (its source's OCL URL when it stores none), an OCL URL as a ConceptMap path
   (/orgs/{org}/ConceptMap/{id}/). So a source the caller isn't shown is named as a source OCL doesn't hold would be,
   and a system only such sources have answers as an unknown one. ConceptMapGroupField names groups the same way.
+  A system given as an OCL path (/orgs/{org}/CodeSystem/{id}/, or the sources or ConceptMap form) names that repository
+  if the caller is shown it, whether it has a canonical URL or not; the answer names it as above.
 - Map types (design D27): case, spaces, hyphens, underscores and surrounding whitespace don't matter, so SAME-AS,
   SAME AS and Same As are one. The relationships are core.concept_maps.constants'; result is true when some match isn't
   not-related-to. A match's relationship reads from the code named to the match, so in reverse, where the code named
@@ -105,27 +107,27 @@ def repository_paths(system, kinds=('sources',)):
 
 def named_sources(systems, namespace, user):
     """
-    For each system, the ids of the Source rows the base shows the caller that side_system shows as it, in one query:
-    those with it as their canonical URL; for an OCL path, the repository's rows without one. A literal list, so the
-    planner reads the mappings by their own indexes.
+    For each system, the ids of the Source rows the base shows the caller that it names, in one query: those with it as
+    their canonical URL; for an OCL path, the repository's rows, whether it has a canonical URL or not (the path is an
+    alias: side_system still shows one that has as its canonical URL). A literal list, so the planner reads the mappings
+    by their own indexes.
     """
     paths = {system: (repository_paths(system) or [None])[0] for system in systems}
-    no_canonical = Q(canonical_url__isnull=True) | Q(canonical_url='')
     rows = viewable_rows(Source, namespace, user).filter(reduce(or_, (
-        Q(uri__startswith=path) & no_canonical if path else Q(canonical_url=system) for system, path in paths.items())))
+        Q(uri__startswith=path) if path else Q(canonical_url=system) for system, path in paths.items())))
     named = {system: [] for system in systems}
     for source_id, canonical, uri in rows.values_list('id', 'canonical_url', 'uri'):
         for system, path in paths.items():
-            if (uri.startswith(path) and not canonical) if path else canonical == system:
+            if uri.startswith(path) if path else canonical == system:
                 named[system].append(source_id)
     return named
 
 
 def shown_as(side, system, source_ids, namespace, user):
     """
-    Q for mappings whose `side` ('from' or 'to') side_system shows as `system`: their source is one of `source_ids`
-    (named_sources'); or it isn't one the caller is shown by a canonical URL, and the URL they store (their source's
-    OCL URL when they store none) names the system. The subquery runs only on the mappings whose URL does.
+    Q for mappings whose `side` ('from' or 'to') `system` names: their source is one of `source_ids` (named_sources');
+    or it isn't one the caller is shown by a canonical URL, and the URL they store names the system, as side_system
+    then shows it. The subquery runs only on the mappings whose URL does.
     """
     source, url = f'{side}_source', f'{side}_source_url'
     unnamed = ~Exists(viewable_rows(Source, namespace, user).filter(
@@ -134,8 +136,7 @@ def shown_as(side, system, source_ids, namespace, user):
     if not paths:
         return Q(**{f'{source}_id__in': source_ids}) | (Q(**{url: system}) & unnamed)
     stored = reduce(or_, (Q(**{f'{url}__startswith': path}) for path in paths))
-    own = (Q(**{f'{url}__isnull': True}) | Q(**{url: ''})) & Q(**{f'{source}_id__in': source_ids})
-    return (stored | own) & unnamed
+    return Q(**{f'{source}_id__in': source_ids}) | (stored & unnamed)
 
 
 def of_version(side, version):

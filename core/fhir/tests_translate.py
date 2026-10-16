@@ -305,6 +305,28 @@ class TranslateMappingsTest(TranslateCorpusMixin, OCLTestCase):
                          [f'{CIEL}|113275|equivalent'])
         self.assertEqual(self.matches(self.answer(self.get(**reverse))), [])
 
+    def test_an_ocl_path_names_its_source_with_a_canonical_url_too(self):
+        """
+        A system or targetsystem given as an OCL path (CodeSystem, ConceptMap or sources form) names the repository it
+        names, if the caller is shown it, even one with a canonical URL; the answer names it by that canonical URL.
+        """
+        for path in ('/orgs/CIEL/CodeSystem/CIEL/', '/orgs/CIEL/sources/CIEL/', '/orgs/CIEL/ConceptMap/CIEL'):
+            for params in ({'url': CIEL}, {}):
+                parameters = self.answer(self.get(system=path, code='138405', **params))
+                self.assertEqual(self.matches(parameters), [f'{ICD10}|B20|equivalent'], (path, params))
+        for path in ('/orgs/WHO/CodeSystem/ICD-10-WHO/', '/orgs/WHO/sources/ICD-10-WHO/'):
+            self.assertEqual(
+                self.matches(self.answer(self.get(system=CIEL, code='113275', targetsystem=path))),
+                sorted([f'{ICD10}|O02.1|narrower', f'{ICD10}|O03|disjoint']), path)
+            self.assertEqual(self.matches(self.answer(self.get(
+                system=path, code='O02.1', targetsystem='/orgs/CIEL/CodeSystem/CIEL/', reverse='true'))),
+                [f'{CIEL}|113275|wider'], path)
+        for path in ('/orgs/MOH/CodeSystem/private-codes/', '/orgs/WHO/CodeSystem/no-such-source/'):
+            parameters = self.answer(self.get(system=CIEL, code='113275', targetsystem=path.replace(
+                '/CodeSystem/', '/sources/')))
+            self.assertEqual(self.matches(parameters), [] if 'no-such' in path else [f'{PRIVATE_PATH}|P1|relatedto'],
+                             path)
+
     def test_a_deleted_mapping_is_no_translation(self):
         """A mapping version deleted (is_active false) though still in the release is read nowhere."""
         deleted = self.mapping('SAME-AS', self.icd, 'D99', [self.ciel_v2], from_code='8000')
@@ -698,17 +720,22 @@ class TranslateAccessTest(TranslateCorpusMixin, OCLTestCase):
             self.assertEqual(self.matches(parameters), matches, user)
 
     def test_a_target_the_caller_is_not_shown_is_named_by_the_url_the_mapping_stores(self):
-        """Only at an owner base, and only to those who may view it, is MOH's private source named by its canonical."""
+        """
+        Only at an owner base, and only to those who may view it, is MOH's private source named by its canonical; its
+        OCL path then names it too, as an alias. To anyone else its canonical names nothing.
+        """
         for base, user, system in (
                 ('/fhir', None, PRIVATE_PATH), ('/fhir', self.moh_member, PRIVATE_PATH),
                 ('/fhir', self.admin, PRIVATE_PATH), ('/orgs/CIEL', None, PRIVATE_PATH),
                 ('/orgs/CIEL', self.outsider, PRIVATE_PATH), ('/orgs/CIEL', self.moh_member, PRIVATE),
                 ('/orgs/CIEL', self.admin, PRIVATE)):
-            parameters = self.answer(self.get(base=base, user=user, system=CIEL, code='113275', targetsystem=system))
-            self.assertEqual(self.matches(parameters), [f'{system}|P1|relatedto'], (base, user))
-            other = PRIVATE if system == PRIVATE_PATH else PRIVATE_PATH
-            self.assertEqual(self.matches(self.answer(self.get(
-                base=base, user=user, system=CIEL, code='113275', targetsystem=other))), [], (base, user))
+            for targetsystem in sorted({system, PRIVATE_PATH}):
+                parameters = self.answer(self.get(base=base, user=user, system=CIEL, code='113275',
+                                                  targetsystem=targetsystem))
+                self.assertEqual(self.matches(parameters), [f'{system}|P1|relatedto'], (base, user, targetsystem))
+            if system == PRIVATE_PATH:
+                self.assertEqual(self.matches(self.answer(self.get(
+                    base=base, user=user, system=CIEL, code='113275', targetsystem=PRIVATE))), [], (base, user))
 
     @expectedFailure  # F1.2: until WP4+WP5's resolve() resolves a default to the newest release the caller is shown
     def test_the_default_version_is_the_newest_release_the_caller_is_shown(self):
