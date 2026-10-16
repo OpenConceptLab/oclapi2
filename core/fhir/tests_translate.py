@@ -222,6 +222,28 @@ class TranslateMappingsTest(TranslateCorpusMixin, OCLTestCase):
             self.assertEqual(self.matches(self.answer(self.get(system=CIEL, code=f'spelling-{index}'))),
                              [f'{ICD10}|S{index}|{equivalence}'], repr(map_type))
 
+    def test_equivalences_stored_as_map_types_are_their_relationships(self):
+        """
+        Before WP6, a FHIR ConceptMap write stored every R4 equivalence but equivalent as the map type, verbatim:
+        those rows read as the relationship the equivalence is, as do R5 relationship codes, whatever their spelling.
+        """
+        stored = {
+            'equivalent': 'equivalent', 'equal': 'equivalent', 'wider': 'wider', 'subsumes': 'wider',
+            'narrower': 'narrower', 'specializes': 'narrower', 'relatedto': 'relatedto', 'inexact': 'relatedto',
+            'disjoint': 'disjoint', 'unmatched': 'disjoint', 'related-to': 'relatedto',
+            'source-is-narrower-than-target': 'wider', 'source-is-broader-than-target': 'narrower',
+            'not-related-to': 'disjoint', 'Disjoint ': 'disjoint', 'WIDER': 'wider', 'Not Related To': 'disjoint'}
+        for index, map_type in enumerate(stored):
+            self.mapping(map_type, self.icd, f'E{index}', [self.ciel_v2], from_code=f'old-{index}')
+        for index, (map_type, equivalence) in enumerate(stored.items()):
+            parameters = self.answer(self.get(system=CIEL, code=f'old-{index}'))
+            self.assertEqual(self.matches(parameters), [f'{ICD10}|E{index}|{equivalence}'], repr(map_type))
+            self.assertEqual(self.result(parameters), equivalence != 'disjoint', repr(map_type))
+        group = next(group for group in APIClient().get(f'/fhir/ConceptMap/{self.ciel_v2.id}').data['group']
+                     if group['target'] == ICD10)
+        read = {element['code']: element['target'][0]['equivalence'] for element in group['element']}
+        self.assertEqual([read[f'old-{index}'] for index in range(len(stored))], list(stored.values()))
+
     def test_not_same_as_alone_is_no_translation(self):
         """result is true only when some match isn't disjoint (R4: not unmatched or disjoint)."""
         self.mapping('NOT-SAME-AS', self.icd, 'Q00', [self.ciel_v2], from_code='5000')

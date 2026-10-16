@@ -16,6 +16,29 @@ MAP_TYPE_RELATIONSHIPS = {
     'NARROWER-THAN': SOURCE_IS_NARROWER,
     'BROADER-THAN': SOURCE_IS_BROADER,
     'NOT-SAME-AS': NOT_RELATED_TO,
+    # Before WP6 a FHIR ConceptMap write stored an R4 equivalence other than equivalent as the map type, verbatim:
+    # each is the relationship HL7's R4/R5 conversion gives it (unmatched, R5's noMap, is not-related-to). R5's
+    # relationship codes are themselves.
+    'EQUIVALENT': EQUIVALENT,
+    'EQUAL': EQUIVALENT,
+    'WIDER': SOURCE_IS_NARROWER,
+    'SUBSUMES': SOURCE_IS_NARROWER,
+    'NARROWER': SOURCE_IS_BROADER,
+    'SPECIALIZES': SOURCE_IS_BROADER,
+    'RELATEDTO': RELATED_TO,
+    'INEXACT': RELATED_TO,
+    'DISJOINT': NOT_RELATED_TO,
+    'UNMATCHED': NOT_RELATED_TO,
+    'RELATED-TO': RELATED_TO,
+    'SOURCE-IS-NARROWER-THAN-TARGET': SOURCE_IS_NARROWER,
+    'SOURCE-IS-BROADER-THAN-TARGET': SOURCE_IS_BROADER,
+    'NOT-RELATED-TO': NOT_RELATED_TO,
 }
-# The map type a relationship is stored as, when a ConceptMap is written
-RELATIONSHIP_MAP_TYPES = {relationship: map_type for map_type, relationship in MAP_TYPE_RELATIONSHIPS.items()}
+# The OCL map type a relationship is stored as, when a ConceptMap is written; related-to has none (the equivalence
+# written is kept)
+RELATIONSHIP_MAP_TYPES = {
+    EQUIVALENT: 'SAME-AS',
+    SOURCE_IS_NARROWER: 'NARROWER-THAN',
+    SOURCE_IS_BROADER: 'BROADER-THAN',
+    NOT_RELATED_TO: 'NOT-SAME-AS',
+}
