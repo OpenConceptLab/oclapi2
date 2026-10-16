@@ -565,8 +565,15 @@ class FhirRepositorySerializerMixin:
             self.fields.pop(self.content_field, None)
 
     def with_fhir_view(self, instance, rep):
-        if self.context.get('opaque_ids') and instance.id:
-            rep['id'] = str(instance.id)
+        """
+        The id (opaque at the global base), and meta.versionId: the version's opaque id at both bases, so the
+        releases of one repository, which share their mnemonic id at an owner base, stay distinct in a Bundle (bdl-7).
+        A search entry is also tagged SUBSETTED. meta keeps what the serializer put there (lastUpdated).
+        """
+        if instance.id:
+            if self.context.get('opaque_ids'):
+                rep['id'] = str(instance.id)
+            rep['meta'] = {'versionId': str(instance.id), **(rep.get('meta') or {})}
         if self.context.get('has_many'):
             rep['meta'] = {**(rep.get('meta') or {}), 'tag': [SUBSETTED]}
         return rep

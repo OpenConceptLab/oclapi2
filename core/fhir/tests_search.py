@@ -656,6 +656,42 @@ class ConceptMapSearchTest(SearchCorpusMixin, OCLTestCase):
             self.assertEqual(self.client.get('/fhir/ConceptMap/', {'target-system': ICD10}).data['total'], 1)
 
 
+class VersionIdTest(SearchCorpusMixin, OCLTestCase):
+    """
+    Every released version has a stable meta.versionId, its opaque id, so an owner-base Bundle with several releases
+    of one repository (one mnemonic id, one fullUrl) still identifies each entry (R4 bdl-7).
+    """
+    def test_owner_base_entries_are_told_apart_by_version_id(self):
+        Collection.objects.filter(id=self.ciel_vs_v2.id).update(released=True)
+        for resource_type, versions in (('CodeSystem', (self.ciel_v1, self.ciel_v2)),
+                                        ('ConceptMap', (self.ciel_v1, self.ciel_v2)),
+                                        ('ValueSet', (self.ciel_vs_v1, self.ciel_vs_v2))):
+            bundle = self.search(resource_type, base='/orgs/CIEL')
+            identities = [(entry['fullUrl'], entry['resource']['meta']['versionId']) for entry in bundle['entry']]
+            self.assertEqual(len(identities), 2, resource_type)
+            self.assertEqual(len(set(identities)), 2, resource_type)
+            self.assertEqual(len({fullurl for fullurl, _ in identities}), 1, resource_type)  # ids stay mnemonics
+            self.assertEqual(sorted(version_id for _, version_id in identities),
+                             sorted(str(version.id) for version in versions), resource_type)
+            for entry in bundle['entry']:
+                meta = entry['resource']['meta']
+                self.assertIn('lastUpdated', meta)
+                self.assertIn(SUBSETTED, meta['tag'])
+
+    def test_reads_and_global_entries_carry_it_too(self):
+        for resource_type, version, owner_path in (
+                ('CodeSystem', self.ciel_v2, '/orgs/CIEL/CodeSystem/CIEL/'),
+                ('ConceptMap', self.ciel_v2, '/orgs/CIEL/ConceptMap/CIEL/'),
+                ('ValueSet', self.ciel_vs_v1, '/orgs/CIEL/ValueSet/ciel-set/')):
+            for path in (f'/fhir/{resource_type}/{version.id}', owner_path):
+                meta = self.get(path).data['meta']
+                self.assertEqual(meta['versionId'], str(version.id), path)
+                self.assertIn('lastUpdated', meta)
+            entry = next(entry for entry in self.search(resource_type)['entry']
+                         if entry['resource']['id'] == str(version.id))
+            self.assertEqual(entry['resource']['meta']['versionId'], entry['resource']['id'])
+
+
 class ReadTest(SearchCorpusMixin, OCLTestCase):
     def read(self, path, user=None, **params):
         response = self.get(path, user, **params)
