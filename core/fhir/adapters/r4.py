@@ -78,13 +78,13 @@ def equivalence(relationship_code):
 
 def translate_parameters(answer):
     """$translate's answer (core.fhir.ops.translate) as R4 Parameters: result, message, and each match's parts."""
-    parameter = [{'name': 'result', 'valueBoolean': answer['result']}]
+    items = [{'name': 'result', 'valueBoolean': answer['result']}]
     if answer.get('message'):
-        parameter.append({'name': 'message', 'valueString': answer['message']})
+        items.append({'name': 'message', 'valueString': answer['message']})
     for match in answer['matches']:
-        parameter.append({'name': 'match', 'part': [
+        items.append({'name': 'match', 'part': [
             {'name': 'equivalence', 'valueCode': equivalence(match['relationship'])},
             {'name': 'concept', 'valueCoding': match['concept']},
             {'name': 'source', 'valueUri': match['source']},
         ]})
-    return {'resourceType': 'Parameters', 'parameter': parameter}
+    return {'resourceType': 'Parameters', 'parameter': items}
