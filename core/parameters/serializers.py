@@ -1,7 +1,6 @@
 from rest_framework import serializers
 from rest_framework.fields import CharField, SerializerMethodField, BooleanField, IntegerField
 
-from core.common.constants import HEAD
 from core.common.serializers import ReadSerializerMixin
 
 # The R4 value types of operation inputs that are read from a valueString too: some clients send a code or a URI
@@ -73,26 +72,3 @@ class ParametersSerializer(ReadSerializerMixin, serializers.Serializer):
                     parameters[name] = value
 
         return {'parameters': parameters}
-
-    @classmethod
-    def from_concept(cls, concept):
-        source = concept.sources.filter(is_latest_version=True).exclude(version=HEAD).first()
-        if not source:
-            source = concept.sources.filter(is_latest_version=True).first()
-        parameters = {
-            'parameter': [
-                {
-                    'name': 'name',
-                    'valueString': source.name
-                },
-                {
-                    'name': 'version',
-                    'valueString': source.version
-                },
-                {
-                    'name': 'display',
-                    'valueString': concept.name if concept.name else concept.display_name
-                }
-            ]
-        }
-        return cls(parameters)
