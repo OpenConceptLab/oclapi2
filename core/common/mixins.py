@@ -538,8 +538,17 @@ class ConceptDictionaryUpdateMixin(ConceptDictionaryMixin):
 
 
 class SourceContainerMixin:
-    def find_repo_by_canonical_url(self, canonical_url):
+    def find_repo_by_canonical_url(self, canonical_url, repo_type=None):
+        """
+        This owner's lowest-id repository row with the canonical URL, a Source before a Collection; `url|version`
+        names a version. With repo_type (Source or Collection), only that type's active, non-retired rows, and the
+        HEAD unless a version is named.
+        """
         url, version = canonical_url_to_url_and_version(canonical_url)
+        if repo_type:
+            repos = {'Source': self.source_set, 'Collection': self.collection_set}[repo_type.OBJECT_TYPE]
+            queryset = repos.filter(canonical_url=url, is_active=True, retired=False)
+            return queryset.filter(version=decode_string(version) if version else HEAD).first()
         queryset = self.source_set.filter(canonical_url=url)
         if not queryset.exists():
             queryset = self.collection_set.filter(canonical_url=url)
