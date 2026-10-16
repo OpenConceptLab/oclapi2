@@ -72,11 +72,11 @@ def path(coding, part):
     return PATHS[coding.parameter] + part
 
 
-def require(coding, part, name, message):
-    """The part of the code an operation needs, or a 400 naming the input it's missing from (`name`, or the Coding)."""
+def require(coding, part, message):
+    """The part of the code an operation needs, or a 400 naming the input it's missing from (`part`, or the Coding)."""
     value = getattr(coding, part)
     if not value:
-        raise outcomes.InvalidError(message, expression=coding.parameter or name)
+        raise outcomes.InvalidError(message, expression=coding.parameter or part)
     return value
 
 
@@ -101,7 +101,7 @@ def system_of(version, named=None):
     return version.canonical_url or getattr(version, 'repository_canonical_url', None) or named
 
 
-def instance_version(resource_type, instance_id, version, kwargs, user):  # pylint: disable=too-many-arguments
+def instance_version(resource_type, instance_id, version, kwargs, user):
     """
     The repository version an instance-level operation is on: as a read finds it (a release: at the global base the
     opaque id's, at an owner base the mnemonic's `version`, else the newest shown); or, at an owner base with HEAD

@@ -171,15 +171,14 @@ class CodeSystemTest(OCLTestCase):
         self.assertEqual(response.data['id'], self.org_source.mnemonic)
         self.assertEqual(response.data['version'], 'v2')
 
-    def valid(self, concept, **extra):
+    def valid(self, concept):
         """$validate-code's answer for a valid code of the org source, at the version resolved (v2)."""
         return {'resourceType': 'Parameters', 'parameter': [
             {'name': 'result', 'valueBoolean': True},
             {'name': 'display', 'valueString': concept.display_name},
             {'name': 'code', 'valueCode': concept.mnemonic},
             {'name': 'system', 'valueUri': SYSTEM},
-            {'name': 'version', 'valueString': 'v2'},
-            *extra.get('more', [])]}
+            {'name': 'version', 'valueString': 'v2'}]}
 
     def assert_issues(self, response, *issues):
         """The answer is result false, with these issues (code, tx-issue-type, expression)."""

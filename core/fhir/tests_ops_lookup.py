@@ -127,8 +127,7 @@ class OpsCorpusMixin:
             client.force_authenticate(user)
         return client
 
-    def get(  # pylint: disable=too-many-arguments
-            self, operation, base='/fhir', user=None, resource='CodeSystem', **params):
+    def get(self, operation, base='/fhir', user=None, resource='CodeSystem', **params):
         return self.client_for(user).get(f'{base}/{resource}/{operation}', params)
 
     def post(  # pylint: disable=too-many-arguments
@@ -148,7 +147,7 @@ class OpsCorpusMixin:
                 parameters[parameter['name']] = parameter
         return parameters
 
-    def assert_outcome(self, response, status_code, issue, tx_issue_type):  # pylint: disable=too-many-arguments
+    def assert_outcome(self, response, status_code, issue, tx_issue_type):
         self.assertEqual(response.status_code, status_code, response.data)
         self.assertEqual(response.data['resourceType'], 'OperationOutcome')
         self.assertEqual(response.data['issue'][0]['code'], issue)

@@ -41,7 +41,7 @@ UNKNOWN_CODE_SYSTEM = 'x-caused-by-unknown-system'  # how CodeSystem $validate-c
 UNKNOWN_VALUE_SET_SYSTEM = 'x-unknown-system'  # and ValueSet $validate-code
 
 
-def issue(coding, part, kind, message_id, message):  # pylint: disable=too-many-arguments
+def issue(coding, part, kind, message_id, message):
     """An issue about one part of the code (code, system or display), of a kind in KINDS."""
     severity, code, tx_issue_type = KINDS[kind]
     return outcomes.issue(code, message, severity=severity, expression=path(coding, part),
@@ -59,7 +59,7 @@ KINDS = {
 }
 
 
-def answer(coding, issues=(), **found):
+def answer(coding, issues=(), **values):
     """
     The neutral answer: result (no error issue), the code and system asked about, what was found (version, display,
     inactive, the unknown system), the issues and the message their texts make.
@@ -68,14 +68,14 @@ def answer(coding, issues=(), **found):
     return {
         'result': not any(item['severity'] in ('error', 'fatal') for item in issues),
         'message': '; '.join(item['details']['text'] for item in issues) or None,
-        'code': fhir_code(coding.code), 'system': coding.system, **found, 'issues': issues,
+        'code': fhir_code(coding.code), 'system': coding.system, **values, 'issues': issues,
     }
 
 
-def unknown_system(coding, parameter):
+def unknown_system(coding, parameter, *more, **extra):
     """
-    (the issue, the unknown system parameter) for a code system that doesn't resolve, or that the caller isn't shown:
-    the same for both, as they depend only on what was asked (the system, and the version named or url|version).
+    The answer for a code system that doesn't resolve, or that the caller isn't shown: the same for both, as it depends
+    only on what was asked (the system, and the version named or url|version). `more` are issues after its own.
     """
     system, _, piped = coding.system.partition('|')
     version = coding.version or piped or None
@@ -87,7 +87,8 @@ def unknown_system(coding, parameter):
         message_id = 'UNKNOWN_CODESYSTEM'
         message = f"A definition for CodeSystem '{system}' could not be found, so the code cannot be validated"
     named = f'{system}|{version}' if version else system
-    return issue(coding, 'system', 'unknown-system', message_id, message), (parameter, named)
+    return answer(coding, [issue(coding, 'system', 'unknown-system', message_id, message), *more],
+                  unknown=(parameter, named), **extra)
 
 
 def unknown_code(coding, system, version):
@@ -95,8 +96,12 @@ def unknown_code(coding, system, version):
                  f"Unknown code '{fhir_code(coding.code)}' in the CodeSystem '{system}' version '{version}'")
 
 
-def checked(coding, concept, display):
-    """The issues of a code its code system holds: a display that isn't one of its names, and a retired concept."""
+def found(coding, concept, version, language):
+    """
+    The answer for a code its code system (or value set) holds: its version, display and inactive flag, with the issues
+    of a display that isn't one of its names and of a retired concept.
+    """
+    display = display_of(concept, language)
     issues = []
     if coding.display and not has_name(concept, coding.display):
         issues.append(issue(
@@ -107,7 +112,7 @@ def checked(coding, concept, display):
         issues.append(issue(coding, 'code', 'inactive', 'INACTIVE_CONCEPT_FOUND',
                             f"The concept '{fhir_code(coding.code)}' has a status of inactive and its use should be "
                             "reviewed"))
-    return issues
+    return answer(coding, issues, version=version, display=display, inactive=concept.retired or None)
 
 
 def in_code_system(coding, version, language):
@@ -117,9 +122,7 @@ def in_code_system(coding, version, language):
     concept = find_concept(version, coding.code)
     if not concept:
         return answer(coding, [unknown_code(coding, system, version.version)], version=version.version)
-    display = display_of(concept, language)
-    return answer(coding, checked(coding, concept, display), version=version.version, display=display,
-                  inactive=concept.retired or None)
+    return found(coding, concept, version.version, language)
 
 
 def validate_code_system(parameters, kwargs, user, instance_id=None):
@@ -128,18 +131,16 @@ def validate_code_system(parameters, kwargs, user, instance_id=None):
     the instance level), for `user`. A url that doesn't resolve answers before the code is required, as it always has.
     """
     coding = coded_input(parameters, 'url', 'version')
-    target = coding  # the code system validated against: the instance, else url (and version), else the coding's
-    if coding.parameter:
-        target = coding._replace(system=text(parameters, 'url') or coding.system,
-                                 version=text(parameters, 'version') or coding.version)
+    # the code system validated against: the instance, else url and version, else the coding's
+    target = coding._replace(
+        system=text(parameters, 'url') or coding.system, version=text(parameters, 'version') or coding.version)
     version = None
     if instance_id or target.system:
         try:
             version = code_system_version(target, kwargs, user, instance_id)
         except UnresolvedError:
-            problem, unknown = unknown_system(target, UNKNOWN_CODE_SYSTEM)
-            return answer(target, [problem], version=target.version, unknown=unknown)
-    require(coding, 'code', 'code', 'A code to validate is required.')
+            return unknown_system(target, UNKNOWN_CODE_SYSTEM, version=target.version)
+    require(coding, 'code', 'A code to validate is required.')
     if version is None:
         raise outcomes.InvalidError('url is required with a code: the code system to validate it in.',
                                     expression=coding.parameter or 'url')
@@ -233,27 +234,21 @@ def validate_value_set(parameters, kwargs, user, instance_id=None):
     instance level), for `user`. A code and its system are required first.
     """
     coding = coded_input(parameters, 'system', 'systemVersion')
-    require(coding, 'code', 'code', 'A code to validate is required.')
-    require(coding, 'system', 'system', 'system is required with a code: the code system the code is from.')
+    require(coding, 'code', 'A code to validate is required.')
+    require(coding, 'system', 'system is required with a code: the code system the code is from.')
     language = text(parameters, 'displayLanguage')
     if not instance_id and not text(parameters, 'url'):
         try:
             return in_code_system(coding, resolve('CodeSystem', coding.system, coding.version, kwargs, user), language)
         except UnresolvedError:
-            problem, unknown = unknown_system(coding, UNKNOWN_CODE_SYSTEM)
-            return answer(coding, [problem], version=coding.version, unknown=unknown)
+            return unknown_system(coding, UNKNOWN_CODE_SYSTEM, version=coding.version)
 
     value_set = value_set_version(parameters, kwargs, user, instance_id)
-    found = member(value_set, coding, namespace_of(kwargs), user)
-    if found:
-        concept, version = found
-        display = display_of(concept, language)
-        return answer(coding, checked(coding, concept, display), version=version, display=display,
-                      inactive=concept.retired or None)
-    return not_a_member(coding, value_set, kwargs, user, language)
+    hit = member(value_set, coding, namespace_of(kwargs), user)
+    return found(coding, *hit, language) if hit else not_a_member(coding, value_set, kwargs, user, language)
 
 
-def not_a_member(coding, value_set, kwargs, user, language):  # pylint: disable=too-many-arguments
+def not_a_member(coding, value_set, kwargs, user, language):
     """A code outside the value set: not-in-vs, with what its code system says of it."""
     name = f"{system_of(value_set, value_set.uri)}|{value_set.version}"
     outside = issue(coding, 'code', 'not-in-value-set', 'None_of_the_provided_codes_are_in_the_value_set_one',
@@ -262,8 +257,7 @@ def not_a_member(coding, value_set, kwargs, user, language):  # pylint: disable=
     try:
         version = resolve('CodeSystem', coding.system, coding.version, kwargs, user)
     except UnresolvedError:
-        problem, unknown = unknown_system(coding, UNKNOWN_VALUE_SET_SYSTEM)
-        return answer(coding, [problem, outside], unknown=unknown)
+        return unknown_system(coding, UNKNOWN_VALUE_SET_SYSTEM, outside)
     system = system_of(version, coding.system)
     concept = find_concept(version, coding.code)
     if not concept:

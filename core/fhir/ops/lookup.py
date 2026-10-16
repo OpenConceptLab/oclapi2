@@ -37,9 +37,9 @@ def lookup(parameters, kwargs, user, instance_id=None):
     """
     coding = coded_input(parameters, 'system', 'version')
     target = coding._replace(version=text(parameters, 'version') or coding.version)
-    code = require(coding, 'code', 'code', '$lookup needs the code to look up.')
+    code = require(coding, 'code', '$lookup needs the code to look up.')
     if not instance_id:
-        require(coding, 'system', 'system', '$lookup needs the system the code is from.')
+        require(coding, 'system', '$lookup needs the system the code is from.')
     try:
         version = code_system_version(target, kwargs, user, instance_id)
     except UnresolvedError as ex:

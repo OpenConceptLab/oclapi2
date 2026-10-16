@@ -52,8 +52,8 @@ from core.concepts.models import Concept
 from core.fhir import outcomes
 from core.fhir.base import CONTROL_PARAMETERS, fhir_base_url
 from core.fhir.resolve import (
-    PUBLIC_ACCESS, REPO_TYPES, namespace_of, owner_access, visible_versions, viewable_rows, is_visible, has_release,
-    is_public, repository_rows, with_repository_access)
+    PUBLIC_ACCESS, REPO_TYPES, namespace_of, owner_access, visible_versions, viewable_rows, is_public, is_shown,
+    repository_rows, with_repository_access)
 from core.mappings.models import Mapping
 from core.sources.models import Source
 
@@ -568,7 +568,7 @@ def read(view):
                         view.kwargs, view.request.user)
 
 
-def read_version(resource_type, resource_id, version, kwargs, user):  # pylint: disable=too-many-arguments
+def read_version(resource_type, resource_id, version, kwargs, user):
     """
     read's rule for a resource `resource_id` names at the base `kwargs` names, for `user`: the id at the global base,
     the mnemonic and `version` (else the latest release shown) at an owner base. For the instance-level operations too.
@@ -585,15 +585,13 @@ def read_version(resource_type, resource_id, version, kwargs, user):  # pylint: 
         versions = versions.filter(version=version) if version else versions.filter(
             retired=False).order_by('-created_at')
 
-    def shown(instance):
-        return instance and is_visible(instance, namespace, user) and has_release(instance, namespace, user)
-
     instance = with_repository_access(with_repository_canonical(versions)).first()
-    if latest and instance and not shown(instance) and is_public(instance.repository_public_access or ''):
+    if latest and instance and not is_shown(instance, namespace, user) and is_public(
+            instance.repository_public_access or ''):
         # the latest is private, in a public repository: the latest public one
         instance = with_repository_access(with_repository_canonical(
             versions.filter(public_access__in=PUBLIC_ACCESS))).first()
-    if not shown(instance):
+    if not instance or not is_shown(instance, namespace, user):
         raise outcomes.NotFoundError(f'{resource_type}/{resource_id} not found')
     return instance
 
