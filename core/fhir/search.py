@@ -10,6 +10,7 @@ FHIR search and read of CodeSystem, ValueSet and ConceptMap: SVCM's Query transa
   A comma separates alternatives, a repeated parameter must hold every time. Anything else is a 400 not-supported.
 - Paging: _count (at most MAX_COUNT, which is also the default) and page; Bundle.total is the full count, and every
   entry has a fullUrl and a search mode.
+- A search's queries are bounded by SEARCH_TIMEOUT_MS: one the database cancels makes the search too costly (422).
 - A search entry is the resource's summary, marked SUBSETTED: no concept, compose or group, which only a read returns.
   A CodeSystem is `complete` (with every concept, retired ones flagged) up to CONCEPT_LIMIT concepts, else
   `not-present`.
@@ -20,9 +21,11 @@ import re
 from datetime import datetime, timedelta, timezone as dt_timezone
 
 from django.conf import settings
+from django.db import connection, transaction, OperationalError
 from django.db.models import Exists, OuterRef, Q, Subquery
 from django.db.models.functions import Coalesce
 from django.utils import timezone
+from psycopg2 import errorcodes
 from rest_framework.fields import CharField
 from rest_framework.response import Response
 
@@ -38,6 +41,7 @@ from core.mappings.models import Mapping
 from core.sources.models import Source
 
 MAX_COUNT = 100  # the most entries a search page holds, and how many it holds when _count isn't given
+SEARCH_TIMEOUT_MS = 5000  # the database time a search may take; past it the search is too costly
 CONCEPT_LIMIT = 1000  # a CodeSystem is `complete` up to this many concepts, else `not-present` (design D9)
 SUBSETTED = {'system': 'http://terminology.hl7.org/CodeSystem/v3-ObservationValue', 'code': 'SUBSETTED'}
 PAGING_PARAMETERS = frozenset({'_count', 'page'})
@@ -285,7 +289,7 @@ class Search:
 
     @staticmethod
     def by_target(value):
-        """A ConceptMap with a mapping to the code system named."""
+        """A ConceptMap with a mapping to the code system named (a search bounded by SEARCH_TIMEOUT_MS)."""
         sources = Source.objects.filter(canonical_q(Source, value)).values('id')
         return Exists(Mapping.sources.through.objects.filter(source_id=OuterRef('id')).filter(
             Q(mapping__to_source_id__in=sources) | Q(mapping__to_source_url=value)))
@@ -300,7 +304,31 @@ def page_size(query):
     return min(int(value), MAX_COUNT)
 
 
+def within_search_timeout(build):
+    """
+    build() with every query it runs bounded by SEARCH_TIMEOUT_MS; a query the database cancels makes the search too
+    costly (422). Inside a transaction (tests) the timeout would outlive the search, so it isn't set there.
+    """
+    if connection.vendor != 'postgresql' or connection.in_atomic_block:
+        return build()
+    try:
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute('SET LOCAL statement_timeout = %s', [SEARCH_TIMEOUT_MS])
+            return build()
+    except OperationalError as ex:
+        if getattr(ex.__cause__, 'pgcode', None) != errorcodes.QUERY_CANCELED:
+            raise
+        raise outcomes.TooCostlyError(
+            'The search would take too long to answer. Narrow it, for example with url, _id or version.') from ex
+
+
 def search(view, resource_type):
+    """The searchset Bundle a FHIR search view answers, in at most SEARCH_TIMEOUT_MS of database time."""
+    return within_search_timeout(lambda: search_bundle(view, resource_type))
+
+
+def search_bundle(view, resource_type):
     """The searchset Bundle a FHIR search view answers: the base's matching versions, one page of them."""
     request = view.request
     count = page_size(request.query_params)

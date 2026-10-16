@@ -9,6 +9,8 @@ from datetime import datetime, timezone as dt_timezone
 from urllib.parse import parse_qs, urlsplit
 
 from django.contrib.auth.models import AnonymousUser
+from django.db import connection, OperationalError
+from django.test import TransactionTestCase
 from mock import patch
 from rest_framework.test import APIClient
 
@@ -17,8 +19,8 @@ from core.collections.tests.factories import OrganizationCollectionFactory, Expa
 from core.common.constants import ACCESS_TYPE_NONE, HEAD
 from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory, ConceptDescriptionFactory
-from core.fhir import resolve as fhir_resolve
-from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
+from core.fhir import resolve as fhir_resolve, search as fhir_search
+from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM, TooCostlyError
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
@@ -571,3 +573,28 @@ class VisibleVersionsTest(SearchCorpusMixin, OCLTestCase):
                     fhir_resolve.is_visible(row, namespace, user) and fhir_resolve.has_release(row)}
                 visible = set(fhir_resolve.visible_versions(resource_type, kwargs, user).values_list('id', flat=True))
                 self.assertEqual(visible, expected, (kwargs, user, resource_type))
+
+
+class SearchTimeoutTest(TransactionTestCase):
+    """A search the database cancels at SEARCH_TIMEOUT_MS is too costly (a 422 outcome), never a 5xx."""
+    def test_a_cancelled_query_is_too_costly(self):
+        def slow():
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT pg_sleep(1)')
+
+        with patch('core.fhir.search.SEARCH_TIMEOUT_MS', 50):
+            with self.assertRaises(TooCostlyError) as context:
+                fhir_search.within_search_timeout(slow)
+        self.assertEqual((context.exception.status_code, context.exception.issue_code), (422, 'too-costly'))
+
+        self.assertEqual(fhir_search.within_search_timeout(lambda: 'answered'), 'answered')
+        with connection.cursor() as cursor:  # the timeout ended with the search
+            cursor.execute('SHOW statement_timeout')
+            self.assertEqual(cursor.fetchone()[0], '0')
+
+    def test_other_database_errors_are_raised(self):
+        def broken():
+            raise OperationalError('connection lost')
+
+        with self.assertRaises(OperationalError):
+            fhir_search.within_search_timeout(broken)
