@@ -223,6 +223,7 @@ class Translation:
     def __init__(self, parameters, kwargs, user):
         self.request = read_request(parameters)
         self.kwargs, self.user, self.namespace = kwargs, user, namespace_of(kwargs)
+        self.sources = None  # named_sources', once looked up
 
     def answer(self):
         """
@@ -259,6 +260,14 @@ class Translation:
             names = request.coding.system, request.targetsystem or '(unspecified)'
         return f"No ConceptMap is available to translate from '{names[0]}' to '{names[1]}'"
 
+    def named_sources(self):
+        """named_sources of the code's system and targetsystem, looked up once."""
+        if self.sources is None:
+            request = self.request  # the systems in this order, whatever their URLs, so the statement's shape is too
+            systems = dict.fromkeys([request.coding.system, request.targetsystem or request.coding.system])
+            self.sources = named_sources(systems, self.namespace, self.user)
+        return self.sources
+
     def resolve(self, resource_type, url, version, expression):
         return resolve(resource_type, url, version, self.kwargs, self.user, expression)
 
@@ -293,8 +302,9 @@ class Translation:
     def in_scope(self):
         """
         Whether the code is in its scope (`source`; in reverse, `target`): its own code system (or that system's
-        implicit value set); a value set it is a member of (its default expansion); not another code system. Neither one
-        the caller is shown is a 404 naming the parameter, as FHIRsmith answers a scope it can't find.
+        implicit value set); a value set it is a member of (its default expansion), as a concept of a source the caller
+        is shown as the code's system (named_sources, as the matches are); not another code system. Neither one the
+        caller is shown is a 404 naming the parameter, as FHIRsmith answers a scope it can't find.
         """
         scope, name, coding = self.request.scope, self.request.scope_name, self.request.coding
         if scope in (coding.system, f'{coding.system}?fhir_vs'):
@@ -309,9 +319,10 @@ class Translation:
                     f"The value set '{scope}' could not be found, so the scope of the translation cannot be "
                     "determined", expression=name, tx_issue_type='not-found') from ex
             return False
-        return bool(value_set.expansion_uri) and Expansion.concepts.through.objects.filter(
+        sources = self.named_sources()[coding.system]
+        return bool(value_set.expansion_uri and sources) and Expansion.concepts.through.objects.filter(
             expansion__uri=value_set.expansion_uri, concept__mnemonic__in=stored_codes(coding.code),
-            concept__parent__canonical_url=coding.system).exists()
+            concept__parent_id__in=sources).exists()
 
     def matches(self, concept_map, named):
         """
@@ -321,7 +332,7 @@ class Translation:
         request = self.request
         near, far = ('to', 'from') if request.reverse else ('from', 'to')
         sides = {near: request.coding.system, **({far: request.targetsystem} if request.targetsystem else {})}
-        sources = named_sources(set(sides.values()), self.namespace, self.user)
+        sources = self.named_sources()
         mappings = concept_map.get_mappings_queryset().filter(
             of_version(near, request.coding.version), retired=False,
             **{f'{near}_concept_code__in': stored_codes(request.coding.code)})

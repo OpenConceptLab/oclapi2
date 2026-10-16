@@ -39,6 +39,7 @@ FIXTURE = 'https://openconceptlab.org/fhir-fixtures/CodeSystem/fixture-codes'
 DAK = 'https://joe.aml'
 CIEL_VS = 'https://example.org/ValueSet/ciel-set'
 ICD10_VS = 'https://example.org/ValueSet/icd-set'
+MIXED_VS = 'http://moh.example/fhir/ValueSet/mixed'
 SNOMED_PATH = '/orgs/IHTSDO/ConceptMap/SNOMED-CT/'  # a source with no canonical URL is named by its OCL path
 OMOP_PATH = '/orgs/OHDSI/ConceptMap/OMOP-Standard/'  # a mapping to a source OCL doesn't hold: the URL it stores
 PRIVATE_PATH = '/orgs/MOH/ConceptMap/private-codes/'
@@ -526,6 +527,49 @@ class TranslateScopeTest(TranslateCorpusMixin, OCLTestCase):
             expansion = ExpansionFactory(collection_version=value_set)
             expansion.concepts.set([concept])
             Collection.objects.filter(id=value_set.id).update(expansion_uri=expansion.uri)
+        # MOH's public value set holds a code of its private source and one of SNOMED, which has no canonical URL
+        snomed_code = ConceptFactory(parent=self.snomed, mnemonic='371374003')
+        collection(self.moh, 'mixed-set', canonical_url=MIXED_VS)
+        mixed = collection(self.moh, 'mixed-set', 'v1', released=True, canonical_url=MIXED_VS)
+        expansion = ExpansionFactory(collection_version=mixed)
+        expansion.concepts.set([ConceptFactory(parent=self.private, mnemonic='P1'), snomed_code])
+        Collection.objects.filter(id=mixed.id).update(expansion_uri=expansion.uri)
+        self.mapping('SAME-AS', self.icd, 'S371', [self.ciel_v2], from_source=self.snomed, from_code='371374003')
+
+    def capture(self, **params):
+        with CaptureQueriesContext(connection) as context:
+            parameters = self.answer(self.get(**params))
+        return parameters, [query['sql'] for query in context.captured_queries]
+
+    def test_a_scope_holds_only_the_codes_of_systems_the_caller_is_shown(self):
+        """
+        A public value set holding a private source's code says nothing about it to those who can't view the source: a
+        private system answers word for word, and with the same statements, as an unknown one, forward and reverse.
+        """
+        for user in (None, self.outsider, self.moh_member, self.admin):
+            for params in ({'source': MIXED_VS}, {'target': MIXED_VS, 'reverse': 'true', 'targetsystem': CIEL}):
+                private, private_sql = self.capture(system=PRIVATE, code='P1', user=user, **params)
+                unknown, unknown_sql = self.capture(system=UNKNOWN, code='P1', user=user, **params)
+                self.assertEqual(json.loads(json.dumps(private).replace(PRIVATE, 'SYSTEM')),
+                                 json.loads(json.dumps(unknown).replace(UNKNOWN, 'SYSTEM')), (user, params))
+                self.assertEqual([sql.replace(PRIVATE, 'SYSTEM') for sql in private_sql],
+                                 [sql.replace(UNKNOWN, 'SYSTEM') for sql in unknown_sql], (user, params))
+                self.assertFalse(self.result(private), (user, params))
+        # to a member of MOH at its base, P1 is in the scope
+        parameters = self.answer(self.get(base='/orgs/MOH', user=self.moh_member, system=PRIVATE, code='P1',
+                                          source=MIXED_VS))
+        self.assertEqual(self.matches(parameters), [f'{CIEL}|113275|wider'])
+
+    def test_a_scope_holds_codes_of_a_system_named_by_its_ocl_path(self):
+        """SNOMED has no canonical URL: in a scope, as in a match, its system is its OCL path."""
+        parameters = self.answer(self.get(url=CIEL, system=SNOMED_PATH, code='371374003', source=MIXED_VS))
+        self.assertEqual(self.matches(parameters), [f'{ICD10}|S371|equivalent'])
+        parameters = self.answer(self.get(system=SNOMED_PATH, code='371374003', targetsystem=CIEL, reverse='true',
+                                          target=MIXED_VS))
+        self.assertEqual(self.matches(parameters), [f'{CIEL}|113275|equivalent'])
+        for params in ({'url': CIEL, 'source': CIEL_VS}, {'targetsystem': CIEL, 'reverse': 'true', 'target': CIEL_VS}):
+            parameters = self.answer(self.get(system=SNOMED_PATH, code='371374003', **params))
+            self.assertFalse(self.result(parameters), params)
 
     def test_a_code_in_the_source_scope_is_translated(self):
         for scope in (CIEL, f'{CIEL}?fhir_vs', CIEL_VS):
