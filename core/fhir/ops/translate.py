@@ -15,7 +15,8 @@ types as R5-shaped relationships. core.fhir.adapters.r4 writes the answer as an 
   and a system only such sources have answers as an unknown one. ConceptMapGroupField names groups the same way.
 - Map types (design D27): case, spaces, hyphens, underscores and surrounding whitespace don't matter, so SAME-AS,
   SAME AS and Same As are one. The relationships are core.concept_maps.constants'; result is true when some match isn't
-  not-related-to. With no match, the answer says why (message).
+  not-related-to. A match's relationship reads from the code named to the match, so in reverse, where the code named
+  is the mapping's target, narrower and broader swap. With no match, the answer says why (message).
 - The code's scope, `source` (the value set the code was chosen from; in reverse, which reverses the meaning of
   source and target, `target`), is a precondition: a code outside it has no translation, and one that resolves to no
   value set (or code system) the caller is shown is not found. The other scope narrows nothing: OCL's ConceptMaps
@@ -37,7 +38,8 @@ from django.db.models import Case, Exists, F, OuterRef, Q, When
 
 from core.collections.models import Expansion
 from core.common.serializers import IdentifierSerializer
-from core.concept_maps.constants import MAP_TYPE_RELATIONSHIPS, NOT_RELATED_TO, RELATED_TO, RESOURCE_TYPE
+from core.concept_maps.constants import (
+    MAP_TYPE_RELATIONSHIPS, NOT_RELATED_TO, RELATED_TO, RESOURCE_TYPE, REVERSED_RELATIONSHIPS)
 from core.fhir import outcomes
 from core.fhir.resolve import UnresolvedError, namespace_of, resolve, viewable_rows
 from core.sources.models import Source
@@ -56,9 +58,13 @@ def map_type_key(map_type):
     return re.sub(r'[\s_-]+', '-', (map_type or '').strip().upper()).strip('-')
 
 
-def relationship(map_type):
-    """The relationship an OCL map type is (design D27): MAP_TYPE_RELATIONSHIPS', else related-to."""
-    return MAP_TYPE_RELATIONSHIPS.get(map_type_key(map_type), RELATED_TO)
+def relationship(map_type, reverse=False):
+    """
+    The relationship an OCL map type is (design D27): MAP_TYPE_RELATIONSHIPS', else related-to. reverse reads it from
+    the mapping's target to its source, as a reverse translation answers it, relative to the code named (its target).
+    """
+    found = MAP_TYPE_RELATIONSHIPS.get(map_type_key(map_type), RELATED_TO)
+    return REVERSED_RELATIONSHIPS.get(found, found) if reverse else found
 
 
 def side_system(canonical, url, uri=None):
@@ -328,7 +334,7 @@ class Translation:
         for row in rows:
             system = side_system(row[f'{far}_canonical'], row[f'{far}_source_url'],
                                  row[f'{far}_source__uri'] if row[f'{far}_shown'] else None)
-            match = (system, fhir_code(row[f'{far}_concept_code']), relationship(row['map_type']))
+            match = (system, fhir_code(row[f'{far}_concept_code']), relationship(row['map_type'], request.reverse))
             matches.setdefault(match, {
                 'relationship': match[2], 'concept': {'system': match[0], 'code': match[1]}, 'source': named})
         return list(matches.values())[:MATCH_LIMIT], len(rows) > MATCH_LIMIT

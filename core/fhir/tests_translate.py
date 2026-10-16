@@ -334,12 +334,13 @@ class TranslateMappingsTest(TranslateCorpusMixin, OCLTestCase):
     def test_reverse_finds_the_codes_that_map_to_the_code(self):
         """
         reverse: the concept named is the target; the ConceptMap is url's, else targetsystem's (the system of the
-        codes sought). Each match is a source concept, with the mapping's own relationship.
+        codes sought). Each match is a source concept; its equivalence is relative to the code named, so CIEL
+        113275 BROADER-THAN O02.1 is a match that is wider than O02.1.
         """
         for params in ({'targetsystem': CIEL}, {'url': CIEL}, {'url': CIEL, 'targetsystem': CIEL}):
             parameters = self.answer(self.get(system=ICD10, code='O02.1', reverse='true', **params))
             self.assertTrue(self.result(parameters), params)
-            self.assertEqual(self.matches(parameters), [f'{CIEL}|113275|narrower'], params)
+            self.assertEqual(self.matches(parameters), [f'{CIEL}|113275|wider'], params)
         self.assertEqual(self.matches(self.answer(self.get(system=PIH, code='7880', reverse='true', url=PIH))),
                          [f'{CIEL}|113275|equivalent'])
         self.assertEqual(
@@ -349,6 +350,23 @@ class TranslateMappingsTest(TranslateCorpusMixin, OCLTestCase):
             self.assertFalse(self.result(parameters), params)
             self.assertEqual(len(self.values(parameters, 'message')), 1, params)
         self.assertEqual(self.matches(self.answer(self.get(system=ICD10, code='O02.1', reverse='false'))), [])
+
+    def test_a_reverse_equivalence_is_relative_to_the_code_named(self):
+        """
+        R4's equivalence reads from the code translated to the match: forward, a mapping from it NARROWER-THAN its
+        target makes a wider match; in reverse the code named is the mapping's target, so the same mapping is a
+        narrower match, and BROADER-THAN a wider one. Equivalent, relatedto and disjoint read the same both ways.
+        """
+        for index, (map_type, forward, backward) in enumerate((
+                ('NARROWER-THAN', 'wider', 'narrower'), ('BROADER-THAN', 'narrower', 'wider'),
+                ('wider', 'wider', 'narrower'), ('SAME-AS', 'equivalent', 'equivalent'),
+                ('NOT-SAME-AS', 'disjoint', 'disjoint'), ('Q-AND-A', 'relatedto', 'relatedto'))):
+            self.mapping(map_type, self.icd, f'W{index}', [self.ciel_v2], from_code=f'way-{index}')
+            self.assertEqual(self.matches(self.answer(self.get(system=CIEL, code=f'way-{index}'))),
+                             [f'{ICD10}|W{index}|{forward}'], map_type)
+            self.assertEqual(self.matches(self.answer(self.get(
+                system=ICD10, code=f'W{index}', targetsystem=CIEL, reverse='true'))),
+                [f'{CIEL}|way-{index}|{backward}'], map_type)
 
     def test_codes_stored_url_encoded_are_translated_as_codes(self):
         """OCL stores a code with reserved characters percent-encoded (ICD-11's ND53.Y&XK70); FHIR has the code."""
@@ -411,7 +429,7 @@ class TranslateRequestTest(TranslateCorpusMixin, OCLTestCase):
             self.assertEqual(self.matches(self.answer(response)), expected, parameters)
         reverse = self.post([{'name': 'system', 'valueUri': ICD10}, {'name': 'code', 'valueCode': 'O02.1'},
                              {'name': 'targetsystem', 'valueUri': CIEL}, {'name': 'reverse', 'valueBoolean': True}])
-        self.assertEqual(self.matches(self.answer(reverse)), [f'{CIEL}|113275|narrower'])
+        self.assertEqual(self.matches(self.answer(reverse)), [f'{CIEL}|113275|wider'])
 
     def test_get_takes_a_coding_as_a_token(self):
         self.assertEqual(self.matches(self.answer(self.get(coding=f'{CIEL}|138405'))), [f'{ICD10}|B20|equivalent'])
@@ -541,7 +559,7 @@ class TranslateScopeTest(TranslateCorpusMixin, OCLTestCase):
                        {'source': CIEL}, {'source': UNKNOWN}, {'source': ICD10_VS},
                        {'source': CIEL_VS, 'target': ICD10_VS}):
             parameters = self.answer(self.get(**reverse, **scopes))
-            self.assertEqual(self.matches(parameters), [f'{CIEL}|113275|narrower'], scopes)
+            self.assertEqual(self.matches(parameters), [f'{CIEL}|113275|wider'], scopes)
         for scopes in ({'target': CIEL_VS}, {'target': CIEL}, {'source': ICD10_VS, 'target': CIEL_VS}):
             parameters = self.answer(self.get(**reverse, **scopes))
             self.assertFalse(self.result(parameters), scopes)
@@ -620,7 +638,7 @@ class TranslateAccessTest(TranslateCorpusMixin, OCLTestCase):
     def test_a_reverse_from_a_source_the_caller_is_not_shown(self):
         """MOH's private map of P1 is no ConceptMap to those it isn't shown."""
         for base, user, matches in (('/fhir', self.moh_member, []), ('/orgs/MOH', None, []),
-                                    ('/orgs/MOH', self.moh_member, [f'{PRIVATE}|P1|wider'])):
+                                    ('/orgs/MOH', self.moh_member, [f'{PRIVATE}|P1|narrower'])):
             parameters = self.answer(self.get(base=base, user=user, system=CIEL, code='113275', reverse='true',
                                               targetsystem=PRIVATE))
             self.assertEqual(self.matches(parameters), matches, (base, user))

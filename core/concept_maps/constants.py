@@ -34,6 +34,8 @@ MAP_TYPE_RELATIONSHIPS = {
     'SOURCE-IS-BROADER-THAN-TARGET': SOURCE_IS_BROADER,
     'NOT-RELATED-TO': NOT_RELATED_TO,
 }
+# A relationship read the other way, from target to source
+REVERSED_RELATIONSHIPS = {SOURCE_IS_NARROWER: SOURCE_IS_BROADER, SOURCE_IS_BROADER: SOURCE_IS_NARROWER}
 # The OCL map type a relationship is stored as, when a ConceptMap is written; related-to has none (the equivalence
 # written is kept)
 RELATIONSHIP_MAP_TYPES = {
