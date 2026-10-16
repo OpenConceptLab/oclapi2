@@ -4,15 +4,14 @@ from django.core.exceptions import ValidationError
 from rest_framework import status
 from rest_framework.response import Response
 
-from core.bundles.serializers import FHIRBundleSerializer
 from core.code_systems.views import CodeSystemValidateCodeView, get_viewable_repo
 from core.collections.models import Collection
 from core.collections.views import CollectionListView, CollectionRetrieveUpdateDestroyView, \
     CollectionVersionExpansionsView
 from core.common.constants import HEAD, LATEST
-from core.common.fhir_helpers import translate_fhir_query
 from core.concepts.models import Concept
 from core.fhir.base import FhirViewMixin
+from core.fhir.search import FhirSearchMixin, FhirReadMixin
 from core.sources.models import Source
 from core.value_sets.serializers import ValueSetDetailSerializer, \
     ValueSetExpansionParametersSerializer, ValueSetExpansionSerializer
@@ -20,29 +19,9 @@ from core.value_sets.serializers import ValueSetDetailSerializer, \
 logger = logging.getLogger('oclapi')
 
 
-class ValueSetListView(FhirViewMixin, CollectionListView):
+class ValueSetListView(FhirViewMixin, FhirSearchMixin, CollectionListView):
+    resource_type = 'ValueSet'
     serializer_class = ValueSetDetailSerializer
-
-    @staticmethod
-    def bundle_response(data, paginator):
-        bundle = FHIRBundleSerializer(
-            {'meta': {}, 'total': len(data), 'type': 'searchset', 'entry': FHIRBundleSerializer.convert_to_entry(data)},
-            context={'paginator': paginator}
-        )
-        return bundle.data
-
-    def get_filter_params(self, default_version_to_head=True):
-        return super().get_filter_params(False)
-
-    def apply_query_filters(self, queryset):
-        query_fields = list(self.serializer_class.Meta.fields)
-        queryset = translate_fhir_query(query_fields, self.request.query_params, queryset)
-
-        return queryset
-
-    def apply_filters(self, queryset):
-        queryset = queryset.exclude(version=HEAD).filter(is_latest_version=True)
-        return self.apply_query_filters(queryset)
 
     def get_serializer_class(self):
         return self.serializer_class
@@ -125,7 +104,8 @@ class ValueSetValidateCodeView(CodeSystemValidateCodeView):
         return queryset
 
 
-class ValueSetRetrieveUpdateView(FhirViewMixin, CollectionRetrieveUpdateDestroyView):
+class ValueSetRetrieveUpdateView(FhirViewMixin, FhirReadMixin, CollectionRetrieveUpdateDestroyView):
+    resource_type = 'ValueSet'
     serializer_class = ValueSetDetailSerializer
 
     def get_filter_params(self, default_version_to_head=True):

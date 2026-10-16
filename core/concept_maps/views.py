@@ -5,15 +5,14 @@ from django.db.models import Q
 from django.http import Http404
 from pydash import get
 
-from core.bundles.serializers import FHIRBundleSerializer
 from core.common.constants import HEAD
-from core.common.fhir_helpers import translate_fhir_query
 from core.common.permissions import CanViewConceptDictionary
 from core.common.serializers import IdentifierSerializer
 from core.concept_maps.constants import RESOURCE_TYPE
 from core.concept_maps.serializers import ConceptMapDetailSerializer, ConceptMapParametersSerializer
 from core.concepts.permissions import CanAccessParentDictionary
 from core.fhir.base import FhirViewMixin
+from core.fhir.search import FhirSearchMixin, FhirReadMixin
 from core.mappings.constants import SAME_AS
 from core.mappings.views import MappingListView
 from core.sources.views import SourceListView, SourceRetrieveUpdateDestroyView
@@ -21,28 +20,9 @@ from core.sources.views import SourceListView, SourceRetrieveUpdateDestroyView
 logger = logging.getLogger('oclapi')
 
 
-class ConceptMapListView(FhirViewMixin, SourceListView):
+class ConceptMapListView(FhirViewMixin, FhirSearchMixin, SourceListView):
+    resource_type = 'ConceptMap'
     serializer_class = ConceptMapDetailSerializer
-
-    @staticmethod
-    def bundle_response(data, paginator):
-        bundle = FHIRBundleSerializer(
-            {'meta': {}, 'total': len(data), 'type': 'searchset', 'entry': FHIRBundleSerializer.convert_to_entry(data)},
-            context={'paginator': paginator}
-        )
-        return bundle.data
-
-    def get_filter_params(self, default_version_to_head=True):
-        return super().get_filter_params(False)
-
-    def apply_query_filters(self, queryset):
-        query_fields = list(self.serializer_class.Meta.fields)
-        queryset = translate_fhir_query(query_fields, self.request.query_params, queryset)
-        return queryset
-
-    def apply_filters(self, queryset):
-        queryset = queryset.exclude(version=HEAD).filter(is_latest_version=True)
-        return self.apply_query_filters(queryset)
 
     def get_serializer_class(self):
         return self.serializer_class
@@ -51,7 +31,8 @@ class ConceptMapListView(FhirViewMixin, SourceListView):
         return self.serializer_class(obj)
 
 
-class ConceptMapRetrieveUpdateView(FhirViewMixin, SourceRetrieveUpdateDestroyView):
+class ConceptMapRetrieveUpdateView(FhirViewMixin, FhirReadMixin, SourceRetrieveUpdateDestroyView):
+    resource_type = 'ConceptMap'
     serializer_class = ConceptMapDetailSerializer
 
     def get_filter_params(self, default_version_to_head=True):
@@ -64,6 +45,7 @@ class ConceptMapRetrieveUpdateView(FhirViewMixin, SourceRetrieveUpdateDestroyVie
         return queryset.exclude(version=HEAD)
 
     def get_object(self, queryset=None):
+        """A write to a ConceptMap that doesn't exist gets None; a read of one is a 404 (FhirReadMixin)."""
         try:
             return super().get_object(queryset)
         except Http404:
