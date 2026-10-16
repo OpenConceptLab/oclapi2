@@ -25,18 +25,20 @@ version the request names. core.fhir.adapters.r4 writes the answer as an R4 Valu
   a fixed order (count at most MAX_COUNT, which is also the default); count=0 answers the total alone. total counts
   what activeOnly and filter keep. The inputs that shaped the answer are echoed in expansion.parameter, then each code
   system the members come from, with each version they are reported in, as used-codesystem. Every other R4 $expand
-  input is either one a stored expansion always satisfies (SATISFIED: OCL's expansions are flat, with no abstract or
-  post-coordinated codes, and have no definitions to leave out) or a 400 not-supported naming it (NOT_SUPPORTED): an
-  inline value set, a context, a date, code system versions and designations would each need an expansion computed
-  for the request, and OCL serves the ones it stores. Names that aren't $expand inputs are ignored, as _format is.
+  input is one a stored expansion always satisfies (SATISFIED: OCL's expansions are flat, with no abstract codes), one
+  supported only when false (ONLY_FALSE: an expansion has no definitions, and doesn't record which of its codes are
+  post-coordinated), or a 400 not-supported naming it (NOT_SUPPORTED): an inline value set, a context, a date, code
+  system versions and designations would each need an expansion computed for the request, and OCL serves the ones it
+  stores. Names that aren't $expand inputs are ignored, as _format is.
 - Cost: a fixed number of queries whatever the size of the expansion, the page read alone; all of them within
   SEARCH_TIMEOUT_MS together, past which the expansion is too costly (422).
 """
 import re
-from urllib.parse import quote
 
-from django.db.models import Case, Exists, IntegerField, JSONField, OuterRef, Q, Subquery, Value, When
+from django.db.models import BooleanField, Case, Exists, ExpressionWrapper, F, Func, IntegerField, JSONField, \
+    OuterRef, Q, Subquery, Value, When
 from django.db.models.functions import Coalesce, JSONObject
+from django.db.models.lookups import Regex
 
 from core.collections.models import Expansion
 from core.common.constants import HEAD
@@ -51,6 +53,14 @@ from core.sources.models import Source
 
 MAX_COUNT = 1000  # the most members a page holds, and how many it holds when count isn't given
 WORD = re.compile(r'\w+')
+# an escape of an ASCII character that is no word character (not a letter, digit or _), matched ignoring case
+NON_WORD_ESCAPE = '%(?:[01][0-9a-f]|2[0-9a-f]|3[a-f]|40|5[b-e]|60|7[b-f])'
+# the escapes of one non-ASCII character as a stored code writes them, matched ignoring case: a well-formed UTF-8
+# sequence of 2 to 4 bytes (Unicode's Table 3-7), else a single byte, which makes no character
+NON_ASCII_CHARACTER = ('(?:%c[2-9a-f]|%d[0-9a-f])%[89ab][0-9a-f]'
+                       '|(?:%e0%[ab][0-9a-f]|%e[1-9a-cef]%[89ab][0-9a-f]|%ed%[89][0-9a-f])%[89ab][0-9a-f]'
+                       '|(?:%f0%[9ab][0-9a-f]|%f[1-3]%[89ab][0-9a-f]|%f4%8[0-9a-f])%[89ab][0-9a-f]%[89ab][0-9a-f]'
+                       '|%[89a-f][0-9a-f]')
 STORED = 'OCL serves the expansion it stores for the value set version'
 VERSIONS = f'Choosing code system versions is not supported: {STORED}, made from the versions used-codesystem names.'
 NOT_SUPPORTED = {  # R4 $expand inputs that need an expansion computed for the request
@@ -64,8 +74,12 @@ NOT_SUPPORTED = {  # R4 $expand inputs that need an expansion computed for the r
     'check-system-version': VERSIONS,
     'force-system-version': VERSIONS,
 }
-INCLUDE_DEFINITION = 'includeDefinition'  # supported when false: OCL's expansions have no definitions
-SATISFIED = ('excludeNested', 'excludeNotForUI', 'excludePostCoordinated')  # booleans every stored expansion meets
+ONLY_FALSE = {  # boolean R4 $expand inputs supported when false
+    'includeDefinition': 'Definitions are not included in an expansion.',
+    'excludePostCoordinated': f'Excluding post-coordinated codes is not supported: {STORED}, which does not record '
+                              'which of its codes are post-coordinated.',
+}
+SATISFIED = ('excludeNested', 'excludeNotForUI')  # booleans every stored expansion meets
 # a reference an expansion couldn't resolve, by its type: (message id, message) without and with a version named
 UNRESOLVED = {
     'reference.valueset': (
@@ -114,9 +128,9 @@ class Inputs:  # pylint: disable=too-few-public-methods
         for name, message in NOT_SUPPORTED.items():
             if name in parameters:
                 raise outcomes.NotSupportedError(message, expression=name)
-        if flag(parameters, INCLUDE_DEFINITION):
-            raise outcomes.NotSupportedError(
-                'Definitions are not included in an expansion.', expression=INCLUDE_DEFINITION)
+        for name, message in ONLY_FALSE.items():
+            if flag(parameters, name):
+                raise outcomes.NotSupportedError(message, expression=name)
         for name in SATISFIED:
             flag(parameters, name)  # either value is met; one that isn't a boolean is still a 400
         self.filter = text(parameters, 'filter')
@@ -140,14 +154,62 @@ class Inputs:  # pylint: disable=too-few-public-methods
         return WORD.findall(self.filter or '')
 
 
-def code_starts_word(word):
+def escapes(char):
+    """A character percent-encoded, as OCL stores it in a code: %XX for each of its UTF-8 bytes."""
+    return ''.join(f'%{byte:02X}' for byte in char.encode())
+
+
+def spelled(word):
     """
-    The regex for a stored code (OCL percent-encodes reserved and non-ASCII characters) whose FHIR spelling has a word
-    starting with `word`: the word, or its own encoding, at the start of a word or right after an encoded character.
-    \\w characters need no escaping, and their encoding is letters, digits and %.
+    A regex, matched ignoring case, for `word` as a stored code may spell it: each character as itself, or as the
+    escapes of itself or of its other case (é: é, %C3%A9 or %C3%89). \\w characters need no escaping in a regex.
     """
-    spellings = '|'.join(dict.fromkeys([word, quote(word)]))
-    return rf'(\m|%[0-9A-Fa-f]{{2}})({spellings})'
+    spellings = (dict.fromkeys([char, *(escapes(case) for case in (char, char.lower(), char.upper())
+                                        if len(case) == 1)]) for char in word)
+    return ''.join(f"(?:{'|'.join(spelling)})" for spelling in spellings)
+
+
+class NonWordBefore(Func):  # pylint: disable=abstract-method
+    """
+    Whether, somewhere in the code, a non-ASCII character's escapes stand right before `spelling` (a word, spelled) and
+    that character is no word character: a well-formed UTF-8 sequence, decoded, for a character Postgres doesn't count
+    as a letter, digit or _; or a single byte, which makes no character (FHIR's decoding spells it U+FFFD). A regex
+    takes the longest match where it starts, so a character's escapes are matched whole.
+    """
+    template = (
+        "EXISTS (SELECT FROM regexp_matches(%(expressions)s, 'gi') AS characters (escapes) WHERE CASE WHEN "
+        "length(escapes[1]) = 3 THEN true ELSE convert_from(decode(regexp_replace(escapes[1], '[^0-9A-Fa-f]', '', "
+        "'g'), 'hex'), 'UTF8') COLLATE \"default\" !~ '[[:alnum:]_]' END)")
+    output_field = BooleanField()
+
+    def __init__(self, spelling):
+        super().__init__(F('mnemonic'), Value(f'(?:{NON_ASCII_CHARACTER})(?={spelling})'))
+
+
+def code_has_word(word):
+    """
+    Whether a member's code, as FHIR spells it (core.fhir.ops.concepts.fhir_code decodes OCL's percent-encoding), has
+    a word starting with `word`, ignoring case, by the rule filter applies to names (Postgres's \\m: a word character
+    is a letter or digit of any script, or _). The stored code is matched a whole character at a time, never from inside
+    an escape. A word starts there:
+    - in a code with no escape, where \\m says; so too for a word that doesn't start with a word character (filter's
+      words are Python's \\w+, which counts a few characters more, ² for one): \\m starts no word with one;
+    - at its start, or after a character that is no word character: written as itself, as an ASCII escape, or a % that
+      starts no escape;
+    - after a non-ASCII character's escapes, when that character, decoded, is no word character (NonWordBefore).
+    Each branch is tried only when the ones before it haven't decided, so a code without the word in any spelling costs
+    one regex, and one without escapes the regex names get.
+    """
+    spelling = spelled(word)
+    return Case(
+        When(~Q(mnemonic__contains='%') | ~Q(Regex(Value(word), '^[[:alnum:]_]')),
+             then=ExpressionWrapper(Q(mnemonic__iregex=rf'\m{word}'), output_field=BooleanField())),
+        When(~Q(mnemonic__iregex=spelling), then=False),
+        When(mnemonic__iregex=rf'(?:^|[^[:alnum:]_%]){spelling}', then=True),
+        When(mnemonic__iregex=rf'{NON_WORD_ESCAPE}{spelling}', then=True),
+        When(mnemonic__iregex=rf'%(?![0-9a-f]{{2}}){spelling}', then=True),
+        When(mnemonic__iregex=rf'%[89a-f][0-9a-f]{spelling}', then=NonWordBefore(spelling)),
+        default=False, output_field=BooleanField())
 
 
 def expand(parameters, kwargs, user, instance_id=None):
@@ -219,7 +281,7 @@ class Expander:
         if self.inputs.active_only:
             members = members.filter(retired=False)
         for word in self.inputs.words:  # \m: a word starts here; \w characters need no escaping in a regex
-            members = members.filter(Q(mnemonic__iregex=code_starts_word(word)) | Exists(ConceptName.objects.filter(
+            members = members.filter(Q(code_has_word(word)) | Exists(ConceptName.objects.filter(
                 concept_id=OuterRef('id'), name__iregex=rf'\m{word}')))
         return members
 

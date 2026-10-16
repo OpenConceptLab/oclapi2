@@ -324,11 +324,11 @@ class FhirOperationBoundsTest(OCLTestCase):
     def test_expand_inputs_it_refuses_read_nothing(self):
         """An $expand input that would need an expansion computed for the request is a 400 before anything is read."""
         for name in ('date', 'exclude-system', 'system-version', 'check-system-version', 'force-system-version',
-                     'designation', 'contextDirection', 'context', 'includeDefinition'):
+                     'designation', 'contextDirection', 'context', 'includeDefinition', 'excludePostCoordinated'):
             for method in ('GET', 'POST valueString'):
                 response, queries = self.request(
                     '/fhir/ValueSet/$expand', method, url=VALUE_SET,
-                    **{name: 'true' if name == 'includeDefinition' else SYSTEM})
+                    **{name: 'true' if name in ('includeDefinition', 'excludePostCoordinated') else SYSTEM})
                 self.assertEqual(response.status_code, 400, (name, method))
                 self.assertEqual(response.data['issue'][0]['expression'], [name], (name, method))
                 self.assertEqual(row_reads(queries), [], (name, method))

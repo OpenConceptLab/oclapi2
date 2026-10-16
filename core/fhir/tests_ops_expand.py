@@ -263,6 +263,28 @@ class ExpandCases(OpsCorpusMixin):
             self.assertEqual([member['code'] for member in expansion.get('contains', [])], codes, text)
             self.assertEqual(expansion['total'], len(codes), text)
 
+    def test_a_filter_matches_the_words_of_a_code_as_fhir_spells_it(self):
+        """filter matches a stored code by its decoded words, ignoring case, non-ASCII letters too: never by the
+        characters of an escape, and a word starts after an encoded character only when that character, decoded, isn't
+        a word character (Codex F2.1)."""
+        codes = {'ND53.Y%26XK70': 'Encoded', quote('café'): 'Coffee shop', quote('caféine'): 'Stimulant',
+                 quote('été'): 'Summer', quote('QX–ZZ9'): 'Range', '50%off': 'Discount', '%FFyy': 'Replacement',
+                 quote('cm.²'): 'Area'}
+        for code, display in codes.items():
+            self.fevers_v1.expansion.concepts.add(ConceptFactory(
+                parent=self.ciel, mnemonic=code, sources=[self.ciel_v2], names=[name(display, preferred=True)]))
+        for text, decoded in (
+                ('26', []), ('c3', []), ('A9', []), ('80', []),  # the characters of an escape
+                ('CAFÉ', ['café', 'caféine']), ('Café', ['café', 'caféine']), ('ÉTÉ', ['été']),  # case, non-ASCII too
+                ('CAFÉINE', ['caféine']), ('ine', []), ('té', []),  # é is a word character: no word starts after it
+                ('zz9', ['QX–ZZ9']), ('XK70', ['ND53.Y&XK70']),  # – and & are not
+                ('off', ['50%off']), ('yy', ['\ufffdyy']),  # a % that is no escape; a byte that is no character
+                ('²', []), ('cm', ['cm.²'])):  # \m, as for names: ² is no word character to Postgres
+            with self.subTest(text):
+                expansion = self.expansion(self.expand(url=FEVERS, filter=text))
+                self.assertEqual([member['code'] for member in expansion.get('contains', [])], decoded)
+                self.assertEqual(expansion['total'], len(decoded))
+
     def test_a_members_system_is_its_releases_own_canonical_url(self):
         """A release with a canonical URL of its own names its members' system, else its repository's does, in contains
         and in used-codesystem (Codex F1.3; search and read follow the same rule)."""
@@ -344,7 +366,8 @@ class ExpandCases(OpsCorpusMixin):
             'system-version': ('valueCanonical', f'{CIEL}|v1'),
             'check-system-version': ('valueCanonical', f'{CIEL}|v1'),
             'force-system-version': ('valueCanonical', f'{CIEL}|v1'), 'designation': ('valueString', 'fr'),
-            'contextDirection': ('valueCode', 'incoming'), 'includeDefinition': ('valueBoolean', True)}
+            'contextDirection': ('valueCode', 'incoming'), 'includeDefinition': ('valueBoolean', True),
+            'excludePostCoordinated': ('valueBoolean', True)}  # Codex F2.2: nothing leaves such codes out
         for name_, (value_type, value) in refused.items():
             responses = (self.expand(url=FEVERS, **{name_: 'true' if value is True else value}),
                          self.post_expand([{'name': 'url', 'valueUri': FEVERS}, {'name': name_, value_type: value}]))
@@ -353,8 +376,11 @@ class ExpandCases(OpsCorpusMixin):
                 self.assertEqual(response.data['issue'][0]['expression'], [name_], name_)
         expected = self.expand(url=FEVERS).content
         for params in ({'excludeNested': 'true'}, {'excludeNested': 'false'}, {'excludeNotForUI': 'true'},
-                       {'excludePostCoordinated': 'true'}, {'includeDefinition': 'false'}, {'q': 'anything'}):
+                       {'excludePostCoordinated': 'false'}, {'includeDefinition': 'false'}, {'q': 'anything'}):
             self.assertEqual(self.expand(url=FEVERS, **params).content, expected, params)
+        for name_ in ('excludePostCoordinated', 'includeDefinition'):
+            posted = self.post_expand([{'name': 'url', 'valueUri': FEVERS}, {'name': name_, 'valueBoolean': False}])
+            self.assertEqual((posted.status_code, posted.content), (200, expected), name_)
         self.assert_outcome(self.expand(url=FEVERS, excludeNested='perhaps'), 400, 'invalid', 'invalid-data')
 
     def test_an_expansion_that_cannot_be_served_is_a_422(self):
@@ -429,8 +455,10 @@ class ExpandCases(OpsCorpusMixin):
             self.fevers_v1.expansion.concepts.add(ConceptFactory(
                 parent=self.ciel, mnemonic=f'x{number}', sources=[self.ciel_v1, self.ciel_v2],
                 names=[name(f'Extra {number}', preferred=True)]))
+        self.fevers_v1.expansion.concepts.add(ConceptFactory(  # a word after an encoded character: same statements
+            parent=self.ciel, mnemonic=quote('QX–ZZ9'), sources=[self.ciel_v2], names=[name('Range', preferred=True)]))
         for params in ({}, {'count': '10', 'offset': '20', 'filter': 'extra', 'activeOnly': 'true'},
-                       {'displayLanguage': 'fr', 'includeDesignations': 'true'}):
+                       {'displayLanguage': 'fr', 'includeDesignations': 'true'}, {'filter': 'zz9 range'}):
             with self.assertNumQueries(resolution + 5):
                 self.assertEqual(self.expand(url=FEVERS, **params).status_code, 200)
         with self.assertNumQueries(resolution + 3):
