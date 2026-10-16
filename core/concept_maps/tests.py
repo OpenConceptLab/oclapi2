@@ -35,7 +35,7 @@ class ConceptMapTest(OCLTestCase):
         self.user_token = self.user.get_token()
         self.user_source = UserSourceFactory(user=self.user, public_access='None', canonical_url='/some/url')
         self.user_source_v1 = UserSourceFactory.build(
-            version='v1', mnemonic=self.user_source.mnemonic, user=self.user_source.parent)
+            version='v1', mnemonic=self.user_source.mnemonic, user=self.user_source.parent, released=True)
         Source.persist_new_version(self.user_source_v1, self.user_source.created_by)
 
         self.org_source_B = OrganizationSourceFactory(organization=self.org, canonical_url='/some/url/B',
@@ -44,7 +44,7 @@ class ConceptMapTest(OCLTestCase):
                                           names=[ConceptNameFactory.build(name="concept_B_1_name")])
         self.concept_B_2 = ConceptFactory(parent=self.org_source_B, mnemonic='concept_B_2')
         self.org_source_B_v1 = OrganizationSourceFactory.build(
-            version='v1', mnemonic=self.org_source_B.mnemonic, organization=self.org_source_B.parent)
+            version='v1', mnemonic=self.org_source_B.mnemonic, organization=self.org_source_B.parent, released=True)
         Source.persist_new_version(self.org_source_B_v1, self.org_source_B.created_by)
 
         self.mapping_1 = MappingFactory(parent=self.org_source, to_concept=self.concept_1,
@@ -61,7 +61,7 @@ class ConceptMapTest(OCLTestCase):
         self.mapping_3.save()
 
         self.org_source_v2 = OrganizationSourceFactory.build(
-            version='v2', mnemonic=self.org_source.mnemonic, organization=self.org_source.parent)
+            version='v2', mnemonic=self.org_source.mnemonic, organization=self.org_source.parent, released=True)
         Source.persist_new_version(self.org_source_v2, self.org_source.created_by)
 
         for mapping in self.org_source_v2.get_mappings_queryset().all():
@@ -82,6 +82,9 @@ class ConceptMapTest(OCLTestCase):
             '/orgs/' + self.org.mnemonic + '/ConceptMap/' + self.org_source.mnemonic + '/'
         )
         self.assertEqual(resource['version'], 'v2')
+        self.assertNotIn('group', resource)  # a search entry is a summary; the read has the groups
+
+        resource = self.client.get(response.data['entry'][0]['fullUrl']).data
         self.assertEqual(len(resource['group']), 1)
         self.assertEqual(resource['group'], [{'source': self.org_source_B_v1.canonical_url,
                                      'target': self.org_source.canonical_url,
@@ -94,19 +97,22 @@ class ConceptMapTest(OCLTestCase):
                                           'target': [{'code': 'concept_1', 'equivalence': 'equivalent'}]}]}])
 
     def test_private_can_view(self):
+        # the global base shows public repositories only, whoever asks; the owner base shows the owner its own
         response = self.client.get('/fhir/ConceptMap/?url=/some/url', HTTP_AUTHORIZATION='Token ' + self.user_token)
 
-        self.assertEqual(len(response.data['entry']), 2)
-        self.assertEqual(response.data['total'], 2)
+        self.assertEqual(len(response.data['entry']), 1)
+        self.assertEqual(response.data['total'], 1)
 
         resource = response.data['entry'][0]['resource']
         self.assertEqual(
             resource['identifier'][0]['value'],
             '/orgs/' + self.org.mnemonic + '/ConceptMap/' + self.org_source.mnemonic + '/'
         )
-
         self.assertEqual(resource['version'], 'v2')
-        resource2 = response.data['entry'][1]['resource']
+
+        response = self.client.get(
+            f'/users/{self.user.mnemonic}/ConceptMap/?url=/some/url', HTTP_AUTHORIZATION='Token ' + self.user_token)
+        resource2 = response.data['entry'][0]['resource']
         self.assertEqual(
             resource2['identifier'][0]['value'],
             '/users/' + self.user.mnemonic + '/ConceptMap/' + self.user_source.mnemonic + '/'
@@ -132,7 +138,7 @@ class ConceptMapTest(OCLTestCase):
         self.assertEqual(resource2['version'], 'v1')
 
     def test_find_by_title(self):
-        response = self.client.get('/fhir/ConceptMap/?title=source name')
+        response = self.client.get('/fhir/ConceptMap/?title:exact=source name')  # title alone is 'starts with'
 
         self.assertEqual(len(response.data['entry']), 1)
         resource = response.data['entry'][0]['resource']
@@ -145,7 +151,10 @@ class ConceptMapTest(OCLTestCase):
     def test_private_can_list(self):
         response = self.client.get('/fhir/ConceptMap/', HTTP_AUTHORIZATION='Token ' + self.user_token)
 
-        self.assertEqual(len(response.data['entry']), 3)
+        self.assertEqual(len(response.data['entry']), 2)  # public only at the global base
+        response = self.client.get(
+            f'/users/{self.user.mnemonic}/ConceptMap/', HTTP_AUTHORIZATION='Token ' + self.user_token)
+        self.assertEqual(len(response.data['entry']), 1)
 
     def test_get_concept_map(self):
         response = self.client.get(f'/orgs/{self.org.mnemonic}/ConceptMap/{self.org_source.mnemonic}/')

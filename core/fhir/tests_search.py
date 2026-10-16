@@ -1,19 +1,27 @@
 """
-FHIR search and read of CodeSystem, ValueSet and ConceptMap (SVCM ITI-95, ITI-96 and ITI-100): what a base shows.
-OpenConceptLab/ocl_online#451.
+core.fhir.search: FHIR search and read of CodeSystem, ValueSet and ConceptMap (SVCM ITI-95, ITI-96 and ITI-100) at the
+global base /fhir/ and at owner bases. Released versions only, never HEAD; public ones at the global base whoever asks;
+an opaque id per released version at the global base, the mnemonic at an owner base; SVCM's search parameters with
+:exact and :contains; _count, paging, the real total and a fullUrl on every entry; a CodeSystem read is complete up to
+the concept limit, else not-present. OpenConceptLab/ocl_online#451.
 """
 from datetime import datetime, timezone as dt_timezone
+from urllib.parse import parse_qs, urlsplit
 
 from django.contrib.auth.models import AnonymousUser
+from mock import patch
 from rest_framework.test import APIClient
 
 from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE, HEAD
 from core.common.tests import OCLTestCase
+from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory, ConceptDescriptionFactory
 from core.fhir import resolve as fhir_resolve
 from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
+from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
+from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
@@ -148,6 +156,403 @@ class SearchCorpusMixin:
         self.assertEqual(issue['code'], code)
         self.assertIn({'system': TX_ISSUE_TYPE_SYSTEM, 'code': tx_issue_type}, issue['details']['coding'])
         return issue
+
+
+class CodeSystemSearchTest(SearchCorpusMixin, OCLTestCase):  # pylint: disable=too-many-public-methods
+    PUBLIC_RELEASES = sorted([
+        f'{CIEL}|v1', f'{CIEL}|v2', f'{ICD10}|ICD102019', f'{ICD10}|v1.0', 'https://example.org/my-codes|v1'])
+
+    def test_global_search_lists_every_released_public_version_with_an_opaque_id(self):
+        bundle = self.search('CodeSystem')
+
+        # never HEAD, an unreleased version, a repository with nothing (or only a retired release) released, or a
+        # private one; a retired release of a repository with a live one is listed
+        self.assertEqual(self.keys(bundle), self.PUBLIC_RELEASES)
+        self.assertEqual(bundle['total'], 5)
+        versions = [self.ciel_v1, self.ciel_v2, self.who_icd_2019, self.sehat_icd_v1, self.jdoe_codes_v1]
+        self.assertEqual(self.ids(bundle), sorted(str(version.id) for version in versions))
+        for entry in bundle['entry']:
+            self.assertEqual(entry['fullUrl'], f"http://testserver/fhir/CodeSystem/{entry['resource']['id']}")
+            self.assertEqual(entry['search'], {'mode': 'match'})
+        self.assertEqual(bundle['link'][0]['relation'], 'self')
+
+    def test_global_base_is_public_only_whoever_asks(self):
+        for user in (self.member, self.admin, self.jdoe):
+            self.assertEqual(self.keys(self.search('CodeSystem', user=user)), self.PUBLIC_RELEASES, user.username)
+
+    def test_url_matches_the_version_canonical_or_its_repository_canonical(self):
+        bundle = self.search('CodeSystem', url=ICD10)
+
+        self.assertEqual(self.keys(bundle), [f'{ICD10}|ICD102019', f'{ICD10}|v1.0'])
+        who = next(entry['resource'] for entry in bundle['entry'] if entry['resource']['version'] == 'ICD102019')
+        self.assertEqual(who['url'], ICD10)  # the repository's canonical, as the version has none
+        self.assertEqual(self.keys(self.search('CodeSystem', system=ICD10)), self.keys(bundle))
+
+        bundle = self.search('CodeSystem', url=ICD10, version='ICD102019')
+        self.assertEqual((self.keys(bundle), bundle['total']), ([f'{ICD10}|ICD102019'], 1))
+        self.assertEqual(self.search('CodeSystem', url='http://example.org/unknown')['total'], 0)
+        self.assertNotIn('entry', self.search('CodeSystem', url='http://example.org/unknown'))
+
+    def test_id_is_the_opaque_id_at_the_global_base_and_the_mnemonic_at_an_owner_base(self):
+        bundle = self.search('CodeSystem', _id=str(self.sehat_icd_v1.id))
+        self.assertEqual(self.keys(bundle), [f'{ICD10}|v1.0'])
+        for missing in ('ICD-10', str(self.sehat_icd.id), str(self.sehat_icd_v2.id), 'ocl-no-such-id'):
+            self.assertEqual(self.search('CodeSystem', _id=missing)['total'], 0, missing)
+
+        bundle = self.search('CodeSystem', base='/orgs/CIEL', _id='CIEL')
+        self.assertEqual(self.keys(bundle), [f'{CIEL}|v1', f'{CIEL}|v2'])
+        self.assertEqual(self.ids(bundle), ['CIEL', 'CIEL'])
+        self.assertEqual(self.search('CodeSystem', base='/orgs/CIEL', _id=str(self.ciel_v2.id))['total'], 0)
+
+    def test_string_parameters_and_their_modifiers(self):
+        # no modifier: starts with, ignoring case
+        self.assertEqual(self.keys(self.search('CodeSystem', title='icd-10')), [f'{ICD10}|ICD102019', f'{ICD10}|v1.0'])
+        self.assertEqual(self.keys(self.search('CodeSystem', name='ciel')), [f'{CIEL}|v1', f'{CIEL}|v2'])
+        self.assertEqual(self.search('CodeSystem', title='WHO')['total'], 0)
+        # :exact is the whole value, case included
+        self.assertEqual(
+            self.keys(self.search('CodeSystem', **{'title:exact': 'ICD-10 WHO Edition'})), [f'{ICD10}|ICD102019'])
+        self.assertEqual(self.search('CodeSystem', **{'title:exact': 'icd-10 who edition'})['total'], 0)
+        self.assertEqual(self.search('CodeSystem', **{'title:exact': 'ICD-10'})['total'], 0)
+        # :contains anywhere, ignoring case
+        self.assertEqual(self.keys(self.search('CodeSystem', **{'title:contains': 'who'})), [f'{ICD10}|ICD102019'])
+        self.assertEqual(
+            self.keys(self.search('CodeSystem', **{'description:contains': 'CLINICAL'})), [f'{CIEL}|v1', f'{CIEL}|v2'])
+        self.assertEqual(
+            self.keys(self.search('CodeSystem', publisher='world health')), [f'{ICD10}|ICD102019'])
+        self.assertEqual(self.keys(self.search('CodeSystem', **{'name:exact': 'CIEL'})), [f'{CIEL}|v1', f'{CIEL}|v2'])
+
+    def test_a_comma_is_or_and_a_repeated_parameter_is_and(self):
+        self.assertEqual(
+            self.keys(self.search('CodeSystem', version='v1,v1.0')),
+            sorted([f'{CIEL}|v1', f'{ICD10}|v1.0', 'https://example.org/my-codes|v1']))
+        response = self.client.get('/fhir/CodeSystem/?name=ci&name=ICD')
+        self.assertEqual(response.data['total'], 0)
+        response = self.client.get('/fhir/CodeSystem/?name=ci&name=CIEL')
+        self.assertEqual(self.keys(response.data), [f'{CIEL}|v1', f'{CIEL}|v2'])
+        # an escaped comma is part of the value
+        Source.objects.filter(id=self.ciel_v2.id).update(full_name='Columbia, International')
+        self.assertEqual(self.keys(self.search('CodeSystem', title=r'Columbia\, Int')), [f'{CIEL}|v2'])
+
+    def test_status(self):
+        self.assertEqual(
+            self.keys(self.search('CodeSystem', status='active')),
+            sorted([f'{CIEL}|v2', f'{ICD10}|ICD102019', f'{ICD10}|v1.0', 'https://example.org/my-codes|v1']))
+        self.assertEqual(self.keys(self.search('CodeSystem', status='retired')), [f'{CIEL}|v1'])
+        self.assertEqual(self.search('CodeSystem', status='draft')['total'], 0)
+        self.assertEqual(self.search('CodeSystem', status='unknown')['total'], 0)
+        self.assertEqual(self.search('CodeSystem', status='retired,active')['total'], 5)
+
+    def test_identifier(self):
+        for token in ('urn:ietf:rfc:3986|urn:oid:2.16.840.1.113883.6.90', 'urn:oid:2.16.840.1.113883.6.90',
+                      'urn:ietf:rfc:3986|'):
+            self.assertEqual(self.keys(self.search('CodeSystem', identifier=token)), [f'{ICD10}|ICD102019'], token)
+        for token in ('urn:ietf:rfc:3986|urn:oid:1.2.3', 'http://example.org|urn:oid:2.16.840.1.113883.6.90'):
+            self.assertEqual(self.search('CodeSystem', identifier=token)['total'], 0, token)
+
+        # the OCL accession identifier every resource carries
+        bundle = self.search('CodeSystem', identifier='/orgs/sehatapp/CodeSystem/ICD-10/')
+        self.assertEqual(self.keys(bundle), [f'{ICD10}|v1.0'])
+        accession = bundle['entry'][0]['resource']['identifier'][0]
+        self.assertEqual(
+            self.keys(self.search('CodeSystem', identifier=f"{accession['system']}|{accession['value']}")),
+            [f'{ICD10}|v1.0'])
+        self.assertEqual(self.search('CodeSystem', identifier='/orgs/sehatapp/ValueSet/ICD-10/')['total'], 0)
+        self.assertEqual(
+            self.search('CodeSystem', identifier='/orgs/FHIR-Fixtures/CodeSystem/fixture-codes/')['total'], 0)
+
+    def test_last_updated_and_its_prefixes(self):
+        Source.objects.filter(id=self.ciel_v2.id).update(updated_at=at(2020))
+        Source.objects.filter(id=self.sehat_icd_v1.id).update(updated_at=at(2022))
+        pinned = {'url': CIEL, 'version': 'v2'}
+        for value, found in (('2020', True), ('eq2020-06', True), ('2020-06-15', True), ('2020-06-16', False),
+                             ('gt2019', True), ('gt2020', False), ('sa2019-12-31', True), ('ge2020-06-15', True),
+                             ('ge2020-06-16', False), ('lt2021', True), ('lt2020-06-15', False), ('eb2020-06-16', True),
+                             ('le2020-06-15', True), ('le2020-06-14', False), ('ne2020', False), ('ne2021', True),
+                             ('ge2020-06-15T12:00:00Z', True), ('gt2020-06-15T12:00:00Z', False),
+                             ('lt2020-06-15T13:00:00+01:00', False), ('le2020-06-15T13:00+01:00', True)):
+            self.assertEqual(self.search('CodeSystem', _lastUpdated=value, **pinned)['total'], int(found), value)
+
+        response = self.client.get('/fhir/CodeSystem/?_lastUpdated=ge2020&_lastUpdated=lt2021')
+        self.assertEqual(self.keys(response.data), [f'{CIEL}|v2'])
+        self.assertEqual(
+            self.keys(self.search('CodeSystem', _lastUpdated='2020,2022')), sorted([f'{CIEL}|v2', f'{ICD10}|v1.0']))
+
+    def test_code(self):
+        concept = ConceptFactory(parent=self.ciel_source, mnemonic='1427', sources=[self.ciel_v2])
+        self.assertEqual(self.keys(self.search('CodeSystem', code=concept.mnemonic)), [f'{CIEL}|v2'])
+        self.assertEqual(self.search('CodeSystem', code='no-such-code')['total'], 0)
+
+    def test_language(self):
+        Source.objects.filter(id=self.ciel_v2.id).update(default_locale='fr')
+        self.assertEqual(self.keys(self.search('CodeSystem', language='fr')), [f'{CIEL}|v2'])
+
+    def test_unsupported_parameters_and_values_are_400_outcomes(self):
+        for query in ('unsupported_parameter=1', 'q=CIEL', 'limit=10', 'name:missing=true', 'url:below=http://x',
+                      '_sort=name', 'reference=http://x', 'source-system=http://x'):
+            issue = self.assertOutcome(self.client.get(f'/fhir/CodeSystem/?{query}'), 400, 'not-supported',
+                                       'not-supported')
+            self.assertIn(query.split('=', maxsplit=1)[0].split(':')[0], issue['details']['text'], query)
+        for query in ('_count=-1', '_count=ten', '_lastUpdated=yesterday', '_lastUpdated=ap2020',
+                      '_lastUpdated=2020-13', 'page=0'):
+            self.assertOutcome(self.client.get(f'/fhir/CodeSystem/?{query}'), 400, 'invalid', 'invalid-data')
+        # the format parameters choose the response, they aren't search input
+        self.assertEqual(self.search('CodeSystem', _format='json', _pretty='true')['total'], 5)
+        self.assertEqual(self.search('CodeSystem', name='')['total'], 5)  # an empty value is no criterion
+
+    def test_count_paging_total_and_links(self):
+        bundle = self.search('CodeSystem', _count='2')
+        self.assertEqual((len(bundle['entry']), bundle['total']), (2, 5))
+        links = {link['relation']: link['url'] for link in bundle['link']}
+        self.assertEqual(set(links), {'self', 'next'})
+        query = parse_qs(urlsplit(links['next']).query)
+        self.assertEqual((query['page'], query['_count']), (['2'], ['2']))
+        self.assertTrue(links['next'].startswith('http://testserver/fhir/CodeSystem/?'))
+
+        page_2 = self.get(links['next']).data
+        self.assertEqual({link['relation'] for link in page_2['link']}, {'self', 'next', 'previous'})
+        page_3 = self.search('CodeSystem', _count='2', page='3')
+        self.assertEqual({link['relation'] for link in page_3['link']}, {'self', 'previous'})
+        seen = [entry['resource']['id'] for page in (bundle, page_2, page_3) for entry in page['entry']]
+        self.assertEqual(sorted(seen), self.ids(self.search('CodeSystem')))  # every version once, in a stable order
+
+        bundle = self.search('CodeSystem', _count='0')
+        self.assertEqual(bundle['total'], 5)
+        self.assertNotIn('entry', bundle)
+
+        with patch('core.fhir.search.MAX_COUNT', 3):
+            bundle = self.search('CodeSystem', _count='1000')
+            self.assertEqual((len(bundle['entry']), bundle['total']), (3, 5))
+            self.assertEqual(len(self.search('CodeSystem')['entry']), 3)  # the default is the maximum
+
+    def test_entries_are_summaries_marked_subsetted(self):
+        ConceptFactory(parent=self.ciel_source, sources=[self.ciel_v2])
+        for entry in self.search('CodeSystem')['entry']:
+            resource = entry['resource']
+            self.assertNotIn('concept', resource)
+            self.assertNotIn('count', resource)
+            self.assertEqual(resource['content'], 'complete')
+            self.assertIn(SUBSETTED, resource['meta']['tag'])
+            self.assertIn('lastUpdated', resource['meta'])
+
+        with patch('core.fhir.search.CONCEPT_LIMIT', 0):
+            contents = {entry['resource']['version']: entry['resource']['content']
+                        for entry in self.search('CodeSystem', url=CIEL)['entry']}
+        self.assertEqual(contents, {'v1': 'complete', 'v2': 'not-present'})
+
+    def test_owner_base_search(self):
+        bundle = self.search('CodeSystem', base='/orgs/CIEL')
+        self.assertEqual(self.keys(bundle), [f'{CIEL}|v1', f'{CIEL}|v2'])
+        for entry in bundle['entry']:
+            self.assertEqual(entry['resource']['id'], 'CIEL')
+            self.assertEqual(entry['fullUrl'], 'http://testserver/orgs/CIEL/CodeSystem/CIEL')
+
+        self.assertEqual(self.keys(self.search('CodeSystem', base='/users/jdoe')), ['https://example.org/my-codes|v1'])
+        self.assertEqual(self.search('CodeSystem', base='/orgs/nobody')['total'], 0)
+        self.assertEqual(self.search('CodeSystem', base='/orgs/misc')['total'], 0)
+
+        # a private owner's repositories: to its members and staff only
+        fixture_releases = [f'{FIXTURE}|1.0.0', f'{FIXTURE}|2.0.0']
+        for user, keys in ((None, []), (self.outsider, []), (self.member, fixture_releases),
+                           (self.admin, fixture_releases)):
+            self.assertEqual(
+                self.keys(self.search('CodeSystem', base='/orgs/FHIR-Fixtures', user=user)), keys, user)
+        bundle = self.search('CodeSystem', base='/orgs/FHIR-Fixtures', user=self.member, url=FIXTURE, version='1.0.0')
+        self.assertEqual(self.ids(bundle), ['fixture-codes'])
+
+    def test_no_query_per_entry(self):
+        def count_queries(expected, **params):
+            with self.assertNumQueries(expected):
+                return self.client.get('/fhir/CodeSystem/', params).data
+
+        # the count and the page, its summaries included (and the url's repositories)
+        one = count_queries(3, url=CIEL, version='v2')
+        every = count_queries(2)
+        self.assertEqual((one['total'], every['total']), (1, 5))
+        with self.assertNumQueries(3):  # + the owner
+            self.client.get('/orgs/CIEL/CodeSystem/')
+
+
+class ValueSetSearchTest(SearchCorpusMixin, OCLTestCase):
+    def test_global_search_and_the_repository_canonical(self):
+        bundle = self.search('ValueSet')
+
+        self.assertEqual(self.keys(bundle), [f'{ICD10_VS}|v1.0', f'{CIEL_VS}|v1'])
+        self.assertEqual(self.ids(bundle), sorted([str(self.icd_vs_v1.id), str(self.ciel_vs_v1.id)]))
+        self.assertEqual(self.keys(self.search('ValueSet', url=ICD10_VS)), [f'{ICD10_VS}|v1.0'])
+        for entry in bundle['entry']:
+            self.assertEqual(entry['fullUrl'], f"http://testserver/fhir/ValueSet/{entry['resource']['id']}")
+            self.assertNotIn('compose', entry['resource'])
+            self.assertIn(SUBSETTED, entry['resource']['meta']['tag'])
+
+    def test_reference_is_a_code_system_the_stored_expansion_draws_on(self):
+        self.assertEqual(self.keys(self.search('ValueSet', reference=ICD10)), [f'{ICD10_VS}|v1.0'])
+        self.assertEqual(self.keys(self.search('ValueSet', reference=CIEL)), [f'{CIEL_VS}|v1'])
+        self.assertEqual(self.search('ValueSet', reference='http://loinc.org')['total'], 0)
+
+    def test_owner_base(self):
+        bundle = self.search('ValueSet', base='/orgs/CIEL')
+        self.assertEqual((self.keys(bundle), self.ids(bundle)), ([f'{CIEL_VS}|v1'], ['ciel-set']))
+
+    def test_unsupported(self):
+        self.assertOutcome(self.client.get('/fhir/ValueSet/?system=http://x'), 400, 'not-supported', 'not-supported')
+
+    def test_no_query_per_entry(self):
+        with self.assertNumQueries(2):
+            self.client.get('/fhir/ValueSet/')
+
+
+class ConceptMapSearchTest(SearchCorpusMixin, OCLTestCase):
+    def setUp(self):
+        super().setUp()
+        icd_code = ConceptFactory(parent=self.sehat_icd, mnemonic='A00')
+        ciel_code = ConceptFactory(parent=self.ciel_source, mnemonic='1427')
+        MappingFactory(
+            parent=self.ciel_source, from_concept=ciel_code, to_concept=icd_code, from_source=self.ciel_source,
+            to_source=self.sehat_icd, from_concept_code='1427', to_concept_code='A00', sources=[self.ciel_v2])
+
+    def test_source_and_target(self):
+        everything = self.search('ConceptMap')
+        self.assertEqual(self.keys(everything), CodeSystemSearchTest.PUBLIC_RELEASES)
+        for entry in everything['entry']:
+            self.assertNotIn('group', entry['resource'])
+            self.assertEqual(entry['fullUrl'], f"http://testserver/fhir/ConceptMap/{entry['resource']['id']}")
+
+        for name in ('source-system', 'source-uri'):
+            self.assertEqual(self.keys(self.search('ConceptMap', **{name: CIEL})), [f'{CIEL}|v2'], name)
+            self.assertEqual(self.search('ConceptMap', **{name: ICD10})['total'], 0, name)
+        for name in ('target-system', 'target-uri'):
+            self.assertEqual(self.keys(self.search('ConceptMap', **{name: ICD10})), [f'{CIEL}|v2'], name)
+            self.assertEqual(self.search('ConceptMap', **{name: CIEL})['total'], 0, name)
+
+    def test_no_query_per_entry(self):
+        with self.assertNumQueries(3):  # the target's repositories, the count, the page
+            self.assertEqual(self.client.get('/fhir/ConceptMap/', {'target-system': ICD10}).data['total'], 1)
+
+
+class ReadTest(SearchCorpusMixin, OCLTestCase):
+    def read(self, path, user=None, **params):
+        response = self.get(path, user, **params)
+        self.assertEqual(response.status_code, 200, response.data)
+        return response.data
+
+    def assertNotFound(self, path, user=None, **params):  # pylint: disable=invalid-name
+        response = self.get(path, user, **params)
+        self.assertOutcome(response, 404, 'not-found', 'not-found')
+
+    def test_global_read_by_opaque_id(self):
+        for resource_type, version in (('CodeSystem', self.who_icd_2019), ('CodeSystem', self.ciel_v1),
+                                       ('ConceptMap', self.ciel_v2), ('ValueSet', self.icd_vs_v1)):
+            resource = self.read(f'/fhir/{resource_type}/{version.id}')
+            self.assertEqual(
+                (resource['resourceType'], resource['id'], resource['version']),
+                (resource_type, str(version.id), version.version))
+            self.assertEqual(self.read(f'/fhir/{resource_type}/{version.id}/')['id'], str(version.id))
+
+        self.assertEqual(self.read(f'/fhir/CodeSystem/{self.who_icd_2019.id}')['url'], ICD10)  # the repository's
+        self.assertEqual(self.read(f'/fhir/ValueSet/{self.icd_vs_v1.id}')['url'], ICD10_VS)
+        self.assertEqual(self.read(f'/fhir/CodeSystem/{self.ciel_v1.id}')['status'], 'retired')
+
+    def test_global_read_finds_only_what_global_search_lists(self):
+        for version in (self.who_icd, self.sehat_icd_v2, self.draft_v1, self.gone_v1, self.flagged, self.fixture_v1):
+            for user in (None, self.member, self.admin):
+                self.assertNotFound(f'/fhir/CodeSystem/{version.id}', user)
+        self.assertNotFound(f'/fhir/ValueSet/{self.ciel_vs_v2.id}')
+        for missing in ('CIEL', 'ICD-10', '0', f'0{self.ciel_v2.id}', '99999999', '12345678901234567890123'):
+            self.assertNotFound(f'/fhir/CodeSystem/{missing}')
+            self.assertNotFound(f'/fhir/ConceptMap/{missing}')
+
+    def test_owner_read_is_the_latest_release_or_the_version_named(self):
+        Source.objects.filter(id=self.ciel_v1.id).update(retired=False)
+        newest = source(self.ciel, 'CIEL', 'v3', canonical_url=CIEL)  # unreleased
+        resource = self.read('/orgs/CIEL/CodeSystem/CIEL/')
+        self.assertEqual((resource['id'], resource['version']), ('CIEL', 'v2'))
+        self.assertEqual(self.read('/orgs/CIEL/CodeSystem/CIEL', version='v1')['version'], 'v1')
+        self.assertEqual(self.read('/orgs/CIEL/ConceptMap/CIEL/')['version'], 'v2')
+        self.assertEqual(self.read('/orgs/sehatapp/ValueSet/icd10-all/')['url'], ICD10_VS)
+        self.assertEqual(self.read('/users/jdoe/CodeSystem/my-codes/')['version'], 'v1')
+        for version in (newest.version, HEAD, 'no-such-version'):
+            self.assertNotFound('/orgs/CIEL/CodeSystem/CIEL/', version=version)
+        for path in ('/orgs/misc/CodeSystem/draft/', '/orgs/misc/CodeSystem/gone/', '/orgs/misc/CodeSystem/flagged/',
+                     '/orgs/nobody/CodeSystem/CIEL/', '/orgs/WHO/CodeSystem/CIEL/', '/orgs/CIEL/ValueSet/CIEL/',
+                     '/orgs/CIEL/ConceptMap/nothing/'):
+            self.assertNotFound(path)
+
+    def test_a_retired_release_is_the_default_only_when_named(self):
+        self.assertEqual(self.read('/orgs/CIEL/CodeSystem/CIEL/')['version'], 'v2')
+        self.assertEqual(self.read('/orgs/CIEL/CodeSystem/CIEL/', version='v1')['status'], 'retired')
+
+    def test_private_owner_read(self):
+        for user in (self.member, self.admin):
+            resource = self.read('/orgs/FHIR-Fixtures/CodeSystem/fixture-codes/', user)
+            self.assertEqual((resource['id'], resource['version']), ('fixture-codes', '2.0.0'))
+        for user in (None, self.outsider):
+            self.assertNotFound('/orgs/FHIR-Fixtures/CodeSystem/fixture-codes/', user)
+
+    def test_code_system_content_is_complete_up_to_the_limit(self):
+        names = [ConceptNameFactory.build(name='Malaria', locale='en', locale_preferred=True),
+                 ConceptNameFactory.build(name='Paludisme', locale='fr')]
+        malaria = ConceptFactory(parent=self.ciel_source, mnemonic='1427', names=names, sources=[self.ciel_v2],
+                                 descriptions=[ConceptDescriptionFactory.build(name='A mosquito-borne disease')])
+        retired = ConceptFactory(parent=self.ciel_source, mnemonic='9999', retired=True, sources=[self.ciel_v2])
+        ConceptFactory(parent=self.ciel_source, mnemonic='gone', is_active=False, sources=[self.ciel_v2])
+
+        resource = self.read(f'/fhir/CodeSystem/{self.ciel_v2.id}')
+
+        self.assertEqual((resource['content'], resource['count']), ('complete', 2))
+        concepts = {concept['code']: concept for concept in resource['concept']}
+        self.assertEqual(set(concepts), {malaria.mnemonic, retired.mnemonic})
+        self.assertEqual(concepts['1427']['display'], 'Malaria')
+        self.assertEqual(concepts['1427']['definition'], 'A mosquito-borne disease')
+        self.assertEqual(
+            sorted((name['language'], name['value']) for name in concepts['1427']['designation']),
+            [('en', 'Malaria'), ('fr', 'Paludisme')])
+        self.assertIn({'code': 'inactive', 'valueBoolean': True}, concepts['9999']['property'])
+        self.assertNotIn('tag', resource['meta'])
+
+        # above the limit the count is the version's concept links, an index-only count: a deleted concept still
+        # linked would count (production has none on a released version)
+        with patch('core.fhir.search.CONCEPT_LIMIT', 1):
+            resource = self.read(f'/fhir/CodeSystem/{self.ciel_v2.id}')
+        self.assertEqual((resource['content'], resource['count']), ('not-present', 3))
+        self.assertNotIn('concept', resource)
+
+    def test_concept_map_read(self):
+        icd_code = ConceptFactory(parent=self.sehat_icd, mnemonic='A00')
+        ciel_code = ConceptFactory(parent=self.ciel_source, mnemonic='1427')
+        MappingFactory(
+            parent=self.ciel_source, from_concept=ciel_code, to_concept=icd_code, from_source=self.ciel_source,
+            to_source=self.sehat_icd, from_concept_code='1427', to_concept_code='A00', sources=[self.ciel_v2])
+
+        resource = self.read(f'/fhir/ConceptMap/{self.ciel_v2.id}')
+
+        self.assertEqual(resource['group'][0]['source'], CIEL)
+        self.assertEqual(resource['group'][0]['target'], ICD10)
+        self.assertEqual(resource['group'][0]['element'][0]['code'], '1427')
+
+    def test_reads_run_no_query_per_concept_or_mapping(self):
+        def read_queries(path):
+            with self.assertNumQueries(5):  # the version, its concept count, the concepts, their names, descriptions
+                self.read(path)
+
+        ConceptFactory(parent=self.ciel_source, sources=[self.ciel_v2], names=1, descriptions=1)
+        read_queries(f'/fhir/CodeSystem/{self.ciel_v2.id}')
+        for _ in range(3):
+            ConceptFactory(parent=self.ciel_source, sources=[self.ciel_v2], names=2, descriptions=1)
+        read_queries(f'/fhir/CodeSystem/{self.ciel_v2.id}')
+        read_queries('/orgs/CIEL/CodeSystem/CIEL/')
+
+        for _ in range(3):
+            MappingFactory(parent=self.ciel_source, from_source=self.ciel_source, to_source=self.sehat_icd,
+                           sources=[self.ciel_v2])
+        with self.assertNumQueries(2):  # the version, its mappings
+            self.read(f'/fhir/ConceptMap/{self.ciel_v2.id}')
+
+    def test_writes_keep_the_owner_check(self):
+        client = APIClient()
+        client.force_authenticate(self.admin)
+        response = client.put(f'/fhir/CodeSystem/{self.ciel_v2.id}/', {}, format='json')
+        self.assertEqual(response.status_code, 404)
 
 
 class VisibleVersionsTest(SearchCorpusMixin, OCLTestCase):

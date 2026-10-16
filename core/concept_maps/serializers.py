@@ -9,6 +9,7 @@ from core.common.fhir_helpers import delete_empty_fields
 from core.concept_maps.constants import RESOURCE_TYPE
 from core.common.constants import HEAD
 from core.common.serializers import StatusField, IdentifierSerializer
+from core.fhir.search import CanonicalUrlField, FhirRepositorySerializerMixin
 from core.mappings.constants import SAME_AS
 from core.mappings.models import Mapping
 from core.mappings.serializers import MappingDetailSerializer
@@ -44,8 +45,8 @@ class ConceptMapGroupField(serializers.Field):
     def to_representation(self, value):
         # limit to 1000 mappings by default
         # TODO: support graphQL to go around the limit
-        limit = self.get_limit()
-        mappings = value.get_mappings_queryset().filter(retired=False).order_by('id')[:limit]
+        mappings = value.get_mappings_queryset().filter(retired=False).select_related(
+            'from_source', 'to_source').order_by('id')[:1000]
         groups = {}
         for mapping in mappings:
             key = (mapping.from_source_url or '') + (mapping.to_source_url or '')
@@ -91,18 +92,12 @@ class ConceptMapGroupField(serializers.Field):
             })
         return [*groups.values()]
 
-    def get_limit(self):
-        if self.context.get('has_many', False):
-            limit = 25
-        else:
-            limit = 1000
-        return limit
 
-
-class ConceptMapDetailSerializer(serializers.ModelSerializer):
+class ConceptMapDetailSerializer(FhirRepositorySerializerMixin, serializers.ModelSerializer):
+    content_field = 'group'
     resourceType = SerializerMethodField(method_name='get_resource_type')
     id = CharField(source='mnemonic')
-    url = CharField(source='canonical_url', required=False)
+    url = CanonicalUrlField(source='canonical_url', required=False)
     title = CharField(source='full_name', required=False)
     status = StatusField(source='*')
     language = CharField(source='default_locale', required=False)
@@ -117,14 +112,6 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
                   'version', 'identifier', 'contact', 'jurisdiction', 'name', 'description', 'publisher', 'purpose',
                   'copyright', 'date', 'experimental', 'group')
 
-    def __new__(cls, *args, **kwargs):
-        if kwargs.get('many', False):
-            context = kwargs.get('context', {})
-            context.update({'has_many': True})
-            kwargs.update({'context': context})
-
-        return super().__new__(cls, *args, **kwargs)
-
     @staticmethod
     def get_resource_type(_):
         return RESOURCE_TYPE
@@ -138,6 +125,7 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
             rep = super().to_representation(instance)
             delete_empty_fields(rep)
             IdentifierSerializer.include_ocl_identifier(instance.uri, RESOURCE_TYPE, rep)
+            self.with_fhir_view(instance, rep)
         except (Exception, ):
             msg = f'Failed to represent "{instance.uri}" as {RESOURCE_TYPE}'
             logger.exception(msg)
