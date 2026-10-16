@@ -1,18 +1,14 @@
 import logging
 
 from django.http import Http404
-from rest_framework.permissions import AllowAny
-from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from core.common.constants import HEAD
 from core.common.permissions import HasOwnership
-from core.common.throttling import ThrottleUtil
 from core.concept_maps.serializers import ConceptMapDetailSerializer
 from core.fhir.adapters import r4
-from core.fhir.base import FhirViewMixin
-from core.fhir.ops.translate import too_costly, translate
-from core.fhir.search import FhirSearchMixin, FhirReadMixin, within_search_timeout
+from core.fhir.base import FhirViewMixin, FhirOperationView
+from core.fhir.ops.translate import translate
+from core.fhir.search import FhirSearchMixin, FhirReadMixin
 from core.sources.views import SourceListView, SourceRetrieveUpdateDestroyView
 
 logger = logging.getLogger('oclapi')
@@ -61,17 +57,7 @@ class ConceptMapRetrieveUpdateView(FhirViewMixin, FhirReadMixin, SourceRetrieveU
         return ConceptMapDetailSerializer(obj, context=self.get_serializer_context())
 
 
-class ConceptMapTranslateView(FhirViewMixin, APIView):
+class ConceptMapTranslateView(FhirOperationView):
     """ConceptMap/$translate, GET and POST, at the global base and at owner bases: core.fhir.ops.translate, in R4."""
-    permission_classes = (AllowAny,)  # a read: what it shows the caller is core.fhir.resolve's rule
-
-    def get_throttles(self):
-        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
-
-    def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        """The answer, its statements bounded as a search's are (a cancelled one is too costly)."""
-        return Response(within_search_timeout(
-            lambda: r4.translate_parameters(translate(self.get_fhir_parameters(), self.kwargs, request.user)),
-            too_costly=too_costly))
-
-    post = get
+    operation = staticmethod(translate)
+    adapter = staticmethod(r4.translate_parameters)

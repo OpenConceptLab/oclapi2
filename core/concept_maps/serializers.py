@@ -10,7 +10,8 @@ from core.concept_maps.constants import RESOURCE_TYPE, RELATIONSHIP_MAP_TYPES
 from core.common.constants import HEAD
 from core.common.serializers import StatusField, IdentifierSerializer
 from core.fhir.adapters import r4
-from core.fhir.ops.translate import fhir_code, relationship, side_system, with_side
+from core.fhir.ops.concepts import fhir_code
+from core.fhir.ops.translate import relationship, side_system, with_side
 from core.fhir.resolve import namespace_of
 from core.fhir.search import CanonicalUrlField, FhirRepositorySerializerMixin
 from core.mappings.models import Mapping

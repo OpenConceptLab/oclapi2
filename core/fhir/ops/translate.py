@@ -30,13 +30,12 @@ types as R5-shaped relationships. core.fhir.adapters.r4 writes the answer as an 
   `conceptMap` (an inline map) and `dependency` aren't supported.
 - Cost: a fixed number of queries whatever the number of mappings (resolution, the sources the systems name, the ids
   of the release's mappings of the code, then those mappings, with whether the caller is shown their sources); at
-  most MATCH_LIMIT matches. The view bounds the statements as a search's are (too long is too costly, a 422).
+  most MATCH_LIMIT matches. Its statements are bounded as a search's are (too long is too costly, a 422).
 """
 import re
 from collections import namedtuple
 from functools import cached_property, reduce
 from operator import or_
-from urllib.parse import quote, unquote
 
 from django.core.exceptions import ValidationError
 from django.db.models import Case, Exists, F, OuterRef, Q, When
@@ -47,7 +46,9 @@ from core.common.serializers import IdentifierSerializer
 from core.concept_maps.constants import (
     MAP_TYPE_RELATIONSHIPS, NOT_RELATED_TO, RELATED_TO, RESOURCE_TYPE, REVERSED_RELATIONSHIPS)
 from core.fhir import outcomes
+from core.fhir.ops.concepts import fhir_code, stored_codes, text
 from core.fhir.resolve import UnresolvedError, namespace_of, resolve, viewable_rows
+from core.fhir.search import within_search_timeout
 from core.mappings.models import Mapping
 from core.sources.models import Source
 
@@ -90,16 +91,6 @@ def side_system(canonical, url, uri=None):
         return IdentifierSerializer.convert_ocl_uri_to_fhir_url(url, RESOURCE_TYPE)
     except ValidationError:  # an OCL URL too short to name a repository
         return url
-
-
-def fhir_code(code):
-    """A code as FHIR carries it: OCL stores one with reserved characters percent-encoded (ICD-11's ND53.Y&XK70)."""
-    return unquote(code) if code and '%' in code else code
-
-
-def stored_codes(code):
-    """The forms a code may be stored in: as it is, and percent-encoded as OCL encodes reserved characters."""
-    return list(dict.fromkeys([code, quote(code, safe=''), quote(code)]))
 
 
 def repository_paths(system, kinds=('sources',)):
@@ -183,15 +174,11 @@ def with_side(queryset, side, namespace, user):
         then=F(f'{side}_source__canonical_url')), default=None)})
 
 
-def text(parameters, name, required=False):
-    """A parameter that is text (a string, uri or code), or None; anything else is a 400 naming it."""
-    value = parameters.get(name)
-    if value is None or value == '':
-        if required:
-            raise outcomes.InvalidError(f"$translate needs '{name}' with the code it translates.", expression=name)
-        return None
-    if not isinstance(value, str):
-        raise outcomes.InvalidError(f"'{name}' must be text.", expression=name)
+def required_text(parameters, name):
+    """A text parameter the code is given with (code, system); absent or empty, a 400 naming it."""
+    value = text(parameters, name)
+    if value is None:
+        raise outcomes.InvalidError(f"$translate needs '{name}' with the code it translates.", expression=name)
     return value
 
 
@@ -231,8 +218,8 @@ def read_request(parameters):
             raise outcomes.InvalidError("'codeableConcept' must hold a coding.", expression='codeableConcept')
         coding = coding_of(codings[0], 'codeableConcept')
     elif 'code' in parameters:
-        code = text(parameters, 'code', required=True)
-        system, _, piped = text(parameters, 'system', required=True).partition('|')
+        code = required_text(parameters, 'code')
+        system, _, piped = required_text(parameters, 'system').partition('|')
         coding = Coding(system, code, text(parameters, 'version') or piped or None)
     else:
         raise outcomes.InvalidError('$translate needs the code it translates: code and system, coding, or '
@@ -391,6 +378,9 @@ class Translation:
         return list(matches.values())[:MATCH_LIMIT], len(ids) > MATCH_LIMIT
 
 
-def translate(parameters, kwargs, user):
-    """A $translate's answer (Translation.answer) for its FhirParameters, at the base `kwargs` names, for `user`."""
-    return Translation(parameters, kwargs, user).answer()
+def translate(parameters, kwargs, user, _instance_id=None):
+    """
+    A $translate's answer (Translation.answer) for its FhirParameters, at the base `kwargs` names, for `user`, its
+    statements bounded as a search's are (a cancelled one is too costly). It has no instance level.
+    """
+    return within_search_timeout(lambda: Translation(parameters, kwargs, user).answer(), too_costly=too_costly)
