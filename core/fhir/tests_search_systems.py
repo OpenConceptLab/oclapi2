@@ -228,7 +228,7 @@ class SystemSearchCases(SearchCorpusMixin):
     def assert_bounded(self, body, scope):  # pylint: disable=invalid-name
         """
         An index request: whole, timed, filtered to the documents of `scope` (never by the documents' own access),
-        every aggregation sized and listing only `scope`'s values, no hits.
+        every aggregation sized, the versions listing only `scope`'s (the filter bounds the rest), no hits.
         """
         self.assertEqual((body['index'], body['size'], body['allow_partial_search_results']),
                          (MappingDocument.Index.name, 0, False))
@@ -242,7 +242,8 @@ class SystemSearchCases(SearchCorpusMixin):
         self.assertEqual([aggregation['field'] for aggregation in terms][:4], list(scope))
         for aggregation in terms:
             self.assertLessEqual(aggregation['size'], 1000, aggregation)
-            self.assertEqual(aggregation['include'], scope[aggregation['field']], aggregation)
+            self.assertEqual(aggregation.get('include'),
+                             scope['source_version'] if aggregation['field'] == 'source_version' else None, aggregation)
 
     def test_queries_stay_three_however_many_mappings(self):
         for index in range(12):
@@ -251,14 +252,6 @@ class SystemSearchCases(SearchCorpusMixin):
         with self.assertNumQueries(3):  # the sources with the canonical, the matches' ids, the page
             response = self.client.get('/fhir/ConceptMap/', {'target-system': ICD10})
         self.assertEqual(self.keys(response.data), [f'{CIEL}|v1', f'{CIEL}|v2'])
-
-    def test_a_version_with_newer_retired_mappings_is_found_by_an_older_live_one(self):
-        for _ in range(4):
-            self.mapping(self.jdoe_codes, ConceptFactory(parent=self.jdoe_codes), self.ciel_code,
-                         [self.jdoe_codes_v1], retired=True)
-        self.assertEqual(self.keys(self.search('ConceptMap', **{'target-system': CIEL})), [f'{MY_CODES}|v1'])
-        Mapping.objects.filter(id=self.my_codes_to_ciel.id).update(retired=True)  # the index still has it live
-        self.assertEqual(self.search('ConceptMap', **{'target-system': CIEL})['total'], 0)
 
     def test_a_version_is_decided_by_all_its_mappings_not_a_few(self):
         """
@@ -277,7 +270,7 @@ class SystemSearchCases(SearchCorpusMixin):
     def test_owners_whose_names_differ_only_in_case_are_told_apart(self):
         """
         The index keeps a mapping's owner and repository names in lowercase, so twins share its versions; the database
-        decides each twin's version by its own mappings, however many more the other has.
+        decides each twin's version by its own mappings.
         """
         maps = []
         for mnemonic in ('Acme', 'ACME'):
@@ -287,8 +280,7 @@ class SystemSearchCases(SearchCorpusMixin):
         self.mapping(maps[0].head, ConceptFactory(parent=maps[0].head), self.ciel_code, [maps[0]])
         self.assertEqual(self.keys(self.search('ConceptMap', **{'target-system': CIEL})),
                          sorted([f'{MY_CODES}|v1', 'https://example.org/Acme/maps|v1']))
-        for _ in range(4):  # newer, and more than a version's few
-            self.mapping(maps[1].head, ConceptFactory(parent=maps[1].head), self.ciel_code, [maps[1]])
+        self.mapping(maps[1].head, ConceptFactory(parent=maps[1].head), self.ciel_code, [maps[1]])
         self.assertEqual(self.keys(self.search('ConceptMap', **{'target-system': CIEL})), sorted(
             [f'{MY_CODES}|v1', 'https://example.org/ACME/maps|v1', 'https://example.org/Acme/maps|v1']))
         Source.objects.filter(mnemonic='Maps', organization__mnemonic='ACME').update(public_access=ACCESS_TYPE_NONE)

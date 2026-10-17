@@ -66,15 +66,21 @@ def side_query(side, repositories):
         'minimum_should_match': 1}}
 
 
-def terms(field, size, scope, aggs=None):
-    """A terms aggregation listing only the values of `scope`, before its size is counted."""
-    return {'terms': {'field': field, 'size': size, 'include': scope[field]}, **({'aggs': aggs} if aggs else {})}
+def terms(field, size, aggs=None, include=None):
+    """A terms aggregation of `field`, listing only the values of `include` (if any) before its size is counted."""
+    return {'terms': {'field': field, 'size': size, **({'include': include} if include else {})},
+            **({'aggs': aggs} if aggs else {})}
 
 
 def by_version(scope):
-    """Owner type, owner, repository and version (HEAD included), each among `scope`'s."""
-    return {'owner_type': terms('owner_type', OWNER_TYPES, scope, {'owner': terms('owner', MAX_BUCKETS, scope, {
-        'source': terms('source', MAX_BUCKETS, scope, {'version': terms('source_version', MAX_BUCKETS, scope)})})})}
+    """
+    Owner type, owner, repository and version (HEAD included). The request's filter keeps only documents whose owner
+    type, owner and repository are among `scope`'s, and those are single-valued, so only the versions (a document
+    lists each one holding it) are cut to `scope`'s.
+    """
+    return {'owner_type': terms('owner_type', OWNER_TYPES, {'owner': terms('owner', MAX_BUCKETS, {
+        'source': terms('source', MAX_BUCKETS, {
+            'version': terms('source_version', MAX_BUCKETS, include=scope['source_version'])})})})}
 
 
 def versions_of(aggregation, too_costly):
