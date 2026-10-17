@@ -1,18 +1,14 @@
 import logging
 
-from django.core.exceptions import ValidationError
-from rest_framework import status
-from rest_framework.response import Response
-
-from core.collections.views import CollectionListView, CollectionRetrieveUpdateDestroyView, \
-    CollectionVersionExpansionsView
+from core.collections.views import CollectionListView, CollectionRetrieveUpdateDestroyView
 from core.common.constants import HEAD
 from core.fhir.adapters import r4
 from core.fhir.base import FhirViewMixin, FhirOperationView
+from core.fhir.ops.expand import expand
 from core.fhir.ops.validate_code import validate_value_set
+from core.fhir.resolve import namespace_of
 from core.fhir.search import FhirSearchMixin, FhirReadMixin
-from core.value_sets.serializers import ValueSetDetailSerializer, \
-    ValueSetExpansionParametersSerializer, ValueSetExpansionSerializer
+from core.value_sets.serializers import ValueSetDetailSerializer, ValueSetExpansionSerializer
 
 logger = logging.getLogger('oclapi')
 
@@ -53,44 +49,13 @@ class ValueSetRetrieveUpdateView(FhirViewMixin, FhirReadMixin, CollectionRetriev
         return ValueSetDetailSerializer(obj)
 
 
-class ValueSetExpandView(FhirViewMixin, CollectionVersionExpansionsView):
-    sync = True
+class ValueSetExpandView(FhirOperationView):
+    """ValueSet/$expand and ValueSet/{id}/$expand: core.fhir.ops.expand. A POST reads as a GET does."""
+    instance = 'collection'
+    operation = staticmethod(expand)
 
-    def get_serializer_class(self):
-        if self.request.method == 'POST':
-            return ValueSetExpansionParametersSerializer
-
-        return ValueSetExpansionSerializer
-
-    def get_response_serializer_class(self):
-        return ValueSetExpansionSerializer
-
-    def get_filter_params(self, default_version_to_head=True):
-        return super().get_filter_params(False)
-
-    def get_base_queryset(self):
-        queryset = super().get_base_queryset()
-        queryset = queryset.exclude(version=HEAD).filter(is_latest_version=True)[:1]
-        return queryset
-
-    def get_queryset(self):
-        qs = super().get_queryset()
-
-        if self.request.method == 'GET':
-            parameters = ValueSetExpansionParametersSerializer.parse_query_params(self.request.query_params)
-            if not parameters.is_valid():
-                raise ValidationError(message=parameters.errors)
-
-            params = parameters.validated_data
-            params = params.get('parameters', {})
-            qs = qs.filter(parameters=params if params else {}).order_by('-id')
-
-        return qs
-
-    def get(self, request, *args, **kwargs):
-        instance = self.get_queryset().first()
-        if instance:
-            serializer = self.get_serializer(instance)
-            return Response(serializer.data)
-
-        return Response(status=status.HTTP_404_NOT_FOUND)
+    def adapter(self, answer):
+        """The answer as an R4 ValueSet: the value set version as a read shows it, with the expansion."""
+        resource = ValueSetExpansionSerializer(
+            answer['value_set'], context={'opaque_ids': namespace_of(self.kwargs) is None}).data
+        return r4.expansion_value_set(resource, answer)

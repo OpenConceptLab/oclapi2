@@ -161,21 +161,39 @@ def system_q(field, system):
     return Q(**{f'{field}__canonical_url': system})
 
 
+def named_by(system, shown):
+    """
+    (Q for concepts, Q for their concept-source links) the system names, as a read names a code system version: by the
+    version's own canonical URL, else its repository's (HEAD's); an OCL path names every version of its repository.
+    So a concept is the system's when its repository is, or has a version the caller is shown (`shown`) with that
+    canonical URL of its own; and only the versions the system names are answered (as $expand reports a member).
+    The repositories are found among sources alone, so the concepts are still read by their code first.
+    """
+    if to_ocl_path(system).startswith('/'):
+        return system_q('parent', system), Q()
+    renamed = shown.filter(canonical_url=system, mnemonic=OuterRef('parent__mnemonic')).filter(
+        Q(organization_id=OuterRef('parent__organization_id')) | Q(user_id=OuterRef('parent__user_id')))
+    inherited = Q(source__canonical_url__isnull=True) | Q(source__canonical_url='')
+    return system_q('parent', system) | Exists(renamed), Q(source__canonical_url=system) | (
+        inherited & Q(concept__parent__canonical_url=system))
+
+
 def member(value_set, coding, namespace, user):
     """
     (the concept, the version of its code system) of the code in the value set version's default expansion, or None:
     a concept with the code (not deleted), of the system (in systemVersion, if named), in a code system version the
-    caller is shown (not deleted), released or not: the expansion defines the value set. The version answered is a
-    release the caller is shown that holds the concept: the one the expansion pins (explicit), else the one it
-    evaluated, else the newest; None without one, never HEAD or an unreleased version.
+    caller is shown (not deleted), released or not, that the system names (named_by): the expansion defines the value
+    set. The version answered is a release the caller is shown that holds the concept: the one the expansion pins
+    (explicit), else the one it evaluated, else the newest; None without one, never HEAD or an unreleased version.
     The code's concepts are read first, by their code and only in code systems the caller is shown (so what hidden ones
     hold costs nothing), then looked for in the expansion by its (expansion, concept) index, so the cost doesn't grow
     with the size of the value set.
     """
     if not value_set.expansion_uri:
         return None
+    concepts_named, versions_named = named_by(coding.system, viewable_rows(Source, namespace, user))
     concept_ids = list(Concept.objects.filter(
-        code_q('mnemonic', coding.code), system_q('parent', coding.system),
+        code_q('mnemonic', coding.code), concepts_named,
         Exists(viewable_rows(Source, namespace, user).filter(id=OuterRef('parent_id'))), is_active=True).values_list(
         'id', flat=True))
     if concept_ids:
@@ -184,8 +202,8 @@ def member(value_set, coding, namespace, user):
     if not concept_ids:
         return None
     rows = Concept.sources.through.objects.filter(
-        Exists(viewable_rows(Source, namespace, user).filter(id=OuterRef('source_id'))), concept_id__in=concept_ids,
-        source__is_active=True)
+        Exists(viewable_rows(Source, namespace, user).filter(id=OuterRef('source_id'))), versions_named,
+        concept_id__in=concept_ids, source__is_active=True)
     if coding.version:
         rows = rows.filter(source__version=coding.version)
     def pinned(versions):
