@@ -468,6 +468,50 @@ class SystemSearchCases(SearchCorpusMixin):
             Source.objects.filter(mnemonic=f'{name}-map', version__startswith='private-').delete()
             self.assertEqual(with_them, self.answers(requests))
 
+    def held_by_a_hidden_version(self, version, lagging, **kwargs):
+        """
+        A public ConceptMap (HEAD and a public v1) and the system it maps into by one older mapping that only its
+        version `version` holds (HEAD no longer does): (the system, that version, the mapping). With `lagging`,
+        v1's own mapping to the system has no documents yet.
+        """
+        name = f'target-{uuid.uuid4().hex[:8]}'  # a system no other test's documents map to
+        target = source(self.misc, name, canonical_url=f'https://example.org/{name}')
+        to_code = ConceptFactory(parent=target)
+        maps = source(self.misc, f'{name}-map', canonical_url=f'https://example.org/{name}-map')
+        release = source(self.misc, maps.mnemonic, 'v1', released=True, canonical_url=maps.canonical_url)
+        code = ConceptFactory(parent=maps)
+        if lagging:
+            own = self.mapping(maps, code, to_code, [release])
+            MappingDocument().update(Mapping.objects.filter(versioned_object_id=own.versioned_object_id),
+                                     action='delete')
+        hidden = source(self.misc, maps.mnemonic, version, canonical_url=maps.canonical_url, **kwargs)
+        held = self.mapping(maps, code, to_code, [hidden])
+        clones = Mapping.objects.filter(versioned_object_id=held.versioned_object_id).exclude(id=held.id)
+        MappingDocument().update(clones, action='delete')
+        clones.delete()
+        held.sources.remove(maps)
+        MappingDocument().update(held, refresh=True)
+        return target, hidden, held
+
+    def test_a_version_the_caller_is_not_shown_holding_a_mapping_leaves_no_trace(self):
+        """
+        A public ConceptMap whose only mapping into a system is held by a version the base doesn't show (a private
+        release, or an unreleased version) answers as without that version: the same bytes, statements and index
+        requests, at /fhir/ and the owner's base, also while v1's own mapping isn't indexed yet.
+        """
+        callers = [('anonymous', None), ('outsider', self.outsider)]
+        for version, kwargs in (('v2', {'released': True, 'public_access': ACCESS_TYPE_NONE}), ('v1.0', {})):
+            for lagging in (False, True):
+                with self.subTest(version=version, lagging=lagging):
+                    target, hidden, held = self.held_by_a_hidden_version(version, lagging, **kwargs)
+                    requests = [(base, {parameter: target.canonical_url}, callers) for base in ('/fhir', '/orgs/misc')
+                                for parameter in ('target-system', 'target-uri')]
+                    with_it = self.answers(requests)
+                    MappingDocument().update(Mapping.objects.filter(id=held.id), action='delete')
+                    Mapping.objects.filter(id=held.id).delete()
+                    Source.objects.filter(id=hidden.id).delete()
+                    self.assertEqual(with_it, self.answers(requests))
+
 
 class SystemSearchWithoutRegistryTest(SystemSearchCases, OCLTestCase):
     registry = False

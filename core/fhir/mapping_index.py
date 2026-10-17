@@ -125,11 +125,15 @@ def request(side, alternatives, scope, left, too_costly):
 
 
 def kept(found, shown):
-    """The repositories and versions of `found` that `shown` lists, HEAD with them; twins in lowercase share theirs."""
+    """
+    The repositories and versions of `found` that `shown` lists, HEAD with them; twins in lowercase share theirs. A
+    repository the index lists only by versions `shown` doesn't is left out.
+    """
     listed = {}
     for (owner_type, owner, mnemonic), versions in shown.items():
         listed.setdefault((owner_type, owner.lower(), mnemonic.lower()), {HEAD}).update(versions)
-    return {repository: versions & listed[repository] for repository, versions in found.items() if repository in listed}
+    return {repository: versions & listed[repository] for repository, versions in found.items()
+            if repository in listed and versions & listed[repository]}
 
 
 def holding(side, repositories, shown, deadline, too_costly):  # pylint: disable=too-many-arguments
