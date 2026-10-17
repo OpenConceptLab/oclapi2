@@ -114,16 +114,19 @@ class IdentifierSerializer(ReadSerializerMixin, Serializer):
 
     @staticmethod
     def convert_ocl_uri_to_fhir_url(uri, resource_type):
-        resource_type_uri = f"/{resource_type}/"
+        """
+        An OCL API relative URI (/{owner_type}/{owner_id}/{sources|collections}/{id}/...) as its repository's FHIR one,
+        /{owner_type}/{owner_id}/{resource_type}/{id}/: only the repository type's segment is renamed, so an owner or a
+        repository named sources or collections keeps its name. Any other URI is returned as it is.
+        """
         if uri and (uri.startswith('/orgs/') or uri.startswith('/users/')):
-            # Recognize OCL API relative URI
-            uri = uri.replace('/sources/', resource_type_uri).replace('/collections/', resource_type_uri)
-            uri = uri.strip('/')
-            parts = uri.split('/')
+            parts = uri.strip('/').split('/')
+            if len(parts) > 2 and parts[2] in ('sources', 'collections'):
+                parts[2] = resource_type
             if len(parts) < 4:
                 raise ValidationError(
                     'Identifier must be in a format: /{owner_type}/{owner_id}/{resourceType}/{resource_id}/, given: '
-                    + uri)
+                    + '/'.join(parts))
             uri = '/' + '/'.join(parts[:4]) + '/'
         return uri
 
