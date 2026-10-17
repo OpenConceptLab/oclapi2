@@ -11,6 +11,7 @@ from fhir.resources.R4B.codesystem import CodeSystem
 from fhir.resources.R4B.operationoutcome import OperationOutcome
 from django.utils import timezone
 from lxml import etree
+from rest_framework.response import Response
 from rest_framework.test import APIClient
 
 from core.code_systems.views import CodeSystemValidateCodeView
@@ -26,6 +27,7 @@ from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.url_registry.tests_resolution import set_registry_toggle
 from core.users.tests.factories import UserProfileFactory
+from core.value_sets.views import ValueSetExpandView
 
 FHIR = '{http://hl7.org/fhir}'
 SYSTEM = 'http://example.org/fhir/CodeSystem/proto'
@@ -321,7 +323,8 @@ class FhirProtocolTest(OCLTestCase):
             self.assert_fhir_answer(response, path)
 
     def test_an_error_returned_rather_than_raised_is_an_outcome(self):
-        response = self.client.get(f'/orgs/{self.org.mnemonic}/ValueSet/protovs/$expand?count=5')
+        with patch.object(ValueSetExpandView, 'get', new=lambda *args, **kwargs: Response(status=404)):
+            response = self.client.get(f'/orgs/{self.org.mnemonic}/ValueSet/protovs/$expand?count=5')
 
         self.assertEqual(response.status_code, 404)
         self.assert_fhir_answer(response)

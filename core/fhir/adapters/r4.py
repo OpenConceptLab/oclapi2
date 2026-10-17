@@ -168,3 +168,28 @@ def translate_parameters(answer):
             {'name': 'source', 'valueUri': match['source']},
         ]})
     return {'resourceType': 'Parameters', 'parameter': items}
+
+
+def expansion_value_set(resource, answer):
+    """
+    $expand's answer (core.fhir.ops.expand) as an R4 ValueSet: `resource`, the value set version as a read shows it
+    without its compose, with the expansion: the stored expansion's identifier and timestamp, total, offset, the inputs
+    echoed and each used-codesystem, then the page of members.
+    """
+    def present(items):
+        return {key: value for key, value in items if value not in (None, [])}
+
+    expansion = {
+        'identifier': answer['identifier'],
+        'timestamp': answer['timestamp'],
+        'total': answer['total'],
+        'offset': answer['offset'],
+        'parameter': [parameter(*item) for item in answer['parameters']] + [
+            parameter('used-codesystem', 'valueUri', system) for system in answer['used']],
+        'contains': [present((
+            ('system', member['system']), ('version', member['version']), ('code', member['code']),
+            ('display', member['display']), ('inactive', member['inactive']),
+            ('designation', [present(designation.items()) for designation in member['designations'] or []]),
+        )) for member in answer['contains']],
+    }
+    return {**resource, 'expansion': present(expansion.items())}
