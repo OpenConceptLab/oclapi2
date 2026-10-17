@@ -73,9 +73,13 @@ EVERYTHING = Q(pk__isnull=False)  # unlike Q(), it holds as an alternative too (
 # string parameters: the field each searches, and the lookup of each modifier (:exact is the field's own equality)
 STRING_FIELDS = {'name': 'name', 'title': 'full_name', 'description': 'description', 'publisher': 'publisher'}
 # the title a CodeSystem or ValueSet shows (TitleField): the full name, else the name when there is none (null, empty or
-# only whitespace)
-SHOWN_TITLE = Case(When(Q(full_name__isnull=True) | Q(full_name__regex=r'^\s*$'), then=F('name')),
-                   default=F('full_name'), output_field=TextField())
+# only Unicode whitespace as defined by str.strip())
+SHOWN_TITLE = Case(
+    When(Q(full_name__isnull=True) | Q(full_name__regex=(
+        '^[\t\n\v\f\r\x1c\x1d\x1e\x1f \x85\xa0\u1680'
+        '\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a'
+        '\u2028\u2029\u202f\u205f\u3000]*$')), then=F('name')),
+    default=F('full_name'), output_field=TextField())
 STRING_LOOKUPS = {'': IStartsWith, 'exact': None, 'contains': IContains}
 # the other parameters, by resource type: the Search method each one's values go to
 COMMON_PARAMETERS = {

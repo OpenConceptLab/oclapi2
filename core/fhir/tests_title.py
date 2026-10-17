@@ -14,14 +14,17 @@ class FhirTitleTest(SearchCorpusMixin, OCLTestCase):
         self.titles = OrganizationFactory(mnemonic='titles')
         for make, kind in ((source, 'cs'), (collection, 'vs')):
             for mnemonic, full_name, url in (('titled', 'The Full Name', TITLED), ('bare', '', BARE),
-                                              ('blank', ' \t ', BLANK)):
+                                              ('blank', ' \t ', BLANK), ('nbsp', '\u00a0', f'{BLANK}/nbsp'),
+                                              ('figure-space', '\u2007', f'{BLANK}/figure-space')):
                 make(self.titles, f'{kind}-{mnemonic}', released=True, canonical_url=f'{url}/{kind}',
                      full_name=full_name)
                 make(self.titles, f'{kind}-{mnemonic}', 'v1', released=True, canonical_url=f'{url}/{kind}',
                      full_name=full_name)
 
     def expected(self, kind):
-        return {f'{kind}-titled': 'The Full Name', f'{kind}-bare': f'{kind}-bare', f'{kind}-blank': f'{kind}-blank'}
+        return {
+            f'{kind}-titled': 'The Full Name', f'{kind}-bare': f'{kind}-bare', f'{kind}-blank': f'{kind}-blank',
+            f'{kind}-nbsp': f'{kind}-nbsp', f'{kind}-figure-space': f'{kind}-figure-space'}
 
     def test_search_entries_and_reads_at_both_bases(self):
         for resource_type, kind in (('CodeSystem', 'cs'), ('ValueSet', 'vs')):
@@ -57,6 +60,10 @@ class FhirTitleTest(SearchCorpusMixin, OCLTestCase):
                 check(['titled'], 'title', 'the full')
                 check(['blank'], 'title:contains', 'BLAN')
                 check(['titled'], 'title:contains', 'full')
+                for mnemonic in ('nbsp', 'figure-space'):
+                    check([mnemonic], 'title:exact', f'{kind}-{mnemonic}')
+                    check([mnemonic], 'title', f'{kind}-{mnemonic[:-1]}')
+                    check([mnemonic], 'title:contains', mnemonic.upper())
                 # a name doesn't match the title when there is a full name
                 check([], 'title:exact', f'{kind}-titled')
                 check([], 'title:contains', 'titled')
