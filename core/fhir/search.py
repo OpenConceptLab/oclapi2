@@ -36,7 +36,7 @@ from operator import or_
 from dateutil.relativedelta import relativedelta
 from django.conf import settings
 from django.db import connection, transaction, OperationalError
-from django.db.models import BooleanField, Exists, Func, OuterRef, Q, Subquery, TextField, Value
+from django.db.models import BooleanField, Case, F, Exists, Func, OuterRef, Q, Subquery, TextField, Value, When
 from django.db.models.functions import Coalesce
 from django.db.models.lookups import Exact, IContains, In, IStartsWith
 from django.utils import timezone
@@ -72,6 +72,14 @@ EVERYTHING = Q(pk__isnull=False)  # unlike Q(), it holds as an alternative too (
 
 # string parameters: the field each searches, and the lookup of each modifier (:exact is the field's own equality)
 STRING_FIELDS = {'name': 'name', 'title': 'full_name', 'description': 'description', 'publisher': 'publisher'}
+# the title a CodeSystem or ValueSet shows (TitleField): the full name, else the name when there is none (null, empty or
+# only Unicode whitespace as defined by str.strip())
+SHOWN_TITLE = Case(
+    When(Q(full_name__isnull=True) | Q(full_name__regex=(
+        '^[\t\n\v\f\r\x1c\x1d\x1e\x1f \x85\xa0\u1680'
+        '\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a'
+        '\u2028\u2029\u202f\u205f\u3000]*$')), then=F('name')),
+    default=F('full_name'), output_field=TextField())
 STRING_LOOKUPS = {'': IStartsWith, 'exact': None, 'contains': IContains}
 # the other parameters, by resource type: the Search method each one's values go to
 COMMON_PARAMETERS = {
@@ -425,6 +433,8 @@ class Search:
 
     def criterion(self, name, modifier, value):
         """The Q for one alternative (still escaped) of a parameter's value."""
+        if name == 'title' and self.resource_type != 'ConceptMap':
+            return self.by_string(SHOWN_TITLE, modifier, unescape(value))
         if name in STRING_FIELDS:
             return self.by_string(STRING_FIELDS[name], modifier, unescape(value))
         if name == 'identifier':
@@ -458,7 +468,7 @@ class Search:
         """
         lookup = STRING_LOOKUPS[modifier]
         if lookup is None:
-            return Q(**{field: value})
+            return Q(Exact(field, Value(value))) if isinstance(field, Case) else Q(**{field: value})
         return lookup(ImmutableUnaccent(field), ImmutableUnaccent(Value(value)))
 
     def by_id(self, value):
@@ -691,6 +701,17 @@ class CanonicalUrlField(CharField):
 
     def get_attribute(self, instance):
         return super().get_attribute(instance) or getattr(instance, 'repository_canonical_url', None)
+
+
+class TitleField(CharField):
+    """
+    A repository's FHIR title: its full name, or its name when it has no full name (empty or only whitespace). Writes
+    still go to full_name.
+    """
+
+    def get_attribute(self, instance):
+        full_name = instance.full_name
+        return full_name if full_name and full_name.strip() else instance.name
 
 
 class FhirRepositorySerializerMixin:
