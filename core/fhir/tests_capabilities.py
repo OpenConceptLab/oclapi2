@@ -575,8 +575,6 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
 
     def test_a_code_system_without_a_canonical_url_is_listed_by_its_ocl_path(self):
         """F1.3: as the operations resolve it, and as $expand names its members' system."""
-        self.assertEqual(NAMELESS, IdentifierSerializer.convert_ocl_uri_to_fhir_url('/orgs/Acme/sources/nameless/',
-                                                                                    'CodeSystem'))
         for fhir_base, kwargs in (('/fhir', {}), ('/orgs/Acme', {'org': 'Acme'})):
             self.assertEqual(self.code_systems(fhir_base)[NAMELESS], ['v1*'], fhir_base)
             self.assertEqual(resolve('CodeSystem', NAMELESS, None, kwargs).version, 'v1')

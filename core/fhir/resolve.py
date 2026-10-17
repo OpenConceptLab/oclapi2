@@ -329,7 +329,7 @@ def ocl_path(uri):
         path = IdentifierSerializer.convert_ocl_uri_to_fhir_url(uri, 'CodeSystem')
     except ValidationError:
         return None
-    if is_canonical_uri(path) or '|' in path or '?' in path or path_version(path):
+    if is_canonical_uri(path):
         return None
     return path if to_parent_uri(to_ocl_path(path)) == uri else None
 

@@ -117,14 +117,10 @@ def unique(items):
     return list(dict.fromkeys(items))
 
 
-def base_kind(kwargs):
-    """The base a route's kwargs name: None for /fhir/, else the owner kwarg."""
-    return next((kind for kind in OWNER_BASES.values() if (kwargs or {}).get(kind)), None)
-
-
 def offered(kwargs):
     """(resources, system operations) the base `kwargs` names routes."""
-    return routed(get_resolver()).get(base_kind(kwargs), ([], []))
+    kind = next((kind for kind in OWNER_BASES.values() if (kwargs or {}).get(kind)), None)
+    return routed(get_resolver()).get(kind, ([], []))
 
 
 def described(request, kwargs):
@@ -170,16 +166,14 @@ def code_systems(kwargs, user):
     return listed
 
 
-def list_too_costly():
-    return outcomes.TooCostlyError('The list of code systems would take too long to answer.')
-
-
 def terminology_capabilities(request, kwargs):
     """The TerminologyCapabilities of the base `kwargs` names, for the request's user."""
     resources, _ = offered(kwargs)
     operations = {(resource['type'], name) for resource in resources for name in resource['operations']}
     return {
         **described(request, kwargs),
-        'code_systems': within_search_timeout(lambda: code_systems(kwargs, request.user), list_too_costly),
+        'code_systems': within_search_timeout(
+            lambda: code_systems(kwargs, request.user),
+            lambda: outcomes.TooCostlyError('The list of code systems would take too long to answer.')),
         **dict(block for operation, block in OPERATION_BLOCKS.items() if operation in operations),
     }
