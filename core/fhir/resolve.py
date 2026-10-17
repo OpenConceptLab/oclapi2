@@ -10,6 +10,14 @@ with or without the URL registry), with FHIR's rules on top.
   already decoded, so 2.0+build names 2.0+build. With none named, the newest released
   version the caller is shown, never HEAD. A repository with nothing released isn't visible, whatever version is
   named.
+- A version named, with a canonical URL (decision 9): when the repository the resolver picks doesn't serve the caller
+  a release of that name, the release of the lowest-id repository with that canonical URL the base shows the caller
+  that holds one; failing that, the version so named (unreleased, or HEAD) of the lowest-id one it shows, as before;
+  else not found. A repository or version the caller isn't shown never holds it. This applies where the repositories
+  with the canonical URL are the step that picks: without the URL registry, at /fhir/ (when it finds one) and at an
+  owner base (whether or not it finds one, so a hidden repository costs what a missing one does); with it, at an owner
+  base whose own registry has no entry for the URL and that has a repository with it. A registry entry decides (at
+  /fhir/ only an entry resolves), and where resolution finds no repository it still finds none.
 - Access, after resolving: at the global base public repositories only, at an owner base what the caller may view.
   The version and its repository (HEAD) must both be viewable. Without the URL registry, the global base's canonical
   match considers only the repositories it shows, so a private copy of a canonical never hides a public one. Otherwise
@@ -24,7 +32,7 @@ identifier each repository a search shows is served at, and the versions of it a
 from collections import namedtuple
 from urllib.parse import quote_plus
 
-from django.db.models import Exists, OuterRef, Q, Subquery
+from django.db.models import Case, Exists, OuterRef, Q, Subquery, Value, When
 from django.db.models.functions import Coalesce
 from rest_framework.exceptions import ValidationError
 
@@ -67,7 +75,7 @@ def namespace_of(kwargs):
     return None
 
 
-def resolve(resource_type, url, version=None, kwargs=None, user=None, expression=None):  # pylint: disable=too-many-arguments
+def resolve(resource_type, url, version=None, kwargs=None, user=None, expression=None):  # pylint: disable=too-many-arguments,too-many-locals
     """
     The repository version a FHIR request names: `url` (a canonical URL, or an OCL path such as
     /orgs/{org}/CodeSystem/{id}/) and `version`, at the base `kwargs` names, for `user`. A view passes its own
@@ -85,33 +93,86 @@ def resolve(resource_type, url, version=None, kwargs=None, user=None, expression
 
     # the version as named (HTTP has decoded the query already), so the shared resolver, which decodes it again,
     # reads it back as it is stored: 2.0+build stays 2.0+build
-    instance = shared_resolution(
-        REPO_TYPES[resource_type], lookup_url, as_stored(elsewhere) if elsewhere else None, namespace, user)
+    repo_type = REPO_TYPES[resource_type]
+    instance, entry, picked = shared_resolution(
+        repo_type, lookup_url, as_stored(elsewhere) if elsewhere else None, namespace, user)
     if instance.id and not (elsewhere or in_path) and not is_shown(instance, namespace, user):
         instance = latest_public_release(instance) or instance  # the newest release is private: the newest public one
+    shown = bool(instance.id) and is_shown(instance, namespace, user)
+    # a version named that the repository picked doesn't serve as a release: its holder's, where the repositories with
+    # the canonical URL are the step that picks (decision 9)
+    if elsewhere and holders_pick(instance, entry, picked, namespace) and not (
+            shown and (instance.is_head or instance.released)):
+        held = held_version(repo_type, instance.resolution_url, elsewhere, namespace, user)
+        if held and held.id != instance.id:
+            if namespace and hasattr(picked, 'fhir_may_view_private'):  # the same owner: the same right
+                held.fhir_may_view_private = picked.fhir_may_view_private
+            instance, shown = held, is_shown(held, namespace, user)
 
-    if not instance.id or not is_shown(instance, namespace, user):
+    if not shown:
         raise error
     return instance
 
 
 def shared_resolution(repo_type, url, version, namespace, user):
     """
-    The shared resolver's answer, with FHIR's flags: no HEAD by default; at the global base only the HEADs it shows;
-    and a HEAD the caller isn't shown resolves to nothing before any version is read. The version found shares the
-    HEAD's check of the caller's right to the owner's private repositories, so it isn't asked twice.
+    (the shared resolver's answer, the registry entry that decided it or None, the HEAD it picked or None), with FHIR's
+    flags: no HEAD by default; at the global base only the HEADs it shows; and a HEAD the caller isn't shown resolves
+    to nothing before any version is read. The version found shares the HEAD's check of the caller's right to the
+    owner's private repositories, so it isn't asked twice.
     """
     heads = []
 
     def head_shown(head):
         heads.append(head)
         return is_visible(head, namespace, user)
-    instance, _ = repo_type.resolve_reference_expression(
+    instance, entry = repo_type.resolve_reference_expression(
         to_ocl_path(url), namespace, version, repo_type=repo_type, allow_head=False,
         heads=None if namespace else shown_heads(repo_type), head_shown=head_shown)
     if heads and hasattr(heads[0], 'fhir_may_view_private'):
         instance.fhir_may_view_private = heads[0].fhir_may_view_private
-    return instance
+    return instance, entry, heads[0] if heads else None
+
+
+def holders_pick(instance, entry, picked, namespace):
+    """
+    Whether the repositories with the canonical URL a request names are the step that picked `instance` (the shared
+    resolver's answer, `entry` the registry entry that decided it, `picked` the HEAD it found): no entry decided, and
+    at /fhir/ a HEAD was found (with the URL registry on, at /fhir/ only an entry finds one), at an owner base whether
+    or not one was. An OCL path names its repository itself.
+    """
+    return instance.is_fqdn and entry is None and bool(namespace or picked)
+
+
+def held_version(repo_type, url, version, namespace, user):
+    """
+    The version named `version` the base shows the caller among the repositories with the canonical URL `url` it
+    shows (their active HEAD has it, isn't retired, and has a live release the caller is shown; at an owner base, the
+    owner's), as resolve() serves a version named when the repository the resolver picks serves no release of it: a
+    release (retired or not), of the lowest-id repository holding one; else the version so named (unreleased, or HEAD)
+    of the lowest-id repository; None without either. Its repository's access is set on it, as the resolver sets it.
+    One query, whatever the number of repositories; what the caller isn't shown is left out in it.
+    """
+    shown = shown_q(namespace, user)
+    owner = {}
+    if namespace:
+        owner = {'organization__uri' if namespace.startswith('/orgs/') else 'user__uri': namespace}
+    same_repository = Q(organization_id=OuterRef('organization_id')) | Q(user_id=OuterRef('user_id'))
+    live = repo_type.objects.filter(
+        shown, same_repository, mnemonic=OuterRef('mnemonic'), is_active=True, released=True,
+        retired=False).exclude(version=HEAD)
+    heads = repo_type.objects.filter(
+        shown, Exists(live), canonical_url=url, version=HEAD, is_active=True, retired=False, **owner)
+    head = heads.filter(same_repository, mnemonic=OuterRef('mnemonic'))
+    release = Q(released=True) & ~Q(version=HEAD)
+    held = repo_type.objects.filter(shown, version=version, is_active=True, **owner).annotate(
+        head_id=Subquery(head.values('id')[:1]), repository_public_access=Subquery(head.values('public_access')[:1]),
+    ).filter(release | Q(head_id=Subquery(heads.order_by('id').values('id')[:1])), head_id__isnull=False).order_by(
+        Case(When(release, then=Value(0)), default=Value(1)), 'head_id').first()
+    if held:
+        held.is_fqdn, held.resolution_url = True, url
+        held.canonical_url = held.canonical_url or url
+    return held
 
 
 def path_version(url):
@@ -274,13 +335,21 @@ def viewable_rows(model, namespace, user):
     A row and its HEAD share their owner, so "both public, or the caller's own" is "the row public or the caller's own,
     and its HEAD public or the caller's own": one EXISTS, which the planner runs as a semi-join.
     """
+    shown = shown_q(namespace, user)
+    return model.objects.filter(shown, with_head(model, shown))
+
+
+def shown_q(namespace, user):
+    """
+    Q for the rows viewable_rows requires of a row and of its HEAD: public; at an owner base also, to those signed in,
+    their own by their rights (everything to staff, their orgs' and their own).
+    """
     public = Q(public_access__in=PUBLIC_ACCESS)
     if namespace is None or not (user and user.is_authenticated):
-        return model.objects.filter(public, with_head(model, public))
+        return public
     if user.is_staff:
-        return model.objects.filter(with_head(model))
-    shown = public | Q(organization_id__in=user.organizations.values('id')) | Q(user_id=user.id)
-    return model.objects.filter(shown, with_head(model, shown))
+        return Q()
+    return public | Q(organization_id__in=user.organizations.values('id')) | Q(user_id=user.id)
 
 
 def visible_versions(resource_type, kwargs=None, user=None, access=None):
@@ -368,7 +437,8 @@ def served_repositories(kwargs, user):  # pylint: disable=too-many-locals
     repositories the caller isn't shown not there (so a hidden repository changes nothing here): its canonical URL (its
     HEAD's) when the resolver picks it for that URL, else its OCL path as a CodeSystem. A repository whose HEAD the
     resolver passes over (a retired one) isn't listed. The versions are those search shows: what resolve() serves by
-    name.
+    name. Under a canonical URL, after the repository's own, those of the other repositories with it the base shows
+    that resolve() serves by name there (decision 9), the default still the repository's own.
 
     The resolver's pick for a canonical URL (one it looks up as written), among active HEADs that aren't retired, as
     resolve_reference_expression makes it for Sources. Without the URL registry: at /fhir/ the lowest-id HEAD the global
@@ -419,6 +489,23 @@ def served_repositories(kwargs, user):  # pylint: disable=too-many-locals
         return next((head for head in candidates if not owner or all(
             getattr(head, field) == value for field, value in owner.items())), None)
 
+    def held(url, head):
+        """
+        The releases resolve() serves named under a canonical URL it picks `head` for: the head's; then, where the
+        repositories with the URL are the step that picks (no registry entry decides), each other one's the base shows
+        that no earlier one holds, lowest id first (decision 9).
+        """
+        rows = list(versions[(head.mnemonic, head.organization_id, head.user_id)])
+        if registry and (not owner or url in own_entries):
+            return rows
+        names = {version for version, _ in rows}
+        for other in by_url[url]:
+            for version, retired in versions.get((other.mnemonic, other.organization_id, other.user_id), []):
+                if version not in names:
+                    names.add(version)
+                    rows.append((version, retired))
+        return rows
+
     served = []
     for repository, rows in versions.items():
         head = by_repository.get(repository)
@@ -427,5 +514,5 @@ def served_repositories(kwargs, user):  # pylint: disable=too-many-locals
         url = head.canonical_url
         identifier = url if is_looked_up_as_written(url) and pick(url) == head else ocl_path(head.uri)
         if identifier:
-            served.append((identifier, rows))
+            served.append((identifier, held(url, head) if identifier == url else rows))
     return served

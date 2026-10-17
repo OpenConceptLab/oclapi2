@@ -432,8 +432,15 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
                 if not default or (default.mnemonic, default.organization_id, default.user_id) != (
                         mnemonic, organization_id, user_id):
                     continue
-                versions = [self.named(identifier, version, kwargs, user) for version in rows.filter(
-                    released=True).exclude(version=HEAD).values_list('version', flat=True)]
+                # the releases served by name there: the repository's own; under a canonical URL, every release of a
+                # repository with it that resolve() serves, as a version named resolves to its holder (decision 9)
+                holders = Source.objects.filter(
+                    version=HEAD, canonical_url=identifier) if identifier == head.canonical_url else [head]
+                releases = Source.objects.filter(released=True, id__in=[
+                    row.id for holder in holders for row in Source.objects.filter(
+                        mnemonic=holder.mnemonic, organization_id=holder.organization_id, user_id=holder.user_id)])
+                versions = [self.named(identifier, version, kwargs, user) for version in set(
+                    releases.exclude(version=HEAD).values_list('version', flat=True))]
                 found[identifier] = (sorted(name for name in versions if name),
                                      self.named(identifier, default.version, kwargs, user))
                 break
@@ -491,7 +498,10 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
         """Every repository search shows, under its canonical URL where the resolver picks it for it, else its path."""
         by_url = {CIEL: ['v2*', 'v1'], ICD10: ['ICD102019*'], NEWEST_PRIVATE: ['v1*'], REST: ['3.0.1', '4.0.1*'],
                   SHARED: ['v1*']}
-        unregistered = {UNREGISTERED: ['v1*'], REDIRECTED: ['v1*'], COLLIDE: ['v1*'], OLD: ['v2*', 'v1']}
+        # a canonical another public repository holds too lists that one's releases after its own (decision 9)
+        unregistered = {UNREGISTERED: ['v1*'], REDIRECTED: ['v1*', 'r1'], COLLIDE: ['v1*'], OLD: ['v2*', 'v1']}
+        if not self.registry:
+            by_url[ICD10] = ['ICD102019*', 'v1.0']
         if self.registry:  # what the registry doesn't hold is served by its path
             unregistered = {
                 code_system_path('Acme', 'unregistered'): ['v1*'], code_system_path('Acme', 'local'): ['v1*'],
@@ -523,11 +533,19 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
         self.assertEqual(self.code_systems('/orgs/Empty'), {})
 
     def test_a_shared_canonical_is_the_repository_the_resolver_picks(self):
-        """F1.2: WHO's ICD-10 (the older), not sehatapp's, with either toggle; F2.1: sehatapp's by its path."""
+        """
+        F1.2: WHO's ICD-10 (the older), not sehatapp's, with either toggle; F2.1: sehatapp's by its path. Without the
+        registry, sehatapp's release is also served named under the canonical, after WHO's (decision 9); with it, the
+        global entry decides.
+        """
         listed = self.code_systems()
-        self.assertEqual((listed[ICD10], listed[code_system_path('sehatapp', 'ICD-10')]), (['ICD102019*'], ['v1.0*']))
-        with self.assertRaises(UnresolvedError):
-            resolve('CodeSystem', ICD10, 'v1.0')
+        self.assertEqual((listed[ICD10], listed[code_system_path('sehatapp', 'ICD-10')]), (
+            ['ICD102019*'] if self.registry else ['ICD102019*', 'v1.0'], ['v1.0*']))
+        if self.registry:
+            with self.assertRaises(UnresolvedError):
+                resolve('CodeSystem', ICD10, 'v1.0')
+        else:
+            self.assertEqual(resolve('CodeSystem', ICD10, 'v1.0').organization, self.sehatapp)
         self.assertEqual(resolve('CodeSystem', code_system_path('sehatapp', 'ICD-10'), 'v1.0').version, 'v1.0')
         self.assertEqual(self.code_systems('/orgs/sehatapp'), {ICD10: ['v1.0*']})
 
@@ -587,8 +605,8 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
         weren't there: collide-public's, which the resolver at HL7's base doesn't serve them (it tries the hidden one
         and stops: open decision A.3).
         """
-        for user in (self.hl7_member, self.admin):
-            self.assertEqual(self.code_systems('/orgs/HL7', user)[COLLIDE], ['p1*'], user)
+        for user in (self.hl7_member, self.admin):  # and collide-public's release, served named (decision 9)
+            self.assertEqual(self.code_systems('/orgs/HL7', user)[COLLIDE], ['p1*', 'v1'], user)
         others = (None, self.outsider, self.moh_member, self.jdoe)
         before = {}
         for user in others:
