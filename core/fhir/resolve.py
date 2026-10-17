@@ -24,7 +24,11 @@ with or without the URL registry), with FHIR's rules on top.
   version is read; for a signed-in non-member one fewer, its check of the right to the hidden repository. That one
   statement is the A.3 residual of the shared resolver's early stop, not of this rule
   (tests_resolve_named_version.HiddenHolderCases measures the same differences on the code before it); closing it
-  needs a change in the shared resolver.
+  needs a change in the shared resolver. A repository whose HEAD the base shows but whose releases are all private
+  is answered as a missing one too, and costs one statement more than a world without it: the resolver shows its
+  HEAD, so it reads the version named before the holder is looked for. Before this rule that configuration answered
+  not found with it and the holder's release without it, so the rule closes the difference in the answer and leaves
+  that one statement, which the same shared-resolver change would close.
 - Access, after resolving: at the global base public repositories only, at an owner base what the caller may view.
   The version and its repository (HEAD) must both be viewable. Without the URL registry, the global base's canonical
   match considers only the repositories it shows, so a private copy of a canonical never hides a public one. Otherwise

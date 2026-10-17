@@ -37,6 +37,7 @@ SETS = 'http://example.org/fhir/ValueSet/sets'
 FIRST = 'http://example.org/fhir/CodeSystem/first-private'
 ONLY = 'http://example.org/fhir/CodeSystem/only-private'
 THREE = 'http://example.org/fhir/CodeSystem/three-holders'
+OPEN_HEAD = 'http://example.org/fhir/CodeSystem/open-head'
 
 
 def client_for(user=None):
@@ -484,6 +485,36 @@ class HiddenHolderCases(NamedVersionCorpusMixin):
             self.assertEqual(status, 200, user)
             self.assertEqual((status, content), without[user][:2], user)
             self.assertEqual(without[user][2] - count, deltas[user], user)
+
+    def test_a_repository_whose_releases_are_all_private_is_answered_as_a_missing_one(self):
+        """
+        Lab's first-open-head is its lowest-id code system with the canonical: its HEAD is public, every release of
+        it is private, and it holds no v2. second-public holds v2 released. A repository with no release the base
+        shows the caller is not shown at all, whatever version is named, so v2 named is second-public's with and
+        without first-open-head, byte for byte, anonymously and for a signed-in non-member, under either registry
+        state. It costs one statement more with it: the shared resolver shows its public HEAD, so it reads the v2
+        it doesn't have before the holder is looked for. Before this rule the same corpus answered 422 with it and
+        200 without, in two statements fewer; the rule closes the difference in the answer and leaves the one
+        statement, which needs a shared-resolver change to close.
+        """
+        lab = OrganizationFactory(mnemonic='Lab')
+        first = source(lab, 'first-open-head', canonical_url=OPEN_HEAD)
+        ConceptFactory(parent=first, mnemonic='C1', names=[name('First one', preferred=True)], sources=[source(
+            lab, 'first-open-head', 'v1', released=True, canonical_url=OPEN_HEAD, public_access=ACCESS_TYPE_NONE)])
+        second = source(lab, 'second-public', canonical_url=OPEN_HEAD)
+        second_v2 = source(lab, 'second-public', 'v2', released=True, canonical_url=OPEN_HEAD)
+        ConceptFactory(parent=second, mnemonic='C1', sources=[second_v2], names=[name('Second one', preferred=True)])
+        self.assertEqual(self.resolved(OPEN_HEAD, 'v2', {'org': 'Lab'}), second_v2.id)
+
+        requests = [('/orgs/Lab', user, '$lookup', {'system': OPEN_HEAD, 'version': 'v2', 'code': 'C1'})
+                    for user in (None, self.outsider)]
+        with_it = self.answers(requests)
+        Source.objects.filter(organization=lab, mnemonic='first-open-head').delete()
+        without = self.answers(requests)
+        for key, (status, content, sql) in with_it.items():
+            self.assertEqual(status, 200, key)
+            self.assertEqual((status, content), without[key][:2], key)
+            self.assertEqual(len(without[key][2]) - len(sql), -1, key)  # one more with it: the v2 it doesn't have
 
 
 class NamedVersionOperationsCases(NamedVersionCorpusMixin):
