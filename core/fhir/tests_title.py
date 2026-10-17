@@ -36,3 +36,27 @@ class FhirTitleTest(SearchCorpusMixin, OCLTestCase):
                 found = self.search(resource_type, base='/fhir', **{'name:exact': mnemonic})
                 global_id = found['entry'][0]['resource']['id']
                 self.assertEqual(self.read(f'/fhir/{resource_type}/{global_id}/')['title'], title)
+
+    def names_found(self, where, key, value):
+        resource_type, base, kind = where
+        bundle = self.search(resource_type, base=base, **{key: value})
+        names = {entry['resource']['name'] for entry in bundle.get('entry', [])}
+        return sorted(name for name in names if name.startswith(f'{kind}-'))
+
+    def test_title_search_matches_the_title_the_read_shows(self):
+        for resource_type, kind in (('CodeSystem', 'cs'), ('ValueSet', 'vs')):
+            for base in ('/fhir', '/orgs/titles'):
+                def check(expected, key, value, where=(resource_type, base, kind)):
+                    self.assertEqual(
+                        self.names_found(where, key, value), [f'{where[2]}-{n}' for n in expected], (where, key, value))
+
+                check(['bare'], 'title:exact', f'{kind}-bare')
+                check(['blank'], 'title:exact', f'{kind}-blank')
+                check(['titled'], 'title:exact', 'The Full Name')
+                check(['bare'], 'title', f'{kind}-ba')
+                check(['titled'], 'title', 'the full')
+                check(['blank'], 'title:contains', 'BLAN')
+                check(['titled'], 'title:contains', 'full')
+                # a name doesn't match the title when there is a full name
+                check([], 'title:exact', f'{kind}-titled')
+                check([], 'title:contains', 'titled')

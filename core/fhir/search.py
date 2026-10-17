@@ -36,7 +36,7 @@ from operator import or_
 from dateutil.relativedelta import relativedelta
 from django.conf import settings
 from django.db import connection, transaction, OperationalError
-from django.db.models import BooleanField, Exists, Func, OuterRef, Q, Subquery, TextField, Value
+from django.db.models import BooleanField, Case, F, Exists, Func, OuterRef, Q, Subquery, TextField, Value, When
 from django.db.models.functions import Coalesce
 from django.db.models.lookups import Exact, IContains, In, IStartsWith
 from django.utils import timezone
@@ -72,6 +72,10 @@ EVERYTHING = Q(pk__isnull=False)  # unlike Q(), it holds as an alternative too (
 
 # string parameters: the field each searches, and the lookup of each modifier (:exact is the field's own equality)
 STRING_FIELDS = {'name': 'name', 'title': 'full_name', 'description': 'description', 'publisher': 'publisher'}
+# the title a CodeSystem or ValueSet shows (TitleField): the full name, else the name when there is none (null, empty or
+# only whitespace)
+SHOWN_TITLE = Case(When(Q(full_name__isnull=True) | Q(full_name__regex=r'^\s*$'), then=F('name')),
+                   default=F('full_name'), output_field=TextField())
 STRING_LOOKUPS = {'': IStartsWith, 'exact': None, 'contains': IContains}
 # the other parameters, by resource type: the Search method each one's values go to
 COMMON_PARAMETERS = {
@@ -425,6 +429,8 @@ class Search:
 
     def criterion(self, name, modifier, value):
         """The Q for one alternative (still escaped) of a parameter's value."""
+        if name == 'title' and self.resource_type != 'ConceptMap':
+            return self.by_string(SHOWN_TITLE, modifier, unescape(value))
         if name in STRING_FIELDS:
             return self.by_string(STRING_FIELDS[name], modifier, unescape(value))
         if name == 'identifier':
@@ -458,7 +464,7 @@ class Search:
         """
         lookup = STRING_LOOKUPS[modifier]
         if lookup is None:
-            return Q(**{field: value})
+            return Q(Exact(field, Value(value))) if isinstance(field, Case) else Q(**{field: value})
         return lookup(ImmutableUnaccent(field), ImmutableUnaccent(Value(value)))
 
     def by_id(self, value):
