@@ -15,9 +15,16 @@ with or without the URL registry), with FHIR's rules on top.
   that holds one; failing that, the version so named (unreleased, or HEAD) of the lowest-id one it shows, as before;
   else not found. A repository or version the caller isn't shown never holds it. This applies where the repositories
   with the canonical URL are the step that picks: without the URL registry, at /fhir/ (when it finds one) and at an
-  owner base (whether or not it finds one, so a hidden repository costs what a missing one does); with it, at an owner
-  base whose own registry has no entry for the URL and that has a repository with it. A registry entry decides (at
-  /fhir/ only an entry resolves), and where resolution finds no repository it still finds none.
+  owner base (whether or not it finds one, so a hidden repository is answered as a missing one is); with it, at an
+  owner base whose own registry has no entry for the URL and that has a repository with it. A registry entry decides
+  (at /fhir/ only an entry resolves), and where resolution finds no repository it still finds none.
+  At an owner base the answer is identical with and without a hidden lowest-id repository, byte for byte, but the
+  statement count can differ by one either way: anonymously one more without it, the version read of the next
+  repository the resolver makes when it picks it, since a HEAD the caller isn't shown resolves to nothing before any
+  version is read; for a signed-in non-member one fewer, its check of the right to the hidden repository. That one
+  statement is the A.3 residual of the shared resolver's early stop, not of this rule
+  (tests_resolve_named_version.HiddenHolderCases measures the same differences on the code before it); closing it
+  needs a change in the shared resolver.
 - Access, after resolving: at the global base public repositories only, at an owner base what the caller may view.
   The version and its repository (HEAD) must both be viewable. Without the URL registry, the global base's canonical
   match considers only the repositories it shows, so a private copy of a canonical never hides a public one. Otherwise

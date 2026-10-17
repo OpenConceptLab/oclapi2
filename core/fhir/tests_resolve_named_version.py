@@ -36,6 +36,7 @@ LOCAL = 'http://example.org/fhir/CodeSystem/local'
 SETS = 'http://example.org/fhir/ValueSet/sets'
 FIRST = 'http://example.org/fhir/CodeSystem/first-private'
 ONLY = 'http://example.org/fhir/CodeSystem/only-private'
+THREE = 'http://example.org/fhir/CodeSystem/three-holders'
 
 
 def client_for(user=None):
@@ -442,6 +443,47 @@ class HiddenHolderCases(NamedVersionCorpusMixin):
             self.assertEqual(response.status_code, 422, system)
             counts.append(len(context.captured_queries))
         self.assertEqual(counts[0], counts[1])
+
+    def test_a_release_found_through_the_fallback_costs_what_no_hidden_repository_does(self):
+        """
+        Three of Lab's code systems share a canonical: private first-private (the lowest id) holds a released v2,
+        second-public holds no v2, third-public holds v2 released. Anonymously and for a signed-in non-member, v2
+        named is third-public's with and without first-private, byte for byte, so nothing in the answer says the
+        hidden one is there. The statement count still differs by one: anonymously one more without it, the version
+        read of second-public the resolver makes when it picks it, since a HEAD the caller isn't shown resolves to
+        nothing before any version is read; for a non-member, without the registry, one fewer, its check of the
+        right to the hidden repository. That is the A.3 residual of the shared resolver's early stop, not of this
+        rule: the same deltas were measured on the code before this rule, where each world answers 422 instead of
+        200. Closing them needs a shared-resolver change.
+        """
+        lab = OrganizationFactory(mnemonic='Lab')
+        hidden = source(lab, 'first-private', canonical_url=THREE, public_access=ACCESS_TYPE_NONE)
+        ConceptFactory(parent=hidden, mnemonic='C1', names=[name('Hidden one', preferred=True)], sources=[source(
+            lab, 'first-private', 'v2', released=True, canonical_url=THREE, public_access=ACCESS_TYPE_NONE)])
+        second = source(lab, 'second-public', canonical_url=THREE)
+        ConceptFactory(parent=second, mnemonic='C1', names=[name('Second one', preferred=True)],
+                       sources=[source(lab, 'second-public', 'v1', released=True, canonical_url=THREE)])
+        third = source(lab, 'third-public', canonical_url=THREE)
+        third_v2 = source(lab, 'third-public', 'v2', released=True, canonical_url=THREE)
+        ConceptFactory(parent=third, mnemonic='C1', sources=[third_v2], names=[name('Third one', preferred=True)])
+        self.assertEqual(self.resolved(THREE, 'v2', {'org': 'Lab'}), third_v2.id)
+
+        def answers():
+            found = {}
+            for user in (None, self.outsider):
+                with CaptureQueriesContext(connection) as context:
+                    response = self.get('$lookup', '/orgs/Lab', user, system=THREE, version='v2', code='C1')
+                found[user] = (response.status_code, response.content, len(context.captured_queries))
+            return found
+
+        with_it = answers()
+        Source.objects.filter(organization=lab, mnemonic='first-private').delete()
+        without = answers()
+        deltas = {None: 1, self.outsider: 0 if self.registry else -1}  # statements without it, less those with it
+        for user, (status, content, count) in with_it.items():
+            self.assertEqual(status, 200, user)
+            self.assertEqual((status, content), without[user][:2], user)
+            self.assertEqual(without[user][2] - count, deltas[user], user)
 
 
 class NamedVersionOperationsCases(NamedVersionCorpusMixin):
