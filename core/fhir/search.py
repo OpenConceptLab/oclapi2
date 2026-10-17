@@ -38,7 +38,7 @@ from django.conf import settings
 from django.db import connection, transaction, OperationalError
 from django.db.models import BooleanField, Exists, Func, OuterRef, Q, Subquery, TextField, Value
 from django.db.models.functions import Coalesce
-from django.db.models.lookups import Exact, IContains, IStartsWith
+from django.db.models.lookups import Exact, IContains, In, IStartsWith
 from django.utils import timezone
 from psycopg2 import errorcodes
 from rest_framework.fields import CharField
@@ -57,7 +57,9 @@ from core.fhir.resolve import (
     PUBLIC_ACCESS, REPO_TYPES, namespace_of, owner_access, visible_versions, viewable_rows, is_public, is_shown,
     repository_rows, with_repository_access)
 from core.mappings.models import Mapping
+from core.orgs.models import Organization
 from core.sources.models import Source
+from core.users.models import UserProfile
 
 MAX_COUNT = 100  # the most entries a search page holds, and how many it holds when _count isn't given
 SEARCH_TIMEOUT_MS = 5000  # the database time a search may take; past it the search is too costly
@@ -278,9 +280,14 @@ def held_identifier(system, value):
 
 
 def indexed_repository(owner_type, owner, mnemonic):
-    """The rows of a repository as the mappings index names it (owner and mnemonic in lowercase): twins included."""
-    owner_field = 'organization__mnemonic' if owner_type == 'Organization' else 'user__username'
-    return Q(mnemonic__iexact=mnemonic, **{f'{owner_field}__iexact': owner})
+    """
+    The rows of a repository as the mappings index names it (owner and mnemonic in lowercase), twins included. The
+    owner is an uncorrelated IN, so the version rows need no join.
+    """
+    if owner_type == 'Organization':
+        return Q(mnemonic__iexact=mnemonic, organization_id__in=Organization.objects.filter(
+            mnemonic__iexact=owner).values('id'))
+    return Q(mnemonic__iexact=mnemonic, user_id__in=UserProfile.objects.filter(username__iexact=owner).values('id'))
 
 
 def mapped(side, value, sources, holding, namespace, user):  # pylint: disable=too-many-arguments
@@ -313,7 +320,11 @@ def mapped(side, value, sources, holding, namespace, user):  # pylint: disable=t
     recent = Q(created_at__gte=timezone.now() - mapping_index.LAG_WINDOW)
     candidates = reduce(or_, (indexed_repository(*repository) & (Q(version__in=sorted(versions)) | recent)
                               for repository, versions in sorted(holding.items())))
-    named = Exists(links.filter(source_id=OuterRef('id'), **{f'{field}_id__in': sources}))
+    # each candidate is read through its own links, each link's mapping a scalar subquery the planner can't turn into
+    # a join: it can't start from all the source's mappings instead, which say nothing of where the version's are
+    live_side = Mapping.objects.filter(id=OuterRef('mapping_id'), retired=False, is_active=True).values(
+        f'{side}_source_id')[:1]
+    named = Exists(Mapping.sources.through.objects.filter(In(Subquery(live_side), sources), source_id=OuterRef('id')))
     return Q(id__in=links.filter(stored).values('source_id')) | (candidates & named)
 
 
