@@ -189,16 +189,23 @@ def repositories_with(rows, urls):
     return found
 
 
-def sources_with(rows, urls):
+def sources_with(rows, urls, versions):
     """
-    For each of `urls`, the Source rows among `rows` with that canonical URL, as (id, (owner type, owner, mnemonic)):
-    one query for them all.
+    ({url: [(id, (owner type, owner, mnemonic))]}, {(owner type, owner, mnemonic): {version names}}): for each of
+    `urls` the Source rows among `rows` with that canonical URL, and the repositories and versions of the rows
+    `versions` lists, in one query for them all.
     """
-    found = {url: [] for url in urls}
-    for url, source_id, mnemonic, org, username in rows.filter(canonical_url__in=urls).values_list(
-            'canonical_url', 'id', 'mnemonic', 'organization__mnemonic', 'user__username'):
-        found[url].append((source_id, ('Organization', org, mnemonic) if org else ('User', username, mnemonic)))
-    return found
+    fields = ('canonical_url', 'id', 'mnemonic', 'organization__mnemonic', 'user__username', 'version')
+    named = rows.filter(canonical_url__in=urls).annotate(listed=Value(False)).values_list(*fields, 'listed')
+    found, shown = {url: [] for url in urls}, {}
+    for url, source_id, mnemonic, org, username, version, listed in named.union(
+            versions.annotate(listed=Value(True)).values_list(*fields, 'listed'), all=True):
+        repository = ('Organization', org, mnemonic) if org else ('User', username, mnemonic)
+        if listed:
+            shown.setdefault(repository, set()).add(version)
+        else:
+            found[url].append((source_id, repository))
+    return found, shown
 
 
 def with_repository_canonical(queryset):
@@ -392,9 +399,10 @@ class Search:
         The canonical URLs a parameter's alternatives (still escaped) name, looked up together in one query, for its
         criteria: the repositories with them (url, system, code's system), or among the sources the base shows the
         caller, the repositories (reference) or the sources (source-system, source-uri, target-system, target-uri).
-        For the sources found, one request to the mappings index lists the repositories and versions holding mappings
-        from (source-) or to (target-) them, among the ConceptMaps the base shows the caller; none is sent for a URL no
-        source the caller is shown has, or at the base of an owner that doesn't exist.
+        The same query lists the ConceptMap versions the base shows the caller (visible_versions). For the sources
+        found, one request to the mappings index lists the repositories and versions holding mappings from (source-) or
+        to (target-) them, among those versions; none is sent for a URL no source the caller is shown has, or where the
+        base shows no ConceptMap.
         """
         lookup = LOOKUPS.get(name)
         urls = {token(item)[0] if name == 'code' else unescape(item) for item in alternatives} - {None, ''}
@@ -405,11 +413,12 @@ class Search:
         elif lookup == 'referenced':
             found = repositories_with(self.viewable_sources(), urls)
         else:
-            found = sources_with(self.viewable_sources(), urls)
-            side, (owner, may_view_private) = SIDES[self.parameters[name]], self.access
+            found, shown = sources_with(
+                self.viewable_sources(), urls, visible_versions(self.resource_type, access=self.access))
+            side = SIDES[self.parameters[name]]
             holding = mapping_index.holding(
-                side, {url: {repository for _, repository in rows} for url, rows in found.items() if owner is not None},
-                mapping_index.visible_to(self.namespace, may_view_private), self.deadline, search_too_costly)
+                side, {url: {repository for _, repository in rows} for url, rows in found.items()}, shown,
+                self.deadline, search_too_costly)
             self.found.update({(side, url): holding.get(url, {}) for url in found})
             found = {url: [source_id for source_id, _ in rows] for url, rows in found.items()}
         self.found.update({(lookup, url): value for url, value in found.items()})

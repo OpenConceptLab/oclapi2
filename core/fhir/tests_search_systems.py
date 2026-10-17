@@ -25,6 +25,7 @@ from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory
 from core.fhir.mapping_index import LAG_WINDOW
+from core.fhir.resolve import visible_versions
 from core.fhir.tests_search import SearchCorpusMixin, source, CIEL, ICD10
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
@@ -135,16 +136,19 @@ class SystemSearchCases(SearchCorpusMixin):
         MappingDocument().update(self.ciel_to_icd)
         self.assertEqual(self.keys(self.search('ConceptMap', **{'target-system': ICD10})), [f'{CIEL}|v2'])
 
-    def test_a_release_the_index_never_lists_is_missed_past_the_lag_window(self):
-        """
-        Past LAG_WINDOW, a release whose mappings' documents never came to list it (its indexing failed) is missed
-        until it's indexed again: the index's lag is bounded by that window, not closed.
-        """
-        name = f'maps-{uuid.uuid4().hex[:8]}'  # a repository no other test's documents name
+    def unindexed_release(self, target):
+        """A public ConceptMap no other test's documents name, its release v1 mapping to `target`: (key, mapping)."""
+        name = f'maps-{uuid.uuid4().hex[:8]}'
         maps = source(self.misc, name, canonical_url=f'https://example.org/{name}')
         release = source(self.misc, name, 'v1', released=True, canonical_url=maps.canonical_url)
-        mapping = self.mapping(maps, ConceptFactory(parent=maps), self.icd_code, [release])
-        key = f'{maps.canonical_url}|v1'
+        return f'{maps.canonical_url}|v1', release, self.mapping(maps, ConceptFactory(parent=maps), target, [release])
+
+    def test_residual_a_release_unindexed_past_the_lag_window_is_missed(self):
+        """
+        Residual (a decision for Jon): past LAG_WINDOW, a release whose mappings' documents never came to list it (its
+        indexing failed) is missed until it's indexed again; WP3's statement found it. Within the window it's found.
+        """
+        key, release, mapping = self.unindexed_release(self.icd_code)
         self.assertIn(key, self.keys(self.search('ConceptMap', **{'target-system': ICD10})))
         self.unindexed(mapping)
         self.assertIn(key, self.keys(self.search('ConceptMap', **{'target-system': ICD10})))  # within the window
@@ -153,46 +157,92 @@ class SystemSearchCases(SearchCorpusMixin):
         MappingDocument().update(mapping)
         self.assertIn(key, self.keys(self.search('ConceptMap', **{'target-system': ICD10})))
 
+    def test_residual_a_repository_none_of_whose_mappings_are_indexed_is_missed(self):
+        """
+        Residual (a decision for Jon): a ConceptMap none of whose mappings to the system are in the index yet (an
+        import that skipped indexing, or one still indexing) is missed, at any age, until they are indexed; WP3's
+        statement found it.
+        """
+        key, release, _ = self.unindexed_release(self.icd_code)
+        mappings = Mapping.objects.filter(parent__mnemonic=release.mnemonic)  # every row: HEAD's latest version too
+        MappingDocument().update(mappings, action='delete')
+        self.assertNotIn(key, self.keys(self.search('ConceptMap', **{'target-system': ICD10})))
+        MappingDocument().update(mappings)
+        self.assertIn(key, self.keys(self.search('ConceptMap', **{'target-system': ICD10})))
+
+    def test_residual_an_ocl_path_is_matched_by_the_stored_url_statement(self):
+        """
+        Residual (a decision for Jon): a system written as an OCL path is matched as WP3 matched it, by the URL each
+        mapping stores, a prefix read of that index with no request to the mappings index: its cost follows the
+        number of mappings storing the URL (LOINC's 1.08M locally, about 3 s; see the report).
+        """
+        with CaptureQueriesContext(connection) as context, index_requests() as spy:
+            response = self.client.get('/fhir/ConceptMap/', {'target-system': '/orgs/sehatapp/ConceptMap/ICD-10/'})
+        self.assertEqual((response.status_code, response.data['total']), (200, 0))
+        self.assertEqual(spy.call_args_list, [])
+        self.assertIn("LIKE '/orgs/sehatapp/sources/ICD-10/%'", context.captured_queries[1]['sql'])
+
     def test_one_bounded_index_request_per_parameter(self):
         """
         One request per system parameter, whatever its alternatives, sent only for a system among the sources the base
         shows the caller: none for one OCL doesn't hold or the caller isn't shown. It reads only the documents of the
-        ConceptMaps the base shows (public ones at /fhir/, the owner's at an owner base), whole (no partial results)
-        within a time limit, and each aggregation has an explicit size; it lists versions, not mappings.
+        ConceptMap versions the base shows the caller, as the database lists them (never a document's own access copy),
+        whole (no partial results) within a time limit, and each aggregation has an explicit size and lists only those
+        repositories and versions (and HEAD); it lists versions, not mappings.
         """
         unknown = ','.join(f'https://example.org/unknown-{index}' for index in range(19))
-        public = [{'term': {'public_can_view': True}}]
-        partner = [{'term': {'owner_type': 'Organization'}}, {'term': {'owner': 'partner'}}]
-        for base, user, params, requests, total, shown in (
-                ('/fhir', None, {'source-system': CIEL}, 1, 1, public),
-                ('/fhir', None, {'source-uri': f'{unknown},{CIEL}'}, 1, 1, public),
-                ('/fhir', None, {'source-system': CIEL, 'target-system': ICD10}, 2, 1, public),
-                ('/fhir', None, {'target-system': f'{ICD10},{CIEL}'}, 1, 2, public),
-                ('/fhir', None, {'target-system': unknown}, 0, 0, None),
-                ('/fhir', self.admin, {'target-system': PRIVATE}, 0, 0, None),
-                ('/fhir', self.admin, {'target-system': CIEL}, 1, 1, public),
-                ('/orgs/Partner', self.partner_only, {'target-system': PRIVATE}, 0, 0, None),
-                ('/orgs/Partner', self.admin, {'target-system': PRIVATE}, 1, 1, partner),
-                ('/orgs/Partner', None, {'target-system': f'{PRIVATE},{CIEL}'}, 1, 0, partner + public)):
+        for base, user, params, requests, total in (
+                ('/fhir', None, {'source-system': CIEL}, 1, 1),
+                ('/fhir', None, {'source-uri': f'{unknown},{CIEL}'}, 1, 1),
+                ('/fhir', None, {'source-system': CIEL, 'target-system': ICD10}, 2, 1),
+                ('/fhir', None, {'target-system': f'{ICD10},{CIEL}'}, 1, 2),
+                ('/fhir', None, {'target-system': unknown}, 0, 0),
+                ('/fhir', self.admin, {'target-system': PRIVATE}, 0, 0),
+                ('/fhir', self.admin, {'target-system': CIEL}, 1, 1),
+                ('/orgs/Partner', self.partner_only, {'target-system': PRIVATE}, 0, 0),
+                ('/orgs/Partner', self.admin, {'target-system': PRIVATE}, 1, 1),
+                ('/orgs/Partner', None, {'target-system': f'{PRIVATE},{CIEL}'}, 1, 0)):
             with index_requests() as spy:
                 response = self.client_for(user).get(f'{base}/ConceptMap/', params)
             self.assertEqual((response.status_code, response.data['total']), (200, total), params)
             self.assertEqual(len(spy.call_args_list), requests, (base, params))
             for call in spy.call_args_list:
-                self.assert_bounded(call.kwargs, shown)
+                self.assert_bounded(call.kwargs, self.scope(base, user))
 
-    def assert_bounded(self, body, shown):  # pylint: disable=invalid-name
-        """An index request: whole, timed, filtered to the documents `shown`, every aggregation sized, no hits."""
+    @staticmethod
+    def scope(base, user):
+        """
+        The owner types, owners and repositories (in lowercase, as the index keeps them) and the version names (with
+        HEAD) of the ConceptMap versions the database shows `user` at `base`.
+        """
+        kwargs = {} if base == '/fhir' else {'org': base.rsplit('/', 1)[-1]}
+        scope = {'owner_type': set(), 'owner': set(), 'source': set(), 'source_version': {'HEAD'}}
+        for mnemonic, org, username, version in visible_versions('ConceptMap', kwargs, user).values_list(
+                'mnemonic', 'organization__mnemonic', 'user__username', 'version'):
+            scope['owner_type'].add('Organization' if org else 'User')
+            scope['owner'].add((org or username).lower())
+            scope['source'].add(mnemonic.lower())
+            scope['source_version'].add(version)
+        return {field: sorted(values) for field, values in scope.items()}
+
+    def assert_bounded(self, body, scope):  # pylint: disable=invalid-name
+        """
+        An index request: whole, timed, filtered to the documents of `scope` (never by the documents' own access),
+        every aggregation sized and listing only `scope`'s values, no hits.
+        """
         self.assertEqual((body['index'], body['size'], body['allow_partial_search_results']),
                          (MappingDocument.Index.name, 0, False))
         self.assertRegex(body['timeout'], r'^[0-9]+ms$')
-        self.assertEqual(body['query']['bool']['filter'][1:], shown)
+        self.assertNotIn('public_can_view', json.dumps(body))
+        self.assertEqual(body['query']['bool']['filter'][1:],
+                         [{'terms': {field: values}} for field, values in scope.items()])
         found = list(aggregations(body['aggs']))
-        self.assertTrue(found)
         self.assertNotIn('top_hits', [kind for kind, _ in found])
-        for kind, aggregation in found:
-            if kind == 'terms':
-                self.assertLessEqual(aggregation['size'], 1000, aggregation)
+        terms = [aggregation for kind, aggregation in found if kind == 'terms']
+        self.assertEqual([aggregation['field'] for aggregation in terms][:4], list(scope))
+        for aggregation in terms:
+            self.assertLessEqual(aggregation['size'], 1000, aggregation)
+            self.assertEqual(aggregation['include'], scope[aggregation['field']], aggregation)
 
     def test_queries_stay_three_however_many_mappings(self):
         for index in range(12):
@@ -246,6 +296,32 @@ class SystemSearchCases(SearchCorpusMixin):
                          sorted([f'{MY_CODES}|v1', 'https://example.org/Acme/maps|v1']))
 
     # cost: a bound on the index's answer and on its time
+
+    def test_a_repository_made_public_is_found_before_its_documents_say_so(self):
+        """
+        Visibility is the database's: a ConceptMap just made public is found while its mappings' documents still say
+        they aren't public (index_source_public_access still running), as WP3 found it.
+        """
+        name = f'opened-{uuid.uuid4().hex[:8]}'
+        head = source(self.misc, name, canonical_url=f'https://example.org/{name}', public_access=ACCESS_TYPE_NONE)
+        release = source(self.misc, name, 'v1', released=True, canonical_url=head.canonical_url,
+                         public_access=ACCESS_TYPE_NONE)
+        self.mapping(head, ConceptFactory(parent=head), self.ciel_code, [release])  # documented as not public
+        key = f'{head.canonical_url}|v1'
+        self.assertNotIn(key, self.keys(self.search('ConceptMap', **{'target-system': CIEL})))
+        Source.objects.filter(mnemonic=name).update(public_access='View')
+        for parameter in ('target-system', 'target-uri'):
+            self.assertIn(key, self.keys(self.search('ConceptMap', **{parameter: CIEL})), parameter)
+
+    def test_a_public_repository_whose_mappings_say_private_is_found(self):
+        """A public ConceptMap's mappings whose own public_access says private are its mappings all the same."""
+        name = f'marked-{uuid.uuid4().hex[:8]}'
+        head = source(self.misc, name, canonical_url=f'https://example.org/{name}')
+        release = source(self.misc, name, 'v1', released=True, canonical_url=head.canonical_url)
+        self.mapping(head, ConceptFactory(parent=head), self.ciel_code, [release], public_access=ACCESS_TYPE_NONE)
+        for parameter in ('target-system', 'target-uri'):
+            self.assertIn(f'{head.canonical_url}|v1', self.keys(self.search('ConceptMap', **{parameter: CIEL})),
+                          parameter)
 
     def test_more_versions_than_the_index_lists_is_too_costly(self):
         self.mapping(self.ciel_source, ConceptFactory(parent=self.ciel_source), self.icd_code, [self.ciel_v1])
@@ -368,6 +444,29 @@ class SystemSearchCases(SearchCorpusMixin):
                 1].count(b'"fullUrl"'), 1)
             Source.objects.filter(mnemonic=f'{name}-hidden').delete()
             self.assertEqual(with_it, self.answers(requests))
+
+    def test_versions_the_caller_is_not_shown_count_toward_no_limit(self):
+        """
+        Private versions of a public ConceptMap holding its mappings into a public system change no public answer: the
+        same bytes, statements and index requests as without them. The aggregation lists only versions the base
+        shows the caller.
+        """
+        name = f'target-{uuid.uuid4().hex[:8]}'  # a system no other test's documents map to
+        target = source(self.misc, name, canonical_url=f'https://example.org/{name}')
+        maps = source(self.misc, f'{name}-map', canonical_url=f'https://example.org/{name}-map')
+        versions = [source(self.misc, f'{name}-map', 'v1', released=True, canonical_url=maps.canonical_url)] + [
+            source(self.misc, f'{name}-map', f'private-{number}', released=True, public_access=ACCESS_TYPE_NONE)
+            for number in range(3)]
+        self.mapping(maps, ConceptFactory(parent=maps), ConceptFactory(parent=target), versions)
+        callers = [('anonymous', None), ('outsider', self.outsider)]
+        requests = [(base, {parameter: target.canonical_url}, callers) for base in ('/fhir', '/orgs/misc')
+                    for parameter in ('target-system', 'target-uri')]
+        with patch('core.fhir.mapping_index.MAX_BUCKETS', 2):  # HEAD and v1 fit; the private versions don't
+            with_them = self.answers(requests)
+            self.assertEqual(with_them[('/fhir', json.dumps({'target-system': target.canonical_url}), 'anonymous')][
+                1].count(b'"fullUrl"'), 1)
+            Source.objects.filter(mnemonic=f'{name}-map', version__startswith='private-').delete()
+            self.assertEqual(with_them, self.answers(requests))
 
 
 class SystemSearchWithoutRegistryTest(SystemSearchCases, OCLTestCase):
