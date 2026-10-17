@@ -5,8 +5,9 @@ Terminology Repository, the software), $versions, and TerminologyCapabilities li
 the caller, with the versions it serves and the default one, in a fixed number of queries, with the URL registry
 toggle off and on. OpenConceptLab/ocl_online#451.
 """
+from urllib.parse import quote_plus
+
 from django.db import connection, transaction
-from django.db.models import Q
 from django.test import SimpleTestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import Resolver404, include, path, resolve as resolve_path
@@ -24,13 +25,12 @@ from core.fhir import base, search
 from core.fhir.base import FhirOperationView
 from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
 from core.fhir.resolve import (
-    ServedHead, UnresolvedError, in_namespace, namespace_of, ocl_path, resolve, viewable_rows)
+    ServedHead, UnresolvedError, in_namespace, namespace_of, ocl_path, resolve, viewable_rows, visible_versions)
 from core.fhir.tests_ops_lookup import OpsCorpusMixin, CIEL, ICD10, REST, SHARED, NEWEST_PRIVATE, HIV
 from core.fhir.tests_search import source
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.url_registry.factories import OrganizationURLRegistryFactory
-from core.url_registry.models import URLRegistry
 from core.url_registry.tests_resolution import set_registry_toggle
 from core.users.tests.factories import UserProfileFactory
 
@@ -69,6 +69,11 @@ def routed_operations(fhir_base='/fhir'):
     return {(resource_type, name) for resource_type, names in R4_OPERATIONS.items() for name in names
             if is_operation_view(f'{fhir_base}/{resource_type}/${name}') or
             is_operation_view(f'{fhir_base}/{resource_type}/some-id/${name}')}
+
+
+def code_system_path(owner, mnemonic):
+    """An org's repository's OCL path as a CodeSystem."""
+    return f'/orgs/{owner}/CodeSystem/{mnemonic}/'
 
 
 def client_for(user=None):
@@ -302,15 +307,15 @@ class Rollback(Exception):
 
 class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-instance-attributes
     """
-    The code systems the operations serve the caller at a base, each under the identifier they resolve it by (its
-    canonical URL, or its OCL path when it has none), with the released versions served by name, newest first, and the
-    one served without a version marked isDefault; as the resolver serves them were the repositories the caller isn't
-    shown not there. On top of the operations' corpus: HL7's retired release beside its live one, a member of HL7, MOH's
-    public release of a repository MOH made private, sehatapp's copy of ICD-10 (a canonical two public repositories
-    share), and these, mostly Acme's: a code system without a canonical URL; one with nothing released; one the
-    registry doesn't hold; one whose newest release has a canonical URL of its own; one retired (its HEAD); a canonical
-    Acme holds and HL7 holds too, which Acme's registry sends to HL7; and two of HL7's sharing a canonical, the older
-    private.
+    Each repository a CodeSystem search at a base shows the caller, under the identifier the resolver serves it at
+    there (its canonical URL when the resolver picks it for that URL, else its OCL path), with the released versions it
+    serves by name, newest first, and the one it serves without a version marked isDefault; as the resolver serves them
+    were the repositories the caller isn't shown not there. On top of the operations' corpus: HL7's retired release
+    beside its live one, a member of HL7, MOH's public release of a repository MOH made private, sehatapp's copy of
+    ICD-10 (a canonical two public repositories share), an org with no sources, and these, mostly Acme's: a code system
+    without a canonical URL; one with nothing released; one the registry doesn't hold; one whose newest release has a
+    canonical URL of its own; one retired (its HEAD); a canonical Acme holds and HL7 holds too, which Acme's registry
+    sends to HL7; two of HL7's sharing a canonical, the older private; and releases named 2.0+build and r%41.
     """
 
     def setUp(self):  # pylint: disable=too-many-statements
@@ -345,6 +350,12 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
                public_access=ACCESS_TYPE_NONE)
         source(self.hl7, 'collide-public', canonical_url=COLLIDE)
         source(self.hl7, 'collide-public', 'v1', released=True, canonical_url=COLLIDE)
+        source(self.acme, 'plus')
+        source(self.acme, 'plus', '1.0', released=True)
+        source(self.acme, 'plus', '2.0+build', released=True)
+        source(self.acme, 'encoded')
+        source(self.acme, 'encoded', 'r%41', released=True)
+        OrganizationFactory(mnemonic='Empty')
         self.users = (None, self.outsider, self.moh_member, self.hl7_member, self.jdoe, self.admin)
 
     def capabilities(self, fhir_base='/fhir', user=None, **params):
@@ -360,36 +371,44 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
                 for item in self.capabilities(fhir_base, user).data.get('codeSystem', [])}
 
     @staticmethod
-    def served(kwargs, user):
-        """
-        {identifier: (released versions served by name, sorted; the version served without one)} by resolve() itself,
-        over every canonical URL OCL holds or registers, and the OCL path of every repository without one (at an owner
-        base, the owner's), each with every released version code OCL holds.
-        """
-        namespace = namespace_of(kwargs)
-        urls = set(Source.objects.exclude(canonical_url=None).exclude(canonical_url='').values_list(
-            'canonical_url', flat=True)) | set(URLRegistry.objects.values_list('url', flat=True))
-        heads = Source.objects.filter(version=HEAD).filter(Q(canonical_url=None) | Q(canonical_url=''))
-        if namespace:
-            heads = heads.filter(Q(organization__uri=namespace) | Q(user__uri=namespace))
-        paths = {IdentifierSerializer.convert_ocl_uri_to_fhir_url(uri, 'CodeSystem')
-                 for uri in heads.values_list('uri', flat=True)}
-        codes = set(Source.objects.filter(released=True).exclude(version=HEAD).values_list('version', flat=True))
-        found = {}
-        for url in urls | paths:
+    def named(identifier, version, kwargs, user):
+        """The identifier of a version resolve() serves by name, or None: the version as written, else encoded."""
+        for name in (version, quote_plus(version)):
             try:
-                default = resolve('CodeSystem', url, None, kwargs, user).version
+                instance = resolve('CodeSystem', identifier, name, kwargs, user)
             except UnresolvedError:
                 continue
-            versions = []
-            for code in codes:
+            if instance.version == version and instance.released and not instance.is_head:
+                return name
+        return None
+
+    def served(self, kwargs, user):
+        """
+        {identifier: (released versions served by name, sorted; the one served without a version)} by search and
+        resolve() themselves: each repository a CodeSystem search at the base shows the caller, under its canonical URL
+        if resolve() serves that repository for it, else its OCL path if it serves it there; each of its released
+        versions resolve() serves by name, as written or else encoded, and the one it serves without a version.
+        """
+        found = {}
+        searched = {(row.mnemonic, row.organization_id, row.user_id) for row in visible_versions(
+            'CodeSystem', kwargs, user)}
+        for mnemonic, organization_id, user_id in searched:
+            rows = Source.objects.filter(mnemonic=mnemonic, organization_id=organization_id, user_id=user_id)
+            head = rows.get(version=HEAD)
+            for identifier in (head.canonical_url, IdentifierSerializer.convert_ocl_uri_to_fhir_url(
+                    head.uri, 'CodeSystem')):
                 try:
-                    instance = resolve('CodeSystem', url, code, kwargs, user)
+                    default = resolve('CodeSystem', identifier, None, kwargs, user) if identifier else None
                 except UnresolvedError:
                     continue
-                if instance.released and not instance.is_head:
-                    versions.append(code)
-            found[url] = (sorted(versions), default)
+                if not default or (default.mnemonic, default.organization_id, default.user_id) != (
+                        mnemonic, organization_id, user_id):
+                    continue
+                versions = [self.named(identifier, version, kwargs, user) for version in rows.filter(
+                    released=True).exclude(version=HEAD).values_list('version', flat=True)]
+                found[identifier] = (sorted(name for name in versions if name),
+                                     self.named(identifier, default.version, kwargs, user))
+                break
         return found
 
     def served_were_hidden_missing(self, kwargs, user):
@@ -409,13 +428,14 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
 
     def test_it_lists_what_the_resolver_serves_were_hidden_repositories_missing(self):
         """
-        At every base, to every caller: exactly the identifiers the operations resolve, with the released versions they
-        serve by name and the one they serve without a version, as they serve them were the repositories the caller
-        isn't shown missing. With them there, every version listed is served, but where a hidden repository of the
-        base's owner holds the canonical too: the resolver tries it and stops there (open decision A.3).
+        At every base, to every caller: each repository a CodeSystem search shows, under the identifier the operations
+        serve it at, with the released versions they serve by name and the one they serve without a version, as they
+        serve them were the repositories the caller isn't shown missing. With them there, every version listed is
+        served, but where a hidden repository of the base's owner holds the canonical too: the resolver tries it and
+        stops there (open decision A.3, Codex F2.3).
         """
         cases = [({}, '/fhir'), ({'user': 'jdoe'}, '/users/jdoe')] + [
-            ({'org': org}, f'/orgs/{org}') for org in ('HL7', 'MOH', 'CIEL', 'WHO', 'sehatapp', 'Acme')]
+            ({'org': org}, f'/orgs/{org}') for org in ('HL7', 'MOH', 'CIEL', 'WHO', 'sehatapp', 'Acme', 'Empty')]
         for kwargs, fhir_base in cases:
             for user in self.users:
                 listed = self.code_systems(fhir_base, user)
@@ -437,44 +457,62 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
         """The canonicals a hidden repository of the base's owner holds that the listing serves from another one."""
         if fhir_base == '/orgs/HL7' and user not in (self.hl7_member, self.admin):
             return {COLLIDE}
-        if fhir_base == '/users/jdoe' and self.registry and user not in (self.jdoe, self.admin):
-            return {SHARED}  # jdoe's own copy is private; the global registry's is HL7's
         return set()
 
     def test_the_global_base(self):
+        """Every repository search shows, under its canonical URL where the resolver picks it for it, else its path."""
+        by_url = {CIEL: ['v2*', 'v1'], ICD10: ['ICD102019*'], NEWEST_PRIVATE: ['v1*'], REST: ['3.0.1', '4.0.1*'],
+                  SHARED: ['v1*']}
+        unregistered = {UNREGISTERED: ['v1*'], REDIRECTED: ['v1*'], COLLIDE: ['v1*'], OLD: ['v2*', 'v1']}
+        if self.registry:  # what the registry doesn't hold is served by its path
+            unregistered = {
+                code_system_path('Acme', 'unregistered'): ['v1*'], code_system_path('Acme', 'local'): ['v1*'],
+                code_system_path('HL7', 'collide-public'): ['v1*'], code_system_path('Acme', 'renamed'): ['v2*', 'v1']}
         expected = {
-            CIEL: ['v2*', 'v1'], ICD10: ['ICD102019*'], NEWEST_PRIVATE: ['v1*'], REST: ['3.0.1', '4.0.1*'],
-            SHARED: ['v1*'], NAMELESS: ['v1*']}
-        if not self.registry:
-            expected.update({UNREGISTERED: ['v1*'], REDIRECTED: ['v1*'], COLLIDE: ['v1*'], OLD: ['v2*', 'v1']})
+            **by_url, **unregistered, NAMELESS: ['v1*'], code_system_path('sehatapp', 'ICD-10'): ['v1.0*'],
+            code_system_path('HL7', 'redirected'): ['r1*'], code_system_path('Acme', 'plus'): ['2.0%2Bbuild*', '1.0'],
+            code_system_path('Acme', 'encoded'): ['r%2541*']}
         for user in self.users:
             self.assertEqual(self.code_systems(user=user), expected, user)
         self.assertEqual(list(self.code_systems()), sorted(expected))
 
     def test_with_the_registry_on_only_what_the_registry_resolves(self):
-        """F1.1: at /fhir/ a canonical the global registry doesn't hold isn't served; an owner's entry sends its
-        canonical where the resolver sends it."""
+        """
+        F1.1, F2.1: at /fhir/ a canonical the global registry doesn't hold isn't served, so its repository is listed by
+        its path. F2.2: an owner base lists the owner's repositories only; one whose canonical the owner's registry
+        sends elsewhere is listed by its path, and the repository it's sent to isn't the owner's.
+        """
         self.assertEqual(UNREGISTERED in self.code_systems(), not self.registry)
+        self.assertEqual(code_system_path('Acme', 'unregistered') in self.code_systems(), self.registry)
         acme = self.code_systems('/orgs/Acme')
         self.assertEqual(acme[UNREGISTERED], ['v1*'])
-        self.assertEqual(acme[REDIRECTED], ['r1*'] if self.registry else ['v1*'])
+        self.assertEqual((acme.get(REDIRECTED), acme.get(code_system_path('Acme', 'local'))),
+                         (None, ['v1*']) if self.registry else (['v1*'], None))
         self.assertEqual(resolve('CodeSystem', REDIRECTED, None, {'org': 'Acme'}).version,
                          'r1' if self.registry else 'v1')
-        self.assertEqual(CIEL in acme, self.registry)  # the global registry's, where the owner holds none
+        self.assertEqual(resolve('CodeSystem', code_system_path('Acme', 'local'), None, {'org': 'Acme'}).version, 'v1')
+        self.assertNotIn(CIEL, acme)  # the global registry's: resolution falls through to it, but it isn't Acme's
+        self.assertEqual(self.code_systems('/orgs/Empty'), {})
 
     def test_a_shared_canonical_is_the_repository_the_resolver_picks(self):
-        """F1.2: WHO's ICD-10 (the older), not sehatapp's, with either toggle."""
-        self.assertEqual(self.code_systems()[ICD10], ['ICD102019*'])
+        """F1.2: WHO's ICD-10 (the older), not sehatapp's, with either toggle; F2.1: sehatapp's by its path."""
+        listed = self.code_systems()
+        self.assertEqual((listed[ICD10], listed[code_system_path('sehatapp', 'ICD-10')]), (['ICD102019*'], ['v1.0*']))
         with self.assertRaises(UnresolvedError):
             resolve('CodeSystem', ICD10, 'v1.0')
-        self.assertEqual(self.code_systems('/orgs/sehatapp'), {
-            ICD10: ['v1.0*'], **(self.globals('sehatapp') if self.registry else {})})
+        self.assertEqual(resolve('CodeSystem', code_system_path('sehatapp', 'ICD-10'), 'v1.0').version, 'v1.0')
+        self.assertEqual(self.code_systems('/orgs/sehatapp'), {ICD10: ['v1.0*']})
 
-    def globals(self, owner):
-        """What the global registry serves at an owner base that holds none of its canonicals itself."""
-        found = {CIEL: ['v2*', 'v1'], ICD10: ['ICD102019*'], NEWEST_PRIVATE: ['v1*'], REST: ['3.0.1', '4.0.1*'],
-                 SHARED: ['v1*']}
-        return {url: codes for url, codes in found.items() if not (owner == 'sehatapp' and url == ICD10)}
+    def test_a_version_is_named_so_the_resolver_reads_it_back(self):
+        """F2.4: the resolver decodes a version named (+ is a space, %XX a character), so one it would misread is
+        listed encoded, and the newest stays the default."""
+        listed = self.code_systems('/orgs/Acme')
+        self.assertEqual(listed[code_system_path('Acme', 'plus')], ['2.0%2Bbuild*', '1.0'])
+        self.assertEqual(listed[code_system_path('Acme', 'encoded')], ['r%2541*'])
+        for identifier, name, version in ((code_system_path('Acme', 'plus'), '2.0%2Bbuild', '2.0+build'),
+                                          (code_system_path('Acme', 'encoded'), 'r%2541', 'r%41')):
+            self.assertEqual(resolve('CodeSystem', identifier, name, {'org': 'Acme'}).version, version)
+            self.assertEqual(resolve('CodeSystem', identifier, None, {'org': 'Acme'}).version, version)
 
     def test_a_code_system_without_a_canonical_url_is_listed_by_its_ocl_path(self):
         """F1.3: as the operations resolve it, and as $expand names its members' system."""
@@ -562,8 +600,8 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
 
     def test_a_fixed_number_of_queries(self):
         """
-        The toggle, the HEADs, the versions (with the registry on, its entries too); at an owner base, the owner first:
-        whatever the number of code systems.
+        The toggle, the versions search shows, the HEADs (with the registry on, its entries too); at an owner base, the
+        owner and the caller's rights over it first: whatever the number of code systems.
         """
         registry = 1 if self.registry else 0
 
@@ -571,14 +609,14 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
             with self.assertNumQueries(expected + registry):
                 return len(self.capabilities(fhir_base, user).data.get('codeSystem', []))
 
-        found = [count(3), count(4, '/orgs/HL7'), count(4, '/orgs/HL7', self.hl7_member)]
+        found = [count(3), count(4, '/orgs/HL7'), count(5, '/orgs/HL7', self.hl7_member)]
         for number in range(30):
             url = f'http://example.org/fhir/CodeSystem/many-{number}'
             source(self.hl7, f'many-{number}', canonical_url=url)
             for version in ('v1', 'v2'):
                 source(self.hl7, f'many-{number}', version, released=True, canonical_url=url)
-        self.assertEqual([count(3), count(4, '/orgs/HL7'), count(4, '/orgs/HL7', self.hl7_member)], [
-            found[0] + (0 if self.registry else 30), found[1] + 30, found[2] + 30])
+        self.assertEqual([count(3), count(4, '/orgs/HL7'), count(5, '/orgs/HL7', self.hl7_member)], [
+            found[0] + 30, found[1] + 30, found[2] + 30])
 
     def test_the_blocks_are_the_routed_operations(self):
         capabilities = self.capabilities().data
@@ -638,7 +676,7 @@ class TerminologyCapabilitiesTimeoutTest(OCLAPITransactionTestCase):
                 cursor.execute('SELECT pg_sleep(1)')
             return []
 
-        with patch('core.fhir.search.SEARCH_TIMEOUT_MS', 50), patch('core.fhir.capabilities.served_versions', slow):
+        with patch('core.fhir.search.SEARCH_TIMEOUT_MS', 50), patch('core.fhir.capabilities.served_repositories', slow):
             response = APIClient().get('/fhir/metadata', {'mode': 'terminology'})
         self.assertEqual(response.status_code, 422, response.data)
         issue = response.data['issue'][0]

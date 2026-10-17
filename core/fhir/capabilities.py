@@ -10,13 +10,13 @@ CapabilityStatement, TerminologyCapabilities and $versions Parameters.
 - The search parameters are the search's own (core.fhir.search's PARAMETERS and STRING_FIELDS).
 - The FHIR versions are those the fhirVersion MIME parameter negotiates (core.fhir.base): R4, 4.0.
 - The software is the OCL API and its version; the base URL is the request's.
-- TerminologyCapabilities lists the code systems the operations serve the caller at the base, as resolve() serves
-  them were the repositories the caller isn't shown missing (core.fhir.resolve's served_heads and served_versions),
-  so a hidden repository changes nothing in it. Each is listed by the identifier the resolver finds it by: its
-  canonical URL (its HEAD's; the repository the resolver picks for it, with the URL registry when the toggle is on),
-  else its OCL path as a CodeSystem; with the released versions served by name, newest first, and the default, the
-  one served without a version. A fixed number of queries, bounded as a search's are (SEARCH_TIMEOUT_MS; past it the
-  list is too costly, a 422).
+- TerminologyCapabilities lists each repository a CodeSystem search at the base shows the caller, under the identifier
+  the resolver serves it at there: its canonical URL (its HEAD's) when the resolver picks it for that URL (with the URL
+  registry when the toggle is on), else its OCL path as a CodeSystem; as resolve() serves them were the repositories
+  the caller isn't shown missing (core.fhir.resolve's served_repositories), so a hidden repository changes nothing in
+  it. Each with its released versions, newest first, and the default, the one served without a version, each named so
+  the resolver reads it back. A fixed number of queries, bounded as a search's are (SEARCH_TIMEOUT_MS; past it the list
+  is too costly, a 422).
 - The routed operations' contracts fill TerminologyCapabilities' blocks: $translate finds the map from the code's
   system (core.fhir.ops.translate), so it needs none; $expand pages, with offset and count.
 """
@@ -27,11 +27,10 @@ from django.urls import URLResolver, get_resolver
 from django.utils import timezone
 
 from core import __version__
-from core.common.utils import decode_string
 from core.fhir import outcomes
 from core.fhir.base import (
     RESOURCE_TYPES, FhirOperationView, FhirVersioning, FhirViewMixin, fhir_base_url)
-from core.fhir.resolve import served_heads, served_versions
+from core.fhir.resolve import served_repositories, version_name
 from core.fhir.search import PARAMETERS, STRING_FIELDS, FhirReadMixin, FhirSearchMixin, within_search_timeout
 
 SOFTWARE = {'name': 'OCL API', 'version': __version__}
@@ -159,22 +158,16 @@ def versions(parameters, kwargs, user, instance=None):  # pylint: disable=unused
 
 def code_systems(kwargs, user):
     """
-    [{url, versions, default}] for each code system the base serves the caller (core.fhir.resolve's served_heads: the
-    repository resolve() picks for each identifier, were the repositories the caller isn't shown missing), by its
-    identifier: the released versions it serves by name, newest first, and the one it serves without a version (the
-    newest live one the caller is shown, as resolve() picks it). A repository serving no live release isn't listed.
+    [{url, versions, default}] for each repository a CodeSystem search at the base shows the caller, under the
+    identifier the resolver serves it at (core.fhir.resolve's served_repositories): its released versions, newest
+    first, and the one served without a version (the newest live one), each named so the resolver reads it back.
     """
-    heads = served_heads(kwargs, user)
-    served = served_versions(kwargs, user, heads.values())
     listed = []
-    for identifier in sorted(heads):
-        head = heads[identifier]
-        rows = served[(head.mnemonic, head.organization_id, head.user_id)]
+    for identifier, rows in sorted(served_repositories(kwargs, user), key=lambda item: item[0]):
         default = next((version for version, retired in rows if not retired), None)
-        if default is None:
-            continue
-        codes = [version for version, _ in rows if decode_string(version) == version]  # as the resolver reads one
-        listed.append({'url': identifier, 'versions': codes, 'default': default if default in codes else None})
+        if default is not None:
+            listed.append({'url': identifier, 'versions': [version_name(version) for version, _ in rows],
+                           'default': version_name(default)})
     return listed
 
 
