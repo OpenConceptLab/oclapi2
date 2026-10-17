@@ -693,6 +693,17 @@ class CanonicalUrlField(CharField):
         return super().get_attribute(instance) or getattr(instance, 'repository_canonical_url', None)
 
 
+class TitleField(CharField):
+    """
+    A repository's FHIR title: its full name, or its name when it has no full name (empty or only whitespace). Writes
+    still go to full_name.
+    """
+
+    def get_attribute(self, instance):
+        full_name = instance.full_name
+        return full_name if full_name and full_name.strip() else instance.name
+
+
 class FhirRepositorySerializerMixin:
     """
     For the CodeSystem, ValueSet and ConceptMap serializers: the opaque id at the global base (context opaque_ids), and

@@ -11,7 +11,7 @@ from core.collections.serializers import CollectionCreateOrUpdateSerializer
 from core.common.constants import HEAD
 from core.common.fhir_helpers import delete_empty_fields
 from core.common.serializers import StatusField, IdentifierSerializer, ReadSerializerMixin
-from core.fhir.search import CanonicalUrlField, FhirRepositorySerializerMixin
+from core.fhir.search import CanonicalUrlField, FhirRepositorySerializerMixin, TitleField
 from core.value_sets.constants import RESOURCE_TYPE
 
 logger = logging.getLogger('oclapi')
@@ -143,7 +143,7 @@ class ValueSetDetailSerializer(FhirRepositorySerializerMixin, serializers.ModelS
     resourceType = SerializerMethodField(method_name='get_resource_type')
     id = CharField(source='mnemonic')
     url = CanonicalUrlField(source='canonical_url', required=False)
-    title = CharField(source='full_name', required=False)
+    title = TitleField(source='full_name', required=False)
     status = StatusField(source='*')
     meta = SerializerMethodField()
     identifier = IdentifierSerializer(many=True, required=False)
