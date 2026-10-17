@@ -6,7 +6,8 @@ with or without the URL registry), with FHIR's rules on top.
 - Namespace: the base URL's. /fhir/ is global; /orgs/{org}/ and /users/{user}/ are that owner's. It comes from the
   route, never from the request.
 - Version: the one named (the operation's version parameter, else url|version, else the version an OCL path names;
-  a path naming one version with another named names none), HEAD included. With none named, the newest released
+  a path naming one version with another named names none), HEAD included, as it is stored: a request's value is
+  already decoded, so 2.0+build names 2.0+build. With none named, the newest released
   version the caller is shown, never HEAD. A repository with nothing released isn't visible, whatever version is
   named.
 - Access, after resolving: at the global base public repositories only, at an owner base what the caller may view.
@@ -82,7 +83,10 @@ def resolve(resource_type, url, version=None, kwargs=None, user=None, expression
     if not lookup_url or conflicting or (namespace and not SourceContainerMixin.get_object_from_namespace(namespace)):
         raise error
 
-    instance = shared_resolution(REPO_TYPES[resource_type], url, version, namespace, user)
+    # the version as named (HTTP has decoded the query already), so the shared resolver, which decodes it again,
+    # reads it back as it is stored: 2.0+build stays 2.0+build
+    instance = shared_resolution(
+        REPO_TYPES[resource_type], lookup_url, as_stored(elsewhere) if elsewhere else None, namespace, user)
     if instance.id and not (elsewhere or in_path) and not is_shown(instance, namespace, user):
         instance = latest_public_release(instance) or instance  # the newest release is private: the newest public one
 
@@ -351,8 +355,9 @@ def registry_entries(owner):
     return own, shared
 
 
-def version_name(version):
-    """A version as a request names it so the resolver, which decodes it (decode_string), reads it back."""
+def as_stored(version):
+    """A version as the shared resolver must be given it to look up `version` as it is stored: it decodes what it's
+    given (decode_string), so one that decoding would change is given encoded."""
     return version if decode_string(version) == version else quote_plus(version)
 
 

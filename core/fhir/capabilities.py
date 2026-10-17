@@ -14,9 +14,8 @@ CapabilityStatement, TerminologyCapabilities and $versions Parameters.
   the resolver serves it at there: its canonical URL (its HEAD's) when the resolver picks it for that URL (with the URL
   registry when the toggle is on), else its OCL path as a CodeSystem; as resolve() serves them were the repositories
   the caller isn't shown missing (core.fhir.resolve's served_repositories), so a hidden repository changes nothing in
-  it. Each with its released versions, newest first, and the default, the one served without a version, each named so
-  the resolver reads it back. A fixed number of queries, bounded as a search's are (SEARCH_TIMEOUT_MS; past it the list
-  is too costly, a 422).
+  it. Each with its released versions as stored, newest first, and the default, the one served without a version. A
+  fixed number of queries, bounded as a search's are (SEARCH_TIMEOUT_MS; past it the list is too costly, a 422).
 - The routed operations' contracts fill TerminologyCapabilities' blocks: $translate finds the map from the code's
   system (core.fhir.ops.translate), so it needs none; $expand pages, with offset and count.
 """
@@ -30,7 +29,7 @@ from core import __version__
 from core.fhir import outcomes
 from core.fhir.base import (
     RESOURCE_TYPES, FhirOperationView, FhirVersioning, FhirViewMixin, fhir_base_url)
-from core.fhir.resolve import served_repositories, version_name
+from core.fhir.resolve import served_repositories
 from core.fhir.search import PARAMETERS, STRING_FIELDS, FhirReadMixin, FhirSearchMixin, within_search_timeout
 
 SOFTWARE = {'name': 'OCL API', 'version': __version__}
@@ -160,14 +159,14 @@ def code_systems(kwargs, user):
     """
     [{url, versions, default}] for each repository a CodeSystem search at the base shows the caller, under the
     identifier the resolver serves it at (core.fhir.resolve's served_repositories): its released versions, newest
-    first, and the one served without a version (the newest live one), each named so the resolver reads it back.
+    first, as they are stored (each a business version, as R4 lists them), and the one served without a version, the
+    newest live one.
     """
     listed = []
     for identifier, rows in sorted(served_repositories(kwargs, user), key=lambda item: item[0]):
         default = next((version for version, retired in rows if not retired), None)
         if default is not None:
-            listed.append({'url': identifier, 'versions': [version_name(version) for version, _ in rows],
-                           'default': version_name(default)})
+            listed.append({'url': identifier, 'versions': [version for version, _ in rows], 'default': default})
     return listed
 
 

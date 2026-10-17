@@ -5,7 +5,7 @@ Terminology Repository, the software), $versions, and TerminologyCapabilities li
 the caller, with the versions it serves and the default one, in a fixed number of queries, with the URL registry
 toggle off and on. OpenConceptLab/ocl_online#451.
 """
-from urllib.parse import quote_plus
+import json
 
 from django.db import connection, transaction
 from django.test import SimpleTestCase, override_settings
@@ -15,18 +15,21 @@ from fhir.resources.R4B.capabilitystatement import CapabilityStatement
 from fhir.resources.R4B.parameters import Parameters
 from fhir.resources.R4B.terminologycapabilities import TerminologyCapabilities
 from mock import patch
+from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 
 from core import __version__
 from core.common.constants import ACCESS_TYPE_NONE, HEAD
 from core.common.serializers import IdentifierSerializer
 from core.common.tests import OCLTestCase, OCLAPITransactionTestCase
+from core.concepts.tests.factories import ConceptFactory
 from core.fhir import base, search
 from core.fhir.base import FhirOperationView
 from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
 from core.fhir.resolve import (
     ServedHead, UnresolvedError, in_namespace, namespace_of, ocl_path, resolve, viewable_rows, visible_versions)
 from core.fhir.tests_ops_lookup import OpsCorpusMixin, CIEL, ICD10, REST, SHARED, NEWEST_PRIVATE, HIV
+from core.fhir.tests_ops_lookup import name as concept_name
 from core.fhir.tests_search import source
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
@@ -284,6 +287,28 @@ class OwnerBaseFhirPathTest(SimpleTestCase):
             self.assertFalse(base.is_fhir_path(path_), path_)
 
 
+class OclPathAsFhirTest(SimpleTestCase):
+    """IdentifierSerializer.convert_ocl_uri_to_fhir_url: an OCL URL as FHIR names it, the repository type's segment."""
+
+    def test_only_the_repository_type_segment_is_replaced(self):
+        convert = IdentifierSerializer.convert_ocl_uri_to_fhir_url
+        for uri, resource_type, expected in (
+                ('/orgs/Acme/sources/collections/', 'CodeSystem', '/orgs/Acme/CodeSystem/collections/'),
+                ('/orgs/Acme/collections/sources/', 'ValueSet', '/orgs/Acme/ValueSet/sources/'),
+                ('/orgs/sources/sources/codes/', 'CodeSystem', '/orgs/sources/CodeSystem/codes/'),
+                ('/users/collections/collections/set/v1/', 'ValueSet', '/users/collections/ValueSet/set/'),
+                # as before for every other name
+                ('/orgs/CIEL/sources/CIEL/', 'CodeSystem', '/orgs/CIEL/CodeSystem/CIEL/'),
+                ('/orgs/CIEL/sources/CIEL/v1/concepts/1/', 'ConceptMap', '/orgs/CIEL/ConceptMap/CIEL/'),
+                ('/users/jo/collections/vs/', 'ValueSet', '/users/jo/ValueSet/vs/'),
+                ('/orgs/CIEL/CodeSystem/CIEL/', 'CodeSystem', '/orgs/CIEL/CodeSystem/CIEL/'),
+                ('http://example.org/fhir/CodeSystem/x', 'CodeSystem', 'http://example.org/fhir/CodeSystem/x'),
+                (None, 'CodeSystem', None)):
+            self.assertEqual(convert(uri, resource_type), expected, uri)
+        with self.assertRaisesMessage(ValidationError, 'given: orgs/CIEL/CodeSystem'):
+            convert('/orgs/CIEL/sources/', 'CodeSystem')
+
+
 class ResolverIdentifiersTest(SimpleTestCase):
     """The identifiers the resolver reads as written: an OCL path back to its repository, a registry namespace."""
 
@@ -315,7 +340,8 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
     ICD-10 (a canonical two public repositories share), an org with no sources, and these, mostly Acme's: a code system
     without a canonical URL; one with nothing released; one the registry doesn't hold; one whose newest release has a
     canonical URL of its own; one retired (its HEAD); a canonical Acme holds and HL7 holds too, which Acme's registry
-    sends to HL7; two of HL7's sharing a canonical, the older private; and releases named 2.0+build and r%41.
+    sends to HL7; two of HL7's sharing a canonical, the older private; releases named 2.0+build and r%41; and a source
+    named collections.
     """
 
     def setUp(self):  # pylint: disable=too-many-statements
@@ -350,11 +376,16 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
                public_access=ACCESS_TYPE_NONE)
         source(self.hl7, 'collide-public', canonical_url=COLLIDE)
         source(self.hl7, 'collide-public', 'v1', released=True, canonical_url=COLLIDE)
-        source(self.acme, 'plus')
-        source(self.acme, 'plus', '1.0', released=True)
-        source(self.acme, 'plus', '2.0+build', released=True)
-        source(self.acme, 'encoded')
-        source(self.acme, 'encoded', 'r%41', released=True)
+        plus = source(self.acme, 'plus')
+        plus_releases = [source(self.acme, 'plus', '1.0', released=True),
+                         source(self.acme, 'plus', '2.0+build', released=True)]
+        ConceptFactory(parent=plus, mnemonic='P1', sources=plus_releases,
+                       names=[concept_name('Plus one', preferred=True)])
+        encoded = source(self.acme, 'encoded')
+        ConceptFactory(parent=encoded, mnemonic='E1', sources=[source(self.acme, 'encoded', 'r%41', released=True)],
+                       names=[concept_name('Encoded one', preferred=True)])
+        source(self.acme, 'collections')
+        source(self.acme, 'collections', 'v1', released=True)
         OrganizationFactory(mnemonic='Empty')
         self.users = (None, self.outsider, self.moh_member, self.hl7_member, self.jdoe, self.admin)
 
@@ -372,22 +403,19 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
 
     @staticmethod
     def named(identifier, version, kwargs, user):
-        """The identifier of a version resolve() serves by name, or None: the version as written, else encoded."""
-        for name in (version, quote_plus(version)):
-            try:
-                instance = resolve('CodeSystem', identifier, name, kwargs, user)
-            except UnresolvedError:
-                continue
-            if instance.version == version and instance.released and not instance.is_head:
-                return name
-        return None
+        """The version, if resolve() serves it named as it is stored (a business version, as R4 lists it)."""
+        try:
+            instance = resolve('CodeSystem', identifier, version, kwargs, user)
+        except UnresolvedError:
+            return None
+        return version if instance.version == version and instance.released and not instance.is_head else None
 
-    def served(self, kwargs, user):
+    def served(self, kwargs, user):  # pylint: disable=too-many-locals
         """
         {identifier: (released versions served by name, sorted; the one served without a version)} by search and
         resolve() themselves: each repository a CodeSystem search at the base shows the caller, under its canonical URL
         if resolve() serves that repository for it, else its OCL path if it serves it there; each of its released
-        versions resolve() serves by name, as written or else encoded, and the one it serves without a version.
+        versions resolve() serves named as stored, and the one it serves without a version.
         """
         found = {}
         searched = {(row.mnemonic, row.organization_id, row.user_id) for row in visible_versions(
@@ -395,8 +423,8 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
         for mnemonic, organization_id, user_id in searched:
             rows = Source.objects.filter(mnemonic=mnemonic, organization_id=organization_id, user_id=user_id)
             head = rows.get(version=HEAD)
-            for identifier in (head.canonical_url, IdentifierSerializer.convert_ocl_uri_to_fhir_url(
-                    head.uri, 'CodeSystem')):
+            owner_type, owner_id, _, repository_id = head.uri.strip('/').split('/')
+            for identifier in (head.canonical_url, f'/{owner_type}/{owner_id}/CodeSystem/{repository_id}/'):
                 try:
                     default = resolve('CodeSystem', identifier, None, kwargs, user) if identifier else None
                 except UnresolvedError:
@@ -470,8 +498,8 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
                 code_system_path('HL7', 'collide-public'): ['v1*'], code_system_path('Acme', 'renamed'): ['v2*', 'v1']}
         expected = {
             **by_url, **unregistered, NAMELESS: ['v1*'], code_system_path('sehatapp', 'ICD-10'): ['v1.0*'],
-            code_system_path('HL7', 'redirected'): ['r1*'], code_system_path('Acme', 'plus'): ['2.0%2Bbuild*', '1.0'],
-            code_system_path('Acme', 'encoded'): ['r%2541*']}
+            code_system_path('HL7', 'redirected'): ['r1*'], code_system_path('Acme', 'plus'): ['2.0+build*', '1.0'],
+            code_system_path('Acme', 'encoded'): ['r%41*'], '/orgs/Acme/CodeSystem/collections/': ['v1*']}
         for user in self.users:
             self.assertEqual(self.code_systems(user=user), expected, user)
         self.assertEqual(list(self.code_systems()), sorted(expected))
@@ -503,16 +531,47 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
         self.assertEqual(resolve('CodeSystem', code_system_path('sehatapp', 'ICD-10'), 'v1.0').version, 'v1.0')
         self.assertEqual(self.code_systems('/orgs/sehatapp'), {ICD10: ['v1.0*']})
 
-    def test_a_version_is_named_so_the_resolver_reads_it_back(self):
-        """F2.4: the resolver decodes a version named (+ is a space, %XX a character), so one it would misread is
-        listed encoded, and the newest stays the default."""
+    def test_a_version_is_listed_as_stored_and_served_by_it(self):
+        """
+        F3.1: TerminologyCapabilities lists a release's business version as it is stored (2.0+build, r%41), the newest
+        the default; the operations serve it named so: GET with it encoded in the query, as HTTP does, and POST as a
+        Parameters string or a Coding's version.
+        """
         listed = self.code_systems('/orgs/Acme')
-        self.assertEqual(listed[code_system_path('Acme', 'plus')], ['2.0%2Bbuild*', '1.0'])
-        self.assertEqual(listed[code_system_path('Acme', 'encoded')], ['r%2541*'])
-        for identifier, name, version in ((code_system_path('Acme', 'plus'), '2.0%2Bbuild', '2.0+build'),
-                                          (code_system_path('Acme', 'encoded'), 'r%2541', 'r%41')):
-            self.assertEqual(resolve('CodeSystem', identifier, name, {'org': 'Acme'}).version, version)
-            self.assertEqual(resolve('CodeSystem', identifier, None, {'org': 'Acme'}).version, version)
+        self.assertEqual(listed[code_system_path('Acme', 'plus')], ['2.0+build*', '1.0'])
+        self.assertEqual(listed[code_system_path('Acme', 'encoded')], ['r%41*'])
+        for fhir_base in ('/fhir', '/orgs/Acme'):
+            for mnemonic, code, version in (('plus', 'P1', '2.0+build'), ('encoded', 'E1', 'r%41')):
+                system = code_system_path('Acme', mnemonic)
+                for operation, valid in (('$lookup', False), ('$validate-code', True)):
+                    named = {'url' if valid else 'system': system, 'code': code}
+                    as_coding = [{'name': 'url', 'valueUri': system}] if valid else []
+                    answers = [
+                        client_for().get(f'{fhir_base}/CodeSystem/{operation}', {**named, 'version': version}),
+                        client_for().get(f'{fhir_base}/CodeSystem/{operation}', named),  # the default
+                        self.post_parameters(fhir_base, operation, [
+                            {'name': key, 'valueCode' if key == 'code' else 'valueUri': value}
+                            for key, value in named.items()] + [{'name': 'version', 'valueString': version}]),
+                        self.post_parameters(fhir_base, operation, as_coding + [{'name': 'coding', 'valueCoding': {
+                            'system': system, 'code': code, 'version': version}}])]
+                    for response in answers:
+                        self.assertEqual(response.status_code, 200, (fhir_base, operation, response.data))
+                        parameters = {item['name']: item for item in response.data['parameter']}
+                        self.assertEqual(parameters['version']['valueString'], version, (fhir_base, operation))
+                        if valid:
+                            self.assertIs(parameters['result']['valueBoolean'], True, (fhir_base, operation))
+
+    @staticmethod
+    def post_parameters(fhir_base, operation, parameters):
+        return client_for().post(
+            f'{fhir_base}/CodeSystem/{operation}', json.dumps({'resourceType': 'Parameters', 'parameter': parameters}),
+            content_type='application/fhir+json')
+
+    def test_a_repository_named_like_a_repository_type_is_listed_by_its_path(self):
+        """F3.2: a source named collections, by /orgs/Acme/CodeSystem/collections/, which the operations resolve."""
+        for fhir_base, kwargs in (('/fhir', {}), ('/orgs/Acme', {'org': 'Acme'})):
+            self.assertEqual(self.code_systems(fhir_base)['/orgs/Acme/CodeSystem/collections/'], ['v1*'], fhir_base)
+            self.assertEqual(resolve('CodeSystem', '/orgs/Acme/CodeSystem/collections/', None, kwargs).version, 'v1')
 
     def test_a_code_system_without_a_canonical_url_is_listed_by_its_ocl_path(self):
         """F1.3: as the operations resolve it, and as $expand names its members' system."""
