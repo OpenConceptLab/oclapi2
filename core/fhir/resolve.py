@@ -18,17 +18,11 @@ with or without the URL registry), with FHIR's rules on top.
   owner base (whether or not it finds one, so a hidden repository is answered as a missing one is); with it, at an
   owner base whose own registry has no entry for the URL and that has a repository with it. A registry entry decides
   (at /fhir/ only an entry resolves), and where resolution finds no repository it still finds none.
-  At an owner base the answer is identical with and without a hidden lowest-id repository, byte for byte, but the
-  statement count can differ by one either way: anonymously one more without it, the version read of the next
-  repository the resolver makes when it picks it, since a HEAD the caller isn't shown resolves to nothing before any
-  version is read; for a signed-in non-member one fewer, its check of the right to the hidden repository. That one
-  statement is the A.3 residual of the shared resolver's early stop, not of this rule
-  (tests_resolve_named_version.HiddenHolderCases measures the same differences on the code before it); closing it
-  needs a change in the shared resolver. A repository whose HEAD the base shows but whose releases are all private
-  is answered as a missing one too, and costs one statement more than a world without it: the resolver shows its
-  HEAD, so it reads the version named before the holder is looked for. Before this rule that configuration answered
-  not found with it and the holder's release without it, so the rule closes the difference in the answer and leaves
-  that one statement, which the same shared-resolver change would close.
+  At an owner base a repository the base doesn't show the caller, and one whose HEAD it shows but whose releases are
+  all private, are both answered as a missing one is, byte for byte; the statement count can still differ by one,
+  the A.3 residual of the shared resolver's early stop rather than of this rule, which a change in the shared
+  resolver would close. tests_resolve_named_version.HiddenHolderCases measures both, and measures the same
+  differences on the code before this rule.
 - Access, after resolving: at the global base public repositories only, at an owner base what the caller may view.
   The version and its repository (HEAD) must both be viewable. Without the URL registry, the global base's canonical
   match considers only the repositories it shows, so a private copy of a canonical never hides a public one. Otherwise
