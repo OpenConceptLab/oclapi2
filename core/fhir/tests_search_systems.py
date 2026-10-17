@@ -8,17 +8,23 @@ OpenConceptLab/ocl_online#451.
 """
 import json
 import re
-from datetime import datetime, timezone as dt_timezone
+import uuid
+from datetime import datetime, timedelta, timezone as dt_timezone
 
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
-from elasticsearch import Elasticsearch, ConnectionTimeout
+from django.utils import timezone
+from elastic_transport import ApiResponseMeta, HttpHeaders, NodeConfig
+from elasticsearch import ApiError, ConnectionError as ESConnectionError, ConnectionTimeout, Elasticsearch, \
+    NotFoundError
+from elasticsearch_dsl.connections import connections
 from mock import patch
 from rest_framework.test import APIClient
 
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory
+from core.fhir.mapping_index import LAG_WINDOW
 from core.fhir.tests_search import SearchCorpusMixin, source, CIEL, ICD10
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
@@ -37,6 +43,13 @@ NOW = datetime(2026, 10, 16, 12, tzinfo=dt_timezone.utc)
 def index_requests():
     """A spy on the mappings index's search requests: patch it in, then read its call_args_list."""
     return patch.object(Elasticsearch, 'search', autospec=True, side_effect=Elasticsearch.search)
+
+
+def es_error(kind, status):
+    """An error as the Elasticsearch client raises it for an HTTP status."""
+    meta = ApiResponseMeta(status=status, http_version='1.1', headers=HttpHeaders(), duration=0.0,
+                           node=NodeConfig('http', 'es', 9200))
+    return kind(message='refused', meta=meta, body={'error': {'type': 'refused'}})
 
 
 def aggregations(node):
@@ -83,8 +96,9 @@ class SystemSearchCases(SearchCorpusMixin):
 
     @staticmethod
     def mapping(parent, from_concept, to_concept, sources, **kwargs):
-        """A mapping as OCL stores one: both sides' sources, their URLs and the codes."""
+        """A mapping as OCL stores one: both sides' sources, their URLs, the codes and its repository's access."""
         kwargs.setdefault('to_concept_code', to_concept.mnemonic)
+        kwargs.setdefault('public_access', parent.public_access)
         return MappingFactory(
             parent=parent, from_concept=from_concept, to_concept=to_concept, from_source=from_concept.parent,
             to_source=to_concept.parent, from_source_url=from_concept.parent.uri, to_source_url=to_concept.parent.uri,
@@ -99,62 +113,94 @@ class SystemSearchCases(SearchCorpusMixin):
 
     # the versions come from the mappings index
 
-    def test_a_version_is_found_once_its_mappings_are_indexed(self):
+    @staticmethod
+    def unindexed(mapping):
+        """The index as it is while a release's indexing runs: the mapping's document lists HEAD alone."""
+        connections.get_connection().update(
+            index=MappingDocument.Index.name, id=str(mapping.id), doc={'source_version': ['HEAD']}, refresh=True)
+
+    def test_a_release_whose_mappings_are_not_indexed_yet_answers_as_before(self):
         """
-        A version whose mappings the index doesn't hold yet (a new release while its indexing runs) isn't found until
-        they are, as in OCL's own mapping search; the database still decides what the version shows.
+        While a release's indexing runs, the documents of its mappings don't list it yet: a release created within
+        LAG_WINDOW, of a repository the index shows mapping to the system, is checked in the database all the same.
+        The same Bundle before, during and after.
         """
-        for name in ('target-system', 'target-uri'):
-            self.assertEqual(self.keys(self.search('ConceptMap', **{name: ICD10})), [f'{CIEL}|v2'], name)
-        MappingDocument().update(self.ciel_to_icd, action='delete')
-        for name in ('target-system', 'target-uri'):
-            self.assertEqual(self.search('ConceptMap', **{name: ICD10})['total'], 0, name)
+        names = ('target-system', 'target-uri')
+        before = {name: self.client.get('/fhir/ConceptMap/', {name: ICD10}).data for name in names}
+        self.assertEqual(self.keys(before['target-system']), [f'{CIEL}|v2'])
+        self.unindexed(self.ciel_to_icd)
+        for name in names:
+            during = self.client.get('/fhir/ConceptMap/', {name: ICD10}).data
+            self.assertEqual((self.keys(during), during['total']), (self.keys(before[name]), 1), name)
         MappingDocument().update(self.ciel_to_icd)
         self.assertEqual(self.keys(self.search('ConceptMap', **{'target-system': ICD10})), [f'{CIEL}|v2'])
+
+    def test_a_release_the_index_never_lists_is_missed_past_the_lag_window(self):
+        """
+        Past LAG_WINDOW, a release whose mappings' documents never came to list it (its indexing failed) is missed
+        until it's indexed again: the index's lag is bounded by that window, not closed.
+        """
+        name = f'maps-{uuid.uuid4().hex[:8]}'  # a repository no other test's documents name
+        maps = source(self.misc, name, canonical_url=f'https://example.org/{name}')
+        release = source(self.misc, name, 'v1', released=True, canonical_url=maps.canonical_url)
+        mapping = self.mapping(maps, ConceptFactory(parent=maps), self.icd_code, [release])
+        key = f'{maps.canonical_url}|v1'
+        self.assertIn(key, self.keys(self.search('ConceptMap', **{'target-system': ICD10})))
+        self.unindexed(mapping)
+        self.assertIn(key, self.keys(self.search('ConceptMap', **{'target-system': ICD10})))  # within the window
+        Source.objects.filter(id=release.id).update(created_at=timezone.now() - LAG_WINDOW - timedelta(hours=1))
+        self.assertNotIn(key, self.keys(self.search('ConceptMap', **{'target-system': ICD10})))
+        MappingDocument().update(mapping)
+        self.assertIn(key, self.keys(self.search('ConceptMap', **{'target-system': ICD10})))
 
     def test_one_bounded_index_request_per_parameter(self):
         """
         One request per system parameter, whatever its alternatives, sent only for a system among the sources the base
-        shows the caller: none for one OCL doesn't hold or the caller isn't shown. Each aggregation has an explicit
-        size, leaves HEAD out and lists a few mappings of each version.
+        shows the caller: none for one OCL doesn't hold or the caller isn't shown. It reads only the documents of the
+        ConceptMaps the base shows (public ones at /fhir/, the owner's at an owner base), whole (no partial results)
+        within a time limit, and each aggregation has an explicit size; it lists versions, not mappings.
         """
         unknown = ','.join(f'https://example.org/unknown-{index}' for index in range(19))
-        for base, user, params, requests, total in (
-                ('/fhir', None, {'source-system': CIEL}, 1, 1),
-                ('/fhir', None, {'source-uri': f'{unknown},{CIEL}'}, 1, 1),
-                ('/fhir', None, {'source-system': CIEL, 'target-system': ICD10}, 2, 1),
-                ('/fhir', None, {'target-system': f'{ICD10},{CIEL}'}, 1, 2),
-                ('/fhir', None, {'target-system': unknown}, 0, 0),
-                ('/fhir', self.admin, {'target-system': PRIVATE}, 0, 0),
-                ('/orgs/Partner', self.partner_only, {'target-system': PRIVATE}, 0, 0),
-                ('/orgs/Partner', self.admin, {'target-system': PRIVATE}, 1, 1)):
+        public = [{'term': {'public_can_view': True}}]
+        partner = [{'term': {'owner_type': 'Organization'}}, {'term': {'owner': 'partner'}}]
+        for base, user, params, requests, total, shown in (
+                ('/fhir', None, {'source-system': CIEL}, 1, 1, public),
+                ('/fhir', None, {'source-uri': f'{unknown},{CIEL}'}, 1, 1, public),
+                ('/fhir', None, {'source-system': CIEL, 'target-system': ICD10}, 2, 1, public),
+                ('/fhir', None, {'target-system': f'{ICD10},{CIEL}'}, 1, 2, public),
+                ('/fhir', None, {'target-system': unknown}, 0, 0, None),
+                ('/fhir', self.admin, {'target-system': PRIVATE}, 0, 0, None),
+                ('/fhir', self.admin, {'target-system': CIEL}, 1, 1, public),
+                ('/orgs/Partner', self.partner_only, {'target-system': PRIVATE}, 0, 0, None),
+                ('/orgs/Partner', self.admin, {'target-system': PRIVATE}, 1, 1, partner),
+                ('/orgs/Partner', None, {'target-system': f'{PRIVATE},{CIEL}'}, 1, 0, partner + public)):
             with index_requests() as spy:
                 response = self.client_for(user).get(f'{base}/ConceptMap/', params)
             self.assertEqual((response.status_code, response.data['total']), (200, total), params)
             self.assertEqual(len(spy.call_args_list), requests, (base, params))
             for call in spy.call_args_list:
-                body = call.kwargs
-                self.assertEqual((body['index'], body['size']), (MappingDocument.Index.name, 0))
-                found = list(aggregations(body['aggs']))
-                self.assertTrue(found)
-                for kind, aggregation in found:
-                    if kind in ('terms', 'top_hits'):
-                        self.assertLessEqual(aggregation['size'], 1000, aggregation)
-                    if kind == 'terms' and aggregation['field'] == 'source_version':
-                        self.assertEqual(aggregation['exclude'], 'HEAD')
+                self.assert_bounded(call.kwargs, shown)
 
-    def test_the_database_checks_a_few_mappings_of_each_version(self):
-        """However many mappings a version holds, the database reads the few the index names: a fixed query count."""
+    def assert_bounded(self, body, shown):  # pylint: disable=invalid-name
+        """An index request: whole, timed, filtered to the documents `shown`, every aggregation sized, no hits."""
+        self.assertEqual((body['index'], body['size'], body['allow_partial_search_results']),
+                         (MappingDocument.Index.name, 0, False))
+        self.assertRegex(body['timeout'], r'^[0-9]+ms$')
+        self.assertEqual(body['query']['bool']['filter'][1:], shown)
+        found = list(aggregations(body['aggs']))
+        self.assertTrue(found)
+        self.assertNotIn('top_hits', [kind for kind, _ in found])
+        for kind, aggregation in found:
+            if kind == 'terms':
+                self.assertLessEqual(aggregation['size'], 1000, aggregation)
+
+    def test_queries_stay_three_however_many_mappings(self):
         for index in range(12):
             self.mapping(self.ciel_source, ConceptFactory(parent=self.ciel_source), self.icd_code,
                          [self.ciel_v1, self.ciel_v2], to_concept_code=f'A{index:02}')
-        with CaptureQueriesContext(connection) as context:
+        with self.assertNumQueries(3):  # the sources with the canonical, the matches' ids, the page
             response = self.client.get('/fhir/ConceptMap/', {'target-system': ICD10})
         self.assertEqual(self.keys(response.data), [f'{CIEL}|v1', f'{CIEL}|v2'])
-        self.assertEqual(len(context.captured_queries), 3)  # the sources with the canonical, the matches' ids, the page
-        checked = re.findall(r'"mapping_id" IN \(([^)]*)\)', context.captured_queries[1]['sql'])
-        self.assertEqual(len(checked), 1, context.captured_queries[1]['sql'])
-        self.assertLessEqual(len(checked[0].split(',')), 2 * 3)  # two versions, three mappings each
 
     def test_a_version_with_newer_retired_mappings_is_found_by_an_older_live_one(self):
         for _ in range(4):
@@ -164,8 +210,25 @@ class SystemSearchCases(SearchCorpusMixin):
         Mapping.objects.filter(id=self.my_codes_to_ciel.id).update(retired=True)  # the index still has it live
         self.assertEqual(self.search('ConceptMap', **{'target-system': CIEL})['total'], 0)
 
+    def test_a_version_is_decided_by_all_its_mappings_not_a_few(self):
+        """
+        However many of a version's newer mappings the database rejects (retired or deleted there, live in the index),
+        an older live one still finds it; once that one is retired too, the version isn't found.
+        """
+        newer = [self.mapping(self.jdoe_codes, ConceptFactory(parent=self.jdoe_codes), self.ciel_code,
+                              [self.jdoe_codes_v1]) for _ in range(4)]
+        Mapping.objects.filter(id__in=[mapping.id for mapping in newer[:2]]).update(retired=True)
+        Mapping.objects.filter(id__in=[mapping.id for mapping in newer[2:]]).update(is_active=False)
+        for name in ('target-system', 'target-uri'):
+            self.assertEqual(self.keys(self.search('ConceptMap', **{name: CIEL})), [f'{MY_CODES}|v1'], name)
+        Mapping.objects.filter(id=self.my_codes_to_ciel.id).update(retired=True)
+        self.assertEqual(self.search('ConceptMap', **{'target-system': CIEL})['total'], 0)
+
     def test_owners_whose_names_differ_only_in_case_are_told_apart(self):
-        """The index keeps a mapping's owner and repository names in lowercase; the database tells such twins apart."""
+        """
+        The index keeps a mapping's owner and repository names in lowercase, so twins share its versions; the database
+        decides each twin's version by its own mappings, however many more the other has.
+        """
         maps = []
         for mnemonic in ('Acme', 'ACME'):
             owner = OrganizationFactory(mnemonic=mnemonic)
@@ -174,9 +237,13 @@ class SystemSearchCases(SearchCorpusMixin):
         self.mapping(maps[0].head, ConceptFactory(parent=maps[0].head), self.ciel_code, [maps[0]])
         self.assertEqual(self.keys(self.search('ConceptMap', **{'target-system': CIEL})),
                          sorted([f'{MY_CODES}|v1', 'https://example.org/Acme/maps|v1']))
-        self.mapping(maps[1].head, ConceptFactory(parent=maps[1].head), self.ciel_code, [maps[1]])
+        for _ in range(4):  # newer, and more than a version's few
+            self.mapping(maps[1].head, ConceptFactory(parent=maps[1].head), self.ciel_code, [maps[1]])
         self.assertEqual(self.keys(self.search('ConceptMap', **{'target-system': CIEL})), sorted(
             [f'{MY_CODES}|v1', 'https://example.org/ACME/maps|v1', 'https://example.org/Acme/maps|v1']))
+        Source.objects.filter(mnemonic='Maps', organization__mnemonic='ACME').update(public_access=ACCESS_TYPE_NONE)
+        self.assertEqual(self.keys(self.search('ConceptMap', **{'target-system': CIEL})),
+                         sorted([f'{MY_CODES}|v1', 'https://example.org/Acme/maps|v1']))
 
     # cost: a bound on the index's answer and on its time
 
@@ -195,6 +262,28 @@ class SystemSearchCases(SearchCorpusMixin):
             response = self.client.get('/fhir/ConceptMap/', {'source-system': CIEL})
         self.assertOutcome(response, 422, 'too-costly', 'too-costly')
         self.assertEqual(spy.call_args_list, [])  # with no time left, it isn't sent
+
+    def test_an_index_answer_that_is_not_whole_is_an_outcome(self):
+        """
+        A search the index answered only in part, or not at all, is never taken as complete: past its time it's too
+        costly; a failed shard, a missing index or any other error is the outcome of an error that isn't the
+        request's (a 422 `exception`), never a 5xx or a short Bundle.
+        """
+        shards = {'total': 2, 'successful': 2, 'skipped': 0, 'failed': 0}
+        empty = {'aggregations': {}, 'hits': {'hits': []}}
+        for answer, code, tx_issue_type in (
+                ({**empty, 'timed_out': True, '_shards': shards}, 'too-costly', 'too-costly'),
+                ({**empty, 'timed_out': False, '_shards': {**shards, 'successful': 1, 'failed': 1}}, 'exception',
+                 'invalid-data'),
+                ({**empty, 'timed_out': False}, 'exception', 'invalid-data'),
+                (es_error(NotFoundError, 404), 'exception', 'invalid-data'),
+                (es_error(ApiError, 500), 'exception', 'invalid-data'),
+                (ESConnectionError('refused'), 'exception', 'invalid-data'),
+                (ConnectionTimeout('timed out'), 'too-costly', 'too-costly')):
+            effect = {'side_effect': answer} if isinstance(answer, Exception) else {'return_value': answer}
+            with patch.object(Elasticsearch, 'search', autospec=True, **effect):
+                response = self.client.get('/fhir/ConceptMap/', {'target-system': ICD10})
+            self.assertOutcome(response, 422, code, tx_issue_type)
 
     # what the caller isn't shown leaves no trace
 
@@ -253,6 +342,32 @@ class SystemSearchCases(SearchCorpusMixin):
         self.assertEqual(with_it[('/fhir', json.dumps({'target-system': CIEL}), 'anonymous')][:1], (200,))
         Source.objects.filter(mnemonic='moh-map').delete()
         self.assertEqual(with_it, self.answers(requests))
+
+    def test_concept_maps_the_caller_is_not_shown_count_toward_no_limit(self):
+        """
+        A private ConceptMap with more versions than the aggregation lists, mapping into a public system, changes no
+        public answer, at /fhir/ or its owner's base: the same bytes, statements and index requests as without it.
+        The index reads only the documents of the ConceptMaps the base shows the caller.
+        """
+        name = f'target-{uuid.uuid4().hex[:8]}'  # a system no other test's documents map to
+        target = source(self.misc, name, canonical_url=f'https://example.org/{name}')
+        code = ConceptFactory(parent=target)
+        shown = source(self.misc, f'{name}-map', canonical_url=f'https://example.org/{name}-map')
+        self.mapping(shown, ConceptFactory(parent=shown), code,
+                     [source(self.misc, f'{name}-map', 'v1', released=True, canonical_url=shown.canonical_url)])
+        hidden = source(self.moh, f'{name}-hidden', public_access=ACCESS_TYPE_NONE)
+        for version in ('v1', 'v2', 'v3'):
+            self.mapping(hidden, ConceptFactory(parent=hidden), code, [
+                source(self.moh, f'{name}-hidden', version, released=True, public_access=ACCESS_TYPE_NONE)])
+        callers = [('anonymous', None), ('outsider', self.outsider)]
+        requests = [(base, {parameter: target.canonical_url}, callers) for base in ('/fhir', '/orgs/MOH')
+                    for parameter in ('target-system', 'target-uri')]
+        with patch('core.fhir.mapping_index.MAX_BUCKETS', 2):  # the public map's HEAD and v1 fit; the hidden one's not
+            with_it = self.answers(requests)
+            self.assertEqual(with_it[('/fhir', json.dumps({'target-system': target.canonical_url}), 'anonymous')][
+                1].count(b'"fullUrl"'), 1)
+            Source.objects.filter(mnemonic=f'{name}-hidden').delete()
+            self.assertEqual(with_it, self.answers(requests))
 
 
 class SystemSearchWithoutRegistryTest(SystemSearchCases, OCLTestCase):

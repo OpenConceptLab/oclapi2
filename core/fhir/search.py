@@ -17,7 +17,8 @@ FHIR search and read of CodeSystem, ValueSet and ConceptMap: SVCM's Query transa
 - A search's queries are bounded together by SEARCH_TIMEOUT_MS: one the database cancels makes the search too costly
   (422). A parameter takes at most MAX_ALTERNATIVES values and a search MAX_SEARCH_ALTERNATIVES (else a 400
   too-costly), and the canonical URLs each parameter names are looked up in one query. ConceptMap's source and target
-  systems also read the mappings index (core.fhir.mapping_index), in one request per parameter within the same time.
+  systems also read their candidate versions from the mappings index (core.fhir.mapping_index), in one request per
+  parameter within the same time.
 - A search entry is the resource's summary, marked SUBSETTED: no concept, compose or group, which only a read returns.
   A CodeSystem is `complete` (with every concept, retired ones flagged) up to CONCEPT_LIMIT concepts, else
   `not-present`.
@@ -276,7 +277,13 @@ def held_identifier(system, value):
         'identifier', f'lax $[*] ? ({" && ".join(conditions)})', variables)
 
 
-def mapped(side, value, sources, examples, namespace, user):  # pylint: disable=too-many-arguments
+def indexed_repository(owner_type, owner, mnemonic):
+    """The rows of a repository as the mappings index names it (owner and mnemonic in lowercase): twins included."""
+    owner_field = 'organization__mnemonic' if owner_type == 'Organization' else 'user__username'
+    return Q(mnemonic__iexact=mnemonic, **{f'{owner_field}__iexact': owner})
+
+
+def mapped(side, value, sources, holding, namespace, user):  # pylint: disable=too-many-arguments
     """
     A ConceptMap version holding a live mapping whose group source (side 'from') or target ('to') shows `value`, as
     ConceptMapGroupField builds groups: retired and deleted mappings aren't read; a group's system is the from or to
@@ -285,12 +292,13 @@ def mapped(side, value, sources, examples, namespace, user):  # pylint: disable=
     source-uri and target-uri are read as the systems.
 
     `sources` are the ids of the sources with that canonical the base shows the caller (viewable_rows), listed first
-    (sources_with), and `examples` the mappings the index lists for each version holding mappings from or to them
-    (mapping_index.examples): the database checks only those, so a heavily mapped source costs no more than another.
-    A mapping whose source isn't one the caller is shown by a canonical URL is matched by the URL it stores: a source
-    the caller isn't shown answers exactly as one OCL doesn't hold. Alone, that is one EXISTS, which the planner runs
-    as a semi-join; beside the index's mappings each part is an uncorrelated IN, which it runs once, rather than a
-    subquery per version.
+    (sources_with), and `holding` the repositories and versions the mappings index lists as holding mappings from or
+    to them (mapping_index.holding). Only those versions, and their repositories' releases created within
+    mapping_index.LAG_WINDOW (which the index may not list yet), are candidates: the database decides each by its own
+    mappings, so a heavily mapped source costs no more than another. A mapping whose source isn't one the caller is
+    shown by a canonical URL is matched by the URL it stores: a source the caller isn't shown answers exactly as one
+    OCL doesn't hold. Alone, that is one EXISTS, which the planner runs as a semi-join; beside the candidates it's an
+    uncorrelated IN, which it runs once.
     """
     field = f'mapping__{side}_source'
     unnamed = ~Exists(viewable_rows(Source, namespace, user).filter(id=OuterRef(f'{field}_id'), canonical_url__gt=''))
@@ -300,10 +308,13 @@ def mapped(side, value, sources, examples, namespace, user):  # pylint: disable=
         stored |= reduce(or_, (Q(**{f'{field}_url__startswith': f'/{path[1]}/{path[2]}/{kind}/{path[3]}/'})
                                for kind in ('sources', 'collections', 'ConceptMap'))) & unnamed
     links = Mapping.sources.through.objects.filter(mapping__retired=False, mapping__is_active=True)
-    if not examples:
+    if not holding:
         return Exists(links.filter(stored, source_id=OuterRef('id')))
-    return Q(id__in=links.filter(stored).values('source_id')) | Q(id__in=links.filter(
-        **{f'{field}_id__in': sources, 'mapping_id__in': examples}).values('source_id'))
+    recent = Q(created_at__gte=timezone.now() - mapping_index.LAG_WINDOW)
+    candidates = reduce(or_, (indexed_repository(*repository) & (Q(version__in=sorted(versions)) | recent)
+                              for repository, versions in sorted(holding.items())))
+    named = Exists(links.filter(source_id=OuterRef('id'), **{f'{field}_id__in': sources}))
+    return Q(id__in=links.filter(stored).values('source_id')) | (candidates & named)
 
 
 class Search:
@@ -370,8 +381,9 @@ class Search:
         The canonical URLs a parameter's alternatives (still escaped) name, looked up together in one query, for its
         criteria: the repositories with them (url, system, code's system), or among the sources the base shows the
         caller, the repositories (reference) or the sources (source-system, source-uri, target-system, target-uri).
-        For the sources found, one request to the mappings index lists a few mappings of each version holding
-        mappings from (source-) or to (target-) them; none is sent for a URL no source the caller is shown has.
+        For the sources found, one request to the mappings index lists the repositories and versions holding mappings
+        from (source-) or to (target-) them, among the ConceptMaps the base shows the caller; none is sent for a URL no
+        source the caller is shown has, or at the base of an owner that doesn't exist.
         """
         lookup = LOOKUPS.get(name)
         urls = {token(item)[0] if name == 'code' else unescape(item) for item in alternatives} - {None, ''}
@@ -383,10 +395,11 @@ class Search:
             found = repositories_with(self.viewable_sources(), urls)
         else:
             found = sources_with(self.viewable_sources(), urls)
-            side = SIDES[self.parameters[name]]
-            examples = mapping_index.examples(side, {url: {repository for _, repository in rows}
-                                                     for url, rows in found.items()}, self.deadline, search_too_costly)
-            self.found.update({(side, url): examples.get(url, []) for url in found})
+            side, (owner, may_view_private) = SIDES[self.parameters[name]], self.access
+            holding = mapping_index.holding(
+                side, {url: {repository for _, repository in rows} for url, rows in found.items() if owner is not None},
+                mapping_index.visible_to(self.namespace, may_view_private), self.deadline, search_too_costly)
+            self.found.update({(side, url): holding.get(url, {}) for url in found})
             found = {url: [source_id for source_id, _ in rows] for url, rows in found.items()}
         self.found.update({(lookup, url): value for url, value in found.items()})
 
