@@ -23,7 +23,8 @@ from core.common.tests import OCLTestCase, OCLAPITransactionTestCase
 from core.fhir import base, search
 from core.fhir.base import FhirOperationView
 from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
-from core.fhir.resolve import UnresolvedError, namespace_of, resolve, viewable_rows
+from core.fhir.resolve import (
+    ServedHead, UnresolvedError, in_namespace, namespace_of, ocl_path, resolve, viewable_rows)
 from core.fhir.tests_ops_lookup import OpsCorpusMixin, CIEL, ICD10, REST, SHARED, NEWEST_PRIVATE, HIV
 from core.fhir.tests_search import source
 from core.orgs.tests.factories import OrganizationFactory
@@ -276,6 +277,23 @@ class OwnerBaseFhirPathTest(SimpleTestCase):
         for path_ in ('/orgs/CIEL/', '/orgs/CIEL/metadata/x/', '/orgs/metadata/', '/sources/x/metadata',
                       '/users/jo/extras/'):
             self.assertFalse(base.is_fhir_path(path_), path_)
+
+
+class ResolverIdentifiersTest(SimpleTestCase):
+    """The identifiers the resolver reads as written: an OCL path back to its repository, a registry namespace."""
+
+    def test_an_ocl_path_is_one_the_resolver_reads_back_to_the_repository(self):
+        self.assertEqual(ocl_path('/orgs/Acme/sources/nameless/'), '/orgs/Acme/CodeSystem/nameless/')
+        self.assertEqual(ocl_path('/users/jo/sources/codes/'), '/users/jo/CodeSystem/codes/')
+        # too short to name a repository; read as a canonical URL; read as a mapping's URL
+        for uri in ('/orgs/Acme/', '/orgs/Acme/sources/a:b/', '/orgs/Acme/sources/mappings/'):
+            self.assertIsNone(ocl_path(uri), uri)
+
+    def test_a_registry_namespace_names_an_org_or_a_user(self):
+        head = ServedHead(1, 'codes', None, 7, 'urn:x', '/users/jo/sources/codes/', None, '/users/jo/')
+        self.assertTrue(in_namespace(head, '/users/jo/'))
+        for namespace in ('/orgs/jo/', '/users/someone/', '/', None, ''):
+            self.assertFalse(in_namespace(head, namespace), namespace)
 
 
 class Rollback(Exception):
