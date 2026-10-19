@@ -3289,6 +3289,9 @@ class CollectionConceptsViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 3)
+        uuids = [int(item['uuid']) for item in response.data]
+        self.assertEqual(uuids, sorted(uuids, reverse=True))
+        self.assertEqual(response['num_found'], '3')
 
         response = self.client.get(
             self.collection.uri + 'concepts/concept3/',
@@ -3385,6 +3388,9 @@ class CollectionMappingsViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 3)
+        uuids = [int(item['uuid']) for item in response.data]
+        self.assertEqual(uuids, sorted(uuids, reverse=True))
+        self.assertEqual(response['num_found'], '3')
 
         response = self.client.get(
             self.collection.uri + 'mappings/mapping3/',
