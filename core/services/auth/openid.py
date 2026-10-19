@@ -1,6 +1,7 @@
 import base64
 import logging
 import time
+from urllib.parse import quote, urlencode
 
 import requests
 from django.conf import settings
@@ -31,53 +32,68 @@ class OpenIDAuthService(AbstractAuthService):
     OIDP_ADMIN_TOKEN_URL = settings.OIDC_SERVER_INTERNAL_URL + '/realms/master/protocol/openid-connect/token'
 
     @staticmethod
+    def build_url(endpoint, params, code_challenge=None, code_challenge_method=None):
+        # Every value is percent-encoded: Django has already decoded the query these come from, so a
+        # redirect_uri carrying ?, & or # would otherwise split into extra params or lose its tail.
+        if code_challenge and code_challenge_method:
+            params = {**params, 'code_challenge': code_challenge, 'code_challenge_method': code_challenge_method}
+        return f"{endpoint}?{urlencode(params, quote_via=quote)}"
+
+    @staticmethod
     def get_login_redirect_url(client_id, redirect_uri, state, nonce, code_challenge=None, code_challenge_method=None):  # pylint: disable=line-too-long,too-many-arguments
         # response_type=code only (no id_token): a pure code flow never puts the id_token in the
         # callback URL/access logs. scope=openid is requested explicitly so the token-exchange
         # response still includes id_token in its body, where the frontend now reads it from.
-        url = f"{settings.OIDC_OP_AUTHORIZATION_ENDPOINT}?" \
-              f"response_type=code&" \
-              f"scope=openid profile email&" \
-              f"client_id={client_id}&" \
-              f"state={state}&" \
-              f"nonce={nonce}&" \
-              f"redirect_uri={redirect_uri}"
-        if code_challenge and code_challenge_method:
-            url += f"&code_challenge={code_challenge}&code_challenge_method={code_challenge_method}"
-        return url
+        return OpenIDAuthService.build_url(
+            settings.OIDC_OP_AUTHORIZATION_ENDPOINT,
+            {
+                'response_type': 'code',
+                'scope': 'openid profile email',
+                'client_id': client_id,
+                'state': state,
+                'nonce': nonce,
+                'redirect_uri': redirect_uri,
+            },
+            code_challenge, code_challenge_method
+        )
 
     @staticmethod
     def get_reset_password_redirect_url(client_id, redirect_uri, code_challenge=None, code_challenge_method=None):
-        url = f"{settings.OIDC_OP_AUTHORIZATION_ENDPOINT}?" \
-              f"scope=openid&" \
-              f"kc_action=UPDATE_PASSWORD&" \
-              f"response_type=code&" \
-              f"client_id={client_id}&" \
-              f"redirect_uri={redirect_uri}"
-        if code_challenge and code_challenge_method:
-            url += f"&code_challenge={code_challenge}&code_challenge_method={code_challenge_method}"
-        return url
+        return OpenIDAuthService.build_url(
+            settings.OIDC_OP_AUTHORIZATION_ENDPOINT,
+            {
+                'scope': 'openid',
+                'kc_action': 'UPDATE_PASSWORD',
+                'response_type': 'code',
+                'client_id': client_id,
+                'redirect_uri': redirect_uri,
+            },
+            code_challenge, code_challenge_method
+        )
 
     @staticmethod
     def get_registration_redirect_url(client_id, redirect_uri, state, nonce, code_challenge=None, code_challenge_method=None):  # pylint: disable=line-too-long,too-many-arguments
         # See get_login_redirect_url: pure code flow + explicit openid scope, id_token comes
         # from the token-exchange response body instead of the callback URL.
-        url = f"{settings.OIDC_OP_REGISTRATION_ENDPOINT}?" \
-              f"response_type=code&" \
-              f"scope=openid profile email&" \
-              f"client_id={client_id}&" \
-              f"state={state}&" \
-              f"nonce={nonce}&" \
-              f"redirect_uri={redirect_uri}"
-        if code_challenge and code_challenge_method:
-            url += f"&code_challenge={code_challenge}&code_challenge_method={code_challenge_method}"
-        return url
+        return OpenIDAuthService.build_url(
+            settings.OIDC_OP_REGISTRATION_ENDPOINT,
+            {
+                'response_type': 'code',
+                'scope': 'openid profile email',
+                'client_id': client_id,
+                'state': state,
+                'nonce': nonce,
+                'redirect_uri': redirect_uri,
+            },
+            code_challenge, code_challenge_method
+        )
 
     @staticmethod
     def get_logout_redirect_url(id_token_hint, redirect_uri):
-        return f"{settings.OIDC_OP_LOGOUT_ENDPOINT}?" \
-               f"id_token_hint={id_token_hint}&" \
-               f"post_logout_redirect_uri={redirect_uri}"
+        return OpenIDAuthService.build_url(
+            settings.OIDC_OP_LOGOUT_ENDPOINT,
+            {'id_token_hint': id_token_hint, 'post_logout_redirect_uri': redirect_uri}
+        )
 
     @staticmethod
     def credential_representation_from_hash(hash_, temporary=False):
