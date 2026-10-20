@@ -586,12 +586,13 @@ class ResolveReferenceNamespaceTest(OCLAPITestCase):
     def test_one_expression_query_count(self):
         """
         A hot path: these counts may only fall. Without the registry: the token (3), the toggle, the repository, its
-        latest released version and the serializer (2); ?namespace= adds a toggle read. The registry adds the global
-        entry, its namespace owner and a Source check before the read; there ?namespace= also swaps the global entry
-        and its owner for the namespace owner and its own entry.
+        latest released version, that version's HEAD for its view access (ocl_online#486) and the serializer (2);
+        ?namespace= adds a toggle read. The registry adds the global entry, its namespace owner and a Source check
+        before the read; there ?namespace= also swaps the global entry and its owner for the namespace owner and its
+        own entry.
         """
-        for registry, query, count in ((False, '', 8), (False, '?namespace=/orgs/org-b/', 9),
-                                       (True, '', 11), (True, '?namespace=/orgs/org-b/', 12)):
+        for registry, query, count in ((False, '', 9), (False, '?namespace=/orgs/org-b/', 10),
+                                       (True, '', 12), (True, '?namespace=/orgs/org-b/', 13)):
             with self.subTest(registry=registry, query=query):
                 set_registry_toggle(registry)
                 with self.assertNumQueries(count):
