@@ -971,7 +971,7 @@ def get_match_operations_attribution(request):
     return algorithm_id, map_project
 
 
-class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):  # pragma: no cover
+class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
     default_limit = 1
     score_threshold = 0.9
     score_threshold_semantic_very_high = 0.9

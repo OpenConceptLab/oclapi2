@@ -509,12 +509,13 @@ class Reranker:
         """Synonyms under the first key (or list of keys) present; items are strings or name dicts."""
         keys = synonyms_key if isinstance(synonyms_key, (list, tuple)) else compact([synonyms_key])
         synonyms = next((get(source, key) for key in keys if get(source, key)), None)
-        if not isinstance(synonyms, (list, tuple)):
+        # ES hits hold AttrList/AttrDict here, not list/dict.
+        if not synonyms or isinstance(synonyms, (str, dict)) or not hasattr(synonyms, '__iter__'):
             return []
         result = []
         for synonym in synonyms:
-            if isinstance(synonym, dict):
-                synonym = None if synonym.get('retired') else synonym.get('name')
+            if not isinstance(synonym, str):
+                synonym = None if get(synonym, 'retired') else get(synonym, 'name')
             if isinstance(synonym, str):
                 result.append(synonym)
         return result

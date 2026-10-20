@@ -3,6 +3,7 @@ import threading
 from unittest.mock import ANY, Mock, patch
 
 import factory
+from elasticsearch_dsl.utils import AttrDict
 from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
@@ -627,6 +628,21 @@ class ConceptTest(OCLTestCase):
                 'carbagen', {'display_name': 'Carbamazepine', 'synonyms': ['Fabra'], 'names': names},
                 'display_name', keys),
             ['Carbamazepine', 'Fabra'])
+
+    def test_reranker_candidate_texts_reads_es_attr_types(self):
+        hit = AttrDict({'_source': {
+            'name': 'Carbamazepine', 'synonyms': ['Tegretol', 'Carbagen'],
+            'names': [{'name': 'Carbagen'}, {'name': 'Epitol', 'retired': True}]}})
+        source = Reranker._get_source(hit, '_source', True)  # pylint: disable=protected-access
+
+        self.assertEqual(
+            Reranker._get_candidate_texts(  # pylint: disable=protected-access
+                'carbagen', source, 'name', 'synonyms'),
+            ['Carbamazepine', 'Carbagen', 'Tegretol'])
+        self.assertEqual(
+            Reranker._get_candidate_texts(  # pylint: disable=protected-access
+                'carbagen', source, 'name', 'names'),
+            ['Carbamazepine', 'Carbagen'])
 
     def test_reranker_candidate_texts_caps_synonyms_by_spelling_similarity(self):
         synonyms = [f'Brand{i}' for i in range(10)] + ['Carbagen']

@@ -1,8 +1,11 @@
+import uuid
 from unittest.mock import patch
 
 import factory
+import fakeredis
 
 from celery.states import PENDING
+from django.contrib.auth.models import Group
 from django.core.cache import cache
 from django.db import connection
 from django.db.models import F
@@ -13,21 +16,29 @@ from rest_framework.request import Request
 from rest_framework.test import APIRequestFactory
 
 from core.bundles.models import Bundle
+from core.capabilities.exceptions import CapabilityExceeded
+from core.capacity.config import clear_cache, save_config
+from core.capacity.constants import HEADER_DECISION
+from core.capacity.limiter import RedisLanes
 from core.sources.models import CloneLimitExceeded
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE, OPENMRS_VALIDATION_SCHEMA
-from core.common.tests import OCLAPITestCase
+from core.common.tests import OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.concepts.constants import CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
+from core.concepts.search import ConceptFuzzySearch
 from core.concepts.serializers import ConceptListSerializer, ConceptDetailSerializer
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory, ConceptDescriptionFactory
+from core.concepts.views import MetadataToConceptsListView
 from core.integration_tests.test_utils import SourceChildListQueryCountMixin
 from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
+from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.tasks.models import Task
+from core.users.constants import CORE_USER_GROUP
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -4247,3 +4258,373 @@ class ConceptListQueryCountTest(SourceChildListQueryCountMixin, OCLAPITestCase):
         self.assertEqual(page_queries, small_page_queries)
         self.assertEqual(data, [ConceptListSerializer(row, context=context).data for row in revisions])
         self.assertEqual({row['latest_source_version'] for row in data}, {None})
+
+
+class CapacityRedisMockMixin:
+    """$match/$rerank heavy calls go through the capacity gate, which needs Redis: use a fake one."""
+    def setUp(self):
+        super().setUp()
+        RedisLanes.use_client(fakeredis.FakeRedis(server=fakeredis.FakeServer()))
+        clear_cache()
+        self.emit_patches = [patch('core.capacity.limiter.emit').start(), patch('core.capacity.config.emit').start()]
+
+    def tearDown(self):
+        patch.stopall()
+        RedisLanes.use_client(None)
+        clear_cache()
+        super().tearDown()
+
+
+class MetadataToConceptsListViewTest(CapacityRedisMockMixin, OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.patch_concept_es_mapping_for_ci()
+        self.user = UserProfileFactory()
+        self.user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
+        # a unique owner, so docs left in ES by earlier runs never match
+        self.source = OrganizationSourceFactory(
+            mnemonic='MatchSource', organization=OrganizationFactory(mnemonic=f'MatchOrg{uuid.uuid4().hex[:8]}'))
+        self.malaria = ConceptFactory(
+            parent=self.source, mnemonic='malaria-match', names=[ConceptNameFactory.build(name='Malaria')])
+        self.fever = ConceptFactory(
+            parent=self.source, mnemonic='fever-match', names=[ConceptNameFactory.build(name='Fever')])
+        self.retired = ConceptFactory(
+            parent=self.source, mnemonic='retired-match', retired=True,
+            names=[ConceptNameFactory.build(name='Retired Malaria')])
+        for concept in [self.malaria, self.fever, self.retired]:
+            self.source.concepts.add(concept.get_latest_version())
+        ConceptDocument().update(Concept.objects.filter(parent=self.source), refresh=True)
+
+    def match(self, data=None, query='', user=None):
+        payload = {'rows': [{'name': 'Malaria'}], 'target_repo_url': self.source.uri}
+        payload.update(data or {})
+        return self.client.post(
+            f'/concepts/$match/{query}', payload, format='json',
+            HTTP_AUTHORIZATION='Token ' + (user or self.user).get_token())
+
+    @staticmethod
+    def result_ids(result):
+        return [concept['id'] for concept in result['results']]
+
+    def test_post_401(self):
+        response = self.client.post(
+            '/concepts/$match/', {'rows': [{'name': 'Malaria'}], 'target_repo_url': self.source.uri}, format='json')
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_post_400_without_rows_or_target_repo(self):
+        for data in [{'rows': []}, {'rows': None}, {'target_repo_url': None}]:
+            response = self.match(data)
+            self.assertEqual(response.status_code, 400, data)
+
+    def test_post_400_unresolvable_target_repo(self):
+        response = self.match({'target_repo_url': '/orgs/NoSuchOrg/sources/NoSuchSource/'})
+        self.assertEqual(response.status_code, 400)
+
+        response = self.match(
+            {'target_repo_url': None, 'target_repo': {'owner': 'NoSuchOrg', 'source': 'NoSuchSource'}})
+        self.assertEqual(response.status_code, 400)
+
+    def test_post_400_semantic_on_repo_without_semantic_algorithm(self):
+        response = self.match(query='?semantic=true')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data['detail'], 'This repo version does not support semantic search')
+
+    def test_post_200_lexical_match_by_target_repo_url(self):
+        response = self.match({'map_config': [{'input': 'name'}], 'filter': {'concept_class': 'Diagnosis'}})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        result = response.data[0]
+        self.assertEqual(result['row'], {'name': 'Malaria'})
+        self.assertEqual(result['map_config'], [{'input': 'name'}])
+        self.assertEqual(result['filter'], {'concept_class': 'Diagnosis'})
+        self.assertEqual(self.result_ids(result), ['malaria-match'])  # default limit is 1
+        search_meta = result['results'][0]['search_meta']
+        self.assertEqual(search_meta['algorithm'], 'ocl-search')
+        self.assertEqual(search_meta['match_type'], 'very_high')  # always very_high for limit 1
+        self.assertEqual(search_meta['search_normalized_score'], 100.0)
+        self.assertEqual(response['num_returned'], '1')
+        self.assertFalse(response.has_header(HEADER_DECISION))  # lexical match isn't a heavy call
+
+    def test_post_200_lexical_match_by_target_repo_params(self):
+        response = self.match({
+            'target_repo_url': None,
+            'target_repo': {
+                'owner': self.source.parent.mnemonic, 'owner_type': 'Organization', 'source': 'MatchSource'}
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.result_ids(response.data[0]), ['malaria-match'])
+
+    def test_post_200_one_result_set_per_row(self):
+        response = self.match({'rows': [{'name': 'Malaria'}, {'name': 'Fever'}]}, query='?limit=1')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([result['row'] for result in response.data], [{'name': 'Malaria'}, {'name': 'Fever'}])
+        self.assertEqual(self.result_ids(response.data[0]), ['malaria-match'])
+        self.assertEqual(self.result_ids(response.data[1]), ['fever-match'])
+        self.assertEqual(response['num_returned'], '2')
+
+    def test_post_200_limit_ranks_by_score_with_match_types(self):
+        response = self.match(query='?limit=10')
+
+        self.assertEqual(response.status_code, 200)
+        results = response.data[0]['results']
+        self.assertEqual(results[0]['id'], 'malaria-match')
+        self.assertEqual(results[0]['search_meta']['match_type'], 'very_high')  # name highlight
+        self.assertNotIn('retired-match', self.result_ids(response.data[0]))
+        scores = [result['search_meta']['search_normalized_score'] for result in results]
+        self.assertEqual(scores, sorted(scores, reverse=True))
+
+    def test_post_200_include_retired(self):
+        response = self.match(query='?limit=10&includeRetired=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('retired-match', self.result_ids(response.data[0]))
+
+    def test_post_200_best_match_drops_low_matches(self):
+        with patch.object(MetadataToConceptsListView, 'apply_score', autospec=True) as apply_score_mock:
+            def apply_score(concept, *_args):
+                concept._match_type = 'very_high' if concept.id == self.malaria.id else 'low'  # pylint: disable=protected-access
+                concept._score = concept._normalized_score = 1  # pylint: disable=protected-access
+            apply_score_mock.side_effect = apply_score
+
+            response = self.match({'rows': [{'name': 'Malaria Fever'}]}, query='?limit=10&bestMatch=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.result_ids(response.data[0]), ['malaria-match'])
+
+    def test_post_200_verbose(self):
+        response = self.match(query='?verbose=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('descriptions', response.data[0]['results'][0])
+
+        response = self.match()
+
+        self.assertNotIn('descriptions', response.data[0]['results'][0])
+
+    def test_post_200_reranker_orders_by_rerank_score(self):
+        fever_ids = {str(self.fever.id), str(self.fever.get_latest_version().id)}
+
+        def rerank(hits, **_kwargs):
+            return [
+                {'_id': hit['_id'], '_score': hit['_score'],
+                 'highlight': hit['highlight'] if 'highlight' in hit else None,
+                 'search_rerank_score': 0.95 if hit['_id'] in fever_ids else 0.4}
+                for hit in hits
+            ]
+
+        with patch('core.common.search.Reranker') as reranker_mock:
+            reranker_mock.return_value.rerank.side_effect = rerank
+            response = self.match({'rows': [{'name': 'Malaria Fever'}]}, query='?limit=10&reranker=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(reranker_mock.return_value.rerank.call_args.kwargs['txt'], 'Malaria Fever')
+        results = response.data[0]['results']
+        self.assertEqual(list(dict.fromkeys(self.result_ids(response.data[0]))), ['fever-match', 'malaria-match'])
+        self.assertEqual(results[0]['search_meta']['search_rerank_score'], 0.95)
+        self.assertEqual(results[-1]['search_meta']['search_rerank_score'], 0.4)
+        self.assertEqual(response[HEADER_DECISION], 'admitted')  # reranked match is a heavy call
+
+    def test_post_429_heavy_call_refused_by_capacity_limit(self):
+        save_config({'mode': 'enforce', 'enforce_for': 'all', 'per_user': {'preview': 0}})
+
+        with patch.object(MetadataToConceptsListView, 'filter_queryset') as filter_queryset_mock:
+            response = self.match(query='?reranker=true')
+
+        self.assertEqual(response.status_code, 429)
+        filter_queryset_mock.assert_not_called()
+
+    def test_post_403_match_operation_limit_reached(self):
+        with patch.object(
+                UserProfile, 'check_and_consume_capability',
+                side_effect=CapabilityExceeded('mapper.match_operations', 10, 10, 1)):
+            response = self.match()
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['detail'], 'Match operation limit reached.')
+        self.assertEqual((response.data['limit'], response.data['used']), (10, 10))
+
+    def test_post_refunds_consumed_units_when_search_fails(self):
+        with patch.object(MetadataToConceptsListView, 'filter_queryset', side_effect=ValueError('es down')), \
+                patch('core.capabilities.models.UsageCounter.refund') as refund_mock:
+            with self.assertRaises(ValueError):
+                self.match({'rows': [{'name': 'Malaria'}, {'name': 'Fever'}]})
+
+        refund_mock.assert_called_once_with(self.user, ANY, units=2)
+
+    def test_variants_are_only_for_core_users(self):
+        with patch.object(ConceptFuzzySearch, 'search', wraps=ConceptFuzzySearch.search) as search_mock:
+            self.match({'variants': '/orgs/OCL/sources/Variants/'})
+            self.assertIsNone(search_mock.call_args.kwargs['variants_repo'])
+
+            self.user.groups.add(Group.objects.get(name=CORE_USER_GROUP))
+            self.match({'variants': '/orgs/OCL/sources/Variants/'})
+            self.assertEqual(search_mock.call_args.kwargs['variants_repo'], '/orgs/OCL/sources/Variants/')
+
+    @override_settings(DEFAULT_LEXICAL_VARIANTS_REPO='/orgs/OCL/sources/DefaultVariants/')
+    def test_resolve_variants_repo(self):
+        resolve = MetadataToConceptsListView._resolve_variants_repo  # pylint: disable=protected-access
+        for value in [None, False, 'false', '0', '', '  ', 123]:
+            self.assertIsNone(resolve(value), value)
+        for value in [True, 'true', ' TRUE ', '1']:
+            self.assertEqual(resolve(value), '/orgs/OCL/sources/DefaultVariants/', value)
+        self.assertEqual(resolve(' /orgs/foo/sources/bar/ '), '/orgs/foo/sources/bar/')
+
+    def test_apply_score(self):
+        def score(highlight, scores=None, is_semantic=False, reranker=False, limit=10):
+            concept = Concept(mnemonic='c')
+            concept._highlight = highlight  # pylint: disable=protected-access
+            MetadataToConceptsListView.apply_score(concept, is_semantic, scores or {}, 0.9, reranker, limit)
+            return concept._match_type  # pylint: disable=protected-access
+
+        self.assertEqual(score({}, limit=1), 'very_high')
+        self.assertEqual(score({'name': ['x']}), 'very_high')
+        self.assertEqual(score({'synonyms': ['x']}), 'high')
+        self.assertEqual(score({'description': ['x']}), 'medium')
+        self.assertEqual(score({}), 'low')
+        self.assertEqual(score({}, {'normalized': 0.95}, is_semantic=True), 'very_high')
+        self.assertEqual(score({'name': ['x']}, {'normalized': 0.1}, is_semantic=True), 'very_high')
+        self.assertEqual(score({'synonyms': ['x']}, {'normalized': 0.1}, is_semantic=True), 'high')
+        self.assertEqual(score({'description': ['x']}, {'normalized': 0.1}, is_semantic=True), 'medium')
+        self.assertEqual(score({}, {'normalized': 0.1}, is_semantic=True), 'low')
+        for normalized, match_type in [(0.9, 'very_high'), (0.65, 'high'), (0.5, 'medium'), (0.49, 'low')]:
+            self.assertEqual(
+                score({'name': ['x']}, {'normalized': normalized}, is_semantic=True, reranker=True), match_type)
+
+        concept = Concept(mnemonic='c')
+        concept._highlight = {}  # pylint: disable=protected-access
+        MetadataToConceptsListView.apply_score(
+            concept, False, {'raw': 3, 'normalized': 0.5, 'rerank': 0.7}, 0.9, True, 10)
+        self.assertEqual(
+            (concept._score, concept._normalized_score, concept._rerank_score), (3, 0.5, 0.7))  # pylint: disable=protected-access
+
+    def test_get_target_repos_from_params(self):
+        user_source = UserSourceFactory(user=self.user, mnemonic='MatchSource')
+        org = self.source.parent.mnemonic
+
+        def get_repos(**params):
+            return list(MetadataToConceptsListView.get_target_repos_from_params({'source': 'MatchSource', **params}))
+
+        self.assertEqual(get_repos(owner=org, owner_type='orgs'), [self.source])
+        self.assertEqual(get_repos(owner=org, owner_type='users'), [])
+        self.assertEqual(get_repos(owner=self.user.username, owner_type='User'), [user_source])
+        self.assertEqual(get_repos(owner=self.user.username), [user_source])
+        self.assertEqual(get_repos(owner=org, source_version='v1'), [])
+
+
+class RerankConceptsListViewTest(CapacityRedisMockMixin, OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = UserProfileFactory()
+        self.user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
+        self.rows = [{'id': 1, 'display_name': 'Fever'}, {'id': 2, 'display_name': 'Malaria'}]
+
+    def rerank(self, data=None, user=None):
+        payload = {'rows': self.rows, 'q': 'malaria'}
+        payload.update(data or {})
+        return self.client.post(
+            '/concepts/$rerank/', payload, format='json', HTTP_AUTHORIZATION='Token ' + (user or self.user).get_token())
+
+    def test_post_401(self):
+        response = self.client.post('/concepts/$rerank/', {'rows': self.rows, 'q': 'malaria'}, format='json')
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_post_403_without_mapper_access(self):
+        self.user.groups.clear()
+
+        response = self.rerank()
+
+        self.assertEqual(response.status_code, 403)
+
+    @patch('core.concepts.views.Reranker')
+    def test_post_400_invalid_rows_or_query(self, reranker_mock):
+        for data, detail in [
+                ({'rows': {'id': 1}}, 'Invalid or missing "rows" in request body.'),
+                ({'rows': []}, 'Invalid or missing "rows" in request body.'),
+                ({'q': ''}, 'Missing "q" in request body.')]:
+            response = self.rerank(data)
+            self.assertEqual(response.status_code, 400, data)
+            self.assertEqual(response.data['detail'], detail)
+        reranker_mock.assert_not_called()
+
+    @patch('core.concepts.views.Reranker')
+    def test_post_200(self, reranker_mock):
+        reranked = [{**self.rows[1], 'search_rerank_score': 0.9}, {**self.rows[0], 'search_rerank_score': 0.1}]
+        reranker_mock.return_value.rerank.return_value = reranked
+
+        response = self.rerank()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, reranked)
+        reranker_mock.assert_called_once_with(model_name=None)
+        reranker_mock.return_value.rerank.assert_called_once_with(
+            hits=self.rows, name_key='display_name', txt='malaria', score_key=None, order_results=True,
+            synonyms_key=['synonyms', 'names'])
+        self.assertEqual(response[HEADER_DECISION], 'admitted')
+
+    @patch('core.concepts.views.Reranker')
+    def test_post_200_with_custom_keys(self, reranker_mock):
+        reranker_mock.return_value.rerank.return_value = []
+
+        response = self.rerank({'name_key': 'name', 'synonyms_key': 'aliases', 'score_key': 'my_score'})
+
+        self.assertEqual(response.status_code, 200)
+        kwargs = reranker_mock.return_value.rerank.call_args.kwargs
+        self.assertEqual(
+            (kwargs['name_key'], kwargs['synonyms_key'], kwargs['score_key']), ('name', 'aliases', 'my_score'))
+
+    @patch('core.concepts.views.Reranker')
+    def test_post_custom_encoder_model_is_only_for_core_users(self, reranker_mock):
+        reranker_mock.return_value.rerank.return_value = []
+
+        response = self.rerank({'encoder_model': 'custom/model'})
+
+        self.assertEqual(response.status_code, 403)
+        reranker_mock.assert_not_called()
+
+        with override_settings(ENCODER_MODEL_NAME='default/model'):
+            response = self.rerank({'encoder_model': 'default/model'})
+        self.assertEqual(response.status_code, 200)
+        reranker_mock.assert_called_with(model_name='default/model')
+
+        self.user.groups.add(Group.objects.get(name=CORE_USER_GROUP))
+        response = self.rerank({'encoder_model': 'custom/model'})
+
+        self.assertEqual(response.status_code, 200)
+        reranker_mock.assert_called_with(model_name='custom/model')
+
+    @patch('core.concepts.views.Reranker')
+    def test_post_400_on_reranker_errors(self, reranker_mock):
+        for error in [ValueError('bad model'), RuntimeError('cuda'), OSError('no model file')]:
+            reranker_mock.return_value.rerank.side_effect = error
+
+            response = self.rerank()
+
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(response.data['detail'], str(error))
+
+    @patch('core.concepts.views.ERRBIT_LOGGER')
+    @patch('core.concepts.views.Reranker')
+    def test_post_500_on_unexpected_error(self, reranker_mock, errbit_logger_mock):
+        reranker_mock.return_value.rerank.side_effect = KeyError('boom')
+
+        response = self.rerank()
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data['detail'], 'An error occurred while processing the rerank request.')
+        errbit_logger_mock.log.assert_called_once()
+
+    @patch('core.concepts.views.Reranker')
+    def test_post_429_refused_by_capacity_limit(self, reranker_mock):
+        save_config({'mode': 'enforce', 'enforce_for': 'all', 'per_user': {'preview': 0}})
+
+        response = self.rerank()
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.data['error_code'], 'capacity_exceeded')
+        reranker_mock.assert_not_called()
