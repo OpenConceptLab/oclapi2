@@ -107,8 +107,9 @@ class ConceptMapTranslateView(MappingListView):
         """
 
     def apply_filters(self, queryset):
+        # get_serializer renders the answer, so a POSTed Parameters resource is read by the serializer class itself
         if self.request.method in ['POST', 'PUT']:
-            parameters = self.get_serializer(data=self.request.data, instance=None)
+            parameters = self.get_serializer_class()(data=self.request.data)
         else:
             parameters = self.get_serializer_class().parse_query_params(self.request.query_params)
 

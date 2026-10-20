@@ -171,11 +171,12 @@ class FhirOperationBoundsTest(OCLTestCase):
                     self.assert_result(response, display is None, msg)
 
     def test_translate_reads_only_the_named_code(self):
-        for url, code, system in product((None, SYSTEM), (None, 'c1'), (None, SYSTEM)):
-            msg = (url, code, system)
+        for method, url, code, system in product(
+                ('GET', 'POST', 'POST valueString'), (None, SYSTEM), (None, 'c1'), (None, SYSTEM)):
+            msg = (method, url, code, system)
             with self.subTest(msg):
                 response, queries = self.request(
-                    '/fhir/ConceptMap/$translate', 'GET', url=url, code=code, system=system)
+                    '/fhir/ConceptMap/$translate', method, url=url, code=code, system=system)
 
                 self.assertEqual(unbounded_reads(queries), [], msg)
                 if not code:
