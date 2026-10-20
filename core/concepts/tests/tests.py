@@ -311,6 +311,15 @@ class ConceptViewsAPITest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            reranker_instance_mock.rerank.call_args.kwargs['synonyms_key'], ['synonyms', 'names'])
+
+        self.client.post(
+            '/concepts/$rerank/', {'rows': [{'id': 1}], 'q': 'some text', 'synonyms_key': 'aliases'},
+            format='json', HTTP_AUTHORIZATION=f"Token {user.get_token()}"
+        )
+
+        self.assertEqual(reranker_instance_mock.rerank.call_args.kwargs['synonyms_key'], 'aliases')
 
     def test_rerank_concepts_access_denied_403(self):
         user = UserProfileFactory()
@@ -576,6 +585,61 @@ class ConceptTest(OCLTestCase):
         )
 
         self.assertEqual(scores, [Reranker.MISSING_SCORE, Reranker.MISSING_SCORE])
+
+    @patch.object(Reranker, '_get_encoder_state')
+    def test_reranker_scores_hit_by_best_of_name_and_synonyms(self, get_encoder_state_mock):
+        encoder_mock = Mock()
+        encoder_mock.predict.side_effect = lambda pairs, **_: [0.99 if doc == 'Carbagen' else 0.2 for _, doc in pairs]
+        get_encoder_state_mock.return_value = {'encoder': encoder_mock, 'predict_lock': threading.Lock()}
+        reranker = Reranker()
+
+        scores = reranker._predict_scores(  # pylint: disable=protected-access
+            hits=[
+                {'_source': {'name': 'Carbamazepine', 'synonyms': ['Tegretol', 'Carbagen', 'carbagen']}},
+                {'_source': {'name': 'Carbomer', 'synonyms': None}},
+            ],
+            txt='Carbagen',
+            name_key='name',
+            source_attr='_source',
+            should_convert_source_to_dict=True,
+            synonyms_key='synonyms',
+        )
+
+        self.assertEqual(scores, [0.99, 0.2])
+        pairs = encoder_mock.predict.call_args[0][0]
+        self.assertEqual(
+            pairs, [('Carbagen', 'Carbamazepine'), ('Carbagen', 'Carbagen'), ('Carbagen', 'Tegretol'),
+                    ('Carbagen', 'Carbomer')])
+
+    def test_reranker_candidate_texts_reads_synonyms_or_name_objects(self):
+        names = [
+            {'name': 'Carbamazepine', 'locale': 'en'}, {'name': 'Carbagen', 'locale': 'en'},
+            {'name': 'Tegretol', 'locale': 'en', 'retired': True}, {'locale': 'en'}, 'Epitol'
+        ]
+        keys = ['synonyms', 'names']
+
+        self.assertEqual(
+            Reranker._get_candidate_texts(  # pylint: disable=protected-access
+                'carbagen', {'display_name': 'Carbamazepine', 'names': names}, 'display_name', keys),
+            ['Carbamazepine', 'Carbagen', 'Epitol'])
+        self.assertEqual(
+            Reranker._get_candidate_texts(  # pylint: disable=protected-access
+                'carbagen', {'display_name': 'Carbamazepine', 'synonyms': ['Fabra'], 'names': names},
+                'display_name', keys),
+            ['Carbamazepine', 'Fabra'])
+
+    def test_reranker_candidate_texts_caps_synonyms_by_spelling_similarity(self):
+        synonyms = [f'Brand{i}' for i in range(10)] + ['Carbagen']
+
+        texts = Reranker._get_candidate_texts(  # pylint: disable=protected-access
+            'carbagen', {'name': 'Carbamazepine', 'synonyms': synonyms}, 'name', 'synonyms')
+
+        self.assertEqual(len(texts), 1 + Reranker.MAX_SYNONYMS_TO_SCORE)
+        self.assertEqual(texts[:2], ['Carbamazepine', 'Carbagen'])
+        self.assertEqual(
+            Reranker._get_candidate_texts(  # pylint: disable=protected-access
+                'carbagen', {'name': 'Carbamazepine', 'synonyms': synonyms}, 'name', None),
+            ['Carbamazepine'])
 
     @patch.object(Reranker, '_get_encoder_state')
     def test_reranker_uses_sigmoid_activation_for_qwen_models(self, get_encoder_state_mock):
