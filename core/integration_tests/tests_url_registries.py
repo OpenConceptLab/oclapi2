@@ -303,6 +303,7 @@ class URLRegistriesViewTest(OCLAPITestCase):
         viewer_org.members.add(viewer)
         OrganizationURLRegistryFactory(name='owner-reg', organization=owner_org)
         OrganizationURLRegistryFactory(name='viewer-reg', organization=viewer_org)
+        URLRegistryDocument().update(list(URLRegistry.objects.filter(organization__isnull=False)), refresh=True)
         headers = {'HTTP_AUTHORIZATION': f'Token {viewer.get_token()}'}
 
         for suffix in ['', '?sortAsc=last_update']:
