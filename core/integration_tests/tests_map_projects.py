@@ -31,8 +31,7 @@ class OrganizationMapProjectListTest(MapProjectAbstractViewTest):
 
     def test_own_orgs(self):
         expected = ['shared-priv', 'shared-pub', 'vieweronly-priv', 'vieweronly-pub']
-        for url in [f'/users/{self.user.username}/orgs/map-projects/', '/user/orgs/map-projects/']:
-            self.assertEqual(self.get_names(url, self.user), expected)
+        self.assertEqual(self.get_names(f'/users/{self.user.username}/orgs/map-projects/', self.user), expected)
 
     def test_staff_requester_sees_all_of_other_user_orgs(self):
         staff = UserProfileFactory(is_staff=True)

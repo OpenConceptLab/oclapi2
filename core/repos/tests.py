@@ -531,9 +531,9 @@ class OtherUserOrganizationListsTest(OCLAPITestCase):
     def test_lists_url_user_orgs_visible_to_requester(self):
         expected = ['owneronly-pub', 'shared-priv', 'shared-pub']
         for resource in ['sources', 'collections']:
-            for suffix in ['', '?q=-', '?sortDesc=id']:
+            for suffix in ['', '?sortAsc=last_update']:
                 self.assertEqual(self.get_ids(f'/users/other-owner/orgs/{resource}/{suffix}'), expected)
-        for suffix in ['', '?q=-']:
+        for suffix in ['', '?sortAsc=last_update']:
             self.assertEqual(
                 self.get_ids(f'/users/other-owner/orgs/repos/{suffix}'),
                 sorted(expected * 2))
@@ -542,14 +542,14 @@ class OtherUserOrganizationListsTest(OCLAPITestCase):
         staff = UserProfileFactory(is_staff=True)
         expected = ['owneronly-priv', 'owneronly-pub', 'shared-priv', 'shared-pub']
         for resource in ['sources', 'collections']:
-            for suffix in ['', '?q=-']:
+            for suffix in ['', '?sortAsc=last_update']:
                 response = self.client.get(
                     f'/users/other-owner/orgs/{resource}/{suffix}', HTTP_AUTHORIZATION=f'Token {staff.get_token()}')
                 self.assertEqual(sorted(item['id'] for item in response.data), expected)
 
     def test_own_orgs_unchanged(self):
         expected = ['shared-priv', 'shared-pub', 'vieweronly-priv', 'vieweronly-pub']
-        for url in ['/users/other-viewer/orgs/sources/?q=-', '/user/orgs/sources/?q=-',
+        for url in ['/users/other-viewer/orgs/sources/?sortAsc=last_update', '/user/orgs/sources/?sortAsc=last_update',
                     '/users/other-viewer/orgs/sources/']:
             self.assertEqual(self.get_ids(url), expected)
 

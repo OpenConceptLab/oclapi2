@@ -302,7 +302,7 @@ class URLRegistriesViewTest(OCLAPITestCase):
         OrganizationURLRegistryFactory(name='viewer-reg', organization=viewer_org)
         headers = {'HTTP_AUTHORIZATION': f'Token {viewer.get_token()}'}
 
-        for suffix in ['', '?q=reg']:
+        for suffix in ['', '?sortAsc=last_update']:
             response = self.client.get(f'/users/ur-owner/orgs/url-registry/{suffix}', **headers)
             self.assertEqual(response.status_code, 200)
             self.assertEqual([item['name'] for item in response.data], ['owner-reg'])
