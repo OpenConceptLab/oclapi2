@@ -897,6 +897,41 @@ class UserDetailViewTest(OCLAPITestCase):
         self.user.refresh_from_db()
         self.assertEqual(self.user.username, 'renamed-user')
 
+    @patch('core.services.auth.core.AuthService.is_sso_enabled')
+    def test_put_username_change_sso_disabled_taken_400(self, is_sso_enabled_mock):
+        is_sso_enabled_mock.return_value = False
+        taken = UserProfileFactory()
+        username = self.user.username
+
+        response = self.client.put(
+            '/user/',
+            {'username': taken.username},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('username', response.data)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, username)
+
+    @patch('core.services.auth.core.AuthService.is_sso_enabled')
+    def test_put_username_change_sso_disabled_invalid_400(self, is_sso_enabled_mock):
+        is_sso_enabled_mock.return_value = False
+        username = self.user.username
+
+        response = self.client.put(
+            '/user/',
+            {'username': 'not valid/name'},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('username', response.data)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, username)
+
     def test_delete_self_405(self):
         response = self.client.delete(
             f'/users/{self.superuser.username}/',

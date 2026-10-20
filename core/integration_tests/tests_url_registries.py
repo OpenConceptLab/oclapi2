@@ -3,6 +3,7 @@ from rest_framework.exceptions import ErrorDetail
 from core.common.tests import OCLAPITestCase
 from core.orgs.tests.factories import OrganizationFactory
 from core.url_registry.factories import GlobalURLRegistryFactory, OrganizationURLRegistryFactory, UserURLRegistryFactory
+from core.url_registry.documents import URLRegistryDocument
 from core.url_registry.models import URLRegistry
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
@@ -289,6 +290,29 @@ class URLRegistriesViewTest(OCLAPITestCase):
             HTTP_AUTHORIZATION=f"Token {user_registry.user.get_token()}",
         )
         self.assertEqual(response.status_code, 404)
+
+
+    def test_other_user_orgs_url_registry_search(self):
+        URLRegistryDocument._index.delete(ignore=404)  # pylint: disable=protected-access
+        URLRegistryDocument.init()
+        viewer = UserProfileFactory(username='ur-viewer')
+        owner = UserProfileFactory(username='ur-owner')
+        owner_org = OrganizationFactory(mnemonic='ur-owner-org')
+        viewer_org = OrganizationFactory(mnemonic='ur-viewer-org')
+        owner_org.members.add(owner)
+        viewer_org.members.add(viewer)
+        OrganizationURLRegistryFactory(name='owner-reg', organization=owner_org)
+        OrganizationURLRegistryFactory(name='viewer-reg', organization=viewer_org)
+        URLRegistryDocument().update(list(URLRegistry.objects.filter(organization__isnull=False)), refresh=True)
+        headers = {'HTTP_AUTHORIZATION': f'Token {viewer.get_token()}'}
+
+        for suffix in ['', '?sortAsc=last_update']:
+            response = self.client.get(f'/users/ur-owner/orgs/url-registry/{suffix}', **headers)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual([item['name'] for item in response.data], ['owner-reg'])
+
+            response = self.client.get(f'/user/orgs/url-registry/{suffix}', **headers)
+            self.assertEqual([item['name'] for item in response.data], ['viewer-reg'])
 
 
 class URLRegistryViewTest(OCLAPITestCase):

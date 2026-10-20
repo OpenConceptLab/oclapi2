@@ -1,3 +1,4 @@
+import difflib
 import gc
 import re
 import threading
@@ -273,7 +274,7 @@ class CustomESSearch:
         start_time = time.time()
         hits = Reranker(encoder_model).rerank(
             txt=txt, hits=hits.hits, name_key='name', source_attr='_source', should_convert_source_to_dict=True,
-            order_results=False
+            order_results=False, synonyms_key='synonyms'
         ) if encoder else hits.hits
         print(f"[{cid}] Cross encoder time: {time.time() - start_time} seconds")
         for result in hits:
@@ -431,6 +432,7 @@ class Reranker:
     ]
     SCORE_KEY = 'search_rerank_score'
     MISSING_SCORE = -1000000.0
+    MAX_SYNONYMS_TO_SCORE = 5
     CUSTOM_ENCODER_CACHE = OrderedDict()
     CUSTOM_ENCODER_CACHE_LOCK = threading.Lock()
     CUSTOM_ENCODER_LOAD_LOCKS = {}
@@ -444,8 +446,9 @@ class Reranker:
 
     def rerank(  # pylint: disable=too-many-arguments
             self, hits, txt, name_key='name', source_attr=None, should_convert_source_to_dict=True,
-            score_key=None, order_results=True):
-        scores = self._predict_scores(hits, txt, name_key, source_attr, should_convert_source_to_dict)
+            score_key=None, order_results=True, synonyms_key=None):
+        scores = self._predict_scores(
+            hits, txt, name_key, source_attr, should_convert_source_to_dict, synonyms_key)
         return self._assign_score(hits, scores, score_key, order_results)
 
     @property
@@ -458,7 +461,8 @@ class Reranker:
         return settings.ENCODER_MODEL_NAME
 
     # private
-    def _predict_scores(self, hits, txt, name_key, source_attr, should_convert_source_to_dict):  # pylint: disable=too-many-arguments
+    def _predict_scores(  # pylint: disable=too-many-arguments
+            self, hits, txt, name_key, source_attr, should_convert_source_to_dict, synonyms_key=None):
         if not hits or not txt:
             return []
         # Keep unscorable candidates sortable while remaining JSON-safe.
@@ -466,19 +470,55 @@ class Reranker:
         if not isinstance(txt, str) or not txt.strip():
             return scores_full
 
-        docs = [get(self._get_source(hit, source_attr, should_convert_source_to_dict), name_key) for hit in hits]
         valid = []
-        for i, d in enumerate(docs):
-            if isinstance(d, str) and d.strip():
-                valid.append((i, d.strip()))
+        for i, hit in enumerate(hits):
+            source = self._get_source(hit, source_attr, should_convert_source_to_dict)
+            for doc in self._get_candidate_texts(txt, source, name_key, synonyms_key):
+                valid.append((i, doc))
         if not valid:
             return scores_full
         with self.encoder_predict_lock:
             scores = self.encoder.predict([(txt, d) for _, d in valid], **self._get_predict_kwargs())
+        # A hit scores as its best-matching text, so an exact synonym match is not lost to a dissimilar name.
         for (i, _), s in zip(valid, scores):
-            scores_full[i] = float(s)
+            scores_full[i] = max(scores_full[i], float(s))
 
         return scores_full
+
+    @classmethod
+    def _get_candidate_texts(cls, txt, source, name_key, synonyms_key):
+        """Name plus the synonyms closest in spelling to txt, capped to bound cross-encoder pairs."""
+        texts = []
+        seen = set()
+        name = get(source, name_key)
+        if isinstance(name, str) and name.strip():
+            texts.append(name.strip())
+            seen.add(name.strip().lower())
+        synonyms = cls._get_synonyms(source, synonyms_key)
+        candidates = []
+        for synonym in synonyms:
+            if synonym.strip() and synonym.strip().lower() not in seen:
+                seen.add(synonym.strip().lower())
+                candidates.append(synonym.strip())
+        query = txt.strip().lower()
+        candidates.sort(key=lambda syn: difflib.SequenceMatcher(None, query, syn.lower()).ratio(), reverse=True)
+        return texts + candidates[:cls.MAX_SYNONYMS_TO_SCORE]
+
+    @staticmethod
+    def _get_synonyms(source, synonyms_key):
+        """Synonyms under the first key (or list of keys) present; items are strings or name dicts."""
+        keys = synonyms_key if isinstance(synonyms_key, (list, tuple)) else compact([synonyms_key])
+        synonyms = next((get(source, key) for key in keys if get(source, key)), None)
+        # ES hits hold AttrList/AttrDict here, not list/dict.
+        if not synonyms or isinstance(synonyms, (str, dict)) or not hasattr(synonyms, '__iter__'):
+            return []
+        result = []
+        for synonym in synonyms:
+            if not isinstance(synonym, str):
+                synonym = None if get(synonym, 'retired') else get(synonym, 'name')
+            if isinstance(synonym, str):
+                result.append(synonym)
+        return result
 
     def _get_activation_fn(self):
         """Return the score activation required by the configured reranker model."""

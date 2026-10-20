@@ -37,15 +37,16 @@ from elasticsearch.helpers import parallel_bulk
 
 PAIRS_SQL = """
 WITH members AS (
-    SELECT c.id, c.mnemonic, c.versioned_object_id, c.created_at, c.retired,
+    SELECT c.id, c.mnemonic, c.versioned_object_id, c.created_at, c.retired, v.retired AS vo_retired,
            EXISTS (SELECT 1 FROM collection_expansions_concepts x WHERE x.concept_id = c.id) AS in_expansion,
            EXISTS (SELECT 1 FROM collections_referencedconcept r WHERE r.concept_id = c.id) AS in_reference
     FROM concepts_sources cs JOIN concepts c ON c.id = cs.concept_id
+    JOIN concepts v ON v.id = c.versioned_object_id
     WHERE cs.source_id = %(version_id)s AND c.parent_id = %(head_id)s
 ), dups AS (
     SELECT mnemonic FROM members GROUP BY mnemonic HAVING count(*) > 1
 )
-SELECT m.mnemonic, m.id, m.versioned_object_id, m.created_at, m.retired, m.in_expansion, m.in_reference,
+SELECT m.mnemonic, m.id, m.versioned_object_id, m.created_at, m.retired, m.vo_retired, m.in_expansion, m.in_reference,
        count(*) OVER (PARTITION BY m.mnemonic) AS group_size
 FROM members m JOIN dups d ON d.mnemonic = m.mnemonic
 ORDER BY m.mnemonic, m.created_at DESC, m.id DESC
@@ -175,7 +176,7 @@ def choose_by_coverage(conn, decided, allow_swap=True):
 
 
 def build_plan(conn, head_id, version_id, include_both_used, skip_linked=False, cover_aware=False, allow_swap=True,
-               prefer_active=False):
+               prefer_active=False, keep_active_vo=False):
     rows = query(conn, PAIRS_SQL, {'head_id': head_id, 'version_id': version_id})
     groups = {}
     for row in rows:
@@ -190,7 +191,10 @@ def build_plan(conn, head_id, version_id, include_both_used, skip_linked=False, 
         if all(used) and not include_both_used:
             conflicts.append(mnemonic)
             continue
-        if prefer_active and newest['retired'] != other['retired']:
+        if keep_active_vo and newest['vo_retired'] != other['vo_retired']:
+            keep, lose = (other, newest) if newest['vo_retired'] else (newest, other)
+            decided.append((mnemonic, keep, lose, 'keep the row of the active VO'))
+        elif prefer_active and newest['retired'] != other['retired']:
             keep, lose = (other, newest) if newest['retired'] else (newest, other)
             decided.append((mnemonic, keep, lose, 'keep the active one'))
         elif used[1] and not used[0]:
@@ -275,6 +279,8 @@ def main():
                         help='keep the newer row only if it has all the older one\'s hierarchy and mappings, else the older')
     parser.add_argument('--no-swap', action='store_true',
                         help='with --cover-aware, never flip to the older row: such pairs are left alone')
+    parser.add_argument('--keep-active-vo', action='store_true',
+                        help='when one VO of a pair is retired and the other is not, keep the active VO\'s row')
     parser.add_argument('--prefer-active', action='store_true',
                         help='when one row of a pair is retired and the other is not, keep the active one')
     parser.add_argument('--expect-pairs', type=int, help='abort unless the plan has exactly this many pairs')
@@ -302,7 +308,7 @@ def main():
     version_label = version[1]
     print(f'version {args.version_id} = {version_label}')
 
-    plan, conflicts, skipped_groups = build_plan(conn, args.head_id, args.version_id, args.include_both_used, args.skip_linked, args.cover_aware, not args.no_swap, args.prefer_active)
+    plan, conflicts, skipped_groups = build_plan(conn, args.head_id, args.version_id, args.include_both_used, args.skip_linked, args.cover_aware, not args.no_swap, args.prefer_active, args.keep_active_vo)
     summarise(plan, conflicts, skipped_groups)
     if args.csv and plan:
         with open(args.csv, 'w', newline='', encoding='utf-8') as f:
@@ -318,7 +324,7 @@ def main():
 
     ids = [p['lose_id'] for p in plan]
     removed = remove_members(conn, args.version_id, ids, args.batch_size)
-    remaining = len(build_plan(conn, args.head_id, args.version_id, args.include_both_used, args.skip_linked, args.cover_aware, not args.no_swap, args.prefer_active)[0])
+    remaining = len(build_plan(conn, args.head_id, args.version_id, args.include_both_used, args.skip_linked, args.cover_aware, not args.no_swap, args.prefer_active, args.keep_active_vo)[0])
     print(f'removed {removed} memberships; plan now has {remaining} pairs')
     if ids and not args.no_es:
         failed = sync_es(es_client(), args.index, ids, version_label)

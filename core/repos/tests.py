@@ -500,6 +500,65 @@ class OrganizationRepoListViewDbFirstTest(OCLAPITestCase):
         self.assertEqual(response.data, [])
 
 
+class OtherUserOrganizationListsTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        SourceDocument._index.delete()  # pylint: disable=protected-access
+        CollectionDocument._index.delete()  # pylint: disable=protected-access
+        SourceDocument.init()
+        CollectionDocument.init()
+        self.viewer = UserProfileFactory(username='other-viewer')
+        owner = UserProfileFactory(username='other-owner')
+        shared = OrganizationFactory(mnemonic='other-shared')
+        owner_only = OrganizationFactory(mnemonic='other-owner-org')
+        viewer_only = OrganizationFactory(mnemonic='other-viewer-org')
+        shared.members.add(self.viewer, owner)
+        owner_only.members.add(owner)
+        viewer_only.members.add(self.viewer)
+        for org, name in [(shared, 'shared'), (owner_only, 'owneronly'), (viewer_only, 'vieweronly')]:
+            OrganizationSourceFactory(organization=org, mnemonic=f'{name}-pub', public_access='View')
+            OrganizationCollectionFactory(organization=org, mnemonic=f'{name}-pub', public_access='View')
+            OrganizationSourceFactory(organization=org, mnemonic=f'{name}-priv', public_access='None')
+            OrganizationCollectionFactory(organization=org, mnemonic=f'{name}-priv', public_access='None')
+        SourceDocument().update(list(Source.objects.filter(version=HEAD)))
+        CollectionDocument().update(list(Collection.objects.filter(version=HEAD)))
+
+    def get_ids(self, url):
+        response = self.client.get(url, HTTP_AUTHORIZATION=f'Token {self.viewer.get_token()}')
+        self.assertEqual(response.status_code, 200)
+        return sorted(item['id'] for item in response.data)
+
+    def test_lists_url_user_orgs_visible_to_requester(self):
+        expected = ['owneronly-pub', 'shared-priv', 'shared-pub']
+        for resource in ['sources', 'collections']:
+            for suffix in ['', '?sortAsc=last_update']:
+                self.assertEqual(self.get_ids(f'/users/other-owner/orgs/{resource}/{suffix}'), expected)
+        for suffix in ['', '?sortAsc=last_update']:
+            self.assertEqual(
+                self.get_ids(f'/users/other-owner/orgs/repos/{suffix}'),
+                sorted(expected * 2))
+
+    def test_staff_requester_sees_all_of_other_user_orgs(self):
+        staff = UserProfileFactory(is_staff=True)
+        expected = ['owneronly-priv', 'owneronly-pub', 'shared-priv', 'shared-pub']
+        for resource in ['sources', 'collections']:
+            for suffix in ['', '?sortAsc=last_update']:
+                response = self.client.get(
+                    f'/users/other-owner/orgs/{resource}/{suffix}', HTTP_AUTHORIZATION=f'Token {staff.get_token()}')
+                self.assertEqual(sorted(item['id'] for item in response.data), expected)
+
+    def test_own_orgs_unchanged(self):
+        expected = ['shared-priv', 'shared-pub', 'vieweronly-priv', 'vieweronly-pub']
+        for url in ['/users/other-viewer/orgs/sources/?sortAsc=last_update', '/user/orgs/sources/?sortAsc=last_update',
+                    '/users/other-viewer/orgs/sources/']:
+            self.assertEqual(self.get_ids(url), expected)
+
+    def test_unknown_user_404(self):
+        response = self.client.get(
+            '/users/no-such-user/orgs/sources/?q=a', HTTP_AUTHORIZATION=f'Token {self.viewer.get_token()}')
+        self.assertEqual(response.status_code, 404)
+
+
 class VersionChangelogTest(OCLTestCase):
     def test_version1_url_cannot_equal_version2_url(self):
         source = OrganizationSourceFactory()

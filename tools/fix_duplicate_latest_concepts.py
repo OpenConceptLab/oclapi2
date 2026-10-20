@@ -141,9 +141,30 @@ def main():
     parser.add_argument('--batch-size', type=int, default=500)
     parser.add_argument('--csv', help='write the plan, with usage, to this file')
     parser.add_argument('--no-es', action='store_true', help='skip the ES update (run a reindex yourself)')
+    parser.add_argument('--es-only-from-csv', metavar='PLAN_CSV',
+                        help='redo only the ES update for the ids in an earlier plan CSV, for rows the DB already '
+                             'shows as unflagged (use after the ES step failed)')
     args = parser.parse_args()
 
     conn = pg_connect()
+    if args.es_only_from_csv:
+        with open(args.es_only_from_csv, newline='', encoding='utf-8') as f:
+            ids = sorted({int(row['id']) for row in csv.DictReader(f)})
+        with conn.cursor() as cur:
+            cur.execute(
+                'SELECT id FROM concepts WHERE id = ANY(%s) AND parent_id = %s AND NOT is_latest_version',
+                (ids, args.source_id))
+            unflagged = sorted(row[0] for row in cur.fetchall())
+        print(f'ids in CSV: {len(ids)}; unflagged in the DB: {len(unflagged)}')
+        if args.expect_rows is not None and len(unflagged) != args.expect_rows:
+            sys.exit(f'aborting: {len(unflagged)} rows, expected {args.expect_rows}')
+        if not args.apply:
+            print('dry run: nothing written (use --apply)')
+            return
+        failed = sync_es(es_client(), args.index, unflagged)
+        if failed:
+            sys.exit(f'{failed} ES updates failed')
+        return
     plan = load_plan(conn, args.source_id)
     summarise(plan)
     if args.csv and plan:

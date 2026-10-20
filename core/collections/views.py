@@ -991,6 +991,7 @@ class CollectionVersionExpansionConceptsView(CollectionVersionExpansionChildrenV
     document_model = ConceptDocument
     es_fields = Concept.es_fields
     facet_class = ConceptFacetedSearch
+    default_qs_sort_attr = '-id'
 
     def get_serializer_class(self):
         from core.concepts.serializers import ConceptDetailSerializer, ConceptListSerializer
@@ -1005,6 +1006,7 @@ class CollectionVersionExpansionMappingsView(CollectionVersionExpansionChildrenV
     document_model = MappingDocument
     es_fields = Mapping.es_fields
     facet_class = MappingFacetedSearch
+    default_qs_sort_attr = '-id'
 
     def get_serializer_class(self):
         from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer
@@ -1039,6 +1041,7 @@ class CollectionVersionConceptsView(CollectionBaseView, ListWithHeadersMixin):
     document_model = ConceptDocument
     es_fields = Concept.es_fields
     facet_class = ConceptFacetedSearch
+    default_qs_sort_attr = '-id'
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_base_queryset())
@@ -1138,6 +1141,7 @@ class CollectionVersionMappingsView(CollectionBaseView, ListWithHeadersMixin):
     document_model = MappingDocument
     es_fields = Mapping.es_fields
     facet_class = MappingFacetedSearch
+    default_qs_sort_attr = '-id'
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_base_queryset())

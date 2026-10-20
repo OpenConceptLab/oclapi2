@@ -1067,8 +1067,16 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     def has_edit_access(self, user):
         return self.has_parent_edit_access(user)
 
+    @property
+    def is_publicly_viewable(self):
+        """A version is public only while its HEAD is, as it keeps the access it had when the HEAD is made private."""
+        if not self.public_can_view:
+            return False
+        head = self.head
+        return head is None or head.public_can_view
+
     def has_view_access(self, user):
-        if self.public_can_view:
+        if self.is_publicly_viewable:
             return True
 
         return bool(user and user.is_authenticated and self.has_parent_edit_access(user))

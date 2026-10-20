@@ -1,9 +1,8 @@
+from pydash import get
 from rest_framework.permissions import BasePermission
 
 from core.capabilities.constants import MAPPER_PROJECTS_CAPABILITY_ID
 from core.capabilities.exceptions import MapProjectCapacityExceeded
-from core.common.constants import ACCESS_TYPE_VIEW
-from core.common.utils import normalize_public_access
 from core.users.constants import (
     MAPPER_CUSTOM_ALGORITHMS_PERMISSION, MAPPER_ORG_PROJECTS_PERMISSION, MAPPER_USE_PERMISSION,
 )
@@ -52,11 +51,12 @@ class HasOwnership(BasePermission):
 
 class CanViewConceptDictionary(HasPrivateAccess):
     """
-    The user can view this source
+    The user can view this source. A version is viewable only while its HEAD is too, as a version keeps the
+    access it was created with when the HEAD is made private later.
     """
 
     def has_object_permission(self, request, view, obj):
-        if normalize_public_access(obj.public_access) == ACCESS_TYPE_VIEW:
+        if get(obj, 'is_publicly_viewable', obj.public_can_view):
             return True
 
         return super().has_object_permission(request, view, obj)
@@ -95,7 +95,7 @@ class CanViewConceptDictionaryVersion(HasAccessToVersionedObject):
     """
 
     def has_object_permission(self, request, view, obj):
-        if normalize_public_access(obj.public_access) == ACCESS_TYPE_VIEW:
+        if get(obj, 'is_publicly_viewable', obj.public_can_view):
             return True
         return super().has_object_permission(request, view, obj)
 

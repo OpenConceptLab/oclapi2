@@ -18,6 +18,7 @@ from core.collections.tests.factories import OrganizationCollectionFactory, Expa
 from core.common.models import BaseModel
 from core.common.tasks import export_source, index_source_concepts, index_source_mappings
 from core.common.tests import OCLAPITestCase
+from core.integration_tests.tests_access_control import PrivateHeadVersionAccessMixin
 from core.common.utils import get_latest_dir_in_path
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
@@ -3291,3 +3292,14 @@ class SourceReleaseFlagsTest(OCLAPITestCase):
         self.assertEqual(actions[0]['doc'], {'public_can_view': True})
         self.assertNotIn('doc_as_upsert', actions[0])
         self.assertNotIn('on_bulk_error', by_ids.call_args[1])  # default handler full-indexes 404s
+
+
+class SourceVersionPrivateHeadAccessTest(PrivateHeadVersionAccessMixin, OCLAPITestCase):
+    model = Source
+    org_repo_factory = OrganizationSourceFactory
+    user_repo_factory = UserSourceFactory
+
+    def add_concept(self, head, version):
+        concept = ConceptFactory(parent=head)
+        version.concepts.add(concept)
+        return concept

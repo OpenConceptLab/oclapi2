@@ -971,7 +971,7 @@ def get_match_operations_attribution(request):
     return algorithm_id, map_project
 
 
-class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):  # pragma: no cover
+class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
     default_limit = 1
     score_threshold = 0.9
     score_threshold_semantic_very_high = 0.9
@@ -1312,6 +1312,8 @@ class RerankConceptsListView(CapacityLimitMixin, BaseAPIView):
         user = self.request.user
         rows = self.request.data.get('rows', [])
         name_key = self.request.data.get('name_key', None) or 'display_name'
+        # Rows may carry `synonyms` (strings) or `names` (concept name objects), as oclmap sends.
+        synonyms_key = self.request.data.get('synonyms_key', None) or ['synonyms', 'names']
         text = self.request.data.get('q', None)
         score_key = self.request.data.get('score_key', None)
         encoder_model = self.request.data.get('encoder_model', None)
@@ -1337,7 +1339,8 @@ class RerankConceptsListView(CapacityLimitMixin, BaseAPIView):
             try:
                 reranker = Reranker(model_name=encoder_model)
                 results = reranker.rerank(
-                    hits=rows, name_key=name_key, txt=text, score_key=score_key, order_results=True)
+                    hits=rows, name_key=name_key, txt=text, score_key=score_key, order_results=True,
+                    synonyms_key=synonyms_key)
                 return Response(results)
             except (ValueError, RuntimeError, OSError) as e:
                 return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)

@@ -532,6 +532,102 @@ class CollectionVersionExpansionProcessingAccessTest(ProcessingFlagAccessMixin, 
         return repo.is_processing
 
 
+class PrivateHeadVersionAccessMixin(AccessTestMixin):
+    """A version is only as viewable as its HEAD: making the HEAD private hides the versions that still say View."""
+    model = None
+    org_repo_factory = None
+    user_repo_factory = None
+    # pylint: disable=not-callable
+    version_suffixes = ('', 'concepts/', 'mappings/', 'summary/', 'export/')
+    member_suffixes = ('', 'concepts/', 'mappings/', 'summary/')  # an export request would reach the export service
+
+    def create_org_version(self, **head_kwargs):
+        head = self.org_repo_factory(organization=self.org, public_access=ACCESS_TYPE_VIEW, **head_kwargs)
+        version = self.org_repo_factory(
+            mnemonic=head.mnemonic, organization=self.org, version='v1', public_access=ACCESS_TYPE_VIEW)
+        self.make_private(head)
+        return head, version
+
+    def make_private(self, head):
+        # Bypasses the source signal, as a version made before the signal covered it would be
+        self.model.objects.filter(id=head.id).update(public_access=ACCESS_TYPE_NONE)
+
+    def assert_hidden_from_non_members(self, url):
+        self.assertEqual(self.request('get', url, self.outsider).status_code, 403, url)
+        self.assertEqual(self.request('get', url).status_code, 401, url)
+
+    def assert_visible_to_members(self, url):
+        for user in [self.member, self.staff]:
+            self.assertNotIn(self.request('get', url, user).status_code, [401, 403], url)
+
+    def test_version_endpoints_are_hidden_when_head_is_private(self):
+        _, version = self.create_org_version()
+
+        for suffix in self.version_suffixes:
+            self.assert_hidden_from_non_members(version.uri + suffix)
+
+    def add_concept(self, head, version):
+        raise NotImplementedError
+
+    def test_cascade_on_version_is_hidden_when_head_is_private(self):
+        head, version = self.create_org_version()
+        concept = self.add_concept(head, version)
+        url = f'{version.uri}concepts/{concept.mnemonic}/$cascade/'
+
+        for user in [self.outsider, None]:
+            self.assertIn(self.request('get', url, user).status_code, [401, 403, 404], url)
+        self.assertEqual(self.request('get', url, self.member).status_code, 200)
+
+    def test_cascade_on_version_of_public_head_stays_visible(self):
+        head = self.org_repo_factory(organization=self.org, public_access=ACCESS_TYPE_VIEW)
+        version = self.org_repo_factory(
+            mnemonic=head.mnemonic, organization=self.org, version='v1', public_access=ACCESS_TYPE_VIEW)
+        concept = self.add_concept(head, version)
+
+        self.assertEqual(
+            self.request('get', f'{version.uri}concepts/{concept.mnemonic}/$cascade/', self.outsider).status_code, 200)
+
+    def test_latest_released_version_is_hidden_when_head_is_private(self):
+        head, version = self.create_org_version()
+        self.model.objects.filter(id=version.id).update(released=True)
+
+        for suffix in ('latest/', 'latest/summary/'):
+            self.assert_hidden_from_non_members(head.uri + suffix)
+
+    def test_version_endpoints_are_visible_to_members_when_head_is_private(self):
+        _, version = self.create_org_version()
+
+        for suffix in self.member_suffixes:
+            self.assert_visible_to_members(version.uri + suffix)
+
+    def test_version_of_user_owned_private_head_is_visible_to_owner_only(self):
+        head = self.user_repo_factory(user=self.owner, public_access=ACCESS_TYPE_VIEW)
+        version = self.user_repo_factory(
+            mnemonic=head.mnemonic, user=self.owner, version='v1', public_access=ACCESS_TYPE_VIEW)
+        self.make_private(head)
+
+        for suffix in self.version_suffixes:
+            self.assert_hidden_from_non_members(version.uri + suffix)
+        for suffix in self.member_suffixes:
+            self.assertNotIn(self.request('get', version.uri + suffix, self.owner).status_code, [401, 403])
+
+    def test_version_of_public_head_stays_visible(self):
+        head = self.org_repo_factory(organization=self.org, public_access=ACCESS_TYPE_VIEW)
+        version = self.org_repo_factory(
+            mnemonic=head.mnemonic, organization=self.org, version='v1', public_access=ACCESS_TYPE_VIEW)
+
+        for suffix in ('', 'concepts/', 'mappings/', 'summary/'):
+            self.assertEqual(self.request('get', version.uri + suffix, self.outsider).status_code, 200, suffix)
+            self.assertEqual(self.request('get', version.uri + suffix).status_code, 200, suffix)
+
+    def test_private_version_of_public_head_stays_hidden(self):
+        head = self.org_repo_factory(organization=self.org, public_access=ACCESS_TYPE_VIEW)
+        version = self.org_repo_factory(
+            mnemonic=head.mnemonic, organization=self.org, version='v1', public_access=ACCESS_TYPE_NONE)
+
+        self.assert_hidden_from_non_members(version.uri)
+
+
 class UserOrganizationListAccessTest(AccessTestMixin, OCLAPITestCase):
     """/users/<user>/orgs/ lists the orgs of <user> that the requester can view."""
     def setUp(self):

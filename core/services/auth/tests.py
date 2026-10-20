@@ -1,4 +1,5 @@
 from unittest.mock import patch, Mock, ANY
+from urllib.parse import parse_qs, urlparse
 
 from core.services.auth.django import DjangoAuthService
 from core.services.auth.openid import OpenIDAuthService
@@ -25,16 +26,50 @@ class OpenIDAuthServiceTest(OCLTestCase):
     def test_get_login_redirect_url(self):
         self.assertEqual(
             OpenIDAuthService.get_login_redirect_url('client-id', 'http://localhost:4000', 'state', 'nonce'),
-            '/realms/ocl/protocol/openid-connect/auth?response_type=code&scope=openid profile email&'
-            'client_id=client-id&state=state&nonce=nonce&redirect_uri=http://localhost:4000'
+            '/realms/ocl/protocol/openid-connect/auth?response_type=code&scope=openid%20profile%20email&'
+            'client_id=client-id&state=state&nonce=nonce&redirect_uri=http%3A%2F%2Flocalhost%3A4000'
+        )
+        self.assertEqual(
+            OpenIDAuthService.get_login_redirect_url(
+                'client-id', 'http://localhost:4000', 'state', 'nonce', 'challenge', 'S256'),
+            '/realms/ocl/protocol/openid-connect/auth?response_type=code&scope=openid%20profile%20email&'
+            'client_id=client-id&state=state&nonce=nonce&redirect_uri=http%3A%2F%2Flocalhost%3A4000&'
+            'code_challenge=challenge&code_challenge_method=S256'
         )
 
     def test_get_logout_redirect_url(self):
         self.assertEqual(
             OpenIDAuthService.get_logout_redirect_url('id-token-hint', 'http://localhost:4000'),
             '/realms/ocl/protocol/openid-connect/logout?id_token_hint=id-token-hint&'
-            'post_logout_redirect_uri=http://localhost:4000'
+            'post_logout_redirect_uri=http%3A%2F%2Flocalhost%3A4000'
         )
+
+    def test_redirect_urls_keep_query_values_whole(self):
+        redirect_uri = 'http://localhost:4000/#/signin?returnTo=http%3A%2F%2Flocalhost%3A4000%2Fa&b=1'
+
+        def query(url):
+            parsed = urlparse(url)
+            self.assertEqual(parsed.fragment, '')
+            return parse_qs(parsed.query)
+
+        logout = query(OpenIDAuthService.get_logout_redirect_url('id-token', redirect_uri))
+        self.assertEqual(logout, {'id_token_hint': ['id-token'], 'post_logout_redirect_uri': [redirect_uri]})
+
+        for url in [
+                OpenIDAuthService.get_login_redirect_url('client', redirect_uri, 's&t', 'n#o', 'c', 'S256'),
+                OpenIDAuthService.get_registration_redirect_url('client', redirect_uri, 's&t', 'n#o', 'c', 'S256'),
+        ]:
+            params = query(url)
+            self.assertEqual(params['redirect_uri'], [redirect_uri])
+            self.assertEqual(params['state'], ['s&t'])
+            self.assertEqual(params['nonce'], ['n#o'])
+            self.assertEqual(params['scope'], ['openid profile email'])
+            self.assertEqual(params['code_challenge'], ['c'])
+
+        reset = query(OpenIDAuthService.get_reset_password_redirect_url('client', redirect_uri))
+        self.assertEqual(reset['redirect_uri'], [redirect_uri])
+        self.assertEqual(reset['kc_action'], ['UPDATE_PASSWORD'])
+        self.assertNotIn('code_challenge', reset)
 
     @patch('requests.post')
     def test_exchange_code_for_token(self, post_mock):
