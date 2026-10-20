@@ -13,6 +13,7 @@ from core.collections.tests.factories import OrganizationCollectionFactory, User
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tasks import export_collection
 from core.common.tests import OCLAPITestCase
+from core.integration_tests.tests_access_control import PrivateHeadVersionAccessMixin
 from core.common.utils import get_latest_dir_in_path, drop_version
 from core.concepts.models import Concept
 from core.concepts.serializers import ConceptVersionExportSerializer, ConceptListSerializer
@@ -4528,3 +4529,17 @@ class CollectionReferencesPreviewPermissionTest(OCLAPITestCase):
             self.collection.uri + 'references/preview/', self.payload,
             HTTP_AUTHORIZATION='Token ' + self.owner.get_token(), format='json')
         self.assertEqual(response.status_code, 200)
+
+
+class CollectionVersionPrivateHeadAccessTest(PrivateHeadVersionAccessMixin, OCLAPITestCase):
+    model = Collection
+    org_repo_factory = OrganizationCollectionFactory
+    user_repo_factory = UserCollectionFactory
+
+    def add_concept(self, head, version):
+        concept = ConceptFactory(parent=OrganizationSourceFactory())
+        expansion = ExpansionFactory(collection_version=version)
+        expansion.concepts.add(concept)
+        version.expansion_uri = expansion.uri
+        version.save()
+        return concept
