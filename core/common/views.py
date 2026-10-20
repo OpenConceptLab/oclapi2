@@ -738,6 +738,31 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return self.get_view_name() in ['Organization Collection List', 'Organization Source List',
                                         'Organization Repo List', 'Organization Url Registry List']
 
+    def get_members_view_org_mnemonics(self):
+        """Orgs of the user in the URL (the requester for /user/orgs/<repos>/)."""
+        from core.users.models import UserProfile
+        username = self.kwargs.get('user') or get(self.request.user, 'username')
+        user = UserProfile.objects.filter(username=username).first() if username else None
+        if not user:
+            raise Http404()
+        return list(user.organizations.values_list('mnemonic', flat=True))
+
+    def get_other_members_view_criteria(self):
+        """/users/<other>/orgs/<repos>/: public content, plus private content of the orgs shared with the requester."""
+        criteria = Q('term', public_can_view=True)
+        shared = set(self.get_members_view_org_mnemonics()) & set(
+            self.request.user.organizations.values_list('mnemonic', flat=True))
+        for mnemonic in shared:
+            criteria |= Q('term', owner=mnemonic)
+        return criteria
+
+    def is_other_user_members_view(self):
+        user = self.request.user
+        username = self.kwargs.get('user')
+        return bool(
+            self.is_members_view() and username and user.is_authenticated and username != user.username and
+            not user.is_staff and not self.is_url_registry_document())
+
     def get_scope_owner_criteria(self):
         """Private content in the requester's own scope (their user, or an org of theirs) is shown, but the owner and
         source filters match names in any case, and owner names that differ only in case are other owners: their
@@ -750,7 +775,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         org = self.kwargs.get('org')
         owner = org or self.kwargs.get('user') or self.request.user.username
         public = Q('term', public_can_view=True)
-        orgs = list(self.request.user.organizations.values_list('mnemonic', flat=True)) if (
+        orgs = self.get_members_view_org_mnemonics() if (
             self.is_members_view()) else ([org] if org else None)
         if self.is_concept_document():
             return public | Q('term', **{EXACT_OWNER_FIELD: owner})
@@ -802,8 +827,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if not ignore_retired_filter and self._should_exclude_retired_from_search_results():
             results = results.filter('term', retired=False)
 
-        visibility_criteria = self.get_scope_owner_criteria() if self._should_include_private() else (
-            self.get_public_criteria())
+        visibility_criteria = self.get_other_members_view_criteria() if self.is_other_user_members_view() else (
+            self.get_scope_owner_criteria() if self._should_include_private() else self.get_public_criteria())
         if visibility_criteria is not None:
             results = results.filter(visibility_criteria)
         faceted_criterion = self.get_faceted_criterion()
@@ -933,8 +958,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             kwargs_filters = self.get_kwargs_filters()
             if is_members_view:
                 kwargs_filters['ownerType'] = 'Organization'
-                kwargs_filters['owner'] = list(
-                    user.organizations.values_list('mnemonic', flat=True)) or ['UNKNOWN-ORG-DUMMY']
+                kwargs_filters['owner'] = self.get_members_view_org_mnemonics() or ['UNKNOWN-ORG-DUMMY']
             elif self.user_is_self and is_authenticated:
                 kwargs_filters['ownerType'] = 'User'
                 kwargs_filters['owner'] = username

@@ -158,7 +158,7 @@ class OrganizationRepoListView(ReposListView):
         if not user.is_authenticated:
             return CountableRepoList([])
 
-        org_mnemonics = list(user.organizations.values_list('mnemonic', flat=True))
+        org_mnemonics = self.get_members_view_org_mnemonics()
         if not org_mnemonics:
             return CountableRepoList([])
 
