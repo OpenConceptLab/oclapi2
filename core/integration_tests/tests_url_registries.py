@@ -3,6 +3,7 @@ from rest_framework.exceptions import ErrorDetail
 from core.common.tests import OCLAPITestCase
 from core.orgs.tests.factories import OrganizationFactory
 from core.url_registry.factories import GlobalURLRegistryFactory, OrganizationURLRegistryFactory, UserURLRegistryFactory
+from core.url_registry.documents import URLRegistryDocument
 from core.url_registry.models import URLRegistry
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
@@ -292,6 +293,8 @@ class URLRegistriesViewTest(OCLAPITestCase):
 
 
     def test_other_user_orgs_url_registry_search(self):
+        URLRegistryDocument._index.delete(ignore=404)  # pylint: disable=protected-access
+        URLRegistryDocument.init()
         viewer = UserProfileFactory(username='ur-viewer')
         owner = UserProfileFactory(username='ur-owner')
         owner_org = OrganizationFactory(mnemonic='ur-owner-org')
