@@ -143,8 +143,12 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
         error = self.assertUnresolved('CodeSystem', ICD10, 'nope')
         self.assertEqual(error.version, 'nope')
 
-        # the version of a repository that lost the resolution: the resolver never tries another one
-        self.assertUnresolved('CodeSystem', ICD10, 'v1.0')
+        # the version of the repository that lost the resolution: without the registry, it holds the release named, so
+        # it is served (decision 9, core.fhir.tests_resolve_named_version); with it, the global entry decides
+        if self.registry:
+            self.assertUnresolved('CodeSystem', ICD10, 'v1.0')
+        else:
+            self.assertEqual(self.resolve('CodeSystem', ICD10, 'v1.0').id, self.sehat_icd_v1.id)
         self.assertEqual(self.resolve('CodeSystem', ICD10, 'v1.0', {'org': 'sehatapp'}).id, self.sehat_icd_v1.id)
 
     def test_named_version(self):

@@ -14,8 +14,10 @@ CapabilityStatement, TerminologyCapabilities and $versions Parameters.
   the resolver serves it at there: its canonical URL (its HEAD's) when the resolver picks it for that URL (with the URL
   registry when the toggle is on), else its OCL path as a CodeSystem; as resolve() serves them were the repositories
   the caller isn't shown missing (core.fhir.resolve's served_repositories), so a hidden repository changes nothing in
-  it. Each with its released versions as stored, newest first, and the default, the one served without a version. A
-  fixed number of queries, bounded as a search's are (SEARCH_TIMEOUT_MS; past it the list is too costly, a 422).
+  it. Each with its released versions as stored, newest first, and the default, the one served without a version.
+  Under a canonical URL, after the repository's own, the releases of the other repositories with it the base shows
+  that the operations serve by name there (a version named resolves to its holder). A fixed number of queries,
+  bounded as a search's are (SEARCH_TIMEOUT_MS; past it the list is too costly, a 422).
 - The routed operations' contracts fill TerminologyCapabilities' blocks: $translate finds the map from the code's
   system (core.fhir.ops.translate), so it needs none; $expand pages, with offset and count.
 """
