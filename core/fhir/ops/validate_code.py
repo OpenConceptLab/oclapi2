@@ -183,8 +183,10 @@ def member(value_set, coding, namespace, user):
     (the concept, the version of its code system) of the code in the value set version's default expansion, or None:
     a concept with the code (not deleted), of the system (in systemVersion, if named), in a code system version the
     caller is shown (not deleted), released or not, that the system names (named_by): the expansion defines the value
-    set. The version answered is a release the caller is shown that holds the concept: the one the expansion pins
-    (explicit), else the one it evaluated, else the newest; None without one, never HEAD or an unreleased version.
+    set. The version answered is a release the caller is shown that holds the member's row, else one that holds
+    another version of its concept (an expansion can hold a concept's versioned-object row, which only HEAD holds):
+    the one the expansion pins (explicit), else the one it evaluated, else the newest; None without one, never HEAD
+    or an unreleased version.
     The code's concepts are read first, by their code and only in code systems the caller is shown (so what hidden ones
     hold costs nothing), then looked for in the expansion by its (expansion, concept) index, so the cost doesn't grow
     with the size of the value set.
@@ -192,18 +194,20 @@ def member(value_set, coding, namespace, user):
     if not value_set.expansion_uri:
         return None
     concepts_named, versions_named = named_by(coding.system, viewable_rows(Source, namespace, user))
-    concept_ids = list(Concept.objects.filter(
+    concepts = dict(Concept.objects.filter(
         code_q('mnemonic', coding.code), concepts_named,
         Exists(viewable_rows(Source, namespace, user).filter(id=OuterRef('parent_id'))), is_active=True).values_list(
-        'id', flat=True))
-    if concept_ids:
+        'id', 'versioned_object_id'))
+    concept_ids = []
+    if concepts:
         concept_ids = list(Expansion.concepts.through.objects.filter(
-            expansion__uri=value_set.expansion_uri, concept_id__in=concept_ids).values_list('concept_id', flat=True))
+            expansion__uri=value_set.expansion_uri, concept_id__in=concepts).values_list('concept_id', flat=True))
     if not concept_ids:
         return None
     rows = Concept.sources.through.objects.filter(
         Exists(viewable_rows(Source, namespace, user).filter(id=OuterRef('source_id'))), versions_named,
-        concept_id__in=concept_ids, source__is_active=True)
+        concept__versioned_object_id__in=sorted({concepts[concept_id] for concept_id in concept_ids}),
+        source__is_active=True)
     if coding.version:
         rows = rows.filter(source__version=coding.version)
     def pinned(versions):
@@ -212,8 +216,9 @@ def member(value_set, coding, namespace, user):
     release = Q(source__released=True, source__retired=False) & ~Q(source__version=HEAD)
     row = rows.annotate(
         release=Case(When(release, then=Value(1)), default=Value(0), output_field=IntegerField()),
+        held=Case(When(concept_id__in=concept_ids, then=Value(1)), default=Value(0), output_field=IntegerField()),
         explicit=pinned(Expansion.explicit_source_versions), evaluated=pinned(Expansion.evaluated_source_versions),
-    ).order_by('-release', '-explicit', '-evaluated', '-source__created_at', 'concept_id').values_list(
+    ).order_by('-release', '-held', '-explicit', '-evaluated', '-source__created_at', 'concept_id').values_list(
         'concept_id', 'source__version', 'release').first()
     if not row:
         return None
