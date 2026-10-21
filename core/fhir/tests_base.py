@@ -589,10 +589,11 @@ class FhirParametersTest(SimpleTestCase):
                 parameter = {'name': 'code', **given}
                 body = {'resourceType': 'Parameters', 'parameter': [
                     {'name': 'property', 'part': [parameter]} if nested else parameter]}
-                with self.subTest((given, nested)), self.assertRaises(outcomes.InvalidError) as raised:
-                    self.read(self.factory.post(
-                        '/fhir/CodeSystem/$lookup', json.dumps(body), content_type='application/fhir+json'))
-                self.assertEqual(raised.exception.expression, 'code')
+                with self.subTest((given, nested)):
+                    with self.assertRaises(outcomes.InvalidError) as raised:
+                        self.read(self.factory.post(
+                            '/fhir/CodeSystem/$lookup', json.dumps(body), content_type='application/fhir+json'))
+                    self.assertEqual(raised.exception.expression, 'code')
 
 
 class BaseUrlTest(SimpleTestCase):
