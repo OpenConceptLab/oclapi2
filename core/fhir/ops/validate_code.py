@@ -223,11 +223,10 @@ def member(value_set, coding, namespace, user):
     if not row:
         return None
     # the member as the expansion holds it, as $expand shows it, whichever version of its concept the release holds
-    held, versioned_object_id, version, released = row
-    member_id = held if held in concept_ids else min(
-        concept_id for concept_id in concept_ids if concepts[concept_id] == versioned_object_id)
+    member_id = row[0] if row[0] in concept_ids else min(
+        concept_id for concept_id in concept_ids if concepts[concept_id] == row[1])
     concept = Concept.objects.filter(id=member_id).select_related('parent').prefetch_related('names').first()
-    return concept, version if released else None
+    return concept, row[2] if row[3] else None
 
 
 def value_set_version(parameters, kwargs, user, instance_id):
