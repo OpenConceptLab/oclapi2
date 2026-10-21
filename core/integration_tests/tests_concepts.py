@@ -28,7 +28,7 @@ from core.concepts.constants import CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.search import ConceptFuzzySearch
-from core.concepts.serializers import ConceptListSerializer, ConceptDetailSerializer
+from core.concepts.serializers import ConceptListSerializer, ConceptDetailSerializer, ConceptAbstractSerializer
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory, ConceptDescriptionFactory
 from core.concepts.views import MetadataToConceptsListView
 from core.integration_tests.test_utils import SourceChildListQueryCountMixin
@@ -4628,3 +4628,79 @@ class RerankConceptsListViewTest(CapacityRedisMockMixin, OCLAPITestCase):
         self.assertEqual(response.status_code, 429)
         self.assertEqual(response.data['error_code'], 'capacity_exceeded')
         reranker_mock.assert_not_called()
+
+
+class ConceptListIncludeMappingsTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.source = OrganizationSourceFactory()
+        self.other_source = OrganizationSourceFactory()
+        self.concepts = [ConceptFactory(parent=self.source) for _ in range(3)]
+        self.other_concept = ConceptFactory(parent=self.other_source)
+        self.mappings = {}
+        for concept in self.concepts:
+            self.mappings[concept.mnemonic] = {
+                MappingFactory(
+                    parent=self.source, from_concept=concept, to_concept=self.concepts[0], map_type=f'type{index}'
+                ).id for index in range(2)
+            }
+        self.mappings[self.other_concept.mnemonic] = {MappingFactory(
+            parent=self.other_source, from_concept=self.other_concept, to_concept=self.other_concept).id}
+
+    def mappings_by_concept(self, url):
+        response = self.client.get(url + ('&' if '?' in url else '?') + 'verbose=true&includeMappings=true')
+        self.assertEqual(response.status_code, 200)
+        return {row['id']: sorted(mapping['uuid'] for mapping in row['mappings']) for row in response.data}
+
+    def assert_same_with_and_without_batching(self, url, expected=None):
+        batched = self.mappings_by_concept(url)
+        with patch.object(ConceptAbstractSerializer, 'preload_page', lambda *args: None):
+            per_concept = self.mappings_by_concept(url)
+        self.assertEqual(batched, per_concept)
+        if expected is not None:
+            self.assertEqual(
+                batched, {mnemonic: sorted(str(_id) for _id in ids) for mnemonic, ids in expected.items()})
+
+    def test_source_head_list(self):
+        self.assert_same_with_and_without_batching(
+            self.source.uri + 'concepts/', {c.mnemonic: self.mappings[c.mnemonic] for c in self.concepts})
+
+    def test_global_list_across_sources(self):
+        batched = self.mappings_by_concept('/concepts/')
+        self.assertEqual(len(batched), 4)
+        self.assert_same_with_and_without_batching('/concepts/', {
+            mnemonic: ids for mnemonic, ids in self.mappings.items()})
+
+    def test_source_version_list(self):
+        version = OrganizationSourceFactory(
+            organization=self.source.organization, mnemonic=self.source.mnemonic, version='v1')
+        for concept in self.concepts:
+            version.concepts.add(concept.get_latest_version())
+        self.assert_same_with_and_without_batching(version.uri + 'concepts/')
+        self.assertTrue(any(self.mappings_by_concept(version.uri + 'concepts/').values()))
+
+    def test_concept_versions_list(self):
+        self.assert_same_with_and_without_batching(
+            self.concepts[1].versions_url, {self.concepts[1].mnemonic: self.mappings[self.concepts[1].mnemonic]})
+
+    def test_collection_list_ignores_mappings_outside_expansion(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        concept = self.concepts[0]
+        kept = Mapping.objects.filter(parent=self.source, from_concept=concept).first()
+        expansion.concepts.add(concept.get_latest_version())
+        expansion.mappings.add(kept)
+
+        url = collection.uri + 'HEAD/concepts/'
+        self.assert_same_with_and_without_batching(url)
+        shown = {uuid for uuids in self.mappings_by_concept(url).values() for uuid in uuids}
+        self.assertLessEqual(shown, {str(kept.id)})
+
+    def test_inverse_mappings_are_unchanged(self):
+        url = self.source.uri + 'concepts/?verbose=true&includeInverseMappings=true'
+        batched = self.client.get(url).data
+        with patch.object(ConceptAbstractSerializer, 'preload_page', lambda *args: None):
+            per_concept = self.client.get(url).data
+        self.assertEqual(batched, per_concept)

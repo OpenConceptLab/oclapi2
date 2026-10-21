@@ -3132,7 +3132,8 @@ class ConceptSerializersTest(OCLTestCase):
         with CaptureQueriesContext(connection) as large:
             page = ConceptListSerializer(concepts, many=True, context=context).data
 
-        self.assertEqual([row['mappings'] for row in page], rows)
+        by_id = lambda mappings: sorted(mappings, key=lambda mapping: mapping['uuid'])  # noqa: E731
+        self.assertEqual([by_id(row['mappings']) for row in page], [by_id(row) for row in rows])
         self.assertEqual(len(rows[0]), 2)
         self.assertLess(len(large) - len(small), 4 * 4)
 
