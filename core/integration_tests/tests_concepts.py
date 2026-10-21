@@ -4668,8 +4668,7 @@ class ConceptListIncludeMappingsTest(OCLAPITestCase):
     def test_global_list_across_sources(self):
         batched = self.mappings_by_concept('/concepts/')
         self.assertEqual(len(batched), 4)
-        self.assert_same_with_and_without_batching('/concepts/', {
-            mnemonic: ids for mnemonic, ids in self.mappings.items()})
+        self.assert_same_with_and_without_batching('/concepts/', dict(self.mappings))
 
     def test_source_version_list(self):
         version = OrganizationSourceFactory(
