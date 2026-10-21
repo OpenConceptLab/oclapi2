@@ -740,9 +740,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     def create_new_versions_for_removed_parents(self, uris):
         if uris:
-            concepts = Concept.objects.filter(uri__in=uris)
+            concepts = Concept.objects.filter(uri__in=uris).select_related('parent')
             child_versioned_object_uri = drop_version(self.uri)
             for concept in concepts:
+                if not concept.parent.has_edit_access(self.created_by):
+                    continue
                 current_latest_version = concept.get_latest_version()
                 Concept.create_new_version_for(
                     concept.clone(),
@@ -751,7 +753,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                         'descriptions': [desc.to_dict() for desc in concept.descriptions.all()],
                         'parent_concept_urls': concept.parent_concept_urls
                     },
-                    concept.created_by,
+                    self.created_by,
                     create_parent_version=False,
                     add_prev_version_children=False,
                     _hierarchy_processing=True
