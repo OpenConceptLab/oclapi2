@@ -6,6 +6,7 @@ from django.http import Http404
 from pydash import get
 
 from core.bundles.serializers import FHIRBundleSerializer
+from core.code_systems.views import FhirParameterRequiredError
 from core.common.constants import HEAD
 from core.common.fhir_helpers import translate_fhir_query
 from core.common.permissions import CanViewConceptDictionary
@@ -81,6 +82,24 @@ class ConceptMapTranslateView(MappingListView):
     def get_serializer_class(self):
         return ConceptMapParametersSerializer
 
+    # $translate answers with the translation of the mappings apply_filters names, and nothing else. The mapping
+    # list's shortcuts (a search, a sort or a faceted filter, facets, search stats, a CSV export) would answer in its
+    # place, and the search ones skip apply_filters, so each is off. Their parameters are ignored like any other this
+    # operation doesn't define.
+    allow_csv_export = False
+
+    def should_perform_es_search(self):
+        return False
+
+    def only_facets(self):
+        return False
+
+    def only_search_stats(self):
+        return False
+
+    def should_include_facets(self):
+        return False
+
     def verify_scope(self):
         """
         Override to not verify scope and allow POSTing for everyone
@@ -88,8 +107,9 @@ class ConceptMapTranslateView(MappingListView):
         """
 
     def apply_filters(self, queryset):
+        # get_serializer renders the answer, so a POSTed Parameters resource is read by the serializer class itself
         if self.request.method in ['POST', 'PUT']:
-            parameters = self.get_serializer(data=self.request.data, instance=None)
+            parameters = self.get_serializer_class()(data=self.request.data)
         else:
             parameters = self.get_serializer_class().parse_query_params(self.request.query_params)
 
@@ -104,22 +124,19 @@ class ConceptMapTranslateView(MappingListView):
         system = params.get('system')
         targetsystem = params.get('targetsystem')
         # TODO: implement 'source' and 'target'
+        if not code:
+            raise FhirParameterRequiredError('A code to translate is required.', expression='code')
+        if not system:
+            raise FhirParameterRequiredError(
+                'system is required with a code: the code system the code is from.', expression='system')
+
         if url:
             queryset = queryset.filter(parent__canonical_url=url)
-            if not queryset:
-                return queryset
-
-        if code:
-            queryset = queryset.filter(from_concept_code=code)
-            if not queryset:
-                return queryset
-        if system:
-            system_url = IdentifierSerializer.convert_fhir_url_to_ocl_uri(system, 'sources')
-            queryset = queryset.filter(Q(from_source__canonical_url=system) |
-                                       Q(from_source_url=system_url) |
-                                       Q(from_source__uri=system_url))
-            if not queryset:
-                return queryset
+        queryset = queryset.filter(from_concept_code=code)
+        system_url = IdentifierSerializer.convert_fhir_url_to_ocl_uri(system, 'sources')
+        queryset = queryset.filter(Q(from_source__canonical_url=system) |
+                                   Q(from_source_url=system_url) |
+                                   Q(from_source__uri=system_url))
         if targetsystem:
             target_url = IdentifierSerializer.convert_fhir_url_to_ocl_uri(targetsystem, 'sources')
             queryset = queryset.filter(Q(to_source__canonical_url=targetsystem) |
