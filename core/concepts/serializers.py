@@ -273,7 +273,7 @@ class ConceptAbstractSerializer(SourceVersionFieldMixin, AbstractResourceSeriali
                 mapping for mapping in mappings
                 if mapping.parent_id == concept.parent_id and mapping.from_concept_id in concept_ids[concept.id]]
 
-    def get_mappings(self, obj):
+    def get_mappings(self, obj):  # pylint: disable=too-many-locals
         from core.mappings.serializers import MappingDetailSerializer, MappingMinimalSerializer
         context = get(self, 'context')
         request = get(context, 'request')
