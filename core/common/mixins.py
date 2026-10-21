@@ -4,16 +4,18 @@ from urllib import parse
 from urllib.parse import urlencode
 
 from celery.states import SUCCESS
+from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.db import transaction, models
+from django.db import transaction, models, connection, OperationalError
 from django.db.models import Q, F, QuerySet, prefetch_related_objects
 from django.http import HttpResponseForbidden, Http404
 from django.shortcuts import redirect
 from django.urls import resolve, Resolver404
 from django.utils.functional import cached_property
 from ocldev.checksum import Checksum
+from psycopg2.errorcodes import QUERY_CANCELED
 from pydash import compact, get
 from rest_framework import status
 from rest_framework.mixins import ListModelMixin, CreateModelMixin
@@ -191,7 +193,29 @@ class ListWithHeadersMixin(ListModelMixin):
                 params.get(INCLUDE_CHILD_CONCEPTS) not in TRUTHY and
                 get(self, 'parent_resource.is_latest_version', False))
 
-    def list(self, request, *args, **kwargs):  # pylint:disable=too-many-locals,too-many-branches,too-many-statements
+    def list(self, request, *args, **kwargs):
+        """
+        The list, with its queries bounded by LIST_QUERY_TIMEOUT_MS: a list that can't finish answers 503 instead of
+        holding a worker. CSV exports, and lists already in a transaction (tests), run unbounded.
+        """
+        timeout = int(settings.LIST_QUERY_TIMEOUT_MS or 0)
+        if (not timeout or connection.vendor != 'postgresql' or connection.in_atomic_block or
+                (self.allow_csv_export and request.query_params.get('csv', False))):
+            return self._list(request)
+        try:
+            with transaction.atomic():
+                with connection.cursor() as cursor:
+                    cursor.execute('SET LOCAL statement_timeout = %s', [timeout])
+                return self._list(request)
+        except OperationalError as ex:
+            if getattr(ex.__cause__, 'pgcode', None) != QUERY_CANCELED:
+                raise
+            logger.warning('List query cancelled after %sms: %s', timeout, request.get_full_path())
+            return Response(
+                {'detail': 'This list took too long to load. Narrow it with a search (q), a filter, or a repository.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    def _list(self, request):  # pylint:disable=too-many-locals,too-many-branches,too-many-statements
         cache_key_body = None
         cache_key_headers = None
         data = None

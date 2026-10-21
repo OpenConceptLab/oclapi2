@@ -706,6 +706,9 @@ CAPACITY_REDIS_RETRY_SECONDS = int(os.environ.get('CAPACITY_REDIS_RETRY_SECONDS'
 CAPACITY_REDIS_DEADLINE_SECONDS = float(os.environ.get('CAPACITY_REDIS_DEADLINE_SECONDS', 1.0))
 CAPACITY_TASK_ID = os.environ.get('CAPACITY_TASK_ID', '')
 
+# Postgres statement_timeout for a paginated list's queries, so a list that can't finish frees its worker; 0 is off
+LIST_QUERY_TIMEOUT_MS = int(os.environ.get('LIST_QUERY_TIMEOUT_MS', 30000))
+
 ANALYTICS_API = os.environ.get('ANALYTICS_API', 'http://host.docker.internal:8002')
 if ANALYTICS_API:
     MIDDLEWARE = [*MIDDLEWARE, 'core.middlewares.middlewares.AnalyticsMiddleware']
