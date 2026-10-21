@@ -6,7 +6,8 @@ import factory
 from elasticsearch_dsl.utils import AttrDict
 from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError
+from django.db import IntegrityError, connection
+from django.test.utils import CaptureQueriesContext
 from django.http import Http404, QueryDict
 from django.test import override_settings
 from pydash import omit
@@ -3115,6 +3116,25 @@ class ConceptSerializersTest(OCLTestCase):
             'includeMappings=true&targetRepoUrls=https://example.com/no-such-source/'))
         result = serializer.get_mappings(concept1)
         self.assertEqual(result, [])
+
+    def test_list_serializer_loads_page_mappings_once(self):
+        source = OrganizationSourceFactory()
+        concepts = [ConceptFactory(parent=source) for _ in range(6)]
+        for concept in concepts[:5]:
+            MappingFactory(from_concept=concept, to_concept=concepts[5], parent=source, map_type='Same As')
+            MappingFactory(from_concept=concept, to_concept=concepts[5], parent=source, map_type='Other')
+        query = 'includeMappings=true&mapTypes=Same As,Other'
+        context = self.build_context(query)
+
+        rows = [ConceptListSerializer(concept, context=context).data['mappings'] for concept in concepts]
+        with CaptureQueriesContext(connection) as small:
+            page = ConceptListSerializer(concepts[:2], many=True, context=context).data
+        with CaptureQueriesContext(connection) as large:
+            page = ConceptListSerializer(concepts, many=True, context=context).data
+
+        self.assertEqual([row['mappings'] for row in page], rows)
+        self.assertEqual(len(rows[0]), 2)
+        self.assertLess(len(large) - len(small), 4 * 4)
 
     def test_get_mappings_returns_empty_list_by_default(self):
         concept = ConceptFactory()
