@@ -57,12 +57,20 @@ SHARED_SEARCH_PARAMETERS = {
     '_id': 'Resource-id', '_lastUpdated': 'Resource-lastUpdated',
     **{name: f'conformance-{name}' for name in (
         'url', 'version', 'status', 'identifier', 'name', 'title', 'description', 'publisher')}}
+# The search parameters OCL reads otherwise than R4 defines them, and how (core.fhir.search's mapped)
+SEARCH_PARAMETER_DOCUMENTATION = {
+    ('ConceptMap', f'{side}-uri'): (
+        f'Read as `{side}-system`: OCL keeps no {side} value set on a ConceptMap, so this matches the system of a '
+        f"group's {side}, not a value set.") for side in ('source', 'target')}
 
 
 def search_parameter(resource_type, name):
-    """A search parameter as a CapabilityStatement lists it: its name, R4 definition and type."""
+    """A search parameter as a CapabilityStatement lists it: its name, R4 definition and type, and how OCL reads it
+    when that isn't as R4 defines it."""
     definition = SHARED_SEARCH_PARAMETERS.get(name, f'{resource_type}-{name}')
-    return {'name': name, 'definition': SEARCH_PARAMETER + definition, 'type': SEARCH_PARAMETER_TYPES[name]}
+    documentation = SEARCH_PARAMETER_DOCUMENTATION.get((resource_type, name))
+    return {'name': name, 'definition': SEARCH_PARAMETER + definition, 'type': SEARCH_PARAMETER_TYPES[name],
+            **({'documentation': documentation} if documentation else {})}
 
 
 def operation(name, resource_type=None):
