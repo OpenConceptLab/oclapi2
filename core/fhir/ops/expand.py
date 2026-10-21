@@ -286,23 +286,32 @@ class Expander:
     def release(self):
         """
         For a member: the release it is reported in, as {version, url (its own canonical URL)}: a live release the
-        caller is shown that holds the concept, the expansion's explicit one first, then the one it evaluated, then the
-        newest; None without one.
+        caller is shown that holds the member's row, the expansion's explicit one first, then the one it evaluated,
+        then the newest; failing that, one that holds another version of its concept, in the same order (an expansion
+        can hold a concept's versioned-object row, which only HEAD holds); None without one.
         Newest is by the source's id (a repository's releases' ids follow their creation), so the lookup of the newest
-        stops at the concept's first link it finds.
+        stops at the first link it finds. Each lookup runs only when the ones before it find nothing.
         """
         releases = viewable_rows(Source, self.namespace, self.user).filter(
             is_active=True, released=True, retired=False).exclude(version=HEAD).values('id')
-        holding = Concept.sources.through.objects.filter(concept_id=OuterRef('id'), source_id__in=releases)
+        links = Concept.sources.through.objects.filter(source_id__in=releases)
         explicit, evaluated = (
             versions.through.objects.filter(expansion_id=self.expansion.id).values('source_id')
             for versions in (Expansion.explicit_source_versions, Expansion.evaluated_source_versions))
-        pinned = holding.filter(Q(source_id__in=explicit) | Q(source_id__in=evaluated)).annotate(explicit=Case(
-            When(source_id__in=explicit, then=Value(1)), default=Value(0), output_field=IntegerField())).order_by(
-            '-explicit', '-source_id')
-        return Coalesce(*(Subquery(links.annotate(
+
+        def in_order(holding):
+            pinned = holding.filter(Q(source_id__in=explicit) | Q(source_id__in=evaluated)).annotate(explicit=Case(
+                When(source_id__in=explicit, then=Value(1)), default=Value(0), output_field=IntegerField())).order_by(
+                '-explicit', '-source_id')
+            return pinned, holding.order_by('-source_id')
+
+        return Coalesce(*(Subquery(holding.annotate(
             release=JSONObject(version='source__version', url='source__canonical_url')).values('release')[:1],
-            output_field=JSONField()) for links in (pinned, holding.order_by('-source_id'))), output_field=JSONField())
+            output_field=JSONField()) for holding in (
+                *in_order(links.filter(concept_id=OuterRef('id'))),
+                *in_order(links.filter(concept__versioned_object_id=OuterRef('versioned_object_id'),
+                                       concept__is_active=True)))),
+            output_field=JSONField())
 
     def used(self):
         """Each code system the members come from, with each version they are reported in: system|version."""
