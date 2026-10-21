@@ -12,6 +12,7 @@ from django.test.utils import CaptureQueriesContext
 from core.collections.tests.factories import ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLTestCase
+from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
 from core.fhir.tests_ops_lookup import OpsCorpusMixin, name
 from core.fhir.tests_search import collection, source
@@ -91,11 +92,29 @@ class ConceptVersionCases(OpsCorpusMixin):
         self.assertEqual(self.members(base='/orgs/Acme', user=self.admin), [('A', '3'), ('B', '3')])
 
     def test_validate_code_answers_the_release_and_finds_the_code_in_it(self):
-        self.assertEqual(self.validated(code='A'), {'result': True, 'version': '1', 'display': 'Code A in 1'})
+        """The version is the release's; the concept, and so the display, is the member's, as $expand shows it."""
+        self.assertEqual(self.validated(code='A'), {'result': True, 'version': '1', 'display': 'Code A'})
         self.assertEqual(self.validated(code='A', systemVersion='1'),
-                         {'result': True, 'version': '1', 'display': 'Code A in 1'})
+                         {'result': True, 'version': '1', 'display': 'Code A'})
         self.assertEqual(self.validated(code='B', systemVersion='2')['result'], True)
         self.assertEqual(self.validated(code='A', systemVersion='3')['result'], False)  # not shown
+
+    def test_a_coding_expand_returns_validates(self):
+        for member in self.expanded()['contains']:
+            response = self.get('$validate-code', resource='ValueSet', url=DEMO_SET, system=member['system'],
+                                code=member['code'], systemVersion=member['version'], display=member['display'])
+            self.assertEqual(response.status_code, 200, response.data)
+            answer = {item['name']: next(value for key, value in item.items() if key != 'name')
+                      for item in response.data['parameter']}
+            self.assertEqual((answer['result'], answer['version'], answer['display']),
+                             (True, member['version'], member['display']), answer)
+
+    def test_a_deleted_version_of_the_concept_is_never_the_release(self):
+        """A release whose version of the concept is deleted doesn't hold it: the next in order answers."""
+        Concept.objects.filter(versioned_object=self.roots['A'], sources=self.demo_v1).update(is_active=False)
+        self.assertEqual(self.members(), [('A', '2'), ('B', '1')])
+        self.assertEqual(self.validated(code='A', systemVersion='1')['result'], False)
+        self.assertEqual(self.validated(code='A'), {'result': True, 'version': '2', 'display': 'Code A'})
 
     def test_a_member_a_release_holds_itself_answers_as_before(self):
         """A version row stays in the release that holds it, though the expansion pins another one."""

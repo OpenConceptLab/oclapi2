@@ -309,7 +309,8 @@ class Expander:
             release=JSONObject(version='source__version', url='source__canonical_url')).values('release')[:1],
             output_field=JSONField()) for holding in (
                 *in_order(links.filter(concept_id=OuterRef('id'))),
-                *in_order(links.filter(concept__versioned_object_id=OuterRef('versioned_object_id'))))),
+                *in_order(links.filter(concept__versioned_object_id=OuterRef('versioned_object_id'),
+                                       concept__is_active=True)))),
             output_field=JSONField())
 
     def used(self):

@@ -184,9 +184,9 @@ def member(value_set, coding, namespace, user):
     a concept with the code (not deleted), of the system (in systemVersion, if named), in a code system version the
     caller is shown (not deleted), released or not, that the system names (named_by): the expansion defines the value
     set. The version answered is a release the caller is shown that holds the member's row, else one that holds
-    another version of its concept (an expansion can hold a concept's versioned-object row, which only HEAD holds):
-    the one the expansion pins (explicit), else the one it evaluated, else the newest; None without one, never HEAD
-    or an unreleased version.
+    another (not deleted) version of its concept (an expansion can hold a concept's versioned-object row, which only
+    HEAD holds): the one the expansion pins (explicit), else the one it evaluated, else the newest; None without one,
+    never HEAD or an unreleased version. The concept answered is the member itself, as $expand shows it.
     The code's concepts are read first, by their code and only in code systems the caller is shown (so what hidden ones
     hold costs nothing), then looked for in the expansion by its (expansion, concept) index, so the cost doesn't grow
     with the size of the value set.
@@ -207,7 +207,7 @@ def member(value_set, coding, namespace, user):
     rows = Concept.sources.through.objects.filter(
         Exists(viewable_rows(Source, namespace, user).filter(id=OuterRef('source_id'))), versions_named,
         concept__versioned_object_id__in=sorted({concepts[concept_id] for concept_id in concept_ids}),
-        source__is_active=True)
+        concept__is_active=True, source__is_active=True)
     if coding.version:
         rows = rows.filter(source__version=coding.version)
     def pinned(versions):
@@ -219,11 +219,15 @@ def member(value_set, coding, namespace, user):
         held=Case(When(concept_id__in=concept_ids, then=Value(1)), default=Value(0), output_field=IntegerField()),
         explicit=pinned(Expansion.explicit_source_versions), evaluated=pinned(Expansion.evaluated_source_versions),
     ).order_by('-release', '-held', '-explicit', '-evaluated', '-source__created_at', 'concept_id').values_list(
-        'concept_id', 'source__version', 'release').first()
+        'concept_id', 'concept__versioned_object_id', 'source__version', 'release').first()
     if not row:
         return None
-    concept = Concept.objects.filter(id=row[0]).select_related('parent').prefetch_related('names').first()
-    return concept, row[1] if row[2] else None
+    # the member as the expansion holds it, as $expand shows it, whichever version of its concept the release holds
+    held, versioned_object_id, version, released = row
+    member_id = held if held in concept_ids else min(
+        concept_id for concept_id in concept_ids if concepts[concept_id] == versioned_object_id)
+    concept = Concept.objects.filter(id=member_id).select_related('parent').prefetch_related('names').first()
+    return concept, version if released else None
 
 
 def value_set_version(parameters, kwargs, user, instance_id):
