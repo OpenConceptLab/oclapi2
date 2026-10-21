@@ -220,8 +220,9 @@ def member(value_set, coding, namespace, user):
             expansion__uri=value_set.expansion_uri, source_id=OuterRef('source_id')))
     row = rows.annotate(
         release=Case(When(release, then=Value(1)), default=Value(0), output_field=IntegerField()),
+        held=Case(When(concept_id__in=concept_ids, then=Value(1)), default=Value(0), output_field=IntegerField()),
         explicit=pinned(Expansion.explicit_source_versions), evaluated=pinned(Expansion.evaluated_source_versions),
-    ).order_by('-release', '-explicit', '-evaluated', '-source__created_at', 'concept_id').values_list(
+    ).order_by('-release', '-held', '-explicit', '-evaluated', '-source__created_at', 'concept_id').values_list(
         'concept_id', 'concept__versioned_object_id', 'source__version', 'release').first()
     if not row:
         return None

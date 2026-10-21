@@ -16,6 +16,8 @@ from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
 from core.fhir.tests_ops_lookup import OpsCorpusMixin, name
 from core.fhir.tests_search import collection, source
+from core.orgs.tests.factories import OrganizationFactory
+from core.sources.models import Source
 from core.url_registry.factories import GlobalURLRegistryFactory
 
 DEMO = 'http://example.org/fhir/CodeSystem/demo'
@@ -121,6 +123,17 @@ class ConceptVersionCases(OpsCorpusMixin):
         self.assertEqual(self.validated(code='C'), {'result': True, 'version': '2', 'display': 'Code C'})
         self.assertEqual(self.validated(code='C', systemVersion='1')['result'], False)  # 1 holds another version
         self.assertEqual(self.validated(code='C', systemVersion='2')['result'], True)
+
+    def test_a_member_its_release_holds_outranks_another_concepts_pinned_version(self):
+        """Two members share the canonical, code and release name: the one a release holds itself answers first."""
+        other = OrganizationFactory(mnemonic='Other')
+        source(other, 'demo', canonical_url=DEMO)
+        other_v1 = source(other, 'demo', '1', released=True, canonical_url=DEMO)
+        held = ConceptFactory(parent=Source.objects.get(organization=other, mnemonic='demo', version='HEAD'),
+                              mnemonic='A', sources=[other_v1], names=[name('Other A', preferred=True)])
+        self.stored.concepts.add(held)
+        self.assertEqual(self.validated(code='A', systemVersion='1', display='Other A'),
+                         {'result': True, 'version': '1', 'display': 'Other A'})
 
     def test_the_statement_count_is_that_of_an_expansion_of_version_rows(self):
         def statements():
