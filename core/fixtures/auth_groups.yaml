@@ -54,6 +54,12 @@
     codename: list_unpaginated
     name: Can request unpaginated (Compress) list responses
     content_type: [users, userprofile]
+- model: "auth.permission"
+  pk: 1009
+  fields:
+    codename: mapper_ai_output_locale
+    name: Can choose the Mapper AI Assistant's output language
+    content_type: [users, userprofile]
 - model: "auth.group"
   pk: 1
   fields:

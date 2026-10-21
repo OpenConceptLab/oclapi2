@@ -9,12 +9,14 @@ ENFORCE_FOR_ALL = 'all'
 ENFORCE_FOR = (ENFORCE_FOR_AWARE, ENFORCE_FOR_ALL)
 CAPACITY_AWARE_METADATA_KEY = 'capacity_aware'
 
-# A user's tier is their highest plan group, highest first.
+# Capacity tiers, highest first. Staff and superusers get the staff tier; everyone else the highest tier their groups
+# are set to (`capacity_tier` in the groups config, core.capacity.models.GroupCapacityTier), else the lowest.
 TIER_STAFF = 'staff'
 TIER_CORE = 'core'
 TIER_EARLY_ACCESS = 'early_access'
 TIER_PREVIEW = 'preview'
 TIERS = (TIER_STAFF, TIER_CORE, TIER_EARLY_ACCESS, TIER_PREVIEW)
+DEFAULT_TIER = TIERS[-1]
 
 # Lanes: each counts the heavy calls in flight in one scope.
 LANE_API_HEAVY = 'api_heavy'  # every heavy call, cluster-wide

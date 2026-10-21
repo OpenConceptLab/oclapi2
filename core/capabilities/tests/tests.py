@@ -410,6 +410,23 @@ class SeedGroupCapabilitiesTest(OCLAPITestCase):
         self.assertEqual(self.codenames('pro'), {'mapper_use', 'mapper_custom_algorithms', 'mapper_scispacy'})
         self.assertEqual(self.limits('pro'), {'mapper.projects': 20, 'mapper.match_operations': 0})
 
+    def test_seeds_and_syncs_the_capacity_tier(self):
+        from core.capacity.models import GroupCapacityTier
+        config = {'groups': {'group_a': {'capacity_tier': 'early_access'}, 'group_b': {}}}
+        self.seed(config)
+        self.assertEqual(GroupCapacityTier.objects.get(group__name='group_a').tier, 'early_access')
+        self.assertFalse(GroupCapacityTier.objects.filter(group__name='group_b').exists())
+
+        self.seed({'groups': {'group_a': {'capacity_tier': 'core'}}})
+        self.assertEqual(GroupCapacityTier.objects.get(group__name='group_a').tier, 'core')
+
+        self.seed({'groups': {'group_a': {'permissions': ['mapper_use']}}})
+        self.assertFalse(GroupCapacityTier.objects.filter(group__name='group_a').exists())
+
+    def test_rejects_an_unknown_capacity_tier(self):
+        with self.assertRaisesMessage(CommandError, 'group_a: capacity_tier must be one of'):
+            self.seed({'groups': {'group_a': {'capacity_tier': 'gold'}}})
+
     def test_reseed_syncs_permissions_and_limits(self):
         self.seed(self.CONFIG)
         self.seed({

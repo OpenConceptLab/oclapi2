@@ -1,6 +1,7 @@
 groups:
   preview:
     permissions: [mapper_use, mapper_ai_assistant]
+    capacity_tier: preview
     capabilities:
       mapper.projects: 1
       mapper.rows_per_project: 25
@@ -16,3 +17,4 @@ groups:
       clone.resources_per_call: 1000
   early_access:
     permissions: [mapper_use, mapper_ai_assistant, mapper_scispacy]
+    capacity_tier: early_access

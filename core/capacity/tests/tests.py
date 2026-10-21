@@ -28,7 +28,7 @@ from core.capacity import logs
 from core.capacity.limiter import (
     RedisLanes, CapacityGate, LeaseRenewer, get_tier, get_queue_ms, lane_key, get_task_id, build_redis_client,
     get_status)
-from core.capacity.models import CapacityConfig
+from core.capacity.models import CapacityConfig, GroupCapacityTier
 from core.capacity.threads import RedisThread
 from core.common.tests import OCLTestCase, OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.common.utils import get_event_metadata
@@ -36,10 +36,22 @@ from core.users.constants import CORE_USER_GROUP, EARLY_ACCESS_GROUP
 from core.users.tests.factories import UserProfileFactory
 
 
+# The tiers the groups config sets for these test groups (seed_group_capabilities syncs them in deployments).
+TEST_GROUP_TIERS = {CORE_USER_GROUP: 'core', EARLY_ACCESS_GROUP: 'early_access', PREVIEW_GROUP_NAME: 'preview'}
+
+
+def get_group(name, tier=None):
+    group = Group.objects.get_or_create(name=name)[0]
+    tier = tier or TEST_GROUP_TIERS.get(name)
+    if tier:
+        GroupCapacityTier.objects.update_or_create(group=group, defaults={'tier': tier})
+    return group
+
+
 def make_user(group=None, **kwargs):
     user = UserProfileFactory(**kwargs)
     if group:
-        user.groups.add(Group.objects.get_or_create(name=group)[0])
+        user.groups.add(get_group(group))
     return user
 
 
@@ -242,7 +254,21 @@ class CapacityHelpersTest(OCLTestCase):
         self.assertEqual(get_tier(make_user(PREVIEW_GROUP_NAME)), 'preview')
         self.assertEqual(get_tier(make_user()), 'preview')
         user = make_user(PREVIEW_GROUP_NAME)
-        user.groups.add(Group.objects.get(name=CORE_USER_GROUP))
+        user.groups.add(get_group(CORE_USER_GROUP))
+        self.assertEqual(get_tier(user), 'core')
+
+    def test_get_tier_comes_from_the_groups_tier_not_its_name(self):
+        get_group('group_a', tier='early_access')
+        self.assertEqual(get_tier(make_user('group_a')), 'early_access')
+        self.assertEqual(get_tier(make_user('group_without_tier')), 'preview')
+        user = make_user(CORE_USER_GROUP)
+        GroupCapacityTier.objects.filter(group__name=CORE_USER_GROUP).delete()
+        self.assertEqual(get_tier(user), 'preview')
+
+    def test_get_tier_is_the_highest_of_the_users_groups(self):
+        user = make_user('group_a')
+        user.groups.add(get_group('group_b', tier='core'))
+        user.groups.add(get_group('group_c', tier='preview'))
         self.assertEqual(get_tier(user), 'core')
 
     def test_get_queue_ms(self):
