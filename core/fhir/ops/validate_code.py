@@ -198,10 +198,8 @@ def member(value_set, coding, namespace, user):
         code_q('mnemonic', coding.code), concepts_named,
         Exists(viewable_rows(Source, namespace, user).filter(id=OuterRef('parent_id'))), is_active=True).values_list(
         'id', 'versioned_object_id'))
-    concept_ids = []
-    if concepts:
-        concept_ids = list(Expansion.concepts.through.objects.filter(
-            expansion__uri=value_set.expansion_uri, concept_id__in=concepts).values_list('concept_id', flat=True))
+    concept_ids = list(Expansion.concepts.through.objects.filter(
+        expansion__uri=value_set.expansion_uri, concept_id__in=concepts).values_list('concept_id', flat=True))
     if not concept_ids:
         return None
     release = Q(source__released=True, source__retired=False) & ~Q(source__version=HEAD)
@@ -222,13 +220,11 @@ def member(value_set, coding, namespace, user):
             expansion__uri=value_set.expansion_uri, source_id=OuterRef('source_id')))
     row = rows.annotate(
         release=Case(When(release, then=Value(1)), default=Value(0), output_field=IntegerField()),
-        held=Case(When(concept_id__in=concept_ids, then=Value(1)), default=Value(0), output_field=IntegerField()),
         explicit=pinned(Expansion.explicit_source_versions), evaluated=pinned(Expansion.evaluated_source_versions),
-    ).order_by('-release', '-held', '-explicit', '-evaluated', '-source__created_at', 'concept_id').values_list(
+    ).order_by('-release', '-explicit', '-evaluated', '-source__created_at', 'concept_id').values_list(
         'concept_id', 'concept__versioned_object_id', 'source__version', 'release').first()
     if not row:
         return None
-    # the member as the expansion holds it, as $expand shows it, whichever version of its concept the release holds
     member_id = row[0] if row[0] in concept_ids else min(
         concept_id for concept_id in concept_ids if concepts[concept_id] == row[1])
     concept = Concept.objects.filter(id=member_id).select_related('parent').prefetch_related('names').first()

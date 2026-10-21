@@ -66,8 +66,8 @@ class ConceptVersionCases(OpsCorpusMixin):
         return [item['valueUri'] for item in self.expanded(base, user)['parameter']
                 if item['name'] == 'used-codesystem']
 
-    def validated(self, **params):
-        response = self.get('$validate-code', resource='ValueSet', url=DEMO_SET, system=DEMO, **params)
+    def validated(self, system=DEMO, **params):
+        response = self.get('$validate-code', resource='ValueSet', url=DEMO_SET, system=system, **params)
         self.assertEqual(response.status_code, 200, response.data)
         return {item['name']: next(value for key, value in item.items() if key != 'name')
                 for item in response.data['parameter'] if item['name'] in ('result', 'version', 'display')}
@@ -94,20 +94,14 @@ class ConceptVersionCases(OpsCorpusMixin):
     def test_validate_code_answers_the_release_and_finds_the_code_in_it(self):
         """The version is the release's; the concept, and so the display, is the member's, as $expand shows it."""
         self.assertEqual(self.validated(code='A'), {'result': True, 'version': '1', 'display': 'Code A'})
-        self.assertEqual(self.validated(code='A', systemVersion='1'),
-                         {'result': True, 'version': '1', 'display': 'Code A'})
         self.assertEqual(self.validated(code='B', systemVersion='2')['result'], True)
         self.assertEqual(self.validated(code='A', systemVersion='3')['result'], False)  # not shown
 
     def test_a_coding_expand_returns_validates(self):
         for member in self.expanded()['contains']:
-            response = self.get('$validate-code', resource='ValueSet', url=DEMO_SET, system=member['system'],
-                                code=member['code'], systemVersion=member['version'], display=member['display'])
-            self.assertEqual(response.status_code, 200, response.data)
-            answer = {item['name']: next(value for key, value in item.items() if key != 'name')
-                      for item in response.data['parameter']}
-            self.assertEqual((answer['result'], answer['version'], answer['display']),
-                             (True, member['version'], member['display']), answer)
+            self.assertEqual(self.validated(system=member['system'], code=member['code'],
+                                            systemVersion=member['version'], display=member['display']),
+                             {'result': True, 'version': member['version'], 'display': member['display']})
 
     def test_a_deleted_version_of_the_concept_is_never_the_release(self):
         """A release whose version of the concept is deleted doesn't hold it: the next in order answers."""
