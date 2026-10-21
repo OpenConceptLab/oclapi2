@@ -204,16 +204,22 @@ def member(value_set, coding, namespace, user):
             expansion__uri=value_set.expansion_uri, concept_id__in=concepts).values_list('concept_id', flat=True))
     if not concept_ids:
         return None
-    rows = Concept.sources.through.objects.filter(
-        Exists(viewable_rows(Source, namespace, user).filter(id=OuterRef('source_id'))), versions_named,
+    release = Q(source__released=True, source__retired=False) & ~Q(source__version=HEAD)
+    links = Concept.sources.through.objects.filter(
+        Exists(viewable_rows(Source, namespace, user).filter(id=OuterRef('source_id'))), source__is_active=True)
+    # another version of a member's concept counts only while no release the caller is shown holds the member itself
+    rows = links.filter(
+        Q(concept_id__in=concept_ids) | ~Exists(links.filter(
+            release, concept_id__in=concept_ids,
+            concept__versioned_object_id=OuterRef('concept__versioned_object_id'))),
+        versions_named,
         concept__versioned_object_id__in=sorted({concepts[concept_id] for concept_id in concept_ids}),
-        concept__is_active=True, source__is_active=True)
+        concept__is_active=True)
     if coding.version:
         rows = rows.filter(source__version=coding.version)
     def pinned(versions):
         return Exists(versions.through.objects.filter(
             expansion__uri=value_set.expansion_uri, source_id=OuterRef('source_id')))
-    release = Q(source__released=True, source__retired=False) & ~Q(source__version=HEAD)
     row = rows.annotate(
         release=Case(When(release, then=Value(1)), default=Value(0), output_field=IntegerField()),
         held=Case(When(concept_id__in=concept_ids, then=Value(1)), default=Value(0), output_field=IntegerField()),

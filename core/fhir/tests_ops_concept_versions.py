@@ -125,6 +125,8 @@ class ConceptVersionCases(OpsCorpusMixin):
         self.stored.concepts.add(held)
         self.assertEqual(self.members()[-1], ('C', '2'))
         self.assertEqual(self.validated(code='C'), {'result': True, 'version': '2', 'display': 'Code C'})
+        self.assertEqual(self.validated(code='C', systemVersion='1')['result'], False)  # 1 holds another version
+        self.assertEqual(self.validated(code='C', systemVersion='2')['result'], True)
 
     def test_the_statement_count_is_that_of_an_expansion_of_version_rows(self):
         def statements():
