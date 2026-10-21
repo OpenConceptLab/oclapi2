@@ -572,8 +572,17 @@ class FhirParametersTest(SimpleTestCase):
                 content_type='application/fhir+json'))
 
     def test_a_parameter_with_more_than_one_value_is_invalid_whatever_their_order(self):
-        """R4 gives a parameter one value[x], resource or part: two are refused, never read as whichever came first."""
+        """R4 gives a parameter one value[x], resource or part: two are refused, never read as whichever came first. A
+        primitive's _value[x] is its own value[x], and another's is a second one."""
+        absent = {'extension': [{'url': 'http://hl7.org/fhir/StructureDefinition/data-absent-reason',
+                                 'valueCode': 'unknown'}]}
+        body = {'resourceType': 'Parameters', 'parameter': [
+            {'name': 'code', 'valueCode': 'c1', '_valueCode': {'id': 'c'}}, {'name': 'system', '_valueUri': absent}]}
+        params = self.read(self.factory.post(
+            '/fhir/CodeSystem/$lookup', json.dumps(body), content_type='application/fhir+json'))
+        self.assertEqual((params.get('code'), params.get('system')), ('c1', None))
         for given in ({'valueString': 'c2', 'valueCode': 'c1'}, {'valueCode': 'c1', 'valueString': 'c2'},
+                      {'valueCode': 'c1', '_valueString': absent}, {'_valueString': absent, 'valueCode': 'c1'},
                       {'valueUri': 'http://a', 'part': [{'name': 'x', 'valueCode': 'y'}]},
                       {'valueString': 'c1', 'resource': {'resourceType': 'ValueSet'}}):
             for nested in (False, True):
