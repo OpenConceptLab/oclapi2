@@ -56,6 +56,11 @@ def issues_of(response):
         for item in response.data['issue']]
 
 
+def name_matches(queries):
+    """The statements that match a filter against concept names."""
+    return [query['sql'] for query in queries if re.search(r'\."name"(::text)? ~\*', query['sql'])]
+
+
 class ExpandCases(OpsCorpusMixin):
     def expand(self, base='/fhir', user=None, **params):
         return self.get('$expand', base=base, user=user, resource='ValueSet', **params)
@@ -510,6 +515,37 @@ class ExpandCases(OpsCorpusMixin):
         self.assertTrue(value_set['expansion']['contains'][1]['inactive'])
 
     # cost
+
+    def test_a_filtered_page_matches_names_once(self):
+        """A page larger than the matching members reads the name match once, for both total and contains."""
+        with CaptureQueriesContext(connection) as context:
+            expansion = self.expansion(self.expand(url=FEVERS, filter='infect', count='1000'))
+        self.assertEqual((expansion['total'], expansion['offset'], expansion['contains']), (1, 0, [INFECTIOUS]))
+        self.assertEqual(len(name_matches(context.captured_queries)), 1)
+
+    def test_a_filtered_page_with_an_offset_matches_names_once(self):
+        """The total counts every match, and the offset selects a page in id order without matching names again."""
+        for number in range(30):
+            self.fevers_v1.expansion.concepts.add(ConceptFactory(
+                parent=self.ciel, mnemonic=f'x{number}', sources=[self.ciel_v1, self.ciel_v2],
+                names=[name(f'Extra {number}', preferred=True)]))
+        with CaptureQueriesContext(connection) as context:
+            expansion = self.expansion(self.expand(url=FEVERS, filter='extra', count='2', offset='1'))
+        self.assertEqual((expansion['total'], expansion['offset']), (30, 1))
+        self.assertEqual(expansion['contains'], [
+            {'system': CIEL, 'version': 'v2', 'code': 'x1', 'display': 'Extra 1'},
+            {'system': CIEL, 'version': 'v2', 'code': 'x2', 'display': 'Extra 2'}])
+        self.assertEqual(len(name_matches(context.captured_queries)), 1)
+
+    def test_an_empty_filtered_page_reads_no_page_or_names(self):
+        """A zero count, an offset past the matches and no matches read no page or names."""
+        resolution = 5 if self.registry else 3
+        for text, count, offset, total in (('infect', '0', '0', 1), ('infect', '2', '1', 1),
+                                            ('missing', '1000', '0', 0)):
+            with self.assertNumQueries(resolution + 3):
+                expansion = self.expansion(self.expand(url=FEVERS, filter=text, count=count, offset=offset))
+            self.assertEqual((expansion['total'], expansion['offset']), (total, int(offset)))
+            self.assertNotIn('contains', expansion)
 
     def test_a_fixed_number_of_queries(self):
         """Resolution, the stored expansion, the total, used-codesystem, one page and its names: whatever the size of
