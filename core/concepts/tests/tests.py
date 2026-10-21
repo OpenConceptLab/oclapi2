@@ -6,7 +6,8 @@ import factory
 from elasticsearch_dsl.utils import AttrDict
 from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError
+from django.db import IntegrityError, connection
+from django.test.utils import CaptureQueriesContext
 from django.http import Http404, QueryDict
 from django.test import override_settings
 from pydash import omit
@@ -34,7 +35,7 @@ from core.concepts.validators import ValidatorSpecifier
 from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
-from core.sources.tests.factories import OrganizationSourceFactory
+from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -1033,6 +1034,66 @@ class ConceptTest(OCLTestCase):
             sorted([child_concept.uri, another_child_concept.uri])
         )
         self.assertEqual(list(parent_concept_latest_version.prev_version.child_concept_urls), [child_concept.uri])
+
+    @staticmethod
+    def _parent_with_name(source):
+        return ConceptFactory(
+            parent=source, names=[ConceptNameFactory.build(locale='en', name='parent', locale_preferred=True)])
+
+    def _link_then_unlink_parent(self, user, parent, child_source):
+        child = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'child', 'parent': child_source,
+            'names': [ConceptNameFactory.build(locale='en', name='child', locale_preferred=True)],
+            'parent_concept_urls': [parent.uri]
+        }, user)
+        self.assertEqual(child.errors, {})
+        versions_before = parent.versions.count()
+        errors = Concept.create_new_version_for(
+            child.clone(),
+            {'names': [{'locale': 'en', 'name': 'child2', 'locale_preferred': True}], 'parent_concept_urls': []},
+            user
+        )
+        self.assertEqual(errors, {})
+        return versions_before
+
+    def test_removing_parent_does_not_version_parent_in_public_repo_user_cannot_edit(self):
+        parent = self._parent_with_name(OrganizationSourceFactory(public_access=ACCESS_TYPE_VIEW))
+        outsider = UserProfileFactory()
+
+        versions_before = self._link_then_unlink_parent(outsider, parent, UserSourceFactory(user=outsider))
+
+        self.assertEqual(parent.versions.count(), versions_before)
+
+    def test_removing_parent_does_not_version_parent_in_private_repo_user_cannot_edit(self):
+        private_source = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        parent = self._parent_with_name(private_source)
+        editor = UserProfileFactory()
+        editor_source = UserSourceFactory(user=editor)
+        # the editor already has the private parent linked, without access to its repo
+        child = ConceptFactory(parent=editor_source, mnemonic='child', created_by=editor)
+        child.get_latest_version().parent_concepts.add(parent)
+        versions_before = parent.versions.count()
+
+        errors = Concept.create_new_version_for(
+            child.clone(),
+            {'names': [{'locale': 'en', 'name': 'child2', 'locale_preferred': True}], 'parent_concept_urls': []},
+            editor
+        )
+
+        self.assertEqual(errors, {})
+        self.assertEqual(parent.versions.count(), versions_before)
+
+    def test_removing_parent_versions_parent_when_user_can_edit_its_repo(self):
+        org = OrganizationFactory()
+        member = UserProfileFactory()
+        org.members.add(member)
+        source = OrganizationSourceFactory(organization=org)
+        parent = self._parent_with_name(source)
+
+        versions_before = self._link_then_unlink_parent(member, parent, source)
+
+        self.assertEqual(parent.versions.count(), versions_before + 1)
+        self.assertEqual(parent.get_latest_version().created_by, member)
 
     def test_hierarchy(self):  # pylint: disable=too-many-statements
         # Av1
@@ -3055,6 +3116,28 @@ class ConceptSerializersTest(OCLTestCase):
             'includeMappings=true&targetRepoUrls=https://example.com/no-such-source/'))
         result = serializer.get_mappings(concept1)
         self.assertEqual(result, [])
+
+    def test_list_serializer_loads_page_mappings_once(self):
+        source = OrganizationSourceFactory()
+        concepts = [ConceptFactory(parent=source) for _ in range(6)]
+        for concept in concepts[:5]:
+            MappingFactory(from_concept=concept, to_concept=concepts[5], parent=source, map_type='Same As')
+            MappingFactory(from_concept=concept, to_concept=concepts[5], parent=source, map_type='Other')
+        query = 'includeMappings=true&mapTypes=Same As,Other'
+        context = self.build_context(query)
+
+        rows = [ConceptListSerializer(concept, context=context).data['mappings'] for concept in concepts]
+        with CaptureQueriesContext(connection) as small:
+            page = ConceptListSerializer(concepts[:2], many=True, context=context).data
+        with CaptureQueriesContext(connection) as large:
+            page = ConceptListSerializer(concepts, many=True, context=context).data
+
+        def by_id(mappings):
+            return sorted(mappings, key=lambda mapping: mapping['uuid'])
+
+        self.assertEqual([by_id(row['mappings']) for row in page], [by_id(row) for row in rows])
+        self.assertEqual(len(rows[0]), 2)
+        self.assertLess(len(large) - len(small), 4 * 4)
 
     def test_get_mappings_returns_empty_list_by_default(self):
         concept = ConceptFactory()

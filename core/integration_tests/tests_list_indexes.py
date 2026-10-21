@@ -7,6 +7,8 @@ from django.test import SimpleTestCase, TestCase
 MIGRATIONS = (
     'core.concepts.migrations.0090_concepts_repo_list_ids_idx',
     'core.mappings.migrations.0061_mappings_repo_list_ids_idx',
+    'core.concepts.migrations.0091_concepts_head_parent_pub_all',
+    'core.mappings.migrations.0062_mappings_head_parent_pub_all',
 )
 
 
@@ -22,6 +24,13 @@ class ListCoveringIndexTest(TestCase):
                 # the old index stays until EXPLAIN in production shows the new one in use (a later migration)
                 cursor.execute('select to_regclass(%s)', [f'{table}_repo_list_idx'])
                 self.assertIsNotNone(cursor.fetchone()[0])
+
+    def test_head_index_covers_retired_rows(self):
+        with connection.cursor() as cursor:
+            for table in ('concepts', 'mappings'):
+                cursor.execute('select indexdef from pg_indexes where indexname = %s', [f'{table}_head_parent_pub_all'])
+                definition = cursor.fetchone()[0]
+                self.assertIn('(parent_id, public_access) WHERE (is_active AND (id = versioned_object_id))', definition)
 
 
 class ListCoveringIndexMigrationTest(SimpleTestCase):

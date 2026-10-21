@@ -265,6 +265,9 @@ class SourceChildPageSerializer(ListSerializer):  # pylint: disable=abstract-met
         self.child.Meta.model.load_list_fields(
             instances, self.child.fields.keys(), get_collection_in_scope(self.context),
             get(self.context, 'request.user') or get(self.context, 'user'))
+        preload_page = getattr(self.child, 'preload_page', None)
+        if preload_page:
+            preload_page(instances)
         return super().to_representation(instances)
 
 
