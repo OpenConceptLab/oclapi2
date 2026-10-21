@@ -450,7 +450,15 @@ class FhirXmlRenderer(BaseRenderer):
 
 
 def parameter_value(parameter):
-    """A Parameters.parameter's value: its value[x], resource, or parts (as FhirParameters)."""
+    """
+    A Parameters.parameter's value: its value[x], resource, or parts (as FhirParameters). R4 allows it one of them, so
+    a parameter with more is invalid.
+    """
+    given = [key for key in parameter if key.startswith('value') or key in ('resource', 'part')]
+    if len(given) > 1:
+        raise outcomes.InvalidError(
+            f"The parameter '{parameter.get('name')}' has more than one value: {', '.join(given)}.",
+            expression=parameter.get('name'))
     for key, value in parameter.items():
         if key.startswith('value'):
             return value
