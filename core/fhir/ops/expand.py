@@ -17,9 +17,10 @@ version the request names. core.fhir.adapters.r4 writes the answer as an R4 Valu
 - Each member: its code system (the canonical URL of the release it is reported in, else its repository's, else the
   repository's OCL path as a CodeSystem), its code as FHIR spells it, its display (with
   displayLanguage, its preferred name in that language when it has one), inactive when retired, its names as
-  designations with includeDesignations, and the version: a release the caller is shown that holds the concept, the
-  one the expansion pins (explicit) first, then the one it evaluated, then the newest; none without one, never HEAD
-  or an unreleased version (as $validate-code answers).
+  designations with includeDesignations, and the version: a live release the caller is shown that holds the member's
+  row, the expansion's explicit pin first, then its evaluated pin, then the newest. A versioned-object row carries
+  the concept's newest content, so it uses the newest holding release of another, not deleted, version, whatever the
+  expansion pins. None without one, never HEAD or an unreleased version (as $validate-code answers).
 - Inputs: activeOnly leaves retired concepts out; filter keeps the concepts whose code (as FHIR spells it) or one of
   whose names has a word starting with each of the filter's words, ignoring case; offset and count page the members in
   a fixed order (count at most MAX_COUNT, which is also the default); count=0 answers the total alone. total counts
@@ -30,8 +31,10 @@ version the request names. core.fhir.adapters.r4 writes the answer as an R4 Valu
   post-coordinated), or a 400 not-supported naming it (NOT_SUPPORTED): an inline value set, a context, a date, code
   system versions and designations would each need an expansion computed for the request, and OCL serves the ones it
   stores. Names that aren't $expand inputs are ignored, as _format is.
-- Cost: a fixed number of queries whatever the size of the expansion, the page read alone; all of them within
-  SEARCH_TIMEOUT_MS together, past which the expansion is too costly (422).
+- Cost: a fixed number of queries whatever the size of the expansion; for members whose rows no release holds,
+  links of each repository's newest live release the caller is shown are read as a set, then older holding releases
+  probed per member only for those still unresolved. Full concepts and names are read for the page alone. All queries
+  within SEARCH_TIMEOUT_MS together, past which the expansion is too costly (422).
 """
 import re
 
@@ -283,57 +286,90 @@ class Expander:
                 concept_id=OuterRef('id'), name__iregex=rf'\m{word}')))
         return members
 
+    def live_releases(self):
+        """The active, non-retired releases the caller is shown, never HEAD."""
+        return viewable_rows(Source, self.namespace, self.user).filter(
+            is_active=True, released=True, retired=False).exclude(version=HEAD)
+
     def release(self):
         """
-        For a member: the release it is reported in, as {version, url (its own canonical URL)}: a live release the
-        caller is shown that holds the member's row, the expansion's explicit one first, then the one it evaluated,
-        then the newest; failing that, one that holds another version of its concept, in the same order (an expansion
-        can hold a concept's versioned-object row, which only HEAD holds); None without one.
-        Newest is by the source's id (a repository's releases' ids follow their creation), so the lookup of the newest
-        stops at the first link it finds. Each lookup runs only when the ones before it find nothing.
+        The live release the caller is shown that holds the member's row, as {version, url}: explicit pin first,
+        then evaluated, then newest by source id; None without one. The newest lookup runs only when no pin holds it.
         """
-        releases = viewable_rows(Source, self.namespace, self.user).filter(
-            is_active=True, released=True, retired=False).exclude(version=HEAD).values('id')
-        links = Concept.sources.through.objects.filter(source_id__in=releases)
+        links = Concept.sources.through.objects.filter(
+            source_id__in=self.live_releases().values('id'), concept_id=OuterRef('id'))
         explicit, evaluated = (
             versions.through.objects.filter(expansion_id=self.expansion.id).values('source_id')
             for versions in (Expansion.explicit_source_versions, Expansion.evaluated_source_versions))
-
-        def in_order(holding):
-            pinned = holding.filter(Q(source_id__in=explicit) | Q(source_id__in=evaluated)).annotate(explicit=Case(
-                When(source_id__in=explicit, then=Value(1)), default=Value(0), output_field=IntegerField())).order_by(
-                '-explicit', '-source_id')
-            return pinned, holding.order_by('-source_id')
-
+        pinned = links.filter(Q(source_id__in=explicit) | Q(source_id__in=evaluated)).annotate(explicit=Case(
+            When(source_id__in=explicit, then=Value(1)), default=Value(0), output_field=IntegerField())).order_by(
+            '-explicit', '-source_id')
         return Coalesce(*(Subquery(holding.annotate(
             release=JSONObject(version='source__version', url='source__canonical_url')).values('release')[:1],
-            output_field=JSONField()) for holding in (
-                *in_order(links.filter(concept_id=OuterRef('id'))),
-                *in_order(links.filter(concept__versioned_object_id=OuterRef('versioned_object_id'),
-                                       concept__is_active=True)))),
+            output_field=JSONField()) for holding in (pinned, links.order_by('-source_id'))),
             output_field=JSONField())
 
+    def releases(self, members, rows):
+        """
+        {member id: release} from (id, versioned-object id, parent id, direct release) rows of `members`.
+        Members held by releases keep their direct release. A versioned-object member carries its concept's newest
+        content, so it uses the newest live release the caller is shown that holds an active version, ignoring pins.
+        Only a repository's own releases hold its concepts' versions, so a match in its newest visible live release
+        is also the newest holding release. Those links are read as a set; any still unresolved use a correlated
+        newest lookup, restricted to their member ids. Every member remains a key, with None if no release holds it.
+        """
+        rows = list(rows)
+        found = {member: release for member, _, _, release in rows}
+        missing = {member: (root, parent) for member, root, parent, release in rows if release is None}
+        if not missing:
+            return found
+        newest = self.live_releases().filter(mnemonic=OuterRef('mnemonic')).filter(
+            Q(organization_id=OuterRef('organization_id')) | Q(user_id=OuterRef('user_id'))).order_by('-id')
+        heads = Source.objects.filter(id__in={parent for _, parent in missing.values()}).annotate(
+            newest=Subquery(newest.values('id')[:1])).values('newest')
+        held = dict(Concept.sources.through.objects.filter(
+            source_id__in=heads, concept__is_active=True,
+            concept__versioned_object_id__in=members.order_by().values('versioned_object_id')).annotate(
+            release=JSONObject(version='source__version', url='source__canonical_url')).values_list(
+            'concept__versioned_object_id', 'release'))
+        for member, (root, _) in list(missing.items()):
+            if root in held:
+                found[member] = held[root]
+                del missing[member]
+        if missing:
+            holding = Concept.sources.through.objects.filter(
+                source_id__in=self.live_releases().values('id'), concept__is_active=True,
+                concept__versioned_object_id=OuterRef('versioned_object_id')).order_by('-source_id')
+            found.update(Concept.objects.filter(id__in=list(missing)).annotate(release=Subquery(holding.annotate(
+                release=JSONObject(version='source__version', url='source__canonical_url')).values('release')[:1],
+                output_field=JSONField())).values_list('id', 'release'))
+        return found
+
     def used(self):
-        """Each code system the members come from, with each version they are reported in: system|version."""
-        rows = self.members().annotate(release=self.release()).values_list(
-            'parent__canonical_url', 'parent__uri', 'release').order_by().distinct()
-        used = {code_system(url, uri, release) for url, uri, release in rows}
+        """Each code system and release of all members, including those held only in other versions: system|version."""
+        members = self.members()
+        rows = list(members.annotate(release=self.release()).values_list(
+            'id', 'versioned_object_id', 'parent_id', 'release', 'parent__canonical_url', 'parent__uri').order_by())
+        releases = self.releases(members, (row[:4] for row in rows))
+        used = {code_system(url, uri, releases[member]) for member, _, _, _, url, uri in rows}
         return sorted(f'{system}|{version}' if version else system for system, version in used)
 
     def page(self, matching):
         """
         The page offset and count name, in a fixed order, with what each member is shown with. The page is chosen
-        first, so what it is shown with is read for its members alone, however deep the offset.
+        first, so releases, concepts and names are read for its members alone, however deep the offset.
         """
         offset = self.inputs.offset or 0
-        page = matching.order_by('id').values('id')[offset:offset + self.inputs.count]
-        concepts = Concept.objects.filter(id__in=page).annotate(release=self.release()).select_related('parent').only(
-            'id', 'mnemonic', 'retired', 'parent_id', 'parent__canonical_url', 'parent__uri',
+        page = Concept.objects.filter(id__in=matching.order_by('id').values('id')[offset:offset + self.inputs.count])
+        concepts = page.annotate(release=self.release()).select_related('parent').only(
+            'id', 'mnemonic', 'retired', 'parent_id', 'versioned_object_id', 'parent__canonical_url', 'parent__uri',
             'parent__default_locale', 'parent__supported_locales').prefetch_related('names').order_by('id')
+        releases = self.releases(page, (
+            (concept.id, concept.versioned_object_id, concept.parent_id, concept.release) for concept in concepts))
         members = []
         for concept in concepts:
             parent = concept.parent
-            system, version = code_system(parent.canonical_url, parent.uri, concept.release)
+            system, version = code_system(parent.canonical_url, parent.uri, releases[concept.id])
             members.append({
                 'system': system, 'version': version, 'code': fhir_code(concept.mnemonic),
                 'display': display_of(concept, self.inputs.language), 'inactive': concept.retired or None,

@@ -14,11 +14,12 @@ valid, with what OCL knows about it. core.fhir.adapters.r4 writes the answer as 
   required (400), and a url.
 - ValueSet: membership is the resolved version's default expansion: the code, from a concept whose code system is
   `system` (and `systemVersion`), in a code system version the caller is shown, released or not. The version
-  answered is a release the caller is shown that holds the concept: the expansion's explicit version, else the one
-  it evaluated, else the newest; none without one (never HEAD or an unreleased version). Not a member: result false
-  (not-in-vs), with what the code system itself says of the code (unknown system, unknown code, or its display). A
-  value set that doesn't resolve is a 422 not-found OperationOutcome. Without url (and not at the instance level),
-  the code is checked in its code system alone, as OCL has always answered.
+  answered is a live release the caller is shown that holds the member's row: the expansion's explicit pin, then
+  its evaluated pin, then the newest. A versioned-object row carries the concept's newest content, so it uses the
+  newest holding release of another, not deleted, version, whatever the expansion pins; none without one (never HEAD
+  or an unreleased version). Not a member: result false (not-in-vs), with what the code system itself says of the code
+  (unknown system, unknown code, or its display). A value set that doesn't resolve is a 422 not-found OperationOutcome.
+  Without url (and not at the instance level), the code is checked in its code system alone, as OCL has always answered.
 - Issues carry FHIRsmith's message ids (operationoutcome-message-id) and expressions, so clients and the parity
   suite compare them by kind; `message` joins their texts.
 - Cost: a fixed number of queries whatever the size of the code system or value set.
@@ -183,10 +184,11 @@ def member(value_set, coding, namespace, user):
     (the concept, the version of its code system) of the code in the value set version's default expansion, or None:
     a concept with the code (not deleted), of the system (in systemVersion, if named), in a code system version the
     caller is shown (not deleted), released or not, that the system names (named_by): the expansion defines the value
-    set. The version answered is a release the caller is shown that holds the member's row, else one that holds
-    another (not deleted) version of its concept (an expansion can hold a concept's versioned-object row, which only
-    HEAD holds): the one the expansion pins (explicit), else the one it evaluated, else the newest; None without one,
-    never HEAD or an unreleased version. The concept answered is the member itself, as $expand shows it.
+    set. The version answered is a live release the caller is shown that holds the member's row: the expansion's
+    explicit pin, then its evaluated pin, then the newest. A versioned-object row, held only by HEAD, carries the
+    concept's newest content, so it uses the newest holding release of another, not deleted, version, ignoring pins.
+    None without one, never HEAD or an unreleased version. The concept answered is the member itself, as $expand
+    shows it.
     The code's concepts are read first, by their code and only in code systems the caller is shown (so what hidden ones
     hold costs nothing), then looked for in the expansion by its (expansion, concept) index, so the cost doesn't grow
     with the size of the value set.
@@ -216,8 +218,10 @@ def member(value_set, coding, namespace, user):
     if coding.version:
         rows = rows.filter(source__version=coding.version)
     def pinned(versions):
-        return Exists(versions.through.objects.filter(
-            expansion__uri=value_set.expansion_uri, source_id=OuterRef('source_id')))
+        """Whether the link holds the member's row itself and the expansion pins its source."""
+        return Case(When(Q(concept_id__in=concept_ids) & Exists(versions.through.objects.filter(
+            expansion__uri=value_set.expansion_uri, source_id=OuterRef('source_id'))), then=Value(1)),
+            default=Value(0), output_field=IntegerField())
     row = rows.annotate(
         release=Case(When(release, then=Value(1)), default=Value(0), output_field=IntegerField()),
         held=Case(When(concept_id__in=concept_ids, then=Value(1)), default=Value(0), output_field=IntegerField()),
