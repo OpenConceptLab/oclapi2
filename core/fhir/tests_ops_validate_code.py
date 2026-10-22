@@ -23,6 +23,8 @@ from core.url_registry.factories import GlobalURLRegistryFactory
 DRAFT_ONLY = 'http://example.org/fhir/CodeSystem/head-only'
 GONE = 'http://example.org/fhir/CodeSystem/gone'
 DRAFT_UNRELEASED = 'http://example.org/fhir/CodeSystem/unreleased'
+RENAMED = 'http://example.org/fhir/CodeSystem/renamed'
+RENAMED_OLD = 'http://example.org/fhir/CodeSystem/renamed-old'
 
 
 def issues_of(parameters):
@@ -319,6 +321,26 @@ class ValidateCodeCases(OpsCorpusMixin):
             GlobalURLRegistryFactory(url='https://example.org/pinned', namespace=self.acme.uri)
         self.assertEqual(self.answer(self.validate_in(
             url='https://example.org/pinned', system=CIEL, code='117053'))['version'], 'v1')
+
+    def test_a_member_is_validated_by_the_system_expand_reports_it_in(self):
+        """
+        A release with a canonical URL of its own names its members, else its repository's does: ValueSet $validate-code
+        accepts the system $expand reports a member in, with that release's version (WP7 Codex F1.3; a read names the
+        release the same way).
+        """
+        renamed = source(self.acme, 'renamed', canonical_url=RENAMED)
+        old = source(self.acme, 'renamed', 'v1', released=True, canonical_url=RENAMED_OLD)
+        plain = source(self.acme, 'renamed', 'v2', released=True, canonical_url=None)
+        self.fevers_v1.expansion.concepts.add(*(
+            ConceptFactory(parent=renamed, mnemonic=code, sources=[version],
+                           names=[name(f'Renamed {code}', preferred=True)])
+            for code, version in (('R1', old), ('R2', plain))))
+        expanded = self.get('$expand', resource='ValueSet', url=FEVERS, filter='renamed').data['expansion']['contains']
+        self.assertEqual([(member['code'], member['system'], member['version']) for member in expanded],
+                         [('R1', RENAMED_OLD, 'v1'), ('R2', RENAMED, 'v2')])
+        for code, system, version in (('R1', RENAMED_OLD, 'v1'), ('R2', RENAMED, 'v2')):
+            answer = self.answer(self.validate_in(url=FEVERS, system=system, code=code))
+            self.assertEqual((answer['result'], answer['system'], answer.get('version')), (True, system, version), code)
 
     def test_a_member_from_a_code_system_with_no_release(self):
         """A released value set's expansion defines its members, whatever the release state of their code systems;
