@@ -462,7 +462,7 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            [c['version_url'] for c in response.data['concepts']],
+            [c['url'] for c in response.data['concepts']],
             [c.uri for c in sorted([concept1, concept2], key=lambda c: c.id, reverse=True)])
 
     def test_get_200_with_resources(self):
