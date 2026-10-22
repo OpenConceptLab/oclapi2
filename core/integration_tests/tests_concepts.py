@@ -4631,6 +4631,8 @@ class RerankConceptsListViewTest(CapacityRedisMockMixin, OCLAPITestCase):
 
 
 class ConceptListIncludeMappingsTest(OCLAPITestCase):
+    maxDiff = None
+
     def setUp(self):
         super().setUp()
         self.source = OrganizationSourceFactory()
