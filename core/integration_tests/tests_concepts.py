@@ -1,4 +1,6 @@
+import json
 import uuid
+import zipfile
 from unittest.mock import patch
 
 import factory
@@ -3279,10 +3281,15 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertIn('limit=1000', response['next'])
         self.assertEqual(self.follow_pages(self.source.concepts_url + '?limit=1000'), (['MyConcept1', 'MyConcept2'], 2))
 
+        # without a limit too, the default page is under the max
+        self.assertEqual(self.follow_pages(self.source.concepts_url), (['MyConcept1', 'MyConcept2'], 2))
+        response = self.client.get('/concepts/', HTTP_AUTHORIZATION='Token ' + self.random_user.get_token())
+        self.assertEqual(len(response.data), 1)
+
         # search (ES) and the global list are capped the same way
         response = self.client.get(self.source.concepts_url + '?q=MyConcept&limit=1000')
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response['num_returned'], '1')
+        self.assertLessEqual(len(response.data), 1)
+        self.assertEqual(response['pages'], response['num_found'])  # pages of one row
         response = self.client.get('/concepts/?limit=1000', HTTP_AUTHORIZATION='Token ' + self.random_user.get_token())
         self.assertEqual(len(response.data), 1)
 
@@ -3322,9 +3329,14 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual(response.data['limit'], 1)
         self.assertEqual(response.data['requested'], 2)
 
-        response = self.client.get(
-            self.source.concepts_url, HTTP_COMPRESS='true', HTTP_AUTHORIZATION='Token ' + self.token)
-        self.assertEqual(response.status_code, 200)
+        # someone allowed any size gets the whole list, not one capped page of it
+        self.source_v1.concepts.add(self.concept1.get_latest_version())
+        for url in (self.source.concepts_url + '?q=MyConcept&limit=1000', self.source.uri + 'v1/concepts/?limit=1000'):
+            response = self.client.get(url, HTTP_COMPRESS='true', HTTP_AUTHORIZATION='Token ' + self.token)
+            self.assertEqual(response.status_code, 200, url)
+            content = json.loads(
+                zipfile.ZipFile(response.rendered_content.filelike).read('export.json').decode('utf-8'))
+            self.assertEqual(sorted(concept['id'] for concept in content), ['MyConcept1', 'MyConcept2'], url)
 
 
 @override_settings(CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}})

@@ -29,7 +29,6 @@ from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion, CanEditConceptDictionary
-from core.users.constants import LIST_UNPAGINATED_PERMISSION
 from .checksums import ChecksumModel
 from .exceptions import Http403, UnpaginatedListLimitReached
 from .utils import write_csv_to_s3, get_query_params_from_url_string, compact_dict_by_values, \
@@ -343,8 +342,7 @@ class ListWithHeadersMixin(ListModelMixin):
         """
         if self.request.META.get(HTTP_COMPRESS_HEADER, False) not in TRUTHY:
             return False
-        user = self.request.user
-        if user.is_staff or user.has_perm(LIST_UNPAGINATED_PERMISSION):
+        if self.can_list_unpaginated():
             return True
         total = self.total_count or (
             self.object_list.count() if isinstance(self.object_list, QuerySet) else len(self.object_list))
