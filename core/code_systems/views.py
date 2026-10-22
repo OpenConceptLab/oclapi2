@@ -11,6 +11,8 @@ from core.common.fhir_helpers import translate_fhir_query
 from core.common.serializers import IdentifierSerializer
 from core.concepts.permissions import CanViewParentDictionaryAsGuest
 from core.concepts.views import ConceptRetrieveUpdateDestroyView
+from core.fhir.base import FhirViewMixin
+from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
 from core.parameters.serializers import ParametersSerializer
 from core.sources.models import Source
 from core.sources.views import SourceListView, SourceRetrieveUpdateDestroyView
@@ -28,7 +30,7 @@ def get_viewable_repo(repos, user):
     return None
 
 
-class CodeSystemListView(SourceListView):
+class CodeSystemListView(FhirViewMixin, SourceListView):
     serializer_class = CodeSystemDetailSerializer
 
     @staticmethod
@@ -74,37 +76,14 @@ class CodeSystemLookupNotFoundError(ValidationError):
                     {
                         "severity": "error",
                         "code": "not-found",
-                        "details": {"text": message},
+                        "details": {"coding": [{"system": TX_ISSUE_TYPE_SYSTEM, "code": "not-found"}], "text": message},
                     }
                 ],
             }
         )
 
 
-class FhirParameterRequiredError(ValidationError):
-    """A 400 OperationOutcome for an operation input that is required, naming it in `expression`."""
-    def __init__(self, message: str, expression: str):
-        super().__init__(
-            detail={
-                "resourceType": "OperationOutcome",
-                "id": "exception",
-                "text": {
-                    "status": "additional",
-                    "div": f'<div xmlns="http://www.w3.org/1999/xhtml">{message}</div>',
-                },
-                "issue": [
-                    {
-                        "severity": "error",
-                        "code": "invalid",
-                        "details": {"text": message},
-                        "expression": [expression],
-                    }
-                ],
-            }
-        )
-
-
-class CodeSystemListLookupView(ConceptRetrieveUpdateDestroyView):
+class CodeSystemListLookupView(FhirViewMixin, ConceptRetrieveUpdateDestroyView):
     serializer_class = ParametersSerializer
 
     def is_container_version_specified(self):
@@ -151,7 +130,7 @@ class CodeSystemListLookupView(ConceptRetrieveUpdateDestroyView):
         return None
 
 
-class CodeSystemValidateCodeView(ConceptRetrieveUpdateDestroyView):
+class CodeSystemValidateCodeView(FhirViewMixin, ConceptRetrieveUpdateDestroyView):
     serializer_class = ValidateCodeParametersSerializer
 
     def verify_scope(self):
@@ -253,7 +232,7 @@ class CodeSystemValidateCodeView(ConceptRetrieveUpdateDestroyView):
         }
 
 
-class CodeSystemRetrieveUpdateView(SourceRetrieveUpdateDestroyView):
+class CodeSystemRetrieveUpdateView(FhirViewMixin, SourceRetrieveUpdateDestroyView):
     serializer_class = CodeSystemDetailSerializer
 
     def get_filter_params(self, default_version_to_head=True):

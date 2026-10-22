@@ -14,6 +14,7 @@ from core.common.serializers import IdentifierSerializer
 from core.concept_maps.constants import RESOURCE_TYPE
 from core.concept_maps.serializers import ConceptMapDetailSerializer, ConceptMapParametersSerializer
 from core.concepts.permissions import CanAccessParentDictionary
+from core.fhir.base import FhirViewMixin
 from core.mappings.constants import SAME_AS
 from core.mappings.views import MappingListView
 from core.sources.views import SourceListView, SourceRetrieveUpdateDestroyView
@@ -21,7 +22,7 @@ from core.sources.views import SourceListView, SourceRetrieveUpdateDestroyView
 logger = logging.getLogger('oclapi')
 
 
-class ConceptMapListView(SourceListView):
+class ConceptMapListView(FhirViewMixin, SourceListView):
     serializer_class = ConceptMapDetailSerializer
 
     @staticmethod
@@ -51,7 +52,7 @@ class ConceptMapListView(SourceListView):
         return self.serializer_class(obj)
 
 
-class ConceptMapRetrieveUpdateView(SourceRetrieveUpdateDestroyView):
+class ConceptMapRetrieveUpdateView(FhirViewMixin, SourceRetrieveUpdateDestroyView):
     serializer_class = ConceptMapDetailSerializer
 
     def get_filter_params(self, default_version_to_head=True):
@@ -73,7 +74,7 @@ class ConceptMapRetrieveUpdateView(SourceRetrieveUpdateDestroyView):
         return ConceptMapDetailSerializer(obj)
 
 
-class ConceptMapTranslateView(MappingListView):
+class ConceptMapTranslateView(FhirViewMixin, MappingListView):
     serializer_class = ConceptMapParametersSerializer
 
     def get_permissions(self):
