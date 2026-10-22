@@ -167,8 +167,11 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         super().save(*args, force_insert=force_insert, force_update=force_update, using=using,
                      update_fields=update_fields)
 
-        if self.id and 'canonical_url' in dirty_fields and self.active_url_registry_entries.exists():
-            resolve_url_registry_entries.apply_async((self.id, self.resource_type), queue='default', permanent=False)
+        if self.id and 'canonical_url' in dirty_fields:
+            if self.active_url_registry_entries.exists():
+                resolve_url_registry_entries.apply_async(
+                    (self.id, self.resource_type), queue='default', permanent=False)
+            self.link_url_registry_entries()
 
     def post_create_actions(self):
         if self.should_auto_expand:
