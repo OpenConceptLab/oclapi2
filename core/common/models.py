@@ -1539,8 +1539,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         return instance, resolved_registry_entry
 
     @classmethod
-    def resolve_reference_expression(  # pylint: disable=too-many-arguments
-            cls, url, namespace=None, version=None, repo_type=None, allow_head=True):
+    def resolve_reference_expression(  # pylint: disable=too-many-arguments,too-many-locals
+            cls, url, namespace=None, version=None, repo_type=None, allow_head=True, heads=None, head_shown=None):
         """
         resolves to repository version according to this process:
 
@@ -1574,6 +1574,10 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
           active. Unresolved is an unsaved repo_type.
         - allow_head=False: with no version named, the latest released version other than HEAD (even a HEAD flagged
           released) or nothing. A version named HEAD is still served.
+        - heads (a Q on HEAD rows, with repo_type): without the registry, a canonical URL matches only the HEADs it
+          holds, so a repository the caller isn't shown never stands in for one they are (FHIR's global base).
+        - head_shown (a callable, with repo_type): a HEAD it refuses resolves to nothing before any version of it is
+          read, so a repository the caller isn't shown costs what one that doesn't exist does (FHIR).
         """
 
         resolution_url, version, is_canonical = cls.__get_resolution_url(url, version)
@@ -1599,11 +1603,13 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                         instance = registry_entry.find_repo(repo_type)
 
                 return cls.resolve_repo(
-                    instance, version, is_canonical, resolution_url, repo_type, allow_head), registry_entry
+                    instance, version, is_canonical, resolution_url, repo_type, allow_head, head_shown), registry_entry
 
             criteria &= models.Q(canonical_url=resolution_url)
             if repo_type:
                 criteria &= models.Q(version=HEAD)
+                if heads is not None:
+                    criteria &= heads
             if namespace:
                 criteria &= models.Q(models.Q(user__uri=namespace) | models.Q(organization__uri=namespace))
         else:
@@ -1611,15 +1617,17 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         from core.repos.models import Repository
         return cls.resolve_repo(
-            Repository.get(criteria, repo_type), version, is_canonical, resolution_url, repo_type, allow_head
-        ), registry_entry
+            Repository.get(criteria, repo_type), version, is_canonical, resolution_url, repo_type, allow_head,
+            head_shown), registry_entry
 
     @classmethod
     def resolve_repo(  # pylint: disable=too-many-arguments
-            cls, instance, version, is_canonical, resolution_url, repo_type=None, allow_head=True):
+            cls, instance, version, is_canonical, resolution_url, repo_type=None, allow_head=True, head_shown=None):
         if instance:
             head = instance if repo_type and instance.is_head else None
-            if version:
+            if head and head_shown and not head_shown(head):
+                instance = None
+            elif version:
                 versions = instance.active_versions if repo_type else instance.versions
                 instance = versions.filter(version=decode_string(version)).first()
             elif instance.is_head:

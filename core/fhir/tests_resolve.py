@@ -246,11 +246,11 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
         else:
             self.assertUnresolved('CodeSystem', CIEL, kwargs={'org': 'sehatapp'})
 
-    def test_a_private_repository_that_resolves_hides_a_public_one(self):
+    def test_a_private_copy_of_a_canonical_and_a_public_one(self):
         """
-        Access is checked after resolving, and nothing else is tried: when the private copy of a shared canonical
-        resolves (the lower id without the registry, the global entry's namespace with it), the public copy is not
-        found at the global base, while each owner base still finds its own.
+        Without the registry, the global base matches a canonical only among the repositories it shows, so the private
+        copy of a shared canonical (the lower id) never hides the public one. A registry entry is the curated answer:
+        when it names the private copy's namespace, nothing else is tried. Each owner base still finds its own.
         """
         shared = 'http://example.org/shared-codes'
         private = source(self.fixtures, 'shared', canonical_url=shared, public_access=ACCESS_TYPE_NONE)
@@ -263,7 +263,11 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
             GlobalURLRegistryFactory(url=shared, namespace=self.fixtures.uri)
 
         for user in (ANONYMOUS, self.member, self.admin):
-            self.assertUnresolved('CodeSystem', shared, user=user)
+            if self.registry:
+                self.assertUnresolved('CodeSystem', shared, user=user)
+            else:
+                self.assertEqual(self.resolve('CodeSystem', shared, user=user).id, public_v1.id)
+                self.assertEqual(self.resolve('CodeSystem', shared, 'v1', user=user).id, public_v1.id)
         self.assertEqual(
             self.resolve('CodeSystem', shared, kwargs={'org': 'FHIR-Fixtures'}, user=self.member).id, private_v1.id)
         self.assertUnresolved('CodeSystem', shared, kwargs={'org': 'FHIR-Fixtures'}, user=self.outsider)
@@ -292,6 +296,38 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
             for reference in (url, f'{url}|v1', '/orgs/MOH/CodeSystem/hiv/'):
                 self.assertEqual(self.resolve('CodeSystem', reference, kwargs={'org': 'MOH'}, user=user).id, release.id)
 
+    def test_the_default_version_is_the_newest_release_the_caller_is_shown(self):
+        """
+        A newest release that is private doesn't hide an older public one at the global base, or from those who may
+        not view the owner's private repositories at its base; those who may get the newest. A named one is as named.
+        """
+        url = 'http://example.org/newest-private'
+        source(self.hl7, 'newest', canonical_url=url)
+        public_v1 = source(self.hl7, 'newest', 'v1', released=True, canonical_url=url)
+        private_v2 = source(self.hl7, 'newest', 'v2', released=True, canonical_url=url, public_access=ACCESS_TYPE_NONE)
+        if self.registry:
+            GlobalURLRegistryFactory(url=url, namespace=self.hl7.uri)
+        for kwargs, user in ((None, ANONYMOUS), (None, self.admin), ({'org': 'HL7'}, self.outsider)):
+            self.assertEqual(self.resolve('CodeSystem', url, kwargs=kwargs, user=user).id, public_v1.id)
+            self.assertUnresolved('CodeSystem', url, 'v2', kwargs, user)
+        self.assertEqual(self.resolve('CodeSystem', url, kwargs={'org': 'HL7'}, user=self.admin).id, private_v2.id)
+
+    def test_a_version_in_an_ocl_path_is_a_version_named(self):
+        """
+        /orgs/{org}/sources/{id}/{version}/ names that version, so a private one answers as a missing one: it never
+        falls back to the newest public release, as a request naming no version does (Codex F1.1).
+        """
+        source(self.hl7, 'newest')
+        public_v1 = source(self.hl7, 'newest', 'v1', released=True)
+        private_v2 = source(self.hl7, 'newest', 'v2', released=True, public_access=ACCESS_TYPE_NONE)
+        for path in ('/orgs/HL7/sources/newest/v2/', '/orgs/HL7/CodeSystem/newest/v2/',
+                     '/orgs/HL7/sources/newest/v2/concepts/c1/'):
+            error = self.assertUnresolved('CodeSystem', path)
+            self.assertEqual(error.version, 'v2')
+            self.assertEqual(self.resolve('CodeSystem', path, kwargs={'org': 'HL7'}, user=self.admin).id, private_v2.id)
+        self.assertEqual(self.resolve('CodeSystem', '/orgs/HL7/CodeSystem/newest/v1/').id, public_v1.id)
+        self.assertEqual(self.resolve('CodeSystem', '/orgs/HL7/CodeSystem/newest/').id, public_v1.id)
+
     def test_query_counts(self):
         """
         A hot path: these counts may only fall. Without the registry: the toggle, the repository and its latest
@@ -304,7 +340,9 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
                 (3 + extra, ('CodeSystem', ICD10)),
                 (3 + extra, ('CodeSystem', ICD10, 'ICD102019')),
                 (4 + extra, ('ValueSet', PBD, None, {'org': 'padam'})),
-                (6 + extra, ('CodeSystem', FIXTURE, None, {'org': 'FHIR-Fixtures'}, self.member)),
+                # the caller's right to the owner's private repositories is checked once, on HEAD; the registry finds
+                # HEAD through its owner, so its organization is already known
+                (6 + extra - bool(self.registry), ('CodeSystem', FIXTURE, None, {'org': 'FHIR-Fixtures'}, self.member)),
         ):
             with self.subTest(args=args), self.assertNumQueries(count):
                 self.resolve(*args)
