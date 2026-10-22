@@ -14,7 +14,7 @@ from core.common.serializers import ReadSerializerMixin, StatusField, Identifier
 from core.concepts.models import Concept, ConceptName
 from core.concepts.serializers import ConceptDetailSerializer
 from core.fhir import search as fhir_search
-from core.fhir.search import CanonicalUrlField, FhirRepositorySerializerMixin
+from core.fhir.search import CanonicalUrlField, FhirRepositorySerializerMixin, TitleField
 from core.parameters.serializers import ParametersSerializer
 from core.sources.models import Source
 from core.sources.serializers import SourceCreateOrUpdateSerializer
@@ -181,7 +181,7 @@ class CodeSystemDetailSerializer(FhirRepositorySerializerMixin, serializers.Mode
     resourceType = SerializerMethodField(method_name='get_resource_type')
     id = CharField(source='mnemonic')
     url = CanonicalUrlField(source='canonical_url', required=False)
-    title = CharField(source='full_name', required=False)
+    title = TitleField(source='full_name', required=False)
     status = StatusField(source='*')
     language = CharField(source='default_locale', required=False)
     count = SerializerMethodField(method_name='get_total_count')
