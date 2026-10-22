@@ -85,10 +85,12 @@ class ExpandCases(OpsCorpusMixin):
         draft.expansion_uri = expansion.uri
         draft.save()
 
-        response = self.expand(url='/orgs/Acme/ValueSet/fevers/', valueSetVersion='v2')
+        for params in ({'url': '/orgs/Acme/ValueSet/fevers/', 'valueSetVersion': 'v2'},
+                       {'url': '/orgs/Acme/ValueSet/fevers/v2/'}):
+            response = self.expand(**params)
 
-        self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual((response.data['url'], response.data['version']), (FEVERS, 'v2'))
+            self.assertEqual(response.status_code, 200, response.data)
+            self.assertEqual((response.data['url'], response.data['version']), (FEVERS, 'v2'))
 
     def test_a_type_level_get_answers_the_value_set_with_its_stored_expansion(self):
         response = self.expand(url=FEVERS)

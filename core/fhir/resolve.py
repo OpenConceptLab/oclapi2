@@ -267,13 +267,16 @@ def is_public(public_access):
 def repository_access(instance):
     """
     The public_access of a version's repository, its active HEAD's, or None without one. A read (with_repository_access)
-    and the resolver (resolve_repo) set it on the version they find, so it isn't looked up again.
+    and the resolver (resolve_repo) set it on the version they find, so it isn't looked up again; with the canonical
+    URL of its repository, which the HEAD looked up here gives the version too (one an OCL path names itself).
     """
     if instance.is_head:
         return instance.public_access if instance.is_active else None
     if hasattr(instance, 'repository_public_access'):
         return instance.repository_public_access
     head = instance.head
+    if head and not hasattr(instance, 'repository_canonical_url'):
+        instance.repository_canonical_url = head.canonical_url
     return head.public_access if head else None
 
 

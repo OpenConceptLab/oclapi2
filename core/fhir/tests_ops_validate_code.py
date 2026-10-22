@@ -547,11 +547,13 @@ class ValidateCodeCases(OpsCorpusMixin):
         ConceptFactory(parent=self.ciel, mnemonic='D1', sources=[draft],
                        names=[name('In v3 only', preferred=True)])
 
-        answer = self.answer(self.post('$validate-code', [
-            {'name': 'url', 'valueUri': '/orgs/CIEL/CodeSystem/CIEL/'}, {'name': 'version', 'valueString': 'v3'},
-            {'name': 'coding', 'valueCoding': {'system': CIEL, 'code': 'D1'}}]))
+        coding = {'name': 'coding', 'valueCoding': {'system': CIEL, 'code': 'D1'}}
+        for parameters in ([{'name': 'url', 'valueUri': '/orgs/CIEL/CodeSystem/CIEL/'},
+                            {'name': 'version', 'valueString': 'v3'}, coding],
+                           [{'name': 'url', 'valueUri': '/orgs/CIEL/CodeSystem/CIEL/v3/'}, coding]):
+            answer = self.answer(self.post('$validate-code', parameters))
 
-        self.assertEqual((answer['result'], answer['system'], answer['version']), (True, CIEL, 'v3'))
+            self.assertEqual((answer['result'], answer['system'], answer['version']), (True, CIEL, 'v3'))
 
     def test_a_released_owner_value_set_instance_version_uses_six_queries(self):
         with self.assertNumQueries(6):

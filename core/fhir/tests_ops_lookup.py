@@ -492,11 +492,13 @@ class LookupCases(OpsCorpusMixin):
         ConceptFactory(parent=self.ciel, mnemonic='D1', sources=[draft],
                        names=[name('In v3 only', preferred=True)])
 
-        response = self.lookup(system='/orgs/CIEL/CodeSystem/CIEL/', version='v3', code='D1')
+        for params in ({'system': '/orgs/CIEL/CodeSystem/CIEL/', 'version': 'v3'},
+                       {'system': '/orgs/CIEL/CodeSystem/CIEL/v3/'}):
+            response = self.lookup(code='D1', **params)
 
-        self.assertEqual(response.status_code, 200, response.data)
-        answer = self.by_name(response)
-        self.assertEqual((answer['system']['valueUri'], answer['version']['valueString']), (CIEL, 'v3'))
+            self.assertEqual(response.status_code, 200, response.data)
+            answer = self.by_name(response)
+            self.assertEqual((answer['system']['valueUri'], answer['version']['valueString']), (CIEL, 'v3'))
 
     def test_a_released_owner_instance_version_uses_three_queries(self):
         with self.assertNumQueries(3):
