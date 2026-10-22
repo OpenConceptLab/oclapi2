@@ -79,6 +79,17 @@ class ExpandCases(OpsCorpusMixin):
 
     # the route, the envelope and the members
 
+    def test_a_value_set_version_named_with_a_path_takes_its_repository_canonical(self):
+        draft = collection(self.acme, 'fevers', 'v2')
+        expansion = ExpansionFactory(mnemonic='autoexpand-v2', collection_version=draft)
+        draft.expansion_uri = expansion.uri
+        draft.save()
+
+        response = self.expand(url='/orgs/Acme/ValueSet/fevers/', valueSetVersion='v2')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual((response.data['url'], response.data['version']), (FEVERS, 'v2'))
+
     def test_a_type_level_get_answers_the_value_set_with_its_stored_expansion(self):
         response = self.expand(url=FEVERS)
 

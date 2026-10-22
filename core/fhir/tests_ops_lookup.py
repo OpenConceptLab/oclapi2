@@ -476,6 +476,28 @@ class LookupCases(OpsCorpusMixin):
             (answer['system']['valueUri'], answer['version']['valueString'], answer['display']['valueString']),
             (CIEL, 'v3', 'In v3 only'))
 
+    def test_a_named_unreleased_instance_version_with_its_own_canonical_takes_its_repository_canonical_too(self):
+        draft = source(self.ciel_org, 'CIEL', 'v3', canonical_url='https://example.org/old-ciel')
+        ConceptFactory(parent=self.ciel, mnemonic='D1', sources=[draft],
+                       names=[name('In v3 only', preferred=True)])
+
+        for system in (CIEL, 'https://example.org/old-ciel'):
+            response = self.get('CIEL/$lookup', base='/orgs/CIEL', system=system, code='D1', version='v3')
+
+            self.assertEqual(response.status_code, 200, response.data)
+            self.assertEqual(self.by_name(response)['display']['valueString'], 'In v3 only')
+
+    def test_a_version_named_with_a_path_takes_its_repository_canonical(self):
+        draft = source(self.ciel_org, 'CIEL', 'v3')
+        ConceptFactory(parent=self.ciel, mnemonic='D1', sources=[draft],
+                       names=[name('In v3 only', preferred=True)])
+
+        response = self.lookup(system='/orgs/CIEL/CodeSystem/CIEL/', version='v3', code='D1')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        answer = self.by_name(response)
+        self.assertEqual((answer['system']['valueUri'], answer['version']['valueString']), (CIEL, 'v3'))
+
     def test_a_released_owner_instance_version_uses_three_queries(self):
         with self.assertNumQueries(3):
             response = self.get('CIEL/$lookup', base='/orgs/CIEL', code='999', version='v1')
