@@ -53,6 +53,7 @@ class SourceChildListQueryCountMixin:
     relation = None
     list_serializer = None
     detail_serializer = None
+    small_page_size = 2  # the smaller page must hold the same kinds of rows as the page of 4
 
     def get_page(self, url, limit, params=''):
         with CaptureQueriesContext(connection) as context:
@@ -62,8 +63,8 @@ class SourceChildListQueryCountMixin:
         return response, len(context.captured_queries)
 
     def assert_page(self, url, serializer_class, params=''):
-        """Same query count for a page of 2 and of 4; same output as serializing each row on its own."""
-        _, small_page_queries = self.get_page(url, 2, params)
+        """Same query count for a small page and a page of 4; same output as serializing each row on its own."""
+        _, small_page_queries = self.get_page(url, self.small_page_size, params)
         response, page_queries = self.get_page(url, 4, params)
         self.assertEqual(page_queries, small_page_queries)
 

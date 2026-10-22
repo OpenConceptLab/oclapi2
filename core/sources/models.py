@@ -19,6 +19,7 @@ from core.common.tasks import update_mappings_source, index_source_concepts, ind
 from core.common.utils import to_camel_case
 from core.common.validators import validate_non_negative
 from core.concepts.models import ConceptName, Concept
+from core.resolvers.core import validate_resolvers
 from core.services.storages.postgres import PostgresQL
 from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE, \
     HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID, LOCALE_EXTERNAL_AUTO_ID_CHOICES
@@ -128,6 +129,8 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
     properties = ArrayField(models.JSONField(), default=list, null=True, blank=True)
     filters = ArrayField(models.JSONField(), default=list, null=True, blank=True)
+    # Read-time resolvers by family, e.g. {"names": {"replace": [...], "literals": [...]}}. See DOCS_RESOLVERS.md.
+    resolvers = models.JSONField(null=True, blank=True)
     match_algorithms = ArrayField(
         models.CharField(max_length=50), default=list, null=True, blank=True)
 
@@ -267,6 +270,7 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     def clean(self):
         self.hierarchy_meaning = self.hierarchy_meaning or None
 
+        validate_resolvers(self.resolvers)
         self.clean_properties()
         self.clean_filters()
         self.clean_match_algorithms()

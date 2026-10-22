@@ -3,6 +3,7 @@ from django.test import override_settings
 from rest_framework.exceptions import ErrorDetail
 
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
+from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLAPITestCase
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from core.integration_tests.test_utils import SourceChildListQueryCountMixin
@@ -12,6 +13,7 @@ from core.mappings.models import Mapping
 from core.mappings.serializers import MappingListSerializer, MappingDetailSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
+from core.resolvers.tests import CONCEPTS, RESOLVERS, make_concept, make_source
 from core.sources.tests.factories import UserSourceFactory, OrganizationSourceFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
@@ -1086,6 +1088,9 @@ class MappingListQueryCountTest(SourceChildListQueryCountMixin, OCLAPITestCase):
     relation = 'mappings'
     list_serializer = MappingListSerializer
     detail_serializer = MappingDetailSerializer
+    # A source version lists a mapping's head and latest version, which are the same kind of row. Unlinked (external)
+    # mappings cost one batched name lookup per page, so the smaller page needs 3 rows to hold both kinds as well.
+    small_page_size = 3
 
     def setUp(self):
         super().setUp()
@@ -1106,3 +1111,62 @@ class MappingListQueryCountTest(SourceChildListQueryCountMixin, OCLAPITestCase):
         for mapping in mappings:
             mapping.set_checksums()  # a GET calculates and saves missing checksums, one row at a time
         self.set_released_versions(mappings)
+
+
+class MappingResolvedConceptNameTest(OCLAPITestCase):
+    """A mapping to a post-coordinated code shows the name its destination Source resolves."""
+    CODE = 'ND13.2%26XJ44E%2FND13.3%26XJ44E'  # as stored: percent-encoded once
+    NAME = 'Fracture of unspecified tarsal bone [Closed fracture] / Fracture of metatarsal bone [Closed fracture]'
+
+    def setUp(self):
+        super().setUp()
+        self.origin = OrganizationSourceFactory()
+        self.origin_concept = make_concept(self.origin, 'O1', 'Origin one')
+        self.destination = make_source(RESOLVERS, CONCEPTS)
+
+    def make_mapping(self, code, destination=None):
+        """A mapping whose destination code is not linked to a concept, as post-coordinated codes are."""
+        destination = destination or self.destination
+        return MappingFactory(
+            parent=self.origin, from_concept=self.origin_concept, from_source=self.origin,
+            from_source_url=self.origin.uri, to_concept=None, to_source=destination,
+            to_source_url=destination.uri, to_concept_code=code, to_concept_name='Stored name')
+
+    def get(self, url, user=None, **params):
+        headers = {'HTTP_AUTHORIZATION': 'Token ' + user.get_token()} if user else {}
+        response = self.client.get(url, params, **headers)
+        self.assertEqual(response.status_code, 200, response.content)
+        return response.data
+
+    def test_every_representation_shows_the_resolved_name(self):
+        mapping = self.make_mapping(self.CODE)
+
+        for data in (self.get(self.origin.uri + 'mappings/')[0], self.get(mapping.uri),
+                     self.get(mapping.uri + 'versions/')[0]):
+            self.assertEqual(data['to_concept_name_resolved'], self.NAME)
+            self.assertEqual(data['to_concept_name'], 'Stored name')  # the stored value is untouched
+            self.assertIsNone(data['to_concept_url'])  # no concept, no url
+        brief = self.get(self.origin.uri + 'mappings/', brief='true')
+        self.assertEqual(brief[0]['cascade_target_concept_name'], self.NAME)
+        cascade = self.get(self.origin_concept.uri + '$cascade/', method='sourceMappings', cascadeLevels='1')
+        entries = [entry for entry in cascade['entry'] if entry.get('cascade_target_concept_code')]
+        self.assertEqual([entry['cascade_target_concept_name'] for entry in entries], [self.NAME])
+
+    def test_the_stored_name_is_kept_when_a_part_is_missing(self):
+        mapping = self.make_mapping('ND13.2%26NOPE')
+
+        # as before the resolver: no linked concept, so the field is omitted
+        self.assertNotIn('to_concept_name_resolved', self.get(mapping.uri))
+        brief = self.get(self.origin.uri + 'mappings/', brief='true')
+        self.assertEqual(brief[0]['cascade_target_concept_name'], 'Stored name')
+
+    def test_a_private_destination_is_resolved_only_for_users_who_can_see_it(self):
+        organization = OrganizationFactory()
+        private = make_source(RESOLVERS, CONCEPTS, organization=organization, public_access=ACCESS_TYPE_NONE)
+        mapping = self.make_mapping(self.CODE, private)
+        member = UserProfileFactory()
+        organization.members.add(member)
+
+        self.assertNotIn('to_concept_name_resolved', self.get(mapping.uri))  # omitted, as without a resolver
+        self.assertNotIn('to_concept_name_resolved', self.get(mapping.uri, UserProfileFactory()))
+        self.assertEqual(self.get(mapping.uri, member)['to_concept_name_resolved'], self.NAME)

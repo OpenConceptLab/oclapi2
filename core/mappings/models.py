@@ -16,6 +16,7 @@ from core.common.utils import separate_version, to_parent_uri, generate_temp_ver
 from core.mappings.constants import MAPPING_TYPE, MAPPING_IS_ALREADY_RETIRED, MAPPING_WAS_RETIRED, \
     MAPPING_IS_ALREADY_NOT_RETIRED, MAPPING_WAS_UNRETIRED, ALREADY_EXISTS
 from core.mappings.mixins import MappingValidationMixin
+from core.mappings.name_resolution import load_resolved_names, SIDES
 from core.services.storages.postgres import PostgresQL
 
 
@@ -25,6 +26,12 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         'to_source__organization', 'to_source__user', 'created_by', 'updated_by', 'from_concept__names',
         'to_concept__names'
     )
+    # serializer fields showing a resolved concept name, and the mapping sides (from/to) each one reads
+    NAME_RESOLUTION_FIELDS = {
+        'from_concept_name_resolved': ('from', ),
+        'to_concept_name_resolved': ('to', ),
+        'cascade_target_concept_name': SIDES,  # the cascade direction is a serializer choice; the unused side is cheap
+    }
 
     class Meta:
         db_table = 'mappings'
@@ -322,6 +329,14 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         initial_version.is_latest_version = True
         initial_version.save()
         return initial_version
+
+    @classmethod
+    def load_list_fields(cls, instances, fields, collection=None, user=None):
+        """Besides the generic page lookups, resolves the concept names the serialized fields will show."""
+        super().load_list_fields(instances, fields, collection, user)
+        sides = {side for field in fields for side in cls.NAME_RESOLUTION_FIELDS.get(field, ())}
+        if sides:
+            load_resolved_names(instances, [side for side in SIDES if side in sides], user)
 
     def populate_fields_from_relations(  # pylint: disable=too-many-locals,too-many-statements
             self, data, cache=None, user=None):

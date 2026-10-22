@@ -1,5 +1,6 @@
 import json
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.validators import RegexValidator
 from pydash import get, compact
 from rest_framework.fields import CharField, IntegerField, DateTimeField, JSONField, ListField, \
@@ -14,6 +15,7 @@ from core.common.constants import DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, HEAD, \
 from core.common.serializers import AbstractRepoResourcesSerializer, AbstractResourceSerializer, PublicAccessField
 from core.common.utils import get_truthy_values
 from core.orgs.models import Organization
+from core.resolvers.core import validate_resolvers as validate_resolvers_config
 from core.settings import DEFAULT_LOCALE
 from core.sources.models import Source
 from core.users.models import UserProfile
@@ -181,7 +183,7 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
                 'autoid_concept_mnemonic_start_from', 'autoid_concept_external_id_start_from',
                 'autoid_mapping_mnemonic_start_from', 'autoid_mapping_external_id_start_from',
                 'autoid_concept_name_external_id', 'autoid_concept_description_external_id', 'properties', 'filters',
-                'match_algorithms'
+                'match_algorithms', 'resolvers'
         ]:
             setattr(source, attr, validated_data.get(attr, get(source, attr)))
         for attr in ['jurisdiction', 'identifier', 'contact', 'meta']:
@@ -201,6 +203,15 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
             source.hierarchy_root = Concept.objects.filter(
                 uri=hierarchy_root_url).first() if hierarchy_root_url else None
         return source
+
+    @staticmethod
+    def validate_resolvers(value):
+        """New versions are persisted without full_clean, so the resolvers are validated here for every write."""
+        try:
+            validate_resolvers_config(value)
+        except DjangoValidationError as ex:
+            raise ValidationError(ex.messages) from ex
+        return value
 
     def update(self, instance, validated_data):
         original_schema = instance.custom_validation_schema
@@ -428,7 +439,7 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourc
             'autoid_mapping_mnemonic', 'autoid_mapping_external_id',
             'autoid_concept_mnemonic_start_from', 'autoid_concept_external_id_start_from',
             'autoid_mapping_mnemonic_start_from', 'autoid_mapping_external_id_start_from', 'checksums',
-            'properties', 'filters', 'match_algorithms'
+            'properties', 'filters', 'match_algorithms', 'resolvers'
         ) + AbstractRepoResourcesSerializer.Meta.fields
 
     def __init__(self, *args, **kwargs):
@@ -518,7 +529,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
             'content_type', 'revision_date', 'summary', 'text', 'meta',
             'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
             'version_needed', 'hierarchy_root_url', 'checksums', 'states', 'tasks', 'properties', 'filters',
-            'match_algorithms', 'external_exports'
+            'match_algorithms', 'external_exports', 'resolvers'
         ) + AbstractRepoResourcesSerializer.Meta.fields
 
     def __init__(self, *args, **kwargs):
