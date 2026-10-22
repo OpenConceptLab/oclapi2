@@ -4704,4 +4704,16 @@ class ConceptListIncludeMappingsTest(OCLAPITestCase):
         batched = self.client.get(url).data
         with patch.object(ConceptAbstractSerializer, 'preload_page', lambda *args: None):
             per_concept = self.client.get(url).data
+        if batched != per_concept:  # temporary diagnostic, removed before merge
+            def unequal(left, right, path=''):
+                if isinstance(left, dict) and isinstance(right, dict):
+                    for key in set(left) | set(right):
+                        yield from unequal(left.get(key), right.get(key), f'{path}.{key}')
+                elif isinstance(left, list) and isinstance(right, list) and len(left) == len(right):
+                    for index, (lval, rval) in enumerate(zip(left, right)):
+                        yield from unequal(lval, rval, f'{path}[{index}]')
+                elif left != right:
+                    yield f'{path}: {left!r} ({type(left).__name__}, self-equal={left == left}) != ' \
+                          f'{right!r} ({type(right).__name__}, self-equal={right == right})'
+            print('\nDIAG-UNEQUAL', list(unequal(batched, per_concept))[:20])
         self.assertEqual(batched, per_concept)
