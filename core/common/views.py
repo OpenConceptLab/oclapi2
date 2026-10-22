@@ -134,8 +134,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         self.limit = self.cap_limit(self.limit)
 
     def cap_limit(self, limit):
-        """`limit`, capped on a capped list, except for checksums and for a `Compress` by someone allowed any size, whose
-        results must not be pre-sliced to one page."""
+        """`limit`, capped on a capped list, except for checksums and for a `Compress` by someone allowed any size,
+         whose results must not be pre-sliced to one page."""
         if not self.is_page_size_capped or (self.is_brief() and self.is_checksums()) or (
                 self.request.META.get(HTTP_COMPRESS_HEADER, False) in TRUTHY and self.can_list_unpaginated()):
             return limit
