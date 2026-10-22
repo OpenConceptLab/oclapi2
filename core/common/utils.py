@@ -27,7 +27,7 @@ from requests.auth import HTTPBasicAuth
 from rest_framework.utils import encoders
 
 from core.common.constants import UPDATED_SINCE_PARAM, BULK_IMPORT_QUEUES_COUNT, CURRENT_USER, REQUEST_URL, \
-    TEMP_PREFIX, HEAD, EXPORT_TIME_EXTRA, RETIRED_ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW
+    TEMP_PREFIX, HEAD, EXPORT_TIME_EXTRA, RETIRED_ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, LIST_DEFAULT_LIMIT
 from core.settings import EXPORT_SERVICE
 
 
@@ -926,6 +926,11 @@ def to_int(value, default_value):
         return int(value) or default_value
     except (ValueError, TypeError):
         return default_value
+
+
+def cap_page_size(limit):
+    """`limit` as an int, at most settings.LIST_MAX_LIMIT: it keeps one page of a heavy list a short request."""
+    return min(to_int(limit, LIST_DEFAULT_LIMIT), settings.LIST_MAX_LIMIT)
 
 
 def parse_id(value):

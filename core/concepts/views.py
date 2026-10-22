@@ -24,7 +24,7 @@ from core.bundles.serializers import BundleSerializer
 from core.collections.documents import CollectionDocument
 from core.common import ERRBIT_LOGGER
 from core.common.constants import (
-    HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE, LIMIT_PARAM, LIST_DEFAULT_LIMIT)
+    HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE, LIST_DEFAULT_LIMIT)
 from core.common.exceptions import Http400, Http403, Http409
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.capabilities.constants import CAPABILITY_EXCEEDED_ERROR_CODE, CAPABILITY_NOT_ENTITLED_ERROR_CODE, \
@@ -176,6 +176,7 @@ class ConceptDefaultLocalesView(ListAPIView, BaseAPIView):  # pragma: no cover
 
 
 class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
+    is_page_size_capped = True
     serializer_class = ConceptListSerializer
 
     def get_permissions(self):
@@ -222,7 +223,7 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
                 queryset = Concept.apply_attribute_based_filters(
                     parent.concepts_set, self.params).filter(is_active=True)
             else:
-                limit = to_int(self.params.get(LIMIT_PARAM), LIST_DEFAULT_LIMIT)
+                limit = to_int(self.limit, LIST_DEFAULT_LIMIT)  # capped, so later pages start where the first ended
                 page = to_int(self.params.get('page'), 1)
                 offset = (page - 1) * limit
                 through_qs = Concept.sources.through.objects.filter(source_id=parent.id)
@@ -602,6 +603,7 @@ class ConceptCloneView(ConceptCascadeView):
 
 
 class ConceptChildrenView(ConceptBaseView, ListWithHeadersMixin):
+    is_page_size_capped = True
     is_searchable = False  # a search would list the repo's concepts, not this concept's hierarchy
     serializer_class = ConceptChildrenSerializer
     default_qs_sort_attr = 'mnemonic'
@@ -622,6 +624,7 @@ class ConceptChildrenView(ConceptBaseView, ListWithHeadersMixin):
 
 
 class ConceptParentsView(ConceptBaseView, ListWithHeadersMixin):
+    is_page_size_capped = True
     is_searchable = False  # a search would list the repo's concepts, not this concept's hierarchy
     serializer_class = ConceptParentsSerializer
 
@@ -666,6 +669,7 @@ class ConceptReactivateView(ConceptBaseView, UpdateAPIView):
 
 
 class ConceptVersionsView(ConceptBaseView, ConceptDictionaryMixin, ListWithHeadersMixin):
+    is_page_size_capped = True
     permission_classes = (CanViewParentDictionary,)
 
     def get_queryset(self):
@@ -688,6 +692,7 @@ class ConceptVersionsView(ConceptBaseView, ConceptDictionaryMixin, ListWithHeade
 
 
 class ConceptMappingsView(ConceptBaseView, ListWithHeadersMixin):
+    is_page_size_capped = True
     serializer_class = MappingListSerializer
     permission_classes = (CanViewParentDictionary,)
     default_qs_sort_attr = ['map_type', 'sort_weight']

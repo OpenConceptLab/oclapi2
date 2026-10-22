@@ -34,7 +34,7 @@ from core.common.serializers import RootSerializer
 from core.common.swagger_parameters import all_resource_query_param
 from core.common.throttling import ThrottleUtil
 from core.common.utils import compact_dict_by_values, to_snake_case, parse_updated_since_param, \
-    to_int, get_falsy_values, get_truthy_values, format_url_for_search
+    to_int, get_falsy_values, get_truthy_values, format_url_for_search, cap_page_size
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.orgs.constants import ORG_OBJECT_TYPE
 from core.users.constants import USER_OBJECT_TYPE
@@ -52,6 +52,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     pk_field = 'mnemonic'
     user_is_self = False
     is_searchable = False
+    is_page_size_capped = False  # concept, mapping and reference lists: `limit` is capped at settings.LIST_MAX_LIMIT
     limit = LIST_DEFAULT_LIMIT
     default_filters = {}
     sort_asc_param = 'sortAsc'
@@ -130,6 +131,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         params = request.query_params.dict()
         self.validate_pagination_params(request, params)
         self.limit = params.get(LIMIT_PARAM, None) or params.get(FHIR_LIMIT_PARAM, None) or LIST_DEFAULT_LIMIT
+        if self.is_page_size_capped and not (self.is_brief() and self.is_checksums()):
+            self.limit = cap_page_size(self.limit)
 
     @staticmethod
     def validate_pagination_params(request, params):
@@ -1205,10 +1208,9 @@ class SourceChildCommonBaseView(BaseAPIView):
     def __set_params(self):
         self.params = self.__get_params()
         if self.params:
-            self.limit = to_int(
-                CSV_DEFAULT_LIMIT if self.params.get('csv') else self.params.get(LIMIT_PARAM),
-                LIST_DEFAULT_LIMIT
-            )
+            # `limit` as initialize read (and capped) it; `_count` isn't read here
+            limit = self.limit if self.params.get(LIMIT_PARAM) else LIST_DEFAULT_LIMIT
+            self.limit = to_int(CSV_DEFAULT_LIMIT if self.params.get('csv') else limit, LIST_DEFAULT_LIMIT)
 
 
 class SourceChildExtrasBaseView:

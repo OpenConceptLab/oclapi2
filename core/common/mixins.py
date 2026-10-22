@@ -339,7 +339,7 @@ class ListWithHeadersMixin(ListModelMixin):
     def should_compress(self):
         """
         `Compress: true` returns the whole list, unpaginated (a zip). Anyone may, for up to MAX_UNPAGINATED_RESULTS
-        results; bigger lists need `users.list_unpaginated` (ocl_online#230).
+        results (a capped list: settings.LIST_MAX_LIMIT); bigger lists need `users.list_unpaginated`.
         """
         if self.request.META.get(HTTP_COMPRESS_HEADER, False) not in TRUTHY:
             return False
@@ -348,8 +348,9 @@ class ListWithHeadersMixin(ListModelMixin):
             return True
         total = self.total_count or (
             self.object_list.count() if isinstance(self.object_list, QuerySet) else len(self.object_list))
-        if total > MAX_UNPAGINATED_RESULTS:
-            raise UnpaginatedListLimitReached(MAX_UNPAGINATED_RESULTS, total)
+        max_results = settings.LIST_MAX_LIMIT if get(self, 'is_page_size_capped') else MAX_UNPAGINATED_RESULTS
+        if total > max_results:
+            raise UnpaginatedListLimitReached(max_results, total)
         return True
 
     def get_object_ids(self):

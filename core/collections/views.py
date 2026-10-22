@@ -351,6 +351,7 @@ class CollectionReferenceResolveView(CollectionReferenceAbstractResourcesView): 
 
 
 class CollectionReferenceConceptsView(CollectionReferenceAbstractResourcesView):
+    is_page_size_capped = True
     is_searchable = True
     document_model = ConceptDocument
     es_fields = Concept.es_fields
@@ -365,6 +366,7 @@ class CollectionReferenceConceptsView(CollectionReferenceAbstractResourcesView):
 
 
 class CollectionReferenceMappingsView(CollectionReferenceAbstractResourcesView):
+    is_page_size_capped = True
     is_searchable = True
     document_model = MappingDocument
     es_fields = Mapping.es_fields
@@ -428,6 +430,8 @@ class CollectionReferencesView(
     CollectionBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, DestroyAPIView, ListWithHeadersMixin,
     TaskMixin, CollectionReferencesMixin
 ):
+    is_page_size_capped = True
+
     def get_serializer_class(self):
         if self.is_verbose():
             return CollectionReferenceDetailSerializer
@@ -666,6 +670,8 @@ class CollectionReferencesPreview(CollectionBaseView):
 
 
 class CollectionVersionReferencesView(CollectionVersionBaseView, ListWithHeadersMixin, CollectionReferencesMixin):
+    is_page_size_capped = True
+
     def get_serializer_class(self):
         if self.is_verbose():
             return CollectionReferenceDetailSerializer
@@ -986,6 +992,7 @@ class CollectionVersionExpansionChildrenView(CollectionVersionExpansionBaseView,
 
 
 class CollectionVersionExpansionConceptsView(CollectionVersionExpansionChildrenView):
+    is_page_size_capped = True
     is_searchable = True
     document_model = ConceptDocument
     es_fields = Concept.es_fields
@@ -1001,6 +1008,7 @@ class CollectionVersionExpansionConceptsView(CollectionVersionExpansionChildrenV
 
 
 class CollectionVersionExpansionMappingsView(CollectionVersionExpansionChildrenView):
+    is_page_size_capped = True
     is_searchable = True
     document_model = MappingDocument
     es_fields = Mapping.es_fields
@@ -1036,6 +1044,7 @@ class ExpansionMappingsIndexView(ExpansionResourcesIndexView):
 
 
 class CollectionVersionConceptsView(CollectionBaseView, ListWithHeadersMixin):
+    is_page_size_capped = True
     is_searchable = True
     document_model = ConceptDocument
     es_fields = Concept.es_fields
@@ -1112,6 +1121,8 @@ class CollectionVersionConceptCascadeView(ConceptCascadeView, CollectionVersionC
 
 
 class CollectionVersionConceptMappingsView(CollectionVersionConceptRetrieveView, ListWithHeadersMixin):
+    is_page_size_capped = True
+
     def get_queryset(self):
         queryset = self.apply_filters(super().get_queryset())
         expansion = self.get_expansion()
@@ -1136,6 +1147,7 @@ class CollectionVersionConceptMappingsView(CollectionVersionConceptRetrieveView,
 
 
 class CollectionVersionMappingsView(CollectionBaseView, ListWithHeadersMixin):
+    is_page_size_capped = True
     is_searchable = True
     document_model = MappingDocument
     es_fields = Mapping.es_fields
