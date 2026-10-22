@@ -519,7 +519,6 @@ class FhirParametersTest(SimpleTestCase):
 
         self.assertEqual(params.get('system'), 'http://a')
         self.assertEqual(params.getlist('property'), ['x', 'y'])
-        self.assertEqual(params.names(), ['system', 'code', 'property'])
         self.assertNotIn('_format', params)
         self.assertIsNone(params.get('version'))
         self.assertEqual(params.get('version', 'v1'), 'v1')
@@ -679,7 +678,7 @@ class EchoView(FhirViewMixin, APIView):
     def post(self, _request):
         params = self.get_fhir_parameters()
         return Response({'resourceType': 'Parameters', 'parameter': [
-            {'name': name, 'valueString': str(params.get(name))} for name in params.names()] + [
+            {'name': name, 'valueString': str(value)} for name, value in params.items] + [
             {'name': 'base', 'valueUri': self.get_fhir_base_url()}]})
 
 

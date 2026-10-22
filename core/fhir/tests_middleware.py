@@ -244,7 +244,7 @@ class RequireAuthenticationOnFhirPathsTest(SimpleTestCase):
         self.assertEqual(outcome_issue(response), 'error|login|invalid-data')
         issue = json.loads(response.content)['issue'][0]
         self.assertEqual(issue['details']['text'], RequireAuthenticationMiddleware.forbidden_response['detail'])
-        self.assertIn(RequireAuthenticationMiddleware.forbidden_response['upgrade_url'], issue['diagnostics'])
+        self.assertNotIn('diagnostics', issue)
 
     def test_other_paths_keep_their_json_403(self):
         response = self.answer('/orgs/CIEL/sources/')

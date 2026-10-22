@@ -147,8 +147,7 @@ class RequireAuthenticationMiddleware(BaseMiddleware):
 
         if is_fhir_path(request.path):
             return outcome_response(request, operation_outcome(issue(
-                'login', self.forbidden_response['detail'],
-                diagnostics=f"Upgrade: {self.forbidden_response['upgrade_url']}")), 403)
+                'login', self.forbidden_response['detail'])), 403)
         return JsonResponse(self.forbidden_response, status=403)
 
     def is_request_allowed(self, request):

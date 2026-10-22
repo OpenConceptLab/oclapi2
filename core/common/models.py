@@ -1633,8 +1633,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             elif instance.is_head:
                 instance = (instance.get_latest_released_version() or instance) if allow_head else \
                     instance.get_latest_released_version(exclude_head=True)
-            if instance and head:  # the repository's access (its HEAD's), which FHIR checks with the version's
+            if instance and head:  # the repository's (its HEAD's) access and canonical URL, which FHIR reads too
                 instance.repository_public_access = head.public_access
+                instance.repository_canonical_url = head.canonical_url
 
         if not instance:
             from core.sources.models import Source

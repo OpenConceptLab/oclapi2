@@ -510,9 +510,6 @@ class FhirParameters:
     def getlist(self, name):
         return [value for key, value in self.items if key == name]
 
-    def names(self):
-        return list(dict.fromkeys(key for key, _ in self.items))
-
     def __contains__(self, name):
         return any(key == name for key, _ in self.items)
 
