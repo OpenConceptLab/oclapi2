@@ -56,7 +56,7 @@ class FhirProtocolTest(OCLTestCase):
         self.other = ConceptFactory(parent=self.source, mnemonic='c2')
         MappingFactory(parent=self.source, from_concept=self.concept, to_concept=self.other)
         self.source_v1 = OrganizationSourceFactory.build(
-            version='v1', mnemonic=self.source.mnemonic, organization=self.org, canonical_url=SYSTEM)
+            version='v1', mnemonic=self.source.mnemonic, organization=self.org, canonical_url=SYSTEM, released=True)
         Source.persist_new_version(self.source_v1, self.source.created_by)
         self.collection = OrganizationCollectionFactory(
             organization=self.org, mnemonic='protovs', canonical_url=VALUE_SET, version='HEAD')
@@ -186,7 +186,8 @@ class FhirProtocolTest(OCLTestCase):
         self.assertLess(child_names(root).index('link'), child_names(root).index('entry'))
         resource = root.find(f'{FHIR}entry/{FHIR}resource/{FHIR}CodeSystem')
         assert_in_model_order(self, resource, CodeSystem)
-        self.assertEqual(resource.find(f'{FHIR}id').get('value'), 'rel_codes')
+        released = Source.objects.get(mnemonic='rel_codes', version='v1')
+        self.assertEqual(resource.find(f'{FHIR}id').get('value'), str(released.id))  # opaque at the global base
 
         response = self.client.get(f'/orgs/{self.org.mnemonic}/CodeSystem/rel_codes/?_format=xml')
         self.assertEqual(response.status_code, 200)
@@ -196,8 +197,10 @@ class FhirProtocolTest(OCLTestCase):
 
     def test_xml_values_match_json_for_a_value_set_and_a_concept_map_at_an_owner_base(self):
         OrganizationCollectionFactory(
+            organization=self.org, mnemonic='my_vs', canonical_url='http://example.org/vs/my_vs', version='HEAD')
+        OrganizationCollectionFactory(
             organization=self.org, mnemonic='my_vs', canonical_url='http://example.org/vs/my_vs', version='v1',
-            is_latest_version=True)
+            is_latest_version=True, released=True)
         for path in (f'/orgs/{self.org.mnemonic}/ValueSet/my_vs/', f'/orgs/{self.org.mnemonic}/ConceptMap/proto/'):
             as_json = json.loads(self.client.get(path).content)
             response = self.client.get(path + '?_format=xml')

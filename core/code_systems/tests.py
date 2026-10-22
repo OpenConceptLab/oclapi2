@@ -32,14 +32,14 @@ class CodeSystemTest(OCLTestCase):
         self.concept_1 = ConceptFactory(parent=self.org_source, names=1, names__name="concept_1_name")
         self.concept_2 = ConceptFactory(parent=self.org_source)
         self.org_source_v2 = OrganizationSourceFactory.build(
-            version='v2', mnemonic=self.org_source.mnemonic, organization=self.org_source.parent)
+            version='v2', mnemonic=self.org_source.mnemonic, organization=self.org_source.parent, released=True)
         Source.persist_new_version(self.org_source_v2, self.org_source.created_by)
 
         self.user = UserProfileFactory()
         self.user_token = self.user.get_token()
         self.user_source = UserSourceFactory(user=self.user, public_access='None', canonical_url='/some/url')
         self.user_source_v1 = UserSourceFactory.build(
-            version='v1', mnemonic=self.user_source.mnemonic, user=self.user_source.parent)
+            version='v1', mnemonic=self.user_source.mnemonic, user=self.user_source.parent, released=True)
         Source.persist_new_version(self.user_source_v1, self.user_source.created_by)
 
         self.client = APIClient()
@@ -56,28 +56,36 @@ class CodeSystemTest(OCLTestCase):
             '/orgs/' + self.org.mnemonic + '/CodeSystem/' + self.org_source.mnemonic + '/'
         )
         self.assertEqual(resource['version'], 'v2')
+        self.assertNotIn('concept', resource)  # a search entry is a summary; the read has the concepts
+
+        resource = self.client.get(response.data['entry'][0]['fullUrl']).data
         self.assertEqual(len(resource['concept']), 2)
         self.assertEqual(resource['concept'][0]['code'], self.concept_1.mnemonic)
         self.assertEqual(resource['concept'][1]['code'], self.concept_2.mnemonic)
 
     def test_private_can_view(self):
+        # the global base shows public repositories only, whoever asks; the owner base shows the owner its own
         response = self.client.get('/fhir/CodeSystem/?url=/some/url', HTTP_AUTHORIZATION='Token ' + self.user_token)
 
-        self.assertEqual(len(response.data['entry']), 2)
-        self.assertEqual(response.data['total'], 2)
+        self.assertEqual(response.data['total'], 1)
+        resource = response.data['entry'][0]['resource']
+        self.assertEqual(
+            resource['identifier'][0]['value'],
+            '/orgs/' + self.org.mnemonic + '/CodeSystem/' + self.org_source.mnemonic + '/'
+        )
+        self.assertEqual(resource['version'], 'v2')
 
+        response = self.client.get(
+            f'/users/{self.user.mnemonic}/CodeSystem/?url=/some/url', HTTP_AUTHORIZATION='Token ' + self.user_token)
+
+        self.assertEqual(response.data['total'], 1)
         resource = response.data['entry'][0]['resource']
         self.assertEqual(
             resource['identifier'][0]['value'],
             '/users/' + self.user.mnemonic + '/CodeSystem/' + self.user_source.mnemonic + '/'
         )
         self.assertEqual(resource['version'], 'v1')
-        resource_2 = response.data['entry'][1]['resource']
-        self.assertEqual(
-            resource_2['identifier'][0]['value'],
-            '/orgs/' + self.org.mnemonic + '/CodeSystem/' + self.org_source.mnemonic + '/'
-        )
-        self.assertEqual(resource_2['version'], 'v2')
+        self.assertEqual(self.client.get(f'/users/{self.user.mnemonic}/CodeSystem/?url=/some/url').data['total'], 0)
 
     def test_public_can_list(self):
         response = self.client.get('/fhir/CodeSystem/')
@@ -132,19 +140,24 @@ class CodeSystemTest(OCLTestCase):
     def test_private_can_list(self):
         response = self.client.get('/fhir/CodeSystem/', HTTP_AUTHORIZATION='Token ' + self.user_token)
 
-        self.assertEqual(len(response.data['entry']), 2)
+        self.assertEqual(len(response.data['entry']), 1)
+        resource = response.data['entry'][0]['resource']
+        self.assertEqual(
+            resource['identifier'][0]['value'],
+            '/orgs/' + self.org.mnemonic + '/CodeSystem/' + self.org_source.mnemonic + '/'
+        )
+        self.assertEqual(resource['version'], 'v2')
+
+        response = self.client.get(
+            f'/users/{self.user.mnemonic}/CodeSystem/', HTTP_AUTHORIZATION='Token ' + self.user_token)
+
+        self.assertEqual(len(response.data['entry']), 1)
         resource = response.data['entry'][0]['resource']
         self.assertEqual(
             resource['identifier'][0]['value'],
             '/users/' + self.user.mnemonic + '/CodeSystem/' + self.user_source.mnemonic + '/'
         )
         self.assertEqual(resource['version'], 'v1')
-        resource_2 = response.data['entry'][1]['resource']
-        self.assertEqual(
-            resource_2['identifier'][0]['value'],
-            '/orgs/' + self.org.mnemonic + '/CodeSystem/' + self.org_source.mnemonic + '/'
-        )
-        self.assertEqual(resource_2['version'], 'v2')
 
     def test_get_code_system(self):
         response = self.client.get(f'/orgs/{self.org.mnemonic}/CodeSystem/{self.org_source.mnemonic}/')

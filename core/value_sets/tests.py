@@ -41,7 +41,8 @@ class ValueSetTest(OCLAPITestCase):
         self.collection = OrganizationCollectionFactory(
             organization=self.org, mnemonic='c1', canonical_url='http://c1.com', version='HEAD')
         self.collection_v1 = OrganizationCollectionFactory(
-            mnemonic='c1', canonical_url='http://c1.com', version='v1', organization=self.collection.organization)
+            mnemonic='c1', canonical_url='http://c1.com', version='v1', organization=self.collection.organization,
+            released=True)
         expansion = ExpansionFactory(mnemonic='e1', collection_version=self.collection)
         self.collection.expansion_uri = expansion.uri
         self.collection.save()
@@ -75,7 +76,8 @@ class ValueSetTest(OCLAPITestCase):
         response = self.client.get('/fhir/ValueSet/?url=http://c1.com')
 
         self.assertEqual(len(response.data['entry']), 1)
-        resource = response.data['entry'][0]['resource']
+        self.assertNotIn('compose', response.data['entry'][0]['resource'])  # a search entry is a summary
+        resource = self.client.get(response.data['entry'][0]['fullUrl']).data
         self.assertEqual(
             resource['identifier'][0]['value'], f'/orgs/{self.org.mnemonic}/ValueSet/{self.collection.mnemonic}/')
         self.assertEqual(len(resource['compose']['include']), 1)

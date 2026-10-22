@@ -1618,12 +1618,15 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     def resolve_repo(  # pylint: disable=too-many-arguments
             cls, instance, version, is_canonical, resolution_url, repo_type=None, allow_head=True):
         if instance:
+            head = instance if repo_type and instance.is_head else None
             if version:
                 versions = instance.active_versions if repo_type else instance.versions
                 instance = versions.filter(version=decode_string(version)).first()
             elif instance.is_head:
                 instance = (instance.get_latest_released_version() or instance) if allow_head else \
                     instance.get_latest_released_version(exclude_head=True)
+            if instance and head:  # the repository's access (its HEAD's), which FHIR checks with the version's
+                instance.repository_public_access = head.public_access
 
         if not instance:
             from core.sources.models import Source

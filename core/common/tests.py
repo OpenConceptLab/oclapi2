@@ -75,10 +75,8 @@ from core.users.tests.factories import UserProfileFactory
 from .backends import OCLOIDCAuthenticationBackend
 from .exceptions import SSOIdentityMismatchRefused
 from .checksums import Checksum
-from .fhir_helpers import translate_fhir_query
 from .serializers import IdentifierSerializer
 from .validators import URIValidator
-from ..code_systems.serializers import CodeSystemDetailSerializer
 from ..concepts.serializers import ConceptDetailSerializer
 from ..concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from ..mappings.serializers import MappingDetailSerializer
@@ -323,57 +321,6 @@ class OCLTestCase(TestCase, BaseTestCase):
     def setUp(self):
         super().setUp()
         self.maxDiff = None
-
-
-class FhirHelpersTest(OCLTestCase):
-    def test_language_to_default_locale(self):
-        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
-        query_params = {'language': 'eng'}
-        query_set = Source.objects.all()
-
-        query_set = translate_fhir_query(query_fields, query_params, query_set)
-        self.assertTrue('"sources"."default_locale" = eng' in str(query_set.query))
-
-    def test_status_retired(self):
-        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
-        query_params = {'status': 'retired'}
-        query_set = Source.objects.all()
-
-        query_set = translate_fhir_query(query_fields, query_params, query_set)
-        self.assertTrue('WHERE "sources"."retired"' in str(query_set.query))
-
-    def test_status_active(self):
-        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
-        query_params = {'status': 'active'}
-        query_set = Source.objects.all()
-
-        query_set = translate_fhir_query(query_fields, query_params, query_set)
-        self.assertTrue('WHERE "sources"."released"' in str(query_set.query))
-
-    def test_status_draft(self):
-        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
-        query_params = {'status': 'draft'}
-        query_set = Source.objects.all()
-
-        query_set = translate_fhir_query(query_fields, query_params, query_set)
-        self.assertTrue('WHERE NOT "sources"."released"' in str(query_set.query))
-
-    def test_title_to_full_name(self):
-        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
-        query_params = {'title': 'some title'}
-        query_set = Source.objects.all()
-
-        query_set = translate_fhir_query(query_fields, query_params, query_set)
-        self.assertTrue('WHERE "sources"."full_name" = some title' in str(query_set.query))
-
-    def test_other_fields(self):
-        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
-        query_params = {'version': 'v1', 'id': '2'}
-        query_set = Source.objects.all()
-
-        query_set = translate_fhir_query(query_fields, query_params, query_set)
-        self.assertTrue('"sources"."version" = v1' in str(query_set.query))
-        self.assertTrue('"sources"."id" = 2' in str(query_set.query))
 
 
 class IdentifierSerializerTest(OCLTestCase):

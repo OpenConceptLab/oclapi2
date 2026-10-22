@@ -3,16 +3,15 @@ import logging
 from django.db.models import F
 from rest_framework.exceptions import ValidationError, NotAuthenticated, PermissionDenied
 
-from core.bundles.serializers import FHIRBundleSerializer
 from core.code_systems.serializers import CodeSystemDetailSerializer, \
     ValidateCodeParametersSerializer
 from core.common.constants import HEAD
-from core.common.fhir_helpers import translate_fhir_query
 from core.common.serializers import IdentifierSerializer
 from core.concepts.permissions import CanViewParentDictionaryAsGuest
 from core.concepts.views import ConceptRetrieveUpdateDestroyView
 from core.fhir.base import FhirViewMixin
 from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
+from core.fhir.search import FhirSearchMixin, FhirReadMixin
 from core.parameters.serializers import ParametersSerializer
 from core.sources.models import Source
 from core.sources.views import SourceListView, SourceRetrieveUpdateDestroyView
@@ -30,29 +29,9 @@ def get_viewable_repo(repos, user):
     return None
 
 
-class CodeSystemListView(FhirViewMixin, SourceListView):
+class CodeSystemListView(FhirViewMixin, FhirSearchMixin, SourceListView):
+    resource_type = 'CodeSystem'
     serializer_class = CodeSystemDetailSerializer
-
-    @staticmethod
-    def bundle_response(data, paginator):
-        bundle = FHIRBundleSerializer(
-            {'meta': {}, 'total': len(data), 'type': 'searchset', 'entry': FHIRBundleSerializer.convert_to_entry(data)},
-            context={'paginator': paginator}
-        )
-        return bundle.data
-
-    def get_filter_params(self, default_version_to_head=True):
-        return super().get_filter_params(False)
-
-    def apply_query_filters(self, queryset):
-        query_fields = list(self.serializer_class.Meta.fields)
-        query_fields.extend(['code'])
-        queryset = translate_fhir_query(query_fields, self.request.query_params, queryset)
-        return queryset
-
-    def apply_filters(self, queryset):
-        queryset = queryset.exclude(version=HEAD).filter(is_latest_version=True)
-        return self.apply_query_filters(queryset)
 
     def get_serializer_class(self):
         return self.serializer_class
@@ -232,7 +211,8 @@ class CodeSystemValidateCodeView(FhirViewMixin, ConceptRetrieveUpdateDestroyView
         }
 
 
-class CodeSystemRetrieveUpdateView(FhirViewMixin, SourceRetrieveUpdateDestroyView):
+class CodeSystemRetrieveUpdateView(FhirViewMixin, FhirReadMixin, SourceRetrieveUpdateDestroyView):
+    resource_type = 'CodeSystem'
     serializer_class = CodeSystemDetailSerializer
 
     def get_filter_params(self, default_version_to_head=True):

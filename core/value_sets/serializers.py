@@ -11,6 +11,7 @@ from core.collections.serializers import CollectionCreateOrUpdateSerializer
 from core.common.constants import HEAD
 from core.common.fhir_helpers import delete_empty_fields
 from core.common.serializers import StatusField, IdentifierSerializer, ReadSerializerMixin
+from core.fhir.search import CanonicalUrlField, FhirRepositorySerializerMixin
 from core.parameters.serializers import ParametersSerializer
 from core.value_sets.constants import RESOURCE_TYPE
 
@@ -144,10 +145,11 @@ class ComposeValueSetField(serializers.Field):
         return None
 
 
-class ValueSetDetailSerializer(serializers.ModelSerializer):
+class ValueSetDetailSerializer(FhirRepositorySerializerMixin, serializers.ModelSerializer):
+    content_field = 'compose'
     resourceType = SerializerMethodField(method_name='get_resource_type')
     id = CharField(source='mnemonic')
-    url = CharField(source='canonical_url', required=False)
+    url = CanonicalUrlField(source='canonical_url', required=False)
     title = CharField(source='full_name', required=False)
     status = StatusField(source='*')
     meta = SerializerMethodField()
@@ -255,6 +257,7 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
             rep = super().to_representation(instance)
             delete_empty_fields(rep)
             IdentifierSerializer.include_ocl_identifier(instance.uri, RESOURCE_TYPE, rep)
+            self.with_fhir_view(instance, rep)
         except (Exception, ):
             msg = f'Failed to represent "{instance.uri}" as {RESOURCE_TYPE}'
             logger.exception(msg)
