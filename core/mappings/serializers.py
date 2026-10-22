@@ -12,10 +12,24 @@ from core.common.serializers import AbstractResourceSerializer, SourceChildPageS
 from core.common.utils import get_truthy_values
 from core.concepts.serializers import ConceptDetailSerializer
 from core.mappings.models import Mapping
+from core.mappings.name_resolution import get_resolved_name, context_user
 from core.sources.serializers import SourceListSerializer, SourceDetailSerializer
 
 
 TRUTHY = get_truthy_values()
+
+
+class ResolvedConceptNameField(CharField):
+    """
+    Name of a mapping side's concept: the name the Source name resolver computes for the stored code (exact concept or
+    post-coordinated composition) and, when it has none, the linked concept's display name as before.
+    """
+    def __init__(self, side, **kwargs):
+        self.side = side
+        super().__init__(source=f'{side}_concept.display_name', read_only=True, **kwargs)
+
+    def get_attribute(self, instance):
+        return get_resolved_name(instance, self.side, context_user(self.context)) or super().get_attribute(instance)
 
 
 class AbstractMappingSerializer(SourceVersionFieldMixin, AbstractResourceSerializer):
@@ -113,8 +127,8 @@ class MappingListSerializer(AbstractMappingSerializer):
     url = CharField(required=False, source='versioned_object_url')
     version = CharField(read_only=True)
     version_created_on = DateTimeField(source='created_at', read_only=True)
-    from_concept_name_resolved = CharField(source='from_concept.display_name', read_only=True)
-    to_concept_name_resolved = CharField(source='to_concept.display_name', read_only=True)
+    from_concept_name_resolved = ResolvedConceptNameField('from')
+    to_concept_name_resolved = ResolvedConceptNameField('to')
     to_concept_code = EncodedDecodedCharField(required=False)
     from_concept_code = EncodedDecodedCharField(required=False)
     sort_weight = FloatField(required=False, allow_null=True)
@@ -191,6 +205,7 @@ class MappingMinimalSerializer(AbstractMappingSerializer):
 
     class Meta:
         model = Mapping
+        list_serializer_class = SourceChildPageSerializer
         fields = AbstractMappingSerializer.Meta.fields + (
             'id', 'type', 'map_type', 'url', 'version_url', 'to_concept_code', 'to_concept_url',
             'cascade_target_concept_code', 'cascade_target_concept_url', 'cascade_target_source_owner',
@@ -198,9 +213,9 @@ class MappingMinimalSerializer(AbstractMappingSerializer):
             'from_concept_code', 'from_concept_url'
         )
 
-    @staticmethod
-    def get_cascade_target_concept_name(obj):
-        return obj.to_concept_name or get(obj, 'to_concept.display_name')
+    def get_cascade_target_concept_name(self, obj):
+        return get_resolved_name(obj, 'to', context_user(self.context)) or obj.to_concept_name or get(
+            obj, 'to_concept.display_name')
 
 
 class MappingReverseMinimalSerializer(ModelSerializer):
@@ -217,6 +232,7 @@ class MappingReverseMinimalSerializer(ModelSerializer):
 
     class Meta:
         model = Mapping
+        list_serializer_class = SourceChildPageSerializer
         fields = (
             'id', 'type', 'map_type', 'url', 'version_url', 'from_concept_code', 'from_concept_url',
             'cascade_target_concept_code', 'cascade_target_concept_url', 'cascade_target_source_owner',
@@ -224,9 +240,9 @@ class MappingReverseMinimalSerializer(ModelSerializer):
             'checksums'
         )
 
-    @staticmethod
-    def get_cascade_target_concept_name(obj):
-        return obj.from_concept_name or get(obj, 'from_concept.display_name')
+    def get_cascade_target_concept_name(self, obj):
+        return get_resolved_name(obj, 'from', context_user(self.context)) or obj.from_concept_name or get(
+            obj, 'from_concept.display_name')
 
     @staticmethod
     def get_checksums(obj):

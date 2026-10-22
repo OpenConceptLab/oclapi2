@@ -272,6 +272,7 @@ class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeader
             "meta": request.data.get('meta', head_object.meta),
             "properties": request.data.get('properties', head_object.properties),
             "filters": request.data.get('filters', head_object.filters),
+            "resolvers": request.data.get('resolvers', head_object.resolvers),
             "match_algorithms": request.data.get(
                 'match_algorithms', head_object.get_match_algorithms_for_new_version())
         }

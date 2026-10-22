@@ -297,7 +297,7 @@ class ConceptAbstractSerializer(SourceVersionFieldMixin, AbstractResourceSeriali
             ) if is_collection else obj.get_bidirectional_mappings()
             if not include_retired:
                 mappings = mappings.filter(retired=False)
-            return serializer_class(mappings, many=True).data
+            return serializer_class(mappings, many=True, context=context).data
         if self.include_direct_mappings:
             mappings = obj.get_unidirectional_mappings_for_collection(
                 parent_uri, collection_version) if is_collection else obj.get_unidirectional_mappings()
@@ -307,7 +307,7 @@ class ConceptAbstractSerializer(SourceVersionFieldMixin, AbstractResourceSeriali
                 mappings = mappings.filter(to_source_url__in=target_repo_urls)
             if not include_retired:
                 mappings = mappings.filter(retired=False)
-            return serializer_class(mappings, many=True).data
+            return serializer_class(mappings, many=True, context=context).data
 
         return []
 
@@ -503,9 +503,11 @@ class ConceptMinimalSerializerRecursive(ConceptAbstractSerializer):
 
             from core.mappings.serializers import MappingMinimalSerializer, MappingReverseMinimalSerializer
             if get(self, 'context.request.query_params.reverse') in TRUTHY:
-                result += MappingReverseMinimalSerializer(obj.cascaded_entries['mappings'], many=True).data
+                result += MappingReverseMinimalSerializer(
+                    obj.cascaded_entries['mappings'], many=True, context=self.context).data
             else:
-                result += MappingMinimalSerializer(obj.cascaded_entries['mappings'], many=True).data
+                result += MappingMinimalSerializer(
+                    obj.cascaded_entries['mappings'], many=True, context=self.context).data
 
         return result
 

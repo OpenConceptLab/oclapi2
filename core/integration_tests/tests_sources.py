@@ -29,6 +29,7 @@ from core.mappings.models import Mapping
 from core.mappings.serializers import MappingVersionExportSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
+from core.resolvers.tests import RESOLVERS
 from core.sources.models import Source, CloneLimitExceeded
 from core.sources.serializers import SourceDetailSerializer, SourceVersionExportSerializer
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
@@ -197,7 +198,7 @@ class SourceListViewTest(OCLAPITestCase):
                 'autoid_concept_name_external_id', 'autoid_concept_description_external_id',
                 'autoid_concept_mnemonic_start_from', 'autoid_concept_external_id_start_from',
                 'autoid_mapping_mnemonic_start_from', 'autoid_mapping_external_id_start_from', 'checksums',
-                'properties', 'filters', 'match_algorithms'
+                'properties', 'filters', 'match_algorithms', 'resolvers'
             ])
         )
         source = Source.objects.last()
@@ -319,7 +320,7 @@ class SourceRetrieveUpdateDestroyViewTest(OCLAPITestCase):
                 'autoid_concept_name_external_id', 'autoid_concept_description_external_id',
                 'autoid_concept_mnemonic_start_from', 'autoid_concept_external_id_start_from',
                 'autoid_mapping_mnemonic_start_from', 'autoid_mapping_external_id_start_from', 'checksums',
-                'properties', 'filters', 'match_algorithms'
+                'properties', 'filters', 'match_algorithms', 'resolvers'
             ])
         )
         source = Source.objects.last()
@@ -332,6 +333,28 @@ class SourceRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['supported_locales'], ['en', 'fr'])
         self.assertEqual(source.default_locale, 'en')
         self.assertEqual(source.supported_locales, ['fr'])
+
+
+    def test_put_resolvers(self):
+        source = OrganizationSourceFactory(organization=self.organization)
+
+        response = self.client.put(
+            source.uri, {'resolvers': RESOLVERS}, HTTP_AUTHORIZATION='Token ' + self.token, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['resolvers'], RESOLVERS)
+
+        response = self.client.put(
+            source.uri, {'resolvers': {'names': {'replace': []}}}, HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('resolvers', response.data)
+        source.refresh_from_db()
+        self.assertEqual(source.resolvers, RESOLVERS)
+
+        response = self.client.put(
+            source.uri, {'resolvers': None}, HTTP_AUTHORIZATION='Token ' + self.token, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.data['resolvers'])
 
     def test_put_hierarchy_root(self):
         source = OrganizationSourceFactory(organization=self.organization)
@@ -478,9 +501,10 @@ class SourceVersionListViewTest(OCLAPITestCase):
 
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
-    def test_post_201_copies_properties_and_filters_from_head(self):
+    def test_post_201_copies_properties_filters_and_resolvers_from_head(self):
         self.source.properties = [{'code': 'p1'}]
         self.source.filters = [{'code': 'f1'}]
+        self.source.resolvers = RESOLVERS
         self.source.save()
 
         response = self.client.post(
@@ -496,10 +520,12 @@ class SourceVersionListViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data['properties'], [{'code': 'p1'}])
         self.assertEqual(response.data['filters'], [{'code': 'f1'}])
+        self.assertEqual(response.data['resolvers'], RESOLVERS)
 
         new_version = self.source.versions.get(version='v1')
         self.assertEqual(new_version.properties, [{'code': 'p1'}])
         self.assertEqual(new_version.filters, [{'code': 'f1'}])
+        self.assertEqual(new_version.resolvers, RESOLVERS)
 
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
@@ -598,6 +624,17 @@ class SourceVersionListViewTest(OCLAPITestCase):
         self.assertEqual(
             response.data, {'released': [ErrorDetail(string='Must be a valid boolean.', code='invalid')]})
         self.assertEqual(self.source.versions.count(), 1)
+
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    def test_post_400_invalid_resolvers(self):
+        response = self.client.post(
+            self.source.uri + 'versions/', {'id': 'v1', 'resolvers': {'names': {'replace': []}}},
+            HTTP_AUTHORIZATION='Token ' + self.token, format='json')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('resolvers', response.data)
+        self.assertFalse(self.source.versions.filter(version='v1').exists())
 
     @patch('core.sources.views.export_source')
     def test_post_400(self, export_source_mock):
