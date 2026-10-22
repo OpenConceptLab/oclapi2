@@ -23,7 +23,7 @@ from core.capacity.constants import (
     HEADERS, HEADER_DECISION, HEADER_LIMIT, HEADER_IN_FLIGHT, HEADER_TIER, HEADER_TIER_LIMIT, HEADER_TIER_IN_FLIGHT,
     HEADER_SUGGESTED_CONCURRENCY, ENDPOINT_MATCH, ENDPOINT_RERANK, DECISION_ADMITTED, DECISION_SHADOW_REFUSED,
     DECISION_REFUSED, DECISION_UNAVAILABLE, LANE_API_HEAVY, LANE_API_HEAVY_TASK, LANE_ES2_KNN, LANE_TIER, LANE_USER,
-    LOG_EVENT, CONFIG_LOG_EVENT, SOURCE_COMMAND)
+    LOG_EVENT, CONFIG_LOG_EVENT, SOURCE_COMMAND, TIER_CORE, TIER_EARLY_ACCESS, TIER_PREVIEW)
 from core.capacity import logs
 from core.capacity.limiter import (
     RedisLanes, CapacityGate, LeaseRenewer, get_tier, get_queue_ms, lane_key, get_task_id, build_redis_client,
@@ -32,26 +32,26 @@ from core.capacity.models import CapacityConfig, GroupCapacityTier
 from core.capacity.threads import RedisThread
 from core.common.tests import OCLTestCase, OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.common.utils import get_event_metadata
-from core.users.constants import CORE_USER_GROUP, EARLY_ACCESS_GROUP
 from core.users.tests.factories import UserProfileFactory
-
-
-# The tiers the groups config sets for these test groups (seed_group_capabilities syncs them in deployments).
-TEST_GROUP_TIERS = {CORE_USER_GROUP: 'core', EARLY_ACCESS_GROUP: 'early_access', PREVIEW_GROUP_NAME: 'preview'}
 
 
 def get_group(name, tier=None):
     group = Group.objects.get_or_create(name=name)[0]
-    tier = tier or TEST_GROUP_TIERS.get(name)
     if tier:
         GroupCapacityTier.objects.update_or_create(group=group, defaults={'tier': tier})
     return group
 
 
-def make_user(group=None, **kwargs):
+def get_tier_group(tier):
+    return get_group(f'group-{tier}', tier=tier)
+
+
+def make_user(group=None, tier=None, **kwargs):
     user = UserProfileFactory(**kwargs)
     if group:
         user.groups.add(get_group(group))
+    if tier:
+        user.groups.add(get_tier_group(tier))
     return user
 
 
@@ -249,20 +249,20 @@ class CapacityHelpersTest(OCLTestCase):
     def test_get_tier(self):
         self.assertEqual(get_tier(make_user(is_staff=True)), 'staff')
         self.assertEqual(get_tier(make_user(is_superuser=True)), 'staff')
-        self.assertEqual(get_tier(make_user(CORE_USER_GROUP)), 'core')
-        self.assertEqual(get_tier(make_user(EARLY_ACCESS_GROUP)), 'early_access')
-        self.assertEqual(get_tier(make_user(PREVIEW_GROUP_NAME)), 'preview')
+        self.assertEqual(get_tier(make_user(tier=TIER_CORE)), 'core')
+        self.assertEqual(get_tier(make_user(tier=TIER_EARLY_ACCESS)), 'early_access')
+        self.assertEqual(get_tier(make_user(tier=TIER_PREVIEW)), 'preview')
         self.assertEqual(get_tier(make_user()), 'preview')
-        user = make_user(PREVIEW_GROUP_NAME)
-        user.groups.add(get_group(CORE_USER_GROUP))
+        user = make_user(tier=TIER_PREVIEW)
+        user.groups.add(get_tier_group(TIER_CORE))
         self.assertEqual(get_tier(user), 'core')
 
     def test_get_tier_comes_from_the_groups_tier_not_its_name(self):
         get_group('group_a', tier='early_access')
         self.assertEqual(get_tier(make_user('group_a')), 'early_access')
         self.assertEqual(get_tier(make_user('group_without_tier')), 'preview')
-        user = make_user(CORE_USER_GROUP)
-        GroupCapacityTier.objects.filter(group__name=CORE_USER_GROUP).delete()
+        user = make_user(tier=TIER_CORE)
+        GroupCapacityTier.objects.filter(group__name='group-core').delete()
         self.assertEqual(get_tier(user), 'preview')
 
     def test_get_tier_is_the_highest_of_the_users_groups(self):
@@ -340,7 +340,7 @@ class CapacityHelpersTest(OCLTestCase):
 
 class CapacityGateTest(CapacityTestMixin, OCLTestCase):
     def test_admits_and_counts_a_call_in_every_lane(self):
-        user = make_user(EARLY_ACCESS_GROUP)
+        user = make_user(tier=TIER_EARLY_ACCESS)
 
         gate = self.acquire(user)
 
@@ -362,7 +362,7 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
         self.assertEqual(len(self.lines()), 1)
 
     def test_shadow_mode_never_refuses_but_says_it_would_have(self):
-        user = make_user(PREVIEW_GROUP_NAME)
+        user = make_user(tier=TIER_PREVIEW)
 
         first = self.acquire(user)
         second = self.acquire(user)
@@ -377,7 +377,7 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
 
     def test_enforce_mode_refuses_without_taking_a_lease(self):
         self.configure(mode='enforce', enforce_for='all')
-        user = make_user(PREVIEW_GROUP_NAME)
+        user = make_user(tier=TIER_PREVIEW)
 
         first = self.acquire(user)
         second = self.acquire(user)
@@ -401,7 +401,7 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
 
     def test_enforce_for_aware_refuses_only_clients_that_say_they_handle_it(self):
         self.configure(mode='enforce')
-        user = make_user(PREVIEW_GROUP_NAME)
+        user = make_user(tier=TIER_PREVIEW)
         self.acquire(user)
 
         unaware = self.acquire(user, metadata={'algorithm_id': 'ocl-semantic'})
@@ -413,7 +413,7 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
         self.assertTrue(aware.enforced)
 
     def test_a_stale_lease_expires(self):
-        user = make_user(PREVIEW_GROUP_NAME)
+        user = make_user(tier=TIER_PREVIEW)
         # a lease left by a worker that died: its expiry has passed
         self.redis.zadd(lane_key(LANE_USER, user.id), {'dead-worker': 1000})
 
@@ -424,11 +424,11 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
 
     def test_single_row_calls_can_use_the_reserved_slot(self):
         self.configure(mode='enforce', enforce_for='all', api_heavy={'cluster': 2, 'per_task': 5})
-        bulk = self.acquire(make_user(CORE_USER_GROUP))
+        bulk = self.acquire(make_user(tier=TIER_CORE))
 
-        second_bulk = self.acquire(make_user(CORE_USER_GROUP))
-        single_row = self.acquire(make_user(CORE_USER_GROUP), rows=1)
-        rerank = self.acquire(make_user(CORE_USER_GROUP), endpoint=ENDPOINT_RERANK, rows=1, semantic=False)
+        second_bulk = self.acquire(make_user(tier=TIER_CORE))
+        single_row = self.acquire(make_user(tier=TIER_CORE), rows=1)
+        rerank = self.acquire(make_user(tier=TIER_CORE), endpoint=ENDPOINT_RERANK, rows=1, semantic=False)
 
         self.assertEqual(bulk.decision, DECISION_ADMITTED)
         self.assertEqual(bulk.limits[LANE_API_HEAVY], 1)
@@ -442,10 +442,10 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
     def test_each_api_task_has_its_own_lane(self):
         self.configure(mode='enforce', enforce_for='all', api_heavy={'cluster': 4, 'per_task': 1}, reserve_single_row=0)
         with override_settings(CAPACITY_TASK_ID='task-a'):
-            first = self.acquire(make_user(CORE_USER_GROUP))
-            second = self.acquire(make_user(CORE_USER_GROUP))
+            first = self.acquire(make_user(tier=TIER_CORE))
+            second = self.acquire(make_user(tier=TIER_CORE))
         with override_settings(CAPACITY_TASK_ID='task-b'):
-            other_task = self.acquire(make_user(CORE_USER_GROUP))
+            other_task = self.acquire(make_user(tier=TIER_CORE))
 
         self.assertEqual(first.decision, DECISION_ADMITTED)
         self.assertEqual((second.decision, second.full), (DECISION_REFUSED, [LANE_API_HEAVY_TASK]))
@@ -454,11 +454,11 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
 
     def test_tier_ceilings_leave_other_tiers_alone(self):
         self.configure(mode='enforce', enforce_for='all', api_heavy={'cluster': 10, 'per_task': 10}, es2_knn=10)
-        self.acquire(make_user(PREVIEW_GROUP_NAME))
-        self.acquire(make_user(PREVIEW_GROUP_NAME))
+        self.acquire(make_user(tier=TIER_PREVIEW))
+        self.acquire(make_user(tier=TIER_PREVIEW))
 
-        third_preview = self.acquire(make_user(PREVIEW_GROUP_NAME))
-        early_access = self.acquire(make_user(EARLY_ACCESS_GROUP))
+        third_preview = self.acquire(make_user(tier=TIER_PREVIEW))
+        early_access = self.acquire(make_user(tier=TIER_EARLY_ACCESS))
 
         self.assertEqual((third_preview.decision, third_preview.full), (DECISION_REFUSED, [LANE_TIER]))
         self.assertEqual(third_preview.counts[LANE_TIER], 2)
@@ -467,10 +467,10 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
 
     def test_only_semantic_calls_take_an_es2_knn_lane(self):
         self.configure(mode='enforce', enforce_for='all', es2_knn=1)
-        semantic = self.acquire(make_user(CORE_USER_GROUP))
+        semantic = self.acquire(make_user(tier=TIER_CORE))
 
-        semantic_again = self.acquire(make_user(CORE_USER_GROUP))
-        reranked_lexical = self.acquire(make_user(CORE_USER_GROUP), semantic=False, reranker=True)
+        semantic_again = self.acquire(make_user(tier=TIER_CORE))
+        reranked_lexical = self.acquire(make_user(tier=TIER_CORE), semantic=False, reranker=True)
 
         self.assertIn(LANE_ES2_KNN, semantic.limits)
         self.assertEqual((semantic_again.decision, semantic_again.full), (DECISION_REFUSED, [LANE_ES2_KNN]))
@@ -480,7 +480,7 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
     def test_a_paused_tier(self):
         self.configure(mode='enforce', enforce_for='all', tiers={'preview': 0})
 
-        gate = self.acquire(make_user(PREVIEW_GROUP_NAME))
+        gate = self.acquire(make_user(tier=TIER_PREVIEW))
 
         self.assertEqual((gate.decision, gate.full), (DECISION_REFUSED, [LANE_TIER]))
         self.assertEqual(gate.retry_after, 120)
@@ -490,9 +490,9 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
     def test_a_paused_lane_is_the_scope_reported(self):
         self.configure(mode='enforce', enforce_for='all', reserve_single_row=0,
                        api_heavy={'cluster': 1, 'per_task': 5}, tiers={'preview': 0})
-        self.acquire(make_user(CORE_USER_GROUP))
+        self.acquire(make_user(tier=TIER_CORE))
 
-        gate = self.acquire(make_user(PREVIEW_GROUP_NAME))
+        gate = self.acquire(make_user(tier=TIER_PREVIEW))
 
         self.assertEqual(gate.full, [LANE_API_HEAVY, LANE_TIER])
         self.assertEqual(gate.scope, LANE_TIER)
@@ -502,7 +502,7 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
 
     def test_retry_after_grows_with_the_calls_ahead_up_to_the_max(self):
         self.configure(tiers={'core': 10}, per_user={'core': 10}, api_heavy={'cluster': 10, 'per_task': 10})
-        user = make_user(CORE_USER_GROUP)
+        user = make_user(tier=TIER_CORE)
         gates = [self.acquire(user, semantic=False, reranker=True) for _ in range(12)]
 
         # bulk calls get 9 of the cluster's 10
@@ -511,18 +511,18 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
         self.assertEqual(self.acquire(user, semantic=False, reranker=True).retry_after, 12)
 
     def test_suggested_concurrency(self):
-        core = make_user(CORE_USER_GROUP)
+        core = make_user(tier=TIER_CORE)
 
         first = self.acquire(core)
         self.assertEqual(first.get_suggested_concurrency(), 3)  # alone: up to the per-user limit
-        second = self.acquire(make_user(CORE_USER_GROUP))
+        second = self.acquire(make_user(tier=TIER_CORE))
         self.assertEqual(second.get_suggested_concurrency(), 2)  # its own + the 1 bulk slot left in the cluster
-        preview = self.acquire(make_user(PREVIEW_GROUP_NAME))
+        preview = self.acquire(make_user(tier=TIER_PREVIEW))
         self.assertEqual(preview.get_suggested_concurrency(), 1)  # never below 1 unless paused
         self.assertIsNone(CapacityGate(Mock(), ENDPOINT_MATCH).get_suggested_concurrency())
 
     def test_renewal_extends_every_lease_or_none(self):
-        gate = self.acquire(make_user(PREVIEW_GROUP_NAME))
+        gate = self.acquire(make_user(tier=TIER_PREVIEW))
         key = lane_key(LANE_USER, gate.request.user.id)
         soon = time.time() * 1000 + 5000
         for lane_key_ in gate.keys:
@@ -578,7 +578,7 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
         gate.renew.assert_not_called()
 
     def test_a_call_starts_a_renewer_and_release_stops_it(self):
-        gate = self.acquire(make_user(PREVIEW_GROUP_NAME))
+        gate = self.acquire(make_user(tier=TIER_PREVIEW))
 
         self.assertTrue(gate.renewer.is_alive())
         gate.release()
@@ -589,24 +589,24 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
         broken.register_script.return_value = Mock(side_effect=redis.ConnectionError('refused'))
         RedisLanes.use_client(broken)
 
-        gate = self.acquire(make_user(PREVIEW_GROUP_NAME))
+        gate = self.acquire(make_user(tier=TIER_PREVIEW))
 
         self.assertEqual(gate.decision, DECISION_UNAVAILABLE)
         self.assertFalse(gate.holding)
         self.assertEqual(gate.error, 'ConnectionError: refused')
         self.assertFalse(RedisLanes.is_available())
 
-        skipped = self.acquire(make_user(PREVIEW_GROUP_NAME))
+        skipped = self.acquire(make_user(tier=TIER_PREVIEW))
         self.assertEqual(skipped.decision, DECISION_UNAVAILABLE)
         self.assertEqual(broken.register_script.return_value.call_count, 1)
         self.assertEqual(skipped.get_suggested_concurrency(), 1)
 
         RedisLanes.unavailable_until = 0.0
-        self.acquire(make_user(PREVIEW_GROUP_NAME))
+        self.acquire(make_user(tier=TIER_PREVIEW))
         self.assertEqual(broken.register_script.return_value.call_count, 2)
 
     def test_a_failed_release_or_renewal_is_logged_not_raised(self):
-        gate = self.acquire(make_user(PREVIEW_GROUP_NAME))
+        gate = self.acquire(make_user(tier=TIER_PREVIEW))
         with patch.object(RedisLanes, 'renew', side_effect=redis.TimeoutError('slow')):
             gate.renew()
         self.assertEqual(gate.error, 'TimeoutError: slow')
@@ -619,7 +619,7 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
         self.assertFalse(RedisLanes.is_available())
 
     def test_renewal_and_release_skip_redis_after_it_failed(self):
-        gate = self.acquire(make_user(PREVIEW_GROUP_NAME))
+        gate = self.acquire(make_user(tier=TIER_PREVIEW))
         RedisLanes.mark_unavailable()
 
         with patch.object(RedisLanes, 'renew') as renew_mock, patch.object(RedisLanes, 'release') as release_mock:
@@ -633,7 +633,7 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
 
     def test_a_renewer_that_fails_to_start_still_releases(self):
         with patch.object(LeaseRenewer, 'start', side_effect=RuntimeError("can't start new thread")):
-            gate = self.acquire(make_user(PREVIEW_GROUP_NAME))
+            gate = self.acquire(make_user(tier=TIER_PREVIEW))
 
         self.assertEqual(gate.decision, DECISION_ADMITTED)
         self.assertIsNone(gate.renewer)
@@ -651,7 +651,7 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
             self.assertEqual(self.redis.zcard(key), 0)
 
         with patch('core.capacity.limiter.get_not_after_ms', return_value=int(time.time() * 1000) - 5000):
-            gate = self.acquire(make_user(PREVIEW_GROUP_NAME))
+            gate = self.acquire(make_user(tier=TIER_PREVIEW))
         self.assertEqual(gate.decision, DECISION_UNAVAILABLE)
         self.assertFalse(gate.holding)
         self.assertIn('no lease was taken', gate.error)
@@ -661,7 +661,7 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
         self.redis.zadd(lane_key(LANE_API_HEAVY), {'long-lease': time.time() * 1000 + 600000})
         self.redis.pexpire(lane_key(LANE_API_HEAVY), 1200000)
 
-        gate = self.acquire(make_user(PREVIEW_GROUP_NAME))
+        gate = self.acquire(make_user(tier=TIER_PREVIEW))
         gate.renew()
 
         self.assertGreater(self.redis.pttl(lane_key(LANE_API_HEAVY)), 600000)
@@ -674,7 +674,7 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
 
         with patch.object(RedisLanes, 'run_script', side_effect=hang):
             started = time.monotonic()
-            gate = self.acquire(make_user(PREVIEW_GROUP_NAME))
+            gate = self.acquire(make_user(tier=TIER_PREVIEW))
             elapsed = time.monotonic() - started
 
         self.assertLess(elapsed, 0.4)
@@ -703,7 +703,7 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
         self.configure(mode='enforce', enforce_for='all', per_user={'preview': 0})
 
         with patch.object(CapacityGate, 'get_retry_after', side_effect=ValueError('bad math')):
-            gate = self.acquire(make_user(PREVIEW_GROUP_NAME))
+            gate = self.acquire(make_user(tier=TIER_PREVIEW))
 
         self.assertEqual(gate.decision, DECISION_UNAVAILABLE)
         self.assertFalse(gate.refused)
@@ -711,7 +711,7 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
 
     def test_an_unexpected_error_fails_open(self):
         with patch('core.capacity.limiter.get_tier', side_effect=KeyError('tier')):
-            gate = self.acquire(make_user(PREVIEW_GROUP_NAME))
+            gate = self.acquire(make_user(tier=TIER_PREVIEW))
 
         self.assertEqual(gate.decision, DECISION_UNAVAILABLE)
         self.assertEqual(gate.error, "KeyError: 'tier'")
@@ -722,7 +722,7 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
     def test_off_mode_does_nothing(self):
         self.configure(mode='off')
         with patch.object(RedisLanes, 'acquire') as acquire_mock:
-            gate = self.acquire(make_user(PREVIEW_GROUP_NAME))
+            gate = self.acquire(make_user(tier=TIER_PREVIEW))
         response = {}
 
         gate.apply_headers(response)
@@ -735,7 +735,7 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
 
     def test_headers(self):
         self.configure(mode='enforce', enforce_for='all')
-        user = make_user(PREVIEW_GROUP_NAME)
+        user = make_user(tier=TIER_PREVIEW)
         admitted, refused = self.acquire(user), self.acquire(user)
         admitted_headers, refused_headers = {}, {}
 
@@ -755,7 +755,7 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
         self.assertEqual(admitted.error, 'ValueError: bad header')
 
     def test_the_log_line(self):
-        user = make_user(PREVIEW_GROUP_NAME)
+        user = make_user(tier=TIER_PREVIEW)
         self.acquire(user)
         received = int(time.time()) - 3
         gate = self.acquire(
@@ -780,7 +780,7 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
 
     def test_a_failing_log_line_never_fails_the_call(self):
         self.limiter_emit.side_effect = OSError('stdout closed')
-        gate = self.acquire(make_user(PREVIEW_GROUP_NAME))
+        gate = self.acquire(make_user(tier=TIER_PREVIEW))
 
         gate.release()
 
@@ -788,8 +788,8 @@ class CapacityGateTest(CapacityTestMixin, OCLTestCase):
 
     def test_status(self):
         with override_settings(CAPACITY_TASK_ID='task-a'):
-            gate = self.acquire(make_user(PREVIEW_GROUP_NAME))
-            self.acquire(make_user(CORE_USER_GROUP), semantic=False, reranker=True)
+            gate = self.acquire(make_user(tier=TIER_PREVIEW))
+            self.acquire(make_user(tier=TIER_CORE), semantic=False, reranker=True)
 
         state = get_status()
 
@@ -809,7 +809,7 @@ class CapacityViewsTest(CapacityTestMixin, OCLAPITestCase):
     def setUp(self):
         super().setUp()
         self.staff = make_user(is_staff=True)
-        self.preview_user = make_user(PREVIEW_GROUP_NAME)
+        self.preview_user = make_user(PREVIEW_GROUP_NAME, tier=TIER_PREVIEW)  # the group grants mapper_use
 
     def post(self, path, data, user=None, **extra):
         return self.client.post(
@@ -1018,7 +1018,7 @@ class CapacityCommandTest(CapacityTestMixin, OCLTestCase):
         self.assertIn(user.username, history)
 
     def test_status(self):
-        self.acquire(make_user(PREVIEW_GROUP_NAME))
+        self.acquire(make_user(tier=TIER_PREVIEW))
 
         self.assertEqual(json.loads(self.run_command('status'))[LANE_API_HEAVY]['in_flight'], 1)
 

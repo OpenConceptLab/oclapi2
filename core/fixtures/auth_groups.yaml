@@ -54,8 +54,9 @@
     codename: list_unpaginated
     name: Can request unpaginated (Compress) list responses
     content_type: [users, userprofile]
+# No pk: ids from 1009 on belong to permissions Django created for later models, so loaddata
+# matches this one by its natural key (codename + content type).
 - model: "auth.permission"
-  pk: 1009
   fields:
     codename: mapper_ai_output_locale
     name: Can choose the Mapper AI Assistant's output language
