@@ -4702,4 +4702,8 @@ class ConceptListIncludeMappingsTest(OCLAPITestCase):
         batched = self.client.get(url).data
         with patch.object(ConceptAbstractSerializer, 'preload_page', lambda *args: None):
             per_concept = self.client.get(url).data
-        self.assertEqual(batched, per_concept)
+        # plain lists, so a failure shows the differing element
+        self.assertEqual(list(batched), list(per_concept))
+        for row in batched:
+            mapping_ids = [int(mapping['uuid']) for mapping in row['mappings']]
+            self.assertEqual(mapping_ids, sorted(mapping_ids))

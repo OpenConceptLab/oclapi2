@@ -297,7 +297,7 @@ class ConceptAbstractSerializer(SourceVersionFieldMixin, AbstractResourceSeriali
             ) if is_collection else obj.get_bidirectional_mappings()
             if not include_retired:
                 mappings = mappings.filter(retired=False)
-            return serializer_class(mappings, many=True).data
+            return serializer_class(mappings.order_by('id'), many=True).data
         if self.include_direct_mappings:
             mappings = obj.get_unidirectional_mappings_for_collection(
                 parent_uri, collection_version) if is_collection else obj.get_unidirectional_mappings()
@@ -307,7 +307,7 @@ class ConceptAbstractSerializer(SourceVersionFieldMixin, AbstractResourceSeriali
                 mappings = mappings.filter(to_source_url__in=target_repo_urls)
             if not include_retired:
                 mappings = mappings.filter(retired=False)
-            return serializer_class(mappings, many=True).data
+            return serializer_class(mappings.order_by('id'), many=True).data
 
         return []
 
@@ -726,11 +726,11 @@ class ConceptVersionDetailSerializer(CollectionVersionsMixin, SourceVersionField
             mappings = obj.get_bidirectional_mappings_for_collection(
                 parent_uri, collection_version
             ) if is_collection else obj.get_bidirectional_mappings()
-            return MappingDetailSerializer(mappings, many=True, context=context).data
+            return MappingDetailSerializer(mappings.order_by('id'), many=True, context=context).data
         if self.include_direct_mappings:
             mappings = obj.get_unidirectional_mappings_for_collection(
                 parent_uri, collection_version) if is_collection else obj.get_unidirectional_mappings()
-            return MappingDetailSerializer(mappings, many=True, context=context).data
+            return MappingDetailSerializer(mappings.order_by('id'), many=True, context=context).data
 
         return []
 
