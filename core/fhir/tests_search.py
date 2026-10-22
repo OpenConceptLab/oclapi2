@@ -978,6 +978,78 @@ class ReadTest(SearchCorpusMixin, OCLTestCase):
         with self.assertNumQueries(2):  # the version, its mappings
             self.read(f'/fhir/ConceptMap/{self.ciel_v2.id}')
 
+    def test_value_set_compose_caps_only_concept_references(self):
+        for code in ('M1', 'M2', 'M3'):
+            self.ciel_vs_v1.references.create(expression=code, reference_type='mappings', system=CIEL, code=code)
+        with patch('core.value_sets.serializers.REFERENCE_LIMIT', 2):
+            with self.assertNumQueries(2):
+                resource = self.read(f'/fhir/ValueSet/{self.ciel_vs_v1.id}')
+            self.assertNotIn('compose', resource)
+            self.assertNotIn('tag', resource['meta'])
+
+            for count, code in enumerate(('C', 'B', 'A'), 1):
+                self.ciel_vs_v1.references.create(expression=code, reference_type='concepts', system=CIEL,
+                                                 code=code, include=code != 'B')
+                with self.assertNumQueries(2) as queries:
+                    resource = self.read(f'/fhir/ValueSet/{self.ciel_vs_v1.id}')
+
+                self.assertEqual(resource['compose']['include'], [{'system': CIEL, 'concept': [{'code': 'C'}]}])
+                if count == 1:
+                    self.assertNotIn('exclude', resource['compose'])
+                else:
+                    self.assertEqual(resource['compose']['exclude'], [{'system': CIEL, 'concept': [{'code': 'B'}]}])
+                if count > 2:
+                    self.assertEqual(resource['meta']['tag'], [SUBSETTED])
+                else:
+                    self.assertNotIn('tag', resource['meta'])
+                self.assertIn('lastUpdated', resource['meta'])
+                self.assertEqual(resource['meta']['versionId'], str(self.ciel_vs_v1.id))
+                self.assertIn('LIMIT 3', queries.captured_queries[-1]['sql'])
+
+    def test_concept_map_group_caps_only_live_mappings(self):
+        for flags in ({'retired': True}, {'is_active': False}):
+            MappingFactory(parent=self.ciel_source, from_source=self.ciel_source, to_source=self.sehat_icd,
+                           sources=[self.ciel_v2], **flags)
+        with patch('core.concept_maps.serializers.MAPPING_LIMIT', 2):
+            with self.assertNumQueries(2):
+                resource = self.read(f'/fhir/ConceptMap/{self.ciel_v2.id}')
+            self.assertNotIn('group', resource)
+            self.assertNotIn('tag', resource['meta'])
+
+            for count, code in enumerate(('C', 'B', 'A'), 1):
+                MappingFactory(parent=self.ciel_source, from_source=self.ciel_source, to_source=self.sehat_icd,
+                               from_concept_code='1', to_concept_code=code, sources=[self.ciel_v2])
+                with self.assertNumQueries(2) as queries:
+                    resource = self.read(f'/fhir/ConceptMap/{self.ciel_v2.id}')
+
+                targets = [target['code'] for group in resource['group'] for element in group['element']
+                           for target in element['target']]
+                self.assertEqual(targets, ['C'] if count == 1 else ['C', 'B'])
+                if count > 2:
+                    self.assertEqual(resource['meta']['tag'], [SUBSETTED])
+                else:
+                    self.assertNotIn('tag', resource['meta'])
+                self.assertIn('lastUpdated', resource['meta'])
+                self.assertEqual(resource['meta']['versionId'], str(self.ciel_v2.id))
+                self.assertIn('LIMIT 3', queries.captured_queries[-1]['sql'])
+
+    def test_subsetted_reads_keep_existing_metadata(self):
+        tag = {'system': 'http://example.org/tags', 'code': 'example'}
+        meta = {'lastUpdated': '2026-01-01T00:00:00Z', 'tag': [tag]}
+        for code in ('A', 'B'):
+            self.ciel_vs_v1.references.create(expression=code, reference_type='concepts', system=CIEL, code=code)
+            MappingFactory(parent=self.ciel_source, from_source=self.ciel_source, to_source=self.sehat_icd,
+                           from_concept_code='1', to_concept_code=code, sources=[self.ciel_v2])
+        for resource_type, version, module, serializer, limit in (
+                ('ValueSet', self.ciel_vs_v1, 'value_sets', 'ValueSetDetailSerializer', 'REFERENCE_LIMIT'),
+                ('ConceptMap', self.ciel_v2, 'concept_maps', 'ConceptMapDetailSerializer', 'MAPPING_LIMIT')):
+            with patch(f'core.{module}.serializers.{limit}', 1), \
+                    patch(f'core.{module}.serializers.{serializer}.get_meta', return_value=meta):
+                resource = self.read(f'/fhir/{resource_type}/{version.id}')
+
+            self.assertEqual(resource['meta'], {**meta, 'versionId': str(version.id), 'tag': [tag, SUBSETTED]})
+            self.assertEqual(meta['tag'], [tag])
+
     def test_writes_keep_the_owner_check(self):
         client = APIClient()
         client.force_authenticate(self.admin)

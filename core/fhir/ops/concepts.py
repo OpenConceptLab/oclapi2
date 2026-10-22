@@ -104,15 +104,19 @@ def system_of(version, named=None):
 def instance_version(resource_type, instance_id, version, kwargs, user):
     """
     The repository version an instance-level operation is on: as a read finds it (a release: at the global base the
-    opaque id's, at an owner base the mnemonic's `version`, else the newest shown); or, at an owner base with HEAD
-    named, HEAD through core.fhir.resolve, with its visibility rule (design D6). A global id names a release, so a
-    HEAD named there is left to the caller's version check. Not found is a read's 404.
+    opaque id's, at an owner base the mnemonic's `version`, else the newest shown). At an owner base, HEAD and a named
+    version the read doesn't find go through core.fhir.resolve, with its visibility rule. A global id names a release,
+    so any version named there is left to the caller's version check. Not found is a read's 404.
     """
     namespace = namespace_of(kwargs)
     if namespace is None or version != HEAD:
-        return read_version(resource_type, instance_id, version, kwargs, user)
+        try:
+            return read_version(resource_type, instance_id, version, kwargs, user)
+        except outcomes.NotFoundError:
+            if namespace is None or not version:
+                raise
     try:
-        return resolve(resource_type, f'{namespace}{REPO_PATHS[resource_type]}/{instance_id}/', HEAD, kwargs, user)
+        return resolve(resource_type, f'{namespace}{REPO_PATHS[resource_type]}/{instance_id}/', version, kwargs, user)
     except UnresolvedError as ex:
         raise outcomes.NotFoundError(f'{resource_type}/{instance_id} not found') from ex
 

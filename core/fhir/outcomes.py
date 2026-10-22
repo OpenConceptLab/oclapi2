@@ -197,12 +197,6 @@ class NotSupportedError(FhirError):
     default_detail = 'The request uses something this server does not support.'
 
 
-class MultipleMatchesError(FhirError):
-    status_code = status.HTTP_400_BAD_REQUEST
-    issue_code = 'multiple-matches'
-    default_detail = 'More than one resource matches the request.'
-
-
 class TooCostlyError(FhirError):
     status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
     issue_code = 'too-costly'

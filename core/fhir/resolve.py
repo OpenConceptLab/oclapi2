@@ -155,8 +155,8 @@ def held_version(repo_type, url, version, namespace, user):
     shows (their active HEAD has it, isn't retired, and has a live release the caller is shown; at an owner base, the
     owner's), as resolve() serves a version named when the repository the resolver picks serves no release of it: a
     release (retired or not), of the lowest-id repository holding one; else the version so named (unreleased, or HEAD)
-    of the lowest-id repository; None without either. Its repository's access is set on it, as the resolver sets it.
-    One query, whatever the number of repositories; what the caller isn't shown is left out in it.
+    of the lowest-id repository; None without either. Its repository's access and canonical URL are set on it, as the
+    resolver sets them. One query, whatever the number of repositories; what the caller isn't shown is left out in it.
     """
     shown = shown_q(namespace, user)
     owner = {}
@@ -175,7 +175,7 @@ def held_version(repo_type, url, version, namespace, user):
     ).filter(release | Q(head_id=Subquery(heads.order_by('id').values('id')[:1])), head_id__isnull=False).order_by(
         Case(When(release, then=Value(0)), default=Value(1)), 'head_id').first()
     if held:
-        held.is_fqdn, held.resolution_url = True, url
+        held.is_fqdn, held.resolution_url, held.repository_canonical_url = True, url, url
         held.canonical_url = held.canonical_url or url
     return held
 
@@ -213,6 +213,7 @@ def latest_public_release(instance):
         **owner).exclude(version=HEAD).order_by('-created_at').first()
     if latest:
         latest.repository_public_access = repository_access(instance)
+        latest.repository_canonical_url = getattr(instance, 'repository_canonical_url', None)
         latest.is_fqdn, latest.resolution_url = instance.is_fqdn, instance.resolution_url
         if instance.is_fqdn and not latest.canonical_url:
             latest.canonical_url = instance.resolution_url
@@ -266,13 +267,16 @@ def is_public(public_access):
 def repository_access(instance):
     """
     The public_access of a version's repository, its active HEAD's, or None without one. A read (with_repository_access)
-    and the resolver (resolve_repo) set it on the version they find, so it isn't looked up again.
+    and the resolver (resolve_repo) set it on the version they find, so it isn't looked up again; with the canonical
+    URL of its repository, which the HEAD looked up here gives the version too (one an OCL path names itself).
     """
     if instance.is_head:
         return instance.public_access if instance.is_active else None
     if hasattr(instance, 'repository_public_access'):
         return instance.repository_public_access
     head = instance.head
+    if head and not hasattr(instance, 'repository_canonical_url'):
+        instance.repository_canonical_url = head.canonical_url
     return head.public_access if head else None
 
 

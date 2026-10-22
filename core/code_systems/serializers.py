@@ -15,22 +15,11 @@ from core.concepts.models import Concept, ConceptName
 from core.concepts.serializers import ConceptDetailSerializer
 from core.fhir import search as fhir_search
 from core.fhir.search import CanonicalUrlField, FhirRepositorySerializerMixin, TitleField
-from core.parameters.serializers import ParametersSerializer
 from core.sources.models import Source
 from core.sources.serializers import SourceCreateOrUpdateSerializer
 
 logger = logging.getLogger('oclapi')
 
-
-class ValidateCodeParametersSerializer(ParametersSerializer):
-    allowed_input_parameters = {
-        'url': 'valueUri',
-        'code': 'valueCode',
-        'display': 'valueString',
-        'version': 'valueString',
-        'systemVersion': 'valueString',
-        'system': 'valueUri'
-    }
 
 class CodeSystemConceptDesignationUseSerializer(serializers.Field):
     def to_internal_value(self, data):
