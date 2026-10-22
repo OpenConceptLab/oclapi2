@@ -80,12 +80,12 @@ def xml_parser():
 
 def is_fhir_path(path):
     """
-    Whether a path is under a FHIR base: the global /fhir/, or at an owner base a FHIR resource type, its metadata or
-    $versions.
+    Whether a path is under a FHIR base: the global /fhir/, or at an owner base (/orgs/{org}/, /users/{user}/) a FHIR
+    resource type, its metadata or $versions.
     """
     segments = path.strip('/').split('/')
-    return segments[0] == 'fhir' or (len(segments) >= 3 and segments[2] in RESOURCE_TYPES) or (
-        len(segments) == 3 and segments[0] in ('orgs', 'users') and segments[2] in OWNER_BASE_PATHS)
+    return segments[0] == 'fhir' or (len(segments) >= 3 and segments[0] in ('orgs', 'users') and (
+        segments[2] in RESOURCE_TYPES or (len(segments) == 3 and segments[2] in OWNER_BASE_PATHS)))
 
 
 def fhir_base_url(request, kwargs=None):
