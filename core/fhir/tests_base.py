@@ -610,7 +610,8 @@ class BaseUrlTest(SimpleTestCase):
         for path in ('/fhir', '/fhir/', '/fhir/metadata', '/fhir/CodeSystem/$lookup/', '/orgs/CIEL/CodeSystem',
                      '/orgs/CIEL/ValueSet/x/$expand/', '/users/jo/ConceptMap/$translate'):
             self.assertTrue(base.is_fhir_path(path), path)
-        for path in ('/', '/orgs/CIEL/', '/orgs/CIEL/sources/', '/fhirx/', '/version/'):
+        for path in ('/', '/orgs/CIEL/', '/orgs/CIEL/sources/', '/fhirx/', '/version/', '/user/sources/CodeSystem/',
+                     '/sources/x/ConceptMap/'):
             self.assertFalse(base.is_fhir_path(path), path)
 
 

@@ -44,7 +44,8 @@ class FhirMiddlewareTest(SimpleTestCase):
             self.assertEqual(response['Content-Type'], 'application/fhir+json', path)
             self.assertEqual(outcome_issue(response), 'error|not-found|not-found', path)
 
-        self.assertEqual(self.answer('/orgs/CIEL/sources/').content, b'ok')
+        for path in ('/orgs/CIEL/sources/', '/user/sources/CodeSystem/'):
+            self.assertEqual(self.answer(path).content, b'ok', path)
 
     @override_settings(FHIR_SUBDOMAIN='fhir')
     def test_other_paths_on_the_fhir_host_are_a_404_outcome(self):
