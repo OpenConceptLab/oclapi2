@@ -1,7 +1,8 @@
 from django.db.models import F
+from drf_yasg.utils import swagger_serializer_method
 from pydash import get, compact
 from rest_framework.fields import CharField, DateTimeField, BooleanField, URLField, JSONField, SerializerMethodField, \
-    UUIDField, ListField, IntegerField, ReadOnlyField
+    UUIDField, ListField, IntegerField, ReadOnlyField, DictField
 from rest_framework.serializers import ModelSerializer
 
 from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPINGS_PARAM, INCLUDE_EXTRAS_PARAM, \
@@ -222,6 +223,7 @@ class ConceptAbstractSerializer(SourceVersionFieldMixin, AbstractResourceSeriali
         super().__init__(*args, **kwargs)
 
     @staticmethod
+    @swagger_serializer_method(serializer_or_field=DictField(child=CharField()))
     def get_checksums(obj):
         return obj.get_checksums()
 
@@ -513,7 +515,7 @@ class ConceptDetailSerializer(ConceptAbstractSerializer):
     type = CharField(source='versioned_resource_type', read_only=True)
     id = EncodedDecodedCharField(source='mnemonic', required=False)
     source = CharField(source='parent_resource', read_only=True)
-    parent_id = UUIDField(write_only=True)
+    parent_id = UUIDField(write_only=True, required=False)
     owner = CharField(source='owner_name', read_only=True)
     created_on = DateTimeField(source='created_at', read_only=True)
     updated_on = DateTimeField(source='updated_at', read_only=True)
@@ -600,6 +602,7 @@ class ConceptVersionExportSerializer(ModelSerializer):
         )
 
     @staticmethod
+    @swagger_serializer_method(serializer_or_field=DictField(child=CharField()))
     def get_checksums(obj):
         return obj.get_checksums()
 

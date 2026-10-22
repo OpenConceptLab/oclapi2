@@ -18,3 +18,4 @@ class OCLSwaggerSchemaGenerator(OpenAPISchemaGenerator):
     """Use the OCL endpoint enumerator so Swagger paths match the published URLs."""
 
     endpoint_enumerator_class = OCLSwaggerEndpointEnumerator
+

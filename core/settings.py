@@ -184,6 +184,7 @@ SWAGGER_SETTINGS = {
         }
     },
     'DOC_EXPANSION': 'none',
+    'DEFAULT_PAGINATOR_INSPECTORS': ['core.common.swagger_pagination.HeaderPagedListInspector'],
     'DEFAULT_INFO': 'core.urls.api_info',
 }
 

@@ -1,9 +1,10 @@
 import json
 
 from django.core.validators import RegexValidator
+from drf_yasg.utils import swagger_serializer_method
 from pydash import get, compact
 from rest_framework.fields import CharField, IntegerField, DateTimeField, JSONField, ListField, \
-    BooleanField, SerializerMethodField
+    BooleanField, SerializerMethodField, DictField
 from rest_framework.relations import PrimaryKeyRelatedField
 from rest_framework.serializers import ModelSerializer, ValidationError
 
@@ -86,6 +87,7 @@ class SourceListSerializer(AbstractResourceSerializer):
         return summary
 
     @staticmethod
+    @swagger_serializer_method(serializer_or_field=DictField(child=CharField()))
     def get_checksums(obj):
         return obj.get_all_checksums()
 
@@ -133,10 +135,12 @@ class SourceVersionListSerializer(ModelSerializer):
         super().__init__(*args, **kwargs)
 
     @staticmethod
+    @swagger_serializer_method(serializer_or_field=DictField(child=CharField()))
     def get_checksums(obj):
         return obj.get_all_checksums()
 
     @staticmethod
+    @swagger_serializer_method(serializer_or_field=ListField(child=DictField()))
     def get_external_exports(obj):
         from core.repos.serializers import RepoExternalExportSerializer
         queryset = obj.external_exports.filter()
@@ -410,6 +414,7 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourc
     hierarchy_root = SerializerMethodField()
     hierarchy_root_url = CharField(source='hierarchy_root.url', required=False, allow_blank=True, allow_null=True)
     filters = ListField(required=False, allow_null=True)
+    logo_url = CharField(read_only=True, allow_null=True)
 
     class Meta:
         model = Source
@@ -572,6 +577,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
         return tasks
 
     @staticmethod
+    @swagger_serializer_method(serializer_or_field=ListField(child=DictField()))
     def get_external_exports(obj):
         from core.repos.serializers import RepoExternalExportSerializer
         queryset = obj.external_exports.filter()
