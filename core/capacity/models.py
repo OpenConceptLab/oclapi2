@@ -20,3 +20,16 @@ class CapacityConfig(models.Model):
     @classmethod
     def get_latest(cls):
         return cls.objects.order_by('-id').first()
+
+
+class GroupCapacityTier(models.Model):
+    """
+    The capacity tier a group's members get (OpenConceptLab/ocl_online#517), from `capacity_tier` in the groups
+    config, which `seed_group_capabilities` syncs. A user gets the highest tier of their groups; core.capacity.limiter
+    never reads group names.
+    """
+    class Meta:
+        db_table = 'group_capacity_tiers'
+
+    group = models.OneToOneField('auth.Group', on_delete=models.CASCADE, related_name='capacity_tier')
+    tier = models.CharField(max_length=32)
