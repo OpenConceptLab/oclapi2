@@ -20,7 +20,7 @@ from core.common.utils import to_parent_uri
 from core.concepts.models import Concept
 from core.fhir import outcomes
 from core.fhir.resolve import REPO_PATHS, UnresolvedError, namespace_of, resolve, to_ocl_path
-from core.fhir.search import read_version
+from core.fhir.search import read_version, with_repository_canonical
 
 # A code, as an operation is given it; `parameter` is the Coding parameter it came in, None for separate parameters
 Coding = namedtuple('Coding', 'system code version display parameter')
@@ -105,8 +105,9 @@ def instance_version(resource_type, instance_id, version, kwargs, user):
     """
     The repository version an instance-level operation is on: as a read finds it (a release: at the global base the
     opaque id's, at an owner base the mnemonic's `version`, else the newest shown). At an owner base, HEAD and a named
-    version the read doesn't find go through core.fhir.resolve, with its visibility rule. A global id names a release,
-    so any version named there is left to the caller's version check. Not found is a read's 404.
+    version the read doesn't find go through core.fhir.resolve, with its visibility rule; a named version without its
+    own canonical URL has its repository's, as on a read. A global id names a release, so any version named there is
+    left to the caller's version check. Not found is a read's 404.
     """
     namespace = namespace_of(kwargs)
     if namespace is None or version != HEAD:
@@ -116,9 +117,14 @@ def instance_version(resource_type, instance_id, version, kwargs, user):
             if namespace is None or not version:
                 raise
     try:
-        return resolve(resource_type, f'{namespace}{REPO_PATHS[resource_type]}/{instance_id}/', version, kwargs, user)
+        instance = resolve(
+            resource_type, f'{namespace}{REPO_PATHS[resource_type]}/{instance_id}/', version, kwargs, user)
     except UnresolvedError as ex:
         raise outcomes.NotFoundError(f'{resource_type}/{instance_id} not found') from ex
+    if version != HEAD and not instance.canonical_url:  # its repository's, as a read gives it
+        instance.repository_canonical_url = with_repository_canonical(type(instance).objects.filter(
+            id=instance.id)).values_list('repository_canonical_url', flat=True).first()
+    return instance
 
 
 def is_system_of(system, version, named=None):

@@ -463,6 +463,19 @@ class LookupCases(OpsCorpusMixin):
         self.assert_outcome(self.get('CIEL/$lookup', base='/orgs/CIEL', user=self.moh_member,
                                     code='D1', version='missing'), 404, 'not-found', 'not-found')
 
+    def test_a_named_unreleased_instance_version_without_a_canonical_takes_its_repository_canonical(self):
+        draft = source(self.ciel_org, 'CIEL', 'v3')
+        ConceptFactory(parent=self.ciel, mnemonic='D1', sources=[draft],
+                       names=[name('In v3 only', preferred=True)])
+
+        response = self.get('CIEL/$lookup', base='/orgs/CIEL', system=CIEL, code='D1', version='v3')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        answer = self.by_name(response)
+        self.assertEqual(
+            (answer['system']['valueUri'], answer['version']['valueString'], answer['display']['valueString']),
+            (CIEL, 'v3', 'In v3 only'))
+
     def test_a_released_owner_instance_version_uses_three_queries(self):
         with self.assertNumQueries(3):
             response = self.get('CIEL/$lookup', base='/orgs/CIEL', code='999', version='v1')

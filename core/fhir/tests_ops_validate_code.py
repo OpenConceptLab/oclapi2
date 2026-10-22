@@ -530,6 +530,18 @@ class ValidateCodeCases(OpsCorpusMixin):
                                     user=self.moh_member, system=CIEL, code='999', valueSetVersion='missing'),
                             404, 'not-found', 'not-found')
 
+    def test_a_named_unreleased_value_set_instance_version_without_a_canonical_takes_its_repository_canonical(self):
+        draft = collection(self.acme, 'fevers', 'v2')
+        expansion = ExpansionFactory(mnemonic='autoexpand-v2', collection_version=draft)
+        expansion.concepts.add(self.older)
+        draft.expansion_uri = expansion.uri
+        draft.save()
+
+        answer = self.answer(self.get('fevers/$validate-code', base='/orgs/Acme', resource='ValueSet', url=FEVERS,
+                                      system=CIEL, code='999', valueSetVersion='v2'))
+
+        self.assertEqual((answer['result'], answer['display']), (True, 'Older code'))
+
     def test_a_released_owner_value_set_instance_version_uses_six_queries(self):
         with self.assertNumQueries(6):
             response = self.get('fevers/$validate-code', base='/orgs/Acme', resource='ValueSet',
