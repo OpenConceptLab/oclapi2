@@ -423,6 +423,22 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['active_mappings'], None)
         self.assertEqual(response.data['versions'], 1)
 
+    def test_get_200_include_concepts_ordered_by_id_desc(self):
+        concept1 = ConceptFactory()
+        concept2 = ConceptFactory()
+        coll = OrganizationCollectionFactory(mnemonic='coll1')
+        expansion = ExpansionFactory(collection_version=coll)
+        coll.expansion_uri = expansion.uri
+        coll.save()
+        expansion.concepts.add(concept1, concept2)
+
+        response = self.client.get(coll.uri + '?includeConcepts=true', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [c['version_url'] for c in response.data['concepts']],
+            [c.uri for c in sorted([concept1, concept2], key=lambda c: c.id, reverse=True)])
+
     def test_get_200_with_resources(self):
         concept = ConceptFactory()
         mapping = MappingFactory()
