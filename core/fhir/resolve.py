@@ -6,7 +6,8 @@ with or without the URL registry), with FHIR's rules on top.
 - Namespace: the base URL's. /fhir/ is global; /orgs/{org}/ and /users/{user}/ are that owner's. It comes from the
   route, never from the request.
 - Version: the one named (the operation's version parameter, else url|version, else the version an OCL path names;
-  a path naming one version with another named names none), HEAD included. With none named, the newest released
+  a path naming one version with another named names none), HEAD included, as it is stored: a request's value is
+  already decoded, so 2.0+build names 2.0+build. With none named, the newest released
   version the caller is shown, never HEAD. A repository with nothing released isn't visible, whatever version is
   named.
 - Access, after resolving: at the global base public repositories only, at an owner base what the caller may view.
@@ -16,16 +17,26 @@ with or without the URL registry), with FHIR's rules on top.
   none of its versions is read.
 
 Every failure is the same UnresolvedError, so it never tells a caller that a repository they can't see exists.
+
+served_repositories is the set form of the resolver's choices for code systems, for TerminologyCapabilities: the
+identifier each repository a search shows is served at, and the versions of it a caller is served.
 """
+from collections import namedtuple
+from urllib.parse import quote_plus
+
 from django.db.models import Exists, OuterRef, Q, Subquery
 from django.db.models.functions import Coalesce
+from rest_framework.exceptions import ValidationError
 
 from core.collections.models import Collection
 from core.common.constants import HEAD, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT
 from core.common.mixins import SourceContainerMixin
-from core.common.utils import normalize_public_access, to_parent_uri
+from core.common.serializers import IdentifierSerializer
+from core.common.utils import decode_string, is_canonical_uri, normalize_public_access, to_parent_uri
 from core.fhir.outcomes import NotFoundError
 from core.sources.models import Source
+from core.toggles.models import Toggle
+from core.url_registry.models import URLRegistry
 
 REPO_TYPES = {'CodeSystem': Source, 'ConceptMap': Source, 'ValueSet': Collection}
 REPO_PATHS = {'CodeSystem': 'sources', 'ConceptMap': 'sources', 'ValueSet': 'collections'}
@@ -72,7 +83,10 @@ def resolve(resource_type, url, version=None, kwargs=None, user=None, expression
     if not lookup_url or conflicting or (namespace and not SourceContainerMixin.get_object_from_namespace(namespace)):
         raise error
 
-    instance = shared_resolution(REPO_TYPES[resource_type], url, version, namespace, user)
+    # the version as named (HTTP has decoded the query already), so the shared resolver, which decodes it again,
+    # reads it back as it is stored: 2.0+build stays 2.0+build
+    instance = shared_resolution(
+        REPO_TYPES[resource_type], lookup_url, as_stored(elsewhere) if elsewhere else None, namespace, user)
     if instance.id and not (elsewhere or in_path) and not is_shown(instance, namespace, user):
         instance = latest_public_release(instance) or instance  # the newest release is private: the newest public one
 
@@ -291,3 +305,127 @@ def visible_versions(resource_type, kwargs=None, user=None, access=None):
     retired_beside_live = releases.filter(retired=True).filter(
         Exists(org_live.exclude(version=HEAD)) | Exists(user_live.exclude(version=HEAD)))
     return releases.filter(Q(retired=False) | Q(id__in=retired_beside_live.values('id')))
+
+
+REGISTRY_TOGGLE = 'URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE'  # whether the resolver consults the URL registry
+ServedHead = namedtuple(
+    'ServedHead', 'id mnemonic organization_id user_id canonical_url uri organization_uri user_uri')
+
+
+def is_looked_up_as_written(url):
+    """
+    Whether the resolver looks a canonical URL up as it is written (resolve_reference_expression's reading of a url):
+    one it takes for canonical (':'), with no |version or ?query part, that isn't an OCL path.
+    """
+    return bool(url) and is_canonical_uri(url) and '|' not in url and '?' not in url and to_ocl_path(url) == url
+
+
+def ocl_path(uri):
+    """
+    A repository's OCL path as a CodeSystem (/orgs/{org}/CodeSystem/{id}/), as $expand names the system of a member
+    without a canonical URL, if the resolver reads it back to the repository (`uri`), naming no version; else None.
+    """
+    try:
+        path = IdentifierSerializer.convert_ocl_uri_to_fhir_url(uri, 'CodeSystem')
+    except ValidationError:
+        return None
+    if is_canonical_uri(path):
+        return None
+    return path if to_parent_uri(to_ocl_path(path)) == uri else None
+
+
+def in_namespace(head, namespace):
+    """Whether a HEAD is the repository of the owner a registry entry's namespace names (get_object_from_namespace)."""
+    if namespace and '/orgs/' in namespace:
+        return head.organization_uri == namespace
+    if namespace and '/users/' in namespace:
+        return head.user_uri == namespace
+    return False
+
+
+def registry_entries(owner):
+    """(the owner's, the global registry's) active entries, each {url: namespace}, for an owner filter: one query."""
+    scope = Q(organization__isnull=True, user__isnull=True)
+    if owner:
+        scope |= Q(**owner)
+    own, shared = {}, {}
+    for url, namespace, organization_id, user_id in URLRegistry.objects.filter(is_active=True).filter(
+            scope).values_list('url', 'namespace', 'organization_id', 'user_id'):
+        (shared if organization_id is None and user_id is None else own)[url] = namespace
+    return own, shared
+
+
+def as_stored(version):
+    """A version as the shared resolver must be given it to look up `version` as it is stored: it decodes what it's
+    given (decode_string), so one that decoding would change is given encoded."""
+    return version if decode_string(version) == version else quote_plus(version)
+
+
+def served_repositories(kwargs, user):  # pylint: disable=too-many-locals
+    """
+    [(identifier, [(version, retired)], newest first)] for each repository a CodeSystem search at the base `kwargs`
+    names shows `user` (visible_versions), under the identifier resolve() serves it at there, as it would were the
+    repositories the caller isn't shown not there (so a hidden repository changes nothing here): its canonical URL (its
+    HEAD's) when the resolver picks it for that URL, else its OCL path as a CodeSystem. A repository whose HEAD the
+    resolver passes over (a retired one) isn't listed. The versions are those search shows: what resolve() serves by
+    name.
+
+    The resolver's pick for a canonical URL (one it looks up as written), among active HEADs that aren't retired, as
+    resolve_reference_expression makes it for Sources. Without the URL registry: at /fhir/ the lowest-id HEAD the global
+    base shows (shown_heads); at an owner base the owner's lowest-id one. With it: at /fhir/ the lowest-id HEAD in the
+    global registry entry's namespace, none without an entry; at an owner base the owner's entry's namespace's if the
+    owner has one for the URL, else the owner's lowest-id HEAD.
+
+    A fixed number of queries: the owner and the caller's rights over it, the toggle, the registry's entries (with it
+    on), the versions, the HEADs.
+    """
+    access = owner_access(kwargs, user)
+    owner = access[0]
+    if owner is None:
+        return []
+    registry = Toggle.get(REGISTRY_TOGGLE)
+    own_entries, global_entries = registry_entries(owner) if registry else ({}, {})
+    versions = {}
+    for *repository, version, retired in visible_versions('CodeSystem', access=access).order_by(
+            '-created_at', '-id').values_list('mnemonic', 'organization_id', 'user_id', 'version', 'retired'):
+        versions.setdefault(tuple(repository), []).append((version, retired))
+    if not versions:
+        return []
+
+    heads = viewable_rows(Source, namespace_of(kwargs), user).filter(version=HEAD, is_active=True, retired=False)
+    if owner:  # the owner's, and where its registry entries point
+        heads = heads.filter(Q(**owner) | Q(canonical_url__in=list(own_entries)))
+    elif registry:  # the repositories searched, and where the global registry's entries point
+        heads = heads.filter(Q(mnemonic__in={mnemonic for mnemonic, _, _ in versions}) | Q(
+            canonical_url__in=list(global_entries)))
+    else:
+        heads = heads.filter(shown_heads(Source))
+    by_url, by_repository = {}, {}  # the HEADs with each canonical URL, lowest id first; each repository's
+    for row in heads.order_by('id').values_list(
+            'id', 'mnemonic', 'organization_id', 'user_id', 'canonical_url', 'uri', 'organization__uri', 'user__uri'):
+        head = ServedHead(*row)
+        by_url.setdefault(head.canonical_url, []).append(head)
+        by_repository[(head.mnemonic, head.organization_id, head.user_id)] = head
+
+    def pick(url):
+        """The HEAD the resolver picks for a canonical URL at this base."""
+        candidates = by_url.get(url, [])
+        if registry:
+            entries = own_entries if owner else global_entries
+            if url in entries:
+                return next((head for head in candidates if in_namespace(head, entries[url])), None)
+            if not owner:
+                return None
+        return next((head for head in candidates if not owner or all(
+            getattr(head, field) == value for field, value in owner.items())), None)
+
+    served = []
+    for repository, rows in versions.items():
+        head = by_repository.get(repository)
+        if not head:
+            continue
+        url = head.canonical_url
+        identifier = url if is_looked_up_as_written(url) and pick(url) == head else ocl_path(head.uri)
+        if identifier:
+            served.append((identifier, rows))
+    return served
