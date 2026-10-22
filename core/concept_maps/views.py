@@ -75,6 +75,7 @@ class ConceptMapRetrieveUpdateView(SourceRetrieveUpdateDestroyView):
 
 class ConceptMapTranslateView(MappingListView):
     serializer_class = ConceptMapParametersSerializer
+    is_page_size_capped = False  # FHIR paging (`_count`) is decided apart from the list cap
 
     def get_permissions(self):
         return [CanAccessParentDictionary(), CanViewConceptDictionary()]

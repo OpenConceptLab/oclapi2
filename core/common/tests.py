@@ -62,7 +62,7 @@ from core.common.utils import (
     split_list_by_condition, is_zip_file, get_date_range_label, get_prev_month, from_string_to_date, get_end_of_month,
     get_start_of_month, es_id_in, web_url, get_queue_task_names, get_resource_class_from_resource_uri, encode_string,
     to_parent_kwargs_from_uri, reverse_resource, reverse_resource_version, write_export_file, queue_bulk_import,
-    get_bulk_import_celery_once_lock_key, generic_sort, get_embeddings, encode_texts, get_lm_model)
+    get_bulk_import_celery_once_lock_key, generic_sort, get_embeddings, encode_texts, get_lm_model, cap_page_size)
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.mappings.documents import MappingDocument
@@ -981,6 +981,15 @@ class UtilsTest(OCLTestCase):
             ),
             [1, 'foobar', 1, 'foobar', [{'a': 1}, {'b': 'foobar'}]]
         )
+
+    def test_cap_page_size(self):
+        self.assertEqual(cap_page_size('1000'), 100)
+        self.assertEqual(cap_page_size('100'), 100)
+        self.assertEqual(cap_page_size(40), 40)
+        self.assertEqual(cap_page_size(None), 25)
+        self.assertEqual(cap_page_size('0'), 25)
+        with override_settings(LIST_MAX_LIMIT=1):
+            self.assertEqual(cap_page_size('10'), 1)
 
     def test_chunks(self):
         self.assertEqual(list(chunks([], 1000)), [])
