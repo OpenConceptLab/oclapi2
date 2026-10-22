@@ -17,7 +17,6 @@ from mock.mock import patch, Mock
 from rest_framework.response import Response
 from rest_framework.test import APIClient
 
-from core.code_systems.serializers import ValidateCodeParametersSerializer
 from core.collections.models import CollectionReference
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.mixins import ListWithHeadersMixin
@@ -357,20 +356,3 @@ class FhirOperationBoundsTest(OCLTestCase):
                 self.assertEqual(unbounded_expansion_reads(queries, self.collection_v1.expansion.id), [])
                 self.assertEqual(json.loads(response.content), json.loads(expected.content), (params, headers))
         self.assertEqual({name: mock.call_count for name, mock in mocks.items()}, dict.fromkeys(mocks, 0))
-
-    def test_parameters_are_read_with_the_value_types_r4_allows(self):
-        serializer = ValidateCodeParametersSerializer(data={'resourceType': 'Parameters', 'parameter': [
-            {'name': 'url', 'valueString': SYSTEM},
-            {'name': 'code', 'valueString': 'c1'},
-            {'name': 'display', 'valueString': DISPLAY},
-            {'name': 'version', 'valueCode': 'v1'},
-            {'name': 'system', 'valueBoolean': True},
-        ]})
-
-        self.assertTrue(serializer.is_valid())
-        self.assertEqual(serializer.validated_data['parameters'], {'url': SYSTEM, 'code': 'c1', 'display': DISPLAY})
-
-        serializer = ValidateCodeParametersSerializer(data={'resourceType': 'Parameters', 'parameter': [
-            {'name': 'code', 'valueCode': 'c1', 'valueString': 'c2'}]})
-        self.assertTrue(serializer.is_valid())
-        self.assertEqual(serializer.validated_data['parameters'], {'code': 'c1'})

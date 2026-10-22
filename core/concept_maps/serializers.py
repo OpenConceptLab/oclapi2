@@ -20,6 +20,7 @@ from core.sources.models import Source
 from core.sources.serializers import SourceCreateOrUpdateSerializer
 
 logger = logging.getLogger('oclapi')
+MAPPING_LIMIT = 1000
 
 
 class ConceptMapGroupField(serializers.Field):
@@ -60,12 +61,13 @@ class ConceptMapGroupField(serializers.Field):
         mappings = value.get_active_mappings()  # neither retired nor deleted
         for side in ('from', 'to'):
             mappings = with_side(mappings, side, namespace, user)
-        rows = mappings.order_by('id').values(
+        rows = list(mappings.order_by('id').values(
             'map_type', 'from_concept_code', 'to_concept_code', *(
                 f'{side}_{field}' for side in ('from', 'to')
-                for field in ('source_url', 'source__uri', 'shown', 'canonical')))[:1000]
+                for field in ('source_url', 'source__uri', 'shown', 'canonical')))[:MAPPING_LIMIT + 1])
+        self.subsetted = len(rows) > MAPPING_LIMIT
         groups, elements = {}, {}
-        for row in rows:
+        for row in rows[:MAPPING_LIMIT]:
             key = tuple(side_system(row[f'{side}_canonical'], row[f'{side}_source_url'],
                                     row[f'{side}_source__uri'] if row[f'{side}_shown'] else None)
                         for side in ('from', 'to'))

@@ -427,6 +427,49 @@ class LookupCases(OpsCorpusMixin):
                        names=[name('Deleted', preferred=True)])
         self.assert_outcome(self.lookup(system=CIEL, code='555'), 404, 'not-found', 'invalid-code')
 
+    def test_an_owner_instance_serves_a_named_unreleased_version(self):
+        draft = source(self.ciel_org, 'CIEL', 'v3', canonical_url=CIEL)
+        ConceptFactory(parent=self.ciel, mnemonic='D1', sources=[draft],
+                       names=[name('In v3 only', preferred=True)])
+
+        response = self.get('CIEL/$lookup', base='/orgs/CIEL', code='D1', version='v3')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        answer = self.by_name(response)
+        self.assertEqual((answer['version']['valueString'], answer['display']['valueString']), ('v3', 'In v3 only'))
+        self.assert_outcome(self.get('CIEL/$lookup', base='/orgs/CIEL', code='D1'),
+                            404, 'not-found', 'invalid-code')
+        self.assert_outcome(self.get(f'{draft.id}/$lookup', code='D1', version='v3'),
+                            404, 'not-found', 'not-found')
+        response = self.client_for().get('/orgs/CIEL/CodeSystem/CIEL/', {'version': 'v3'})
+        self.assert_outcome(response, 404, 'not-found', 'not-found')
+
+    def test_a_private_unreleased_instance_version_is_visible_to_its_owner(self):
+        draft = source(self.ciel_org, 'CIEL', 'v3', canonical_url=CIEL, public_access=ACCESS_TYPE_NONE)
+        ConceptFactory(parent=self.ciel, mnemonic='D1', sources=[draft],
+                       names=[name('In v3 only', preferred=True)])
+        self.ciel_org.members.add(self.moh_member)
+        for user in (None, self.outsider):
+            hidden = self.get('CIEL/$lookup', base='/orgs/CIEL', user=user, code='D1', version='v3')
+            missing = self.get('CIEL/$lookup', base='/orgs/CIEL', user=user, code='D1', version='missing')
+            self.assert_outcome(hidden, 404, 'not-found', 'not-found')
+            self.assert_outcome(missing, 404, 'not-found', 'not-found')
+            self.assertEqual(hidden.content, missing.content)
+
+        response = self.get('CIEL/$lookup', base='/orgs/CIEL', user=self.moh_member, code='D1', version='v3')
+        self.assertEqual(response.status_code, 200, response.data)
+        answer = self.by_name(response)
+        self.assertEqual((answer['version']['valueString'], answer['display']['valueString']), ('v3', 'In v3 only'))
+        self.assert_outcome(self.get('CIEL/$lookup', base='/orgs/CIEL', user=self.moh_member,
+                                    code='D1', version='missing'), 404, 'not-found', 'not-found')
+
+    def test_a_released_owner_instance_version_uses_three_queries(self):
+        with self.assertNumQueries(3):
+            response = self.get('CIEL/$lookup', base='/orgs/CIEL', code='999', version='v1')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(self.by_name(response)['version']['valueString'], 'v1')
+
     def test_a_fixed_number_of_queries(self):
         """Resolution (the toggle, the repository, its release; the registry adds its entry and namespace owner), the
         concept and its names, however many concepts the code system holds."""

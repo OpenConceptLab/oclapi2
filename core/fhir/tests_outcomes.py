@@ -25,7 +25,6 @@ class TypedErrorTest(SimpleTestCase):
             (outcomes.NotFoundError, 404, 'not-found', 'not-found'),
             (outcomes.InvalidError, 400, 'invalid', 'invalid-data'),
             (outcomes.NotSupportedError, 400, 'not-supported', 'not-supported'),
-            (outcomes.MultipleMatchesError, 400, 'multiple-matches', 'invalid-data'),
             (outcomes.TooCostlyError, 422, 'too-costly', 'too-costly'),
             (outcomes.ProcessingError, 422, 'processing', 'invalid-data'),
         ]

@@ -11,6 +11,7 @@ from django.test.utils import CaptureQueriesContext
 
 from core.collections.models import Collection
 from core.collections.tests.factories import ExpansionFactory
+from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory
 from core.fhir.outcomes import MESSAGE_ID_EXTENSION
@@ -486,6 +487,55 @@ class ValidateCodeCases(OpsCorpusMixin):
             self.validate_in(url=FEVERS, system=CIEL, code='999', systemVersion='v1')
         with self.assertNumQueries(2 * resolution + 2):  # no concept with the code: no membership to read
             self.validate_in(url=FEVERS, system=CIEL, code='nope')
+
+    def test_an_owner_value_set_instance_serves_a_named_unreleased_version(self):
+        draft = collection(self.acme, 'fevers', 'v2', canonical_url=FEVERS)
+        expansion = ExpansionFactory(mnemonic='autoexpand-v2', collection_version=draft)
+        expansion.concepts.add(self.older)
+        draft.expansion_uri = expansion.uri
+        draft.save()
+
+        response = self.get('fevers/$validate-code', base='/orgs/Acme', resource='ValueSet', system=CIEL,
+                            code='999', valueSetVersion='v2')
+
+        answer = self.answer(response)
+        self.assertEqual((answer['result'], answer['display']), (True, 'Older code'))
+        self.assertFalse(self.answer(self.get('fevers/$validate-code', base='/orgs/Acme', resource='ValueSet',
+                                              system=CIEL, code='999'))['result'])
+        self.assert_outcome(self.get(f'{draft.id}/$validate-code', resource='ValueSet', system=CIEL, code='999',
+                                    valueSetVersion='v2'), 404, 'not-found', 'not-found')
+        response = self.client_for().get('/orgs/Acme/ValueSet/fevers/', {'version': 'v2'})
+        self.assert_outcome(response, 404, 'not-found', 'not-found')
+
+    def test_a_private_unreleased_value_set_instance_version_is_visible_to_its_owner(self):
+        draft = collection(self.acme, 'fevers', 'v2', canonical_url=FEVERS, public_access=ACCESS_TYPE_NONE)
+        expansion = ExpansionFactory(mnemonic='autoexpand-v2', collection_version=draft)
+        expansion.concepts.add(self.older)
+        draft.expansion_uri = expansion.uri
+        draft.save()
+        self.acme.members.add(self.moh_member)
+        for user in (None, self.outsider):
+            hidden = self.get('fevers/$validate-code', base='/orgs/Acme', resource='ValueSet', user=user,
+                              system=CIEL, code='999', valueSetVersion='v2')
+            missing = self.get('fevers/$validate-code', base='/orgs/Acme', resource='ValueSet', user=user,
+                               system=CIEL, code='999', valueSetVersion='missing')
+            self.assert_outcome(hidden, 404, 'not-found', 'not-found')
+            self.assert_outcome(missing, 404, 'not-found', 'not-found')
+            self.assertEqual(hidden.content, missing.content)
+
+        answer = self.answer(self.get('fevers/$validate-code', base='/orgs/Acme', resource='ValueSet',
+                                      user=self.moh_member, system=CIEL, code='999', valueSetVersion='v2'))
+        self.assertEqual((answer['result'], answer['display']), (True, 'Older code'))
+        self.assert_outcome(self.get('fevers/$validate-code', base='/orgs/Acme', resource='ValueSet',
+                                    user=self.moh_member, system=CIEL, code='999', valueSetVersion='missing'),
+                            404, 'not-found', 'not-found')
+
+    def test_a_released_owner_value_set_instance_version_uses_six_queries(self):
+        with self.assertNumQueries(6):
+            response = self.get('fevers/$validate-code', base='/orgs/Acme', resource='ValueSet',
+                                system=CIEL, code='117053', valueSetVersion='v1')
+
+        self.assertTrue(self.answer(response)['result'])
 
 
 class ValidateCodeWithoutRegistryTest(ValidateCodeCases, OCLTestCase):
