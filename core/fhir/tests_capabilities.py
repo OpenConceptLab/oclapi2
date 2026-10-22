@@ -146,6 +146,17 @@ class CapabilityStatementTest(OCLTestCase):
         concept_map = {item['name']: item['type'] for item in resources['ConceptMap']['searchParam']}
         self.assertEqual((concept_map['source-system'], concept_map['source-uri']), ('uri', 'reference'))
 
+    def test_source_uri_and_target_uri_are_documented_as_read_as_the_systems(self):
+        """OCL keeps no source or target value set on a ConceptMap, so source-uri and target-uri are read as the
+        groups' systems, and only they carry documentation saying so."""
+        for fhir_base in BASES:
+            resources = self.statement(fhir_base)['rest'][0]['resource']
+            documented = {(resource['type'], item['name']): item['documentation']
+                          for resource in resources for item in resource['searchParam'] if 'documentation' in item}
+            self.assertEqual(set(documented), {('ConceptMap', 'source-uri'), ('ConceptMap', 'target-uri')}, fhir_base)
+            for side in ('source', 'target'):
+                self.assertTrue(documented[('ConceptMap', f'{side}-uri')].startswith(f'Read as `{side}-system`'))
+
     def test_it_instantiates_svcms_terminology_repository_and_names_the_software(self):
         statement = self.statement()
         self.assertEqual(statement['instantiates'], [SVCM_REPOSITORY])
