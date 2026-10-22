@@ -34,15 +34,14 @@ from rest_framework.response import Response
 
 from core.capacity.config import get_config
 from core.capacity.constants import (
-    TIERS, MODE_OFF, MODE_ENFORCE, ENFORCE_FOR_ALL, CAPACITY_AWARE_METADATA_KEY, TIER_STAFF, TIER_CORE,
-    TIER_EARLY_ACCESS, TIER_PREVIEW, LANE_API_HEAVY, LANE_API_HEAVY_TASK, LANE_ES2_KNN, LANE_TIER, LANE_USER,
+    TIERS, DEFAULT_TIER, MODE_OFF, MODE_ENFORCE, ENFORCE_FOR_ALL, CAPACITY_AWARE_METADATA_KEY, TIER_STAFF,
+    LANE_API_HEAVY, LANE_API_HEAVY_TASK, LANE_ES2_KNN, LANE_TIER, LANE_USER,
     DECISION_ADMITTED, DECISION_SHADOW_REFUSED, DECISION_REFUSED, DECISION_UNAVAILABLE, ENDPOINT_MATCH,
     HEADER_DECISION, HEADER_LIMIT, HEADER_IN_FLIGHT, HEADER_TIER, HEADER_TIER_LIMIT, HEADER_TIER_IN_FLIGHT,
     HEADER_SUGGESTED_CONCURRENCY, CAPACITY_EXCEEDED_ERROR_CODE, LOG_EVENT, REDIS_KEY_PREFIX)
 from core.capacity.logs import emit
 from core.capacity.threads import RedisThread
 from core.common.utils import get_event_metadata
-from core.users.constants import CORE_USER_GROUP, EARLY_ACCESS_GROUP
 
 _NOW_MS = """
 if redis.replicate_commands then redis.replicate_commands() end
@@ -248,15 +247,15 @@ def get_not_after_ms():
 
 
 def get_tier(user):
-    """The user's highest plan tier, as capabilities resolve it: staff > core > early_access > preview."""
+    """
+    The user's capacity tier: staff for staff and superusers, else the highest tier their groups are set to
+    (`capacity_tier` in the groups config, OpenConceptLab/ocl_online#517), else the lowest.
+    """
+    from core.capacity.models import GroupCapacityTier
     if user.is_staff or user.is_superuser:
         return TIER_STAFF
-    groups = set(user.groups.values_list('name', flat=True))
-    if CORE_USER_GROUP in groups:
-        return TIER_CORE
-    if EARLY_ACCESS_GROUP in groups:
-        return TIER_EARLY_ACCESS
-    return TIER_PREVIEW
+    tiers = set(GroupCapacityTier.objects.filter(group__in=user.groups.all()).values_list('tier', flat=True))
+    return next((tier for tier in TIERS if tier in tiers), DEFAULT_TIER)
 
 
 def get_queue_ms(request, now=None):

@@ -345,7 +345,7 @@ class AbstractRepoResourcesSerializer(AbstractResourceSerializer):
             from core.concepts.models import Concept
             from core.concepts.serializers import ConceptListSerializer
             queryset = self._paginate(
-                Concept.apply_attribute_based_filters(obj.get_concepts_queryset(), self.query_params))
+                Concept.apply_attribute_based_filters(obj.get_concepts_queryset(), self.query_params), '-id')
             results = self._serialize(queryset, ConceptListSerializer)
         return results
 
@@ -355,7 +355,7 @@ class AbstractRepoResourcesSerializer(AbstractResourceSerializer):
             from core.mappings.models import Mapping
             from core.mappings.serializers import MappingListSerializer
             queryset = self._paginate(
-                Mapping.apply_attribute_based_filters(obj.get_mappings_queryset(), self.query_params))
+                Mapping.apply_attribute_based_filters(obj.get_mappings_queryset(), self.query_params), '-id')
             results = self._serialize(queryset, MappingListSerializer)
         return results
 

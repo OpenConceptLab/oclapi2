@@ -1325,6 +1325,15 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             if key not in VERSION_UNCOPYABLE_EXTRAS
         }
 
+    def generate_checksum(self, checksum_type='standard'):
+        # bookkeeping extras (e.g. export time) are not content
+        extras = self.extras
+        self.extras = {key: value for key, value in (extras or {}).items() if key not in VERSION_UNCOPYABLE_EXTRAS}
+        try:
+            return super().generate_checksum(checksum_type)
+        finally:
+            self.extras = extras
+
     def add_processing(self, process_id):
         if not process_id:
             return

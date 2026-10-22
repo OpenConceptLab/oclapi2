@@ -6,7 +6,7 @@ RUN apt-get update && apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
     bash git gcc libssl-dev libffi-dev libpq-dev python3-dev build-essential cargo
 
-RUN pip install --upgrade pip
+RUN pip install --upgrade "pip>=26.2.2"
 
 RUN mkdir /code
 WORKDIR /code
@@ -34,7 +34,7 @@ RUN apt-get update && apt-get upgrade -y && \
     libpq-dev bash curl && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --upgrade pip
+RUN pip install --upgrade "pip>=26.2.2"
 
 COPY --from=builder /code/wheels /wheels
 COPY --from=builder /code/requirements.txt .

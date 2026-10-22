@@ -5,12 +5,17 @@ import yaml
 from django.core.management import BaseCommand, CommandError
 from django.db import transaction
 
+from core.capacity.constants import TIERS
+
 GROUPS_CONFIG_ENV = 'OCL_GROUPS_CONFIG'
 
-# Plan groups are deployment config: {"groups": {"<name>": {"permissions": [...], "capabilities": {...}}}}
+# Groups are deployment config:
+# {"groups": {"<name>": {"permissions": [...], "capabilities": {...}, "capacity_tier": "<tier>"}}}
 # Sync - the config is the source of truth for every group it declares: users.* permissions are set exactly,
-# declared limits are upserted and undeclared ones deleted. Groups it doesn't declare are left alone.
+# declared limits are upserted and undeclared ones deleted, and so is the capacity tier. Groups it doesn't declare
+# are left alone.
 # Limits: 0 = unlimited, -1 = blocked (the kill switch), N > 0 = the limit; no row = not entitled (blocked).
+# capacity_tier: one of core.capacity.constants.TIERS; a user gets the highest of their groups' (core.capacity.limiter).
 
 
 def seed_groups(config, stdout=None):
@@ -47,6 +52,17 @@ def seed_group(group_name, group_config, warn):
         GroupCapability.objects.update_or_create(group=group, capability=capability, defaults={'limit': limit})
         declared_ids.append(capability.id)
     GroupCapability.objects.filter(group=group).exclude(capability_id__in=declared_ids).delete()
+    seed_capacity_tier(group, group_config.get('capacity_tier'))
+
+
+def seed_capacity_tier(group, tier):
+    from core.capacity.models import GroupCapacityTier
+
+    # sync: the declared capacity tier is upserted, or the group's is deleted
+    if tier:
+        GroupCapacityTier.objects.update_or_create(group=group, defaults={'tier': tier})
+    else:
+        GroupCapacityTier.objects.filter(group=group).delete()
 
 
 def validate_config(config):
@@ -66,6 +82,9 @@ def validate_config(config):
                 not all(isinstance(limit, int) and not isinstance(limit, bool) for limit in capabilities.values())
         ):
             raise CommandError(f'{group_name}: capabilities must map names to integer limits')
+        tier = group_config.get('capacity_tier')
+        if tier is not None and tier not in TIERS:
+            raise CommandError(f'{group_name}: capacity_tier must be one of {", ".join(TIERS)}')
     return config['groups']
 
 

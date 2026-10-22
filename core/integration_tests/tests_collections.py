@@ -340,6 +340,32 @@ class CollectionListViewTest(OCLAPITestCase):
             ]
         )
 
+    def test_post_201_ignores_expansion_uri(self):
+        org = OrganizationFactory(mnemonic='org')
+        user = UserProfileFactory(organizations=[org], username='user')
+        other_expansion = ExpansionFactory(collection_version=OrganizationCollectionFactory())
+
+        for collection_id, expansion_uri, autoexpand_head in [
+                ('coll1', 'https://other.example/x/', True), ('coll2', other_expansion.uri, False)]:
+            with self.subTest(expansion_uri=expansion_uri):
+                response = self.client.post(
+                    '/orgs/org/collections/',
+                    {
+                        'id': collection_id,
+                        'name': 'Collection',
+                        'expansion_uri': expansion_uri,
+                        'autoexpand_head': autoexpand_head
+                    },
+                    HTTP_AUTHORIZATION='Token ' + user.get_token(),
+                    format='json'
+                )
+
+                self.assertEqual(response.status_code, 201)
+                collection = org.collection_set.get(mnemonic=collection_id, version='HEAD')
+                own_expansion = collection.expansions.first()
+                self.assertEqual(collection.expansion_uri, own_expansion.uri if autoexpand_head else None)
+                self.assertEqual(response.data['expansion_url'], collection.expansion_uri)
+
     def test_post_400(self):
         org = OrganizationFactory(mnemonic='org')
         user = UserProfileFactory(organizations=[org])
@@ -422,6 +448,22 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data['active_concepts'], None)
         self.assertEqual(response.data['active_mappings'], None)
         self.assertEqual(response.data['versions'], 1)
+
+    def test_get_200_include_concepts_ordered_by_id_desc(self):
+        concept1 = ConceptFactory()
+        concept2 = ConceptFactory()
+        coll = OrganizationCollectionFactory(mnemonic='coll1')
+        expansion = ExpansionFactory(collection_version=coll)
+        coll.expansion_uri = expansion.uri
+        coll.save()
+        expansion.concepts.add(concept1, concept2)
+
+        response = self.client.get(coll.uri + '?includeConcepts=true', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [c['url'] for c in response.data['concepts']],
+            [c.uri for c in sorted([concept1, concept2], key=lambda c: c.id, reverse=True)])
 
     def test_get_200_with_resources(self):
         concept = ConceptFactory()
@@ -2429,6 +2471,25 @@ class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, {'version': [ErrorDetail(string='This field may not be null.', code='null')]})
 
+    def test_put_expansion_url(self):
+        own_expansion = ExpansionFactory(collection_version=self.collection_v1)
+        other_expansion = ExpansionFactory(collection_version=self.collection)
+
+        for expansion_url, status_code in [
+                ('https://other.example/x/', 400), (other_expansion.uri, 400), (own_expansion.uri, 200)]:
+            with self.subTest(expansion_url=expansion_url):
+                response = self.client.put(
+                    self.collection_v1.uri,
+                    {'expansion_url': expansion_url},
+                    HTTP_AUTHORIZATION='Token ' + self.token,
+                    format='json'
+                )
+
+                self.assertEqual(response.status_code, status_code)
+
+        self.collection_v1.refresh_from_db()
+        self.assertEqual(self.collection_v1.expansion_uri, own_expansion.uri)
+
     @patch('core.common.models.delete_s3_objects')
     def test_delete(self, delete_s3_objects_mock):
         response = self.client.delete(
@@ -3168,6 +3229,24 @@ class CollectionVersionListViewTest(OCLAPITestCase):
         self.assertIsNone(last_created_version.expansion_uri)
         self.assertEqual(last_created_version.expansions.count(), 0)
         self.assertEqual(last_created_version.references.count(), 1)
+
+    def test_post_201_ignores_expansion_uri(self):
+        other_expansion = ExpansionFactory(collection_version=UserCollectionFactory())
+
+        for version, expansion_uri, autoexpand in [
+                ('v1', 'https://other.example/x/', True), ('v2', other_expansion.uri, False)]:
+            with self.subTest(expansion_uri=expansion_uri):
+                response = self.client.post(
+                    self.collection.uri + 'versions/',
+                    {'id': version, 'expansion_uri': expansion_uri, 'autoexpand': autoexpand},
+                    HTTP_AUTHORIZATION='Token ' + self.token,
+                    format='json'
+                )
+
+                self.assertEqual(response.status_code, 201)
+                new_version = self.collection.versions.get(version=version)
+                own_expansion = new_version.expansions.first()
+                self.assertEqual(new_version.expansion_uri, own_expansion.uri if autoexpand else None)
 
 
 class ExportCollectionTaskTest(OCLAPITestCase):

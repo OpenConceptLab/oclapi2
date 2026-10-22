@@ -199,10 +199,11 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
         collection.full_name = validated_data.get('full_name', collection.full_name) or collection.name
         collection.autoexpand_head = validated_data.get('autoexpand_head', collection.autoexpand_head)
         collection.autoexpand = validated_data.get('autoexpand', collection.autoexpand)
-        collection.expansion_uri = validated_data.get('expansion_uri', collection.expansion_uri)
-        if collection.id and collection.expansion_uri and not collection.expansions.filter(
-                uri=collection.expansion_uri).exists():
-            self._errors.update({'expansion_url': INVALID_EXPANSION_URL})
+        # A new collection or version has no expansions yet, so only an update may name one.
+        if collection.id:
+            collection.expansion_uri = validated_data.get('expansion_uri', collection.expansion_uri)
+            if collection.expansion_uri and not collection.expansions.filter(uri=collection.expansion_uri).exists():
+                self._errors.update({'expansion_url': INVALID_EXPANSION_URL})
 
         return collection
 

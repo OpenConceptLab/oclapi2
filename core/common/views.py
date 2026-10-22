@@ -1327,6 +1327,8 @@ class RootView(BaseAPIView):  # pragma: no cover
                     continue
                 if route.startswith('^\\'):
                     route = route.replace('^\\', '')
+            if name == 'schema-json':
+                route = 'swagger.json'
             if route and name is None:
                 name = ('_'.join(route.split('/')[:2])).replace('__', '_').lower()
                 if name.endswith('_'):

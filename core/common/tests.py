@@ -2975,6 +2975,21 @@ class ChecksumTest(OCLTestCase):
             mapping1.checksums['smart']
         )
 
+    def test_repo_checksums_ignore_bookkeeping_extras(self):
+        source = OrganizationSourceFactory(extras={})
+        collection = OrganizationCollectionFactory(extras={'foo': 'bar'})
+        source_checksums = source.get_all_checksums()
+        collection_checksums = collection.get_all_checksums()
+
+        source.extras = {'__export_time': '693.04'}
+        collection.extras = {'foo': 'bar', '__export_time': '693.04'}
+
+        self.assertEqual(source.get_all_checksums(), source_checksums)
+        self.assertEqual(collection.get_all_checksums(), collection_checksums)
+
+        source.extras = {'foo': 'bar'}
+        self.assertNotEqual(source.get_all_checksums()['standard'], source_checksums['standard'])
+
     def test_diff_with_precomputed_maps_matches_queryset_driven(self):
         concept1 = ConceptFactory(mnemonic='c1')
         concept2 = ConceptFactory(mnemonic='c2')
