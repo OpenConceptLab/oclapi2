@@ -11,6 +11,7 @@ from core.collections.views import CollectionListView, CollectionRetrieveUpdateD
 from core.common.constants import HEAD, LATEST
 from core.concepts.models import Concept
 from core.fhir.base import FhirViewMixin
+from core.fhir.outcomes import InvalidError
 from core.fhir.search import FhirSearchMixin, FhirReadMixin
 from core.sources.models import Source
 from core.value_sets.serializers import ValueSetDetailSerializer, \
@@ -87,10 +88,10 @@ class ValueSetValidateCodeView(CodeSystemValidateCodeView):
             queryset = queryset.filter(expansion_set__collection_version__in=version_ids)
 
         if not code:
-            raise FhirParameterRequiredError('A code to validate is required.', expression='code')
+            raise InvalidError('A code to validate is required.', expression='code')
         if not system:
-            raise FhirParameterRequiredError(
-                'system is required with a code: the code system the code is from.', expression='system')
+            raise InvalidError('system is required with a code: the code system the code is from.',
+                               expression='system')
 
         concept_source = Source.objects.filter(canonical_url=system)
         if system_version:

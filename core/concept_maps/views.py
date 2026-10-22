@@ -12,6 +12,7 @@ from core.concept_maps.constants import RESOURCE_TYPE
 from core.concept_maps.serializers import ConceptMapDetailSerializer, ConceptMapParametersSerializer
 from core.concepts.permissions import CanAccessParentDictionary
 from core.fhir.base import FhirViewMixin
+from core.fhir.outcomes import InvalidError
 from core.fhir.search import FhirSearchMixin, FhirReadMixin
 from core.mappings.constants import SAME_AS
 from core.mappings.views import MappingListView
@@ -72,10 +73,9 @@ class ConceptMapTranslateView(FhirViewMixin, MappingListView):
     def get_serializer_class(self):
         return ConceptMapParametersSerializer
 
-    # $translate answers with the translation of the mappings apply_filters names, and nothing else. The mapping
-    # list's shortcuts (a search, a sort or a faceted filter, facets, search stats, a CSV export) would answer in its
-    # place, and the search ones skip apply_filters, so each is off. Their parameters are ignored like any other this
-    # operation doesn't define.
+    # $translate answers from the mappings apply_filters names, and from nothing else. The mapping list's shortcuts
+    # (a search, a sort or a faceted filter, facets, search stats, a CSV export) would skip apply_filters, so each is
+    # off, and their parameters are ignored like any other this operation doesn't define.
     allow_csv_export = False
 
     def should_perform_es_search(self):
@@ -115,10 +115,10 @@ class ConceptMapTranslateView(FhirViewMixin, MappingListView):
         targetsystem = params.get('targetsystem')
         # TODO: implement 'source' and 'target'
         if not code:
-            raise FhirParameterRequiredError('A code to translate is required.', expression='code')
+            raise InvalidError('A code to translate is required.', expression='code')
         if not system:
-            raise FhirParameterRequiredError(
-                'system is required with a code: the code system the code is from.', expression='system')
+            raise InvalidError('system is required with a code: the code system the code is from.',
+                               expression='system')
 
         if url:
             queryset = queryset.filter(parent__canonical_url=url)

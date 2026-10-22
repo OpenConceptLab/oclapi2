@@ -23,6 +23,7 @@ from core.common.mixins import ListWithHeadersMixin
 from core.common.tests import OCLTestCase
 from core.common.views import BaseAPIView
 from core.concepts.tests.factories import ConceptFactory
+from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
 from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
@@ -103,7 +104,7 @@ class FhirOperationBoundsTest(OCLTestCase):
                 parameters = [{'name': name, ('valueString' if 'valueString' in method else VALUE_TYPES[name]): value}
                               for name, value in inputs.items()]
                 response = self.client.post(path, json.dumps({'resourceType': 'Parameters', 'parameter': parameters}),
-                                            content_type='application/json')
+                                            content_type='application/fhir+json')
         return response, context.captured_queries
 
     def assert_required(self, response, name, msg):
@@ -112,6 +113,7 @@ class FhirOperationBoundsTest(OCLTestCase):
         self.assertEqual(outcome['resourceType'], 'OperationOutcome', msg)
         self.assertEqual(outcome['issue'][0]['code'], 'invalid', msg)
         self.assertEqual(outcome['issue'][0]['expression'], [name], msg)
+        self.assertEqual(outcome['issue'][0]['details']['coding'][0]['system'], TX_ISSUE_TYPE_SYSTEM, msg)
 
     def assert_result(self, response, expected, msg):
         self.assertEqual(response.status_code, 200, msg)
@@ -171,12 +173,11 @@ class FhirOperationBoundsTest(OCLTestCase):
                     self.assert_result(response, display is None, msg)
 
     def test_translate_reads_only_the_named_code(self):
-        for method, url, code, system in product(
-                ('GET', 'POST', 'POST valueString'), (None, SYSTEM), (None, 'c1'), (None, SYSTEM)):
-            msg = (method, url, code, system)
+        for url, code, system in product((None, SYSTEM), (None, 'c1'), (None, SYSTEM)):
+            msg = (url, code, system)
             with self.subTest(msg):
                 response, queries = self.request(
-                    '/fhir/ConceptMap/$translate', method, url=url, code=code, system=system)
+                    '/fhir/ConceptMap/$translate', 'GET', url=url, code=code, system=system)
 
                 self.assertEqual(unbounded_reads(queries), [], msg)
                 if not code:

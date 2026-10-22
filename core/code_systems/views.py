@@ -10,7 +10,7 @@ from core.common.serializers import IdentifierSerializer
 from core.concepts.permissions import CanViewParentDictionaryAsGuest
 from core.concepts.views import ConceptRetrieveUpdateDestroyView
 from core.fhir.base import FhirViewMixin
-from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
+from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM, InvalidError
 from core.fhir.search import FhirSearchMixin, FhirReadMixin
 from core.parameters.serializers import ParametersSerializer
 from core.sources.models import Source
@@ -157,10 +157,9 @@ class CodeSystemValidateCodeView(FhirViewMixin, ConceptRetrieveUpdateDestroyView
                 return queryset.none()
 
         if not code:
-            raise FhirParameterRequiredError('A code to validate is required.', expression='code')
+            raise InvalidError('A code to validate is required.', expression='code')
         if not source:
-            raise FhirParameterRequiredError(
-                'url is required with a code: the code system to validate it in.', expression='url')
+            raise InvalidError('url is required with a code: the code system to validate it in.', expression='url')
 
         queryset = queryset.filter(sources=source, mnemonic=code)
 
