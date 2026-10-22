@@ -33,8 +33,9 @@ version the request names. core.fhir.adapters.r4 writes the answer as an R4 Valu
   stores. Names that aren't $expand inputs are ignored, as _format is.
 - Cost: a fixed number of queries whatever the size of the expansion; for members whose rows no release holds,
   links of each repository's newest live release the caller is shown are read as a set, then older holding releases
-  probed per member only for those still unresolved. Full concepts and names are read for the page alone. All queries
-  within SEARCH_TIMEOUT_MS together, past which the expansion is too costly (422).
+  probed per member only for those still unresolved. Full concepts and names are read for the page alone. A filtered
+  expansion reads the ids of its matching members once, and its total and page come from them. All queries within
+  SEARCH_TIMEOUT_MS together, past which the expansion is too costly (422).
 """
 import re
 
@@ -354,13 +355,12 @@ class Expander:
         used = {code_system(url, uri, releases[member]) for member, _, _, _, url, uri in rows}
         return sorted(f'{system}|{version}' if version else system for system, version in used)
 
-    def page(self, matching):
+    def page(self, ids):
         """
-        The page offset and count name, in a fixed order, with what each member is shown with. The page is chosen
-        first, so releases, concepts and names are read for its members alone, however deep the offset.
+        The members `ids` names (the page offset and count chose), in a fixed order, with what each is shown with.
+        Releases, concepts and names are read for the page's members alone, however deep the offset.
         """
-        offset = self.inputs.offset or 0
-        page = Concept.objects.filter(id__in=matching.order_by('id').values('id')[offset:offset + self.inputs.count])
+        page = Concept.objects.filter(id__in=ids)
         concepts = page.annotate(release=self.release()).select_related('parent').only(
             'id', 'mnemonic', 'retired', 'parent_id', 'versioned_object_id', 'parent__canonical_url', 'parent__uri',
             'parent__default_locale', 'parent__supported_locales').prefetch_related('names').order_by('id')
@@ -379,8 +379,16 @@ class Expander:
 
     def answer(self):
         matching = self.matching()
+        if self.inputs.filter:
+            ids = list(matching.order_by('id').values_list('id', flat=True))
+            total = len(ids)
+        else:
+            total = matching.count()
+            ids = matching.order_by('id').values('id')
+        offset = self.inputs.offset or 0
         return {
             'value_set': self.value_set, 'identifier': self.expansion.uri, 'timestamp': self.expansion.created_at,
-            'total': matching.count(), 'offset': self.inputs.offset or 0, 'parameters': self.inputs.echo,
-            'used': self.used(), 'contains': self.page(matching) if self.inputs.count else [],
+            'total': total, 'offset': offset, 'parameters': self.inputs.echo,
+            'used': self.used(),
+            'contains': self.page(ids[offset:offset + self.inputs.count]) if self.inputs.count else [],
         }
