@@ -13,7 +13,7 @@ from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 from django.db import connection, OperationalError
 from django.test import TransactionTestCase
-from django.test.utils import CaptureQueriesContext
+from django.test.utils import CaptureQueriesContext, override_settings
 from mock import patch
 from rest_framework.test import APIClient
 
@@ -54,6 +54,14 @@ def collection(owner, mnemonic, version=HEAD, **kwargs):
         organization=owner, mnemonic=mnemonic, name=mnemonic, version=version, **kwargs)
 
 
+def indexing():
+    """
+    Saves indexed, for the mappings index ConceptMap system search reads: an earlier test's pause_indexing() can leave
+    indexing off for the rest of a run (resume_indexing does nothing in TEST_MODE).
+    """
+    return override_settings(ES_SYNC=True, ELASTICSEARCH_DSL_AUTOSYNC=True, ELASTICSEARCH_DSL_AUTO_REFRESH=True)
+
+
 def at(year):
     return datetime(year, 6, 15, 12, tzinfo=dt_timezone.utc)
 
@@ -68,6 +76,7 @@ class SearchCorpusMixin:
     """
     def setUp(self):
         super().setUp()
+        self.enterContext(indexing())
         self.client = APIClient()
         self.admin = UserProfile.objects.get(username='ocladmin')
         self.who = OrganizationFactory(mnemonic='WHO')

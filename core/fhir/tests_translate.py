@@ -23,7 +23,7 @@ from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
 from core.fhir.ops.translate import repository_paths
 from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
-from core.fhir.tests_search import source, collection
+from core.fhir.tests_search import source, collection, indexing
 from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
@@ -61,6 +61,7 @@ class TranslateCorpusMixin:
     def setUp(self):
         set_registry_toggle(self.registry)
         super().setUp()
+        self.enterContext(indexing())
         self.admin = UserProfile.objects.get(username='ocladmin')
         self.ciel = OrganizationFactory(mnemonic='CIEL')
         self.who = OrganizationFactory(mnemonic='WHO')
