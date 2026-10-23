@@ -119,21 +119,27 @@ class FhirSwaggerTest(SimpleTestCase):
                     if bodies:
                         self.assertEqual(operation['consumes'], ['application/fhir+json'])
                         self.assertEqual(bodies[0]['schema']['$ref'], '#/definitions/FhirParameters')
-        # a coding replaces these inputs (core.fhir.ops: coded_input, translate.read_request); each says so
-        replaced = {
-            'CodeSystem/$lookup': {'code', 'system'},
-            'CodeSystem/$validate-code': {'code', 'display'},
-            'ValueSet/$validate-code': {'code', 'system', 'systemVersion', 'display'},
-            'ConceptMap/$translate': {'code', 'system', 'version'},
-        }
-        for path, names in replaced.items():
-            query = {p['name']: p for p in self.schema['paths'][f'/fhir/{path}']['get']['parameters']}
-            for name in names:
-                self.assertIn(name, query['coding']['description'], (path, name))
-                self.assertIn('Not read when coding', query[name]['description'], (path, name))
         expand = self.schema['paths']['/fhir/ValueSet/$expand']['get']['parameters']
         count = next(p for p in expand if p['name'] == 'count')
         self.assertEqual((count['type'], count['maximum']), ('integer', 1000))
+
+    def test_coding_says_which_inputs_it_replaces(self):
+        # a coding replaces these inputs (core.fhir.ops: coded_input, translate.read_request), and the coding's
+        # description names them; those it leaves unread say so ($lookup's system still names an instance: mismatch)
+        replaced = {
+            'CodeSystem/$lookup': ({'code', 'system'}, {'code'}),
+            'CodeSystem/$validate-code': ({'code', 'display'}, {'code', 'display'}),
+            'ValueSet/$validate-code': ({'code', 'system', 'systemVersion', 'display'},
+                                        {'code', 'system', 'systemVersion', 'display'}),
+            'ConceptMap/$translate': ({'code', 'system', 'version'}, {'code', 'system', 'version'}),
+        }
+        for path, (names, unread) in replaced.items():
+            query = {p['name']: p for p in self.schema['paths'][f'/fhir/{path}']['get']['parameters']}
+            for name in names:
+                self.assertIn(name, query['coding']['description'], (path, name))
+                self.assertEqual('Not read when coding' in query[name]['description'], name in unread, (path, name))
+        lookup = {p['name']: p for p in self.schema['paths']['/fhir/CodeSystem/$lookup']['get']['parameters']}
+        self.assertIn('At an instance it must name that code system', lookup['system']['description'])
 
     def test_tags_order_responses_and_security_definitions(self):
         for tag in (*OPERATIONS, 'Capabilities'):

@@ -56,6 +56,9 @@ FORMAT = query('_format', 'Response format; overrides Accept.', enum=['json', 'x
 CODE = query('code', 'Code to look up, validate or translate; alternatively supply coding.' + NOT_WITH_CODING)
 SYSTEM = query('system', 'Canonical URL or OCL path of the code system the code is from.' + NOT_WITH_CODING)
 VERSION = query('version', 'Business version of the code system; defaults to the latest released version.')
+LOOKUP_SYSTEM = query('system', 'Canonical URL or OCL path of the code system the code is from. At an instance it '
+                                'must name that code system. With coding at the type level, the coding\'s system '
+                                'is used instead.')
 URL = query('url', 'Canonical URL or OCL path of the target resource; may include |version.')
 VALUE_SET_VERSION = query('valueSetVersion', 'Business version of the value set.')
 LANGUAGE = query('displayLanguage', 'Preferred language for the returned display, when a name in it exists.')
@@ -70,7 +73,9 @@ def coding(replaces, applies=''):
 
 OPERATION_PARAMETERS = {
     ('CodeSystem', '$lookup'): [
-        SYSTEM, VERSION, CODE, coding('code and system', ' version still selects the code system version.'),
+        LOOKUP_SYSTEM, VERSION, CODE,
+        coding('code and system', ' version still selects the code system version; at an instance, a separate '
+                                  'system must still name it.'),
         LANGUAGE],
     ('CodeSystem', '$validate-code'): [
         URL, VERSION, CODE,
