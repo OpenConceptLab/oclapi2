@@ -19,6 +19,7 @@ from core.common.throttling import ThrottleUtil
 from core.common.utils import set_current_user, set_request_url
 from core.fhir.base import FHIR_JSON, is_fhir_path, is_outcome_response, outcome_response, response_json
 from core.fhir.outcomes import issue, operation_outcome, outcome_for_status
+from core.fhir.swagger import on_fhir_host
 from core.services.analytics_event_emitter import AnalyticsEventEmitter
 from core.services.auth.core import AuthService
 
@@ -298,14 +299,16 @@ class FhirMiddleware(BaseMiddleware):
     Keeps FHIR on the FHIR host when FHIR_SUBDOMAIN is set: FHIR resource paths 404 elsewhere, and other paths 404 on
     the FHIR host, each with an OperationOutcome.
     """
+    documentation_paths = ('/swagger/', '/swagger.json', '/swagger.yaml')  # the FHIR host's own Swagger
 
     def __call__(self, request):
         fhir_path = is_fhir_path(request.path)
         if settings.FHIR_SUBDOMAIN:
-            on_fhir_host = request.get_host().startswith(settings.FHIR_SUBDOMAIN + '.')
-            if on_fhir_host and not fhir_path and request.path.strip('/').split('/')[0] != 'version':
+            fhir_host = on_fhir_host(request)
+            if fhir_host and not fhir_path and request.path.strip('/').split('/')[0] != 'version' and \
+                    request.path not in self.documentation_paths:
                 return self.not_found(request, 'This path is not part of the FHIR API.')
-            if not on_fhir_host and fhir_path:
+            if not fhir_host and fhir_path:
                 return self.not_found(request, 'The FHIR API is served on its own host.')
 
         return self.get_response(request)
