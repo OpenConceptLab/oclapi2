@@ -51,21 +51,35 @@ def query(name, description, type_=openapi.TYPE_STRING, **kwargs):
     return openapi.Parameter(name, openapi.IN_QUERY, type=type_, description=description, **kwargs)
 
 
+NOT_WITH_CODING = ' Not read when coding or codeableConcept is given.'
 FORMAT = query('_format', 'Response format; overrides Accept.', enum=['json', 'xml'])
-CODE = query('code', 'Code to look up, validate or translate; alternatively supply coding.')
-CODING = query('coding', 'A system|code token, instead of separate code and system parameters.')
-SYSTEM = query('system', 'Canonical URL or OCL path of the code system the code is from.')
+CODE = query('code', 'Code to look up, validate or translate; alternatively supply coding.' + NOT_WITH_CODING)
+SYSTEM = query('system', 'Canonical URL or OCL path of the code system the code is from.' + NOT_WITH_CODING)
 VERSION = query('version', 'Business version of the code system; defaults to the latest released version.')
 URL = query('url', 'Canonical URL or OCL path of the target resource; may include |version.')
 VALUE_SET_VERSION = query('valueSetVersion', 'Business version of the value set.')
 LANGUAGE = query('displayLanguage', 'Preferred language for the returned display, when a name in it exists.')
-DISPLAY = query('display', 'Display to validate against the concept\'s names, ignoring case.')
+DISPLAY = query('display', 'Display to validate against the concept\'s names, ignoring case.' + NOT_WITH_CODING)
+
+
+def coding(replaces, applies=''):
+    """The coding input of one operation: a system|code token here, a full Coding in a POSTed body."""
+    return query('coding', f'A system|code token. It replaces {replaces}.{applies} A GET token carries no version '
+                           'or display: send those inside a POSTed valueCoding.')
+
+
 OPERATION_PARAMETERS = {
-    ('CodeSystem', '$lookup'): [SYSTEM, VERSION, CODE, CODING, LANGUAGE],
-    ('CodeSystem', '$validate-code'): [URL, VERSION, CODE, CODING, DISPLAY, LANGUAGE],
+    ('CodeSystem', '$lookup'): [
+        SYSTEM, VERSION, CODE, coding('code and system', ' version still selects the code system version.'),
+        LANGUAGE],
+    ('CodeSystem', '$validate-code'): [
+        URL, VERSION, CODE,
+        coding('code and display', ' url and version still name the code system validated against.'),
+        DISPLAY, LANGUAGE],
     ('ValueSet', '$validate-code'): [
-        URL, VALUE_SET_VERSION, SYSTEM, query('systemVersion', 'Business version of the input code system.'),
-        CODE, CODING, DISPLAY, LANGUAGE],
+        URL, VALUE_SET_VERSION, SYSTEM,
+        query('systemVersion', 'Business version of the input code system.' + NOT_WITH_CODING),
+        CODE, coding('code, system, systemVersion and display'), DISPLAY, LANGUAGE],
     ('ValueSet', '$expand'): [
         URL, VALUE_SET_VERSION,
         query('filter', 'Each word must prefix a word in the code or one of its names, ignoring case.'), LANGUAGE,
@@ -86,7 +100,8 @@ OPERATION_PARAMETERS = {
         CODE, SYSTEM,
         query('version', 'Input code system version; omitted means no mapping-side version filter. '
                         'Without url in forward translation, also selects the map version unless conceptMapVersion '
-                        'is given.'), CODING,
+                        'is given.' + NOT_WITH_CODING),
+        coding('code, system and version'),
         query('source', 'Input value set scope for forward translation; ignored when reverse=true.'),
         query('target', 'Input value set scope for reverse translation; ignored in forward translation.'),
         query('targetsystem', 'Restrict matches to this code system; in reverse, the system of the codes sought.'),

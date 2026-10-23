@@ -119,6 +119,18 @@ class FhirSwaggerTest(SimpleTestCase):
                     if bodies:
                         self.assertEqual(operation['consumes'], ['application/fhir+json'])
                         self.assertEqual(bodies[0]['schema']['$ref'], '#/definitions/FhirParameters')
+        # a coding replaces these inputs (core.fhir.ops: coded_input, translate.read_request); each says so
+        replaced = {
+            'CodeSystem/$lookup': {'code', 'system'},
+            'CodeSystem/$validate-code': {'code', 'display'},
+            'ValueSet/$validate-code': {'code', 'system', 'systemVersion', 'display'},
+            'ConceptMap/$translate': {'code', 'system', 'version'},
+        }
+        for path, names in replaced.items():
+            query = {p['name']: p for p in self.schema['paths'][f'/fhir/{path}']['get']['parameters']}
+            for name in names:
+                self.assertIn(name, query['coding']['description'], (path, name))
+                self.assertIn('Not read when coding', query[name]['description'], (path, name))
         expand = self.schema['paths']['/fhir/ValueSet/$expand']['get']['parameters']
         count = next(p for p in expand if p['name'] == 'count')
         self.assertEqual((count['type'], count['maximum']), ('integer', 1000))
