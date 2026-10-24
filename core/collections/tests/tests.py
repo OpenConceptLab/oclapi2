@@ -637,7 +637,8 @@ class CollectionTest(OCLTestCase):
         collection = OrganizationCollectionFactory(canonical_url='http://old.canonical.url')
         URLRegistry.objects.create(url='http://foo-registry.com', repo=collection, is_active=True)
 
-        with patch('core.collections.models.resolve_url_registry_entries') as resolve_mock:
+        with patch('core.common.models.resolve_url_registry_entries') as resolve_mock, \
+                self.captureOnCommitCallbacks(execute=True):
             collection.canonical_url = 'http://new.canonical.url'
             collection.save()
 

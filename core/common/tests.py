@@ -75,10 +75,8 @@ from core.users.tests.factories import UserProfileFactory
 from .backends import OCLOIDCAuthenticationBackend
 from .exceptions import SSOIdentityMismatchRefused
 from .checksums import Checksum
-from .fhir_helpers import translate_fhir_query
 from .serializers import IdentifierSerializer
 from .validators import URIValidator
-from ..code_systems.serializers import CodeSystemDetailSerializer
 from ..concepts.serializers import ConceptDetailSerializer
 from ..concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from ..mappings.serializers import MappingDetailSerializer
@@ -325,57 +323,6 @@ class OCLTestCase(TestCase, BaseTestCase):
         self.maxDiff = None
 
 
-class FhirHelpersTest(OCLTestCase):
-    def test_language_to_default_locale(self):
-        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
-        query_params = {'language': 'eng'}
-        query_set = Source.objects.all()
-
-        query_set = translate_fhir_query(query_fields, query_params, query_set)
-        self.assertTrue('"sources"."default_locale" = eng' in str(query_set.query))
-
-    def test_status_retired(self):
-        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
-        query_params = {'status': 'retired'}
-        query_set = Source.objects.all()
-
-        query_set = translate_fhir_query(query_fields, query_params, query_set)
-        self.assertTrue('WHERE "sources"."retired"' in str(query_set.query))
-
-    def test_status_active(self):
-        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
-        query_params = {'status': 'active'}
-        query_set = Source.objects.all()
-
-        query_set = translate_fhir_query(query_fields, query_params, query_set)
-        self.assertTrue('WHERE "sources"."released"' in str(query_set.query))
-
-    def test_status_draft(self):
-        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
-        query_params = {'status': 'draft'}
-        query_set = Source.objects.all()
-
-        query_set = translate_fhir_query(query_fields, query_params, query_set)
-        self.assertTrue('WHERE NOT "sources"."released"' in str(query_set.query))
-
-    def test_title_to_full_name(self):
-        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
-        query_params = {'title': 'some title'}
-        query_set = Source.objects.all()
-
-        query_set = translate_fhir_query(query_fields, query_params, query_set)
-        self.assertTrue('WHERE "sources"."full_name" = some title' in str(query_set.query))
-
-    def test_other_fields(self):
-        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
-        query_params = {'version': 'v1', 'id': '2'}
-        query_set = Source.objects.all()
-
-        query_set = translate_fhir_query(query_fields, query_params, query_set)
-        self.assertTrue('"sources"."version" = v1' in str(query_set.query))
-        self.assertTrue('"sources"."id" = 2' in str(query_set.query))
-
-
 class IdentifierSerializerTest(OCLTestCase):
     def test_deserialize(self):
         data = {'system': '/org/OCL/test',
@@ -450,6 +397,37 @@ class IdentifierSerializerTest(OCLTestCase):
                          'system': 'http://hl7.org/fhir/v2/0203'}],
                      'text': 'Accession ID'},
                  'value': '/orgs/OCL/Code/1/'}])
+
+    def test_convert_ocl_uri_to_fhir_url_renames_only_the_repository_type_segment(self):
+        convert = IdentifierSerializer.convert_ocl_uri_to_fhir_url
+        for uri, resource_type, expected in (
+                ('/orgs/Acme/sources/collections/', 'CodeSystem', '/orgs/Acme/CodeSystem/collections/'),
+                ('/orgs/Acme/collections/sources/', 'ValueSet', '/orgs/Acme/ValueSet/sources/'),
+                ('/orgs/sources/sources/codes/', 'CodeSystem', '/orgs/sources/CodeSystem/codes/'),
+                ('/users/collections/collections/set/v1/', 'ValueSet', '/users/collections/ValueSet/set/'),
+                # as before for every other name
+                ('/orgs/CIEL/sources/CIEL/', 'CodeSystem', '/orgs/CIEL/CodeSystem/CIEL/'),
+                ('/orgs/CIEL/sources/CIEL/v1/concepts/1/', 'ConceptMap', '/orgs/CIEL/ConceptMap/CIEL/'),
+                ('/users/jo/collections/vs/', 'ValueSet', '/users/jo/ValueSet/vs/'),
+                ('/orgs/CIEL/CodeSystem/CIEL/', 'CodeSystem', '/orgs/CIEL/CodeSystem/CIEL/'),
+                ('http://example.org/fhir/CodeSystem/x', 'CodeSystem', 'http://example.org/fhir/CodeSystem/x'),
+                (None, 'CodeSystem', None)):
+            self.assertEqual(convert(uri, resource_type), expected, uri)
+        with self.assertRaisesMessage(ValidationError, 'given: /orgs/CIEL/sources/'):
+            convert('/orgs/CIEL/sources/', 'CodeSystem')
+
+    def test_convert_fhir_url_to_ocl_uri_renames_only_the_resource_type_segment(self):
+        convert = IdentifierSerializer.convert_fhir_url_to_ocl_uri
+        for url, kind, expected in (
+                ('/orgs/CIEL/CodeSystem/CIEL/', 'sources', '/orgs/CIEL/sources/CIEL/'),
+                ('/users/jo/ValueSet/vs/v1/', 'collections', '/users/jo/collections/vs/v1/'),
+                ('/orgs/CIEL/ConceptMap/CIEL', 'sources', '/orgs/CIEL/sources/CIEL'),
+                # an owner or a repository with a resource type's name keeps it
+                ('/orgs/CodeSystem/ConceptMap/ValueSet/', 'sources', '/orgs/CodeSystem/sources/ValueSet/'),
+                ('/orgs/CIEL/sources/CIEL/', 'sources', '/orgs/CIEL/sources/CIEL/'),
+                ('http://example.org/fhir/CodeSystem/x', 'sources', 'http://example.org/fhir/CodeSystem/x'),
+                (None, 'sources', None)):
+            self.assertEqual(convert(url, kind), expected, url)
 
 
 class UtilsTest(OCLTestCase):
@@ -1344,6 +1322,16 @@ class UtilsTest(OCLTestCase):
 
 
 class BaseModelTest(OCLTestCase):
+    def test_is_public_access(self):
+        for value in ('View', 'view', 'Edit', 'EDIT'):
+            self.assertTrue(BaseModel.is_public_access(value), value)
+        for value in ('None', None, ''):
+            self.assertFalse(BaseModel.is_public_access(value), value)
+        # the stored values a queryset reads as public are those it reads as public
+        for value in BaseModel.PUBLIC_ACCESS_VALUES:
+            self.assertTrue(BaseModel.is_public_access(value), value)
+        self.assertTrue(OrganizationSourceFactory(public_access='Edit').public_can_view)
+
     def test_model_name(self):
         self.assertEqual(Concept().model_name, 'Concept')
         self.assertEqual(Source().model_name, 'Source')

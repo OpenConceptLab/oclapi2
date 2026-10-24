@@ -29,7 +29,7 @@ from core.common.es import ESScript
 from core.common.models import ConceptContainerModel, BaseResourceModel
 from core.common.search import CustomESSearch
 from core.common.tasks import seed_children_to_expansion, batch_index_resources, index_expansion_concepts, \
-    index_expansion_mappings, readd_references_to_expansion_on_references_removal, resolve_url_registry_entries
+    index_expansion_mappings, readd_references_to_expansion_on_references_removal
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
     get_resource_class_from_resource_name, to_snake_case, \
     es_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
@@ -167,8 +167,8 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         super().save(*args, force_insert=force_insert, force_update=force_update, using=using,
                      update_fields=update_fields)
 
-        if self.id and 'canonical_url' in dirty_fields and self.active_url_registry_entries.exists():
-            resolve_url_registry_entries.apply_async((self.id, self.resource_type), queue='default', permanent=False)
+        if self.id and 'canonical_url' in dirty_fields:
+            self.resolve_url_registry_entries_later()
 
     def post_create_actions(self):
         if self.should_auto_expand:
