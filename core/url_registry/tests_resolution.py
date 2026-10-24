@@ -625,6 +625,14 @@ class URLRegistryLinkCostTest(OCLTestCase):
         elsewhere.refresh_from_db()
         self.assertEqual((entry.repo, elsewhere.repo), (head, None))
 
+    def test_the_task_queued_is_the_saved_rows_whatever_the_instance_becomes(self):
+        GlobalURLRegistryFactory(url=self.URL, namespace=self.org.uri)
+        with patch.object(resolve_url_registry_entries, 'apply_async') as queued:
+            with self.captureOnCommitCallbacks(execute=True):
+                head = source(self.org, 'codes', canonical_url=self.URL)
+                saved_id, head.id = head.id, None  # as an instance reused for the next version
+        queued.assert_called_once_with((saved_id, 'Source'), queue='default', permanent=False)
+
     def test_the_task_skips_a_row_deleted_meanwhile(self):
         resolve_url_registry_entries(0, 'Source')
 

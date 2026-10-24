@@ -1465,8 +1465,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         task points the entries it may move at what they resolve to now. The request asks only whether there are any.
         """
         if self.url_registry_entries_to_resolve().exists():
-            transaction.on_commit(lambda: resolve_url_registry_entries.apply_async(
-                (self.id, self.resource_type), queue='default', permanent=False))
+            args = (self.id, self.resource_type)  # this row's, whatever the instance becomes before the commit
+            transaction.on_commit(
+                lambda: resolve_url_registry_entries.apply_async(args, queue='default', permanent=False))
 
     @cached_property
     def version_export_path(self):

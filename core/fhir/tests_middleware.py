@@ -2,7 +2,7 @@
 import gzip
 import json
 from io import BytesIO
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import requests
 from django.conf import settings
@@ -94,11 +94,13 @@ class FhirErrorMiddlewareTest(SimpleTestCase):
         logged = JsonResponse({'error': 'Server Error (500)'}, status=500)
         logged._has_been_logged = True  # pylint: disable=protected-access
 
-        with patch('core.fhir.outcomes.report_server_error') as report:
+        with patch('core.middlewares.middlewares.report_server_error') as report:
             response = self.answer('/fhir/CodeSystem/', logged)
+            self.assertEqual(response.status_code, 422)
+            report.assert_not_called()
 
-        self.assertEqual(response.status_code, 422)
-        report.assert_not_called()
+            self.answer('/fhir/CodeSystem/', JsonResponse({'error': 'Server Error (500)'}, status=500))
+            report.assert_called_once_with(500)
 
     def test_a_json_error_keeps_its_message(self):
         response = self.answer('/orgs/CIEL/CodeSystem/', JsonResponse({'detail': 'Slow down.'}, status=429))
@@ -314,3 +316,33 @@ class RequireAuthenticationOnFhirPathsTest(SimpleTestCase):
         response = middleware(self.factory.get('/orgs/CIEL/sources/', HTTP_AUTHORIZATION='Bearer x'))
         self.assertEqual(response.status_code, 401)
         self.assertIn('detail', json.loads(response.content))
+
+
+@patch.dict('rest_framework.throttling.UserRateThrottle.THROTTLE_RATES', {
+    'fhir_minute': '5/minute', 'standard_minute': '50/minute', 'standard_day': '500/day'})
+@override_settings(ENABLE_THROTTLING=True)
+class FhirThrottleHeadersTest(SimpleTestCase):
+    """On a FHIR path the remaining-requests header counts the FHIR API's own throttle, and there's no daily one."""
+    factory = RequestFactory()
+
+    def test_a_fhir_path_reports_the_fhir_counter(self):
+        from core.common.throttling import FhirMinuteThrottle, StandardMinuteThrottle
+        from core.middlewares.middlewares import ThrottleHeadersMiddleware
+        user = Mock(is_authenticated=True, is_superuser=False, is_guest_group=False, is_core_group=False, pk=7)
+        middleware = ThrottleHeadersMiddleware(lambda request: HttpResponse('ok'))
+
+        def respond(path):
+            request = self.factory.get(path)
+            request.user = user
+            return middleware.process_response(request, HttpResponse('ok'))
+
+        with patch.object(FhirMinuteThrottle, 'cache') as fhir_cache, \
+                patch.object(StandardMinuteThrottle, 'cache') as standard_cache:
+            fhir_cache.get.return_value = [FhirMinuteThrottle().timer()] * 2
+            standard_cache.get.return_value = [StandardMinuteThrottle().timer()] * 10
+            response = respond('/fhir/CodeSystem/')
+            self.assertEqual(response['X-LimitRemaining-Minute'], '3')
+            self.assertNotIn('X-LimitRemaining-Day', response)
+
+            fhir_cache.get.return_value = None  # nothing counted yet
+            self.assertNotIn('X-LimitRemaining-Minute', respond('/orgs/CIEL/ValueSet/'))
