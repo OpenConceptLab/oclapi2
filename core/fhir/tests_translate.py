@@ -11,7 +11,7 @@ import re
 from itertools import product
 
 from django.db import connection
-from django.test.utils import CaptureQueriesContext
+from django.test.utils import CaptureQueriesContext, override_settings
 from mock import patch
 from rest_framework.test import APIClient
 
@@ -21,7 +21,6 @@ from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLTestCase, OCLAPITransactionTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
-from core.fhir.ops.translate import repository_paths
 from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
 from core.fhir.tests_search import source, collection, indexing
 from core.mappings.models import Mapping
@@ -455,7 +454,7 @@ class TranslateMappingsTest(TranslateCorpusMixin, OCLTestCase):
             self.mapping('SAME-AS', self.icd, code, [self.ciel_v2], from_code='6000')
         self.assertEqual(self.matches(self.answer(self.get(system=CIEL, code='6000'))),
                          [f'{ICD10}|D{index}|equivalent' for index in range(1, 5)])
-        with patch('core.fhir.ops.translate.MATCH_LIMIT', 2):
+        with override_settings(FHIR_TRANSLATE_MATCH_LIMIT=2):
             parameters = self.answer(self.get(system=CIEL, code='6000'))
         self.assertTrue(self.result(parameters))
         self.assertEqual(len(self.matches(parameters)), 2)
@@ -465,15 +464,6 @@ class TranslateMappingsTest(TranslateCorpusMixin, OCLTestCase):
 class TranslateMappingsWithRegistryTest(TranslateMappingsTest):
     """The same, with the URL registry on: the global base resolves a canonical through its global entry."""
     registry = True
-
-
-class TranslatePathTest(OCLTestCase):
-    def test_repository_paths(self):
-        """An OCL path's repository, whatever its owner and id are called."""
-        self.assertIsNone(repository_paths(CIEL))
-        self.assertEqual(repository_paths('/orgs/sources/ConceptMap/sources/', ('sources', 'ConceptMap')),
-                         ['/orgs/sources/sources/sources/', '/orgs/sources/ConceptMap/sources/'])
-        self.assertEqual(repository_paths('/users/jdoe/CodeSystem/codes'), ['/users/jdoe/sources/codes/'])
 
 
 class TranslateRequestTest(TranslateCorpusMixin, OCLTestCase):
@@ -537,6 +527,9 @@ class TranslateRequestTest(TranslateCorpusMixin, OCLTestCase):
             self.assertTrue(issue['details']['text'], params)
         for parameters, expression in (
                 ([{'name': 'codeableConcept', 'valueCodeableConcept': {'text': 'no coding'}}], 'codeableConcept'),
+                # one coding at a time, as $lookup and $validate-code take it: none is left unread
+                ([{'name': 'codeableConcept', 'valueCodeableConcept': {'coding': [
+                    {'system': CIEL, 'code': '113275'}, {'system': CIEL, 'code': '138405'}]}}], 'codeableConcept'),
                 ([{'name': 'coding', 'valueCoding': {'code': '113275'}}], 'coding'),
                 ([{'name': 'system', 'valueUri': CIEL}, {'name': 'code', 'valueBoolean': True}], 'code'),
                 ([{'name': 'system', 'valueUri': CIEL}, {'name': 'code', 'valueCode': '1'},
@@ -1045,7 +1038,7 @@ class TranslateTimeoutTest(OCLAPITransactionTestCase):
             with connection.cursor() as cursor:
                 cursor.execute('SELECT pg_sleep(1)')
 
-        with patch('core.fhir.search.SEARCH_TIMEOUT_MS', 50), patch(
+        with override_settings(FHIR_SEARCH_TIMEOUT_MS=50), patch(
                 'core.fhir.ops.translate.Translation.matches', slow):
             response = APIClient().get('/fhir/ConceptMap/$translate', {'system': CIEL, 'code': '1'})
         self.assertEqual(response.status_code, 422, response.data)

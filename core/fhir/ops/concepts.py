@@ -10,43 +10,18 @@ asked about, finding it in a code system version, and the concept's display and 
 - Display: with a language, the concept's preferred name in that language when it has one; else its own display (OCL's
   display_name: the preferred name in its code system's default locale).
 """
-from collections import namedtuple
 from urllib.parse import quote, unquote
 
 from django.db.models import F, Q
 
 from core.common.constants import HEAD
+from core.common.fhir_helpers import to_ocl_path
 from core.common.utils import to_parent_uri
 from core.concepts.models import Concept
 from core.fhir import outcomes
-from core.fhir.resolve import REPO_PATHS, UnresolvedError, namespace_of, resolve, to_ocl_path
+from core.fhir.base import Coding
+from core.fhir.resolve import REPO_PATHS, UnresolvedError, namespace_of, resolve
 from core.fhir.search import read_version
-
-# A code, as an operation is given it; `parameter` is the Coding parameter it came in, None for separate parameters
-Coding = namedtuple('Coding', 'system code version display parameter')
-PATHS = {None: '', 'coding': 'Coding.', 'codeableConcept': 'CodeableConcept.coding[0].'}
-
-
-def text(parameters, name):
-    """A text input (a string, code or uri), or None when it's absent or empty; any other value is a 400 naming it."""
-    value = parameters.get(name)
-    if value is None or value == '':
-        return None
-    if not isinstance(value, str):
-        raise outcomes.InvalidError(f"'{name}' must be text.", expression=name)
-    return value
-
-
-def coding_of(value, name):
-    """A Coding parameter as a Coding: a dict, or in a GET, a system|code token. Its parts must be text."""
-    if isinstance(value, str):
-        system, _, code = value.rpartition('|')
-        value = {'system': system, 'code': code}
-    parts = {key: value.get(key) for key in ('system', 'code', 'version', 'display')} if isinstance(value, dict) else {}
-    if not parts or not all(part is None or isinstance(part, str) for part in parts.values()):
-        raise outcomes.InvalidError(f"'{name}' must be a Coding.", expression=name)
-    return Coding(*(part or None for part in parts.values()), parameter=name)
-
 
 def coded_input(parameters, system, version):
     """
@@ -54,30 +29,11 @@ def coded_input(parameters, system, version):
     the system and version from the parameters named `system` and `version`.
     """
     if 'coding' in parameters:
-        return coding_of(parameters.get('coding'), 'coding')
+        return parameters.coding('coding')
     if 'codeableConcept' in parameters:
-        concept = parameters.get('codeableConcept')
-        codings = concept.get('coding') if isinstance(concept, dict) else None
-        if not isinstance(codings, list) or len(codings) != 1:
-            raise outcomes.NotSupportedError(
-                'A codeableConcept is supported with one coding: send each coding on its own.',
-                expression='codeableConcept')
-        return coding_of(codings[0], 'codeableConcept')
-    return Coding(text(parameters, system), text(parameters, 'code'), text(parameters, version),
-                  text(parameters, 'display'), None)
-
-
-def path(coding, part):
-    """The FHIRPath of a part of the code in an issue: the parameter itself, or the part of the Coding it came in."""
-    return PATHS[coding.parameter] + part
-
-
-def require(coding, part, message):
-    """The part of the code an operation needs, or a 400 naming the input it's missing from (`part`, or the Coding)."""
-    value = getattr(coding, part)
-    if not value:
-        raise outcomes.InvalidError(message, expression=coding.parameter or part)
-    return value
+        return parameters.codeable_concept_coding('codeableConcept')
+    return Coding(parameters.text(system), parameters.text('code'), parameters.text(version),
+                  parameters.text('display'), None)
 
 
 def stored_codes(code):
@@ -144,12 +100,12 @@ def mismatch(parameters, coding, version, system_name, instance_id):
     system and version must be those of the code system it is validated in, which url and version may name.
     """
     if instance_id:
-        systems = [(text(parameters, system_name), system_name), (coding.system, path(coding, 'system'))]
-        versions = [(text(parameters, 'version'), 'version'), (coding.version, path(coding, 'version'))]
+        systems = [(parameters.text(system_name), system_name), (coding.system, coding.path('system'))]
+        versions = [(parameters.text('version'), 'version'), (coding.version, coding.path('version'))]
         named = None
     elif coding.parameter:
-        systems, versions = [(coding.system, path(coding, 'system'))], [(coding.version, path(coding, 'version'))]
-        named = text(parameters, system_name) or coding.system
+        systems, versions = [(coding.system, coding.path('system'))], [(coding.version, coding.path('version'))]
+        named = parameters.text(system_name) or coding.system
     else:
         return None
     for system, expression in systems:

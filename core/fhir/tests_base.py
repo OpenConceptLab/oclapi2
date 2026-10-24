@@ -3,8 +3,9 @@ import json
 import re
 import uuid
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+from django.contrib.auth.models import AnonymousUser
 from django.test import SimpleTestCase, override_settings
 from django.http import HttpResponse, JsonResponse
 from fhir.resources.R4B.bundle import Bundle
@@ -20,9 +21,10 @@ from rest_framework.response import Response
 from rest_framework.test import APIRequestFactory
 from rest_framework.views import APIView
 
+from core.common.throttling import FhirMinuteThrottle
 from core.fhir import base, outcomes
 from core.fhir.base import FhirContentNegotiation, FhirJsonParser, FhirJsonRenderer, FhirXmlParser, \
-    FhirXmlRenderer, FhirParameters, FhirVersioning, FhirViewMixin
+    FhirXmlRenderer, FhirOperationView, FhirParameters, FhirVersioning, FhirViewMixin
 
 FHIR = '{http://hl7.org/fhir}'
 BROWSER_ACCEPT = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
@@ -346,7 +348,7 @@ class XmlElementOrderTest(SimpleTestCase):
         self.assertEqual(child_names(root.find(f'{FHIR}concept')), ['code'])
 
     def test_each_dropped_key_is_logged_once(self):
-        base.LOGGED_DROPPED_ELEMENTS.clear()
+        base.log_dropped.cache_clear()
         with self.assertLogs('oclapi', level='WARNING') as logs:
             base.to_xml(released_code_system())
             base.to_xml(released_code_system())
@@ -463,7 +465,7 @@ class XmlSingleElementTest(SimpleTestCase):
             self.assertEqual(root.find(f'{FHIR}identifier/{FHIR}value').get('value'), '/orgs/X/ConceptMap/cm/')
 
     def test_the_items_left_out_are_logged_once(self):
-        base.LOGGED_DROPPED_ELEMENTS.clear()
+        base.log_dropped.cache_clear()
         identifiers = [{'value': 'a'}, {'value': 'b'}, {'value': 'c'}]
         with self.assertLogs('oclapi', level='WARNING') as logs:
             base.to_xml(self.concept_map(identifiers))
@@ -593,6 +595,84 @@ class FhirParametersTest(SimpleTestCase):
                         self.read(self.factory.post(
                             '/fhir/CodeSystem/$lookup', json.dumps(body), content_type='application/fhir+json'))
                     self.assertEqual(raised.exception.expression, 'code')
+
+
+class FhirParametersAccessorTest(SimpleTestCase):
+    """One reader per input type, for every operation."""
+
+    @staticmethod
+    def params(**values):
+        return FhirParameters(values.items())
+
+    def assert_invalid(self, read, name, error=outcomes.InvalidError):
+        with self.assertRaises(error) as raised:
+            read()
+        self.assertEqual(raised.exception.expression, name)
+        return raised.exception
+
+    def test_text(self):
+        self.assertEqual(self.params(url='http://x').text('url'), 'http://x')
+        self.assertIsNone(self.params(url='').text('url'))
+        self.assertIsNone(self.params().text('url'))
+        self.assert_invalid(lambda: self.params(url=True).text('url'), 'url')
+
+    def test_required_text(self):
+        self.assertEqual(self.params(code='1').required_text('code', 'Give a code.'), '1')
+        error = self.assert_invalid(lambda: self.params(code='').required_text('code', 'Give a code.'), 'code')
+        self.assertEqual(str(error.detail), 'Give a code.')
+
+    def test_boolean(self):
+        for value, expected in ((True, True), (False, False), ('true', True), ('FALSE', False), ('', None),
+                                (None, None)):
+            self.assertIs(self.params(flag=value).boolean('flag'), expected, value)
+        self.assertIsNone(self.params().boolean('flag'))
+        for value in ('maybe', ' true', 'true ', 1, 0):
+            error = self.assert_invalid(lambda value=value: self.params(flag=value).boolean('flag'), 'flag')
+            self.assertEqual(str(error.detail), f"'flag' must be true or false, got '{value}'.")
+
+    def test_whole_number(self):
+        for value, expected in (('0', 0), ('25', 25), (7, 7), ('', None), (None, None)):
+            self.assertEqual(self.params(count=value).whole_number('count'), expected, value)
+        for value in ('-1', '1.5', ' 5', '5 ', '1234567890', -1, True, 2.0):
+            error = self.assert_invalid(lambda value=value: self.params(count=value).whole_number('count'), 'count')
+            self.assertEqual(str(error.detail), f"'count' must be a whole number, got '{value}'.")
+
+    def test_coding(self):
+        coding = self.params(coding={'system': 'http://x', 'code': 'c', 'version': '2', 'display': 'C'}).coding(
+            'coding')
+        self.assertEqual(tuple(coding), ('http://x', 'c', '2', 'C', 'coding'))
+        # a GET's system|code token splits at its first |, as a token search value does
+        self.assertEqual(self.params(coding='http://x|a|b').coding('coding')[:2], ('http://x', 'a|b'))
+        self.assertEqual(self.params(coding='no-bar').coding('coding')[:2], (None, 'no-bar'))
+        self.assertEqual(self.params(coding={'code': 'c', 'system': ''}).coding('coding')[:2], (None, 'c'))
+        for value in ({'system': 'http://x', 'code': 7}, ['http://x', 'c'], 7, {}):
+            error = self.assert_invalid(lambda value=value: self.params(coding=value).coding('coding'), 'coding')
+            self.assertEqual(str(error.detail), "'coding' must be a Coding.")
+
+    def test_codeable_concept_coding(self):
+        coding = self.params(codeableConcept={'coding': [{'system': 'http://x', 'code': 'c'}], 'text': 'C'}).\
+            codeable_concept_coding('codeableConcept')
+        self.assertEqual(tuple(coding), ('http://x', 'c', None, None, 'codeableConcept'))
+        for value in ({'text': 'no coding'}, {'coding': []}, {'coding': 'x'}, 'x'):
+            error = self.assert_invalid(
+                lambda value=value: self.params(codeableConcept=value).codeable_concept_coding('codeableConcept'),
+                'codeableConcept')
+            self.assertEqual(str(error.detail), "'codeableConcept' must hold a coding.")
+        self.assert_invalid(lambda: self.params(codeableConcept={'coding': [
+            {'system': 'http://x', 'code': 'a'}, {'system': 'http://x', 'code': 'b'}]}).codeable_concept_coding(
+            'codeableConcept'), 'codeableConcept', outcomes.NotSupportedError)
+
+    def test_a_coding_names_its_parts_where_they_came_in(self):
+        from_coding = self.params(coding={'code': 'c'}).coding('coding')
+        self.assertEqual(from_coding.path('system'), 'Coding.system')
+        error = self.assert_invalid(lambda: from_coding.require('system', 'Give a system.'), 'coding')
+        self.assertEqual(str(error.detail), 'Give a system.')
+        self.assertEqual(from_coding.require('code', 'Give a code.'), 'c')
+        concept = self.params(codeableConcept={'coding': [{'code': 'c'}]}).codeable_concept_coding('codeableConcept')
+        self.assertEqual(concept.path('code'), 'CodeableConcept.coding[0].code')
+        separate = base.Coding('http://x', None, None, None, None)
+        self.assertEqual(separate.path('code'), 'code')
+        self.assert_invalid(lambda: separate.require('code', 'Give a code.'), 'code')
 
 
 class BaseUrlTest(SimpleTestCase):
@@ -741,6 +821,14 @@ class FhirViewMixinTest(SimpleTestCase):
         self.assertEqual(get.data['parameter'][0], {'name': 'code', 'valueString': '1'})
         self.assertEqual(get.data['parameter'][1], {'name': 'base', 'valueUri': 'http://testserver/fhir'})
 
+    def test_a_server_error_a_view_returns_is_reported(self):
+        with patch('core.fhir.outcomes.ERRBIT_LOGGER') as errbit, self.assertLogs('oclapi', level='ERROR') as logs:
+            response = EchoView.as_view()(self.factory.get('/fhir/x?status=503'))
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(logs.output, ['ERROR:oclapi:FHIR answered a 503 server error as a 422'])
+        errbit.raise_errbit.assert_called_once_with('FHIR answered a 503 server error as a 422')
+
     def test_errors_a_view_returns_go_out_as_outcomes_and_never_as_a_5xx(self):
         for status, expected, code in ((404, 404, 'not-found'), (409, 409, 'invalid'), (503, 422, 'exception')):
             response = EchoView.as_view()(self.factory.get(f'/fhir/x?status={status}'))
@@ -748,3 +836,26 @@ class FhirViewMixinTest(SimpleTestCase):
             self.assertEqual(response.status_code, expected, status)
             self.assertEqual(response.data['resourceType'], 'OperationOutcome', status)
             self.assertEqual(response.data['issue'][0]['code'], code, status)
+
+
+@patch.dict('rest_framework.throttling.UserRateThrottle.THROTTLE_RATES', {'fhir_minute': '1000/minute'})
+@override_settings(ENABLE_THROTTLING=True)
+class FhirThrottleTest(SimpleTestCase):
+    """Every FHIR view throttles every caller at the same rate, which protects the server; groups play no part."""
+
+    def test_each_fhir_view_throttles_every_caller_alike(self):
+        from core.code_systems.views import CodeSystemListView, CodeSystemRetrieveUpdateView
+        from core.fhir.views import CapabilityStatementView, VersionsView
+        callers = (AnonymousUser(), Mock(is_authenticated=True, is_superuser=True, is_guest_group=False),
+                   Mock(is_authenticated=True, is_superuser=False, is_core_group=True, is_guest_group=False))
+        for view_class in (FhirOperationView, CapabilityStatementView, VersionsView, CodeSystemListView,
+                           CodeSystemRetrieveUpdateView):
+            for user in callers:
+                view = view_class()
+                view.request = Mock(user=user)
+                self.assertEqual([type(throttle) for throttle in view.get_throttles()], [FhirMinuteThrottle],
+                                 (view_class, user))
+
+    @override_settings(ENABLE_THROTTLING=False)
+    def test_nothing_is_throttled_with_throttling_off(self):
+        self.assertEqual(FhirOperationView().get_throttles(), [])

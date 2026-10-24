@@ -39,21 +39,25 @@ from urllib.parse import quote_plus
 
 from django.db.models import Case, Exists, OuterRef, Q, Subquery, Value, When
 from django.db.models.functions import Coalesce
-from rest_framework.exceptions import ValidationError
 
 from core.collections.models import Collection
-from core.common.constants import HEAD, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT
+from core.common.constants import HEAD
+from core.common.models import BaseModel
 from core.common.mixins import SourceContainerMixin
-from core.common.serializers import IdentifierSerializer
-from core.common.utils import decode_string, is_canonical_uri, normalize_public_access, to_parent_uri
+from core.common.fhir_helpers import REPOSITORY_KINDS, to_fhir_path, to_ocl_path
+from core.common.utils import decode_string, is_canonical_uri, to_parent_uri
 from core.fhir.outcomes import NotFoundError
 from core.sources.models import Source
 from core.toggles.models import Toggle
+from core.url_registry.constants import URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE
 from core.url_registry.models import URLRegistry
 
 REPO_TYPES = {'CodeSystem': Source, 'ConceptMap': Source, 'ValueSet': Collection}
-REPO_PATHS = {'CodeSystem': 'sources', 'ConceptMap': 'sources', 'ValueSet': 'collections'}
-PUBLIC_ACCESS = (ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT)  # what public_can_view reads as public
+REPO_PATHS = REPOSITORY_KINDS
+PUBLIC_ACCESS = BaseModel.PUBLIC_ACCESS_VALUES  # what public_can_view reads as public, as stored
+# a HEAD served_repositories reads: what the resolver's pick and a CodeSystem's identifier depend on
+ServedHead = namedtuple(
+    'ServedHead', 'id mnemonic organization_id user_id canonical_url uri organization_uri user_uri')
 
 
 class UnresolvedError(NotFoundError):
@@ -220,17 +224,6 @@ def latest_public_release(instance):
     return latest
 
 
-def to_ocl_path(url):
-    """
-    An OCL FHIR path (/orgs/{org}/CodeSystem/{id}/...) as the OCL path of the repository it names, by its own
-    resource type, so a reference to the other type finds nothing; anything else as it is.
-    """
-    parts = url.split('/')
-    if len(parts) > 3 and not parts[0] and parts[1] in ('orgs', 'users') and parts[3] in REPO_PATHS:
-        parts[3] = REPO_PATHS[parts[3]]
-    return '/'.join(parts)
-
-
 def is_visible(instance, namespace, user):
     """
     Whether a base shows a repository version: the version and its repository (its active HEAD, which governs access
@@ -241,7 +234,8 @@ def is_visible(instance, namespace, user):
     access = repository_access(instance)
     if access is None:
         return False
-    return (instance.public_can_view and is_public(access)) or may_view_private(instance, namespace, user)
+    return (instance.public_can_view and BaseModel.is_public_access(access)) or may_view_private(
+        instance, namespace, user)
 
 
 def has_release(instance, namespace=None, user=None):
@@ -257,11 +251,6 @@ def has_release(instance, namespace=None, user=None):
     if not may_view_private(instance, namespace, user):
         live = live.filter(public_access__in=PUBLIC_ACCESS)
     return live.exists()
-
-
-def is_public(public_access):
-    """A public_access value as public_can_view reads it."""
-    return normalize_public_access(public_access).lower() == ACCESS_TYPE_VIEW.lower()
 
 
 def repository_access(instance):
@@ -329,9 +318,7 @@ def owner_access(kwargs, user):
     owner = SourceContainerMixin.get_object_from_namespace(namespace)
     if not owner:
         return None, False
-    is_org = bool(kwargs.get('org'))
-    return {'organization_id' if is_org else 'user_id': owner.id}, bool(user and user.is_authenticated) and (
-        user.is_staff or (owner.is_member(user) if is_org else owner.id == user.id))
+    return {'organization_id' if kwargs.get('org') else 'user_id': owner.id}, owner.has_edit_access(user)
 
 
 def viewable_rows(model, namespace, user):
@@ -385,11 +372,6 @@ def visible_versions(resource_type, kwargs=None, user=None, access=None):
     return releases.filter(Q(retired=False) | Q(id__in=retired_beside_live.values('id')))
 
 
-REGISTRY_TOGGLE = 'URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE'  # whether the resolver consults the URL registry
-ServedHead = namedtuple(
-    'ServedHead', 'id mnemonic organization_id user_id canonical_url uri organization_uri user_uri')
-
-
 def is_looked_up_as_written(url):
     """
     Whether the resolver looks a canonical URL up as it is written (resolve_reference_expression's reading of a url):
@@ -403,11 +385,8 @@ def ocl_path(uri):
     A repository's OCL path as a CodeSystem (/orgs/{org}/CodeSystem/{id}/), as $expand names the system of a member
     without a canonical URL, if the resolver reads it back to the repository (`uri`), naming no version; else None.
     """
-    try:
-        path = IdentifierSerializer.convert_ocl_uri_to_fhir_url(uri, 'CodeSystem')
-    except ValidationError:
-        return None
-    if is_canonical_uri(path):
+    path = to_fhir_path(uri, 'CodeSystem')
+    if path is None or is_canonical_uri(path):
         return None
     return path if to_parent_uri(to_ocl_path(path)) == uri else None
 
@@ -462,7 +441,7 @@ def served_repositories(kwargs, user):  # pylint: disable=too-many-locals
     owner = access[0]
     if owner is None:
         return []
-    registry = Toggle.get(REGISTRY_TOGGLE)
+    registry = Toggle.get(URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE)
     own_entries, global_entries = registry_entries(owner) if registry else ({}, {})
     versions = {}
     for *repository, version, retired in visible_versions('CodeSystem', access=access).order_by(

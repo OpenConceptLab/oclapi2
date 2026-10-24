@@ -22,10 +22,10 @@ version the request names. core.fhir.adapters.r4 writes the answer as an R4 Valu
   the concept's newest content, so it uses the newest holding release of another, not deleted, version, whatever the
   expansion pins. None without one, never HEAD or an unreleased version (as $validate-code answers).
 - Inputs: activeOnly leaves retired concepts out; filter keeps the concepts whose code (as FHIR spells it) or one of
-  whose names has a word starting with each of the filter's words, ignoring case; offset and count page the members in
-  a fixed order (count at most MAX_COUNT, which is also the default); count=0 answers the total alone. total counts
-  what activeOnly and filter keep. The inputs that shaped the answer are echoed in expansion.parameter, then each code
-  system the members come from, with each version they are reported in, as used-codesystem. Every other R4 $expand
+  whose names has a word starting with each of the filter's words, ignoring case; offset and count page the members in a
+  fixed order (count at most FHIR_EXPAND_MAX_COUNT, which is also the default); count=0 answers the total alone. total
+  counts what activeOnly and filter keep. The inputs that shaped the answer are echoed in expansion.parameter, then each
+  code system the members come from, with each version they are reported in, as used-codesystem. Every other R4 $expand
   input is one a stored expansion always satisfies (SATISFIED: OCL's expansions are flat, with no abstract codes), one
   supported only when false (ONLY_FALSE: an expansion has no definitions, and doesn't record which of its codes are
   post-coordinated), or a 400 not-supported naming it (NOT_SUPPORTED): an inline value set, a context, a date, code
@@ -35,10 +35,11 @@ version the request names. core.fhir.adapters.r4 writes the answer as an R4 Valu
   links of each repository's newest live release the caller is shown are read as a set, then older holding releases
   probed per member only for those still unresolved. Full concepts and names are read for the page alone. A filtered
   expansion reads the ids of its matching members once, and its total and page come from them. All queries within
-  SEARCH_TIMEOUT_MS together, past which the expansion is too costly (422).
+  FHIR_SEARCH_TIMEOUT_MS together, past which the expansion is too costly (422).
 """
 import re
 
+from django.conf import settings
 from django.db.models import BooleanField, Case, Exists, ExpressionWrapper, F, Func, IntegerField, JSONField, \
     OuterRef, Q, Subquery, Value, When
 from django.db.models.functions import Coalesce, JSONObject
@@ -49,13 +50,13 @@ from core.common.constants import HEAD
 from core.common.serializers import IdentifierSerializer
 from core.concepts.models import Concept, ConceptName
 from core.fhir import outcomes
-from core.fhir.ops.concepts import designations, display_of, fhir_code, text
+from core.fhir.constants import EXPANSION_TOO_COSTLY
+from core.fhir.ops.concepts import designations, display_of, fhir_code
 from core.fhir.ops.validate_code import value_set_version
 from core.fhir.resolve import namespace_of, viewable_rows
 from core.fhir.search import within_search_timeout
 from core.sources.models import Source
 
-MAX_COUNT = 1000  # the most members a page holds, and how many it holds when count isn't given
 WORD = re.compile(r'\w+')
 # an escape of an ASCII character that is no word character (not a letter, digit or _), matched ignoring case
 NON_WORD_ESCAPE = '%(?:[01][0-9a-f]|2[0-9a-f]|3[a-f]|40|5[b-e]|60|7[b-f])'
@@ -98,35 +99,6 @@ UNRESOLVED = {
 }
 
 
-def too_costly():
-    return outcomes.TooCostlyError(
-        'The expansion would take too long to answer. Narrow it, for example with filter, or page it with count.')
-
-
-def whole_number(parameters, name):
-    """A whole-number input (an integer, or its digits as text), or None when it's absent; anything else is a 400."""
-    value = parameters.get(name)
-    if value is None or value == '':
-        return None
-    if isinstance(value, str) and re.fullmatch(r'[0-9]{1,9}', value.strip()):
-        return int(value)
-    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
-        return value
-    raise outcomes.InvalidError(f"'{name}' must be a whole number, got '{value}'.", expression=name)
-
-
-def flag(parameters, name):
-    """A boolean input (a boolean, or true or false as text), or None when it's absent; anything else is a 400."""
-    value = parameters.get(name)
-    if value in (None, ''):
-        return None
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str) and (lowered := value.strip().lower()) in ('true', 'false'):
-        return lowered == 'true'
-    raise outcomes.InvalidError(f"'{name}' must be true or false, got '{value}'.", expression=name)
-
-
 class Inputs:  # pylint: disable=too-few-public-methods
     """$expand's inputs other than the value set, read and checked before anything is: the echo is what was given."""
 
@@ -135,17 +107,17 @@ class Inputs:  # pylint: disable=too-few-public-methods
             if name in parameters:
                 raise outcomes.NotSupportedError(message, expression=name)
         for name, message in ONLY_FALSE.items():
-            if flag(parameters, name):
+            if parameters.boolean(name):
                 raise outcomes.NotSupportedError(message, expression=name)
         for name in SATISFIED:
-            flag(parameters, name)  # either value is met; one that isn't a boolean is still a 400
-        self.filter = text(parameters, 'filter')
-        self.language = text(parameters, 'displayLanguage')
-        self.designations = flag(parameters, 'includeDesignations')
-        self.active_only = flag(parameters, 'activeOnly')
-        self.offset = whole_number(parameters, 'offset')
-        count = whole_number(parameters, 'count')
-        self.count = MAX_COUNT if count is None else min(count, MAX_COUNT)
+            parameters.boolean(name)  # either value is met; one that isn't a boolean is still a 400
+        self.filter = parameters.text('filter')
+        self.language = parameters.text('displayLanguage')
+        self.designations = parameters.boolean('includeDesignations')
+        self.active_only = parameters.boolean('activeOnly')
+        self.offset = parameters.whole_number('offset')
+        count = parameters.whole_number('count')
+        self.count = settings.FHIR_EXPAND_MAX_COUNT if count is None else min(count, settings.FHIR_EXPAND_MAX_COUNT)
         self.echo = [item for item in (
             ('filter', 'valueString', self.filter),
             ('displayLanguage', 'valueCode', self.language),
@@ -220,9 +192,10 @@ def expand(parameters, kwargs, user, instance_id=None):
     level), for `user`: {value_set, identifier, timestamp, total, offset, parameters, used, contains}.
     """
     inputs = Inputs(parameters)
-    if not instance_id and not text(parameters, 'url'):
+    if not instance_id and not parameters.text('url'):
         raise outcomes.InvalidError('url is required: the value set to expand.', expression='url')
-    return within_search_timeout(lambda: Expander(parameters, inputs, kwargs, user, instance_id).answer(), too_costly)
+    return within_search_timeout(
+        lambda: Expander(parameters, inputs, kwargs, user, instance_id).answer(), EXPANSION_TOO_COSTLY)
 
 
 def stored_expansion(value_set):

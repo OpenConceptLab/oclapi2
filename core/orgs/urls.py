@@ -1,6 +1,6 @@
 from django.urls import path, include
 
-from core.fhir.views import CapabilityStatementView, VersionsView
+from core.fhir.urls import metadata_routes
 from core.users.views import UserListView
 from . import views
 
@@ -22,10 +22,7 @@ urlpatterns = [
         '<str:org>/url-registry/', include('core.url_registry.urls'), name='org-url-registry-urls'),
     path('<str:org>/repos/', include('core.repos.urls'), name='org-repos-urls'),
     path('<str:org>/sources/', include('core.sources.urls')),
-    path('<str:org>/metadata', CapabilityStatementView.as_view(), name='organization-fhir-metadata'),
-    path('<str:org>/metadata/', CapabilityStatementView.as_view(), name='organization-fhir-metadata-slash'),
-    path('<str:org>/$versions', VersionsView.as_view(), name='organization-fhir-versions'),
-    path('<str:org>/$versions/', VersionsView.as_view(), name='organization-fhir-versions-slash'),
+    *metadata_routes('<str:org>/', 'organization-fhir'),
     path('<str:org>/CodeSystem/', include('core.code_systems.urls'), name='code_systems_urls'),
     path('<str:org>/CodeSystem', include('core.code_systems.urls'), name='code_systems_urls_no_slash'),
     path('<str:org>/ValueSet/', include('core.value_sets.urls'), name='value_sets_urls'),

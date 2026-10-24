@@ -1,11 +1,13 @@
 """The middleware's answers on FHIR paths are OperationOutcomes (OpenConceptLab/ocl_online#451)."""
 import gzip
 import json
-from unittest.mock import patch
+from io import BytesIO
+from unittest.mock import Mock, patch
 
 import requests
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
+from django.core.handlers.wsgi import WSGIRequest
 from django.http import HttpResponse, JsonResponse, HttpResponseNotFound
 from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 from fhir.resources.R4B.operationoutcome import OperationOutcome
@@ -79,12 +81,26 @@ class FhirErrorMiddlewareTest(SimpleTestCase):
 
         server_error = JsonResponse({'error': 'Server Error (500)'}, status=500)
         server_error['Access-Control-Allow-Origin'] = '*'
-        response = self.answer('/fhir/CodeSystem/', server_error, HTTP_ACCEPT='application/fhir+xml')
+        with patch('core.fhir.outcomes.ERRBIT_LOGGER') as errbit, self.assertLogs('oclapi', level='ERROR'):
+            response = self.answer('/fhir/CodeSystem/', server_error, HTTP_ACCEPT='application/fhir+xml')
+        errbit.raise_errbit.assert_called_once_with('FHIR answered a 500 server error as a 422')
 
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response['Access-Control-Allow-Origin'], '*')  # the stack's headers are kept
         issue = etree.fromstring(response.content).find('{http://hl7.org/fhir}issue/{http://hl7.org/fhir}code')
         self.assertEqual(issue.get('value'), 'exception')
+
+    def test_a_server_error_django_already_logged_is_not_reported_again(self):
+        logged = JsonResponse({'error': 'Server Error (500)'}, status=500)
+        logged._has_been_logged = True  # pylint: disable=protected-access
+
+        with patch('core.middlewares.middlewares.report_server_error') as report:
+            response = self.answer('/fhir/CodeSystem/', logged)
+            self.assertEqual(response.status_code, 422)
+            report.assert_not_called()
+
+            self.answer('/fhir/CodeSystem/', JsonResponse({'error': 'Server Error (500)'}, status=500))
+            report.assert_called_once_with(500)
 
     def test_a_json_error_keeps_its_message(self):
         response = self.answer('/orgs/CIEL/CodeSystem/', JsonResponse({'detail': 'Slow down.'}, status=429))
@@ -105,6 +121,14 @@ class FhirErrorMiddlewareTest(SimpleTestCase):
         self.assertIs(self.answer('/orgs/CIEL/sources/x/', not_found), not_found)
         ok = HttpResponse('ok')
         self.assertIs(self.answer('/fhir/CodeSystem/', ok), ok)
+
+    def test_an_exception_off_a_fhir_path_is_raised_as_before(self):
+        def crash(request):
+            raise ConnectionError('sign-in provider unreachable')
+
+        for path in ('/orgs/CIEL/sources/', '/user/sources/CodeSystem/', '/version/'):
+            with self.assertRaises(ConnectionError, msg=path):
+                FhirErrorMiddleware(crash)(self.factory.get(path))
 
 
 @override_settings(DATA_UPLOAD_MAX_NUMBER_FIELDS=1000, FHIR_SUBDOMAIN=None, REQUIRE_AUTHENTICATION=False,
@@ -200,6 +224,28 @@ class MediaTypeParsingFailureTest(TestCase):
         self.assertIsNone(response.wsgi_request.encoding)
 
 
+class ProductionRequestOffFhirPathsTest(SimpleTestCase):
+    """Off a FHIR path, the production request class reads Content-Type exactly as Django's own does."""
+
+    @staticmethod
+    def environ(path, content_type):
+        return {'REQUEST_METHOD': 'POST', 'PATH_INFO': path, 'CONTENT_TYPE': content_type, 'CONTENT_LENGTH': '2',
+                'wsgi.input': BytesIO(b'{}'), 'SERVER_NAME': 'testserver', 'SERVER_PORT': '80',
+                'wsgi.url_scheme': 'http'}
+
+    def test_a_malformed_content_type_off_a_fhir_path_fails_as_in_django(self):
+        for path in ('/orgs/CIEL/sources/', '/user/sources/CodeSystem/'):
+            for request_class in (WSGIRequest, application.request_class):
+                with self.assertRaisesMessage(LookupError, 'unknown encoding: bad'):
+                    request_class(self.environ(path, "application/json; foo*=bad''%41"))
+
+    def test_a_non_text_charset_off_a_fhir_path_is_kept_as_in_django(self):
+        request = application.request_class(self.environ('/orgs/CIEL/sources/', 'application/json; charset=base64'))
+
+        self.assertEqual(request.encoding, 'base64')
+        self.assertFalse(hasattr(request, 'fhir_content_type_error'))
+
+
 @override_settings(REQUIRE_AUTHENTICATION=True, APPROVED_ANONYMOUS_CLIENTS=[], APPROVED_ANONYMOUS_API_KEYS=[],
                    APPROVED_ANONYMOUS_IPS=[], MIDDLEWARE=[
                        *settings.MIDDLEWARE[:settings.MIDDLEWARE.index(
@@ -270,3 +316,33 @@ class RequireAuthenticationOnFhirPathsTest(SimpleTestCase):
         response = middleware(self.factory.get('/orgs/CIEL/sources/', HTTP_AUTHORIZATION='Bearer x'))
         self.assertEqual(response.status_code, 401)
         self.assertIn('detail', json.loads(response.content))
+
+
+@patch.dict('rest_framework.throttling.UserRateThrottle.THROTTLE_RATES', {
+    'fhir_minute': '5/minute', 'standard_minute': '50/minute', 'standard_day': '500/day'})
+@override_settings(ENABLE_THROTTLING=True)
+class FhirThrottleHeadersTest(SimpleTestCase):
+    """On a FHIR path the remaining-requests header counts the FHIR API's own throttle, and there's no daily one."""
+    factory = RequestFactory()
+
+    def test_a_fhir_path_reports_the_fhir_counter(self):
+        from core.common.throttling import FhirMinuteThrottle, StandardMinuteThrottle
+        from core.middlewares.middlewares import ThrottleHeadersMiddleware
+        user = Mock(is_authenticated=True, is_superuser=False, is_guest_group=False, is_core_group=False, pk=7)
+        middleware = ThrottleHeadersMiddleware(lambda request: HttpResponse('ok'))
+
+        def respond(path):
+            request = self.factory.get(path)
+            request.user = user
+            return middleware.process_response(request, HttpResponse('ok'))
+
+        with patch.object(FhirMinuteThrottle, 'cache') as fhir_cache, \
+                patch.object(StandardMinuteThrottle, 'cache') as standard_cache:
+            fhir_cache.get.return_value = [FhirMinuteThrottle().timer()] * 2
+            standard_cache.get.return_value = [StandardMinuteThrottle().timer()] * 10
+            response = respond('/fhir/CodeSystem/')
+            self.assertEqual(response['X-LimitRemaining-Minute'], '3')
+            self.assertNotIn('X-LimitRemaining-Day', response)
+
+            fhir_cache.get.return_value = None  # nothing counted yet
+            self.assertNotIn('X-LimitRemaining-Minute', respond('/orgs/CIEL/ValueSet/'))

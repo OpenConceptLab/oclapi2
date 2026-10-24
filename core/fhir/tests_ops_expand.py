@@ -11,7 +11,7 @@ import re
 from urllib.parse import quote
 
 from django.db import connection
-from django.test.utils import CaptureQueriesContext
+from django.test.utils import CaptureQueriesContext, override_settings
 from lxml import etree
 from mock.mock import patch
 from rest_framework.test import APIClient
@@ -430,7 +430,9 @@ class ExpandCases(OpsCorpusMixin):
                          422)
         for params, expression in (({}, 'url'), ({'count': '-1'}, 'count'), ({'count': 'all'}, 'count'),
                                    ({'offset': '1.5'}, 'offset'), ({'activeOnly': 'maybe'}, 'activeOnly'),
-                                   ({'includeDesignations': '1'}, 'includeDesignations')):
+                                   ({'includeDesignations': '1'}, 'includeDesignations'),
+                                   # no padding, as no FHIR integer or boolean has any
+                                   ({'count': ' 5'}, 'count'), ({'activeOnly': 'true '}, 'activeOnly')):
             response = self.expand(**({'url': FEVERS} if expression != 'url' else {}), **params)
             self.assert_outcome(response, 400, 'invalid', 'invalid-data')
             self.assertEqual(response.data['issue'][0]['expression'], [expression], params)
@@ -605,7 +607,7 @@ class ExpandTimeoutTest(OCLAPITransactionTestCase):
             with connection.cursor() as cursor:
                 cursor.execute('SELECT pg_sleep(1)')
 
-        with patch('core.fhir.search.SEARCH_TIMEOUT_MS', 50), patch('core.fhir.ops.expand.Expander.used', slow):
+        with override_settings(FHIR_SEARCH_TIMEOUT_MS=50), patch('core.fhir.ops.expand.Expander.used', slow):
             response = APIClient().get('/fhir/ValueSet/$expand', {'url': FEVERS})
         self.assertEqual(response.status_code, 422, response.data)
         issue = response.data['issue'][0]

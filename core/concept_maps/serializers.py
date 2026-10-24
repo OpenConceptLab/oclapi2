@@ -1,6 +1,7 @@
 import logging
 from collections import OrderedDict
 
+from django.conf import settings
 from rest_framework import serializers
 from rest_framework.fields import CharField, SerializerMethodField, \
     DateTimeField
@@ -20,7 +21,6 @@ from core.sources.models import Source
 from core.sources.serializers import SourceCreateOrUpdateSerializer
 
 logger = logging.getLogger('oclapi')
-MAPPING_LIMIT = 1000
 
 
 class ConceptMapGroupField(serializers.Field):
@@ -51,23 +51,25 @@ class ConceptMapGroupField(serializers.Field):
 
     def to_representation(self, value):
         """
-        At most 1,000 live mappings, grouped by the systems they are shown as: each side named as $translate names it
-        (side_system), its source's canonical URL when the caller is shown that source at the read's base, else the URL
-        the mapping stores. Whether a source is shown is a subquery of the one statement.
+        At most FHIR_CONCEPT_MAP_MAPPING_LIMIT live mappings, grouped by the systems they are shown as: each side named
+        as $translate names it (side_system), its source's canonical URL when the caller is shown that source at the
+        read's base, else the URL the mapping stores. Whether a source is shown is a subquery of the one statement.
         """
         # TODO: support graphQL to go around the limit
-        request, view = self.context.get('request'), self.context.get('view')
-        namespace, user = namespace_of(getattr(view, 'kwargs', None)), getattr(request, 'user', None)
+        view = self.context.get('view')
+        namespace = namespace_of(getattr(view, 'kwargs', None))
+        user = getattr(self.context.get('request'), 'user', None)
         mappings = value.get_active_mappings()  # neither retired nor deleted
         for side in ('from', 'to'):
             mappings = with_side(mappings, side, namespace, user)
+        limit = settings.FHIR_CONCEPT_MAP_MAPPING_LIMIT
         rows = list(mappings.order_by('id').values(
             'map_type', 'from_concept_code', 'to_concept_code', *(
                 f'{side}_{field}' for side in ('from', 'to')
-                for field in ('source_url', 'source__uri', 'shown', 'canonical')))[:MAPPING_LIMIT + 1])
-        self.subsetted = len(rows) > MAPPING_LIMIT
+                for field in ('source_url', 'source__uri', 'shown', 'canonical')))[:limit + 1])
+        self.subsetted = len(rows) > limit
         groups, elements = {}, {}
-        for row in rows[:MAPPING_LIMIT]:
+        for row in rows[:limit]:
             key = tuple(side_system(row[f'{side}_canonical'], row[f'{side}_source_url'],
                                     row[f'{side}_source__uri'] if row[f'{side}_shown'] else None)
                         for side in ('from', 'to'))

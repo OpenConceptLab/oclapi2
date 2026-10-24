@@ -4,7 +4,11 @@ and on: today's answers for its existing callers, the flags FHIR resolves with (
 never write a registry entry, the registry links kept on the write side instead, and $resolveReference's ?namespace=.
 OpenConceptLab/ocl_online#451.
 """
+from contextlib import contextmanager
+
+from django.db import connection
 from django.test import override_settings
+from django.test.utils import CaptureQueriesContext
 from mock import patch
 from pydash import get
 
@@ -18,12 +22,12 @@ from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.toggles.models import Toggle
+from core.url_registry.constants import URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE
 from core.url_registry.documents import URLRegistryDocument
 from core.url_registry.factories import GlobalURLRegistryFactory, OrganizationURLRegistryFactory
 from core.url_registry.models import URLRegistry
 from core.users.models import UserProfile
 
-REGISTRY_TOGGLE = 'URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE'
 ICD10 = 'http://hl7.org/fhir/sid/icd-10'
 PBD = 'http://pbd.com.np'
 DRAFT = 'https://example.org/draft'
@@ -32,9 +36,9 @@ FLAGGED = 'https://example.org/flagged-head'
 
 def set_registry_toggle(on):
     """The toggle in every environment's column, so a test doesn't depend on which one settings.ENV reads."""
-    Toggle.objects.filter(name=REGISTRY_TOGGLE).update(
+    Toggle.objects.filter(name=URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE).update(
         dev=on, qa=on, demo=on, staging=on, who_staging=on, production=on)
-    assert Toggle.get(REGISTRY_TOGGLE) is on
+    assert Toggle.get(URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE) is on
 
 
 def source(org, mnemonic, version=HEAD, **kwargs):
@@ -299,12 +303,21 @@ def run_inline(args, **_):
     return resolve_url_registry_entries(*args)
 
 
+@contextmanager
+def queued_tasks_run(test):
+    """The resolve_url_registry_entries tasks a block queues on commit, run inline when it ends; yields their mock"""
+    with patch.object(resolve_url_registry_entries, 'apply_async', side_effect=run_inline) as queued, \
+            test.captureOnCommitCallbacks(execute=True):
+        yield queued
+
+
 @override_settings(ES_SYNC=True, ELASTICSEARCH_DSL_AUTOSYNC=True, ELASTICSEARCH_DSL_AUTO_REFRESH=True)
 class URLRegistryLinkTest(OCLAPITestCase):
     """
     An entry's cached repository is kept on the write side, since reads no longer write: a repository created after
     its entry links it, and a canonical URL change clears the entries of the old URL and fills those of the new one,
-    in the registry API and in the registry's search index. Indexing is switched on here because a test that pauses
+    in the registry API and in the registry's search index. The resolve_url_registry_entries task does it, queued once
+    the change commits. Indexing is switched on here because a test that pauses
     it leaves it paused (resume_indexing does nothing in TEST_MODE).
     """
     OLD, NEW = 'https://example.org/acme/codes', 'https://example.org/acme/codes-v2'
@@ -336,19 +349,21 @@ class URLRegistryLinkTest(OCLAPITestCase):
         for entry in old_entries + [new_entry]:
             self.assertEqual(self.linked_repo(entry), (None, (None, None)))
 
-        response = self.client.post(f'{self.org.uri}sources/', {
-            'id': 'codes', 'name': 'codes', 'short_code': 'codes', 'canonical_url': self.OLD,
-            'default_locale': 'en', 'supported_locales': 'en'}, format='json', **self.auth)
+        with queued_tasks_run(self) as queued:
+            response = self.client.post(f'{self.org.uri}sources/', {
+                'id': 'codes', 'name': 'codes', 'short_code': 'codes', 'canonical_url': self.OLD,
+                'default_locale': 'en', 'supported_locales': 'en'}, format='json', **self.auth)
         self.assertEqual(response.status_code, 201, response.data)
+        queued.assert_called_once()
         codes = f'{self.org.uri}sources/codes/'
         for entry in old_entries:
             self.assertEqual(self.linked_repo(entry), (codes, ('codes', 'acme-registry')))
         self.assertEqual(self.linked_repo(new_entry), (None, (None, None)))
 
-        with patch.object(resolve_url_registry_entries, 'apply_async', side_effect=run_inline) as queued:
+        with queued_tasks_run(self) as queued:
             response = self.client.put(codes, {'canonical_url': self.NEW}, format='json', **self.auth)
         self.assertEqual(response.status_code, 200, response.data)
-        queued.assert_called_once()  # the entries the repository was linked to, through the existing task
+        queued.assert_called_once()  # the entries of the old URL it was linked to, and the new URL's
         for entry in old_entries:
             self.assertEqual(self.linked_repo(entry), (None, (None, None)))
         self.assertEqual(self.linked_repo(new_entry), (codes, ('codes', 'acme-registry')))
@@ -356,20 +371,22 @@ class URLRegistryLinkTest(OCLAPITestCase):
     def test_a_version_given_an_entrys_canonical_links_it_and_loses_it_again(self):
         """A version row that gains the canonical an unlinked entry names is what the registry's lookup finds"""
         head_entry = self.create_entry(self.org.uri, self.OLD)
-        head = source(self.org, 'codes', canonical_url=self.OLD)
-        source(self.org, 'codes', 'v1', released=True, canonical_url=self.OLD)
+        with queued_tasks_run(self):
+            head = source(self.org, 'codes', canonical_url=self.OLD)
+            source(self.org, 'codes', 'v1', released=True, canonical_url=self.OLD)
         head_link = (head.uri, ('codes', 'acme-registry'))
         self.assertEqual(self.linked_repo(head_entry), head_link)  # a new version doesn't take HEAD's entry
 
         new_entries = [self.create_entry('/', self.NEW), self.create_entry(self.org.uri, self.NEW)]
         version_url = f'{head.uri}v1/'
-        response = self.client.put(version_url, {'canonical_url': self.NEW}, format='json', **self.auth)
+        with queued_tasks_run(self):
+            response = self.client.put(version_url, {'canonical_url': self.NEW}, format='json', **self.auth)
         self.assertEqual(response.status_code, 200, response.data)
         for entry in new_entries:
             self.assertEqual(self.linked_repo(entry), (version_url, ('codes', 'acme-registry')))
         self.assertEqual(self.linked_repo(head_entry), head_link)
 
-        with patch.object(resolve_url_registry_entries, 'apply_async', side_effect=run_inline) as queued:
+        with queued_tasks_run(self) as queued:
             response = self.client.put(
                 version_url, {'canonical_url': 'https://example.org/acme/elsewhere'}, format='json', **self.auth)
         self.assertEqual(response.status_code, 200, response.data)
@@ -384,9 +401,10 @@ class URLRegistryLinkTest(OCLAPITestCase):
         return row is not None, bool(row)
 
     def create_source(self, canonical_url):
-        response = self.client.post(f'{self.org.uri}sources/', {
-            'id': 'codes', 'name': 'codes', 'short_code': 'codes', 'canonical_url': canonical_url,
-            'default_locale': 'en', 'supported_locales': 'en'}, format='json', **self.auth)
+        with queued_tasks_run(self):
+            response = self.client.post(f'{self.org.uri}sources/', {
+                'id': 'codes', 'name': 'codes', 'short_code': 'codes', 'canonical_url': canonical_url,
+                'default_locale': 'en', 'supported_locales': 'en'}, format='json', **self.auth)
         self.assertEqual(response.status_code, 201, response.data)
         return f'{self.org.uri}sources/codes/'
 
@@ -530,14 +548,16 @@ class URLRegistryLinkTest(OCLAPITestCase):
 
     def test_a_collection_created_after_its_entry_links_it(self):
         entry = GlobalURLRegistryFactory(url=self.OLD, namespace=self.org.uri)
-        source(self.org, 'codes', canonical_url=self.OLD.replace('codes', 'other'))
-        value_set = collection(self.org, 'codes-vs', canonical_url=self.OLD)
+        with queued_tasks_run(self):
+            source(self.org, 'codes', canonical_url=self.OLD.replace('codes', 'other'))
+            value_set = collection(self.org, 'codes-vs', canonical_url=self.OLD)
         entry.refresh_from_db()
         self.assertEqual(entry.repo, value_set)
 
         # neither a new version row nor a later repository with the same canonical takes the entry over
-        collection(self.org, 'codes-vs', 'v1', released=True, canonical_url=self.OLD)
-        collection(self.org, 'codes-vs-2', canonical_url=self.OLD)
+        with queued_tasks_run(self):
+            collection(self.org, 'codes-vs', 'v1', released=True, canonical_url=self.OLD)
+            collection(self.org, 'codes-vs-2', canonical_url=self.OLD)
         entry.refresh_from_db()
         self.assertEqual(entry.repo, value_set)
 
@@ -545,11 +565,86 @@ class URLRegistryLinkTest(OCLAPITestCase):
         other = OrganizationFactory(mnemonic='acme-other')
         entry = GlobalURLRegistryFactory(url=self.OLD, namespace=other.uri)
         inactive = GlobalURLRegistryFactory(url=self.NEW, namespace=self.org.uri, is_active=False)
-        source(self.org, 'codes', canonical_url=self.OLD)
-        source(self.org, 'codes-2', canonical_url=self.NEW)
+        with queued_tasks_run(self) as queued:
+            source(self.org, 'codes', canonical_url=self.OLD)
+            source(self.org, 'codes-2', canonical_url=self.NEW)
+        queued.assert_not_called()
         for unlinked in (entry, inactive):
             unlinked.refresh_from_db()
             self.assertIsNone(unlinked.repo_id)
+
+
+class URLRegistryLinkCostTest(OCLTestCase):
+    """
+    A row given a canonical URL, new or changed, asks the registry one question in the request: whether any active entry
+    is linked to it or names its URL in its namespace. The entries move in the resolve_url_registry_entries task.
+    """
+    URL = 'https://example.org/acme/cost'
+
+    def setUp(self):
+        super().setUp()
+        self.org = OrganizationFactory(mnemonic='acme-cost')
+
+    def save(self, build):
+        """(what build() returns, the registry's queries it ran, the task calls it queued) with no entry resolved"""
+        with CaptureQueriesContext(connection) as context, patch.object(URLRegistry, 'lookup_entry') as lookup, \
+                patch.object(resolve_url_registry_entries, 'apply_async') as queued:
+            row = build()
+        lookup.assert_not_called()
+        return row, [query['sql'] for query in context.captured_queries if 'url_registries' in query['sql']], queued
+
+    def test_a_row_with_no_entry_asks_once_and_queues_nothing(self):
+        head, queries, queued = self.save(lambda: source(self.org, 'codes', canonical_url=self.URL))
+        self.assertEqual(len(queries), 1)
+        queued.assert_not_called()
+
+        _, queries, queued = self.save(lambda: source(self.org, 'codes', 'v1', released=True, canonical_url=self.URL))
+        self.assertEqual(len(queries), 1)
+        queued.assert_not_called()
+
+        head.canonical_url = f'{self.URL}-2'
+        _, queries, queued = self.save(head.save)
+        self.assertEqual(len(queries), 1)
+        queued.assert_not_called()
+
+    def test_a_row_an_entry_names_queues_the_task_that_links_it(self):
+        entry = GlobalURLRegistryFactory(url=self.URL, namespace=self.org.uri)
+        other = OrganizationFactory(mnemonic='acme-else')
+        elsewhere = OrganizationURLRegistryFactory(organization=other, url=self.URL, namespace=other.uri)
+
+        with patch.object(resolve_url_registry_entries, 'apply_async') as queued:
+            with self.captureOnCommitCallbacks(execute=True):
+                with patch.object(URLRegistry, 'lookup_entry') as lookup:
+                    head = source(self.org, 'codes', canonical_url=self.URL)
+                lookup.assert_not_called()
+                queued.assert_not_called()  # until the row commits
+        queued.assert_called_once_with((head.id, 'Source'), queue='default', permanent=False)
+
+        resolve_url_registry_entries(head.id, 'Source')
+        entry.refresh_from_db()
+        elsewhere.refresh_from_db()
+        self.assertEqual((entry.repo, elsewhere.repo), (head, None))
+
+    def test_the_task_queued_is_the_saved_rows_whatever_the_instance_becomes(self):
+        GlobalURLRegistryFactory(url=self.URL, namespace=self.org.uri)
+        with patch.object(resolve_url_registry_entries, 'apply_async') as queued:
+            with self.captureOnCommitCallbacks(execute=True):
+                head = source(self.org, 'codes', canonical_url=self.URL)
+                saved_id, head.id = head.id, None  # as an instance reused for the next version
+        queued.assert_called_once_with((saved_id, 'Source'), queue='default', permanent=False)
+
+    def test_the_task_skips_a_row_deleted_meanwhile(self):
+        resolve_url_registry_entries(0, 'Source')
+
+    @patch('core.common.models.delete_s3_objects')  # export files: no broker in tests
+    def test_a_delete_resolves_only_the_entries_of_its_namespace(self, _):
+        head = source(self.org, 'codes', canonical_url=self.URL)
+        GlobalURLRegistryFactory(url=self.URL, namespace=OrganizationFactory(mnemonic='acme-else').uri)
+        mine = OrganizationURLRegistryFactory(organization=self.org, url=self.URL, namespace=self.org.uri)
+
+        with patch.object(URLRegistry, 'lookup_entry', autospec=True, side_effect=URLRegistry.lookup_entry) as lookup:
+            head.delete(force=True)
+        self.assertEqual([call.args[0].id for call in lookup.call_args_list], [mine.id])
 
 
 class ResolveReferenceNamespaceTest(OCLAPITestCase):

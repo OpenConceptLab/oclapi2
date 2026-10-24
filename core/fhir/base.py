@@ -5,7 +5,8 @@ The FHIR view layer: what every FHIR view shares, whatever its operation.
 - The `fhirVersion` MIME parameter: R4 (4.0) is served and any other version is refused.
 - XML through fhir.resources' R4B models, which are wire-identical to R4 for the terminology resources, so
   elements always come out in FHIR's order.
-- One reader for operation parameters, from a GET query string or a POSTed Parameters resource.
+- One reader for operation parameters, from a GET query string or a POSTed Parameters resource, with a typed
+  accessor per input type.
 - The FHIR base URL of a request, from its own host.
 - Errors as OperationOutcome (core.fhir.outcomes), in views and in the middleware.
 """
@@ -16,8 +17,10 @@ import re
 import types
 import typing
 import zlib
+from collections import namedtuple
 from functools import lru_cache
 
+from django.conf import settings
 from django.core.exceptions import BadRequest, SuspiciousOperation
 from django.http import HttpResponse
 from fhir.resources.R4B import get_fhir_model_class
@@ -35,7 +38,7 @@ from rest_framework.utils.mediatypes import _MediaType
 from rest_framework.versioning import AcceptHeaderVersioning
 from rest_framework.views import APIView
 
-from core.common.throttling import ThrottleUtil
+from core.common.throttling import FhirMinuteThrottle
 from core.fhir import outcomes
 
 logger = logging.getLogger('oclapi')
@@ -70,7 +73,6 @@ EMPTY_VALUES = (None, '', {}, [])
 XML_FORBIDDEN_CHARACTERS = re.compile('[^\x09\x0a\x0d\x20-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]')
 REPLACEMENT_CHARACTER = '\ufffd'
 XML_NAME = re.compile(r'^[A-Za-z_][A-Za-z0-9_.-]*$')
-LOGGED_DROPPED_ELEMENTS = set()  # what the XML has left out so far: each kind is logged once per process
 
 
 def xml_parser():
@@ -277,10 +279,10 @@ def resource_model(data):
         return None
 
 
+@lru_cache(maxsize=1024)
 def log_dropped(model_class, key, reason):
-    if (model_class.__name__, key, reason) not in LOGGED_DROPPED_ELEMENTS:
-        LOGGED_DROPPED_ELEMENTS.add((model_class.__name__, key, reason))
-        logger.warning('FHIR XML: %s.%s %s', model_class.__name__, key, reason)
+    """What the XML leaves out, each kind logged once per process: the content's problem, not the request's."""
+    logger.warning('FHIR XML: %s.%s %s', model_class.__name__, key, reason)
 
 
 def xhtml_markup(text):
@@ -470,12 +472,43 @@ def parameter_value(parameter):
     return None
 
 
+class Coding(namedtuple('Coding', 'system code version display parameter')):
+    """A code as an operation is given it. `parameter` is the Coding parameter it came in, None for separate ones."""
+    PATHS = {None: '', 'coding': 'Coding.', 'codeableConcept': 'CodeableConcept.coding[0].'}
+
+    def path(self, part):
+        """The FHIRPath of a part of the code in an issue: the parameter, or the part of the Coding it came in."""
+        return self.PATHS[self.parameter] + part
+
+    def require(self, part, message):
+        """The part an operation needs, or a 400 naming the input it's missing from (`part`, or the Coding)."""
+        value = getattr(self, part)
+        if not value:
+            raise outcomes.InvalidError(message, expression=self.parameter or part)
+        return value
+
+
+def coding_of(value, name):
+    """
+    A Coding input as a Coding: a dict, or in a GET a system|code token, split at its first | as a token search value
+    is. Its parts must be text; an absent or empty part is None.
+    """
+    if isinstance(value, str):
+        system, _, code = value.partition('|') if '|' in value else ('', '', value)
+        value = {'system': system, 'code': code}
+    parts = {key: value.get(key) for key in ('system', 'code', 'version', 'display')} if isinstance(value, dict) else {}
+    if not any(parts.values()) or not all(part is None or isinstance(part, str) for part in parts.values()):
+        raise outcomes.InvalidError(f"'{name}' must be a Coding.", expression=name)
+    return Coding(*(part or None for part in parts.values()), parameter=name)
+
+
 class FhirParameters:
     """
     An operation's input, read the same way from a GET query string and from a POSTed Parameters resource (FHIR JSON,
     FHIR XML or a form). Names can repeat. Values keep their FHIR JSON form: a string, boolean or number, a dict for
     a Coding, CodeableConcept or resource, and FhirParameters for parts. On a POST, the body's parameters come first,
-    then the query string's. Protocol parameters such as _format are left out.
+    then the query string's. Protocol parameters such as _format are left out. Each typed accessor reads the first
+    value of a name: None when it's absent or empty, a 400 naming the input when it isn't of the type.
     """
 
     def __init__(self, items=()):
@@ -512,6 +545,62 @@ class FhirParameters:
 
     def __contains__(self, name):
         return any(key == name for key, _ in self.items)
+
+    def text(self, name):
+        """A text input: a string, code or uri."""
+        value = self.get(name)
+        if value is None or value == '':
+            return None
+        if not isinstance(value, str):
+            raise outcomes.InvalidError(f"'{name}' must be text.", expression=name)
+        return value
+
+    def required_text(self, name, message):
+        """A text input the operation needs: absent or empty, a 400 with `message`."""
+        value = self.text(name)
+        if value is None:
+            raise outcomes.InvalidError(message, expression=name)
+        return value
+
+    def boolean(self, name):
+        """A boolean input: a boolean, or true or false as text, in any case and without padding."""
+        value = self.get(name)
+        if value is None or value == '':
+            return None
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.lower() in ('true', 'false'):
+            return value.lower() == 'true'
+        raise outcomes.InvalidError(f"'{name}' must be true or false, got '{value}'.", expression=name)
+
+    def whole_number(self, name):
+        """A whole-number input: an integer, or up to nine digits as text, without padding."""
+        value = self.get(name)
+        if value is None or value == '':
+            return None
+        if isinstance(value, str) and re.fullmatch(r'[0-9]{1,9}', value):
+            return int(value)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value
+        raise outcomes.InvalidError(f"'{name}' must be a whole number, got '{value}'.", expression=name)
+
+    def coding(self, name):
+        """A Coding input (coding_of)."""
+        return coding_of(self.get(name), name)
+
+    def codeable_concept_coding(self, name):
+        """
+        The one coding of a CodeableConcept input. Several are a 400 not-supported: each is sent on its own, so none
+        is left unread.
+        """
+        concept = self.get(name)
+        codings = concept.get('coding') if isinstance(concept, dict) else None
+        if not isinstance(codings, list) or not codings:
+            raise outcomes.InvalidError(f"'{name}' must hold a coding.", expression=name)
+        if len(codings) > 1:
+            raise outcomes.NotSupportedError(
+                f"A {name} is supported with one coding: send each coding on its own.", expression=name)
+        return coding_of(codings[0], name)
 
 
 def outcome_response(request, outcome, status_code, headers=None):
@@ -563,12 +652,18 @@ class FhirViewMixin:
     def get_exception_handler(self):
         return outcomes.exception_handler
 
+    def get_throttles(self):
+        """One rate for every caller, whoever they are: it protects the server."""
+        return [FhirMinuteThrottle()] if settings.ENABLE_THROTTLING else []
+
     def finalize_response(self, request, response, *args, **kwargs):
         """Normalize returned outcomes at every status and depth, and wrap other error responses as outcomes."""
         if isinstance(response, Response):
             if response.status_code >= 400:
                 if not outcomes.is_outcome(response.data):
                     response.data = outcomes.outcome_for_status(response.status_code, response.data)
+                if response.status_code >= 500:
+                    outcomes.report_server_error(response.status_code)
                 response.status_code = outcomes.response_status(response.status_code)
             response.data = outcomes.normalize_outcomes(response.data)
         return super().finalize_response(request, response, *args, **kwargs)
@@ -584,14 +679,11 @@ class FhirOperationView(FhirViewMixin, APIView):
     """
     A FHIR operation that only reads, GET and POST alike, at the global base and at owner bases: `operation`'s answer
     for the request's FhirParameters, base and user (and the resource the route kwarg `instance` names, at the instance
-    level), written by `adapter`. Throttled as OCL's other views are.
+    level), written by `adapter`.
     """
     permission_classes = (AllowAny,)  # what an operation shows the caller is core.fhir.resolve's rule
     operation = adapter = None
     instance = None
-
-    def get_throttles(self):
-        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         answer = self.operation(  # pylint: disable=not-callable

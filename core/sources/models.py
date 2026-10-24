@@ -15,7 +15,7 @@ from core.common.checksums import VersionCompareMixin
 from core.common.constants import HEAD
 from core.common.models import ConceptContainerModel
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings, \
-    sync_source_concept_vectors, resolve_url_registry_entries, index_source_public_access
+    sync_source_concept_vectors, index_source_public_access
 from core.common.utils import to_camel_case
 from core.common.validators import validate_non_negative
 from core.concepts.models import ConceptName, Concept
@@ -700,10 +700,7 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 self.__update_sequences(dirty_fields)
 
         if self.id and 'canonical_url' in dirty_fields:
-            if self.active_url_registry_entries.exists():
-                resolve_url_registry_entries.apply_async(
-                    (self.id, self.resource_type), queue='default', permanent=False)
-            self.link_url_registry_entries()
+            self.resolve_url_registry_entries_later()
 
     def __update_sequences(self, dirty_fields=[]):  # pylint: disable=dangerous-default-value
         def should_update(is_seq, field):

@@ -17,7 +17,7 @@ CapabilityStatement, TerminologyCapabilities and $versions Parameters.
   it. Each with its released versions as stored, newest first, and the default, the one served without a version.
   Under a canonical URL, after the repository's own, the releases of the other repositories with it the base shows
   that the operations serve by name there (a version named resolves to its holder). A fixed number of queries,
-  bounded as a search's are (SEARCH_TIMEOUT_MS; past it the list is too costly, a 422).
+  bounded as a search's are (FHIR_SEARCH_TIMEOUT_MS; past it the list is too costly, a 422).
 - The routed operations' contracts fill TerminologyCapabilities' blocks: $translate finds the map from the code's
   system (core.fhir.ops.translate), so it needs none; $expand pages, with offset and count.
 """
@@ -28,14 +28,13 @@ from django.urls import URLResolver, get_resolver
 from django.utils import timezone
 
 from core import __version__
-from core.fhir import outcomes
+from core.fhir.constants import CODE_SYSTEMS_TOO_COSTLY
 from core.fhir.base import (
     RESOURCE_TYPES, FhirOperationView, FhirVersioning, FhirViewMixin, fhir_base_url)
 from core.fhir.resolve import served_repositories
 from core.fhir.search import PARAMETERS, STRING_FIELDS, FhirReadMixin, FhirSearchMixin, within_search_timeout
 
 SOFTWARE = {'name': 'OCL API', 'version': __version__}
-STARTED = timezone.now().replace(microsecond=0).isoformat()  # what the statements describe was deployed then
 FORMATS = [renderer.media_type for renderer in FhirViewMixin.renderer_classes if 'fhir' in renderer.media_type]
 OWNER_BASES = {'orgs': 'org', 'users': 'user'}  # the owner bases' first segment, and the route kwarg naming the owner
 INTERACTIONS = {'read': FhirReadMixin, 'search-type': FhirSearchMixin}  # in R4's order, by the view serving each
@@ -94,6 +93,12 @@ def offering(segments, view):
 
 
 @lru_cache(maxsize=None)
+def started():
+    """When this process first described the service: what the statements describe was deployed then."""
+    return timezone.now().replace(microsecond=0).isoformat()
+
+
+@lru_cache(maxsize=None)
 def routed(resolver):
     """
     {base: (resources, system operations)} for a URL configuration: each base's resource types in route order, each
@@ -127,7 +132,7 @@ def offered(kwargs):
 
 def described(request, kwargs):
     """What both statements say of the service: the base URL, when it was deployed, and the software."""
-    return {'url': fhir_base_url(request, kwargs), 'date': STARTED, 'software': SOFTWARE}
+    return {'url': fhir_base_url(request, kwargs), 'date': started(), 'software': SOFTWARE}
 
 
 def capability_statement(request, kwargs):
@@ -174,8 +179,6 @@ def terminology_capabilities(request, kwargs):
     operations = {(resource['type'], name) for resource in resources for name in resource['operations']}
     return {
         **described(request, kwargs),
-        'code_systems': within_search_timeout(
-            lambda: code_systems(kwargs, request.user),
-            lambda: outcomes.TooCostlyError('The list of code systems would take too long to answer.')),
+        'code_systems': within_search_timeout(lambda: code_systems(kwargs, request.user), CODE_SYSTEMS_TOO_COSTLY),
         **dict(block for operation, block in OPERATION_BLOCKS.items() if operation in operations),
     }

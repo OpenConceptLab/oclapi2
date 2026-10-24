@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timedelta, timezone as dt_timezone
 
 from django.db import connection
-from django.test.utils import CaptureQueriesContext
+from django.test.utils import CaptureQueriesContext, override_settings
 from django.utils import timezone
 from elastic_transport import ApiResponseMeta, HttpHeaders, NodeConfig
 from elasticsearch import ApiError, ConnectionError as ESConnectionError, ConnectionTimeout, Elasticsearch, \
@@ -326,7 +326,7 @@ class SystemSearchCases(SearchCorpusMixin):
         with patch.object(Elasticsearch, 'search', autospec=True, side_effect=ConnectionTimeout('timed out')):
             response = self.client.get('/fhir/ConceptMap/', {'target-system': ICD10})
         self.assertOutcome(response, 422, 'too-costly', 'too-costly')
-        with index_requests() as spy, patch('core.fhir.search.SEARCH_TIMEOUT_MS', 0):
+        with index_requests() as spy, override_settings(FHIR_SEARCH_TIMEOUT_MS=0):
             response = self.client.get('/fhir/ConceptMap/', {'source-system': CIEL})
         self.assertOutcome(response, 422, 'too-costly', 'too-costly')
         self.assertEqual(spy.call_args_list, [])  # with no time left, it isn't sent

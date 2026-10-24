@@ -30,36 +30,35 @@ types as R5-shaped relationships. core.fhir.adapters.r4 writes the answer as an 
   `conceptMap` (an inline map) and `dependency` aren't supported.
 - Cost: a fixed number of queries whatever the number of mappings (resolution, the sources the systems name, the ids
   of the release's mappings of the code, then those mappings, with whether the caller is shown their sources); at
-  most MATCH_LIMIT matches. Its statements are bounded as a search's are (too long is too costly, a 422).
+  most FHIR_TRANSLATE_MATCH_LIMIT matches. Its statements are bounded as a search's are (too long is too costly, a 422).
 """
 import re
 from collections import namedtuple
 from functools import cached_property, reduce
 from operator import or_
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db.models import Case, Exists, F, OuterRef, Q, When
 
 from core.collections.models import Expansion
 from core.concepts.models import Concept
+from core.common.fhir_helpers import repository_prefixes
 from core.common.serializers import IdentifierSerializer
 from core.concept_maps.constants import (
     MAP_TYPE_RELATIONSHIPS, NOT_RELATED_TO, RELATED_TO, RESOURCE_TYPE, REVERSED_RELATIONSHIPS)
 from core.fhir import outcomes
-from core.fhir.ops.concepts import fhir_code, stored_codes, text
+from core.fhir.constants import TRANSLATION_TOO_COSTLY
+from core.fhir.base import Coding
+from core.fhir.ops.concepts import fhir_code, stored_codes
 from core.fhir.resolve import UnresolvedError, namespace_of, resolve, viewable_rows
 from core.fhir.search import within_search_timeout
 from core.mappings.models import Mapping
 from core.sources.models import Source
 
-MATCH_LIMIT = 1000  # the most matches an answer lists
 UNSUPPORTED_PARAMETERS = ('conceptMap', 'dependency')
-# An OCL path of a source: its own (sources), or as FHIR names it (CodeSystem; ConceptMap, how OCL shows a source with
-# no canonical URL). A collections or ValueSet path names a value set, never a source's alias.
-OCL_PATH = re.compile(r'/(orgs|users)/([^/]+)/(?:sources|CodeSystem|ConceptMap)/([^/]+)/?')
 IMPLICIT_VALUE_SET = '?fhir_vs'  # {code system}?fhir_vs: every code of the code system
 
-Coding = namedtuple('Coding', 'system code version')
 Request = namedtuple('Request', 'coding url concept_map_version scope scope_name targetsystem reverse')
 
 
@@ -93,15 +92,6 @@ def side_system(canonical, url, uri=None):
         return url
 
 
-def repository_paths(system, kinds=('sources',)):
-    """
-    The OCL URL prefixes of the repository an OCL path names (/orgs/{org}/{kind}/{id}/ for each kind), or None for a
-    canonical URL.
-    """
-    path = OCL_PATH.fullmatch(system)
-    return [f'/{path[1]}/{path[2]}/{kind}/{path[3]}/' for kind in kinds] if path else None
-
-
 def named_sources(systems, namespace, user):
     """
     For each system, the ids of the Source rows the base shows the caller that it names, in one query: those with it as
@@ -109,7 +99,7 @@ def named_sources(systems, namespace, user):
     alias: side_system still shows one that has as its canonical URL). A literal list, so the planner reads the mappings
     by their own indexes.
     """
-    paths = {system: (repository_paths(system) or [None])[0] for system in systems}
+    paths = {system: (repository_prefixes(system, ('sources',)) or [None])[0] for system in systems}
     rows = viewable_rows(Source, namespace, user).filter(reduce(or_, (
         Q(uri__startswith=path) if path else Q(canonical_url=system) for system, path in paths.items())))
     named = {system: [] for system in systems}
@@ -129,7 +119,7 @@ def shown_as(side, system, source_ids, namespace, user):
     source, url = f'{side}_source', f'{side}_source_url'
     unnamed = ~Exists(viewable_rows(Source, namespace, user).filter(
         id=OuterRef(f'{source}_id'), canonical_url__gt=''))
-    paths = repository_paths(system, ('sources', 'collections', 'ConceptMap'))
+    paths = repository_prefixes(system, ('sources', 'collections', 'ConceptMap'))
     stored = reduce(or_, (Q(**{f'{url}__startswith': path}) for path in paths)) if paths else Q(**{url: system})
     return Q(**{f'{source}_id__in': source_ids}) | (stored & unnamed)
 
@@ -147,11 +137,6 @@ def holds(value_set, code, sources):
     return bool(value_set.expansion_uri and sources) and Expansion.concepts.through.objects.filter(
         expansion__uri=value_set.expansion_uri, concept_id__in=Concept.objects.filter(
             mnemonic__in=stored_codes(code), parent_id__in=sources, is_active=True).values('id')).exists()
-
-
-def too_costly():
-    return outcomes.TooCostlyError(
-        'The translation would take too long to answer. Narrow it, for example with url, version or targetsystem.')
 
 
 def of_version(side, version):
@@ -174,60 +159,33 @@ def with_side(queryset, side, namespace, user):
         then=F(f'{side}_source__canonical_url')), default=None)})
 
 
-def required_text(parameters, name):
-    """A text parameter the code is given with (code, system); absent or empty, a 400 naming it."""
-    value = text(parameters, name)
-    if value is None:
-        raise outcomes.InvalidError(f"$translate needs '{name}' with the code it translates.", expression=name)
-    return value
-
-
-def boolean(parameters, name):
-    value = parameters.get(name)
-    if value in (None, ''):
-        return False
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str) and value.lower() in ('true', 'false'):
-        return value.lower() == 'true'
-    raise outcomes.InvalidError(f"'{name}' must be true or false.", expression=name)
-
-
-def coding_of(value, name):
-    """A Coding parameter (in a GET, a system|code token), as a Coding; one without a system and a code is a 400."""
-    if isinstance(value, str):
-        system, _, code = value.partition('|')
-        value = {'system': system, 'code': code}
-    if not isinstance(value, dict) or not all(isinstance(value.get(key), str) and value[key]
-                                              for key in ('system', 'code')):
+def given_coding(parameters, name):
+    """A Coding the code comes in (coding, or a codeableConcept's one coding); without a system and a code, a 400."""
+    coding = parameters.coding(name) if name == 'coding' else parameters.codeable_concept_coding(name)
+    if not coding.system or not coding.code:
         raise outcomes.InvalidError(f"'{name}' must be a Coding with a system and a code.", expression=name)
-    return Coding(value['system'], value['code'], value.get('version'))
+    return coding
 
 
 def read_request(parameters):
-    """The request in FhirParameters: the code (code and system, coding, or a codeableConcept's first coding), etc."""
+    """The request in FhirParameters: the code (code and system, coding, or a codeableConcept's coding), etc."""
     for name in UNSUPPORTED_PARAMETERS:
         if name in parameters:
             raise outcomes.NotSupportedError(f"$translate doesn't support '{name}'.", expression=name)
-    if 'coding' in parameters:
-        coding = coding_of(parameters.get('coding'), 'coding')
-    elif 'codeableConcept' in parameters:
-        concept = parameters.get('codeableConcept')
-        codings = (concept.get('coding') if isinstance(concept, dict) else None) or []
-        if not isinstance(codings, list) or not codings:
-            raise outcomes.InvalidError("'codeableConcept' must hold a coding.", expression='codeableConcept')
-        coding = coding_of(codings[0], 'codeableConcept')
+    if 'coding' in parameters or 'codeableConcept' in parameters:
+        coding = given_coding(parameters, 'coding' if 'coding' in parameters else 'codeableConcept')
     elif 'code' in parameters:
-        code = required_text(parameters, 'code')
-        system, _, piped = required_text(parameters, 'system').partition('|')
-        coding = Coding(system, code, text(parameters, 'version') or piped or None)
+        code = parameters.required_text('code', "$translate needs 'code' with the code it translates.")
+        system, _, piped = parameters.required_text(
+            'system', "$translate needs 'system' with the code it translates.").partition('|')
+        coding = Coding(system, code, parameters.text('version') or piped or None, None, None)
     else:
         raise outcomes.InvalidError('$translate needs the code it translates: code and system, coding, or '
                                     'codeableConcept.', expression='code')
-    reverse = boolean(parameters, 'reverse')
+    reverse = bool(parameters.boolean('reverse'))
     scope_name = 'target' if reverse else 'source'  # R4: reverse reverses the meaning of source and target
-    return Request(coding, text(parameters, 'url'), text(parameters, 'conceptMapVersion'), text(parameters, scope_name),
-                   scope_name, text(parameters, 'targetsystem'), reverse)
+    return Request(coding, parameters.text('url'), parameters.text('conceptMapVersion'), parameters.text(scope_name),
+                   scope_name, parameters.text('targetsystem'), reverse)
 
 
 class Translation:
@@ -256,7 +214,7 @@ class Translation:
             into = f" {'from' if request.reverse else 'to'} '{request.targetsystem}'" if request.targetsystem else ''
             return self.no_match(f"ConceptMap '{named}' has no mapping {'to' if request.reverse else 'from'} "
                                  f"'{coding.system}#{coding.code}'{into}")
-        message = f'Only the first {MATCH_LIMIT} matches are listed.' if more else None
+        message = f'Only the first {settings.FHIR_TRANSLATE_MATCH_LIMIT} matches are listed.' if more else None
         return {'result': any(match['relationship'] != NOT_RELATED_TO for match in matches), 'message': message,
                 'matches': matches}
 
@@ -360,12 +318,13 @@ class Translation:
 
     def matches(self, concept_map, named):
         """
-        (the matches, whether there were more than MATCH_LIMIT), in mapping order, each match once: the sources the
-        systems name, the mappings' ids, then the first MATCH_LIMIT + 1 of those mappings.
+        (the matches, whether there were more than FHIR_TRANSLATE_MATCH_LIMIT), in mapping order, each match once: the
+        sources the systems name, the mappings' ids, then the first limit + 1 of those mappings.
         """
+        limit = settings.FHIR_TRANSLATE_MATCH_LIMIT
         near, far = ('to', 'from') if self.request.reverse else ('from', 'to')
         ids = self.match_ids(concept_map, near, far)
-        rows = with_side(Mapping.objects.filter(id__in=ids[:MATCH_LIMIT + 1]), far, self.namespace, self.user).order_by(
+        rows = with_side(Mapping.objects.filter(id__in=ids[:limit + 1]), far, self.namespace, self.user).order_by(
             'id').values('map_type', f'{far}_concept_code', f'{far}_source_url', f'{far}_source__uri', f'{far}_shown',
                          f'{far}_canonical')
         matches = {}
@@ -375,7 +334,7 @@ class Translation:
             match = (system, fhir_code(row[f'{far}_concept_code']), relationship(row['map_type'], self.request.reverse))
             matches.setdefault(match, {
                 'relationship': match[2], 'concept': {'system': match[0], 'code': match[1]}, 'source': named})
-        return list(matches.values())[:MATCH_LIMIT], len(ids) > MATCH_LIMIT
+        return list(matches.values())[:limit], len(ids) > limit
 
 
 def translate(parameters, kwargs, user, _instance_id=None):
@@ -383,4 +342,4 @@ def translate(parameters, kwargs, user, _instance_id=None):
     A $translate's answer (Translation.answer) for its FhirParameters, at the base `kwargs` names, for `user`, its
     statements bounded as a search's are (a cancelled one is too costly). It has no instance level.
     """
-    return within_search_timeout(lambda: Translation(parameters, kwargs, user).answer(), too_costly=too_costly)
+    return within_search_timeout(lambda: Translation(parameters, kwargs, user).answer(), TRANSLATION_TOO_COSTLY)

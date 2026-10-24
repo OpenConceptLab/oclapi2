@@ -485,7 +485,7 @@ class CodeSystemSearchTest(SearchCorpusMixin, OCLTestCase):  # pylint: disable=t
             issue = self.assertOutcome(self.client.get(f'/fhir/CodeSystem/?{query}'), 400, 'not-supported',
                                        'not-supported')
             self.assertIn(query.split('=', maxsplit=1)[0].split(':')[0], issue['details']['text'], query)
-        for query in ('_count=-1', '_count=ten', '_lastUpdated=yesterday', '_lastUpdated=ap2020',
+        for query in ('_count=-1', '_count=ten', '_count=%205', '_lastUpdated=yesterday', '_lastUpdated=ap2020',
                       '_lastUpdated=2020-13', '_lastUpdated=2020-06-15T12:00%2B25:00', 'page=0'):
             self.assertOutcome(self.client.get(f'/fhir/CodeSystem/?{query}'), 400, 'invalid', 'invalid-data')
         # the format parameters choose the response, they aren't search input
@@ -512,7 +512,7 @@ class CodeSystemSearchTest(SearchCorpusMixin, OCLTestCase):  # pylint: disable=t
         self.assertEqual(bundle['total'], 5)
         self.assertNotIn('entry', bundle)
 
-        with patch('core.fhir.search.MAX_COUNT', 3):
+        with override_settings(FHIR_SEARCH_MAX_COUNT=3):
             bundle = self.search('CodeSystem', _count='1000')
             self.assertEqual((len(bundle['entry']), bundle['total']), (3, 5))
             self.assertEqual(len(self.search('CodeSystem')['entry']), 3)  # the default is the maximum
@@ -527,7 +527,7 @@ class CodeSystemSearchTest(SearchCorpusMixin, OCLTestCase):  # pylint: disable=t
             self.assertIn(SUBSETTED, resource['meta']['tag'])
             self.assertIn('lastUpdated', resource['meta'])
 
-        with patch('core.fhir.search.CONCEPT_LIMIT', 0):
+        with override_settings(FHIR_CODE_SYSTEM_CONCEPT_LIMIT=0):
             contents = {entry['resource']['version']: entry['resource']['content']
                         for entry in self.search('CodeSystem', url=CIEL)['entry']}
         self.assertEqual(contents, {'v1': 'complete', 'v2': 'not-present'})
@@ -955,7 +955,7 @@ class ReadTest(SearchCorpusMixin, OCLTestCase):
 
         # above the limit the count is the version's concept links, an index-only count: a deleted concept still
         # linked would count (production has none on a released version)
-        with patch('core.fhir.search.CONCEPT_LIMIT', 1):
+        with override_settings(FHIR_CODE_SYSTEM_CONCEPT_LIMIT=1):
             resource = self.read(f'/fhir/CodeSystem/{self.ciel_v2.id}')
         self.assertEqual((resource['content'], resource['count']), ('not-present', 3))
         self.assertNotIn('concept', resource)
@@ -981,7 +981,7 @@ class ReadTest(SearchCorpusMixin, OCLTestCase):
     def test_value_set_compose_caps_only_concept_references(self):
         for code in ('M1', 'M2', 'M3'):
             self.ciel_vs_v1.references.create(expression=code, reference_type='mappings', system=CIEL, code=code)
-        with patch('core.value_sets.serializers.REFERENCE_LIMIT', 2):
+        with override_settings(FHIR_VALUE_SET_REFERENCE_LIMIT=2):
             with self.assertNumQueries(2):
                 resource = self.read(f'/fhir/ValueSet/{self.ciel_vs_v1.id}')
             self.assertNotIn('compose', resource)
@@ -1010,7 +1010,7 @@ class ReadTest(SearchCorpusMixin, OCLTestCase):
         for flags in ({'retired': True}, {'is_active': False}):
             MappingFactory(parent=self.ciel_source, from_source=self.ciel_source, to_source=self.sehat_icd,
                            sources=[self.ciel_v2], **flags)
-        with patch('core.concept_maps.serializers.MAPPING_LIMIT', 2):
+        with override_settings(FHIR_CONCEPT_MAP_MAPPING_LIMIT=2):
             with self.assertNumQueries(2):
                 resource = self.read(f'/fhir/ConceptMap/{self.ciel_v2.id}')
             self.assertNotIn('group', resource)
@@ -1041,9 +1041,11 @@ class ReadTest(SearchCorpusMixin, OCLTestCase):
             MappingFactory(parent=self.ciel_source, from_source=self.ciel_source, to_source=self.sehat_icd,
                            from_concept_code='1', to_concept_code=code, sources=[self.ciel_v2])
         for resource_type, version, module, serializer, limit in (
-                ('ValueSet', self.ciel_vs_v1, 'value_sets', 'ValueSetDetailSerializer', 'REFERENCE_LIMIT'),
-                ('ConceptMap', self.ciel_v2, 'concept_maps', 'ConceptMapDetailSerializer', 'MAPPING_LIMIT')):
-            with patch(f'core.{module}.serializers.{limit}', 1), \
+                ('ValueSet', self.ciel_vs_v1, 'value_sets', 'ValueSetDetailSerializer',
+                 'FHIR_VALUE_SET_REFERENCE_LIMIT'),
+                ('ConceptMap', self.ciel_v2, 'concept_maps', 'ConceptMapDetailSerializer',
+                 'FHIR_CONCEPT_MAP_MAPPING_LIMIT')):
+            with override_settings(**{limit: 1}), \
                     patch(f'core.{module}.serializers.{serializer}.get_meta', return_value=meta):
                 resource = self.read(f'/fhir/{resource_type}/{version.id}')
 
@@ -1161,13 +1163,13 @@ class VisibleVersionsTest(SearchCorpusMixin, OCLTestCase):
 
 
 class SearchTimeoutTest(TransactionTestCase):
-    """A search the database cancels at SEARCH_TIMEOUT_MS is too costly (a 422 outcome), never a 5xx."""
+    """A search the database cancels at FHIR_SEARCH_TIMEOUT_MS is too costly (a 422 outcome), never a 5xx."""
     def test_a_cancelled_query_is_too_costly(self):
         def slow():
             with connection.cursor() as cursor:
                 cursor.execute('SELECT pg_sleep(1)')
 
-        with patch('core.fhir.search.SEARCH_TIMEOUT_MS', 50):
+        with override_settings(FHIR_SEARCH_TIMEOUT_MS=50):
             with self.assertRaises(TooCostlyError) as context:
                 fhir_search.within_search_timeout(slow)
         self.assertEqual((context.exception.status_code, context.exception.issue_code), (422, 'too-costly'))
@@ -1184,7 +1186,7 @@ class SearchTimeoutTest(TransactionTestCase):
                 for _ in range(4):
                     cursor.execute('SELECT pg_sleep(0.04)')
 
-        with patch('core.fhir.search.SEARCH_TIMEOUT_MS', 100):
+        with override_settings(FHIR_SEARCH_TIMEOUT_MS=100):
             with self.assertRaises(TooCostlyError):
                 fhir_search.within_search_timeout(slow)
             self.assertEqual(fhir_search.within_search_timeout(lambda: 'answered'), 'answered')
@@ -1196,7 +1198,7 @@ class SearchTimeoutTest(TransactionTestCase):
             with connection.cursor() as cursor:
                 cursor.execute('SELECT 1')
 
-        with patch('core.fhir.search.SEARCH_TIMEOUT_MS', 50):
+        with override_settings(FHIR_SEARCH_TIMEOUT_MS=50):
             with self.assertRaises(TooCostlyError):
                 fhir_search.within_search_timeout(late)
 

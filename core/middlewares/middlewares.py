@@ -15,10 +15,11 @@ from core.common.authentication import OCLAuthentication
 from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER, RESPONSE_TIME_HEADER, REQUEST_URL_HEADER, \
     REQUEST_METHOD_HEADER
 from core.common.exceptions import DeactivatedAccountLoginRefused, SSOIdentityMismatchRefused
-from core.common.throttling import ThrottleUtil
+from core.common.throttling import FhirMinuteThrottle, ThrottleUtil
 from core.common.utils import set_current_user, set_request_url
 from core.fhir.base import FHIR_JSON, is_fhir_path, is_outcome_response, outcome_response, response_json
-from core.fhir.outcomes import issue, operation_outcome, outcome_for_status
+from core.fhir.outcomes import issue, operation_outcome, outcome_for_status, report_server_error
+from core.fhir.swagger import on_fhir_host
 from core.services.analytics_event_emitter import AnalyticsEventEmitter
 from core.services.auth.core import AuthService
 
@@ -279,9 +280,11 @@ class FhirErrorMiddleware(BaseMiddleware):
             # while reporting it): on a FHIR path it still goes out as an OperationOutcome, never a 5xx.
             if not is_fhir_path(request.path):
                 raise
-            fhir_logger.exception('Unexpected %s answering a FHIR request', type(ex).__name__)
-            status = 400 if isinstance(ex, SuspiciousOperation) else 500
-            return outcome_response(request, outcome_for_status(status, None), 400 if status == 400 else 422)
+            if isinstance(ex, SuspiciousOperation):
+                fhir_logger.exception('Unexpected %s answering a FHIR request', type(ex).__name__)
+                return outcome_response(request, outcome_for_status(400, None), 400)
+            report_server_error(500, ex)
+            return outcome_response(request, outcome_for_status(500, None), 500)
         if response.status_code < 400 or not is_fhir_path(request.path) or is_outcome_response(response):
             return response
         if response.status_code == 404:  # nothing is routed there
@@ -289,6 +292,8 @@ class FhirErrorMiddleware(BaseMiddleware):
         else:  # a server error's own message isn't passed on
             outcome = outcome_for_status(
                 response.status_code, response_json(response) if response.status_code < 500 else None)
+            if response.status_code >= 500 and not getattr(response, '_has_been_logged', False):
+                report_server_error(response.status_code)  # one Django logged has reached Errbit already
         headers = {key: value for key, value in response.items() if key.lower() not in self.replaced_headers}
         return outcome_response(request, outcome, response.status_code, headers)
 
@@ -298,14 +303,16 @@ class FhirMiddleware(BaseMiddleware):
     Keeps FHIR on the FHIR host when FHIR_SUBDOMAIN is set: FHIR resource paths 404 elsewhere, and other paths 404 on
     the FHIR host, each with an OperationOutcome.
     """
+    documentation_paths = ('/swagger/', '/swagger.json', '/swagger.yaml')  # the FHIR host's own Swagger
 
     def __call__(self, request):
         fhir_path = is_fhir_path(request.path)
         if settings.FHIR_SUBDOMAIN:
-            on_fhir_host = request.get_host().startswith(settings.FHIR_SUBDOMAIN + '.')
-            if on_fhir_host and not fhir_path and request.path.strip('/').split('/')[0] != 'version':
+            fhir_host = on_fhir_host(request)
+            if fhir_host and not fhir_path and request.path.strip('/').split('/')[0] != 'version' and \
+                    request.path not in self.documentation_paths:
                 return self.not_found(request, 'This path is not part of the FHIR API.')
-            if not on_fhir_host and fhir_path:
+            if not fhir_host and fhir_path:
                 return self.not_found(request, 'The FHIR API is served on its own host.')
 
         return self.get_response(request)
@@ -325,6 +332,11 @@ class ThrottleHeadersMiddleware(MiddlewareMixin):
         return False
 
     def process_response(self, request, response):
+        if is_fhir_path(request.path):  # the FHIR API's own counter, the same for every caller
+            remaining = ThrottleUtil.get_limit_remaining(FhirMinuteThrottle(), request, APIView())
+            if remaining is not None:
+                response['X-LimitRemaining-Minute'] = remaining
+            return response
         if request.path.rstrip("/") not in ['', '/swagger', '/redoc', '/version']:
             view = APIView()
             throttles = ThrottleUtil.get_match_throttles_by_user_plan(request.user) if self.is_match_throttled_path(

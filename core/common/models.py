@@ -41,14 +41,15 @@ from .constants import (
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
     CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, OPENMRS_VALIDATION_SCHEMA, VALIDATION_SCHEMAS,
     DEFAULT_VALIDATION_SCHEMA, ES_REQUEST_TIMEOUT, UPDATED_BY_USERNAME_PARAM, ES_RETRYABLE_ERROR_TYPES,
-    INDEX_BATCH_SIZE)
+    INDEX_BATCH_SIZE, RETIRED_ACCESS_TYPE_EDIT)
 from .es import ESScript
 from .exceptions import Http400, BatchIndexingError
 from .fields import URIField
 from .mixins import SourceContainerMixin
 from .tasks import handle_save, handle_m2m_changed, seed_children_to_new_version, update_validation_schema, \
-    update_source_active_concepts_count, update_source_active_mappings_count
+    update_source_active_concepts_count, update_source_active_mappings_count, resolve_url_registry_entries
 from ..toggles.models import Toggle
+from ..url_registry.constants import URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE
 
 TRUTHY = get_truthy_values()
 
@@ -302,9 +303,17 @@ class BaseModel(models.Model):
     def is_versioned(self):
         return False
 
+    # the stored public_access values that let the public view, for querysets (is_public_access reads the same)
+    PUBLIC_ACCESS_VALUES = (ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT)
+
+    @staticmethod
+    def is_public_access(public_access):
+        """Whether a public_access value lets the public view: View, or the retired Edit."""
+        return (normalize_public_access(public_access) or '').lower() == ACCESS_TYPE_VIEW.lower()
+
     @property
     def public_can_view(self):
-        return normalize_public_access(self.public_access).lower() == ACCESS_TYPE_VIEW.lower()
+        return self.is_public_access(self.public_access)
 
     @property
     def resource_type(self):
@@ -972,16 +981,18 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             entry.unlink()
         return [entry.id for entry in entries]
 
-    @staticmethod
-    def relink_url_registry_entries(entry_ids, canonical_urls):
+    def relink_url_registry_entries(self, entry_ids, canonical_urls):
         """
-        After a delete: every active entry that was linked to a deleted row, and every active entry naming one of the
-        deleted rows' canonical URLs, linked or not, is re-resolved (lookup_entry). A retry of a delete that failed
-        part-way so finds, by URL, the entries the failed attempt unlinked. The link is a cache that resolution never
-        reads, so a failure here only leaves it stale until the next delete, retry or write that relinks.
+        After a delete: every active entry that was linked to a deleted row, and every active entry of this
+        repository's namespace naming one of the deleted rows' canonical URLs, linked or not, is re-resolved
+        (lookup_entry). An entry resolves in its own namespace only, so no other can have pointed at the rows. A retry
+        of a delete that failed part-way so finds, by URL, the entries the failed attempt unlinked. The link is a cache
+        that resolution never reads, so a failure here only leaves it stale until the next delete, retry or write that
+        relinks.
         """
         from core.url_registry.models import URLRegistry
-        for entry in URLRegistry.objects.filter(Q(id__in=entry_ids) | Q(url__in=canonical_urls), is_active=True):
+        for entry in URLRegistry.objects.filter(
+                Q(id__in=entry_ids) | Q(url__in=canonical_urls, namespace=self.parent_url), is_active=True):
             entry.lookup_entry()
 
     @staticmethod
@@ -1056,6 +1067,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     active_mappings_queryset = property(get_active_mappings)
 
     def has_parent_edit_access(self, user):
+        """The owner's has_edit_access, without reading a user-owned repository's owner."""
         if user.is_staff:
             return True
 
@@ -1433,23 +1445,25 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         return False
 
-    @property
-    def active_url_registry_entries(self):
-        return self.url_registry_entries.filter(is_active=True)
-
-    def link_url_registry_entries(self):
+    def url_registry_entries_to_resolve(self):
         """
-        For a repository row (HEAD or version) created with, or given, a canonical URL: the active registry entries
-        that name it in this repository's namespace are pointed at what they resolve to now (lookup_entry: the
-        namespace's lowest-id row with the URL, as the registry has always resolved), so an entry made before the row
-        that answers it gets it. The entries already linked to this row are re-resolved by the
-        resolve_url_registry_entries task.
+        The active registry entries a change to this row's canonical URL may move: those linked to it, and those naming
+        its URL in its namespace, which resolve to the namespace's lowest-id row with the URL.
         """
-        if not self.canonical_url:
-            return
         from core.url_registry.models import URLRegistry
-        for entry in URLRegistry.objects.filter(is_active=True, url=self.canonical_url, namespace=self.parent_url):
-            entry.lookup_entry()
+        linked = Q(repo_type=ContentType.objects.get_for_model(self), repo_id=self.id)
+        named = Q(url=self.canonical_url, namespace=self.parent_url) if self.canonical_url else Q(pk__in=[])
+        return URLRegistry.objects.filter(linked | named, is_active=True)
+
+    def resolve_url_registry_entries_later(self):
+        """
+        For a row created with, or given, a canonical URL: once the change commits, the resolve_url_registry_entries
+        task points the entries it may move at what they resolve to now. The request asks only whether there are any.
+        """
+        if self.url_registry_entries_to_resolve().exists():
+            args = (self.id, self.resource_type)  # this row's, whatever the instance becomes before the commit
+            transaction.on_commit(
+                lambda: resolve_url_registry_entries.apply_async(args, queue='default', permanent=False))
 
     @cached_property
     def version_export_path(self):
@@ -1588,7 +1602,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         from core.url_registry.models import URLRegistry
         registry_entry = None
         if is_canonical:
-            if Toggle.get('URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE'):
+            if Toggle.get(URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE):
                 registry_entry = None
                 if not is_global_namespace:
                     owner = SourceContainerMixin.get_object_from_namespace(namespace)
