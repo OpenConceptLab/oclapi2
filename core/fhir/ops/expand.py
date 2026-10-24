@@ -51,7 +51,7 @@ from core.common.serializers import IdentifierSerializer
 from core.concepts.models import Concept, ConceptName
 from core.fhir import outcomes
 from core.fhir.constants import EXPANSION_TOO_COSTLY
-from core.fhir.ops.concepts import designations, display_of, fhir_code, text
+from core.fhir.ops.concepts import designations, display_of, fhir_code
 from core.fhir.ops.validate_code import value_set_version
 from core.fhir.resolve import namespace_of, viewable_rows
 from core.fhir.search import within_search_timeout
@@ -99,30 +99,6 @@ UNRESOLVED = {
 }
 
 
-def whole_number(parameters, name):
-    """A whole-number input (an integer, or its digits as text), or None when it's absent; anything else is a 400."""
-    value = parameters.get(name)
-    if value is None or value == '':
-        return None
-    if isinstance(value, str) and re.fullmatch(r'[0-9]{1,9}', value.strip()):
-        return int(value)
-    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
-        return value
-    raise outcomes.InvalidError(f"'{name}' must be a whole number, got '{value}'.", expression=name)
-
-
-def flag(parameters, name):
-    """A boolean input (a boolean, or true or false as text), or None when it's absent; anything else is a 400."""
-    value = parameters.get(name)
-    if value in (None, ''):
-        return None
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str) and (lowered := value.strip().lower()) in ('true', 'false'):
-        return lowered == 'true'
-    raise outcomes.InvalidError(f"'{name}' must be true or false, got '{value}'.", expression=name)
-
-
 class Inputs:  # pylint: disable=too-few-public-methods
     """$expand's inputs other than the value set, read and checked before anything is: the echo is what was given."""
 
@@ -131,16 +107,16 @@ class Inputs:  # pylint: disable=too-few-public-methods
             if name in parameters:
                 raise outcomes.NotSupportedError(message, expression=name)
         for name, message in ONLY_FALSE.items():
-            if flag(parameters, name):
+            if parameters.boolean(name):
                 raise outcomes.NotSupportedError(message, expression=name)
         for name in SATISFIED:
-            flag(parameters, name)  # either value is met; one that isn't a boolean is still a 400
-        self.filter = text(parameters, 'filter')
-        self.language = text(parameters, 'displayLanguage')
-        self.designations = flag(parameters, 'includeDesignations')
-        self.active_only = flag(parameters, 'activeOnly')
-        self.offset = whole_number(parameters, 'offset')
-        count = whole_number(parameters, 'count')
+            parameters.boolean(name)  # either value is met; one that isn't a boolean is still a 400
+        self.filter = parameters.text('filter')
+        self.language = parameters.text('displayLanguage')
+        self.designations = parameters.boolean('includeDesignations')
+        self.active_only = parameters.boolean('activeOnly')
+        self.offset = parameters.whole_number('offset')
+        count = parameters.whole_number('count')
         self.count = settings.FHIR_EXPAND_MAX_COUNT if count is None else min(count, settings.FHIR_EXPAND_MAX_COUNT)
         self.echo = [item for item in (
             ('filter', 'valueString', self.filter),
@@ -216,7 +192,7 @@ def expand(parameters, kwargs, user, instance_id=None):
     level), for `user`: {value_set, identifier, timestamp, total, offset, parameters, used, contains}.
     """
     inputs = Inputs(parameters)
-    if not instance_id and not text(parameters, 'url'):
+    if not instance_id and not parameters.text('url'):
         raise outcomes.InvalidError('url is required: the value set to expand.', expression='url')
     return within_search_timeout(
         lambda: Expander(parameters, inputs, kwargs, user, instance_id).answer(), EXPANSION_TOO_COSTLY)

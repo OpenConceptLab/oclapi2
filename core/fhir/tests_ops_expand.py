@@ -430,7 +430,9 @@ class ExpandCases(OpsCorpusMixin):
                          422)
         for params, expression in (({}, 'url'), ({'count': '-1'}, 'count'), ({'count': 'all'}, 'count'),
                                    ({'offset': '1.5'}, 'offset'), ({'activeOnly': 'maybe'}, 'activeOnly'),
-                                   ({'includeDesignations': '1'}, 'includeDesignations')):
+                                   ({'includeDesignations': '1'}, 'includeDesignations'),
+                                   # no padding, as no FHIR integer or boolean has any
+                                   ({'count': ' 5'}, 'count'), ({'activeOnly': 'true '}, 'activeOnly')):
             response = self.expand(**({'url': FEVERS} if expression != 'url' else {}), **params)
             self.assert_outcome(response, 400, 'invalid', 'invalid-data')
             self.assertEqual(response.data['issue'][0]['expression'], [expression], params)

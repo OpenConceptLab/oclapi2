@@ -18,8 +18,7 @@ from rest_framework import status
 
 from core.fhir import outcomes
 from core.fhir.ops.concepts import (
-    coded_input, require, find_concept, display_of, designations, fhir_code, instance_version, mismatch, system_of,
-    text)
+    coded_input, find_concept, display_of, designations, fhir_code, instance_version, mismatch, system_of)
 from core.fhir.resolve import UnresolvedError, resolve
 
 
@@ -36,10 +35,10 @@ def lookup(parameters, kwargs, user, instance_id=None):
     level), for `user`: {name, version, display, code, system, abstract, inactive, designations}.
     """
     coding = coded_input(parameters, 'system', 'version')
-    target = coding._replace(version=text(parameters, 'version') or coding.version)
-    code = require(coding, 'code', '$lookup needs the code to look up.')
+    target = coding._replace(version=parameters.text('version') or coding.version)
+    code = coding.require('code', '$lookup needs the code to look up.')
     if not instance_id:
-        require(coding, 'system', '$lookup needs the system the code is from.')
+        coding.require('system', '$lookup needs the system the code is from.')
     try:
         version = code_system_version(target, kwargs, user, instance_id)
     except UnresolvedError as ex:
@@ -55,7 +54,7 @@ def lookup(parameters, kwargs, user, instance_id=None):
             f"Unable to find code '{code}' in {system} version {version.version}", tx_issue_type='invalid-code')
     return {
         'name': version.name, 'version': version.version,
-        'display': display_of(concept, text(parameters, 'displayLanguage')) or fhir_code(concept.mnemonic),
+        'display': display_of(concept, parameters.text('displayLanguage')) or fhir_code(concept.mnemonic),
         'code': fhir_code(concept.mnemonic), 'system': system, 'abstract': False, 'inactive': bool(concept.retired),
         'designations': designations(concept),
     }

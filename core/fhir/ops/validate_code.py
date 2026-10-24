@@ -32,8 +32,8 @@ from core.common.constants import HEAD
 from core.concepts.models import Concept
 from core.fhir import outcomes
 from core.fhir.ops.concepts import (
-    coded_input, path, require, text, find_concept, display_of, has_name, fhir_code, code_q, instance_version,
-    is_system_of, mismatch, system_of)
+    coded_input, find_concept, display_of, has_name, fhir_code, code_q, instance_version, is_system_of, mismatch,
+    system_of)
 from core.fhir.ops.lookup import code_system_version
 from core.fhir.resolve import UnresolvedError, namespace_of, resolve, to_ocl_path, viewable_rows
 from core.sources.models import Source
@@ -45,7 +45,7 @@ UNKNOWN_VALUE_SET_SYSTEM = 'x-unknown-system'  # and ValueSet $validate-code
 def issue(coding, part, kind, message_id, message):
     """An issue about one part of the code (code, system or display), of a kind in KINDS."""
     severity, code, tx_issue_type = KINDS[kind]
-    return outcomes.issue(code, message, severity=severity, expression=path(coding, part),
+    return outcomes.issue(code, message, severity=severity, expression=coding.path(part),
                           tx_issue_type=tx_issue_type, message_id=message_id)
 
 
@@ -134,14 +134,14 @@ def validate_code_system(parameters, kwargs, user, instance_id=None):
     coding = coded_input(parameters, 'url', 'version')
     # the code system validated against: the instance, else url and version, else the coding's
     target = coding._replace(
-        system=text(parameters, 'url') or coding.system, version=text(parameters, 'version') or coding.version)
+        system=parameters.text('url') or coding.system, version=parameters.text('version') or coding.version)
     version = None
     if instance_id or target.system:
         try:
             version = code_system_version(target, kwargs, user, instance_id)
         except UnresolvedError:
             return unknown_system(target, UNKNOWN_CODE_SYSTEM, version=target.version)
-    require(coding, 'code', 'A code to validate is required.')
+    coding.require('code', 'A code to validate is required.')
     if version is None:
         raise outcomes.InvalidError('url is required with a code: the code system to validate it in.',
                                     expression=coding.parameter or 'url')
@@ -151,7 +151,7 @@ def validate_code_system(parameters, kwargs, user, instance_id=None):
         return answer(coding, [outcomes.issue(
             code, f'{conflict[1]}: the code is not validated', severity=severity, expression=conflict[0],
             tx_issue_type=tx_issue_type)])
-    return in_code_system(coding, version, text(parameters, 'displayLanguage'))
+    return in_code_system(coding, version, parameters.text('displayLanguage'))
 
 
 def system_q(field, system):
@@ -241,7 +241,7 @@ def value_set_version(parameters, kwargs, user, instance_id):
     The value set version the request names; a url that doesn't resolve is a 422 not-found. At the instance level the id
     names it, and a url or valueSetVersion naming another one is a 400.
     """
-    version, url = text(parameters, 'valueSetVersion'), text(parameters, 'url')
+    version, url = parameters.text('valueSetVersion'), parameters.text('url')
     if instance_id:
         value_set = instance_version('ValueSet', instance_id, version, kwargs, user)
         if url and not is_system_of(url, value_set):
@@ -267,10 +267,10 @@ def validate_value_set(parameters, kwargs, user, instance_id=None):
     instance level), for `user`. A code and its system are required first.
     """
     coding = coded_input(parameters, 'system', 'systemVersion')
-    require(coding, 'code', 'A code to validate is required.')
-    require(coding, 'system', 'system is required with a code: the code system the code is from.')
-    language = text(parameters, 'displayLanguage')
-    if not instance_id and not text(parameters, 'url'):
+    coding.require('code', 'A code to validate is required.')
+    coding.require('system', 'system is required with a code: the code system the code is from.')
+    language = parameters.text('displayLanguage')
+    if not instance_id and not parameters.text('url'):
         try:
             return in_code_system(coding, resolve('CodeSystem', coding.system, coding.version, kwargs, user), language)
         except UnresolvedError:

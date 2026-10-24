@@ -48,7 +48,8 @@ from core.concept_maps.constants import (
     MAP_TYPE_RELATIONSHIPS, NOT_RELATED_TO, RELATED_TO, RESOURCE_TYPE, REVERSED_RELATIONSHIPS)
 from core.fhir import outcomes
 from core.fhir.constants import TRANSLATION_TOO_COSTLY
-from core.fhir.ops.concepts import fhir_code, stored_codes, text
+from core.fhir.base import Coding
+from core.fhir.ops.concepts import fhir_code, stored_codes
 from core.fhir.resolve import UnresolvedError, namespace_of, resolve, viewable_rows
 from core.fhir.search import within_search_timeout
 from core.mappings.models import Mapping
@@ -60,7 +61,6 @@ UNSUPPORTED_PARAMETERS = ('conceptMap', 'dependency')
 OCL_PATH = re.compile(r'/(orgs|users)/([^/]+)/(?:sources|CodeSystem|ConceptMap)/([^/]+)/?')
 IMPLICIT_VALUE_SET = '?fhir_vs'  # {code system}?fhir_vs: every code of the code system
 
-Coding = namedtuple('Coding', 'system code version')
 Request = namedtuple('Request', 'coding url concept_map_version scope scope_name targetsystem reverse')
 
 
@@ -170,60 +170,33 @@ def with_side(queryset, side, namespace, user):
         then=F(f'{side}_source__canonical_url')), default=None)})
 
 
-def required_text(parameters, name):
-    """A text parameter the code is given with (code, system); absent or empty, a 400 naming it."""
-    value = text(parameters, name)
-    if value is None:
-        raise outcomes.InvalidError(f"$translate needs '{name}' with the code it translates.", expression=name)
-    return value
-
-
-def boolean(parameters, name):
-    value = parameters.get(name)
-    if value in (None, ''):
-        return False
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str) and value.lower() in ('true', 'false'):
-        return value.lower() == 'true'
-    raise outcomes.InvalidError(f"'{name}' must be true or false.", expression=name)
-
-
-def coding_of(value, name):
-    """A Coding parameter (in a GET, a system|code token), as a Coding; one without a system and a code is a 400."""
-    if isinstance(value, str):
-        system, _, code = value.partition('|')
-        value = {'system': system, 'code': code}
-    if not isinstance(value, dict) or not all(isinstance(value.get(key), str) and value[key]
-                                              for key in ('system', 'code')):
+def given_coding(parameters, name):
+    """A Coding the code comes in (coding, or a codeableConcept's one coding); without a system and a code, a 400."""
+    coding = parameters.coding(name) if name == 'coding' else parameters.codeable_concept_coding(name)
+    if not coding.system or not coding.code:
         raise outcomes.InvalidError(f"'{name}' must be a Coding with a system and a code.", expression=name)
-    return Coding(value['system'], value['code'], value.get('version'))
+    return coding
 
 
 def read_request(parameters):
-    """The request in FhirParameters: the code (code and system, coding, or a codeableConcept's first coding), etc."""
+    """The request in FhirParameters: the code (code and system, coding, or a codeableConcept's coding), etc."""
     for name in UNSUPPORTED_PARAMETERS:
         if name in parameters:
             raise outcomes.NotSupportedError(f"$translate doesn't support '{name}'.", expression=name)
-    if 'coding' in parameters:
-        coding = coding_of(parameters.get('coding'), 'coding')
-    elif 'codeableConcept' in parameters:
-        concept = parameters.get('codeableConcept')
-        codings = (concept.get('coding') if isinstance(concept, dict) else None) or []
-        if not isinstance(codings, list) or not codings:
-            raise outcomes.InvalidError("'codeableConcept' must hold a coding.", expression='codeableConcept')
-        coding = coding_of(codings[0], 'codeableConcept')
+    if 'coding' in parameters or 'codeableConcept' in parameters:
+        coding = given_coding(parameters, 'coding' if 'coding' in parameters else 'codeableConcept')
     elif 'code' in parameters:
-        code = required_text(parameters, 'code')
-        system, _, piped = required_text(parameters, 'system').partition('|')
-        coding = Coding(system, code, text(parameters, 'version') or piped or None)
+        code = parameters.required_text('code', "$translate needs 'code' with the code it translates.")
+        system, _, piped = parameters.required_text(
+            'system', "$translate needs 'system' with the code it translates.").partition('|')
+        coding = Coding(system, code, parameters.text('version') or piped or None, None, None)
     else:
         raise outcomes.InvalidError('$translate needs the code it translates: code and system, coding, or '
                                     'codeableConcept.', expression='code')
-    reverse = boolean(parameters, 'reverse')
+    reverse = bool(parameters.boolean('reverse'))
     scope_name = 'target' if reverse else 'source'  # R4: reverse reverses the meaning of source and target
-    return Request(coding, text(parameters, 'url'), text(parameters, 'conceptMapVersion'), text(parameters, scope_name),
-                   scope_name, text(parameters, 'targetsystem'), reverse)
+    return Request(coding, parameters.text('url'), parameters.text('conceptMapVersion'), parameters.text(scope_name),
+                   scope_name, parameters.text('targetsystem'), reverse)
 
 
 class Translation:

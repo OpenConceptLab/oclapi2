@@ -485,7 +485,7 @@ class CodeSystemSearchTest(SearchCorpusMixin, OCLTestCase):  # pylint: disable=t
             issue = self.assertOutcome(self.client.get(f'/fhir/CodeSystem/?{query}'), 400, 'not-supported',
                                        'not-supported')
             self.assertIn(query.split('=', maxsplit=1)[0].split(':')[0], issue['details']['text'], query)
-        for query in ('_count=-1', '_count=ten', '_lastUpdated=yesterday', '_lastUpdated=ap2020',
+        for query in ('_count=-1', '_count=ten', '_count=%205', '_lastUpdated=yesterday', '_lastUpdated=ap2020',
                       '_lastUpdated=2020-13', '_lastUpdated=2020-06-15T12:00%2B25:00', 'page=0'):
             self.assertOutcome(self.client.get(f'/fhir/CodeSystem/?{query}'), 400, 'invalid', 'invalid-data')
         # the format parameters choose the response, they aren't search input

@@ -52,7 +52,7 @@ from core.common.mixins import CustomPaginator
 from core.common.utils import to_int
 from core.concepts.models import Concept
 from core.fhir import mapping_index, outcomes
-from core.fhir.base import CONTROL_PARAMETERS, fhir_base_url
+from core.fhir.base import CONTROL_PARAMETERS, FhirParameters, fhir_base_url
 from core.fhir.constants import SEARCH_TOO_COSTLY
 from core.fhir.resolve import (
     PUBLIC_ACCESS, REPO_TYPES, namespace_of, owner_access, visible_versions, viewable_rows, is_public, is_shown,
@@ -557,12 +557,9 @@ class Search:
 
 
 def page_size(query):
-    value = query.get('_count')
-    if value is None:
-        return settings.FHIR_SEARCH_MAX_COUNT
-    if not re.fullmatch(r'[0-9]{1,9}', value.strip()):
-        raise outcomes.InvalidError(f"_count must be a whole number, got '{value}'.", expression='_count')
-    return min(int(value), settings.FHIR_SEARCH_MAX_COUNT)
+    """_count, at most FHIR_SEARCH_MAX_COUNT, which it is when not given."""
+    count = FhirParameters(FhirParameters.query_items(query)).whole_number('_count')
+    return settings.FHIR_SEARCH_MAX_COUNT if count is None else min(count, settings.FHIR_SEARCH_MAX_COUNT)
 
 
 def within_search_timeout(build, too_costly=SEARCH_TOO_COSTLY):

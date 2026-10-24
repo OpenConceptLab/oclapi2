@@ -597,6 +597,83 @@ class FhirParametersTest(SimpleTestCase):
                     self.assertEqual(raised.exception.expression, 'code')
 
 
+class FhirParametersAccessorTest(SimpleTestCase):
+    """One reader per input type, for every operation."""
+
+    @staticmethod
+    def params(**values):
+        return FhirParameters(values.items())
+
+    def assert_invalid(self, read, name, error=outcomes.InvalidError):
+        with self.assertRaises(error) as raised:
+            read()
+        self.assertEqual(raised.exception.expression, name)
+        return raised.exception
+
+    def test_text(self):
+        self.assertEqual(self.params(url='http://x').text('url'), 'http://x')
+        self.assertIsNone(self.params(url='').text('url'))
+        self.assertIsNone(self.params().text('url'))
+        self.assert_invalid(lambda: self.params(url=True).text('url'), 'url')
+
+    def test_required_text(self):
+        self.assertEqual(self.params(code='1').required_text('code', 'Give a code.'), '1')
+        error = self.assert_invalid(lambda: self.params(code='').required_text('code', 'Give a code.'), 'code')
+        self.assertEqual(str(error.detail), 'Give a code.')
+
+    def test_boolean(self):
+        for value, expected in ((True, True), (False, False), ('true', True), ('FALSE', False), ('', None),
+                                (None, None)):
+            self.assertIs(self.params(flag=value).boolean('flag'), expected, value)
+        self.assertIsNone(self.params().boolean('flag'))
+        for value in ('maybe', ' true', 'true ', 1, 0):
+            error = self.assert_invalid(lambda value=value: self.params(flag=value).boolean('flag'), 'flag')
+            self.assertEqual(str(error.detail), f"'flag' must be true or false, got '{value}'.")
+
+    def test_whole_number(self):
+        for value, expected in (('0', 0), ('25', 25), (7, 7), ('', None), (None, None)):
+            self.assertEqual(self.params(count=value).whole_number('count'), expected, value)
+        for value in ('-1', '1.5', ' 5', '5 ', '1234567890', -1, True, 2.0):
+            error = self.assert_invalid(lambda value=value: self.params(count=value).whole_number('count'), 'count')
+            self.assertEqual(str(error.detail), f"'count' must be a whole number, got '{value}'.")
+
+    def test_coding(self):
+        coding = self.params(coding={'system': 'http://x', 'code': 'c', 'version': '2', 'display': 'C'}).coding('coding')
+        self.assertEqual(tuple(coding), ('http://x', 'c', '2', 'C', 'coding'))
+        # a GET's system|code token splits at its first |, as a token search value does
+        self.assertEqual(self.params(coding='http://x|a|b').coding('coding')[:2], ('http://x', 'a|b'))
+        self.assertEqual(self.params(coding='no-bar').coding('coding')[:2], (None, 'no-bar'))
+        self.assertEqual(self.params(coding={'code': 'c', 'system': ''}).coding('coding')[:2], (None, 'c'))
+        for value in ({'system': 'http://x', 'code': 7}, ['http://x', 'c'], 7, {}):
+            error = self.assert_invalid(lambda value=value: self.params(coding=value).coding('coding'), 'coding')
+            self.assertEqual(str(error.detail), "'coding' must be a Coding.")
+
+    def test_codeable_concept_coding(self):
+        coding = self.params(codeableConcept={'coding': [{'system': 'http://x', 'code': 'c'}], 'text': 'C'}).\
+            codeable_concept_coding('codeableConcept')
+        self.assertEqual(tuple(coding), ('http://x', 'c', None, None, 'codeableConcept'))
+        for value in ({'text': 'no coding'}, {'coding': []}, {'coding': 'x'}, 'x'):
+            error = self.assert_invalid(
+                lambda value=value: self.params(codeableConcept=value).codeable_concept_coding('codeableConcept'),
+                'codeableConcept')
+            self.assertEqual(str(error.detail), "'codeableConcept' must hold a coding.")
+        self.assert_invalid(lambda: self.params(codeableConcept={'coding': [
+            {'system': 'http://x', 'code': 'a'}, {'system': 'http://x', 'code': 'b'}]}).codeable_concept_coding(
+            'codeableConcept'), 'codeableConcept', outcomes.NotSupportedError)
+
+    def test_a_coding_names_its_parts_where_they_came_in(self):
+        from_coding = self.params(coding={'code': 'c'}).coding('coding')
+        self.assertEqual(from_coding.path('system'), 'Coding.system')
+        error = self.assert_invalid(lambda: from_coding.require('system', 'Give a system.'), 'coding')
+        self.assertEqual(str(error.detail), 'Give a system.')
+        self.assertEqual(from_coding.require('code', 'Give a code.'), 'c')
+        concept = self.params(codeableConcept={'coding': [{'code': 'c'}]}).codeable_concept_coding('codeableConcept')
+        self.assertEqual(concept.path('code'), 'CodeableConcept.coding[0].code')
+        separate = base.Coding('http://x', None, None, None, None)
+        self.assertEqual(separate.path('code'), 'code')
+        self.assert_invalid(lambda: separate.require('code', 'Give a code.'), 'code')
+
+
 class BaseUrlTest(SimpleTestCase):
     factory = APIRequestFactory()
 

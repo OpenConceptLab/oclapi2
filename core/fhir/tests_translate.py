@@ -537,6 +537,9 @@ class TranslateRequestTest(TranslateCorpusMixin, OCLTestCase):
             self.assertTrue(issue['details']['text'], params)
         for parameters, expression in (
                 ([{'name': 'codeableConcept', 'valueCodeableConcept': {'text': 'no coding'}}], 'codeableConcept'),
+                # one coding at a time, as $lookup and $validate-code take it: none is left unread
+                ([{'name': 'codeableConcept', 'valueCodeableConcept': {'coding': [
+                    {'system': CIEL, 'code': '113275'}, {'system': CIEL, 'code': '138405'}]}}], 'codeableConcept'),
                 ([{'name': 'coding', 'valueCoding': {'code': '113275'}}], 'coding'),
                 ([{'name': 'system', 'valueUri': CIEL}, {'name': 'code', 'valueBoolean': True}], 'code'),
                 ([{'name': 'system', 'valueUri': CIEL}, {'name': 'code', 'valueCode': '1'},
