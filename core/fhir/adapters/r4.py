@@ -165,6 +165,13 @@ def equivalence(relationship_code):
     return EQUIVALENCES[relationship_code]
 
 
+def concept_map_groups(groups):
+    """ConceptMap groups (core.fhir.ops.translate.concept_map_groups) in R4, each relationship as an equivalence."""
+    return [{**group, 'element': [{**element, 'target': [
+        {'code': target['code'], 'equivalence': equivalence(target['relationship'])} for target in element['target']]}
+        for element in group['element']]} for group in groups]
+
+
 def translate_parameters(answer):
     """$translate's answer (core.fhir.ops.translate) as R4 Parameters: result, message, and each match's parts."""
     items = [{'name': 'result', 'valueBoolean': answer['result']}]
