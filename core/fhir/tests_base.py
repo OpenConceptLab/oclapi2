@@ -638,7 +638,8 @@ class FhirParametersAccessorTest(SimpleTestCase):
             self.assertEqual(str(error.detail), f"'count' must be a whole number, got '{value}'.")
 
     def test_coding(self):
-        coding = self.params(coding={'system': 'http://x', 'code': 'c', 'version': '2', 'display': 'C'}).coding('coding')
+        coding = self.params(coding={'system': 'http://x', 'code': 'c', 'version': '2', 'display': 'C'}).coding(
+            'coding')
         self.assertEqual(tuple(coding), ('http://x', 'c', '2', 'C', 'coding'))
         # a GET's system|code token splits at its first |, as a token search value does
         self.assertEqual(self.params(coding='http://x|a|b').coding('coding')[:2], ('http://x', 'a|b'))

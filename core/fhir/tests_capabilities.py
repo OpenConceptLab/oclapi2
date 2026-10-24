@@ -317,13 +317,13 @@ class RepositoryPathTest(SimpleTestCase):
         # whatever its owner and id are called
         self.assertEqual(prefixes('/orgs/sources/ConceptMap/sources/', ('sources', 'ConceptMap')),
                          ['/orgs/sources/sources/sources/', '/orgs/sources/ConceptMap/sources/'])
-        for path in ('/orgs/CIEL/ValueSet/vs/', '/orgs/CIEL/sources/CIEL/v1/', 'http://x', '', None):
-            self.assertIsNone(prefixes(path, ('sources',)), path)
+        for value in ('/orgs/CIEL/ValueSet/vs/', '/orgs/CIEL/sources/CIEL/v1/', 'http://x', '', None):
+            self.assertIsNone(prefixes(value, ('sources',)), value)
         # as a ConceptMap group names a source: that name only, with its slash
         self.assertEqual(prefixes('/orgs/CIEL/ConceptMap/CIEL/', ('sources',), names=('ConceptMap',),
                                   trailing_slash=True), ['/orgs/CIEL/sources/CIEL/'])
-        for path in ('/orgs/CIEL/ConceptMap/CIEL', '/orgs/CIEL/CodeSystem/CIEL/'):
-            self.assertIsNone(prefixes(path, ('sources',), names=('ConceptMap',), trailing_slash=True), path)
+        for value in ('/orgs/CIEL/ConceptMap/CIEL', '/orgs/CIEL/CodeSystem/CIEL/'):
+            self.assertIsNone(prefixes(value, ('sources',), names=('ConceptMap',), trailing_slash=True), value)
 
 
 class ResolverIdentifiersTest(SimpleTestCase):

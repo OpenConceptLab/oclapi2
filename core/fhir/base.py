@@ -481,7 +481,7 @@ class Coding(namedtuple('Coding', 'system code version display parameter')):
     PATHS = {None: '', 'coding': 'Coding.', 'codeableConcept': 'CodeableConcept.coding[0].'}
 
     def path(self, part):
-        """The FHIRPath of a part of the code in an issue: the parameter itself, or the part of the Coding it came in."""
+        """The FHIRPath of a part of the code in an issue: the parameter, or the part of the Coding it came in."""
         return self.PATHS[self.parameter] + part
 
     def require(self, part, message):

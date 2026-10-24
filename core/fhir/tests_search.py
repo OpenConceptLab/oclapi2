@@ -1041,7 +1041,8 @@ class ReadTest(SearchCorpusMixin, OCLTestCase):
             MappingFactory(parent=self.ciel_source, from_source=self.ciel_source, to_source=self.sehat_icd,
                            from_concept_code='1', to_concept_code=code, sources=[self.ciel_v2])
         for resource_type, version, module, serializer, limit in (
-                ('ValueSet', self.ciel_vs_v1, 'value_sets', 'ValueSetDetailSerializer', 'FHIR_VALUE_SET_REFERENCE_LIMIT'),
+                ('ValueSet', self.ciel_vs_v1, 'value_sets', 'ValueSetDetailSerializer',
+                 'FHIR_VALUE_SET_REFERENCE_LIMIT'),
                 ('ConceptMap', self.ciel_v2, 'concept_maps', 'ConceptMapDetailSerializer',
                  'FHIR_CONCEPT_MAP_MAPPING_LIMIT')):
             with override_settings(**{limit: 1}), \

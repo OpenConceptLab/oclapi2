@@ -22,10 +22,10 @@ version the request names. core.fhir.adapters.r4 writes the answer as an R4 Valu
   the concept's newest content, so it uses the newest holding release of another, not deleted, version, whatever the
   expansion pins. None without one, never HEAD or an unreleased version (as $validate-code answers).
 - Inputs: activeOnly leaves retired concepts out; filter keeps the concepts whose code (as FHIR spells it) or one of
-  whose names has a word starting with each of the filter's words, ignoring case; offset and count page the members in
-  a fixed order (count at most FHIR_EXPAND_MAX_COUNT, which is also the default); count=0 answers the total alone. total counts
-  what activeOnly and filter keep. The inputs that shaped the answer are echoed in expansion.parameter, then each code
-  system the members come from, with each version they are reported in, as used-codesystem. Every other R4 $expand
+  whose names has a word starting with each of the filter's words, ignoring case; offset and count page the members in a
+  fixed order (count at most FHIR_EXPAND_MAX_COUNT, which is also the default); count=0 answers the total alone. total
+  counts what activeOnly and filter keep. The inputs that shaped the answer are echoed in expansion.parameter, then each
+  code system the members come from, with each version they are reported in, as used-codesystem. Every other R4 $expand
   input is one a stored expansion always satisfies (SATISFIED: OCL's expansions are flat, with no abstract codes), one
   supported only when false (ONLY_FALSE: an expansion has no definitions, and doesn't record which of its codes are
   post-coordinated), or a 400 not-supported naming it (NOT_SUPPORTED): an inline value set, a context, a date, code

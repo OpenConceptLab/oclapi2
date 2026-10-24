@@ -51,13 +51,14 @@ class ConceptMapGroupField(serializers.Field):
 
     def to_representation(self, value):
         """
-        At most FHIR_CONCEPT_MAP_MAPPING_LIMIT live mappings, grouped by the systems they are shown as: each side named as $translate names it
-        (side_system), its source's canonical URL when the caller is shown that source at the read's base, else the URL
-        the mapping stores. Whether a source is shown is a subquery of the one statement.
+        At most FHIR_CONCEPT_MAP_MAPPING_LIMIT live mappings, grouped by the systems they are shown as: each side named
+        as $translate names it (side_system), its source's canonical URL when the caller is shown that source at the
+        read's base, else the URL the mapping stores. Whether a source is shown is a subquery of the one statement.
         """
         # TODO: support graphQL to go around the limit
-        request, view = self.context.get('request'), self.context.get('view')
-        namespace, user = namespace_of(getattr(view, 'kwargs', None)), getattr(request, 'user', None)
+        view = self.context.get('view')
+        namespace = namespace_of(getattr(view, 'kwargs', None))
+        user = getattr(self.context.get('request'), 'user', None)
         mappings = value.get_active_mappings()  # neither retired nor deleted
         for side in ('from', 'to'):
             mappings = with_side(mappings, side, namespace, user)

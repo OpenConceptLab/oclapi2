@@ -315,7 +315,6 @@ class UserProfileTest(OCLTestCase):
         self.assertFalse(user.has_perm(MAPPER_USE_PERMISSION))
 
     def test_can_user_view(self):
-        from django.contrib.auth.models import AnonymousUser
         from core.concepts.tests.factories import ConceptFactory
         member, outsider, staff = UserProfileFactory(), UserProfileFactory(), UserProfileFactory(is_staff=True)
         private_org = OrganizationFactory(public_access=ACCESS_TYPE_NONE)
@@ -1105,7 +1104,6 @@ class UserViewsAPITest(OCLAPITestCase):
         permissions_mock.assert_called()
 
     def test_user_detail_get_object_anonymous_self_raises_404(self):
-        from django.contrib.auth.models import AnonymousUser
         from core.users.views import UserDetailView
         view = UserDetailView()
         view.kwargs = {'user_is_self': True}
