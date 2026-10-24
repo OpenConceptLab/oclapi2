@@ -5,10 +5,10 @@ SUBSETTED = {'system': 'http://terminology.hl7.org/CodeSystem/v3-ObservationValu
 
 
 class CanonicalUrlField(CharField):
-    """A resource's canonical URL: the version's own, else its repository's (repository_canonical_url, on a read)."""
+    """A resource's canonical URL: the version's own, else its repository's."""
 
     def get_attribute(self, instance):
-        return super().get_attribute(instance) or getattr(instance, 'repository_canonical_url', None)
+        return super().get_attribute(instance) or instance.repository_canonical_url
 
 
 class TitleField(CharField):

@@ -221,24 +221,16 @@ def with_repository_canonical(queryset):
 
 def code_system_concepts(source):
     """
-    (count, concepts) for a CodeSystem read, cached on the version: its concepts, retired ones included, when it has
-    at most FHIR_CODE_SYSTEM_CONCEPT_LIMIT, else (its number of concepts, None). The number is counted on the version's
+    (count, concepts) for a CodeSystem read: its concepts, retired ones included, when it has at most
+    FHIR_CODE_SYSTEM_CONCEPT_LIMIT, else (its number of concepts, None). The number is counted on the version's
     concept links alone (an index-only count, cheap even for LOINC); within the limit it's the concepts listed.
     """
-    if not hasattr(source, 'fhir_concepts'):
-        count, concepts = Concept.sources.through.objects.filter(source_id=source.id).count(), None
-        if count <= settings.FHIR_CODE_SYSTEM_CONCEPT_LIMIT:
-            concepts = list(source.concepts.filter(is_active=True).select_related('parent').prefetch_related(
-                'names', 'descriptions').order_by('id'))
-            count = len(concepts)
-        source.fhir_concepts = count, concepts
-    return source.fhir_concepts
-
-
-def concepts_over_limit(source):
-    """Whether a CodeSystem has more concepts than its read lists: a search annotates it, a read counts them."""
-    over = getattr(source, 'concepts_over_limit', None)
-    return code_system_concepts(source)[1] is None if over is None else over
+    count, concepts = Concept.sources.through.objects.filter(source_id=source.id).count(), None
+    if count <= settings.FHIR_CODE_SYSTEM_CONCEPT_LIMIT:
+        concepts = list(source.concepts.filter(is_active=True).select_related('parent').prefetch_related(
+            'names', 'descriptions').order_by('id'))
+        count = len(concepts)
+    return count, concepts
 
 
 def with_concepts_over_limit(queryset):

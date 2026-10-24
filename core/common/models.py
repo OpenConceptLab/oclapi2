@@ -1103,6 +1103,27 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     active_concepts_queryset = property(get_active_concepts)
     active_mappings_queryset = property(get_active_mappings)
 
+    # how resolve_reference_expression found this instance: by a canonical URL (is_fqdn) or an OCL path, and which
+    is_fqdn = False
+    resolution_url = None
+
+    @cached_property
+    def repository_head(self):
+        """The repository's HEAD: itself for a HEAD, else its active HEAD, or None."""
+        return self.head
+
+    @cached_property
+    def repository_public_access(self):
+        """The public_access of the repository, its active HEAD's, or None without one. A query may annotate it."""
+        head = self.repository_head
+        return head.public_access if head and head.is_active else None
+
+    @cached_property
+    def repository_canonical_url(self):
+        """The canonical URL of the repository, its HEAD's. A query may annotate it."""
+        head = self.repository_head
+        return head.canonical_url if head else None
+
     def has_parent_edit_access(self, user):
         """The owner's has_edit_access, without reading a user-owned repository's owner."""
         if user.is_staff:

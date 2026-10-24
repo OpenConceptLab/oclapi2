@@ -260,7 +260,7 @@ class FhirResolver:
         anyone; at an owner base the same, or any of the owner's versions to those who may view its private repositories
         (staff, the org's members, the user).
         """
-        access = repository_access(instance)
+        access = instance.repository_public_access
         if access is None:
             return False
         return (instance.public_can_view and BaseModel.is_public_access(access)) or self.may_view_private(instance)
@@ -429,6 +429,7 @@ def path_version(url):
         return parts[5] or None
     return None
 
+
 def shown_heads(model):
     """
     Q for the HEAD rows the global base shows: public, with a live (released, not retired) public release. The
@@ -440,6 +441,7 @@ def shown_heads(model):
         public_access__in=PUBLIC_ACCESS).exclude(version=HEAD).filter(
         Q(organization_id=OuterRef('organization_id')) | Q(user_id=OuterRef('user_id'))))
 
+
 def latest_public_release(instance):
     """The newest live public release of a version's repository, resolved as the version was, or None."""
     owner = {'organization_id': instance.organization_id} if instance.organization_id else {'user_id': instance.user_id}
@@ -447,27 +449,13 @@ def latest_public_release(instance):
         mnemonic=instance.mnemonic, is_active=True, released=True, retired=False, public_access__in=PUBLIC_ACCESS,
         **owner).exclude(version=HEAD).order_by('-created_at').first()
     if latest:
-        latest.repository_public_access = repository_access(instance)
-        latest.repository_canonical_url = getattr(instance, 'repository_canonical_url', None)
+        latest.repository_public_access = instance.repository_public_access
+        latest.repository_canonical_url = instance.repository_canonical_url
         latest.is_fqdn, latest.resolution_url = instance.is_fqdn, instance.resolution_url
         if instance.is_fqdn and not latest.canonical_url:
             latest.canonical_url = instance.resolution_url
     return latest
 
-def repository_access(instance):
-    """
-    The public_access of a version's repository, its active HEAD's, or None without one. A read (with_repository_access)
-    and the resolver (resolve_repo) set it on the version they find, so it isn't looked up again; with the canonical
-    URL of its repository, which the HEAD looked up here gives the version too (one an OCL path names itself).
-    """
-    if instance.is_head:
-        return instance.public_access if instance.is_active else None
-    if hasattr(instance, 'repository_public_access'):
-        return instance.repository_public_access
-    head = instance.head
-    if head and not hasattr(instance, 'repository_canonical_url'):
-        instance.repository_canonical_url = head.canonical_url
-    return head.public_access if head else None
 
 def repository_rows(model, **filters):
     """
@@ -477,6 +465,7 @@ def repository_rows(model, **filters):
     rows = model.objects.filter(mnemonic=OuterRef('mnemonic'), **filters)
     return (rows.filter(organization_id=OuterRef('organization_id'), user_id__isnull=True),
             rows.filter(user_id=OuterRef('user_id'), organization_id__isnull=True))
+
 
 def with_head(model, *conditions, **filters):
     """
@@ -488,11 +477,13 @@ def with_head(model, *conditions, **filters):
         *conditions, mnemonic=OuterRef('mnemonic'), version=HEAD, is_active=True, **filters).filter(
         Q(organization_id=OuterRef('organization_id')) | Q(user_id=OuterRef('user_id'))))
 
+
 def with_repository_access(queryset):
     """Each row annotated with repository_public_access, its repository's (active HEAD's) public_access."""
     org_heads, user_heads = repository_rows(queryset.model, version=HEAD, is_active=True)
     return queryset.annotate(repository_public_access=Coalesce(
         Subquery(org_heads.values('public_access')[:1]), Subquery(user_heads.values('public_access')[:1])))
+
 
 def is_looked_up_as_written(url):
     """
@@ -500,6 +491,7 @@ def is_looked_up_as_written(url):
     one it takes for canonical (':'), with no |version or ?query part, that isn't an OCL path.
     """
     return bool(url) and is_canonical_uri(url) and '|' not in url and '?' not in url and to_ocl_path(url) == url
+
 
 def ocl_path(uri):
     """
@@ -511,6 +503,7 @@ def ocl_path(uri):
         return None
     return path if to_parent_uri(to_ocl_path(path)) == uri else None
 
+
 def in_namespace(head, namespace):
     """Whether a HEAD is the repository of the owner a registry entry's namespace names (get_object_from_namespace)."""
     if namespace and '/orgs/' in namespace:
@@ -518,6 +511,7 @@ def in_namespace(head, namespace):
     if namespace and '/users/' in namespace:
         return head.user_uri == namespace
     return False
+
 
 def registry_entries(owner):
     """(the owner's, the global registry's) active entries, each {url: namespace}, for an owner filter: one query."""
@@ -529,6 +523,7 @@ def registry_entries(owner):
             scope).values_list('url', 'namespace', 'organization_id', 'user_id'):
         (shared if organization_id is None and user_id is None else own)[url] = namespace
     return own, shared
+
 
 def as_stored(version):
     """A version as the shared resolver must be given it to look up `version` as it is stored: it decodes what it's

@@ -54,7 +54,7 @@ def fhir_code(code):
 
 def system_of(version, named=None):
     """A code system version's canonical URL (else its repository's), or else the URL it was named by."""
-    return version.canonical_url or getattr(version, 'repository_canonical_url', None) or named
+    return version.canonical_url or version.repository_canonical_url or named
 
 
 def instance_version(resource_type, instance_id, version, resolver):
@@ -83,7 +83,7 @@ def is_system_of(system, version, named=None):
     repository's), the URL it was resolved by (`named`), or an OCL path of its repository or of the version.
     """
     url = system.partition('|')[0]
-    canonicals = {version.canonical_url, getattr(version, 'repository_canonical_url', None),
+    canonicals = {version.canonical_url, version.repository_canonical_url,
                   (named or '').partition('|')[0]}
     if url in canonicals - {None, ''}:
         return True
