@@ -1103,7 +1103,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     active_concepts_queryset = property(get_active_concepts)
     active_mappings_queryset = property(get_active_mappings)
 
-    # how resolve_reference_expression found this instance: by a canonical URL (is_fqdn) or an OCL path, and which
+    # how resolve_reference_expression found this instance: by a canonical URL (is_fqdn) or an OCL path, and the URL
     is_fqdn = False
     resolution_url = None
 
