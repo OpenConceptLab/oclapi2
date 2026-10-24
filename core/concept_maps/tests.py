@@ -661,6 +661,25 @@ class ConceptMapTest(OCLTestCase):
 
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    def test_an_exported_concept_map_imports_with_the_map_types_it_had(self):
+        """A ConceptMap read, then written back: each map type with an R4 equivalence is stored as it was."""
+        map_types = ['SAME-AS', 'NARROWER-THAN', 'BROADER-THAN', 'NOT-SAME-AS']
+        auth = {'HTTP_AUTHORIZATION': 'Token ' + self.user_token}
+        group = [{'source': self.org_source_B_v1.canonical_url, 'target': self.org_source.canonical_url,
+                  'element': [{'code': 'concept_B_1', 'target': [
+                      {'code': f'concept_{index}', 'equivalence': equivalence}
+                      for index, equivalence in enumerate(['equivalent', 'wider', 'narrower', 'disjoint'])]}]}]
+        for identifier in ('exported', 'imported'):
+            response = self.client.post(f'/users/{self.user.mnemonic}/ConceptMap/', data={
+                **self.newConceptMap(None, identifier, '1.0', group), 'status': 'active'}, format='json', **auth)
+            self.assertEqual(response.status_code, 201, response.data)
+            version = Source.objects.get(mnemonic=identifier, version='1.0', user=self.user)
+            self.assertEqual(
+                list(version.get_mappings_queryset().order_by('id').values_list('map_type', flat=True)), map_types)
+            group = self.client.get(f'/users/{self.user.mnemonic}/ConceptMap/{identifier}/', **auth).data['group']
+
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_group_equivalence_is_the_map_type_relationship(self):
         """
         A group target's equivalence is its map type's relationship in R4 ($translate's table), and a written
