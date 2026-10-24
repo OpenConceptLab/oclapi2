@@ -1051,6 +1051,21 @@ class SourceTest(OCLTestCase):
 
         self.assertEqual(source.get_latest_released_version(), source_v2)
 
+    def test_get_latest_released_version_can_exclude_a_released_head(self):
+        source = OrganizationSourceFactory(released=True)
+
+        self.assertEqual(source.get_latest_released_version(), source)
+        self.assertIsNone(source.get_latest_released_version(exclude_head=True))
+
+        source_v1 = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True
+        )
+        OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v2', released=True, retired=True
+        )
+
+        self.assertEqual(source.get_latest_released_version(exclude_head=True), source_v1)
+
     def test_get_version(self):
         source = OrganizationSourceFactory()
         source_v1 = OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v1')

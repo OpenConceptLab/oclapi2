@@ -398,6 +398,24 @@ class IdentifierSerializerTest(OCLTestCase):
                      'text': 'Accession ID'},
                  'value': '/orgs/OCL/Code/1/'}])
 
+    def test_convert_ocl_uri_to_fhir_url_renames_only_the_repository_type_segment(self):
+        convert = IdentifierSerializer.convert_ocl_uri_to_fhir_url
+        for uri, resource_type, expected in (
+                ('/orgs/Acme/sources/collections/', 'CodeSystem', '/orgs/Acme/CodeSystem/collections/'),
+                ('/orgs/Acme/collections/sources/', 'ValueSet', '/orgs/Acme/ValueSet/sources/'),
+                ('/orgs/sources/sources/codes/', 'CodeSystem', '/orgs/sources/CodeSystem/codes/'),
+                ('/users/collections/collections/set/v1/', 'ValueSet', '/users/collections/ValueSet/set/'),
+                # as before for every other name
+                ('/orgs/CIEL/sources/CIEL/', 'CodeSystem', '/orgs/CIEL/CodeSystem/CIEL/'),
+                ('/orgs/CIEL/sources/CIEL/v1/concepts/1/', 'ConceptMap', '/orgs/CIEL/ConceptMap/CIEL/'),
+                ('/users/jo/collections/vs/', 'ValueSet', '/users/jo/ValueSet/vs/'),
+                ('/orgs/CIEL/CodeSystem/CIEL/', 'CodeSystem', '/orgs/CIEL/CodeSystem/CIEL/'),
+                ('http://example.org/fhir/CodeSystem/x', 'CodeSystem', 'http://example.org/fhir/CodeSystem/x'),
+                (None, 'CodeSystem', None)):
+            self.assertEqual(convert(uri, resource_type), expected, uri)
+        with self.assertRaisesMessage(ValidationError, 'given: orgs/CIEL/CodeSystem'):
+            convert('/orgs/CIEL/sources/', 'CodeSystem')
+
 
 class UtilsTest(OCLTestCase):
     def test_set_and_get_current_user(self):

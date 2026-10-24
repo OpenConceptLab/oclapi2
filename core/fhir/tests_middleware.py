@@ -1,11 +1,13 @@
 """The middleware's answers on FHIR paths are OperationOutcomes (OpenConceptLab/ocl_online#451)."""
 import gzip
 import json
+from io import BytesIO
 from unittest.mock import patch
 
 import requests
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
+from django.core.handlers.wsgi import WSGIRequest
 from django.http import HttpResponse, JsonResponse, HttpResponseNotFound
 from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 from fhir.resources.R4B.operationoutcome import OperationOutcome
@@ -106,6 +108,14 @@ class FhirErrorMiddlewareTest(SimpleTestCase):
         ok = HttpResponse('ok')
         self.assertIs(self.answer('/fhir/CodeSystem/', ok), ok)
 
+    def test_an_exception_off_a_fhir_path_is_raised_as_before(self):
+        def crash(request):
+            raise ConnectionError('sign-in provider unreachable')
+
+        for path in ('/orgs/CIEL/sources/', '/user/sources/CodeSystem/', '/version/'):
+            with self.assertRaises(ConnectionError, msg=path):
+                FhirErrorMiddleware(crash)(self.factory.get(path))
+
 
 @override_settings(DATA_UPLOAD_MAX_NUMBER_FIELDS=1000, FHIR_SUBDOMAIN=None, REQUIRE_AUTHENTICATION=False,
                    DEBUG=False, DEBUG_PROPAGATE_EXCEPTIONS=False)
@@ -198,6 +208,28 @@ class MediaTypeParsingFailureTest(TestCase):
 
         self.assert_bad_request_outcome(response)
         self.assertIsNone(response.wsgi_request.encoding)
+
+
+class ProductionRequestOffFhirPathsTest(SimpleTestCase):
+    """Off a FHIR path, the production request class reads Content-Type exactly as Django's own does."""
+
+    @staticmethod
+    def environ(path, content_type):
+        return {'REQUEST_METHOD': 'POST', 'PATH_INFO': path, 'CONTENT_TYPE': content_type, 'CONTENT_LENGTH': '2',
+                'wsgi.input': BytesIO(b'{}'), 'SERVER_NAME': 'testserver', 'SERVER_PORT': '80',
+                'wsgi.url_scheme': 'http'}
+
+    def test_a_malformed_content_type_off_a_fhir_path_fails_as_in_django(self):
+        for path in ('/orgs/CIEL/sources/', '/user/sources/CodeSystem/'):
+            for request_class in (WSGIRequest, application.request_class):
+                with self.assertRaisesMessage(LookupError, 'unknown encoding: bad'):
+                    request_class(self.environ(path, "application/json; foo*=bad''%41"))
+
+    def test_a_non_text_charset_off_a_fhir_path_is_kept_as_in_django(self):
+        request = application.request_class(self.environ('/orgs/CIEL/sources/', 'application/json; charset=base64'))
+
+        self.assertEqual(request.encoding, 'base64')
+        self.assertFalse(hasattr(request, 'fhir_content_type_error'))
 
 
 @override_settings(REQUIRE_AUTHENTICATION=True, APPROVED_ANONYMOUS_CLIENTS=[], APPROVED_ANONYMOUS_API_KEYS=[],

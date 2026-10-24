@@ -15,12 +15,10 @@ from fhir.resources.R4B.capabilitystatement import CapabilityStatement
 from fhir.resources.R4B.parameters import Parameters
 from fhir.resources.R4B.terminologycapabilities import TerminologyCapabilities
 from mock import patch
-from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 
 from core import __version__
 from core.common.constants import ACCESS_TYPE_NONE, HEAD
-from core.common.serializers import IdentifierSerializer
 from core.common.tests import OCLTestCase, OCLAPITransactionTestCase
 from core.concepts.tests.factories import ConceptFactory
 from core.fhir import base, search
@@ -296,28 +294,6 @@ class OwnerBaseFhirPathTest(SimpleTestCase):
         for path_ in ('/orgs/CIEL/', '/orgs/CIEL/metadata/x/', '/orgs/metadata/', '/sources/x/metadata',
                       '/users/jo/extras/'):
             self.assertFalse(base.is_fhir_path(path_), path_)
-
-
-class OclPathAsFhirTest(SimpleTestCase):
-    """IdentifierSerializer.convert_ocl_uri_to_fhir_url: an OCL URL as FHIR names it, the repository type's segment."""
-
-    def test_only_the_repository_type_segment_is_replaced(self):
-        convert = IdentifierSerializer.convert_ocl_uri_to_fhir_url
-        for uri, resource_type, expected in (
-                ('/orgs/Acme/sources/collections/', 'CodeSystem', '/orgs/Acme/CodeSystem/collections/'),
-                ('/orgs/Acme/collections/sources/', 'ValueSet', '/orgs/Acme/ValueSet/sources/'),
-                ('/orgs/sources/sources/codes/', 'CodeSystem', '/orgs/sources/CodeSystem/codes/'),
-                ('/users/collections/collections/set/v1/', 'ValueSet', '/users/collections/ValueSet/set/'),
-                # as before for every other name
-                ('/orgs/CIEL/sources/CIEL/', 'CodeSystem', '/orgs/CIEL/CodeSystem/CIEL/'),
-                ('/orgs/CIEL/sources/CIEL/v1/concepts/1/', 'ConceptMap', '/orgs/CIEL/ConceptMap/CIEL/'),
-                ('/users/jo/collections/vs/', 'ValueSet', '/users/jo/ValueSet/vs/'),
-                ('/orgs/CIEL/CodeSystem/CIEL/', 'CodeSystem', '/orgs/CIEL/CodeSystem/CIEL/'),
-                ('http://example.org/fhir/CodeSystem/x', 'CodeSystem', 'http://example.org/fhir/CodeSystem/x'),
-                (None, 'CodeSystem', None)):
-            self.assertEqual(convert(uri, resource_type), expected, uri)
-        with self.assertRaisesMessage(ValidationError, 'given: orgs/CIEL/CodeSystem'):
-            convert('/orgs/CIEL/sources/', 'CodeSystem')
 
 
 class ResolverIdentifiersTest(SimpleTestCase):
