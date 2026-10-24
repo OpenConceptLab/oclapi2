@@ -53,8 +53,9 @@ from core.fhir import outcomes
 from core.fhir.constants import EXPANSION_TOO_COSTLY
 from core.fhir.ops.concepts import designations, display_of, fhir_code
 from core.fhir.ops.validate_code import value_set_version
-from core.fhir.resolve import namespace_of, viewable_rows
+from core.fhir.resolve import viewable_rows
 from core.fhir.search import within_search_timeout
+from core.fhir.utils import namespace_of
 from core.sources.models import Source
 
 WORD = re.compile(r'\w+')

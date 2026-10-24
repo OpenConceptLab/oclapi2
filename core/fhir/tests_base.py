@@ -22,9 +22,14 @@ from rest_framework.test import APIRequestFactory
 from rest_framework.views import APIView
 
 from core.common.throttling import FhirMinuteThrottle
-from core.fhir import base, outcomes
-from core.fhir.base import FhirContentNegotiation, FhirJsonParser, FhirJsonRenderer, FhirXmlParser, \
-    FhirXmlRenderer, FhirOperationView, FhirParameters, FhirVersioning, FhirViewMixin
+from core.fhir import outcomes
+from core.fhir.mixins import FhirOperationView, FhirViewMixin
+from core.fhir.negotiation import (
+    FhirContentNegotiation, FhirJsonParser, FhirJsonRenderer, FhirVersioning, FhirXmlParser, FhirXmlRenderer,
+    is_outcome_response, outcome_response)
+from core.fhir.parameters import Coding, FhirParameters
+from core.fhir.utils import fhir_base_url, is_fhir_path
+from core.fhir.xml import from_xml, log_dropped, to_xml
 
 FHIR = '{http://hl7.org/fhir}'
 BROWSER_ACCEPT = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
@@ -206,14 +211,14 @@ class XmlTest(SimpleTestCase):
             {'name': 'issues', 'resource': {'resourceType': 'OperationOutcome', 'issue': [
                 {'severity': 'error', 'code': 'invalid', 'details': {'text': 'Bad'}}]}}]}
 
-        xml = base.to_xml(parameters)
+        xml = to_xml(parameters)
 
         self.assertTrue(xml.startswith(b'<?xml'))
-        self.assertEqual(base.from_xml(xml), parameters)
+        self.assertEqual(from_xml(xml), parameters)
 
     def test_xml_output_drops_empty_values(self):
-        xml = base.to_xml({'resourceType': 'CodeSystem', 'id': 'a', 'status': 'active', 'content': 'complete',
-                           'title': '', 'description': None, 'identifier': [], 'meta': {}})
+        xml = to_xml({'resourceType': 'CodeSystem', 'id': 'a', 'status': 'active', 'content': 'complete',
+                      'title': '', 'description': None, 'identifier': [], 'meta': {}})
 
         root = etree.fromstring(xml)
         self.assertEqual([child.tag for child in root], [f'{FHIR}id', f'{FHIR}status', f'{FHIR}content'])
@@ -228,7 +233,7 @@ class XmlTest(SimpleTestCase):
             'id': 'my_codes@v1',
         }
 
-        root = etree.fromstring(base.to_xml(code_system))
+        root = etree.fromstring(to_xml(code_system))
 
         self.assertEqual(root.tag, f'{FHIR}CodeSystem')
         self.assert_in_model_order(root, CodeSystem)
@@ -253,7 +258,7 @@ class XmlTest(SimpleTestCase):
                             {'resource': {'resourceType': 'NoSuchResource', 'id': 'x'}},
                             {'resource': 'not a resource'}]}
 
-        root = etree.fromstring(base.to_xml(bundle))
+        root = etree.fromstring(to_xml(bundle))
 
         self.assertEqual(child_names(root), ['type', 'total', 'entry', 'entry'])  # the other two had nothing R4
         resource = root.find(f'{FHIR}entry/{FHIR}resource/{FHIR}CodeSystem')
@@ -263,23 +268,23 @@ class XmlTest(SimpleTestCase):
         self.assertEqual(value_set.find(f'{FHIR}text/{{http://www.w3.org/1999/xhtml}}div').text, '<p>Not a div</p>')
 
     def test_data_that_is_not_a_resource_is_answered_with_an_outcome(self):
-        root = etree.fromstring(base.to_xml({'versions': ['4.0']}))
+        root = etree.fromstring(to_xml({'versions': ['4.0']}))
 
         self.assertEqual(root.tag, f'{FHIR}OperationOutcome')
-        self.assertEqual(base.to_xml(None), b'')
+        self.assertEqual(to_xml(None), b'')
 
     def test_invalid_xml_bodies_are_parse_errors(self):
         for body in (b'not xml', b'<Parameters/>', b'<Foo xmlns="http://hl7.org/fhir"/>',
                      b'<Parameters xmlns="http://hl7.org/fhir"><parameter><nm value="x"/></parameter></Parameters>'):
             with self.assertRaises(ParseError, msg=body):
-                base.from_xml(body)
+                from_xml(body)
 
     def test_entities_are_not_resolved(self):
         body = (b'<?xml version="1.0"?><!DOCTYPE p [<!ENTITY e SYSTEM "file:///etc/passwd">]>'
                 b'<Parameters xmlns="http://hl7.org/fhir"><parameter><name value="code"/>'
                 b'<valueString value="&e;"/></parameter></Parameters>')
         try:
-            parsed = base.from_xml(body)
+            parsed = from_xml(body)
         except ParseError:
             return
         self.assertNotIn('root:', json.dumps(parsed))
@@ -302,7 +307,7 @@ class XmlElementOrderTest(SimpleTestCase):
         assert_in_model_order(self, element, model_class)
 
     def test_a_released_code_system_comes_out_in_fhir_element_order(self):
-        xml = base.to_xml(released_code_system())
+        xml = to_xml(released_code_system())
 
         root = etree.fromstring(xml)
         self.assert_in_model_order(root, CodeSystem)
@@ -311,7 +316,7 @@ class XmlElementOrderTest(SimpleTestCase):
             self.assertNotIn(name, child_names(root))
         concept = root.find(f'{FHIR}concept')
         self.assert_in_model_order(concept, CodeSystemConcept)
-        self.assertEqual(base.from_xml(xml)['concept'][0]['display'], 'One')  # valid R4B XML
+        self.assertEqual(from_xml(xml)['concept'][0]['display'], 'One')  # valid R4B XML
 
     def test_a_search_bundle_holding_one_comes_out_in_fhir_element_order(self):
         code_system = released_code_system(id='my_codes')  # an owner-base id the model refuses
@@ -319,7 +324,7 @@ class XmlElementOrderTest(SimpleTestCase):
                   'total': 1, 'entry': [{'resource': code_system}],
                   'link': [{'relation': 'self', 'url': 'http://testserver/fhir/CodeSystem/?page=1'}]}
 
-        root = etree.fromstring(base.to_xml(bundle))
+        root = etree.fromstring(to_xml(bundle))
 
         self.assertEqual(child_names(root), ['meta', 'type', 'total', 'link', 'entry'])
         resource = root.find(f'{FHIR}entry/{FHIR}resource/{FHIR}CodeSystem')
@@ -328,7 +333,7 @@ class XmlElementOrderTest(SimpleTestCase):
         self.assertEqual(resource.find(f'{FHIR}id').get('value'), 'my_codes')
 
     def test_bundle_children_keep_the_model_order_with_an_id(self):
-        root = etree.fromstring(base.to_xml({
+        root = etree.fromstring(to_xml({
             'resourceType': 'Bundle', 'entry': [{'resource': {'resourceType': 'CodeSystem', 'id': 'codes@1',
                                                               'status': 'active', 'content': 'complete'}}],
             'link': [{'relation': 'self', 'url': 'http://x'}], 'total': 1, 'type': 'searchset', 'id': 'b1',
@@ -341,17 +346,17 @@ class XmlElementOrderTest(SimpleTestCase):
                        'contact': [{'name': 'Jo', 'my key': 'x', 'telecom': [{'value': 'a@b.c', 'oops': 1}]}],
                        'concept': [{'code': 'a', 'concept_class': 'Misc'}]}
 
-        root = etree.fromstring(base.to_xml(code_system))
+        root = etree.fromstring(to_xml(code_system))
 
         self.assertEqual(child_names(root.find(f'{FHIR}contact')), ['name', 'telecom'])
         self.assertEqual(child_names(root.find(f'{FHIR}contact/{FHIR}telecom')), ['value'])
         self.assertEqual(child_names(root.find(f'{FHIR}concept')), ['code'])
 
     def test_each_dropped_key_is_logged_once(self):
-        base.log_dropped.cache_clear()
+        log_dropped.cache_clear()
         with self.assertLogs('oclapi', level='WARNING') as logs:
-            base.to_xml(released_code_system())
-            base.to_xml(released_code_system())
+            to_xml(released_code_system())
+            to_xml(released_code_system())
 
         dropped = [line for line in logs.output if 'does not define' in line]
         self.assertEqual(len(dropped), 3, dropped)
@@ -362,7 +367,7 @@ class XmlElementOrderTest(SimpleTestCase):
             {'severity': 'error', 'details': 'Failed to represent "/x" as CodeSystem', 'expression': 'code'}],
             'text': ['not', 'a', 'narrative'], 'id': {'not': 'an id'}}
 
-        root = etree.fromstring(base.to_xml(outcome))
+        root = etree.fromstring(to_xml(outcome))
 
         self.assertEqual(child_names(root), ['issue'])
         self.assertEqual(child_names(root.find(f'{FHIR}issue')), ['severity', 'expression'])
@@ -374,7 +379,7 @@ class XmlElementOrderTest(SimpleTestCase):
             'extension': [{'url': 'http://ext', 'valueString': 'x'}], 'concept': [{'id': 'c1', 'code': 'x'}]}}]}
         with patch.object(Bundle, 'model_dump_xml', side_effect=ValueError('boom')), \
                 self.assertLogs('oclapi', level='ERROR'):
-            root = etree.fromstring(base.to_xml(bundle))
+            root = etree.fromstring(to_xml(bundle))
 
         code_system = root.find(f'{FHIR}entry/{FHIR}resource/{FHIR}CodeSystem')
         self.assertEqual(code_system.find(f'{FHIR}id').get('value'), 'a')
@@ -411,7 +416,7 @@ class XmlValuesTest(SimpleTestCase):
     def test_a_refused_value_set_writes_its_datetimes_as_the_json_does(self):
         data = serialized_value_set('my_vs')  # an owner-base id the model refuses
 
-        root = etree.fromstring(base.to_xml(data))
+        root = etree.fromstring(to_xml(data))
 
         expected = json_of(data)['meta']['lastUpdated']
         self.assertEqual(self.last_updated(root), expected)
@@ -422,7 +427,7 @@ class XmlValuesTest(SimpleTestCase):
         bundle = {'resourceType': 'Bundle', 'type': 'searchset', 'total': 2,
                   'entry': [{'resource': serialized_value_set('good')}, {'resource': serialized_value_set('bad_id')}]}
 
-        root = etree.fromstring(base.to_xml(bundle))
+        root = etree.fromstring(to_xml(bundle))
 
         expected = json_of(bundle)['entry'][0]['resource']['meta']['lastUpdated']
         for resource in root.iterfind(f'{FHIR}entry/{FHIR}resource/{FHIR}ValueSet'):
@@ -432,7 +437,7 @@ class XmlValuesTest(SimpleTestCase):
     def test_a_valid_resource_writes_the_same_instant(self):
         data = serialized_value_set('good')
 
-        written = self.last_updated(etree.fromstring(base.to_xml(data)))
+        written = self.last_updated(etree.fromstring(to_xml(data)))
 
         self.assertRegex(written, FHIR_INSTANT)
         self.assertEqual(datetime.datetime.fromisoformat(written),
@@ -444,7 +449,7 @@ class XmlValuesTest(SimpleTestCase):
             {'name': 'amount', 'valueDecimal': Decimal('1.50')}, {'name': 'when', 'valueDate': UPDATED.date()},
             {'name': 'code', 'valueString': code}]}
 
-        values = [element.get('value') for element in etree.fromstring(base.to_xml(parameters)).iter()
+        values = [element.get('value') for element in etree.fromstring(to_xml(parameters)).iter()
                   if element.get('value') and etree.QName(element).localname.startswith('value')]
 
         self.assertEqual(values, ['1.5', '2026-10-14', str(code)])
@@ -459,17 +464,17 @@ class XmlSingleElementTest(SimpleTestCase):
     def test_a_concept_map_keeps_its_identifier(self):
         first = {'system': 'http://testserver', 'value': '/orgs/X/ConceptMap/cm/'}
         for identifiers in ([first], [first, {'value': 'another'}]):
-            root = etree.fromstring(base.to_xml(self.concept_map(identifiers)))
+            root = etree.fromstring(to_xml(self.concept_map(identifiers)))
 
             self.assertEqual(len(root.findall(f'{FHIR}identifier')), 1, identifiers)
             self.assertEqual(root.find(f'{FHIR}identifier/{FHIR}value').get('value'), '/orgs/X/ConceptMap/cm/')
 
     def test_the_items_left_out_are_logged_once(self):
-        base.log_dropped.cache_clear()
+        log_dropped.cache_clear()
         identifiers = [{'value': 'a'}, {'value': 'b'}, {'value': 'c'}]
         with self.assertLogs('oclapi', level='WARNING') as logs:
-            base.to_xml(self.concept_map(identifiers))
-            base.to_xml(self.concept_map(identifiers))
+            to_xml(self.concept_map(identifiers))
+            to_xml(self.concept_map(identifiers))
 
         self.assertEqual(len([line for line in logs.output if 'ConceptMap.identifier' in line]), 1, logs.output)
 
@@ -483,7 +488,7 @@ class XmlCharactersTest(SimpleTestCase):
             {'name': 'name', 'valueString': 'Tab\tand\nnew line'}]}
 
         with self.assertLogs('oclapi', level='WARNING') as logs:
-            xml = base.to_xml(parameters)
+            xml = to_xml(parameters)
 
         values = [element.get('value') for element in etree.fromstring(xml).iter(f'{FHIR}valueString')]
         self.assertEqual(values, ['Mal\ufffdaria\ufffd', 'Tab\tand\nnew line'])
@@ -494,7 +499,7 @@ class XmlCharactersTest(SimpleTestCase):
                        'title': 'A\ud800B\uffffC', 'text': {'status': 'generated', 'div': 'x\x1fy'}}
 
         with self.assertLogs('oclapi', level='WARNING'):
-            root = etree.fromstring(base.to_xml(code_system))
+            root = etree.fromstring(to_xml(code_system))
 
         self.assertEqual(root.find(f'{FHIR}title').get('value'), 'A\ufffdB\ufffdC')
         self.assertEqual(root.find(f'{FHIR}text/{{http://www.w3.org/1999/xhtml}}div').text, 'x\ufffdy')
@@ -502,8 +507,8 @@ class XmlCharactersTest(SimpleTestCase):
     def test_the_element_writer_is_safe_too(self):
         with patch.object(CodeSystem, 'model_dump_xml', side_effect=ValueError('boom')), \
                 self.assertLogs('oclapi', level='WARNING'):
-            root = etree.fromstring(base.to_xml({'resourceType': 'CodeSystem', 'id': 'a', 'status': 'active',
-                                                 'content': 'complete', 'title': 'bad\x0b'}))
+            root = etree.fromstring(to_xml({'resourceType': 'CodeSystem', 'id': 'a', 'status': 'active',
+                                            'content': 'complete', 'title': 'bad\x0b'}))
 
         self.assertEqual(root.find(f'{FHIR}title').get('value'), 'bad\ufffd')
 
@@ -670,7 +675,7 @@ class FhirParametersAccessorTest(SimpleTestCase):
         self.assertEqual(from_coding.require('code', 'Give a code.'), 'c')
         concept = self.params(codeableConcept={'coding': [{'code': 'c'}]}).codeable_concept_coding('codeableConcept')
         self.assertEqual(concept.path('code'), 'CodeableConcept.coding[0].code')
-        separate = base.Coding('http://x', None, None, None, None)
+        separate = Coding('http://x', None, None, None, None)
         self.assertEqual(separate.path('code'), 'code')
         self.assert_invalid(lambda: separate.require('code', 'Give a code.'), 'code')
 
@@ -682,17 +687,17 @@ class BaseUrlTest(SimpleTestCase):
         request = self.factory.get(
             '/orgs/CIEL/CodeSystem/', HTTP_HOST='fhir.openconceptlab.org', HTTP_X_FORWARDED_PROTO='https')
 
-        self.assertEqual(base.fhir_base_url(request), 'https://fhir.openconceptlab.org/fhir')
-        self.assertEqual(base.fhir_base_url(request, {'org': 'CIEL'}), 'https://fhir.openconceptlab.org/orgs/CIEL')
-        self.assertEqual(base.fhir_base_url(request, {'user': 'jo'}), 'https://fhir.openconceptlab.org/users/jo')
+        self.assertEqual(fhir_base_url(request), 'https://fhir.openconceptlab.org/fhir')
+        self.assertEqual(fhir_base_url(request, {'org': 'CIEL'}), 'https://fhir.openconceptlab.org/orgs/CIEL')
+        self.assertEqual(fhir_base_url(request, {'user': 'jo'}), 'https://fhir.openconceptlab.org/users/jo')
 
     def test_fhir_paths(self):
         for path in ('/fhir', '/fhir/', '/fhir/metadata', '/fhir/CodeSystem/$lookup/', '/orgs/CIEL/CodeSystem',
                      '/orgs/CIEL/ValueSet/x/$expand/', '/users/jo/ConceptMap/$translate'):
-            self.assertTrue(base.is_fhir_path(path), path)
+            self.assertTrue(is_fhir_path(path), path)
         for path in ('/', '/orgs/CIEL/', '/orgs/CIEL/sources/', '/fhirx/', '/version/', '/user/sources/CodeSystem/',
                      '/sources/x/ConceptMap/'):
-            self.assertFalse(base.is_fhir_path(path), path)
+            self.assertFalse(is_fhir_path(path), path)
 
 
 class OutcomeResponseTest(SimpleTestCase):
@@ -700,14 +705,14 @@ class OutcomeResponseTest(SimpleTestCase):
     outcome = outcomes.operation_outcome(outcomes.issue('not-found', 'Nothing here'))
 
     def test_json_by_default(self):
-        response = base.outcome_response(self.factory.get('/fhir/Patient'), self.outcome, 404)
+        response = outcome_response(self.factory.get('/fhir/Patient'), self.outcome, 404)
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response['Content-Type'], 'application/fhir+json')
         self.assertEqual(json.loads(response.content), self.outcome)
 
     def test_xml_when_asked_and_never_a_5xx(self):
-        response = base.outcome_response(
+        response = outcome_response(
             self.factory.get('/fhir/Patient?_format=xml'), self.outcome, 500, {'Retry-After': '1'})
 
         self.assertEqual(response.status_code, 422)
@@ -716,7 +721,7 @@ class OutcomeResponseTest(SimpleTestCase):
         self.assertEqual(etree.fromstring(response.content).tag, f'{FHIR}OperationOutcome')
 
     def test_an_unsupported_format_still_gets_json(self):
-        response = base.outcome_response(self.factory.get('/fhir/Patient?_format=turtle'), self.outcome, 404)
+        response = outcome_response(self.factory.get('/fhir/Patient?_format=turtle'), self.outcome, 404)
 
         self.assertEqual(response['Content-Type'], 'application/fhir+json')
 
@@ -724,7 +729,7 @@ class OutcomeResponseTest(SimpleTestCase):
     def test_unparseable_query_uses_a_400_json_outcome(self):
         """Error negotiation must not repeat a failed query parse or retain the original error status."""
         query = '&'.join(['_format=xml'] + ['x='] * 1001)
-        response = base.outcome_response(
+        response = outcome_response(
             self.factory.get(f'/fhir/missing?{query}', HTTP_ACCEPT='application/fhir+xml'),
             self.outcome, 404, {'Retry-After': '1'})
 
@@ -737,12 +742,12 @@ class OutcomeResponseTest(SimpleTestCase):
         self.assertEqual(outcome.issue[0].details.coding[0].code, 'invalid-data')
 
     def test_is_outcome_response(self):
-        self.assertTrue(base.is_outcome_response(base.outcome_response(
+        self.assertTrue(is_outcome_response(outcome_response(
             self.factory.get('/fhir/x'), self.outcome, 404)))
-        self.assertTrue(base.is_outcome_response(JsonResponse(self.outcome, status=404)))
-        self.assertFalse(base.is_outcome_response(JsonResponse({'detail': 'Not found.'}, status=404)))
-        self.assertFalse(base.is_outcome_response(HttpResponse(b'<h1>Not Found</h1>', status=404)))
-        self.assertFalse(base.is_outcome_response(HttpResponse(b'{oops', content_type='application/json')))
+        self.assertTrue(is_outcome_response(JsonResponse(self.outcome, status=404)))
+        self.assertFalse(is_outcome_response(JsonResponse({'detail': 'Not found.'}, status=404)))
+        self.assertFalse(is_outcome_response(HttpResponse(b'<h1>Not Found</h1>', status=404)))
+        self.assertFalse(is_outcome_response(HttpResponse(b'{oops', content_type='application/json')))
 
 
 class EchoView(FhirViewMixin, APIView):

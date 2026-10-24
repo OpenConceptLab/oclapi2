@@ -24,12 +24,12 @@ import core.mappings.views as mapping_views
 import core.reports.views as report_views
 from core import VERSION
 from core.collections.views import ReferenceExpressionResolveView
-from core.common.swagger import OCLSwaggerSchemaGenerator
 from core.common.utils import get_api_base_url
 from core.common.views import RootView, FeedbackView, APIVersionView, ChangeLogView, StandardChecksumView, \
     SmartChecksumView
 from core.concepts.views import ConceptsHierarchyAmendAdminView
 from core.events.views import GuestEventsView
+from core.fhir.swagger import ApiSchemaGenerator
 from core.importers.views import BulkImportView
 from core.map_projects.views import AutomatchRunView
 from core.settings import ENV
@@ -43,7 +43,7 @@ api_info = openapi.Info(
 SchemaView = get_schema_view(
     api_info,
     public=True,
-    generator_class=OCLSwaggerSchemaGenerator,
+    generator_class=ApiSchemaGenerator,
     permission_classes=(permissions.AllowAny,),
     url=get_api_base_url()
 )

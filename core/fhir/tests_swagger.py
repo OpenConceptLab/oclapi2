@@ -13,10 +13,11 @@ from rest_framework.request import Request
 from rest_framework.test import APIClient, APITestCase
 from whitenoise.middleware import WhiteNoiseMiddleware
 
-from core.common.swagger import OCLSwaggerEndpointEnumerator, OCLSwaggerSchemaGenerator
-from core.fhir.base import FhirViewMixin, is_fhir_path
+from core.common.swagger import OCLSwaggerEndpointEnumerator
+from core.fhir.mixins import FhirViewMixin
 from core.fhir.search import PARAMETERS, STRING_FIELDS, STRING_LOOKUPS
-from core.fhir.swagger import FhirSwaggerSchemaGenerator
+from core.fhir.swagger import ApiSchemaGenerator, FhirSwaggerSchemaGenerator
+from core.fhir.utils import is_fhir_path
 from core.middlewares.middlewares import FhirMiddleware
 from core.urls import api_info
 
@@ -246,6 +247,6 @@ class ApiSwaggerTest(APITestCase):
         self.assertTrue(expected)
         for subdomain in ('fhir', None):
             with self.settings(FHIR_SUBDOMAIN=subdomain):
-                schema = OCLSwaggerSchemaGenerator(api_info).get_schema(request, public=True)
+                schema = ApiSchemaGenerator(api_info).get_schema(request, public=True)
             actual = {path: item for path, item in schema.paths.items() if not is_fhir_path(path)}
             self.assertEqual(actual, dict(expected))

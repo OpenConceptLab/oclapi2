@@ -8,7 +8,7 @@ CapabilityStatement, TerminologyCapabilities and $versions Parameters.
   instance level, one of its operations; a $operation route directly under the base is a system operation. Routing a
   view lists it; nothing else does.
 - The search parameters are the search's own (core.fhir.search's PARAMETERS and STRING_FIELDS).
-- The FHIR versions are those the fhirVersion MIME parameter negotiates (core.fhir.base): R4, 4.0.
+- The FHIR versions are those the fhirVersion MIME parameter negotiates (core.fhir.negotiation): R4, 4.0.
 - The software is the OCL API and its version; the base URL is the request's.
 - TerminologyCapabilities lists each repository a CodeSystem search at the base shows the caller, under the identifier
   the resolver serves it at there: its canonical URL (its HEAD's) when the resolver picks it for that URL (with the URL
@@ -28,11 +28,12 @@ from django.urls import URLResolver, get_resolver
 from django.utils import timezone
 
 from core import __version__
-from core.fhir.constants import CODE_SYSTEMS_TOO_COSTLY
-from core.fhir.base import (
-    RESOURCE_TYPES, FhirOperationView, FhirVersioning, FhirViewMixin, fhir_base_url)
+from core.fhir.constants import CODE_SYSTEMS_TOO_COSTLY, RESOURCE_TYPES
+from core.fhir.mixins import FhirOperationView, FhirReadMixin, FhirSearchMixin, FhirViewMixin
+from core.fhir.negotiation import FhirVersioning
 from core.fhir.resolve import served_repositories
-from core.fhir.search import PARAMETERS, STRING_FIELDS, FhirReadMixin, FhirSearchMixin, within_search_timeout
+from core.fhir.search import PARAMETERS, STRING_FIELDS, within_search_timeout
+from core.fhir.utils import fhir_base_url
 
 SOFTWARE = {'name': 'OCL API', 'version': __version__}
 FORMATS = [renderer.media_type for renderer in FhirViewMixin.renderer_classes if 'fhir' in renderer.media_type]

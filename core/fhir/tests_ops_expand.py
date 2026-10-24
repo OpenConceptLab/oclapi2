@@ -22,10 +22,10 @@ from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLTestCase, OCLAPITransactionTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
-from core.fhir.base import from_xml
 from core.fhir.outcomes import MESSAGE_ID_EXTENSION, TX_ISSUE_TYPE_SYSTEM
-from core.fhir.tests_ops_lookup import OpsCorpusMixin, name, CIEL, REST, HIV, FEVERS, NEWEST_PRIVATE
-from core.fhir.tests_search import source, collection
+from core.fhir.tests_ops_lookup import CIEL, FEVERS, HIV, NEWEST_PRIVATE, OpsCorpusMixin, REST, name
+from core.fhir.tests_search import collection, source
+from core.fhir.xml import from_xml
 from core.orgs.tests.factories import OrganizationFactory
 from core.url_registry.factories import GlobalURLRegistryFactory
 from core.url_registry.tests_resolution import set_registry_toggle

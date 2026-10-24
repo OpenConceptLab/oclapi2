@@ -24,6 +24,7 @@ from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory, ConceptDescriptionFactory
 from core.fhir import resolve as fhir_resolve, search as fhir_search
 from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM, TooCostlyError
+from core.fhir.utils import namespace_of
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
@@ -1151,7 +1152,7 @@ class VisibleVersionsTest(SearchCorpusMixin, OCLTestCase):
         for kwargs, user in cases:
             for resource_type in ('CodeSystem', 'ValueSet'):
                 model = fhir_resolve.REPO_TYPES[resource_type]
-                namespace = fhir_resolve.namespace_of(kwargs)
+                namespace = namespace_of(kwargs)
                 expected = {
                     row.id for row in model.objects.filter(is_active=True, released=True).exclude(version=HEAD)
                     if (namespace is None or row.parent.uri == namespace) and

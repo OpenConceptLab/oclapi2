@@ -22,14 +22,17 @@ from core.common.constants import ACCESS_TYPE_NONE, HEAD
 from core.common.tests import OCLTestCase, OCLAPITransactionTestCase
 from core.concepts.tests.factories import ConceptFactory
 from core.common import fhir_helpers
-from core.fhir import base, search
-from core.fhir.base import FhirOperationView
+from core.fhir import search
+from core.fhir.constants import FHIR_RELEASE, FHIR_VERSION
+from core.fhir.mixins import FhirOperationView
+from core.fhir.negotiation import FhirVersioning
 from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
 from core.fhir.resolve import (
-    ServedHead, UnresolvedError, in_namespace, namespace_of, ocl_path, resolve, viewable_rows, visible_versions)
-from core.fhir.tests_ops_lookup import OpsCorpusMixin, CIEL, ICD10, REST, SHARED, NEWEST_PRIVATE, HIV
-from core.fhir.tests_ops_lookup import name as concept_name
+    ServedHead, UnresolvedError, in_namespace, ocl_path, resolve, viewable_rows, visible_versions)
+from core.fhir.tests_ops_lookup import (
+    CIEL, HIV, ICD10, NEWEST_PRIVATE, OpsCorpusMixin, REST, SHARED, name as concept_name)
 from core.fhir.tests_search import source
+from core.fhir.utils import is_fhir_path, namespace_of
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.url_registry.factories import OrganizationURLRegistryFactory
@@ -104,7 +107,7 @@ class CapabilityStatementTest(OCLTestCase):
 
     def test_fhir_version_is_r4s(self):
         statement = self.statement()
-        self.assertEqual(statement['fhirVersion'], base.FHIR_RELEASE)
+        self.assertEqual(statement['fhirVersion'], FHIR_RELEASE)
         self.assertEqual(statement['fhirVersion'], '4.0.1')
         self.assertEqual((statement['kind'], statement['status']), ('instance', 'active'))
 
@@ -269,7 +272,7 @@ class VersionsTest(OCLTestCase):
     def test_the_versions_are_the_negotiated_ones(self):
         response = APIClient().get('/fhir/$versions')
         self.assertEqual([item['valueCode'] for item in response.data['parameter']],
-                         [base.FHIR_VERSION, base.FhirVersioning.default_version])
+                         [FHIR_VERSION, FhirVersioning.default_version])
 
     def test_it_parses_as_r4_json_and_xml(self):
         for media_type in ('application/fhir+json', 'application/fhir+xml'):
@@ -291,10 +294,10 @@ class OwnerBaseFhirPathTest(SimpleTestCase):
 
     def test_owner_metadata_and_versions_are_fhir_paths(self):
         for path_ in ('/orgs/CIEL/metadata', '/orgs/CIEL/metadata/', '/users/jo/$versions', '/users/jo/$versions/'):
-            self.assertTrue(base.is_fhir_path(path_), path_)
+            self.assertTrue(is_fhir_path(path_), path_)
         for path_ in ('/orgs/CIEL/', '/orgs/CIEL/metadata/x/', '/orgs/metadata/', '/sources/x/metadata',
                       '/users/jo/extras/'):
-            self.assertFalse(base.is_fhir_path(path_), path_)
+            self.assertFalse(is_fhir_path(path_), path_)
 
 
 class RepositoryPathTest(SimpleTestCase):

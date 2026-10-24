@@ -10,7 +10,8 @@ The FHIR R4 wire form of the version-neutral (R5-shaped) answers core.fhir.ops b
 """
 from core.concept_maps.constants import (
     EQUIVALENT, NOT_RELATED_TO, RELATED_TO, SOURCE_IS_BROADER, SOURCE_IS_NARROWER)
-from core.fhir.base import FHIR_RELEASE, prune
+from core.fhir.constants import FHIR_RELEASE
+from core.fhir.xml import prune
 
 # R5 relationship -> R4 equivalence, as HL7's R4/R5 ConceptMap conversion maps them: the target is wider than a source
 # that is narrower than it; not-related-to is disjoint

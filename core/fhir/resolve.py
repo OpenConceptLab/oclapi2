@@ -47,6 +47,7 @@ from core.common.mixins import SourceContainerMixin
 from core.common.fhir_helpers import REPOSITORY_KINDS, to_fhir_path, to_ocl_path
 from core.common.utils import decode_string, is_canonical_uri, to_parent_uri
 from core.fhir.outcomes import NotFoundError
+from core.fhir.utils import namespace_of
 from core.sources.models import Source
 from core.toggles.models import Toggle
 from core.url_registry.constants import URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE
@@ -72,16 +73,6 @@ class UnresolvedError(NotFoundError):
         super().__init__(
             f"A definition for {resource_type} '{url}'{named} could not be found", expression=expression,
             tx_issue_type='not-found')
-
-
-def namespace_of(kwargs):
-    """The namespace of the FHIR base a route's kwargs name: the owner's URI, or None for the global base."""
-    kwargs = kwargs or {}
-    if kwargs.get('org'):
-        return f"/orgs/{kwargs['org']}/"
-    if kwargs.get('user'):
-        return f"/users/{kwargs['user']}/"
-    return None
 
 
 def resolve(resource_type, url, version=None, kwargs=None, user=None, expression=None):  # pylint: disable=too-many-arguments,too-many-locals

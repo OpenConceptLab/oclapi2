@@ -41,8 +41,6 @@ from django.db.models.functions import Coalesce
 from django.db.models.lookups import Exact, IContains, In, IStartsWith
 from django.utils import timezone
 from psycopg2 import errorcodes
-from rest_framework.fields import CharField
-from rest_framework.response import Response
 
 from core.bundles.serializers import FHIRBundleSerializer
 from core.collections.models import Expansion
@@ -53,17 +51,17 @@ from core.common.mixins import CustomPaginator
 from core.common.utils import to_int
 from core.concepts.models import Concept
 from core.fhir import mapping_index, outcomes
-from core.fhir.base import CONTROL_PARAMETERS, FhirParameters, fhir_base_url
-from core.fhir.constants import SEARCH_TOO_COSTLY
+from core.fhir.constants import CONTROL_PARAMETERS, SEARCH_TOO_COSTLY
+from core.fhir.parameters import FhirParameters
 from core.fhir.resolve import (
-    PUBLIC_ACCESS, REPO_TYPES, namespace_of, owner_access, visible_versions, viewable_rows, is_shown, repository_rows,
+    PUBLIC_ACCESS, REPO_TYPES, is_shown, owner_access, repository_rows, viewable_rows, visible_versions,
     with_repository_access)
+from core.fhir.utils import fhir_base_url, namespace_of
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
 from core.sources.models import Source
 from core.users.models import UserProfile
 
-SUBSETTED = {'system': 'http://terminology.hl7.org/CodeSystem/v3-ObservationValue', 'code': 'SUBSETTED'}
 PAGING_PARAMETERS = frozenset({'_count', 'page'})
 OPAQUE_ID = re.compile(r'[1-9][0-9]{0,17}')  # a database key, as str() writes it
 NOTHING = Q(pk__in=[])
@@ -652,92 +650,3 @@ def read_version(resource_type, resource_id, version, kwargs, user):
     if not instance or not is_shown(instance, namespace, user):
         raise outcomes.NotFoundError(f'{resource_type}/{resource_id} not found')
     return instance
-
-
-class FhirRepositoryViewMixin:
-    """The search and read views of CodeSystem, ValueSet and ConceptMap (after FhirViewMixin)."""
-    resource_type = None
-
-    def get_serializer_context(self):
-        return {**super().get_serializer_context(), 'opaque_ids': namespace_of(self.kwargs) is None}
-
-
-class FhirSearchMixin(FhirRepositoryViewMixin):
-    """GET on a resource type is its search."""
-
-    def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        """The searchset Bundle, in at most FHIR_SEARCH_TIMEOUT_MS of database time."""
-        return Response(within_search_timeout(lambda: search_bundle(self)))
-
-    head = get
-
-
-class FhirReadMixin(FhirRepositoryViewMixin):
-    """
-    GET on an id is its read, at the global base without the owner check the view's writes keep (verify_scope), and
-    without the source and collection views' recounts.
-    """
-
-    def verify_scope(self):
-        if self.request.method not in ('GET', 'HEAD'):
-            super().verify_scope()
-
-    def get_object(self, queryset=None):
-        if self.request.method not in ('GET', 'HEAD'):
-            return super().get_object(queryset)
-        return read(self)
-
-
-class CanonicalUrlField(CharField):
-    """A resource's canonical URL: the version's own, else its repository's (repository_canonical_url, on a read)."""
-
-    def get_attribute(self, instance):
-        return super().get_attribute(instance) or getattr(instance, 'repository_canonical_url', None)
-
-
-class TitleField(CharField):
-    """
-    A repository's FHIR title: its full name, or its name when it has no full name (empty or only whitespace). Writes
-    still go to full_name.
-    """
-
-    def get_attribute(self, instance):
-        full_name = instance.full_name
-        return full_name if full_name and full_name.strip() else instance.name
-
-
-class FhirRepositorySerializerMixin:
-    """
-    For the CodeSystem, ValueSet and ConceptMap serializers: the opaque id at the global base (context opaque_ids), and
-    in a search (many=True, context has_many) the summary, marked SUBSETTED, without `content_field`.
-    """
-    content_field = None
-
-    @classmethod
-    def many_init(cls, *args, **kwargs):
-        kwargs['context'] = {**kwargs.get('context', {}), 'has_many': True}
-        return super().many_init(*args, **kwargs)
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        if self.context.get('has_many'):
-            self.fields.pop(self.content_field, None)
-
-    def with_fhir_view(self, instance, rep):
-        """
-        The id (opaque at the global base), and meta.versionId: the version's opaque id at both bases, so the
-        releases of one repository, which share their mnemonic id at an owner base, stay distinct in a Bundle (bdl-7).
-        A search entry or a read whose content field is subsetted is tagged SUBSETTED. meta keeps its existing values
-        and tags.
-        """
-        if instance.id:
-            if self.context.get('opaque_ids'):
-                rep['id'] = str(instance.id)
-            rep['meta'] = {'versionId': str(instance.id), **(rep.get('meta') or {})}
-        if self.context.get('has_many') or getattr(self.fields.get(self.content_field), 'subsetted', False):
-            meta = rep.get('meta') or {}
-            tags = list(meta.get('tag') or [])
-            if SUBSETTED not in tags:
-                tags.append(SUBSETTED)
-            rep['meta'] = {**meta, 'tag': tags}
-        return rep

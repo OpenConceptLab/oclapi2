@@ -14,7 +14,7 @@ from core.common.serializers import ReadSerializerMixin, StatusField, Identifier
 from core.concepts.models import Concept, ConceptName
 from core.concepts.serializers import ConceptDetailSerializer
 from core.fhir import search as fhir_search
-from core.fhir.search import CanonicalUrlField, FhirRepositorySerializerMixin, TitleField
+from core.fhir.serializers import CanonicalUrlField, FhirRepositorySerializerMixin, TitleField
 from core.sources.models import Source
 from core.sources.serializers import SourceCreateOrUpdateSerializer
 

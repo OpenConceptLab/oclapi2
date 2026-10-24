@@ -18,9 +18,9 @@ from core.code_systems.views import CodeSystemValidateCodeView
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory
-from core.fhir import base
 from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
 from core.fhir.tests_base import assert_in_model_order, child_names
+from core.fhir.xml import from_xml
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
@@ -86,7 +86,7 @@ class FhirProtocolTest(OCLTestCase):
     @staticmethod
     def body(response):
         if 'xml' in response['Content-Type']:
-            return base.from_xml(response.content)
+            return from_xml(response.content)
         return json.loads(response.content)
 
     def post(self, path, body, content_type='application/fhir+json', **headers):
@@ -146,13 +146,13 @@ class FhirProtocolTest(OCLTestCase):
 
             self.assertEqual(response.status_code, 200, (path, headers))
             self.assertEqual(response['Content-Type'], 'application/fhir+xml; charset=utf-8')
-            parameters_ = base.from_xml(response.content)
+            parameters_ = from_xml(response.content)
             self.assertEqual(parameters_['resourceType'], 'Parameters')
             self.assertIn({'name': 'display', 'valueString': 'Malaria'}, parameters_['parameter'])
 
         response = self.client.get(f'/fhir/CodeSystem/$validate-code?url={SYSTEM}&code=c1&_format=xml')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(base.from_xml(response.content)['parameter'][0], {'name': 'result', 'valueBoolean': True})
+        self.assertEqual(from_xml(response.content)['parameter'][0], {'name': 'result', 'valueBoolean': True})
 
         for search in ('ValueSet', 'ConceptMap'):
             response = self.client.get(f'/fhir/{search}/?url={VALUE_SET}&_format=xml')
@@ -227,7 +227,7 @@ class FhirProtocolTest(OCLTestCase):
 
         response = self.client.get(lookup + '&_format=xml')
         self.assertEqual(response.status_code, 200)
-        self.assertIn({'name': 'display', 'valueString': 'Mal\ufffdaria'}, base.from_xml(response.content)['parameter'])
+        self.assertIn({'name': 'display', 'valueString': 'Mal\ufffdaria'}, from_xml(response.content)['parameter'])
 
     def test_xml_in_and_out(self):
         body = parameters_xml(url=('Uri', SYSTEM), code=('Code', 'c1'), version=('String', 'v1'))
@@ -236,7 +236,7 @@ class FhirProtocolTest(OCLTestCase):
             '/fhir/CodeSystem/$validate-code', body, 'application/fhir+xml', HTTP_ACCEPT='application/fhir+xml')
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(base.from_xml(response.content)['parameter'][0], {'name': 'result', 'valueBoolean': True})
+        self.assertEqual(from_xml(response.content)['parameter'][0], {'name': 'result', 'valueBoolean': True})
 
     def test_an_invalid_xml_body_is_a_400_outcome_in_xml(self):
         response = self.post('/fhir/CodeSystem/$validate-code', '<Parameters><oops', 'application/fhir+xml',

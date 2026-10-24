@@ -6,8 +6,11 @@ from django.conf import settings
 from drf_yasg import openapi
 from drf_yasg.generators import OpenAPISchemaGenerator
 
-from core.fhir.base import FHIR_JSON, FHIR_XML
+from core.common.swagger import OCLSwaggerSchemaGenerator
+from core.fhir.constants import FHIR_JSON, FHIR_XML
+from core.fhir.mixins import FhirViewMixin
 from core.fhir.search import PARAMETERS, STRING_FIELDS, STRING_LOOKUPS
+from core.fhir.utils import is_fhir_path
 
 BASES = ('/fhir', '/orgs/{org}', '/users/{user}')
 TAGS = ('CodeSystem', 'ValueSet', 'ConceptMap', 'Capabilities')
@@ -303,3 +306,30 @@ class FhirSwaggerSchemaGenerator(OpenAPISchemaGenerator):
             info=info, paths=paths, security_definitions=security_definitions,
             security=self.get_security_requirements(security_definitions),
             _url=request.build_absolute_uri('/') if request else self.url, _prefix='', **dict(components))
+
+
+class ApiSchemaGenerator(OCLSwaggerSchemaGenerator):
+    """Combine OCL and FHIR schemas according to the request host."""
+
+    def get_endpoints(self, request):
+        """Replace every FHIR view entry, including malformed paths from no-slash includes."""
+        return {path: endpoint for path, endpoint in super().get_endpoints(request).items()
+                if not is_fhir_path(path) and not issubclass(endpoint[0], FhirViewMixin)}
+
+    def get_paths(self, endpoints, components, request, public):
+        """Keep the other API operations intact, adding FHIR only when both share a host."""
+        paths, prefix = super().get_paths(endpoints, components, request, public)
+        if not settings.FHIR_SUBDOMAIN:
+            paths.update(fhir_paths(components))
+        return paths, prefix
+
+    def get_schema(self, request=None, public=False):
+        """Select the host's schema and link the API documentation to the separate FHIR service."""
+        if on_fhir_host(request):
+            return FhirSwaggerSchemaGenerator(self.info).get_schema(request, public)
+        schema = super().get_schema(request, public)
+        if settings.FHIR_SUBDOMAIN:
+            schema.info = deepcopy(schema.info)
+            link = fhir_swagger_url(request, self.url or settings.API_BASE_URL)
+            schema.info.description = schema.info.get('description', '') + f'\n\n[FHIR terminology Swagger]({link}).'
+        return schema

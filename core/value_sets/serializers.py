@@ -12,7 +12,7 @@ from core.collections.serializers import CollectionCreateOrUpdateSerializer
 from core.common.constants import HEAD
 from core.common.fhir_helpers import delete_empty_fields
 from core.common.serializers import StatusField, IdentifierSerializer, ReadSerializerMixin
-from core.fhir.search import CanonicalUrlField, FhirRepositorySerializerMixin, TitleField
+from core.fhir.serializers import CanonicalUrlField, FhirRepositorySerializerMixin, TitleField
 from core.value_sets.constants import RESOURCE_TYPE
 
 logger = logging.getLogger('oclapi')

@@ -13,8 +13,8 @@ from core.common.serializers import StatusField, IdentifierSerializer
 from core.fhir.adapters import r4
 from core.fhir.ops.concepts import fhir_code
 from core.fhir.ops.translate import relationship, side_system, with_side
-from core.fhir.resolve import namespace_of
-from core.fhir.search import CanonicalUrlField, FhirRepositorySerializerMixin
+from core.fhir.serializers import CanonicalUrlField, FhirRepositorySerializerMixin
+from core.fhir.utils import namespace_of
 from core.mappings.models import Mapping
 from core.mappings.serializers import MappingDetailSerializer
 from core.sources.models import Source

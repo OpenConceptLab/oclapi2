@@ -19,9 +19,10 @@ from core.common.fhir_helpers import to_ocl_path
 from core.common.utils import to_parent_uri
 from core.concepts.models import Concept
 from core.fhir import outcomes
-from core.fhir.base import Coding
-from core.fhir.resolve import REPO_PATHS, UnresolvedError, namespace_of, resolve
+from core.fhir.parameters import Coding
+from core.fhir.resolve import REPO_PATHS, UnresolvedError, resolve
 from core.fhir.search import read_version
+from core.fhir.utils import namespace_of
 
 def coded_input(parameters, system, version):
     """

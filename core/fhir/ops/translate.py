@@ -49,10 +49,11 @@ from core.concept_maps.constants import (
     MAP_TYPE_RELATIONSHIPS, NOT_RELATED_TO, RELATED_TO, RESOURCE_TYPE, REVERSED_RELATIONSHIPS)
 from core.fhir import outcomes
 from core.fhir.constants import TRANSLATION_TOO_COSTLY
-from core.fhir.base import Coding
 from core.fhir.ops.concepts import fhir_code, stored_codes
-from core.fhir.resolve import UnresolvedError, namespace_of, resolve, viewable_rows
+from core.fhir.parameters import Coding
+from core.fhir.resolve import UnresolvedError, resolve, viewable_rows
 from core.fhir.search import within_search_timeout
+from core.fhir.utils import namespace_of
 from core.mappings.models import Mapping
 from core.sources.models import Source
 

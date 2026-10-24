@@ -10,6 +10,7 @@ from core.common.constants import ACCESS_TYPE_NONE, HEAD
 from core.common.tests import OCLTestCase
 from core.fhir import resolve as fhir_resolve
 from core.fhir.outcomes import NotFoundError, TX_ISSUE_TYPE_SYSTEM
+from core.fhir.utils import namespace_of
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import UserSourceFactory
 from core.url_registry.factories import GlobalURLRegistryFactory
@@ -28,10 +29,10 @@ ANONYMOUS = AnonymousUser()
 
 class NamespaceTest(OCLTestCase):
     def test_namespace_is_the_base_url_owner(self):
-        self.assertIsNone(fhir_resolve.namespace_of({}))
-        self.assertIsNone(fhir_resolve.namespace_of(None))
-        self.assertEqual(fhir_resolve.namespace_of({'org': 'CIEL', 'source': 'x'}), '/orgs/CIEL/')
-        self.assertEqual(fhir_resolve.namespace_of({'user': 'jdoe'}), '/users/jdoe/')
+        self.assertIsNone(namespace_of({}))
+        self.assertIsNone(namespace_of(None))
+        self.assertEqual(namespace_of({'org': 'CIEL', 'source': 'x'}), '/orgs/CIEL/')
+        self.assertEqual(namespace_of({'user': 'jdoe'}), '/users/jdoe/')
 
     def test_unresolved_error(self):
         error = fhir_resolve.UnresolvedError('CodeSystem', UNKNOWN, expression='system')

@@ -6,9 +6,8 @@ from core.common.constants import HEAD
 from core.common.permissions import HasOwnership
 from core.concept_maps.serializers import ConceptMapDetailSerializer
 from core.fhir.adapters import r4
-from core.fhir.base import FhirViewMixin, FhirOperationView
+from core.fhir.mixins import FhirOperationView, FhirReadMixin, FhirSearchMixin, FhirViewMixin
 from core.fhir.ops.translate import translate
-from core.fhir.search import FhirSearchMixin, FhirReadMixin
 from core.sources.views import SourceListView, SourceRetrieveUpdateDestroyView
 
 logger = logging.getLogger('oclapi')
