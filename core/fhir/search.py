@@ -48,6 +48,7 @@ from core.bundles.serializers import FHIRBundleSerializer
 from core.collections.models import Expansion
 from core.common.constants import HEAD
 from core.common.db_functions import ImmutableUnaccent
+from core.common.fhir_helpers import repository_prefixes
 from core.common.mixins import CustomPaginator
 from core.common.utils import to_int
 from core.concepts.models import Concept
@@ -324,10 +325,10 @@ def mapped(side, value, sources, holding, namespace, user):  # pylint: disable=t
     field = f'mapping__{side}_source'
     unnamed = ~Exists(viewable_rows(Source, namespace, user).filter(id=OuterRef(f'{field}_id'), canonical_url__gt=''))
     stored = Q(**{f'{field}_url': value}) & unnamed
-    path = re.fullmatch(r'/(orgs|users)/([^/]+)/ConceptMap/([^/]+)/', value)
-    if path:
-        stored |= reduce(or_, (Q(**{f'{field}_url__startswith': f'/{path[1]}/{path[2]}/{kind}/{path[3]}/'})
-                               for kind in ('sources', 'collections', 'ConceptMap'))) & unnamed
+    paths = repository_prefixes(value, ('sources', 'collections', 'ConceptMap'), names=('ConceptMap',),
+                                trailing_slash=True)
+    if paths:
+        stored |= reduce(or_, (Q(**{f'{field}_url__startswith': path}) for path in paths)) & unnamed
     links = Mapping.sources.through.objects.filter(mapping__retired=False, mapping__is_active=True)
     if not holding:
         return Exists(links.filter(stored, source_id=OuterRef('id')))

@@ -43,6 +43,7 @@ from django.db.models import Case, Exists, F, OuterRef, Q, When
 
 from core.collections.models import Expansion
 from core.concepts.models import Concept
+from core.common.fhir_helpers import repository_prefixes
 from core.common.serializers import IdentifierSerializer
 from core.concept_maps.constants import (
     MAP_TYPE_RELATIONSHIPS, NOT_RELATED_TO, RELATED_TO, RESOURCE_TYPE, REVERSED_RELATIONSHIPS)
@@ -56,9 +57,6 @@ from core.mappings.models import Mapping
 from core.sources.models import Source
 
 UNSUPPORTED_PARAMETERS = ('conceptMap', 'dependency')
-# An OCL path of a source: its own (sources), or as FHIR names it (CodeSystem; ConceptMap, how OCL shows a source with
-# no canonical URL). A collections or ValueSet path names a value set, never a source's alias.
-OCL_PATH = re.compile(r'/(orgs|users)/([^/]+)/(?:sources|CodeSystem|ConceptMap)/([^/]+)/?')
 IMPLICIT_VALUE_SET = '?fhir_vs'  # {code system}?fhir_vs: every code of the code system
 
 Request = namedtuple('Request', 'coding url concept_map_version scope scope_name targetsystem reverse')
@@ -94,15 +92,6 @@ def side_system(canonical, url, uri=None):
         return url
 
 
-def repository_paths(system, kinds=('sources',)):
-    """
-    The OCL URL prefixes of the repository an OCL path names (/orgs/{org}/{kind}/{id}/ for each kind), or None for a
-    canonical URL.
-    """
-    path = OCL_PATH.fullmatch(system)
-    return [f'/{path[1]}/{path[2]}/{kind}/{path[3]}/' for kind in kinds] if path else None
-
-
 def named_sources(systems, namespace, user):
     """
     For each system, the ids of the Source rows the base shows the caller that it names, in one query: those with it as
@@ -110,7 +99,7 @@ def named_sources(systems, namespace, user):
     alias: side_system still shows one that has as its canonical URL). A literal list, so the planner reads the mappings
     by their own indexes.
     """
-    paths = {system: (repository_paths(system) or [None])[0] for system in systems}
+    paths = {system: (repository_prefixes(system, ('sources',)) or [None])[0] for system in systems}
     rows = viewable_rows(Source, namespace, user).filter(reduce(or_, (
         Q(uri__startswith=path) if path else Q(canonical_url=system) for system, path in paths.items())))
     named = {system: [] for system in systems}
@@ -130,7 +119,7 @@ def shown_as(side, system, source_ids, namespace, user):
     source, url = f'{side}_source', f'{side}_source_url'
     unnamed = ~Exists(viewable_rows(Source, namespace, user).filter(
         id=OuterRef(f'{source}_id'), canonical_url__gt=''))
-    paths = repository_paths(system, ('sources', 'collections', 'ConceptMap'))
+    paths = repository_prefixes(system, ('sources', 'collections', 'ConceptMap'))
     stored = reduce(or_, (Q(**{f'{url}__startswith': path}) for path in paths)) if paths else Q(**{url: system})
     return Q(**{f'{source}_id__in': source_ids}) | (stored & unnamed)
 

@@ -21,6 +21,7 @@ from core import __version__
 from core.common.constants import ACCESS_TYPE_NONE, HEAD
 from core.common.tests import OCLTestCase, OCLAPITransactionTestCase
 from core.concepts.tests.factories import ConceptFactory
+from core.common import fhir_helpers
 from core.fhir import base, search
 from core.fhir.base import FhirOperationView
 from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
@@ -294,6 +295,35 @@ class OwnerBaseFhirPathTest(SimpleTestCase):
         for path_ in ('/orgs/CIEL/', '/orgs/CIEL/metadata/x/', '/orgs/metadata/', '/sources/x/metadata',
                       '/users/jo/extras/'):
             self.assertFalse(base.is_fhir_path(path_), path_)
+
+
+class RepositoryPathTest(SimpleTestCase):
+    """core.common.fhir_helpers: an OCL repository's paths, as OCL and as FHIR name them."""
+
+    def test_to_ocl_path_names_a_repository_by_its_own_resource_type(self):
+        for url, expected in (('/orgs/CIEL/CodeSystem/CIEL/v1/', '/orgs/CIEL/sources/CIEL/v1/'),
+                              ('/orgs/CIEL/ConceptMap/CIEL/', '/orgs/CIEL/sources/CIEL/'),
+                              ('/users/jo/ValueSet/vs', '/users/jo/collections/vs'),
+                              ('/orgs/CIEL/sources/CIEL/', '/orgs/CIEL/sources/CIEL/'),
+                              ('/orgs/CIEL/', '/orgs/CIEL/'),
+                              ('http://hl7.org/fhir/sid/icd-10', 'http://hl7.org/fhir/sid/icd-10')):
+            self.assertEqual(fhir_helpers.to_ocl_path(url), expected, url)
+
+    def test_repository_prefixes(self):
+        prefixes = fhir_helpers.repository_prefixes
+        self.assertEqual(prefixes('/orgs/CIEL/CodeSystem/CIEL', ('sources', 'collections')),
+                         ['/orgs/CIEL/sources/CIEL/', '/orgs/CIEL/collections/CIEL/'])
+        self.assertEqual(prefixes('/users/jo/ConceptMap/codes/', ('sources',)), ['/users/jo/sources/codes/'])
+        # whatever its owner and id are called
+        self.assertEqual(prefixes('/orgs/sources/ConceptMap/sources/', ('sources', 'ConceptMap')),
+                         ['/orgs/sources/sources/sources/', '/orgs/sources/ConceptMap/sources/'])
+        for path in ('/orgs/CIEL/ValueSet/vs/', '/orgs/CIEL/sources/CIEL/v1/', 'http://x', '', None):
+            self.assertIsNone(prefixes(path, ('sources',)), path)
+        # as a ConceptMap group names a source: that name only, with its slash
+        self.assertEqual(prefixes('/orgs/CIEL/ConceptMap/CIEL/', ('sources',), names=('ConceptMap',),
+                                  trailing_slash=True), ['/orgs/CIEL/sources/CIEL/'])
+        for path in ('/orgs/CIEL/ConceptMap/CIEL', '/orgs/CIEL/CodeSystem/CIEL/'):
+            self.assertIsNone(prefixes(path, ('sources',), names=('ConceptMap',), trailing_slash=True), path)
 
 
 class ResolverIdentifiersTest(SimpleTestCase):

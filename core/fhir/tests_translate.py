@@ -21,7 +21,6 @@ from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLTestCase, OCLAPITransactionTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
-from core.fhir.ops.translate import repository_paths
 from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
 from core.fhir.tests_search import source, collection, indexing
 from core.mappings.models import Mapping
@@ -465,15 +464,6 @@ class TranslateMappingsTest(TranslateCorpusMixin, OCLTestCase):
 class TranslateMappingsWithRegistryTest(TranslateMappingsTest):
     """The same, with the URL registry on: the global base resolves a canonical through its global entry."""
     registry = True
-
-
-class TranslatePathTest(OCLTestCase):
-    def test_repository_paths(self):
-        """An OCL path's repository, whatever its owner and id are called."""
-        self.assertIsNone(repository_paths(CIEL))
-        self.assertEqual(repository_paths('/orgs/sources/ConceptMap/sources/', ('sources', 'ConceptMap')),
-                         ['/orgs/sources/sources/sources/', '/orgs/sources/ConceptMap/sources/'])
-        self.assertEqual(repository_paths('/users/jdoe/CodeSystem/codes'), ['/users/jdoe/sources/codes/'])
 
 
 class TranslateRequestTest(TranslateCorpusMixin, OCLTestCase):

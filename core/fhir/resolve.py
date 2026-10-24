@@ -39,13 +39,12 @@ from urllib.parse import quote_plus
 
 from django.db.models import Case, Exists, OuterRef, Q, Subquery, Value, When
 from django.db.models.functions import Coalesce
-from rest_framework.exceptions import ValidationError
 
 from core.collections.models import Collection
 from core.common.constants import HEAD
 from core.common.models import BaseModel
 from core.common.mixins import SourceContainerMixin
-from core.common.serializers import IdentifierSerializer
+from core.common.fhir_helpers import REPOSITORY_KINDS, to_fhir_path, to_ocl_path
 from core.common.utils import decode_string, is_canonical_uri, to_parent_uri
 from core.fhir.outcomes import NotFoundError
 from core.sources.models import Source
@@ -54,7 +53,7 @@ from core.url_registry.constants import URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE
 from core.url_registry.models import URLRegistry
 
 REPO_TYPES = {'CodeSystem': Source, 'ConceptMap': Source, 'ValueSet': Collection}
-REPO_PATHS = {'CodeSystem': 'sources', 'ConceptMap': 'sources', 'ValueSet': 'collections'}
+REPO_PATHS = REPOSITORY_KINDS
 PUBLIC_ACCESS = BaseModel.PUBLIC_ACCESS_VALUES  # what public_can_view reads as public, as stored
 # a HEAD served_repositories reads: what the resolver's pick and a CodeSystem's identifier depend on
 ServedHead = namedtuple(
@@ -225,17 +224,6 @@ def latest_public_release(instance):
     return latest
 
 
-def to_ocl_path(url):
-    """
-    An OCL FHIR path (/orgs/{org}/CodeSystem/{id}/...) as the OCL path of the repository it names, by its own
-    resource type, so a reference to the other type finds nothing; anything else as it is.
-    """
-    parts = url.split('/')
-    if len(parts) > 3 and not parts[0] and parts[1] in ('orgs', 'users') and parts[3] in REPO_PATHS:
-        parts[3] = REPO_PATHS[parts[3]]
-    return '/'.join(parts)
-
-
 def is_visible(instance, namespace, user):
     """
     Whether a base shows a repository version: the version and its repository (its active HEAD, which governs access
@@ -397,11 +385,8 @@ def ocl_path(uri):
     A repository's OCL path as a CodeSystem (/orgs/{org}/CodeSystem/{id}/), as $expand names the system of a member
     without a canonical URL, if the resolver reads it back to the repository (`uri`), naming no version; else None.
     """
-    try:
-        path = IdentifierSerializer.convert_ocl_uri_to_fhir_url(uri, 'CodeSystem')
-    except ValidationError:
-        return None
-    if is_canonical_uri(path):
+    path = to_fhir_path(uri, 'CodeSystem')
+    if path is None or is_canonical_uri(path):
         return None
     return path if to_parent_uri(to_ocl_path(path)) == uri else None
 

@@ -413,8 +413,21 @@ class IdentifierSerializerTest(OCLTestCase):
                 ('http://example.org/fhir/CodeSystem/x', 'CodeSystem', 'http://example.org/fhir/CodeSystem/x'),
                 (None, 'CodeSystem', None)):
             self.assertEqual(convert(uri, resource_type), expected, uri)
-        with self.assertRaisesMessage(ValidationError, 'given: orgs/CIEL/CodeSystem'):
+        with self.assertRaisesMessage(ValidationError, 'given: /orgs/CIEL/sources/'):
             convert('/orgs/CIEL/sources/', 'CodeSystem')
+
+    def test_convert_fhir_url_to_ocl_uri_renames_only_the_resource_type_segment(self):
+        convert = IdentifierSerializer.convert_fhir_url_to_ocl_uri
+        for url, kind, expected in (
+                ('/orgs/CIEL/CodeSystem/CIEL/', 'sources', '/orgs/CIEL/sources/CIEL/'),
+                ('/users/jo/ValueSet/vs/v1/', 'collections', '/users/jo/collections/vs/v1/'),
+                ('/orgs/CIEL/ConceptMap/CIEL', 'sources', '/orgs/CIEL/sources/CIEL'),
+                # an owner or a repository with a resource type's name keeps it
+                ('/orgs/CodeSystem/ConceptMap/ValueSet/', 'sources', '/orgs/CodeSystem/sources/ValueSet/'),
+                ('/orgs/CIEL/sources/CIEL/', 'sources', '/orgs/CIEL/sources/CIEL/'),
+                ('http://example.org/fhir/CodeSystem/x', 'sources', 'http://example.org/fhir/CodeSystem/x'),
+                (None, 'sources', None)):
+            self.assertEqual(convert(url, kind), expected, url)
 
 
 class UtilsTest(OCLTestCase):

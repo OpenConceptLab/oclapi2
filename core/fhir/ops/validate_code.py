@@ -29,13 +29,14 @@ from rest_framework import status
 
 from core.collections.models import Expansion
 from core.common.constants import HEAD
+from core.common.fhir_helpers import to_ocl_path
 from core.concepts.models import Concept
 from core.fhir import outcomes
 from core.fhir.ops.concepts import (
     coded_input, find_concept, display_of, has_name, fhir_code, code_q, instance_version, is_system_of, mismatch,
     system_of)
 from core.fhir.ops.lookup import code_system_version
-from core.fhir.resolve import UnresolvedError, namespace_of, resolve, to_ocl_path, viewable_rows
+from core.fhir.resolve import UnresolvedError, namespace_of, resolve, viewable_rows
 from core.sources.models import Source
 
 UNKNOWN_CODE_SYSTEM = 'x-caused-by-unknown-system'  # how CodeSystem $validate-code names an unknown system

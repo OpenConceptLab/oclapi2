@@ -15,11 +15,12 @@ from urllib.parse import quote, unquote
 from django.db.models import F, Q
 
 from core.common.constants import HEAD
+from core.common.fhir_helpers import to_ocl_path
 from core.common.utils import to_parent_uri
 from core.concepts.models import Concept
 from core.fhir import outcomes
 from core.fhir.base import Coding
-from core.fhir.resolve import REPO_PATHS, UnresolvedError, namespace_of, resolve, to_ocl_path
+from core.fhir.resolve import REPO_PATHS, UnresolvedError, namespace_of, resolve
 from core.fhir.search import read_version
 
 def coded_input(parameters, system, version):

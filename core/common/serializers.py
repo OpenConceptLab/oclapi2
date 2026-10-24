@@ -8,6 +8,7 @@ from core.code_systems.constants import RESOURCE_TYPE as CODE_SYSTEM_RESOURCE_TY
 from core.common.constants import INCLUDE_CONCEPTS_PARAM, INCLUDE_MAPPINGS_PARAM, LIMIT_PARAM, OFFSET_PARAM, \
     INCLUDE_VERBOSE_REFERENCES, INCLUDE_SEARCH_META_PARAM, ACCESS_TYPE_CHOICES, ACCESS_TYPE_VIEW
 from core.common.feeds import DEFAULT_LIMIT
+from core.common.fhir_helpers import REPOSITORY_KINDS, to_fhir_path
 from core.common.utils import to_int, get_truthy_values, normalize_public_access
 from core.concept_maps.constants import RESOURCE_TYPE as CONCEPT_MAP_RESOURCE_TYPE
 from core.orgs.models import Organization
@@ -115,28 +116,25 @@ class IdentifierSerializer(ReadSerializerMixin, Serializer):
     @staticmethod
     def convert_ocl_uri_to_fhir_url(uri, resource_type):
         """
-        An OCL API relative URI (/{owner_type}/{owner_id}/{sources|collections}/{id}/...) as its repository's FHIR one,
-        /{owner_type}/{owner_id}/{resource_type}/{id}/: only the repository type's segment is renamed, so an owner or a
-        repository named sources or collections keeps its name. Any other URI is returned as it is.
+        An OCL API relative URI (/{owner_type}/{owner_id}/{sources|collections}/{id}/...) as its repository's FHIR one
+        (fhir_helpers.to_fhir_path); a ValidationError when it names no repository. Any other URI as it is.
         """
         if uri and (uri.startswith('/orgs/') or uri.startswith('/users/')):
-            parts = uri.strip('/').split('/')
-            if len(parts) > 2 and parts[2] in ('sources', 'collections'):
-                parts[2] = resource_type
-            if len(parts) < 4:
+            path = to_fhir_path(uri, resource_type)
+            if path is None:
                 raise ValidationError(
                     'Identifier must be in a format: /{owner_type}/{owner_id}/{resourceType}/{resource_id}/, given: '
-                    + '/'.join(parts))
-            uri = '/' + '/'.join(parts[:4]) + '/'
+                    + uri)
+            uri = path
         return uri
 
     @staticmethod
-    def convert_fhir_url_to_ocl_uri(uri, resource_type):
-        resource_type_uri = f"/{resource_type}/"
-        if uri and (uri.startswith('/orgs/') or uri.startswith('/users/')):
-            # Recognize OCL FHIR relative URI
-            uri = uri.replace('/ConceptMap/', resource_type_uri).replace('/CodeSystem/', resource_type_uri) \
-                .replace('/ValueSet/', resource_type_uri)
+    def convert_fhir_url_to_ocl_uri(uri, kind):
+        """An OCL FHIR path as OCL's, its resource type's segment renamed to `kind`; any other URI as it is."""
+        parts = uri.split('/') if uri else []
+        if len(parts) > 3 and not parts[0] and parts[1] in ('orgs', 'users') and parts[3] in REPOSITORY_KINDS:
+            parts[3] = kind
+            return '/'.join(parts)
         return uri
 
     @staticmethod
