@@ -10,7 +10,7 @@ from core.fhir.negotiation import FhirContentNegotiation, FhirVersioning, PARSER
 from core.fhir.parameters import FhirParameters
 from core.fhir.resolve import FhirResolver
 from core.fhir.search import read, search_bundle, within_search_timeout
-from core.fhir.utils import fhir_base_url, namespace_of
+from core.fhir.utils import namespace_of
 
 
 class FhirViewMixin:
@@ -50,9 +50,6 @@ class FhirViewMixin:
 
     def get_fhir_parameters(self):
         return FhirParameters.from_request(self.request)
-
-    def get_fhir_base_url(self):
-        return fhir_base_url(self.request, self.kwargs)
 
 
 class FhirOperationView(FhirViewMixin, APIView):

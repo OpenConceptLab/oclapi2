@@ -275,12 +275,9 @@ class Translation:
         systems = dict.fromkeys([system, request.targetsystem or system, scope_system(request.scope) or system])
         return named_sources(systems, self.resolver)
 
-    def resolve(self, resource_type, url, version, expression):
-        return self.resolver.resolve(resource_type, url, version, expression)
-
     def named_concept_map(self):
         """(the ConceptMap version url and conceptMapVersion name, how a match's source names it); else a 404."""
-        instance = self.resolve('ConceptMap', self.request.url, self.request.concept_map_version, 'url')
+        instance = self.resolver.resolve('ConceptMap', self.request.url, self.request.concept_map_version, 'url')
         return instance, self.map_name(instance, self.request.url)
 
     def code_system_map(self):
@@ -295,7 +292,7 @@ class Translation:
         else:  # conceptMapVersion names the map's release, else the code's version
             url, version = request.coding.system, request.concept_map_version or request.coding.version
         try:  # resolve() raises before any query for no url (reverse without targetsystem)
-            instance = self.resolve('CodeSystem', url, version, 'system')
+            instance = self.resolver.resolve('CodeSystem', url, version, 'system')
         except UnresolvedError:
             return None, None
         return instance, self.map_name(instance, url)
@@ -325,13 +322,13 @@ class Translation:
             return True
         if system == scope:  # not an implicit value set: a ValueSet, if one has that URL
             try:
-                value_set = self.resolve('ValueSet', scope, None, name)
+                value_set = self.resolver.resolve('ValueSet', scope, None, name)
             except UnresolvedError:
                 pass
             else:
                 return holds(value_set, coding.code, named[coding.system])
         try:
-            self.resolve('CodeSystem', system, None, name)
+            self.resolver.resolve('CodeSystem', system, None, name)
         except UnresolvedError as ex:
             raise self.scope_not_found(scope, name) from ex
         return False

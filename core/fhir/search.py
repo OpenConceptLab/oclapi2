@@ -345,13 +345,6 @@ class Search:
         # for what isn't a query: the mappings index
         self.deadline = time.monotonic() + settings.FHIR_SEARCH_TIMEOUT_MS / 1000
 
-    def viewable_sources(self):
-        """
-        The Source rows the base shows the caller, whoever owns them: what source-system, target-system and reference
-        match. At an owner base that's another owner's private source too, if the caller may view it themselves.
-        """
-        return self.resolver.viewable_rows(Source)
-
     def criteria(self, query):
         """
         One Q for a query string: every parameter holds (a repeated one each time), any of a value's comma-separated
@@ -409,10 +402,10 @@ class Search:
         if lookup == 'repositories':
             found = repositories_with(self.model.objects, urls)
         elif lookup == 'referenced':
-            found = repositories_with(self.viewable_sources(), urls)
+            found = repositories_with(self.resolver.viewable_rows(Source), urls)
         else:
             found, shown = sources_with(
-                self.viewable_sources(), urls, self.resolver.visible_versions(self.resource_type))
+                self.resolver.viewable_rows(Source), urls, self.resolver.visible_versions(self.resource_type))
             side = SIDES[self.parameters[name]]
             holding = mapping_index.holding(
                 side, {url: {repository for _, repository in rows} for url, rows in found.items()}, shown,
@@ -530,7 +523,8 @@ class Search:
         those the base shows the caller. An uncorrelated IN, which the planner hashes once, rather than a correlated
         subquery.
         """
-        sources = self.viewable_sources().filter(canonical_q(value, self.found[('referenced', value)])).values('id')
+        sources = self.resolver.viewable_rows(Source).filter(
+            canonical_q(value, self.found[('referenced', value)])).values('id')
         return reduce(or_, (
             Q(expansion_uri__in=versions.through.objects.filter(source_id__in=sources).values('expansion__uri'))
             for versions in (Expansion.explicit_source_versions, Expansion.evaluated_source_versions)))

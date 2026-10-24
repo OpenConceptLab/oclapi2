@@ -17,14 +17,7 @@ def fhir_base_url(request, kwargs=None):
     The FHIR base a request came in on, from its own scheme and host (the forwarded ones behind the load balancer),
     so links work on every host OCL serves FHIR from: /fhir, or the owner base /orgs/{org} or /users/{user}.
     """
-    kwargs = kwargs or {}
-    if kwargs.get('org'):
-        path = f"/orgs/{kwargs['org']}"
-    elif kwargs.get('user'):
-        path = f"/users/{kwargs['user']}"
-    else:
-        path = '/fhir'
-    return request.build_absolute_uri(path)
+    return request.build_absolute_uri((namespace_of(kwargs) or '/fhir/')[:-1])
 
 
 def namespace_of(kwargs):

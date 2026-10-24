@@ -765,7 +765,7 @@ class EchoView(FhirViewMixin, APIView):
         params = self.get_fhir_parameters()
         return Response({'resourceType': 'Parameters', 'parameter': [
             {'name': name, 'valueString': str(value)} for name, value in params.items] + [
-            {'name': 'base', 'valueUri': self.get_fhir_base_url()}]})
+            {'name': 'base', 'valueUri': fhir_base_url(self.request, self.kwargs)}]})
 
 
 class ReturnedOutcomeView(FhirViewMixin, APIView):
