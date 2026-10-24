@@ -11,17 +11,17 @@ FHIR search and read of CodeSystem, ValueSet and ConceptMap: SVCM's Query transa
 - Search parameters: SVCM's, with :exact and :contains on the string ones (no modifier is starts-with; both it and
   :contains ignore case and accents, :exact neither).
   A comma separates alternatives, a repeated parameter must hold every time. Anything else is a 400 not-supported.
-- Paging: _count (at most MAX_COUNT, which is also the default) and page; Bundle.total is the full count, and every
-  entry has a fullUrl and a search mode. The search runs once, for the ids of every match; the page's rows are then
-  read by id.
-- A search's queries are bounded together by SEARCH_TIMEOUT_MS: one the database cancels makes the search too costly
-  (422). A parameter takes at most MAX_ALTERNATIVES values and a search MAX_SEARCH_ALTERNATIVES (else a 400
+- Paging: _count (at most FHIR_SEARCH_MAX_COUNT, which is also the default) and page; Bundle.total is the full
+  count, and every entry has a fullUrl and a search mode. The search runs once, for the ids of every match; the page's
+  rows are then read by id.
+- A search's queries are bounded together by FHIR_SEARCH_TIMEOUT_MS: one the database cancels makes the search too
+  costly (422). A parameter takes at most MAX_ALTERNATIVES values and a search MAX_SEARCH_ALTERNATIVES (else a 400
   too-costly), and the canonical URLs each parameter names are looked up in one query. ConceptMap's source and target
   systems also read their candidate versions from the mappings index (core.fhir.mapping_index), in one request per
   parameter within the same time.
 - A search entry is the resource's summary, marked SUBSETTED: no concept, compose or group, which only a read returns.
-  A CodeSystem is `complete` (with every concept, retired ones flagged) up to CONCEPT_LIMIT concepts, else
-  `not-present`.
+  A CodeSystem is `complete` (with every concept, retired ones flagged) up to FHIR_CODE_SYSTEM_CONCEPT_LIMIT concepts,
+  else `not-present` (design D9).
 - A version released before its repository had a canonical URL has the repository's (HEAD's), in its `url` and for
   the url parameter.
 """
@@ -53,6 +53,7 @@ from core.common.utils import to_int
 from core.concepts.models import Concept
 from core.fhir import mapping_index, outcomes
 from core.fhir.base import CONTROL_PARAMETERS, fhir_base_url
+from core.fhir.constants import SEARCH_TOO_COSTLY
 from core.fhir.resolve import (
     PUBLIC_ACCESS, REPO_TYPES, namespace_of, owner_access, visible_versions, viewable_rows, is_public, is_shown,
     repository_rows, with_repository_access)
@@ -61,9 +62,6 @@ from core.orgs.models import Organization
 from core.sources.models import Source
 from core.users.models import UserProfile
 
-MAX_COUNT = 100  # the most entries a search page holds, and how many it holds when _count isn't given
-SEARCH_TIMEOUT_MS = 5000  # the database time a search may take; past it the search is too costly
-CONCEPT_LIMIT = 1000  # a CodeSystem is `complete` up to this many concepts, else `not-present` (design D9)
 SUBSETTED = {'system': 'http://terminology.hl7.org/CodeSystem/v3-ObservationValue', 'code': 'SUBSETTED'}
 PAGING_PARAMETERS = frozenset({'_count', 'page'})
 OPAQUE_ID = re.compile(r'[1-9][0-9]{0,17}')  # a database key, as str() writes it
@@ -226,12 +224,12 @@ def with_repository_canonical(queryset):
 def code_system_concepts(source):
     """
     (count, concepts) for a CodeSystem read, cached on the version: its concepts, retired ones included, when it has
-    at most CONCEPT_LIMIT, else (its number of concepts, None). The number is counted on the version's concept links
-    alone (an index-only count, cheap even for LOINC); within the limit it's the concepts listed.
+    at most FHIR_CODE_SYSTEM_CONCEPT_LIMIT, else (its number of concepts, None). The number is counted on the version's
+    concept links alone (an index-only count, cheap even for LOINC); within the limit it's the concepts listed.
     """
     if not hasattr(source, 'fhir_concepts'):
         count, concepts = Concept.sources.through.objects.filter(source_id=source.id).count(), None
-        if count <= CONCEPT_LIMIT:
+        if count <= settings.FHIR_CODE_SYSTEM_CONCEPT_LIMIT:
             concepts = list(source.concepts.filter(is_active=True).select_related('parent').prefetch_related(
                 'names', 'descriptions').order_by('id'))
             count = len(concepts)
@@ -240,15 +238,16 @@ def code_system_concepts(source):
 
 
 def concepts_over_limit(source):
-    """Whether a CodeSystem has more than CONCEPT_LIMIT concepts: a search annotates it, a read counts them."""
+    """Whether a CodeSystem has more concepts than its read lists: a search annotates it, a read counts them."""
     over = getattr(source, 'concepts_over_limit', None)
     return code_system_concepts(source)[1] is None if over is None else over
 
 
 def with_concepts_over_limit(queryset):
-    """Each Source row annotated with concepts_over_limit, reading at most CONCEPT_LIMIT + 1 of its concept links."""
+    """Each Source row annotated with concepts_over_limit, reading at most one link past the limit."""
+    limit = settings.FHIR_CODE_SYSTEM_CONCEPT_LIMIT
     links = Concept.sources.through.objects.filter(source_id=OuterRef('id'))
-    return queryset.annotate(concepts_over_limit=Exists(links[CONCEPT_LIMIT:CONCEPT_LIMIT + 1]))
+    return queryset.annotate(concepts_over_limit=Exists(links[limit:limit + 1]))
 
 
 def defines_concept(**filters):
@@ -353,7 +352,8 @@ class Search:
         self.namespace, self.user = namespace_of(kwargs), user
         self.access = owner_access(kwargs, user)
         self.found = {}  # (lookup, canonical URL): what look_up found for it
-        self.deadline = time.monotonic() + SEARCH_TIMEOUT_MS / 1000  # for what isn't a query: the mappings index
+        # for what isn't a query: the mappings index
+        self.deadline = time.monotonic() + settings.FHIR_SEARCH_TIMEOUT_MS / 1000
 
     def viewable_sources(self):
         """
@@ -426,7 +426,7 @@ class Search:
             side = SIDES[self.parameters[name]]
             holding = mapping_index.holding(
                 side, {url: {repository for _, repository in rows} for url, rows in found.items()}, shown,
-                self.deadline, search_too_costly)
+                self.deadline)
             self.found.update({(side, url): holding.get(url, {}) for url in found})
             found = {url: [source_id for source_id, _ in rows] for url, rows in found.items()}
         self.found.update({(lookup, url): value for url, value in found.items()})
@@ -559,28 +559,27 @@ class Search:
 def page_size(query):
     value = query.get('_count')
     if value is None:
-        return MAX_COUNT
+        return settings.FHIR_SEARCH_MAX_COUNT
     if not re.fullmatch(r'[0-9]{1,9}', value.strip()):
         raise outcomes.InvalidError(f"_count must be a whole number, got '{value}'.", expression='_count')
-    return min(int(value), MAX_COUNT)
+    return min(int(value), settings.FHIR_SEARCH_MAX_COUNT)
 
 
-def within_search_timeout(build, too_costly=None):
+def within_search_timeout(build, too_costly=SEARCH_TOO_COSTLY):
     """
-    build() within SEARCH_TIMEOUT_MS in all: each query it runs may take only the time the search has left, so a
+    build() within FHIR_SEARCH_TIMEOUT_MS in all: each query it runs may take only the time the search has left, so a
     search of several queries is bounded as a whole. A query the database cancels, or one with no time left, makes the
-    search too costly (422): too_costly() says so, the search's own wording by default (an operation passes its own).
+    answer too costly (422), saying `too_costly`: the search's wording by default (an operation passes its own).
     Inside a transaction (tests) the timeout would outlive the search, so it isn't set there.
     """
-    too_costly = too_costly or search_too_costly
     if connection.vendor != 'postgresql' or connection.in_atomic_block:
         return build()
-    deadline = time.monotonic() + SEARCH_TIMEOUT_MS / 1000
+    deadline = time.monotonic() + settings.FHIR_SEARCH_TIMEOUT_MS / 1000
 
     def within_time_left(execute, sql, params, many, context):
         left = math.ceil((deadline - time.monotonic()) * 1000)
         if left <= 0:
-            raise too_costly()
+            raise outcomes.TooCostlyError(too_costly)
         with context['connection'].connection.cursor() as cursor:  # the driver's own cursor, past this wrapper
             cursor.execute('SET LOCAL statement_timeout = %s', [left])
         return execute(sql, params, many, context)
@@ -591,12 +590,7 @@ def within_search_timeout(build, too_costly=None):
     except OperationalError as ex:
         if getattr(ex.__cause__, 'pgcode', None) != errorcodes.QUERY_CANCELED:
             raise
-        raise too_costly() from ex
-
-
-def search_too_costly():
-    return outcomes.TooCostlyError(
-        'The search would take too long to answer. Narrow it, for example with url, _id or version.')
+        raise outcomes.TooCostlyError(too_costly) from ex
 
 
 def search_bundle(view):
@@ -674,7 +668,7 @@ class FhirSearchMixin(FhirRepositoryViewMixin):
     """GET on a resource type is its search."""
 
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        """The searchset Bundle, in at most SEARCH_TIMEOUT_MS of database time."""
+        """The searchset Bundle, in at most FHIR_SEARCH_TIMEOUT_MS of database time."""
         return Response(within_search_timeout(lambda: search_bundle(self)))
 
     head = get

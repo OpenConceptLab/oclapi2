@@ -738,7 +738,7 @@ class TerminologyCapabilitiesTimeoutTest(OCLAPITransactionTestCase):
                 cursor.execute('SELECT pg_sleep(1)')
             return []
 
-        with patch('core.fhir.search.SEARCH_TIMEOUT_MS', 50), patch('core.fhir.capabilities.served_repositories', slow):
+        with override_settings(FHIR_SEARCH_TIMEOUT_MS=50), patch('core.fhir.capabilities.served_repositories', slow):
             response = APIClient().get('/fhir/metadata', {'mode': 'terminology'})
         self.assertEqual(response.status_code, 422, response.data)
         issue = response.data['issue'][0]

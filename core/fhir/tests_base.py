@@ -348,7 +348,7 @@ class XmlElementOrderTest(SimpleTestCase):
         self.assertEqual(child_names(root.find(f'{FHIR}concept')), ['code'])
 
     def test_each_dropped_key_is_logged_once(self):
-        base.LOGGED_DROPPED_ELEMENTS.clear()
+        base.log_dropped_once.cache_clear()
         with self.assertLogs('oclapi', level='WARNING') as logs:
             base.to_xml(released_code_system())
             base.to_xml(released_code_system())
@@ -465,7 +465,7 @@ class XmlSingleElementTest(SimpleTestCase):
             self.assertEqual(root.find(f'{FHIR}identifier/{FHIR}value').get('value'), '/orgs/X/ConceptMap/cm/')
 
     def test_the_items_left_out_are_logged_once(self):
-        base.LOGGED_DROPPED_ELEMENTS.clear()
+        base.log_dropped_once.cache_clear()
         identifiers = [{'value': 'a'}, {'value': 'b'}, {'value': 'c'}]
         with self.assertLogs('oclapi', level='WARNING') as logs:
             base.to_xml(self.concept_map(identifiers))

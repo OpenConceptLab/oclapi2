@@ -18,12 +18,12 @@ from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.toggles.models import Toggle
+from core.url_registry.constants import URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE
 from core.url_registry.documents import URLRegistryDocument
 from core.url_registry.factories import GlobalURLRegistryFactory, OrganizationURLRegistryFactory
 from core.url_registry.models import URLRegistry
 from core.users.models import UserProfile
 
-REGISTRY_TOGGLE = 'URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE'
 ICD10 = 'http://hl7.org/fhir/sid/icd-10'
 PBD = 'http://pbd.com.np'
 DRAFT = 'https://example.org/draft'
@@ -32,9 +32,9 @@ FLAGGED = 'https://example.org/flagged-head'
 
 def set_registry_toggle(on):
     """The toggle in every environment's column, so a test doesn't depend on which one settings.ENV reads."""
-    Toggle.objects.filter(name=REGISTRY_TOGGLE).update(
+    Toggle.objects.filter(name=URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE).update(
         dev=on, qa=on, demo=on, staging=on, who_staging=on, production=on)
-    assert Toggle.get(REGISTRY_TOGGLE) is on
+    assert Toggle.get(URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE) is on
 
 
 def source(org, mnemonic, version=HEAD, **kwargs):

@@ -30,13 +30,14 @@ types as R5-shaped relationships. core.fhir.adapters.r4 writes the answer as an 
   `conceptMap` (an inline map) and `dependency` aren't supported.
 - Cost: a fixed number of queries whatever the number of mappings (resolution, the sources the systems name, the ids
   of the release's mappings of the code, then those mappings, with whether the caller is shown their sources); at
-  most MATCH_LIMIT matches. Its statements are bounded as a search's are (too long is too costly, a 422).
+  most FHIR_TRANSLATE_MATCH_LIMIT matches. Its statements are bounded as a search's are (too long is too costly, a 422).
 """
 import re
 from collections import namedtuple
 from functools import cached_property, reduce
 from operator import or_
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db.models import Case, Exists, F, OuterRef, Q, When
 
@@ -46,13 +47,13 @@ from core.common.serializers import IdentifierSerializer
 from core.concept_maps.constants import (
     MAP_TYPE_RELATIONSHIPS, NOT_RELATED_TO, RELATED_TO, RESOURCE_TYPE, REVERSED_RELATIONSHIPS)
 from core.fhir import outcomes
+from core.fhir.constants import TRANSLATION_TOO_COSTLY
 from core.fhir.ops.concepts import fhir_code, stored_codes, text
 from core.fhir.resolve import UnresolvedError, namespace_of, resolve, viewable_rows
 from core.fhir.search import within_search_timeout
 from core.mappings.models import Mapping
 from core.sources.models import Source
 
-MATCH_LIMIT = 1000  # the most matches an answer lists
 UNSUPPORTED_PARAMETERS = ('conceptMap', 'dependency')
 # An OCL path of a source: its own (sources), or as FHIR names it (CodeSystem; ConceptMap, how OCL shows a source with
 # no canonical URL). A collections or ValueSet path names a value set, never a source's alias.
@@ -147,11 +148,6 @@ def holds(value_set, code, sources):
     return bool(value_set.expansion_uri and sources) and Expansion.concepts.through.objects.filter(
         expansion__uri=value_set.expansion_uri, concept_id__in=Concept.objects.filter(
             mnemonic__in=stored_codes(code), parent_id__in=sources, is_active=True).values('id')).exists()
-
-
-def too_costly():
-    return outcomes.TooCostlyError(
-        'The translation would take too long to answer. Narrow it, for example with url, version or targetsystem.')
 
 
 def of_version(side, version):
@@ -256,7 +252,7 @@ class Translation:
             into = f" {'from' if request.reverse else 'to'} '{request.targetsystem}'" if request.targetsystem else ''
             return self.no_match(f"ConceptMap '{named}' has no mapping {'to' if request.reverse else 'from'} "
                                  f"'{coding.system}#{coding.code}'{into}")
-        message = f'Only the first {MATCH_LIMIT} matches are listed.' if more else None
+        message = f'Only the first {settings.FHIR_TRANSLATE_MATCH_LIMIT} matches are listed.' if more else None
         return {'result': any(match['relationship'] != NOT_RELATED_TO for match in matches), 'message': message,
                 'matches': matches}
 
@@ -360,12 +356,13 @@ class Translation:
 
     def matches(self, concept_map, named):
         """
-        (the matches, whether there were more than MATCH_LIMIT), in mapping order, each match once: the sources the
-        systems name, the mappings' ids, then the first MATCH_LIMIT + 1 of those mappings.
+        (the matches, whether there were more than FHIR_TRANSLATE_MATCH_LIMIT), in mapping order, each match once: the
+        sources the systems name, the mappings' ids, then the first limit + 1 of those mappings.
         """
+        limit = settings.FHIR_TRANSLATE_MATCH_LIMIT
         near, far = ('to', 'from') if self.request.reverse else ('from', 'to')
         ids = self.match_ids(concept_map, near, far)
-        rows = with_side(Mapping.objects.filter(id__in=ids[:MATCH_LIMIT + 1]), far, self.namespace, self.user).order_by(
+        rows = with_side(Mapping.objects.filter(id__in=ids[:limit + 1]), far, self.namespace, self.user).order_by(
             'id').values('map_type', f'{far}_concept_code', f'{far}_source_url', f'{far}_source__uri', f'{far}_shown',
                          f'{far}_canonical')
         matches = {}
@@ -375,7 +372,7 @@ class Translation:
             match = (system, fhir_code(row[f'{far}_concept_code']), relationship(row['map_type'], self.request.reverse))
             matches.setdefault(match, {
                 'relationship': match[2], 'concept': {'system': match[0], 'code': match[1]}, 'source': named})
-        return list(matches.values())[:MATCH_LIMIT], len(ids) > MATCH_LIMIT
+        return list(matches.values())[:limit], len(ids) > limit
 
 
 def translate(parameters, kwargs, user, _instance_id=None):
@@ -383,4 +380,4 @@ def translate(parameters, kwargs, user, _instance_id=None):
     A $translate's answer (Translation.answer) for its FhirParameters, at the base `kwargs` names, for `user`, its
     statements bounded as a search's are (a cancelled one is too costly). It has no instance level.
     """
-    return within_search_timeout(lambda: Translation(parameters, kwargs, user).answer(), too_costly=too_costly)
+    return within_search_timeout(lambda: Translation(parameters, kwargs, user).answer(), TRANSLATION_TOO_COSTLY)

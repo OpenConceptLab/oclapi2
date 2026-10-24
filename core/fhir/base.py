@@ -71,7 +71,6 @@ EMPTY_VALUES = (None, '', {}, [])
 XML_FORBIDDEN_CHARACTERS = re.compile('[^\x09\x0a\x0d\x20-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]')
 REPLACEMENT_CHARACTER = '\ufffd'
 XML_NAME = re.compile(r'^[A-Za-z_][A-Za-z0-9_.-]*$')
-LOGGED_DROPPED_ELEMENTS = set()  # what the XML has left out so far: each kind is logged once per process
 
 
 def xml_parser():
@@ -279,9 +278,13 @@ def resource_model(data):
 
 
 def log_dropped(model_class, key, reason):
-    if (model_class.__name__, key, reason) not in LOGGED_DROPPED_ELEMENTS:
-        LOGGED_DROPPED_ELEMENTS.add((model_class.__name__, key, reason))
-        logger.warning('FHIR XML: %s.%s %s', model_class.__name__, key, reason)
+    log_dropped_once(model_class.__name__, key, reason)
+
+
+@lru_cache(maxsize=1024)
+def log_dropped_once(model_name, key, reason):
+    """What the XML leaves out, each kind logged once per process: the content's problem, not the request's."""
+    logger.warning('FHIR XML: %s.%s %s', model_name, key, reason)
 
 
 def xhtml_markup(text):

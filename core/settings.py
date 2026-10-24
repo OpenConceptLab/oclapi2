@@ -579,6 +579,16 @@ FLOWER_PASSWORD = os.environ.get('FLOWER_PASSWORD', 'Root123')
 FLOWER_HOST = os.environ.get('FLOWER_HOST', 'flower')
 FLOWER_PORT = os.environ.get('FLOWER_PORT', 5555)
 FHIR_SUBDOMAIN = os.environ.get('FHIR_SUBDOMAIN', None)
+# FHIR's limits: a search page's entries, at most and by default; the database time a search or operation may take,
+# past which it's too costly; what a CodeSystem, ValueSet or ConceptMap read lists (concepts, references, mappings);
+# an $expand page's members, at most and by default; the matches a $translate lists
+FHIR_SEARCH_MAX_COUNT = int(os.environ.get('FHIR_SEARCH_MAX_COUNT', 100))
+FHIR_SEARCH_TIMEOUT_MS = int(os.environ.get('FHIR_SEARCH_TIMEOUT_MS', 5000))
+FHIR_CODE_SYSTEM_CONCEPT_LIMIT = int(os.environ.get('FHIR_CODE_SYSTEM_CONCEPT_LIMIT', 1000))
+FHIR_VALUE_SET_REFERENCE_LIMIT = int(os.environ.get('FHIR_VALUE_SET_REFERENCE_LIMIT', 1000))
+FHIR_CONCEPT_MAP_MAPPING_LIMIT = int(os.environ.get('FHIR_CONCEPT_MAP_MAPPING_LIMIT', 1000))
+FHIR_EXPAND_MAX_COUNT = int(os.environ.get('FHIR_EXPAND_MAX_COUNT', 1000))
+FHIR_TRANSLATE_MATCH_LIMIT = int(os.environ.get('FHIR_TRANSLATE_MATCH_LIMIT', 1000))
 DATA_UPLOAD_MAX_MEMORY_SIZE = 200*1024*1024  # i.e. 200MBs before throwing RequestDataTooBig
 FILE_UPLOAD_MAX_MEMORY_SIZE = 25*1024*1024  # i.e. 25MBs before file is streamed directly to temp file
 

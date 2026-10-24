@@ -72,6 +72,7 @@ from core.tasks.mixins import TaskMixin, IndexingTaskMixin
 from core.tasks.models import Task
 from core.tasks.serializers import TaskBriefSerializer
 from core.toggles.models import Toggle
+from core.url_registry.constants import URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE
 
 logger = logging.getLogger('oclapi')
 
@@ -1307,7 +1308,7 @@ class ReferenceExpressionResolveView(APIView):
         would stop resolving every canonical URL its owner doesn't hold.
         """
         namespace = self.request.query_params.get('namespace')
-        return namespace if namespace and Toggle.get('URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE') else None
+        return namespace if namespace and Toggle.get(URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE) else None
 
     def get_results(self):
         data = self.request.data

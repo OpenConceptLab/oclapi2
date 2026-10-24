@@ -32,6 +32,8 @@ from elasticsearch_dsl.connections import connections
 
 from core.common.constants import HEAD
 from core.fhir import outcomes
+from core.fhir.constants import SEARCH_TOO_COSTLY
+from core.fhir.outcomes import TooCostlyError
 from core.mappings.documents import MappingDocument
 
 logger = logging.getLogger('oclapi')
@@ -83,14 +85,14 @@ def by_version(scope):
             'version': terms('source_version', MAX_BUCKETS, include=scope['source_version'])})})})}
 
 
-def versions_of(aggregation, too_costly):
+def versions_of(aggregation):
     """
     {(owner type, owner, repository): {version names}} for an aggregation by_version(), owner and repository in
     lowercase; too costly when any level left buckets out.
     """
     def buckets(level):
         if level['sum_other_doc_count']:
-            raise too_costly()
+            raise TooCostlyError(SEARCH_TOO_COSTLY)
         return level['buckets']
 
     return {(kind['key'], owner['key'], repository['key']): {
@@ -99,10 +101,10 @@ def versions_of(aggregation, too_costly):
         for repository in buckets(owner['source'])}
 
 
-def whole(response, too_costly):
+def whole(response):
     """A response's aggregations, if the index answered in full; else too costly (its time ran out) or unavailable."""
     if response.get('timed_out'):
-        raise too_costly()
+        raise TooCostlyError(SEARCH_TOO_COSTLY)
     shards = response.get('_shards') or {}
     if not shards or shards.get('failed') or shards.get('successful') != shards.get('total'):
         logger.warning('The mappings index answered a FHIR search in part: %s', shards)
@@ -110,7 +112,7 @@ def whole(response, too_costly):
     return response.get('aggregations') or {}
 
 
-def request(side, alternatives, scope, left, too_costly):
+def request(side, alternatives, scope, left):
     """The index's response for each of `alternatives`' repositories among `scope`, within `left` seconds."""
     client = connections.get_connection().options(request_timeout=left, max_retries=0, retry_on_timeout=False)
     try:
@@ -124,7 +126,7 @@ def request(side, alternatives, scope, left, too_costly):
             aggs={str(number): {'filter': side_query(side, repositories), 'aggs': by_version(scope)}
                   for number, repositories in enumerate(alternatives)})
     except ConnectionTimeout as ex:
-        raise too_costly() from ex
+        raise TooCostlyError(SEARCH_TOO_COSTLY) from ex
     except (ApiError, TransportError) as ex:
         logger.warning('The mappings index did not answer a FHIR search: %s', ex)
         raise IndexUnavailableError(UNAVAILABLE) from ex
@@ -142,24 +144,23 @@ def kept(found, shown):
             if repository in listed and versions & listed[repository]}
 
 
-def holding(side, repositories, shown, deadline, too_costly):  # pylint: disable=too-many-arguments
+def holding(side, repositories, shown, deadline):
     """
     {key: {(owner type, owner, repository): {version names}}}, owner and repository in lowercase: for each key's
     repositories ((owner type, owner, mnemonic) of its sources), the repositories and versions among `shown` (the
     ConceptMap versions the base shows the caller, {(owner type, owner, mnemonic): {version names}}) holding a mapping
     whose `side` ('from' or 'to') source is one of them, with HEAD when the index lists it. One request, by `deadline`
-    (time.monotonic()), else too_costly(); none when nothing is named or shown.
+    (time.monotonic()), else too costly; none when nothing is named or shown.
     """
     keys = sorted(key for key, value in repositories.items() if value)
     if not keys or not shown:
         return {}
     left = deadline - time.monotonic()
     if left <= 0:
-        raise too_costly()
-    aggregations = whole(request(side, [repositories[key] for key in keys], scope_of(shown), left, too_costly),
-                         too_costly)
+        raise TooCostlyError(SEARCH_TOO_COSTLY)
+    aggregations = whole(request(side, [repositories[key] for key in keys], scope_of(shown), left))
     try:
-        return {key: kept(versions_of(aggregations[str(number)], too_costly), shown)
+        return {key: kept(versions_of(aggregations[str(number)]), shown)
                 for number, key in enumerate(keys)}
     except (KeyError, TypeError) as ex:
         logger.warning('The mappings index answered a FHIR search without its aggregations')

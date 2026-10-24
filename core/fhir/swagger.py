@@ -7,8 +7,7 @@ from drf_yasg import openapi
 from drf_yasg.generators import OpenAPISchemaGenerator
 
 from core.fhir.base import FHIR_JSON, FHIR_XML
-from core.fhir.ops.expand import MAX_COUNT as EXPANSION_MAX_COUNT
-from core.fhir.search import MAX_COUNT, PARAMETERS, STRING_FIELDS, STRING_LOOKUPS
+from core.fhir.search import PARAMETERS, STRING_FIELDS, STRING_LOOKUPS
 
 BASES = ('/fhir', '/orgs/{org}', '/users/{user}')
 TAGS = ('CodeSystem', 'ValueSet', 'ConceptMap', 'Capabilities')
@@ -91,8 +90,9 @@ OPERATION_PARAMETERS = {
         query('includeDesignations', 'Include every name as a designation.', openapi.TYPE_BOOLEAN),
         query('activeOnly', 'Exclude retired concepts.', openapi.TYPE_BOOLEAN),
         query('offset', 'Number of matching members to skip.', openapi.TYPE_INTEGER, minimum=0, default=0),
-        query('count', 'Page size, capped at 1,000; zero returns only the total.', openapi.TYPE_INTEGER,
-              minimum=0, maximum=EXPANSION_MAX_COUNT, default=EXPANSION_MAX_COUNT),
+        query('count', f'Page size, capped at {settings.FHIR_EXPAND_MAX_COUNT:,}; zero returns only the total.',
+              openapi.TYPE_INTEGER, minimum=0, maximum=settings.FHIR_EXPAND_MAX_COUNT,
+              default=settings.FHIR_EXPAND_MAX_COUNT),
         query('includeDefinition', 'Only false is supported; definitions are not included.', openapi.TYPE_BOOLEAN,
               enum=[False]),
         query('excludePostCoordinated', 'Only false is supported; stored expansions do not record this distinction.',
@@ -193,8 +193,9 @@ def search_operation(resource_type):
     parameters.extend(query(f'{name}:{modifier}' if modifier else name, f'{name}: {modifiers[modifier]}')
                       for name in STRING_FIELDS for modifier in STRING_LOOKUPS)
     parameters.extend([
-        query('_count', 'Page size, capped at 100; zero returns only the total.', openapi.TYPE_INTEGER,
-              minimum=0, maximum=MAX_COUNT, default=MAX_COUNT),
+        query('_count', f'Page size, capped at {settings.FHIR_SEARCH_MAX_COUNT:,}; zero returns only the total.',
+              openapi.TYPE_INTEGER, minimum=0, maximum=settings.FHIR_SEARCH_MAX_COUNT,
+              default=settings.FHIR_SEARCH_MAX_COUNT),
         query('page', 'Page number, starting at 1.', openapi.TYPE_INTEGER, minimum=1, default=1),
     ])
     return operation(f'Search {resource_type} resources',

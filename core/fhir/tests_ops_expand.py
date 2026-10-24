@@ -11,7 +11,7 @@ import re
 from urllib.parse import quote
 
 from django.db import connection
-from django.test.utils import CaptureQueriesContext
+from django.test.utils import CaptureQueriesContext, override_settings
 from lxml import etree
 from mock.mock import patch
 from rest_framework.test import APIClient
@@ -605,7 +605,7 @@ class ExpandTimeoutTest(OCLAPITransactionTestCase):
             with connection.cursor() as cursor:
                 cursor.execute('SELECT pg_sleep(1)')
 
-        with patch('core.fhir.search.SEARCH_TIMEOUT_MS', 50), patch('core.fhir.ops.expand.Expander.used', slow):
+        with override_settings(FHIR_SEARCH_TIMEOUT_MS=50), patch('core.fhir.ops.expand.Expander.used', slow):
             response = APIClient().get('/fhir/ValueSet/$expand', {'url': FEVERS})
         self.assertEqual(response.status_code, 422, response.data)
         issue = response.data['issue'][0]

@@ -1,5 +1,6 @@
 import logging
 
+from django.conf import settings
 from rest_framework import serializers
 from rest_framework.fields import CharField, DateField, SerializerMethodField, ChoiceField, DateTimeField, \
     BooleanField, ListField, URLField
@@ -15,7 +16,6 @@ from core.fhir.search import CanonicalUrlField, FhirRepositorySerializerMixin, T
 from core.value_sets.constants import RESOURCE_TYPE
 
 logger = logging.getLogger('oclapi')
-REFERENCE_LIMIT = 1000
 
 
 class FilterValueSetSerializer(ReadSerializerMixin, serializers.Serializer):
@@ -110,10 +110,11 @@ class ComposeValueSetField(serializers.Field):
         include = []
         exclude = []
 
-        references = list(value.references.filter(reference_type='concepts').order_by('id')[:REFERENCE_LIMIT + 1])
-        self.subsetted = len(references) > REFERENCE_LIMIT
+        limit = settings.FHIR_VALUE_SET_REFERENCE_LIMIT
+        references = list(value.references.filter(reference_type='concepts').order_by('id')[:limit + 1])
+        self.subsetted = len(references) > limit
         grouped_references = {}
-        for reference in references[:REFERENCE_LIMIT]:
+        for reference in references[:limit]:
             ref_list = grouped_references.get((reference.include, reference.system, reference.version), None)
             if not ref_list:
                 ref_list = []

@@ -11,7 +11,7 @@ import re
 from itertools import product
 
 from django.db import connection
-from django.test.utils import CaptureQueriesContext
+from django.test.utils import CaptureQueriesContext, override_settings
 from mock import patch
 from rest_framework.test import APIClient
 
@@ -455,7 +455,7 @@ class TranslateMappingsTest(TranslateCorpusMixin, OCLTestCase):
             self.mapping('SAME-AS', self.icd, code, [self.ciel_v2], from_code='6000')
         self.assertEqual(self.matches(self.answer(self.get(system=CIEL, code='6000'))),
                          [f'{ICD10}|D{index}|equivalent' for index in range(1, 5)])
-        with patch('core.fhir.ops.translate.MATCH_LIMIT', 2):
+        with override_settings(FHIR_TRANSLATE_MATCH_LIMIT=2):
             parameters = self.answer(self.get(system=CIEL, code='6000'))
         self.assertTrue(self.result(parameters))
         self.assertEqual(len(self.matches(parameters)), 2)
@@ -1045,7 +1045,7 @@ class TranslateTimeoutTest(OCLAPITransactionTestCase):
             with connection.cursor() as cursor:
                 cursor.execute('SELECT pg_sleep(1)')
 
-        with patch('core.fhir.search.SEARCH_TIMEOUT_MS', 50), patch(
+        with override_settings(FHIR_SEARCH_TIMEOUT_MS=50), patch(
                 'core.fhir.ops.translate.Translation.matches', slow):
             response = APIClient().get('/fhir/ConceptMap/$translate', {'system': CIEL, 'code': '1'})
         self.assertEqual(response.status_code, 422, response.data)

@@ -49,6 +49,7 @@ from .mixins import SourceContainerMixin
 from .tasks import handle_save, handle_m2m_changed, seed_children_to_new_version, update_validation_schema, \
     update_source_active_concepts_count, update_source_active_mappings_count
 from ..toggles.models import Toggle
+from ..url_registry.constants import URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE
 
 TRUTHY = get_truthy_values()
 
@@ -1588,7 +1589,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         from core.url_registry.models import URLRegistry
         registry_entry = None
         if is_canonical:
-            if Toggle.get('URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE'):
+            if Toggle.get(URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE):
                 registry_entry = None
                 if not is_global_namespace:
                     owner = SourceContainerMixin.get_object_from_namespace(namespace)

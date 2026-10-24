@@ -49,11 +49,15 @@ from core.common.utils import decode_string, is_canonical_uri, normalize_public_
 from core.fhir.outcomes import NotFoundError
 from core.sources.models import Source
 from core.toggles.models import Toggle
+from core.url_registry.constants import URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE
 from core.url_registry.models import URLRegistry
 
 REPO_TYPES = {'CodeSystem': Source, 'ConceptMap': Source, 'ValueSet': Collection}
 REPO_PATHS = {'CodeSystem': 'sources', 'ConceptMap': 'sources', 'ValueSet': 'collections'}
 PUBLIC_ACCESS = (ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT)  # what public_can_view reads as public
+# a HEAD served_repositories reads: what the resolver's pick and a CodeSystem's identifier depend on
+ServedHead = namedtuple(
+    'ServedHead', 'id mnemonic organization_id user_id canonical_url uri organization_uri user_uri')
 
 
 class UnresolvedError(NotFoundError):
@@ -385,11 +389,6 @@ def visible_versions(resource_type, kwargs=None, user=None, access=None):
     return releases.filter(Q(retired=False) | Q(id__in=retired_beside_live.values('id')))
 
 
-REGISTRY_TOGGLE = 'URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE'  # whether the resolver consults the URL registry
-ServedHead = namedtuple(
-    'ServedHead', 'id mnemonic organization_id user_id canonical_url uri organization_uri user_uri')
-
-
 def is_looked_up_as_written(url):
     """
     Whether the resolver looks a canonical URL up as it is written (resolve_reference_expression's reading of a url):
@@ -462,7 +461,7 @@ def served_repositories(kwargs, user):  # pylint: disable=too-many-locals
     owner = access[0]
     if owner is None:
         return []
-    registry = Toggle.get(REGISTRY_TOGGLE)
+    registry = Toggle.get(URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE)
     own_entries, global_entries = registry_entries(owner) if registry else ({}, {})
     versions = {}
     for *repository, version, retired in visible_versions('CodeSystem', access=access).order_by(
