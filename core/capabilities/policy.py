@@ -131,7 +131,7 @@ class GroupLimitPolicy(CapabilityPolicy):
             return counter.consume(units, idempotency_key=idempotency_key, **attribution), False
 
     def build_refusal(self, user, capability_id, limit, used, units):  # pylint: disable=too-many-arguments,unused-argument
-        return CapabilityExceeded(CAPABILITY_NAME_BY_ID.get(capability_id, capability_id), limit, used, units)
+        return CapabilityExceeded(CAPABILITY_NAME_BY_ID.get(capability_id, capability_id), limit, used)
 
     def reverse(self, usage_event, units):
         return usage_event.reverse(units)

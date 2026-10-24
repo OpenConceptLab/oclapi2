@@ -4441,7 +4441,7 @@ class MetadataToConceptsListViewTest(CapacityRedisMockMixin, OCLAPITestCase):
 
     def test_post_403_match_operation_limit_reached(self):
         with patch.object(
-                GroupLimitPolicy, 'consume', side_effect=CapabilityExceeded('mapper.match_operations', 10, 10, 1)):
+                GroupLimitPolicy, 'consume', side_effect=CapabilityExceeded('mapper.match_operations', 10, 10)):
             response = self.match()
 
         self.assertEqual(response.status_code, 403)

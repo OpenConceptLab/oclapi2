@@ -24,11 +24,7 @@ class UsageRefused(APIException):
 class CapabilityExceeded(UsageRefused):
     """GroupLimitPolicy's refusal: no limit or a blocked one (not entitled), or not enough left."""
 
-    def __init__(self, capability_name, limit, used, requested):
-        self.capability_name = capability_name
-        self.limit = limit
-        self.used = used
-        self.requested = requested
+    def __init__(self, capability_name, limit, used):
         # None = no row anywhere, -1 = blocked: both are "not available", never a count
         not_entitled = limit is None or limit < 0
         super().__init__(
