@@ -115,8 +115,9 @@ class GroupLimitPolicy(CapabilityPolicy):
         limit = self.get_limit(user, capability_id)
 
         with transaction.atomic():
-            # the account first, so a user's requests serialize even when they count in different windows
-            get_user_model().objects.select_for_update().only('id').get(pk=user.pk)
+            # the account first, so a user's requests serialize even when they count in different windows. No key
+            # update, so a foreign-key check on the user (another transaction inserting a counter) isn't blocked.
+            get_user_model().objects.select_for_update(no_key=True).only('id').get(pk=user.pk)
             counter = UsageCounter.get_locked(user, capability_id, self.get_window_start(user, capability_id))
 
             # under the lock and before the limit check, so a retry after the last unit still succeeds

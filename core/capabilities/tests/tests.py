@@ -5,7 +5,9 @@ from unittest.mock import patch
 
 from django.contrib.auth.models import Group, Permission
 from django.core.management import call_command, CommandError
+from django.db import connection
 from django.test import override_settings
+from django.test.utils import CaptureQueriesContext
 
 from core.capabilities.constants import (
     AI_ASSISTANT_CALLS_CAPABILITY_ID, AI_ASSISTANT_CHANGE_COMMENTS_CAPABILITY_ID,
@@ -771,6 +773,17 @@ class GroupLimitPolicyWindowTest(OCLAPITestCase):
 
 
 class GroupLimitPolicyDefaultWindowTest(OCLAPITestCase):
+    def test_consume_locks_the_account_without_blocking_foreign_key_checks(self):
+        user = UserProfileFactory()
+        UserCapabilityOverride.objects.create(user=user, capability_id=MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, limit=0)
+
+        with CaptureQueriesContext(connection) as context:
+            user.check_and_consume_capability(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID)
+
+        self.assertTrue(any(
+            'FROM "user_profiles"' in query['sql'] and query['sql'].endswith('FOR NO KEY UPDATE')
+            for query in context.captured_queries))
+
     def test_usage_counts_in_the_window_that_never_ends(self):
         user = UserProfileFactory()
         UserCapabilityOverride.objects.create(user=user, capability_id=MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, limit=0)
