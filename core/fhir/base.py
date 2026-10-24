@@ -18,6 +18,7 @@ import typing
 import zlib
 from functools import lru_cache
 
+from django.conf import settings
 from django.core.exceptions import BadRequest, SuspiciousOperation
 from django.http import HttpResponse
 from fhir.resources.R4B import get_fhir_model_class
@@ -35,7 +36,7 @@ from rest_framework.utils.mediatypes import _MediaType
 from rest_framework.versioning import AcceptHeaderVersioning
 from rest_framework.views import APIView
 
-from core.common.throttling import ThrottleUtil
+from core.common.throttling import FhirMinuteThrottle
 from core.fhir import outcomes
 
 logger = logging.getLogger('oclapi')
@@ -563,6 +564,10 @@ class FhirViewMixin:
     def get_exception_handler(self):
         return outcomes.exception_handler
 
+    def get_throttles(self):
+        """One rate for every caller, whoever they are: it protects the server."""
+        return [FhirMinuteThrottle()] if settings.ENABLE_THROTTLING else []
+
     def finalize_response(self, request, response, *args, **kwargs):
         """Normalize returned outcomes at every status and depth, and wrap other error responses as outcomes."""
         if isinstance(response, Response):
@@ -586,14 +591,11 @@ class FhirOperationView(FhirViewMixin, APIView):
     """
     A FHIR operation that only reads, GET and POST alike, at the global base and at owner bases: `operation`'s answer
     for the request's FhirParameters, base and user (and the resource the route kwarg `instance` names, at the instance
-    level), written by `adapter`. Throttled as OCL's other views are.
+    level), written by `adapter`.
     """
     permission_classes = (AllowAny,)  # what an operation shows the caller is core.fhir.resolve's rule
     operation = adapter = None
     instance = None
-
-    def get_throttles(self):
-        return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         answer = self.operation(  # pylint: disable=not-callable

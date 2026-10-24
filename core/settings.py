@@ -225,6 +225,7 @@ if ENABLE_THROTTLING:
         'match_standard_day': '5000/day',
         'match_core_minute': '1000/minute',
         'match_core_day': '30000/day',
+        'fhir_minute': os.environ.get('FHIR_THROTTLE_RATE', '1000/minute'),  # every caller alike: server protection
     }
     MIDDLEWARE = [*MIDDLEWARE, 'core.middlewares.middlewares.ThrottleHeadersMiddleware']
 
