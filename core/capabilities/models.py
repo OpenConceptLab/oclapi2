@@ -117,7 +117,8 @@ class UsageEvent(models.Model):
     capability = models.ForeignKey(Capability, on_delete=models.CASCADE, related_name='usage_events')
     units = models.BigIntegerField(default=1)
     # taken back after consumption (e.g. the search they were consumed for failed); `units` stays as consumed
-    reversed_units = models.BigIntegerField(default=0)
+    # db_default: code that predates this column, still serving during a deploy, inserts events without it
+    reversed_units = models.BigIntegerField(default=0, db_default=0)
     # the counter window the units counted in
     window_start = models.DateTimeField(null=True, blank=True)
     action = models.CharField(max_length=100, blank=True, default='')

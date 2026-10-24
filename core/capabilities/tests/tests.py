@@ -784,6 +784,17 @@ class GroupLimitPolicyDefaultWindowTest(OCLAPITestCase):
             'FROM "user_profiles"' in query['sql'] and query['sql'].endswith('FOR NO KEY UPDATE')
             for query in context.captured_queries))
 
+    def test_an_event_inserted_without_the_newer_columns_gets_their_defaults(self):
+        # code that predates reversed_units and window_start keeps serving while a deploy migrates
+        user = UserProfileFactory()
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'INSERT INTO usage_events (user_id, capability_id, units, action, created_at) '
+                'VALUES (%s, %s, 1, %s, now()) RETURNING id', [user.id, MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, 'match'])
+            event = UsageEvent.objects.get(id=cursor.fetchone()[0])
+
+        self.assertEqual((event.reversed_units, event.window_start), (0, None))
+
     def test_usage_counts_in_the_window_that_never_ends(self):
         user = UserProfileFactory()
         UserCapabilityOverride.objects.create(user=user, capability_id=MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, limit=0)
