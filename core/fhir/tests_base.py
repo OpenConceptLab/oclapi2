@@ -741,6 +741,14 @@ class FhirViewMixinTest(SimpleTestCase):
         self.assertEqual(get.data['parameter'][0], {'name': 'code', 'valueString': '1'})
         self.assertEqual(get.data['parameter'][1], {'name': 'base', 'valueUri': 'http://testserver/fhir'})
 
+    def test_a_server_error_a_view_returns_is_reported(self):
+        with patch('core.fhir.outcomes.ERRBIT_LOGGER') as errbit, self.assertLogs('oclapi', level='ERROR') as logs:
+            response = EchoView.as_view()(self.factory.get('/fhir/x?status=503'))
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(logs.output, ['ERROR:oclapi:FHIR answered a 503 server error as a 422'])
+        errbit.raise_errbit.assert_called_once_with('FHIR answered a 503 server error as a 422')
+
     def test_errors_a_view_returns_go_out_as_outcomes_and_never_as_a_5xx(self):
         for status, expected, code in ((404, 404, 'not-found'), (409, 409, 'invalid'), (503, 422, 'exception')):
             response = EchoView.as_view()(self.factory.get(f'/fhir/x?status={status}'))

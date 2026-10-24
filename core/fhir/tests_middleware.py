@@ -81,12 +81,24 @@ class FhirErrorMiddlewareTest(SimpleTestCase):
 
         server_error = JsonResponse({'error': 'Server Error (500)'}, status=500)
         server_error['Access-Control-Allow-Origin'] = '*'
-        response = self.answer('/fhir/CodeSystem/', server_error, HTTP_ACCEPT='application/fhir+xml')
+        with patch('core.fhir.outcomes.ERRBIT_LOGGER') as errbit, self.assertLogs('oclapi', level='ERROR'):
+            response = self.answer('/fhir/CodeSystem/', server_error, HTTP_ACCEPT='application/fhir+xml')
+        errbit.raise_errbit.assert_called_once_with('FHIR answered a 500 server error as a 422')
 
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response['Access-Control-Allow-Origin'], '*')  # the stack's headers are kept
         issue = etree.fromstring(response.content).find('{http://hl7.org/fhir}issue/{http://hl7.org/fhir}code')
         self.assertEqual(issue.get('value'), 'exception')
+
+    def test_a_server_error_django_already_logged_is_not_reported_again(self):
+        logged = JsonResponse({'error': 'Server Error (500)'}, status=500)
+        logged._has_been_logged = True  # pylint: disable=protected-access
+
+        with patch('core.fhir.outcomes.report_server_error') as report:
+            response = self.answer('/fhir/CodeSystem/', logged)
+
+        self.assertEqual(response.status_code, 422)
+        report.assert_not_called()
 
     def test_a_json_error_keeps_its_message(self):
         response = self.answer('/orgs/CIEL/CodeSystem/', JsonResponse({'detail': 'Slow down.'}, status=429))

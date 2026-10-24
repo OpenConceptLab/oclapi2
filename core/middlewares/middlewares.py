@@ -18,7 +18,7 @@ from core.common.exceptions import DeactivatedAccountLoginRefused, SSOIdentityMi
 from core.common.throttling import ThrottleUtil
 from core.common.utils import set_current_user, set_request_url
 from core.fhir.base import FHIR_JSON, is_fhir_path, is_outcome_response, outcome_response, response_json
-from core.fhir.outcomes import issue, operation_outcome, outcome_for_status
+from core.fhir.outcomes import issue, operation_outcome, outcome_for_status, report_server_error
 from core.fhir.swagger import on_fhir_host
 from core.services.analytics_event_emitter import AnalyticsEventEmitter
 from core.services.auth.core import AuthService
@@ -280,9 +280,11 @@ class FhirErrorMiddleware(BaseMiddleware):
             # while reporting it): on a FHIR path it still goes out as an OperationOutcome, never a 5xx.
             if not is_fhir_path(request.path):
                 raise
-            fhir_logger.exception('Unexpected %s answering a FHIR request', type(ex).__name__)
-            status = 400 if isinstance(ex, SuspiciousOperation) else 500
-            return outcome_response(request, outcome_for_status(status, None), 400 if status == 400 else 422)
+            if isinstance(ex, SuspiciousOperation):
+                fhir_logger.exception('Unexpected %s answering a FHIR request', type(ex).__name__)
+                return outcome_response(request, outcome_for_status(400, None), 400)
+            report_server_error(500, ex)
+            return outcome_response(request, outcome_for_status(500, None), 500)
         if response.status_code < 400 or not is_fhir_path(request.path) or is_outcome_response(response):
             return response
         if response.status_code == 404:  # nothing is routed there
@@ -290,6 +292,8 @@ class FhirErrorMiddleware(BaseMiddleware):
         else:  # a server error's own message isn't passed on
             outcome = outcome_for_status(
                 response.status_code, response_json(response) if response.status_code < 500 else None)
+            if response.status_code >= 500 and not getattr(response, '_has_been_logged', False):
+                report_server_error(response.status_code)  # one Django logged has reached Errbit already
         headers = {key: value for key, value in response.items() if key.lower() not in self.replaced_headers}
         return outcome_response(request, outcome, response.status_code, headers)
 

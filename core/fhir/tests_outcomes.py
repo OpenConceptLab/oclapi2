@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from django.core.exceptions import ValidationError as DjangoValidationError, PermissionDenied as DjangoPermissionDenied
 from django.http import Http404
 from django.test import SimpleTestCase
@@ -184,10 +186,14 @@ class ExceptionHandlerTest(SimpleTestCase):
             status_code = 503
 
         for exc in (exceptions.APIException(), Unavailable()):
-            response = self.handle(exc)
+            with self.assertLogs('oclapi', level='ERROR') as logs:
+                response = self.handle(exc)
 
             self.assertEqual(response.status_code, 422, exc)
             self.assertEqual(issue_summary(response.data), ['error|exception|invalid-data|'], exc)
+            # still OCL's error: logged at ERROR with its traceback, which Errbit gets as every logged one
+            self.assertIn(f'FHIR answered a {exc.status_code} server error as a 422', logs.output[0])
+            self.assertIs(logs.records[0].exc_info[1], exc)
 
     def test_unexpected_exception_is_logged_and_answered_with_a_4xx_outcome(self):
         with self.assertLogs('oclapi', level='ERROR') as logs:
@@ -227,3 +233,24 @@ class OutcomeForStatusTest(SimpleTestCase):
     def test_response_status_maps_5xx_to_422(self):
         self.assertEqual(outcomes.response_status(503), 422)
         self.assertEqual(outcomes.response_status(404), 404)
+
+
+class ServerErrorReportTest(SimpleTestCase):
+    """A 5xx answered as a 422 is logged at ERROR and sent to Errbit, so monitoring still counts it."""
+
+    @patch('core.fhir.outcomes.ERRBIT_LOGGER')
+    def test_without_an_exception_errbit_gets_a_notice(self, errbit):
+        with self.assertLogs('oclapi', level='ERROR') as logs:
+            outcomes.report_server_error(502)
+
+        self.assertEqual(logs.output, ['ERROR:oclapi:FHIR answered a 502 server error as a 422'])
+        errbit.raise_errbit.assert_called_once_with('FHIR answered a 502 server error as a 422')
+
+    @patch('core.fhir.outcomes.ERRBIT_LOGGER')
+    def test_with_an_exception_its_traceback_is_logged(self, errbit):
+        exc = exceptions.APIException()
+        with self.assertLogs('oclapi', level='ERROR') as logs:
+            outcomes.report_server_error(500, exc)
+
+        self.assertIs(logs.records[0].exc_info[1], exc)
+        errbit.raise_errbit.assert_not_called()

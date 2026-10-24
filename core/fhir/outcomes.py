@@ -4,7 +4,8 @@ raises with an OperationOutcome.
 
 Every issue carries a tx-issue-type coding, as FHIRsmith and tx.fhir.org do, so clients and the parity suite can
 compare errors by kind rather than by wording. No FHIR response is a 5xx: an error OCL can't attribute to the
-request is answered with a 422 and the issue code `exception`, and logged.
+request is answered with a 422 and the issue code `exception`, logged at ERROR and sent to Errbit
+(report_server_error), so monitoring still counts it.
 """
 import logging
 from http import HTTPStatus
@@ -15,6 +16,8 @@ from django.http import Http404
 from rest_framework import exceptions, status
 from rest_framework.response import Response
 from rest_framework.views import set_rollback
+
+from core.common import ERRBIT_LOGGER
 
 logger = logging.getLogger('oclapi')
 
@@ -87,6 +90,19 @@ def is_outcome(data):
 def response_status(status_code):
     """The status a FHIR error goes out with: a 5xx becomes a 422."""
     return UNEXPECTED_ERROR_STATUS if status_code >= 500 else status_code
+
+
+def report_server_error(status_code, exc=None):
+    """
+    A 5xx a FHIR answer goes out as a 422 is still OCL's error: logged at ERROR, with the exception's traceback when
+    there is one (Errbit gets a logged traceback), else with a notice to Errbit of its own.
+    """
+    message = f'FHIR answered a {status_code} server error as a {UNEXPECTED_ERROR_STATUS}'
+    if exc is not None:
+        message = f'{message}: {type(exc).__name__}'
+    logger.error(message, exc_info=exc)
+    if exc is None:
+        ERRBIT_LOGGER.raise_errbit(message)
 
 
 def status_issue_code(status_code):
@@ -234,8 +250,10 @@ def outcome_for_exception(exc):
             headers['Retry-After'] = str(int(exc.wait))
         status_code = exc.status_code
         outcome = operation_outcome(*detail_issues(exc.detail, status_issue_code(exc.status_code)))
+        if status_code >= 500:
+            report_server_error(status_code, exc)
     else:
-        logger.exception('Unexpected %s answering a FHIR request', type(exc).__name__)
+        report_server_error(status.HTTP_500_INTERNAL_SERVER_ERROR, exc)
         status_code, outcome = UNEXPECTED_ERROR_STATUS, operation_outcome(issue('exception', UNEXPECTED_ERROR_MESSAGE))
     return status_code, outcome, headers
 

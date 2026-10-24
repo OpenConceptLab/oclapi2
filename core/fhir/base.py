@@ -569,6 +569,8 @@ class FhirViewMixin:
             if response.status_code >= 400:
                 if not outcomes.is_outcome(response.data):
                     response.data = outcomes.outcome_for_status(response.status_code, response.data)
+                if response.status_code >= 500:
+                    outcomes.report_server_error(response.status_code)
                 response.status_code = outcomes.response_status(response.status_code)
             response.data = outcomes.normalize_outcomes(response.data)
         return super().finalize_response(request, response, *args, **kwargs)
