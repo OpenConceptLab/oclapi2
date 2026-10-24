@@ -1309,6 +1309,16 @@ class UtilsTest(OCLTestCase):
 
 
 class BaseModelTest(OCLTestCase):
+    def test_is_public_access(self):
+        for value in ('View', 'view', 'Edit', 'EDIT'):
+            self.assertTrue(BaseModel.is_public_access(value), value)
+        for value in ('None', None, ''):
+            self.assertFalse(BaseModel.is_public_access(value), value)
+        # the stored values a queryset reads as public are those it reads as public
+        for value in BaseModel.PUBLIC_ACCESS_VALUES:
+            self.assertTrue(BaseModel.is_public_access(value), value)
+        self.assertTrue(OrganizationSourceFactory(public_access='Edit').public_can_view)
+
     def test_model_name(self):
         self.assertEqual(Concept().model_name, 'Concept')
         self.assertEqual(Source().model_name, 'Source')

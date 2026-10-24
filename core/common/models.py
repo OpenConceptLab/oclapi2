@@ -41,7 +41,7 @@ from .constants import (
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
     CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, OPENMRS_VALIDATION_SCHEMA, VALIDATION_SCHEMAS,
     DEFAULT_VALIDATION_SCHEMA, ES_REQUEST_TIMEOUT, UPDATED_BY_USERNAME_PARAM, ES_RETRYABLE_ERROR_TYPES,
-    INDEX_BATCH_SIZE)
+    INDEX_BATCH_SIZE, RETIRED_ACCESS_TYPE_EDIT)
 from .es import ESScript
 from .exceptions import Http400, BatchIndexingError
 from .fields import URIField
@@ -303,9 +303,17 @@ class BaseModel(models.Model):
     def is_versioned(self):
         return False
 
+    # the stored public_access values that let the public view, for querysets (is_public_access reads the same)
+    PUBLIC_ACCESS_VALUES = (ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT)
+
+    @staticmethod
+    def is_public_access(public_access):
+        """Whether a public_access value lets the public view: View, or the retired Edit."""
+        return (normalize_public_access(public_access) or '').lower() == ACCESS_TYPE_VIEW.lower()
+
     @property
     def public_can_view(self):
-        return normalize_public_access(self.public_access).lower() == ACCESS_TYPE_VIEW.lower()
+        return self.is_public_access(self.public_access)
 
     @property
     def resource_type(self):
@@ -1057,6 +1065,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     active_mappings_queryset = property(get_active_mappings)
 
     def has_parent_edit_access(self, user):
+        """The owner's has_edit_access, without reading a user-owned repository's owner."""
         if user.is_staff:
             return True
 

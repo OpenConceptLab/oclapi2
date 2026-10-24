@@ -2,7 +2,7 @@ import importlib
 from datetime import datetime
 
 from django.apps import apps
-from django.contrib.auth.models import Group, Permission
+from django.contrib.auth.models import AnonymousUser, Group, Permission
 from django.http import Http404
 from mock import Mock, patch, ANY
 from rest_framework.authtoken.models import Token
@@ -25,6 +25,15 @@ class UserProfileTest(OCLTestCase):
     def setUp(self):
         super().setUp()
         self.org = Organization.objects.get(id=OCL_ORG_ID)
+
+    def test_has_edit_access(self):
+        user, other = UserProfileFactory(), UserProfileFactory()
+
+        self.assertTrue(user.has_edit_access(user))
+        self.assertTrue(user.has_edit_access(UserProfileFactory(is_staff=True)))
+        self.assertFalse(user.has_edit_access(other))
+        self.assertFalse(user.has_edit_access(AnonymousUser()))
+        self.assertFalse(user.has_edit_access(None))
 
     def test_create_userprofile_positive(self):
         self.assertFalse(UserProfile.objects.filter(username='user1').exists())

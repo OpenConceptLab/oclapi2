@@ -55,8 +55,8 @@ from core.fhir import mapping_index, outcomes
 from core.fhir.base import CONTROL_PARAMETERS, FhirParameters, fhir_base_url
 from core.fhir.constants import SEARCH_TOO_COSTLY
 from core.fhir.resolve import (
-    PUBLIC_ACCESS, REPO_TYPES, namespace_of, owner_access, visible_versions, viewable_rows, is_public, is_shown,
-    repository_rows, with_repository_access)
+    PUBLIC_ACCESS, REPO_TYPES, namespace_of, owner_access, visible_versions, viewable_rows, is_shown, repository_rows,
+    with_repository_access)
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
 from core.sources.models import Source
@@ -643,8 +643,8 @@ def read_version(resource_type, resource_id, version, kwargs, user):
             retired=False).order_by('-created_at')
 
     instance = with_repository_access(with_repository_canonical(versions)).first()
-    if latest and instance and not is_shown(instance, namespace, user) and is_public(
-            instance.repository_public_access or ''):
+    if latest and instance and not is_shown(instance, namespace, user) and REPO_TYPES[resource_type].is_public_access(
+            instance.repository_public_access):
         # the latest is private, in a public repository: the latest public one
         instance = with_repository_access(with_repository_canonical(
             versions.filter(public_access__in=PUBLIC_ACCESS))).first()

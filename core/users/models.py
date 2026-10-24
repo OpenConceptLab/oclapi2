@@ -229,6 +229,12 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
     def has_auth_group(self, group_name):
         return self.groups.filter(name=group_name).exists()
 
+    def has_edit_access(self, user):
+        """Whether `user` may edit this user's repositories, and so view the private ones: staff and the user."""
+        if not (user and user.is_authenticated):
+            return False
+        return user.is_staff or self.id == user.id
+
     @property
     def is_guest_group(self):
         return self.has_auth_group(GUEST_GROUP)
