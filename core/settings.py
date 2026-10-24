@@ -656,6 +656,16 @@ if ENV == 'development':
     # SILKY_PYTHON_PROFILER = True
     # SILKY_PYTHON_PROFILER_RESULT_PATH = '/code/core/'
 
+# Django apps and URLconfs a deployment adds to this build, as comma-separated dotted paths. Extra URLconfs are
+# included after core.urls' own routes, so those keep precedence.
+OCL_EXTRA_APPS = [app.strip() for app in os.environ.get('OCL_EXTRA_APPS', '').split(',') if app.strip()]
+INSTALLED_APPS = [*INSTALLED_APPS, *OCL_EXTRA_APPS]
+OCL_EXTRA_URLCONFS = [
+    urlconf.strip() for urlconf in os.environ.get('OCL_EXTRA_URLCONFS', '').split(',') if urlconf.strip()
+]
+# The class that decides and records the use of capabilities (core.capabilities.policy)
+CAPABILITY_POLICY = os.environ.get('CAPABILITY_POLICY', 'core.capabilities.policy.GroupLimitPolicy')
+
 # MINIO storage settings
 MINIO_ENDPOINT = os.environ.get('MINIO_ENDPOINT', '')
 MINIO_EXTERNAL_ENDPOINT = os.environ.get('MINIO_EXTERNAL_ENDPOINT', '')

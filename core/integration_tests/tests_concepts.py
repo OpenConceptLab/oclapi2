@@ -17,6 +17,7 @@ from rest_framework.test import APIRequestFactory
 
 from core.bundles.models import Bundle
 from core.capabilities.exceptions import CapabilityExceeded
+from core.capabilities.policy import GroupLimitPolicy
 from core.capacity.config import clear_cache, save_config
 from core.capacity.constants import HEADER_DECISION
 from core.capacity.limiter import RedisLanes
@@ -4440,8 +4441,7 @@ class MetadataToConceptsListViewTest(CapacityRedisMockMixin, OCLAPITestCase):
 
     def test_post_403_match_operation_limit_reached(self):
         with patch.object(
-                UserProfile, 'check_and_consume_capability',
-                side_effect=CapabilityExceeded('mapper.match_operations', 10, 10, 1)):
+                GroupLimitPolicy, 'consume', side_effect=CapabilityExceeded('mapper.match_operations', 10, 10, 1)):
             response = self.match()
 
         self.assertEqual(response.status_code, 403)
@@ -4450,11 +4450,12 @@ class MetadataToConceptsListViewTest(CapacityRedisMockMixin, OCLAPITestCase):
 
     def test_post_refunds_consumed_units_when_search_fails(self):
         with patch.object(MetadataToConceptsListView, 'filter_queryset', side_effect=ValueError('es down')), \
-                patch('core.capabilities.models.UsageCounter.refund') as refund_mock:
+                patch.object(GroupLimitPolicy, 'reverse') as reverse_mock:
             with self.assertRaises(ValueError):
                 self.match({'rows': [{'name': 'Malaria'}, {'name': 'Fever'}]})
 
-        refund_mock.assert_called_once_with(self.user, ANY, units=2)
+        reverse_mock.assert_called_once_with(ANY, 2)
+        self.assertEqual(reverse_mock.call_args.args[0].user, self.user)
 
     def test_variants_are_only_for_core_users(self):
         with patch.object(ConceptFuzzySearch, 'search', wraps=ConceptFuzzySearch.search) as search_mock:

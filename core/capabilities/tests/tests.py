@@ -1,18 +1,22 @@
 import json
+from datetime import datetime, timezone as dt_timezone
 from io import StringIO
 from unittest.mock import patch
 
 from django.contrib.auth.models import Group, Permission
 from django.core.management import call_command, CommandError
+from django.test import override_settings
 
 from core.capabilities.constants import (
     AI_ASSISTANT_CALLS_CAPABILITY_ID, AI_ASSISTANT_CHANGE_COMMENTS_CAPABILITY_ID,
     CLONE_RESOURCES_PER_CALL_CAPABILITY_ID, IMPORTS_FILE_SIZE_CAPABILITY_ID,
     MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, MAPPER_PROJECTS_CAPABILITY_ID,
 )
-from core.capabilities.exceptions import CapabilityExceeded
-from core.capabilities.models import Capability, GroupCapability, UsageEvent, UserCapabilityOverride
+from core.capabilities.exceptions import CapabilityExceeded, UsageRefused
+from core.capabilities.models import Capability, GroupCapability, UsageCounter, UsageEvent, UserCapabilityOverride
+from core.capabilities.policy import CapabilityPolicy, GroupLimitPolicy
 from core.common.tests import OCLAPITestCase, PREVIEW_GROUP_NAME
+from core.common.utils import get_capability_policy
 from core.users.constants import PREVIEW_GROUP, PREVIEW_GRANDFATHERED_GROUP
 from core.users.tests.factories import UserProfileFactory
 
@@ -534,3 +538,247 @@ class AuthoringCapabilityDefaultTest(OCLAPITestCase):
         user = UserProfileFactory()
         self.assertIsNone(user.get_capability_usage(IMPORTS_FILE_SIZE_CAPABILITY_ID))
         self.assertIsNone(user.get_capability_usage(CLONE_RESOURCES_PER_CALL_CAPABILITY_ID))
+
+
+class FakePolicy(CapabilityPolicy):
+    """Records every call, and answers with values GroupLimitPolicy never gives."""
+    calls = []
+    refusal = None
+    window_start = datetime(2030, 1, 1, tzinfo=dt_timezone.utc)
+
+    def get_limit(self, user, capability_id):
+        self.calls.append(('get_limit', user, capability_id))
+        return 7
+
+    def get_usage(self, user, capability_id):
+        self.calls.append(('get_usage', user, capability_id))
+        return {'used': 3, 'window': 'fake'}
+
+    def get_window_start(self, user, capability_id):
+        self.calls.append(('get_window_start', user, capability_id))
+        return self.window_start
+
+    def consume(self, user, capability_id, units=1, *, idempotency_key=None, **attribution):
+        self.calls.append(('consume', user, capability_id, units, idempotency_key, attribution))
+        if self.refusal:
+            raise UsageRefused(dict(self.refusal), not_entitled=self.refusal.get('error_code') == 'fake_not_entitled')
+        return UsageEvent.objects.create(user=user, capability_id=capability_id, units=units), False
+
+    def reverse(self, usage_event, units):
+        self.calls.append(('reverse', usage_event, units))
+        return units
+
+
+@override_settings(CAPABILITY_POLICY='core.capabilities.tests.tests.FakePolicy')
+class CapabilityPolicyContractTest(OCLAPITestCase):
+    """Every call site goes through CAPABILITY_POLICY, and sends what the policy reports."""
+
+    def setUp(self):
+        super().setUp()
+        FakePolicy.calls = []
+        FakePolicy.refusal = None
+        self.user = UserProfileFactory()
+        self.user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))  # mapper.use, for $match
+
+    def calls(self, name):
+        return [call for call in FakePolicy.calls if call[0] == name]
+
+    def consume(self, **data):
+        return self.client.post(
+            '/capabilities/consume/', data={'capability': 'ai_assistant.calls', **data}, format='json',
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+
+    def match(self, rows=2):
+        return self.client.post(
+            '/concepts/$match/', {'rows': [{'name': 'Malaria'}] * rows, 'target_repo_url': '/orgs/OCL/sources/X/'},
+            format='json', HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+
+    def test_user_profile_delegates(self):
+        self.assertEqual(self.user.get_capability_limit(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID), 7)
+        self.assertEqual(self.user.get_capability_usage(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID), 3)
+        event, already_consumed = self.user.check_and_consume_capability(
+            MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, units=2, action='act', algorithm='alg', idempotency_key='key')
+
+        self.assertFalse(already_consumed)
+        self.assertEqual(event.units, 2)
+        self.assertEqual(
+            self.calls('consume'),
+            [('consume', self.user, MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, 2, 'key',
+              {'action': 'act', 'algorithm': 'alg', 'map_project': None, 'run': None})])
+
+    def test_user_capabilities_report_every_usage_field(self):
+        response = self.client.get(
+            '/user/?includeCapabilities=true', HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+
+        self.assertEqual(response.status_code, 200)
+        capabilities_by_name = {c['name']: c for c in response.data['capabilities']}
+        self.assertEqual(
+            capabilities_by_name['ai_assistant.calls'],
+            {'name': 'ai_assistant.calls', 'limit': 7, 'used': 3, 'window': 'fake'})
+
+    def test_consume_reports_every_usage_field(self):
+        response = self.consume(units=2, action='act', idempotency_key='key')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {key: response.data[key] for key in ['capability', 'limit', 'used', 'window', 'units', 'already_consumed']},
+            {'capability': 'ai_assistant.calls', 'limit': 7, 'used': 3, 'window': 'fake', 'units': 2,
+             'already_consumed': False})
+        self.assertEqual(self.calls('consume')[0][3:5], (2, 'key'))
+
+    def test_consume_refusal_is_sent_as_the_policy_built_it(self):
+        FakePolicy.refusal = {'error_code': 'fake_limit_reached', 'limit': 5, 'used': 5, 'window': 'fake'}
+
+        response = self.consume()
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            dict(response.data),
+            {'detail': 'ai_assistant.calls limit reached.', 'error_code': 'fake_limit_reached', 'limit': 5,
+             'used': 5, 'window': 'fake'})
+
+        FakePolicy.refusal = {'detail': 'From the policy.', 'error_code': 'fake_not_entitled'}
+
+        response = self.consume()
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(dict(response.data), {'detail': 'From the policy.', 'error_code': 'fake_not_entitled'})
+
+    def test_match_refusal_is_sent_as_the_policy_built_it(self):
+        FakePolicy.refusal = {'error_code': 'fake_not_entitled', 'limit': None, 'used': 0, 'window': 'fake'}
+
+        response = self.match()
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            dict(response.data),
+            {'detail': 'You do not have Mapper match access.', 'error_code': 'fake_not_entitled', 'limit': None,
+             'used': 0, 'window': 'fake'})
+
+    def test_match_reverses_its_event_when_the_search_fails(self):
+        from core.concepts.views import MetadataToConceptsListView
+        with patch.object(MetadataToConceptsListView, 'filter_queryset', side_effect=ValueError('es down')):
+            with self.assertRaises(ValueError):
+                self.match(rows=3)
+
+        consume, = self.calls('consume')
+        self.assertEqual(consume[1:4], (self.user, MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, 3))
+        reverse, = self.calls('reverse')
+        self.assertEqual((reverse[1].user, reverse[1].units, reverse[2]), (self.user, 3, 3))
+
+    def test_match_that_succeeds_is_not_reversed(self):
+        from core.concepts.views import MetadataToConceptsListView
+        with patch.object(MetadataToConceptsListView, 'filter_queryset', return_value=[]):
+            response = self.match()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(self.calls('consume')), 1)
+        self.assertEqual(self.calls('reverse'), [])
+
+    def test_staff_refund_corrects_the_policy_window(self):
+        staff = UserProfileFactory(is_staff=True)
+        UsageCounter.objects.create(
+            user=self.user, capability_id=AI_ASSISTANT_CALLS_CAPABILITY_ID, window_start=FakePolicy.window_start,
+            used=5)
+        UsageCounter.objects.create(user=self.user, capability_id=AI_ASSISTANT_CALLS_CAPABILITY_ID, used=5)
+
+        response = self.client.post(
+            '/capabilities/refund/', data={'user': self.user.username, 'capability': 'ai_assistant.calls', 'units': 2},
+            format='json', HTTP_AUTHORIZATION='Token ' + staff.get_token())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            dict(response.data),
+            {'user': self.user.username, 'capability': 'ai_assistant.calls', 'limit': 7, 'used': 3, 'window': 'fake'})
+        self.assertEqual(
+            dict(UsageCounter.objects.filter(user=self.user).values_list('window_start', 'used')),
+            {FakePolicy.window_start: 3, None: 5})
+
+
+class WindowedPolicy(GroupLimitPolicy):
+    window_start = None
+
+    def get_window_start(self, user, capability_id):
+        return self.window_start
+
+
+@override_settings(CAPABILITY_POLICY='core.capabilities.tests.tests.WindowedPolicy')
+class GroupLimitPolicyWindowTest(OCLAPITestCase):
+    first_window = datetime(2030, 1, 1, tzinfo=dt_timezone.utc)
+    second_window = datetime(2030, 2, 1, tzinfo=dt_timezone.utc)
+
+    def setUp(self):
+        super().setUp()
+        WindowedPolicy.window_start = self.first_window
+        self.user = UserProfileFactory()
+        UserCapabilityOverride.objects.create(
+            user=self.user, capability_id=MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, limit=3)
+
+    def tearDown(self):
+        WindowedPolicy.window_start = None
+        super().tearDown()
+
+    def consume(self, units=1, idempotency_key=None):
+        return self.user.check_and_consume_capability(
+            MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, units=units, idempotency_key=idempotency_key)
+
+    def used_by_window(self):
+        return dict(UsageCounter.objects.filter(user=self.user).values_list('window_start', 'used'))
+
+    def test_each_window_counts_from_zero(self):
+        event, _ = self.consume(units=3)
+        with self.assertRaises(CapabilityExceeded):
+            self.consume()
+
+        WindowedPolicy.window_start = self.second_window
+        self.consume()
+
+        self.assertEqual(event.window_start, self.first_window)
+        self.assertEqual(self.user.get_capability_usage(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID), 1)
+        self.assertEqual(self.used_by_window(), {self.first_window: 3, self.second_window: 1})
+
+    def test_a_key_replays_in_a_later_window(self):
+        event, _ = self.consume(units=2, idempotency_key='key')
+
+        WindowedPolicy.window_start = self.second_window
+        replay, already_consumed = self.consume(units=2, idempotency_key='key')
+
+        self.assertTrue(already_consumed)
+        self.assertEqual(replay.id, event.id)
+        self.assertEqual(self.used_by_window(), {self.first_window: 2, self.second_window: 0})
+
+    def test_reverse_lowers_the_window_the_units_counted_in(self):
+        event, _ = self.consume(units=2)
+        WindowedPolicy.window_start = self.second_window
+        self.consume()
+
+        self.assertEqual(WindowedPolicy().reverse(event, 2), 2)
+        self.assertEqual(WindowedPolicy().reverse(event, 2), 0)
+
+        event.refresh_from_db()
+        self.assertEqual((event.units, event.reversed_units), (2, 2))
+        self.assertEqual(self.used_by_window(), {self.first_window: 0, self.second_window: 1})
+
+    def test_reverse_never_takes_back_more_than_the_event_or_the_counter(self):
+        event, _ = self.consume(units=3)
+        UsageCounter.refund(self.user, MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, units=2, window_start=self.first_window)
+
+        self.assertEqual(WindowedPolicy().reverse(event, 5), 3)
+
+        event.refresh_from_db()
+        self.assertEqual(event.reversed_units, 3)
+        self.assertEqual(self.used_by_window(), {self.first_window: 0})
+
+
+class GroupLimitPolicyDefaultWindowTest(OCLAPITestCase):
+    def test_usage_counts_in_the_window_that_never_ends(self):
+        user = UserProfileFactory()
+        UserCapabilityOverride.objects.create(user=user, capability_id=MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, limit=0)
+
+        event, _ = user.check_and_consume_capability(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, units=2)
+
+        self.assertIsNone(event.window_start)
+        self.assertEqual(
+            list(UsageCounter.objects.filter(user=user).values_list('window_start', 'used')), [(None, 2)])
+        self.assertEqual(get_capability_policy().reverse(event, 2), 2)
+        self.assertEqual(user.get_capability_usage(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID), 0)

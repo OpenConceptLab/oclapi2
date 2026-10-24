@@ -1,16 +1,16 @@
 from rest_framework import serializers
 
+from core.common.utils import get_capability_policy
+
 
 class CapabilitySerializer(serializers.Serializer):  # pylint: disable=abstract-method
     name = serializers.CharField()
-    limit = serializers.SerializerMethodField()
-    used = serializers.SerializerMethodField()
+    limit = serializers.IntegerField(read_only=True, allow_null=True)
+    used = serializers.IntegerField(read_only=True, allow_null=True)
 
-    def get_limit(self, obj):
-        return self.context['user'].get_capability_limit(obj.id)
-
-    def get_used(self, obj):
-        return self.context['user'].get_capability_usage(obj.id)
+    def to_representation(self, instance):
+        # every usage field the policy reports, not only `used`
+        return {'name': instance.name, **get_capability_policy().describe(self.context['user'], instance.id)}
 
 
 class UserCapabilityOverrideSerializer(serializers.Serializer):  # pylint: disable=abstract-method

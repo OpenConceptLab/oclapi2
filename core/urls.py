@@ -32,7 +32,7 @@ from core.concepts.views import ConceptsHierarchyAmendAdminView
 from core.events.views import GuestEventsView
 from core.importers.views import BulkImportView
 from core.map_projects.views import AutomatchRunView
-from core.settings import ENV
+from core.settings import ENV, OCL_EXTRA_URLCONFS
 
 api_info = openapi.Info(
         title="OCL API",
@@ -126,6 +126,8 @@ if ENV == 'development':
         path("silk/", include("silk.urls", namespace="silk")),
         *urlpatterns
     ]
+
+urlpatterns += [path('', include(urlconf)) for urlconf in OCL_EXTRA_URLCONFS]
 
 
 handler500 = 'rest_framework.exceptions.server_error'
