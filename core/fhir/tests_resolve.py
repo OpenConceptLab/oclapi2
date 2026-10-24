@@ -3,6 +3,8 @@ core.fhir.resolve: FHIR's canonical resolution through the shared resolver, with
 Shared canonicals (ICD-10, ATC), a Source and a Collection sharing one, a repository with nothing released, the
 fixture org's private namespace, unknown systems and versions, and HEAD. OpenConceptLab/ocl_online#451.
 """
+from unittest.mock import patch
+
 from django.contrib.auth.models import AnonymousUser
 
 from core.collections.models import Collection
@@ -54,6 +56,20 @@ class NamespaceTest(OCLTestCase):
         error = fhir_resolve.UnresolvedError('ValueSet', UNKNOWN, '1.0')
         self.assertEqual(str(error.detail), f"A definition for ValueSet '{UNKNOWN}' version '1.0' could not be found")
         self.assertNotIn('expression', error.outcome()['issue'][0])
+
+    def test_the_resolver_asks_about_an_owners_private_repositories_once(self):
+        owner, other = UserProfileFactory(username='jdoe'), UserProfileFactory()
+        head = UserSourceFactory(user=owner, mnemonic='codes')
+        release = UserSourceFactory(user=owner, mnemonic='codes', version='v1')
+        elsewhere = UserSourceFactory(user=other, mnemonic='codes')
+        resolver = FhirResolver({'user': 'jdoe'}, owner)
+        with patch.object(type(head), 'has_parent_edit_access', autospec=True, return_value=True) as asked:
+            self.assertTrue(all(resolver.may_view_private(row) for row in (head, release, head)))
+            self.assertTrue(resolver.may_view_private(elsewhere))
+        self.assertEqual([call.args[0].id for call in asked.call_args_list], [head.id, elsewhere.id])
+        # the global base shows no private repository, and an anonymous caller none anywhere
+        self.assertFalse(FhirResolver({}, owner).may_view_private(head))
+        self.assertFalse(FhirResolver({'user': 'jdoe'}, AnonymousUser()).may_view_private(head))
 
 
 class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-methods
