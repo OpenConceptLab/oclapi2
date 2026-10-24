@@ -10,7 +10,8 @@ The FHIR R4 wire form of the version-neutral (R5-shaped) answers core.fhir.ops b
 """
 from core.concept_maps.constants import (
     EQUIVALENT, NOT_RELATED_TO, RELATED_TO, SOURCE_IS_BROADER, SOURCE_IS_NARROWER)
-from core.fhir.base import FHIR_RELEASE, prune
+from core.fhir.constants import FHIR_RELEASE
+from core.fhir.xml import prune
 
 # R5 relationship -> R4 equivalence, as HL7's R4/R5 ConceptMap conversion maps them: the target is wider than a source
 # that is narrower than it; not-related-to is disjoint
@@ -162,6 +163,13 @@ def validate_code_parameters(answer):
 def equivalence(relationship_code):
     """A relationship's R4 equivalence."""
     return EQUIVALENCES[relationship_code]
+
+
+def concept_map_groups(groups):
+    """ConceptMap groups (core.fhir.ops.translate.concept_map_groups) in R4, each relationship as an equivalence."""
+    return [{**group, 'element': [{**element, 'target': [
+        {'code': target['code'], 'equivalence': equivalence(target['relationship'])} for target in element['target']]}
+        for element in group['element']]} for group in groups]
 
 
 def translate_parameters(answer):

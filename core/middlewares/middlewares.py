@@ -17,9 +17,11 @@ from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER, RESPONSE_
 from core.common.exceptions import DeactivatedAccountLoginRefused, SSOIdentityMismatchRefused
 from core.common.throttling import FhirMinuteThrottle, ThrottleUtil
 from core.common.utils import set_current_user, set_request_url
-from core.fhir.base import FHIR_JSON, is_fhir_path, is_outcome_response, outcome_response, response_json
+from core.fhir.constants import FHIR_JSON
+from core.fhir.negotiation import is_outcome_response, outcome_response, response_json
 from core.fhir.outcomes import issue, operation_outcome, outcome_for_status, report_server_error
 from core.fhir.swagger import on_fhir_host
+from core.fhir.utils import is_fhir_path
 from core.services.analytics_event_emitter import AnalyticsEventEmitter
 from core.services.auth.core import AuthService
 

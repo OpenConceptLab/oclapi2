@@ -111,13 +111,10 @@ class URLRegistry(BaseModel):
 
         return repo, entry
 
-    def find_repo(self, repo_type=None):
-        """
-        The repository the entry points at now: the one with its url in its namespace (none without a namespace).
-        repo_type limits it to a Source or a Collection (find_repo_by_canonical_url). Reads only.
-        """
+    def find_repo(self):
+        """The repository the entry points at now: the one with its url in its namespace, if any. Reads only."""
         namespace_owner = self.namespace_owner
-        return namespace_owner.find_repo_by_canonical_url(self.url, repo_type) if namespace_owner else None
+        return namespace_owner.find_repo_by_canonical_url(self.url) if namespace_owner else None
 
     def lookup_entry(self):
         """

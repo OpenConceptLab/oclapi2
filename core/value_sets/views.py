@@ -3,11 +3,10 @@ import logging
 from core.collections.views import CollectionListView, CollectionRetrieveUpdateDestroyView
 from core.common.constants import HEAD
 from core.fhir.adapters import r4
-from core.fhir.base import FhirViewMixin, FhirOperationView
+from core.fhir.mixins import FhirOperationView, FhirReadMixin, FhirSearchMixin, FhirViewMixin
 from core.fhir.ops.expand import expand
 from core.fhir.ops.validate_code import validate_value_set
-from core.fhir.resolve import namespace_of
-from core.fhir.search import FhirSearchMixin, FhirReadMixin
+from core.fhir.utils import namespace_of
 from core.value_sets.serializers import ValueSetDetailSerializer, ValueSetExpansionSerializer
 
 logger = logging.getLogger('oclapi')
@@ -57,5 +56,6 @@ class ValueSetExpandView(FhirOperationView):
     def adapter(self, answer):
         """The answer as an R4 ValueSet: the value set version as a read shows it, with the expansion."""
         resource = ValueSetExpansionSerializer(
-            answer['value_set'], context={'opaque_ids': namespace_of(self.kwargs) is None}).data
+            answer['value_set'], context={'opaque_ids': namespace_of(self.kwargs) is None,
+                                          'fhir_resolver': self.get_fhir_resolver()}).data
         return r4.expansion_value_set(resource, answer)

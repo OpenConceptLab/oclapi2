@@ -19,8 +19,8 @@ from core.common.fhir_helpers import to_ocl_path
 from core.common.utils import to_parent_uri
 from core.concepts.models import Concept
 from core.fhir import outcomes
-from core.fhir.base import Coding
-from core.fhir.resolve import REPO_PATHS, UnresolvedError, namespace_of, resolve
+from core.fhir.parameters import Coding
+from core.fhir.resolve import REPO_PATHS, UnresolvedError
 from core.fhir.search import read_version
 
 def coded_input(parameters, system, version):
@@ -54,25 +54,25 @@ def fhir_code(code):
 
 def system_of(version, named=None):
     """A code system version's canonical URL (else its repository's), or else the URL it was named by."""
-    return version.canonical_url or getattr(version, 'repository_canonical_url', None) or named
+    return version.canonical_url or version.repository_canonical_url or named
 
 
-def instance_version(resource_type, instance_id, version, kwargs, user):
+def instance_version(resource_type, instance_id, version, resolver):
     """
     The repository version an instance-level operation is on: as a read finds it (a release: at the global base the
     opaque id's, at an owner base the mnemonic's `version`, else the newest shown). At an owner base, HEAD and a named
     version the read doesn't find go through core.fhir.resolve, with its visibility rule. A global id names a release,
     so any version named there is left to the caller's version check. Not found is a read's 404.
     """
-    namespace = namespace_of(kwargs)
+    namespace = resolver.namespace
     if namespace is None or version != HEAD:
         try:
-            return read_version(resource_type, instance_id, version, kwargs, user)
+            return read_version(resource_type, instance_id, version, resolver)
         except outcomes.NotFoundError:
             if namespace is None or not version:
                 raise
     try:
-        return resolve(resource_type, f'{namespace}{REPO_PATHS[resource_type]}/{instance_id}/', version, kwargs, user)
+        return resolver.resolve(resource_type, f'{namespace}{REPO_PATHS[resource_type]}/{instance_id}/', version)
     except UnresolvedError as ex:
         raise outcomes.NotFoundError(f'{resource_type}/{instance_id} not found') from ex
 
@@ -83,7 +83,7 @@ def is_system_of(system, version, named=None):
     repository's), the URL it was resolved by (`named`), or an OCL path of its repository or of the version.
     """
     url = system.partition('|')[0]
-    canonicals = {version.canonical_url, getattr(version, 'repository_canonical_url', None),
+    canonicals = {version.canonical_url, version.repository_canonical_url,
                   (named or '').partition('|')[0]}
     if url in canonicals - {None, ''}:
         return True

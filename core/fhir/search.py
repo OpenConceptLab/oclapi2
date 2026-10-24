@@ -41,8 +41,6 @@ from django.db.models.functions import Coalesce
 from django.db.models.lookups import Exact, IContains, In, IStartsWith
 from django.utils import timezone
 from psycopg2 import errorcodes
-from rest_framework.fields import CharField
-from rest_framework.response import Response
 
 from core.bundles.serializers import FHIRBundleSerializer
 from core.collections.models import Expansion
@@ -53,17 +51,16 @@ from core.common.mixins import CustomPaginator
 from core.common.utils import to_int
 from core.concepts.models import Concept
 from core.fhir import mapping_index, outcomes
-from core.fhir.base import CONTROL_PARAMETERS, FhirParameters, fhir_base_url
-from core.fhir.constants import SEARCH_TOO_COSTLY
+from core.fhir.constants import CONTROL_PARAMETERS, SEARCH_TOO_COSTLY
+from core.fhir.parameters import FhirParameters
 from core.fhir.resolve import (
-    PUBLIC_ACCESS, REPO_TYPES, namespace_of, owner_access, visible_versions, viewable_rows, is_shown, repository_rows,
-    with_repository_access)
+    PUBLIC_ACCESS, REPO_TYPES, repository_rows, with_repository_access)
+from core.fhir.utils import fhir_base_url
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
 from core.sources.models import Source
 from core.users.models import UserProfile
 
-SUBSETTED = {'system': 'http://terminology.hl7.org/CodeSystem/v3-ObservationValue', 'code': 'SUBSETTED'}
 PAGING_PARAMETERS = frozenset({'_count', 'page'})
 OPAQUE_ID = re.compile(r'[1-9][0-9]{0,17}')  # a database key, as str() writes it
 NOTHING = Q(pk__in=[])
@@ -224,24 +221,16 @@ def with_repository_canonical(queryset):
 
 def code_system_concepts(source):
     """
-    (count, concepts) for a CodeSystem read, cached on the version: its concepts, retired ones included, when it has
-    at most FHIR_CODE_SYSTEM_CONCEPT_LIMIT, else (its number of concepts, None). The number is counted on the version's
+    (count, concepts) for a CodeSystem read: its concepts, retired ones included, when it has at most
+    FHIR_CODE_SYSTEM_CONCEPT_LIMIT, else (its number of concepts, None). The number is counted on the version's
     concept links alone (an index-only count, cheap even for LOINC); within the limit it's the concepts listed.
     """
-    if not hasattr(source, 'fhir_concepts'):
-        count, concepts = Concept.sources.through.objects.filter(source_id=source.id).count(), None
-        if count <= settings.FHIR_CODE_SYSTEM_CONCEPT_LIMIT:
-            concepts = list(source.concepts.filter(is_active=True).select_related('parent').prefetch_related(
-                'names', 'descriptions').order_by('id'))
-            count = len(concepts)
-        source.fhir_concepts = count, concepts
-    return source.fhir_concepts
-
-
-def concepts_over_limit(source):
-    """Whether a CodeSystem has more concepts than its read lists: a search annotates it, a read counts them."""
-    over = getattr(source, 'concepts_over_limit', None)
-    return code_system_concepts(source)[1] is None if over is None else over
+    count, concepts = Concept.sources.through.objects.filter(source_id=source.id).count(), None
+    if count <= settings.FHIR_CODE_SYSTEM_CONCEPT_LIMIT:
+        concepts = list(source.concepts.filter(is_active=True).select_related('parent').prefetch_related(
+            'names', 'descriptions').order_by('id'))
+        count = len(concepts)
+    return count, concepts
 
 
 def with_concepts_over_limit(queryset):
@@ -305,7 +294,7 @@ def indexed_repository(owner_type, owner, mnemonic):
     return Q(mnemonic__iexact=mnemonic, user_id__in=UserProfile.objects.filter(username__iexact=owner).values('id'))
 
 
-def mapped(side, value, sources, holding, namespace, user):  # pylint: disable=too-many-arguments
+def mapped(side, value, sources, holding, resolver):
     """
     A ConceptMap version holding a live mapping whose group source (side 'from') or target ('to') shows `value`, as
     ConceptMapGroupField builds groups: retired and deleted mappings aren't read; a group's system is the from or to
@@ -323,7 +312,7 @@ def mapped(side, value, sources, holding, namespace, user):  # pylint: disable=t
     uncorrelated IN, which it runs once.
     """
     field = f'mapping__{side}_source'
-    unnamed = ~Exists(viewable_rows(Source, namespace, user).filter(id=OuterRef(f'{field}_id'), canonical_url__gt=''))
+    unnamed = ~Exists(resolver.viewable_rows(Source).filter(id=OuterRef(f'{field}_id'), canonical_url__gt=''))
     stored = Q(**{f'{field}_url': value}) & unnamed
     paths = repository_prefixes(value, ('sources', 'collections', 'ConceptMap'), names=('ConceptMap',),
                                 trailing_slash=True)
@@ -346,22 +335,15 @@ def mapped(side, value, sources, holding, namespace, user):  # pylint: disable=t
 class Search:
     """The criteria of one search's parameters, on the versions of a resource type at a base, for a caller."""
 
-    def __init__(self, resource_type, kwargs, user=None):
+    def __init__(self, resource_type, resolver):
         self.resource_type = resource_type
         self.model = REPO_TYPES[resource_type]
         self.parameters = PARAMETERS[resource_type]
-        self.namespace, self.user = namespace_of(kwargs), user
-        self.access = owner_access(kwargs, user)
+        self.resolver = resolver
+        self.namespace = resolver.namespace
         self.found = {}  # (lookup, canonical URL): what look_up found for it
         # for what isn't a query: the mappings index
         self.deadline = time.monotonic() + settings.FHIR_SEARCH_TIMEOUT_MS / 1000
-
-    def viewable_sources(self):
-        """
-        The Source rows the base shows the caller, whoever owns them: what source-system, target-system and reference
-        match. At an owner base that's another owner's private source too, if the caller may view it themselves.
-        """
-        return viewable_rows(Source, self.namespace, self.user)
 
     def criteria(self, query):
         """
@@ -420,10 +402,10 @@ class Search:
         if lookup == 'repositories':
             found = repositories_with(self.model.objects, urls)
         elif lookup == 'referenced':
-            found = repositories_with(self.viewable_sources(), urls)
+            found = repositories_with(self.resolver.viewable_rows(Source), urls)
         else:
             found, shown = sources_with(
-                self.viewable_sources(), urls, visible_versions(self.resource_type, access=self.access))
+                self.resolver.viewable_rows(Source), urls, self.resolver.visible_versions(self.resource_type))
             side = SIDES[self.parameters[name]]
             holding = mapping_index.holding(
                 side, {url: {repository for _, repository in rows} for url, rows in found.items()}, shown,
@@ -541,20 +523,19 @@ class Search:
         those the base shows the caller. An uncorrelated IN, which the planner hashes once, rather than a correlated
         subquery.
         """
-        sources = self.viewable_sources().filter(canonical_q(value, self.found[('referenced', value)])).values('id')
+        sources = self.resolver.viewable_rows(Source).filter(
+            canonical_q(value, self.found[('referenced', value)])).values('id')
         return reduce(or_, (
             Q(expansion_uri__in=versions.through.objects.filter(source_id__in=sources).values('expansion__uri'))
             for versions in (Expansion.explicit_source_versions, Expansion.evaluated_source_versions)))
 
     def by_source(self, value):
         """A group's source is the system named."""
-        return mapped('from', value, self.found[('sources', value)], self.found[('from', value)], self.namespace,
-                      self.user)
+        return mapped('from', value, self.found[('sources', value)], self.found[('from', value)], self.resolver)
 
     def by_target(self, value):
         """A group's target is the system named."""
-        return mapped('to', value, self.found[('sources', value)], self.found[('to', value)], self.namespace,
-                      self.user)
+        return mapped('to', value, self.found[('sources', value)], self.found[('to', value)], self.resolver)
 
 
 def page_size(query):
@@ -595,8 +576,8 @@ def search_bundle(view):
     """The searchset Bundle a FHIR search view answers: the base's matching versions, one page of them."""
     request, resource_type = view.request, view.resource_type
     count = page_size(request.query_params)
-    search = Search(resource_type, view.kwargs, request.user)
-    ids = list(visible_versions(resource_type, access=search.access).filter(
+    search = Search(resource_type, view.get_fhir_resolver())
+    ids = list(search.resolver.visible_versions(resource_type).filter(
         search.criteria(request.query_params)).order_by('-id').values_list('id', flat=True))
     paginator, entries = None, []
     if count:
@@ -623,15 +604,15 @@ def read(view):
     must be one search lists: released, never HEAD, visible to the requester there. Raises NotFoundError.
     """
     return read_version(view.resource_type, view.kwargs[view.lookup_field], view.request.query_params.get('version'),
-                        view.kwargs, view.request.user)
+                        view.get_fhir_resolver())
 
 
-def read_version(resource_type, resource_id, version, kwargs, user):
+def read_version(resource_type, resource_id, version, resolver):
     """
-    read's rule for a resource `resource_id` names at the base `kwargs` names, for `user`: the id at the global base,
+    read's rule for a resource `resource_id` names at the resolver's base, for its caller: the id at the global base,
     the mnemonic and `version` (else the latest release shown) at an owner base. For the instance-level operations too.
     """
-    namespace = namespace_of(kwargs)
+    namespace, kwargs = resolver.namespace, resolver.kwargs
     versions = REPO_TYPES[resource_type].objects.filter(is_active=True, released=True).exclude(version=HEAD)
     latest = False
     if namespace is None:
@@ -644,100 +625,11 @@ def read_version(resource_type, resource_id, version, kwargs, user):
             retired=False).order_by('-created_at')
 
     instance = with_repository_access(with_repository_canonical(versions)).first()
-    if latest and instance and not is_shown(instance, namespace, user) and REPO_TYPES[resource_type].is_public_access(
+    if latest and instance and not resolver.is_shown(instance) and REPO_TYPES[resource_type].is_public_access(
             instance.repository_public_access):
         # the latest is private, in a public repository: the latest public one
         instance = with_repository_access(with_repository_canonical(
             versions.filter(public_access__in=PUBLIC_ACCESS))).first()
-    if not instance or not is_shown(instance, namespace, user):
+    if not instance or not resolver.is_shown(instance):
         raise outcomes.NotFoundError(f'{resource_type}/{resource_id} not found')
     return instance
-
-
-class FhirRepositoryViewMixin:
-    """The search and read views of CodeSystem, ValueSet and ConceptMap (after FhirViewMixin)."""
-    resource_type = None
-
-    def get_serializer_context(self):
-        return {**super().get_serializer_context(), 'opaque_ids': namespace_of(self.kwargs) is None}
-
-
-class FhirSearchMixin(FhirRepositoryViewMixin):
-    """GET on a resource type is its search."""
-
-    def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        """The searchset Bundle, in at most FHIR_SEARCH_TIMEOUT_MS of database time."""
-        return Response(within_search_timeout(lambda: search_bundle(self)))
-
-    head = get
-
-
-class FhirReadMixin(FhirRepositoryViewMixin):
-    """
-    GET on an id is its read, at the global base without the owner check the view's writes keep (verify_scope), and
-    without the source and collection views' recounts.
-    """
-
-    def verify_scope(self):
-        if self.request.method not in ('GET', 'HEAD'):
-            super().verify_scope()
-
-    def get_object(self, queryset=None):
-        if self.request.method not in ('GET', 'HEAD'):
-            return super().get_object(queryset)
-        return read(self)
-
-
-class CanonicalUrlField(CharField):
-    """A resource's canonical URL: the version's own, else its repository's (repository_canonical_url, on a read)."""
-
-    def get_attribute(self, instance):
-        return super().get_attribute(instance) or getattr(instance, 'repository_canonical_url', None)
-
-
-class TitleField(CharField):
-    """
-    A repository's FHIR title: its full name, or its name when it has no full name (empty or only whitespace). Writes
-    still go to full_name.
-    """
-
-    def get_attribute(self, instance):
-        full_name = instance.full_name
-        return full_name if full_name and full_name.strip() else instance.name
-
-
-class FhirRepositorySerializerMixin:
-    """
-    For the CodeSystem, ValueSet and ConceptMap serializers: the opaque id at the global base (context opaque_ids), and
-    in a search (many=True, context has_many) the summary, marked SUBSETTED, without `content_field`.
-    """
-    content_field = None
-
-    @classmethod
-    def many_init(cls, *args, **kwargs):
-        kwargs['context'] = {**kwargs.get('context', {}), 'has_many': True}
-        return super().many_init(*args, **kwargs)
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        if self.context.get('has_many'):
-            self.fields.pop(self.content_field, None)
-
-    def with_fhir_view(self, instance, rep):
-        """
-        The id (opaque at the global base), and meta.versionId: the version's opaque id at both bases, so the
-        releases of one repository, which share their mnemonic id at an owner base, stay distinct in a Bundle (bdl-7).
-        A search entry or a read whose content field is subsetted is tagged SUBSETTED. meta keeps its existing values
-        and tags.
-        """
-        if instance.id:
-            if self.context.get('opaque_ids'):
-                rep['id'] = str(instance.id)
-            rep['meta'] = {'versionId': str(instance.id), **(rep.get('meta') or {})}
-        if self.context.get('has_many') or getattr(self.fields.get(self.content_field), 'subsetted', False):
-            meta = rep.get('meta') or {}
-            tags = list(meta.get('tag') or [])
-            if SUBSETTED not in tags:
-                tags.append(SUBSETTED)
-            rep['meta'] = {**meta, 'tag': tags}
-        return rep

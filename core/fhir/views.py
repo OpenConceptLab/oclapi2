@@ -8,7 +8,7 @@ from rest_framework.views import APIView
 
 from core.fhir import capabilities
 from core.fhir.adapters import r4
-from core.fhir.base import FhirOperationView, FhirViewMixin
+from core.fhir.mixins import FhirOperationView, FhirViewMixin
 
 
 class CapabilityStatementView(FhirViewMixin, APIView):

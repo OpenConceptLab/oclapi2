@@ -22,7 +22,7 @@ class FhirWSGIRequest(WSGIRequest):
 
     def _set_content_type_params(self, meta):
         """Preserve the invalid raw header and mark FHIR requests for a safe JSON 400 response."""
-        from core.fhir.base import is_fhir_path
+        from core.fhir.utils import is_fhir_path
 
         try:
             super()._set_content_type_params(meta)

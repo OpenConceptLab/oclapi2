@@ -8,7 +8,7 @@ CapabilityStatement, TerminologyCapabilities and $versions Parameters.
   instance level, one of its operations; a $operation route directly under the base is a system operation. Routing a
   view lists it; nothing else does.
 - The search parameters are the search's own (core.fhir.search's PARAMETERS and STRING_FIELDS).
-- The FHIR versions are those the fhirVersion MIME parameter negotiates (core.fhir.base): R4, 4.0.
+- The FHIR versions are those the fhirVersion MIME parameter negotiates (core.fhir.negotiation): R4, 4.0.
 - The software is the OCL API and its version; the base URL is the request's.
 - TerminologyCapabilities lists each repository a CodeSystem search at the base shows the caller, under the identifier
   the resolver serves it at there: its canonical URL (its HEAD's) when the resolver picks it for that URL (with the URL
@@ -28,11 +28,12 @@ from django.urls import URLResolver, get_resolver
 from django.utils import timezone
 
 from core import __version__
-from core.fhir.constants import CODE_SYSTEMS_TOO_COSTLY
-from core.fhir.base import (
-    RESOURCE_TYPES, FhirOperationView, FhirVersioning, FhirViewMixin, fhir_base_url)
-from core.fhir.resolve import served_repositories
-from core.fhir.search import PARAMETERS, STRING_FIELDS, FhirReadMixin, FhirSearchMixin, within_search_timeout
+from core.fhir.constants import CODE_SYSTEMS_TOO_COSTLY, RESOURCE_TYPES
+from core.fhir.mixins import FhirOperationView, FhirReadMixin, FhirSearchMixin, FhirViewMixin
+from core.fhir.negotiation import FhirVersioning
+from core.fhir.resolve import FhirResolver
+from core.fhir.search import PARAMETERS, STRING_FIELDS, within_search_timeout
+from core.fhir.utils import fhir_base_url
 
 SOFTWARE = {'name': 'OCL API', 'version': __version__}
 FORMATS = [renderer.media_type for renderer in FhirViewMixin.renderer_classes if 'fhir' in renderer.media_type]
@@ -149,7 +150,7 @@ def capability_statement(request, kwargs):
     }
 
 
-def versions(parameters, kwargs, user, instance=None):  # pylint: disable=unused-argument
+def versions(parameters, resolver, instance=None):  # pylint: disable=unused-argument
     """
     $versions: the FHIR versions the fhirVersion MIME parameter accepts, as major.minor (4.0 and 4.0.1 are R4, 4.0),
     and the one served when a request names none.
@@ -158,7 +159,7 @@ def versions(parameters, kwargs, user, instance=None):  # pylint: disable=unused
             'default': FhirVersioning.default_version}
 
 
-def code_systems(kwargs, user):
+def code_systems(resolver):
     """
     [{url, versions, default}] for each repository a CodeSystem search at the base shows the caller, under the
     identifier the resolver serves it at (core.fhir.resolve's served_repositories): its released versions, newest
@@ -166,7 +167,7 @@ def code_systems(kwargs, user):
     newest live one.
     """
     listed = []
-    for identifier, rows in sorted(served_repositories(kwargs, user), key=lambda item: item[0]):
+    for identifier, rows in sorted(resolver.served_repositories(), key=lambda item: item[0]):
         default = next((version for version, retired in rows if not retired), None)
         if default is not None:
             listed.append({'url': identifier, 'versions': [version for version, _ in rows], 'default': default})
@@ -175,10 +176,11 @@ def code_systems(kwargs, user):
 
 def terminology_capabilities(request, kwargs):
     """The TerminologyCapabilities of the base `kwargs` names, for the request's user."""
+    resolver = FhirResolver(kwargs, request.user)
     resources, _ = offered(kwargs)
     operations = {(resource['type'], name) for resource in resources for name in resource['operations']}
     return {
         **described(request, kwargs),
-        'code_systems': within_search_timeout(lambda: code_systems(kwargs, request.user), CODE_SYSTEMS_TOO_COSTLY),
+        'code_systems': within_search_timeout(lambda: code_systems(resolver), CODE_SYSTEMS_TOO_COSTLY),
         **dict(block for operation, block in OPERATION_BLOCKS.items() if operation in operations),
     }

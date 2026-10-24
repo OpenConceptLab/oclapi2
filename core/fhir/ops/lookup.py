@@ -19,28 +19,25 @@ from rest_framework import status
 from core.fhir import outcomes
 from core.fhir.ops.concepts import (
     coded_input, find_concept, display_of, designations, fhir_code, instance_version, mismatch, system_of)
-from core.fhir.resolve import UnresolvedError, resolve
+from core.fhir.resolve import UnresolvedError
 
 
-def code_system_version(coding, kwargs, user, instance_id=None):
+def code_system_version(coding, resolver, instance_id=None):
     """The code system version a $lookup or $validate-code names: the instance, else the coding's system and version."""
     if instance_id:
-        return instance_version('CodeSystem', instance_id, coding.version, kwargs, user)
-    return resolve('CodeSystem', coding.system, coding.version, kwargs, user)
+        return instance_version('CodeSystem', instance_id, coding.version, resolver)
+    return resolver.resolve('CodeSystem', coding.system, coding.version)
 
 
-def lookup(parameters, kwargs, user, instance_id=None):
-    """
-    $lookup's answer for its FhirParameters at the base `kwargs` names (CodeSystem/{instance_id}/$lookup at the instance
-    level), for `user`: {name, version, display, code, system, abstract, inactive, designations}.
-    """
+def lookup(parameters, resolver, instance_id=None):
+    """$lookup for the resolver's base and caller, optionally on an instance."""
     coding = coded_input(parameters, 'system', 'version')
     target = coding._replace(version=parameters.text('version') or coding.version)
     code = coding.require('code', '$lookup needs the code to look up.')
     if not instance_id:
         coding.require('system', '$lookup needs the system the code is from.')
     try:
-        version = code_system_version(target, kwargs, user, instance_id)
+        version = code_system_version(target, resolver, instance_id)
     except UnresolvedError as ex:
         raise outcomes.NotFoundError(
             str(ex.detail), tx_issue_type='not-found', status_code=status.HTTP_422_UNPROCESSABLE_ENTITY) from ex

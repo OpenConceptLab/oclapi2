@@ -731,6 +731,14 @@ class CodeSystemTest(OCLTestCase):
         self.assertEqual(concepts[1].is_head, False)
         self.assertEqual(len(concepts[1].names.all()), 1)
 
+    def test_a_release_without_a_canonical_url_of_its_own_shows_its_repositorys(self):
+        """As a read and a search show it, wherever the serializer is used."""
+        head = OrganizationSourceFactory(canonical_url='https://example.org/codes')
+        release = OrganizationSourceFactory(
+            organization=head.organization, mnemonic=head.mnemonic, version='v1', released=True, canonical_url=None)
+
+        self.assertEqual(CodeSystemDetailSerializer(instance=release).data['url'], 'https://example.org/codes')
+
     def test_unable_to_represent_as_fhir(self):
         instance = Source(id='1', uri='/invalid/uri')
         serialized = CodeSystemDetailSerializer(instance=instance).data

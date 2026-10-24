@@ -14,7 +14,7 @@ from core.common.serializers import ReadSerializerMixin, StatusField, Identifier
 from core.concepts.models import Concept, ConceptName
 from core.concepts.serializers import ConceptDetailSerializer
 from core.fhir import search as fhir_search
-from core.fhir.search import CanonicalUrlField, FhirRepositorySerializerMixin, TitleField
+from core.fhir.serializers import CanonicalUrlField, FhirRepositorySerializerMixin, TitleField
 from core.sources.models import Source
 from core.sources.serializers import SourceCreateOrUpdateSerializer
 
@@ -133,6 +133,14 @@ class CodeSystemPropertySerializer(ReadSerializerMixin, serializers.Serializer):
     type = CharField()
 
 
+def listed_concepts(context, source):
+    """A CodeSystem version's (count, concepts) as its read lists them (code_system_concepts), read once."""
+    listed = context.setdefault('listed_concepts', {})
+    if source.id not in listed:
+        listed[source.id] = fhir_search.code_system_concepts(source)
+    return listed[source.id]
+
+
 class CodeSystemConceptField(serializers.Field):
     def to_internal_value(self, data):
         concepts = CodeSystemConceptSerializer(data=data, many=True)
@@ -141,7 +149,7 @@ class CodeSystemConceptField(serializers.Field):
 
     def to_representation(self, value):
         """Every concept, retired ones included, up to the limit; none above it (content not-present)."""
-        concepts = fhir_search.code_system_concepts(value)[1]
+        concepts = listed_concepts(self.context, value)[1]
         return CodeSystemConceptSerializer(concepts, many=True).data if concepts else []
 
 
@@ -204,12 +212,17 @@ class CodeSystemDetailSerializer(FhirRepositorySerializerMixin, serializers.Mode
 
     def get_total_count(self, obj):
         """A read's concept count; a search's summary has none (it only checks the limit)."""
-        return None if self.context.get('has_many') else fhir_search.code_system_concepts(obj)[0]
+        return None if self.context.get('has_many') else listed_concepts(self.context, obj)[0]
 
-    @staticmethod
-    def get_content(obj):
-        """complete (or the content mode the CodeSystem was saved with) up to the concept limit, else not-present"""
-        if fhir_search.concepts_over_limit(obj):
+    def get_content(self, obj):
+        """
+        complete (or the content mode the CodeSystem was saved with) up to the concept limit, else not-present: a
+        search annotates concepts_over_limit, a read counts them.
+        """
+        over_limit = getattr(obj, 'concepts_over_limit', None)
+        if over_limit is None:
+            over_limit = listed_concepts(self.context, obj)[1] is None
+        if over_limit:
             return 'not-present'
         return obj.content_type if obj.content_type in ('example', 'fragment', 'supplement') else 'complete'
 

@@ -3,6 +3,8 @@ core.fhir.resolve: FHIR's canonical resolution through the shared resolver, with
 Shared canonicals (ICD-10, ATC), a Source and a Collection sharing one, a repository with nothing released, the
 fixture org's private namespace, unknown systems and versions, and HEAD. OpenConceptLab/ocl_online#451.
 """
+from unittest.mock import patch
+
 from django.contrib.auth.models import AnonymousUser
 
 from core.collections.models import Collection
@@ -10,6 +12,8 @@ from core.common.constants import ACCESS_TYPE_NONE, HEAD
 from core.common.tests import OCLTestCase
 from core.fhir import resolve as fhir_resolve
 from core.fhir.outcomes import NotFoundError, TX_ISSUE_TYPE_SYSTEM
+from core.fhir.resolve import FhirResolver
+from core.fhir.utils import namespace_of
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import UserSourceFactory
 from core.url_registry.factories import GlobalURLRegistryFactory
@@ -28,10 +32,10 @@ ANONYMOUS = AnonymousUser()
 
 class NamespaceTest(OCLTestCase):
     def test_namespace_is_the_base_url_owner(self):
-        self.assertIsNone(fhir_resolve.namespace_of({}))
-        self.assertIsNone(fhir_resolve.namespace_of(None))
-        self.assertEqual(fhir_resolve.namespace_of({'org': 'CIEL', 'source': 'x'}), '/orgs/CIEL/')
-        self.assertEqual(fhir_resolve.namespace_of({'user': 'jdoe'}), '/users/jdoe/')
+        self.assertIsNone(namespace_of({}))
+        self.assertIsNone(namespace_of(None))
+        self.assertEqual(namespace_of({'org': 'CIEL', 'source': 'x'}), '/orgs/CIEL/')
+        self.assertEqual(namespace_of({'user': 'jdoe'}), '/users/jdoe/')
 
     def test_unresolved_error(self):
         error = fhir_resolve.UnresolvedError('CodeSystem', UNKNOWN, expression='system')
@@ -52,6 +56,20 @@ class NamespaceTest(OCLTestCase):
         error = fhir_resolve.UnresolvedError('ValueSet', UNKNOWN, '1.0')
         self.assertEqual(str(error.detail), f"A definition for ValueSet '{UNKNOWN}' version '1.0' could not be found")
         self.assertNotIn('expression', error.outcome()['issue'][0])
+
+    def test_the_resolver_asks_about_an_owners_private_repositories_once(self):
+        owner, other = UserProfileFactory(username='jdoe'), UserProfileFactory()
+        head = UserSourceFactory(user=owner, mnemonic='codes')
+        release = UserSourceFactory(user=owner, mnemonic='codes', version='v1')
+        elsewhere = UserSourceFactory(user=other, mnemonic='codes')
+        resolver = FhirResolver({'user': 'jdoe'}, owner)
+        with patch.object(type(head), 'has_parent_edit_access', autospec=True, return_value=True) as asked:
+            self.assertTrue(all(resolver.may_view_private(row) for row in (head, release, head)))
+            self.assertTrue(resolver.may_view_private(elsewhere))
+        self.assertEqual([call.args[0].id for call in asked.call_args_list], [head.id, elsewhere.id])
+        # the global base shows no private repository, and an anonymous caller none anywhere
+        self.assertFalse(FhirResolver({}, owner).may_view_private(head))
+        self.assertFalse(FhirResolver({'user': 'jdoe'}, AnonymousUser()).may_view_private(head))
 
 
 class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-methods
@@ -97,34 +115,33 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
                                (DRAFT, self.drafts)):
                 GlobalURLRegistryFactory(url=url, namespace=owner.uri)
 
-    resolve = staticmethod(fhir_resolve.resolve)
-
-    def assertUnresolved(self, resource_type, url, version=None, kwargs=None, user=ANONYMOUS):  # pylint: disable=invalid-name,too-many-arguments
+    def assertUnresolved(  # pylint: disable=invalid-name,too-many-arguments
+            self, resource_type, url, version=None, kwargs=None, user=ANONYMOUS):
         with self.assertRaises(fhir_resolve.UnresolvedError) as context:
-            self.resolve(resource_type, url, version, kwargs, user)
+            FhirResolver(kwargs, user).resolve(resource_type, url, version)
         self.assertEqual(
             (context.exception.resource_type, context.exception.url), (resource_type, url.partition('|')[0]))
         return context.exception
 
     def test_shared_canonicals_at_the_global_base(self):
-        version = self.resolve('CodeSystem', ICD10)
+        version = FhirResolver().resolve('CodeSystem', ICD10)
         self.assertEqual(version.id, self.who_icd_2019.id)
         self.assertEqual(version.canonical_url, ICD10)
 
         # the latest released version, not the newest one
-        self.assertEqual(self.resolve('CodeSystem', ATC).id, self.who_atc_2023.id)
-        self.assertEqual(self.resolve('CodeSystem', CIEL).id, self.ciel_v1.id)
+        self.assertEqual(FhirResolver().resolve('CodeSystem', ATC).id, self.who_atc_2023.id)
+        self.assertEqual(FhirResolver().resolve('CodeSystem', CIEL).id, self.ciel_v1.id)
 
     def test_shared_canonicals_at_an_owner_base(self):
         sehatapp = {'org': 'sehatapp'}
-        self.assertEqual(self.resolve('CodeSystem', ICD10, kwargs=sehatapp).id, self.sehat_icd_v1.id)
-        self.assertEqual(self.resolve('CodeSystem', ATC, kwargs=sehatapp).id, self.sehat_atc_v2.id)
-        self.assertEqual(self.resolve('CodeSystem', ATC, kwargs={'org': 'WHO'}).id, self.who_atc_2023.id)
+        self.assertEqual(FhirResolver(sehatapp).resolve('CodeSystem', ICD10).id, self.sehat_icd_v1.id)
+        self.assertEqual(FhirResolver(sehatapp).resolve('CodeSystem', ATC).id, self.sehat_atc_v2.id)
+        self.assertEqual(FhirResolver({'org': 'WHO'}).resolve('CodeSystem', ATC).id, self.who_atc_2023.id)
 
     def test_resource_type(self):
-        self.assertEqual(self.resolve('CodeSystem', PBD).id, self.pbd_source_v1.id)
-        self.assertEqual(self.resolve('ConceptMap', PBD).id, self.pbd_source_v1.id)
-        version = self.resolve('ValueSet', PBD)
+        self.assertEqual(FhirResolver().resolve('CodeSystem', PBD).id, self.pbd_source_v1.id)
+        self.assertEqual(FhirResolver().resolve('ConceptMap', PBD).id, self.pbd_source_v1.id)
+        version = FhirResolver().resolve('ValueSet', PBD)
         self.assertEqual(version.id, self.pbd_collection_v1.id)
         self.assertIsInstance(version, Collection)
 
@@ -148,25 +165,26 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
         if self.registry:
             self.assertUnresolved('CodeSystem', ICD10, 'v1.0')
         else:
-            self.assertEqual(self.resolve('CodeSystem', ICD10, 'v1.0').id, self.sehat_icd_v1.id)
-        self.assertEqual(self.resolve('CodeSystem', ICD10, 'v1.0', {'org': 'sehatapp'}).id, self.sehat_icd_v1.id)
+            self.assertEqual(FhirResolver().resolve('CodeSystem', ICD10, 'v1.0').id, self.sehat_icd_v1.id)
+        self.assertEqual(
+            FhirResolver({'org': 'sehatapp'}).resolve('CodeSystem', ICD10, 'v1.0').id, self.sehat_icd_v1.id)
 
     def test_named_version(self):
-        self.assertEqual(self.resolve('CodeSystem', ICD10, 'ICD102019').id, self.who_icd_2019.id)
+        self.assertEqual(FhirResolver().resolve('CodeSystem', ICD10, 'ICD102019').id, self.who_icd_2019.id)
         # an unreleased version is served when named
-        self.assertEqual(self.resolve('CodeSystem', ATC, 'ATC_2024_01_19').id, self.who_atc_2024.id)
-        self.assertEqual(self.resolve('CodeSystem', f'{ATC}|2023AA').id, self.who_atc_2023.id)
+        self.assertEqual(FhirResolver().resolve('CodeSystem', ATC, 'ATC_2024_01_19').id, self.who_atc_2024.id)
+        self.assertEqual(FhirResolver().resolve('CodeSystem', f'{ATC}|2023AA').id, self.who_atc_2023.id)
         # the version parameter wins over url|version, as in the resolver
-        self.assertEqual(self.resolve('CodeSystem', f'{ATC}|nope', '2023AA').id, self.who_atc_2023.id)
+        self.assertEqual(FhirResolver().resolve('CodeSystem', f'{ATC}|nope', '2023AA').id, self.who_atc_2023.id)
         error = self.assertUnresolved('CodeSystem', f'{ATC}|nope')
         self.assertEqual((error.url, error.version), (ATC, 'nope'))
         # a second pipe is no version OCL holds: not found, never a server error
         self.assertEqual(self.assertUnresolved('CodeSystem', f'{ATC}|2023AA|x').version, '2023AA|x')
 
     def test_head_only_when_named(self):
-        self.assertEqual(self.resolve('CodeSystem', ICD10, HEAD).id, self.who_icd.id)
-        self.assertEqual(self.resolve('CodeSystem', f'{ICD10}|HEAD').id, self.who_icd.id)
-        self.assertNotEqual(self.resolve('CodeSystem', ICD10).version, HEAD)
+        self.assertEqual(FhirResolver().resolve('CodeSystem', ICD10, HEAD).id, self.who_icd.id)
+        self.assertEqual(FhirResolver().resolve('CodeSystem', f'{ICD10}|HEAD').id, self.who_icd.id)
+        self.assertNotEqual(FhirResolver().resolve('CodeSystem', ICD10).version, HEAD)
 
     def test_a_repository_with_nothing_released_is_not_visible(self):
         self.assertUnresolved('CodeSystem', DRAFT)
@@ -174,7 +192,7 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
         self.assertUnresolved('CodeSystem', DRAFT, HEAD, {'org': 'drafts'}, self.admin)
 
         source(self.drafts, 'draft', 'v1', released=True, canonical_url=DRAFT)
-        self.assertEqual(self.resolve('CodeSystem', DRAFT, HEAD).id, self.draft.id)
+        self.assertEqual(FhirResolver().resolve('CodeSystem', DRAFT, HEAD).id, self.draft.id)
 
     def test_a_head_flagged_released_is_no_release(self):
         """HEAD's released flag neither makes HEAD the default nor makes a repository visible"""
@@ -187,8 +205,8 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
             self.assertUnresolved('CodeSystem', flagged, version, kwargs, user)
 
         released = source(self.hl7, 'flagged', 'v1', released=True, canonical_url=flagged)
-        self.assertEqual(self.resolve('CodeSystem', flagged).id, released.id)
-        self.assertEqual(self.resolve('CodeSystem', flagged, HEAD).id, head.id)
+        self.assertEqual(FhirResolver().resolve('CodeSystem', flagged).id, released.id)
+        self.assertEqual(FhirResolver().resolve('CodeSystem', flagged, HEAD).id, head.id)
 
     def test_a_relative_url_keeps_its_own_resource_type(self):
         """An OCL path names a Source or a Collection by itself; a reference of the other type is not found"""
@@ -198,25 +216,24 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
         collection(acme, 'codes')
         value_set = collection(acme, 'codes', 'v1', released=True)
         for url in ('/orgs/acme/CodeSystem/codes/', '/orgs/acme/ConceptMap/codes/', '/orgs/acme/sources/codes/'):
-            self.assertEqual(self.resolve('CodeSystem', url).id, codes.id)
-            self.assertEqual(self.resolve('ConceptMap', url).id, codes.id)
+            self.assertEqual(FhirResolver().resolve('CodeSystem', url).id, codes.id)
+            self.assertEqual(FhirResolver().resolve('ConceptMap', url).id, codes.id)
             self.assertUnresolved('ValueSet', url)
         for url in ('/orgs/acme/ValueSet/codes/', '/orgs/acme/collections/codes/'):
-            self.assertEqual(self.resolve('ValueSet', url).id, value_set.id)
+            self.assertEqual(FhirResolver().resolve('ValueSet', url).id, value_set.id)
             self.assertUnresolved('CodeSystem', url)
             self.assertUnresolved('ConceptMap', url)
-        self.assertEqual(self.resolve('CodeSystem', '/orgs/acme/CodeSystem/codes/|v1').id, codes.id)
+        self.assertEqual(FhirResolver().resolve('CodeSystem', '/orgs/acme/CodeSystem/codes/|v1').id, codes.id)
         self.assertUnresolved('ValueSet', '/orgs/acme/CodeSystem/codes/|v1')
 
     def test_fixture_namespace(self):
         fixtures = {'org': 'FHIR-Fixtures'}
         for user in (self.member, self.admin):
-            self.assertEqual(self.resolve('CodeSystem', FIXTURE, kwargs=fixtures, user=user).id, self.fixture_v1.id)
+            self.assertEqual(FhirResolver(fixtures, user).resolve('CodeSystem', FIXTURE).id, self.fixture_v1.id)
             self.assertEqual(
-                self.resolve('CodeSystem', f'{FIXTURE}-at', '1.0.0', fixtures, user).id, self.fixture_at_v1.id)
+                FhirResolver(fixtures, user).resolve('CodeSystem', f'{FIXTURE}-at', '1.0.0').id, self.fixture_at_v1.id)
             self.assertEqual(
-                self.resolve('CodeSystem', '/orgs/FHIR-Fixtures/CodeSystem/codes@fixture/', kwargs=fixtures,
-                             user=user).id,
+                FhirResolver(fixtures, user).resolve('CodeSystem', '/orgs/FHIR-Fixtures/CodeSystem/codes@fixture/').id,
                 self.fixture_at_v1.id)
         for user in (ANONYMOUS, self.outsider, None):
             self.assertUnresolved('CodeSystem', FIXTURE, kwargs=fixtures, user=user)
@@ -230,9 +247,10 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
         head = UserSourceFactory(user=user, mnemonic='mine', canonical_url='http://example.org/mine')
         released = UserSourceFactory(
             user=user, mnemonic='mine', version='1', released=True, canonical_url='http://example.org/mine')
-        self.assertEqual(self.resolve('CodeSystem', 'http://example.org/mine', kwargs={'user': 'jdoe'}).id, released.id)
         self.assertEqual(
-            self.resolve('CodeSystem', 'http://example.org/mine', HEAD, kwargs={'user': 'jdoe'}).id, head.id)
+            FhirResolver({'user': 'jdoe'}).resolve('CodeSystem', 'http://example.org/mine').id, released.id)
+        self.assertEqual(
+            FhirResolver({'user': 'jdoe'}).resolve('CodeSystem', 'http://example.org/mine', HEAD).id, head.id)
 
     def test_an_unknown_owner_base(self):
         self.assertUnresolved('CodeSystem', ICD10, kwargs={'org': 'nobody'})
@@ -246,7 +264,7 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
     def test_another_owners_canonical_at_an_owner_base(self):
         """With the registry, an owner base falls through to the global entry; without it, an owner base is strict."""
         if self.registry:
-            self.assertEqual(self.resolve('CodeSystem', CIEL, kwargs={'org': 'sehatapp'}).id, self.ciel_v1.id)
+            self.assertEqual(FhirResolver({'org': 'sehatapp'}).resolve('CodeSystem', CIEL).id, self.ciel_v1.id)
         else:
             self.assertUnresolved('CodeSystem', CIEL, kwargs={'org': 'sehatapp'})
 
@@ -270,12 +288,12 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
             if self.registry:
                 self.assertUnresolved('CodeSystem', shared, user=user)
             else:
-                self.assertEqual(self.resolve('CodeSystem', shared, user=user).id, public_v1.id)
-                self.assertEqual(self.resolve('CodeSystem', shared, 'v1', user=user).id, public_v1.id)
+                self.assertEqual(FhirResolver(None, user).resolve('CodeSystem', shared).id, public_v1.id)
+                self.assertEqual(FhirResolver(None, user).resolve('CodeSystem', shared, 'v1').id, public_v1.id)
         self.assertEqual(
-            self.resolve('CodeSystem', shared, kwargs={'org': 'FHIR-Fixtures'}, user=self.member).id, private_v1.id)
+            FhirResolver({'org': 'FHIR-Fixtures'}, self.member).resolve('CodeSystem', shared).id, private_v1.id)
         self.assertUnresolved('CodeSystem', shared, kwargs={'org': 'FHIR-Fixtures'}, user=self.outsider)
-        self.assertEqual(self.resolve('CodeSystem', shared, kwargs={'org': 'HL7'}).id, public_v1.id)
+        self.assertEqual(FhirResolver({'org': 'HL7'}).resolve('CodeSystem', shared).id, public_v1.id)
 
     def test_a_public_release_of_a_private_repository(self):
         """
@@ -298,7 +316,7 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
             self.assertUnresolved('CodeSystem', url, kwargs={'org': 'MOH'}, user=user)
         for user in (moh_member, self.admin):
             for reference in (url, f'{url}|v1', '/orgs/MOH/CodeSystem/hiv/'):
-                self.assertEqual(self.resolve('CodeSystem', reference, kwargs={'org': 'MOH'}, user=user).id, release.id)
+                self.assertEqual(FhirResolver({'org': 'MOH'}, user).resolve('CodeSystem', reference).id, release.id)
 
     def test_the_default_version_is_the_newest_release_the_caller_is_shown(self):
         """
@@ -312,9 +330,9 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
         if self.registry:
             GlobalURLRegistryFactory(url=url, namespace=self.hl7.uri)
         for kwargs, user in ((None, ANONYMOUS), (None, self.admin), ({'org': 'HL7'}, self.outsider)):
-            self.assertEqual(self.resolve('CodeSystem', url, kwargs=kwargs, user=user).id, public_v1.id)
+            self.assertEqual(FhirResolver(kwargs, user).resolve('CodeSystem', url).id, public_v1.id)
             self.assertUnresolved('CodeSystem', url, 'v2', kwargs, user)
-        self.assertEqual(self.resolve('CodeSystem', url, kwargs={'org': 'HL7'}, user=self.admin).id, private_v2.id)
+        self.assertEqual(FhirResolver({'org': 'HL7'}, self.admin).resolve('CodeSystem', url).id, private_v2.id)
 
     def test_a_version_in_an_ocl_path_is_a_version_named(self):
         """
@@ -328,9 +346,9 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
                      '/orgs/HL7/sources/newest/v2/concepts/c1/'):
             error = self.assertUnresolved('CodeSystem', path)
             self.assertEqual(error.version, 'v2')
-            self.assertEqual(self.resolve('CodeSystem', path, kwargs={'org': 'HL7'}, user=self.admin).id, private_v2.id)
-        self.assertEqual(self.resolve('CodeSystem', '/orgs/HL7/CodeSystem/newest/v1/').id, public_v1.id)
-        self.assertEqual(self.resolve('CodeSystem', '/orgs/HL7/CodeSystem/newest/').id, public_v1.id)
+            self.assertEqual(FhirResolver({'org': 'HL7'}, self.admin).resolve('CodeSystem', path).id, private_v2.id)
+        self.assertEqual(FhirResolver().resolve('CodeSystem', '/orgs/HL7/CodeSystem/newest/v1/').id, public_v1.id)
+        self.assertEqual(FhirResolver().resolve('CodeSystem', '/orgs/HL7/CodeSystem/newest/').id, public_v1.id)
 
     def test_query_counts(self):
         """
@@ -349,7 +367,7 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
                 (6 + extra - bool(self.registry), ('CodeSystem', FIXTURE, None, {'org': 'FHIR-Fixtures'}, self.member)),
         ):
             with self.subTest(args=args), self.assertNumQueries(count):
-                self.resolve(*args)
+                FhirResolver(*args[3:]).resolve(*args[:3])
 
 
 class FhirResolveWithoutRegistryTest(FhirResolveCases, OCLTestCase):
@@ -363,4 +381,4 @@ class FhirResolveWithRegistryTest(FhirResolveCases, OCLTestCase):
         """The registry's rule: at the global base only a global entry resolves, whatever repositories hold."""
         URLRegistry.objects.filter(url=ICD10).delete()
         self.assertUnresolved('CodeSystem', ICD10)
-        self.assertEqual(self.resolve('CodeSystem', ICD10, kwargs={'org': 'WHO'}).id, self.who_icd_2019.id)
+        self.assertEqual(FhirResolver({'org': 'WHO'}).resolve('CodeSystem', ICD10).id, self.who_icd_2019.id)

@@ -24,6 +24,7 @@ from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory, ConceptDescriptionFactory
 from core.fhir import resolve as fhir_resolve, search as fhir_search
 from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM, TooCostlyError
+from core.fhir.resolve import FhirResolver
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
@@ -785,13 +786,14 @@ class ReferencedSourceAccessTest(SearchCorpusMixin, OCLTestCase):
     def test_the_source_filter_agrees_with_is_visible(self):
         """viewable_rows is is_visible's queryset form, over every source row, HEAD and versions alike."""
         self.with_partner()
-        for namespace in (None, '/orgs/Partner/', '/orgs/MOH/', '/orgs/FHIR-Fixtures/'):
+        for kwargs in ({}, {'org': 'Partner'}, {'org': 'MOH'}, {'org': 'FHIR-Fixtures'}):
             for user in (AnonymousUser(), self.outsider, self.member, self.moh_member, self.partner_only, self.both,
                          self.admin):
-                expected = {row.id for row in Source.objects.all() if fhir_resolve.is_visible(row, namespace, user)}
-                shown = set(fhir_resolve.viewable_rows(Source, namespace, user).values_list('id', flat=True))
-                self.assertEqual(shown, expected, (namespace, user))
-        self.assertIn(self.private.id, fhir_resolve.viewable_rows(Source, '/orgs/Partner/', self.both).values_list(
+                resolver = FhirResolver(kwargs, user)
+                expected = {row.id for row in Source.objects.all() if resolver.is_visible(row)}
+                shown = set(resolver.viewable_rows(Source).values_list('id', flat=True))
+                self.assertEqual(shown, expected, (kwargs, user))
+        self.assertIn(self.private.id, FhirResolver({'org': 'Partner'}, self.both).viewable_rows(Source).values_list(
             'id', flat=True))
 
 
@@ -1151,15 +1153,16 @@ class VisibleVersionsTest(SearchCorpusMixin, OCLTestCase):
         for kwargs, user in cases:
             for resource_type in ('CodeSystem', 'ValueSet'):
                 model = fhir_resolve.REPO_TYPES[resource_type]
-                namespace = fhir_resolve.namespace_of(kwargs)
+                resolver = FhirResolver(kwargs, user)
+                namespace = resolver.namespace
                 expected = {
                     row.id for row in model.objects.filter(is_active=True, released=True).exclude(version=HEAD)
                     if (namespace is None or row.parent.uri == namespace) and
-                    fhir_resolve.is_visible(row, namespace, user) and fhir_resolve.has_release(row, namespace, user)}
-                visible = set(fhir_resolve.visible_versions(resource_type, kwargs, user).values_list('id', flat=True))
+                    resolver.is_visible(row) and resolver.has_release(row)}
+                visible = set(resolver.visible_versions(resource_type).values_list('id', flat=True))
                 self.assertEqual(visible, expected, (kwargs, user, resource_type))
-        self.assertIn(self.hiv_v1.id, fhir_resolve.visible_versions(
-            'CodeSystem', {'org': 'MOH'}, self.moh_member).values_list('id', flat=True))
+        self.assertIn(self.hiv_v1.id, FhirResolver({'org': 'MOH'}, self.moh_member).visible_versions(
+            'CodeSystem').values_list('id', flat=True))
 
 
 class SearchTimeoutTest(TransactionTestCase):

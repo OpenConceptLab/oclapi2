@@ -18,7 +18,7 @@ from core.collections.tests.factories import ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE, HEAD
 from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory
-from core.fhir.resolve import UnresolvedError, resolve
+from core.fhir.resolve import FhirResolver, UnresolvedError
 from core.fhir.tests_ops_lookup import name
 from core.fhir.tests_resolve_named_version import client_for
 from core.fhir.tests_search import collection, source
@@ -156,7 +156,8 @@ class AccessCorpusMixin:
         set_registry_toggle(False)
         super().tearDown()
 
-    def holder(self, mnemonic, display, target, releases, private=False, private_releases=()):  # pylint: disable=too-many-arguments
+    def holder(  # pylint: disable=too-many-arguments
+            self, mnemonic, display, target, releases, private=False, private_releases=()):
         """(HEAD, C1) for a code system of Lab with the canonical HELD, its releases, and a C1 mapping to `target`."""
         access = {'public_access': ACCESS_TYPE_NONE} if private else {}
         head = source(self.lab, mnemonic, canonical_url=HELD, **access)
@@ -185,12 +186,14 @@ class AccessCorpusMixin:
         Source.objects.filter(organization=self.lab, mnemonic='hidden-first').delete()
         Collection.objects.filter(organization=self.lab, mnemonic='vs-hidden').delete()
 
-    def resolved(self, url, version=None, kwargs=None, user=None, resource_type='CodeSystem'):  # pylint: disable=too-many-arguments
-        return resolve(resource_type, url, version, kwargs, user).id
+    def resolved(  # pylint: disable=too-many-arguments
+            self, url, version=None, kwargs=None, user=None, resource_type='CodeSystem'):
+        return FhirResolver(kwargs, user).resolve(resource_type, url, version).id
 
-    def assertUnresolved(self, url, version=None, kwargs=None, user=None, resource_type='CodeSystem'):  # pylint: disable=invalid-name,too-many-arguments
+    def assertUnresolved(  # pylint: disable=invalid-name,too-many-arguments
+            self, url, version=None, kwargs=None, user=None, resource_type='CodeSystem'):
         with self.assertRaises(UnresolvedError):
-            resolve(resource_type, url, version, kwargs, user)
+            FhirResolver(kwargs, user).resolve(resource_type, url, version)
 
 
 class HiddenIsMissingCases(AccessCorpusMixin):
@@ -496,7 +499,7 @@ class CapabilitiesAccessCases(AccessCorpusMixin):
                 for identifier, codes, default in self.listed(fhir_base, user):
                     for code in (*codes, None):
                         try:
-                            served = resolve('CodeSystem', identifier, code, kwargs, user).version
+                            served = FhirResolver(kwargs, user).resolve('CodeSystem', identifier, code).version
                         except UnresolvedError:
                             served = 'not found'
                         if served != (code or default):
