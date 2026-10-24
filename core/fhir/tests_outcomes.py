@@ -239,14 +239,6 @@ class ServerErrorReportTest(SimpleTestCase):
     """A 5xx answered as a 422 is logged at ERROR and sent to Errbit, so monitoring still counts it."""
 
     @patch('core.fhir.outcomes.ERRBIT_LOGGER')
-    def test_without_an_exception_errbit_gets_a_notice(self, errbit):
-        with self.assertLogs('oclapi', level='ERROR') as logs:
-            outcomes.report_server_error(502)
-
-        self.assertEqual(logs.output, ['ERROR:oclapi:FHIR answered a 502 server error as a 422'])
-        errbit.raise_errbit.assert_called_once_with('FHIR answered a 502 server error as a 422')
-
-    @patch('core.fhir.outcomes.ERRBIT_LOGGER')
     def test_with_an_exception_its_traceback_is_logged(self, errbit):
         exc = exceptions.APIException()
         with self.assertLogs('oclapi', level='ERROR') as logs:

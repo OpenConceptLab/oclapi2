@@ -8,7 +8,7 @@ from core.code_systems.constants import RESOURCE_TYPE as CODE_SYSTEM_RESOURCE_TY
 from core.common.constants import INCLUDE_CONCEPTS_PARAM, INCLUDE_MAPPINGS_PARAM, LIMIT_PARAM, OFFSET_PARAM, \
     INCLUDE_VERBOSE_REFERENCES, INCLUDE_SEARCH_META_PARAM, ACCESS_TYPE_CHOICES, ACCESS_TYPE_VIEW
 from core.common.feeds import DEFAULT_LIMIT
-from core.common.fhir_helpers import REPOSITORY_KINDS, to_fhir_path
+from core.common.fhir_helpers import to_fhir_path, to_ocl_path
 from core.common.utils import to_int, get_truthy_values, normalize_public_access
 from core.concept_maps.constants import RESOURCE_TYPE as CONCEPT_MAP_RESOURCE_TYPE
 from core.orgs.models import Organization
@@ -131,11 +131,7 @@ class IdentifierSerializer(ReadSerializerMixin, Serializer):
     @staticmethod
     def convert_fhir_url_to_ocl_uri(uri, kind):
         """An OCL FHIR path as OCL's, its resource type's segment renamed to `kind`; any other URI as it is."""
-        parts = uri.split('/') if uri else []
-        if len(parts) > 3 and not parts[0] and parts[1] in ('orgs', 'users') and parts[3] in REPOSITORY_KINDS:
-            parts[3] = kind
-            return '/'.join(parts)
-        return uri
+        return to_ocl_path(uri, kind) if uri else uri
 
     @staticmethod
     def include_ocl_identifier(uri, resource_type, rep):

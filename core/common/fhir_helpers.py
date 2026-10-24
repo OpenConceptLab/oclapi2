@@ -17,14 +17,14 @@ def delete_empty_fields(obj):
             delete_empty_fields(item)
 
 
-def to_ocl_path(url):
+def to_ocl_path(url, kind=None):
     """
     An OCL FHIR path (/orgs/{org}/CodeSystem/{id}/...) as the OCL path of the repository it names, by its own
-    resource type, so a reference to the other type finds nothing; anything else as it is.
+    resource type (so a reference to the other type finds nothing) unless `kind` names one; anything else as it is.
     """
     parts = url.split('/')
     if len(parts) > 3 and not parts[0] and parts[1] in ('orgs', 'users') and parts[3] in REPOSITORY_KINDS:
-        parts[3] = REPOSITORY_KINDS[parts[3]]
+        parts[3] = kind or REPOSITORY_KINDS[parts[3]]
     return '/'.join(parts)
 
 

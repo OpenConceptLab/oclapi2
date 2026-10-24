@@ -1445,10 +1445,6 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         return False
 
-    @property
-    def active_url_registry_entries(self):
-        return self.url_registry_entries.filter(is_active=True)
-
     def url_registry_entries_to_resolve(self):
         """
         The active registry entries a change to this row's canonical URL may move: those linked to it, and those naming

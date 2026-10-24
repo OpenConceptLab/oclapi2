@@ -279,14 +279,10 @@ def resource_model(data):
         return None
 
 
-def log_dropped(model_class, key, reason):
-    log_dropped_once(model_class.__name__, key, reason)
-
-
 @lru_cache(maxsize=1024)
-def log_dropped_once(model_name, key, reason):
+def log_dropped(model_class, key, reason):
     """What the XML leaves out, each kind logged once per process: the content's problem, not the request's."""
-    logger.warning('FHIR XML: %s.%s %s', model_name, key, reason)
+    logger.warning('FHIR XML: %s.%s %s', model_class.__name__, key, reason)
 
 
 def xhtml_markup(text):

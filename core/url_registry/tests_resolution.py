@@ -639,20 +639,12 @@ class URLRegistryLinkCostTest(OCLTestCase):
     @patch('core.common.models.delete_s3_objects')  # export files: no broker in tests
     def test_a_delete_resolves_only_the_entries_of_its_namespace(self, _):
         head = source(self.org, 'codes', canonical_url=self.URL)
-        other = OrganizationFactory(mnemonic='acme-else')
-        elsewhere = GlobalURLRegistryFactory(url=self.URL, namespace=other.uri)
+        GlobalURLRegistryFactory(url=self.URL, namespace=OrganizationFactory(mnemonic='acme-else').uri)
         mine = OrganizationURLRegistryFactory(organization=self.org, url=self.URL, namespace=self.org.uri)
-        looked_up = []
-        lookup_entry = URLRegistry.lookup_entry
 
-        def record(instance):
-            looked_up.append(instance.id)
-            return lookup_entry(instance)
-
-        with patch.object(URLRegistry, 'lookup_entry', autospec=True, side_effect=record):
+        with patch.object(URLRegistry, 'lookup_entry', autospec=True, side_effect=URLRegistry.lookup_entry) as lookup:
             head.delete(force=True)
-        self.assertEqual(looked_up, [mine.id])
-        self.assertNotIn(elsewhere.id, looked_up)
+        self.assertEqual([call.args[0].id for call in lookup.call_args_list], [mine.id])
 
 
 class ResolveReferenceNamespaceTest(OCLAPITestCase):
