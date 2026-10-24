@@ -54,9 +54,8 @@ from core.fhir import mapping_index, outcomes
 from core.fhir.constants import CONTROL_PARAMETERS, SEARCH_TOO_COSTLY
 from core.fhir.parameters import FhirParameters
 from core.fhir.resolve import (
-    PUBLIC_ACCESS, REPO_TYPES, is_shown, owner_access, repository_rows, viewable_rows, visible_versions,
-    with_repository_access)
-from core.fhir.utils import fhir_base_url, namespace_of
+    PUBLIC_ACCESS, REPO_TYPES, repository_rows, with_repository_access)
+from core.fhir.utils import fhir_base_url
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
 from core.sources.models import Source
@@ -303,7 +302,7 @@ def indexed_repository(owner_type, owner, mnemonic):
     return Q(mnemonic__iexact=mnemonic, user_id__in=UserProfile.objects.filter(username__iexact=owner).values('id'))
 
 
-def mapped(side, value, sources, holding, namespace, user):  # pylint: disable=too-many-arguments
+def mapped(side, value, sources, holding, resolver):
     """
     A ConceptMap version holding a live mapping whose group source (side 'from') or target ('to') shows `value`, as
     ConceptMapGroupField builds groups: retired and deleted mappings aren't read; a group's system is the from or to
@@ -321,7 +320,7 @@ def mapped(side, value, sources, holding, namespace, user):  # pylint: disable=t
     uncorrelated IN, which it runs once.
     """
     field = f'mapping__{side}_source'
-    unnamed = ~Exists(viewable_rows(Source, namespace, user).filter(id=OuterRef(f'{field}_id'), canonical_url__gt=''))
+    unnamed = ~Exists(resolver.viewable_rows(Source).filter(id=OuterRef(f'{field}_id'), canonical_url__gt=''))
     stored = Q(**{f'{field}_url': value}) & unnamed
     paths = repository_prefixes(value, ('sources', 'collections', 'ConceptMap'), names=('ConceptMap',),
                                 trailing_slash=True)
@@ -344,12 +343,12 @@ def mapped(side, value, sources, holding, namespace, user):  # pylint: disable=t
 class Search:
     """The criteria of one search's parameters, on the versions of a resource type at a base, for a caller."""
 
-    def __init__(self, resource_type, kwargs, user=None):
+    def __init__(self, resource_type, resolver):
         self.resource_type = resource_type
         self.model = REPO_TYPES[resource_type]
         self.parameters = PARAMETERS[resource_type]
-        self.namespace, self.user = namespace_of(kwargs), user
-        self.access = owner_access(kwargs, user)
+        self.resolver = resolver
+        self.namespace = resolver.namespace
         self.found = {}  # (lookup, canonical URL): what look_up found for it
         # for what isn't a query: the mappings index
         self.deadline = time.monotonic() + settings.FHIR_SEARCH_TIMEOUT_MS / 1000
@@ -359,7 +358,7 @@ class Search:
         The Source rows the base shows the caller, whoever owns them: what source-system, target-system and reference
         match. At an owner base that's another owner's private source too, if the caller may view it themselves.
         """
-        return viewable_rows(Source, self.namespace, self.user)
+        return self.resolver.viewable_rows(Source)
 
     def criteria(self, query):
         """
@@ -421,7 +420,7 @@ class Search:
             found = repositories_with(self.viewable_sources(), urls)
         else:
             found, shown = sources_with(
-                self.viewable_sources(), urls, visible_versions(self.resource_type, access=self.access))
+                self.viewable_sources(), urls, self.resolver.visible_versions(self.resource_type))
             side = SIDES[self.parameters[name]]
             holding = mapping_index.holding(
                 side, {url: {repository for _, repository in rows} for url, rows in found.items()}, shown,
@@ -546,13 +545,11 @@ class Search:
 
     def by_source(self, value):
         """A group's source is the system named."""
-        return mapped('from', value, self.found[('sources', value)], self.found[('from', value)], self.namespace,
-                      self.user)
+        return mapped('from', value, self.found[('sources', value)], self.found[('from', value)], self.resolver)
 
     def by_target(self, value):
         """A group's target is the system named."""
-        return mapped('to', value, self.found[('sources', value)], self.found[('to', value)], self.namespace,
-                      self.user)
+        return mapped('to', value, self.found[('sources', value)], self.found[('to', value)], self.resolver)
 
 
 def page_size(query):
@@ -593,8 +590,8 @@ def search_bundle(view):
     """The searchset Bundle a FHIR search view answers: the base's matching versions, one page of them."""
     request, resource_type = view.request, view.resource_type
     count = page_size(request.query_params)
-    search = Search(resource_type, view.kwargs, request.user)
-    ids = list(visible_versions(resource_type, access=search.access).filter(
+    search = Search(resource_type, view.get_fhir_resolver())
+    ids = list(search.resolver.visible_versions(resource_type).filter(
         search.criteria(request.query_params)).order_by('-id').values_list('id', flat=True))
     paginator, entries = None, []
     if count:
@@ -621,15 +618,15 @@ def read(view):
     must be one search lists: released, never HEAD, visible to the requester there. Raises NotFoundError.
     """
     return read_version(view.resource_type, view.kwargs[view.lookup_field], view.request.query_params.get('version'),
-                        view.kwargs, view.request.user)
+                        view.get_fhir_resolver())
 
 
-def read_version(resource_type, resource_id, version, kwargs, user):
+def read_version(resource_type, resource_id, version, resolver):
     """
-    read's rule for a resource `resource_id` names at the base `kwargs` names, for `user`: the id at the global base,
+    read's rule for a resource `resource_id` names at the resolver's base, for its caller: the id at the global base,
     the mnemonic and `version` (else the latest release shown) at an owner base. For the instance-level operations too.
     """
-    namespace = namespace_of(kwargs)
+    namespace, kwargs = resolver.namespace, resolver.kwargs
     versions = REPO_TYPES[resource_type].objects.filter(is_active=True, released=True).exclude(version=HEAD)
     latest = False
     if namespace is None:
@@ -642,11 +639,11 @@ def read_version(resource_type, resource_id, version, kwargs, user):
             retired=False).order_by('-created_at')
 
     instance = with_repository_access(with_repository_canonical(versions)).first()
-    if latest and instance and not is_shown(instance, namespace, user) and REPO_TYPES[resource_type].is_public_access(
+    if latest and instance and not resolver.is_shown(instance) and REPO_TYPES[resource_type].is_public_access(
             instance.repository_public_access):
         # the latest is private, in a public repository: the latest public one
         instance = with_repository_access(with_repository_canonical(
             versions.filter(public_access__in=PUBLIC_ACCESS))).first()
-    if not instance or not is_shown(instance, namespace, user):
+    if not instance or not resolver.is_shown(instance):
         raise outcomes.NotFoundError(f'{resource_type}/{resource_id} not found')
     return instance

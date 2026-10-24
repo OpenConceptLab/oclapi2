@@ -18,7 +18,7 @@ from core.collections.tests.factories import ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE, HEAD
 from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory
-from core.fhir.resolve import UnresolvedError, resolve
+from core.fhir.resolve import FhirResolver, UnresolvedError
 from core.fhir.tests_ops_lookup import name
 from core.fhir.tests_search import source, collection
 from core.mappings.tests.factories import MappingFactory
@@ -143,18 +143,20 @@ class NamedVersionCorpusMixin:  # pylint: disable=too-many-instance-attributes
 
     def assertUnresolved(self, url, version=None, kwargs=None, user=None):  # pylint: disable=invalid-name
         with self.assertRaises(UnresolvedError) as context:
-            resolve('CodeSystem', url, version, kwargs, user)
+            FhirResolver(kwargs, user).resolve('CodeSystem', url, version)
         return context.exception
 
-    def resolved(self, url, version=None, kwargs=None, user=None, resource_type='CodeSystem'):  # pylint: disable=too-many-arguments
-        return resolve(resource_type, url, version, kwargs, user).id
+    def resolved(  # pylint: disable=too-many-arguments
+            self, url, version=None, kwargs=None, user=None, resource_type='CodeSystem'):
+        return FhirResolver(kwargs, user).resolve(resource_type, url, version).id
 
     @staticmethod
     def get(operation, base='/fhir', user=None, resource='CodeSystem', **params):  # pylint: disable=too-many-arguments
         return client_for(user).get(f'{base}/{resource}/{operation}', params)
 
     @staticmethod
-    def post(operation, parameters, base='/fhir', user=None, resource='CodeSystem'):  # pylint: disable=too-many-arguments
+    def post(  # pylint: disable=too-many-arguments
+            operation, parameters, base='/fhir', user=None, resource='CodeSystem'):
         return client_for(user).post(
             f'{base}/{resource}/{operation}', json.dumps({'resourceType': 'Parameters', 'parameter': parameters}),
             content_type='application/fhir+json')
@@ -183,7 +185,7 @@ class NamedVersionResolveCases(NamedVersionCorpusMixin):
         self.assertUnresolved(ICD10, 'ICD102019', {'org': 'sehatapp'})
 
     def test_the_holder_keeps_the_canonical_url_it_was_named_by(self):
-        instance = resolve('CodeSystem', ATC, '2023AA')
+        instance = FhirResolver().resolve('CodeSystem', ATC, '2023AA')
         self.assertEqual((instance.canonical_url, instance.is_fqdn, instance.resolution_url), (ATC, True, ATC))
         self.assertEqual(instance.repository_public_access, self.who_atc.public_access)
 
@@ -294,16 +296,16 @@ class NamedVersionResolveCases(NamedVersionCorpusMixin):
         extra = 2 if self.registry else 0
         holder = 0 if self.registry else 1  # with the registry, the entry decides: no holder is looked for
         with self.assertNumQueries(3 + extra):
-            resolve('CodeSystem', ICD10, 'ICD102019')
+            FhirResolver().resolve('CodeSystem', ICD10, 'ICD102019')
         with self.assertNumQueries(3 + extra + holder):
-            self.assertEqual(resolve('CodeSystem', ATC, '2023AA').id, self.who_atc_2023.id)
+            self.assertEqual(FhirResolver().resolve('CodeSystem', ATC, '2023AA').id, self.who_atc_2023.id)
         with self.assertNumQueries(3 + extra + holder):
             self.assertUnresolved(ICD10, 'nope')
         owner = 2 if self.registry else 0  # the owner's registry entry, the owner again
         with self.assertNumQueries(4 + owner):
-            resolve('CodeSystem', LOCAL, 'a1', {'org': 'HL7'})
+            FhirResolver({'org': 'HL7'}).resolve('CodeSystem', LOCAL, 'a1')
         with self.assertNumQueries(5 + owner):
-            self.assertEqual(resolve('CodeSystem', LOCAL, 'b1', {'org': 'HL7'}).id, self.local_b1.id)
+            self.assertEqual(FhirResolver({'org': 'HL7'}).resolve('CodeSystem', LOCAL, 'b1').id, self.local_b1.id)
         for number in range(20):
             org = OrganizationFactory(mnemonic=f'holder-{number}')
             source(org, 'atc', canonical_url=ATC)
@@ -311,9 +313,9 @@ class NamedVersionResolveCases(NamedVersionCorpusMixin):
             source(self.hl7, f'local-{number}', canonical_url=LOCAL)
             source(self.hl7, f'local-{number}', 'b1', released=True, canonical_url=LOCAL)
         with self.assertNumQueries(3 + extra + holder):
-            self.assertEqual(resolve('CodeSystem', ATC, '2023AA').id, self.who_atc_2023.id)
+            self.assertEqual(FhirResolver().resolve('CodeSystem', ATC, '2023AA').id, self.who_atc_2023.id)
         with self.assertNumQueries(5 + owner):
-            self.assertEqual(resolve('CodeSystem', LOCAL, 'b1', {'org': 'HL7'}).id, self.local_b1.id)
+            self.assertEqual(FhirResolver({'org': 'HL7'}).resolve('CodeSystem', LOCAL, 'b1').id, self.local_b1.id)
 
 
 class HiddenHolderCases(NamedVersionCorpusMixin):
@@ -690,10 +692,11 @@ class NamedVersionOperationsCases(NamedVersionCorpusMixin):
         for fhir_base, kwargs in (('/fhir', {}), ('/orgs/HL7', {'org': 'HL7'})):
             for uri, codes in listed(fhir_base).items():
                 for code in codes:
-                    instance = resolve('CodeSystem', uri, code.rstrip('*'), kwargs)
+                    instance = FhirResolver(kwargs).resolve('CodeSystem', uri, code.rstrip('*'))
                     self.assertEqual(instance.version, code.rstrip('*'), (fhir_base, uri, code))
                 default = next(code.rstrip('*') for code in codes if code.endswith('*'))
-                self.assertEqual(resolve('CodeSystem', uri, None, kwargs).version, default, (fhir_base, uri))
+                self.assertEqual(
+                    FhirResolver(kwargs).resolve('CodeSystem', uri, None).version, default, (fhir_base, uri))
 
 
 class NamedVersionResolveWithoutRegistryTest(NamedVersionResolveCases, OCLTestCase):

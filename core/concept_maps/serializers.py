@@ -13,8 +13,8 @@ from core.common.serializers import StatusField, IdentifierSerializer
 from core.fhir.adapters import r4
 from core.fhir.ops.concepts import fhir_code
 from core.fhir.ops.translate import relationship, side_system, with_side
+from core.fhir.resolve import FhirResolver
 from core.fhir.serializers import CanonicalUrlField, FhirRepositorySerializerMixin
-from core.fhir.utils import namespace_of
 from core.mappings.models import Mapping
 from core.mappings.serializers import MappingDetailSerializer
 from core.sources.models import Source
@@ -57,11 +57,11 @@ class ConceptMapGroupField(serializers.Field):
         """
         # TODO: support graphQL to go around the limit
         view = self.context.get('view')
-        namespace = namespace_of(getattr(view, 'kwargs', None))
-        user = getattr(self.context.get('request'), 'user', None)
+        resolver = self.context.get('fhir_resolver') or FhirResolver(
+            getattr(view, 'kwargs', None), getattr(self.context.get('request'), 'user', None))
         mappings = value.get_active_mappings()  # neither retired nor deleted
         for side in ('from', 'to'):
-            mappings = with_side(mappings, side, namespace, user)
+            mappings = with_side(mappings, side, resolver)
         limit = settings.FHIR_CONCEPT_MAP_MAPPING_LIMIT
         rows = list(mappings.order_by('id').values(
             'map_type', 'from_concept_code', 'to_concept_code', *(

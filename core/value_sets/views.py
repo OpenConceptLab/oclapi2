@@ -56,5 +56,6 @@ class ValueSetExpandView(FhirOperationView):
     def adapter(self, answer):
         """The answer as an R4 ValueSet: the value set version as a read shows it, with the expansion."""
         resource = ValueSetExpansionSerializer(
-            answer['value_set'], context={'opaque_ids': namespace_of(self.kwargs) is None}).data
+            answer['value_set'], context={'opaque_ids': namespace_of(self.kwargs) is None,
+                                          'fhir_resolver': self.get_fhir_resolver()}).data
         return r4.expansion_value_set(resource, answer)

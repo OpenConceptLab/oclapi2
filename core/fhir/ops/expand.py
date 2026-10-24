@@ -53,9 +53,7 @@ from core.fhir import outcomes
 from core.fhir.constants import EXPANSION_TOO_COSTLY
 from core.fhir.ops.concepts import designations, display_of, fhir_code
 from core.fhir.ops.validate_code import value_set_version
-from core.fhir.resolve import viewable_rows
 from core.fhir.search import within_search_timeout
-from core.fhir.utils import namespace_of
 from core.sources.models import Source
 
 WORD = re.compile(r'\w+')
@@ -187,16 +185,13 @@ def code_has_word(word):
         default=False, output_field=BooleanField())
 
 
-def expand(parameters, kwargs, user, instance_id=None):
-    """
-    $expand's answer for its FhirParameters at the base `kwargs` names (ValueSet/{instance_id}/$expand at the instance
-    level), for `user`: {value_set, identifier, timestamp, total, offset, parameters, used, contains}.
-    """
+def expand(parameters, resolver, instance_id=None):
+    """Expand the named value set for the resolver's base and caller."""
     inputs = Inputs(parameters)
     if not instance_id and not parameters.text('url'):
         raise outcomes.InvalidError('url is required: the value set to expand.', expression='url')
     return within_search_timeout(
-        lambda: Expander(parameters, inputs, kwargs, user, instance_id).answer(), EXPANSION_TOO_COSTLY)
+        lambda: Expander(parameters, inputs, resolver, instance_id).answer(), EXPANSION_TOO_COSTLY)
 
 
 def stored_expansion(value_set):
@@ -238,16 +233,16 @@ def code_system(canonical_url, uri, release=None):
 class Expander:
     """One $expand: the value set version, its stored expansion, and the members the caller is shown."""
 
-    def __init__(self, parameters, inputs, kwargs, user, instance_id):  # pylint: disable=too-many-arguments
+    def __init__(self, parameters, inputs, resolver, instance_id):
         self.inputs = inputs
-        self.value_set = value_set_version(parameters, kwargs, user, instance_id)
+        self.value_set = value_set_version(parameters, resolver, instance_id)
         self.expansion = stored_expansion(self.value_set)
-        self.namespace, self.user = namespace_of(kwargs), user
+        self.resolver = resolver
 
     def members(self):
         """The expansion's concepts that are its members for the caller: not deleted, of a code system it is shown."""
         return Concept.objects.filter(
-            Exists(viewable_rows(Source, self.namespace, self.user).filter(id=OuterRef('parent_id'))),
+            Exists(self.resolver.viewable_rows(Source).filter(id=OuterRef('parent_id'))),
             expansion_set=self.expansion.id, is_active=True)
 
     def matching(self):
@@ -263,7 +258,7 @@ class Expander:
 
     def live_releases(self):
         """The active, non-retired releases the caller is shown, never HEAD."""
-        return viewable_rows(Source, self.namespace, self.user).filter(
+        return self.resolver.viewable_rows(Source).filter(
             is_active=True, released=True, retired=False).exclude(version=HEAD)
 
     def release(self):

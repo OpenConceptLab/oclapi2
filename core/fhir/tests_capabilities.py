@@ -27,12 +27,11 @@ from core.fhir.constants import FHIR_RELEASE, FHIR_VERSION
 from core.fhir.mixins import FhirOperationView
 from core.fhir.negotiation import FhirVersioning
 from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
-from core.fhir.resolve import (
-    ServedHead, UnresolvedError, in_namespace, ocl_path, resolve, viewable_rows, visible_versions)
+from core.fhir.resolve import FhirResolver, ServedHead, UnresolvedError, in_namespace, ocl_path
 from core.fhir.tests_ops_lookup import (
     CIEL, HIV, ICD10, NEWEST_PRIVATE, OpsCorpusMixin, REST, SHARED, name as concept_name)
 from core.fhir.tests_search import source
-from core.fhir.utils import is_fhir_path, namespace_of
+from core.fhir.utils import is_fhir_path
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.url_registry.factories import OrganizationURLRegistryFactory
@@ -425,7 +424,7 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
     def named(identifier, version, kwargs, user):
         """The version, if resolve() serves it named as it is stored (a business version, as R4 lists it)."""
         try:
-            instance = resolve('CodeSystem', identifier, version, kwargs, user)
+            instance = FhirResolver(kwargs, user).resolve('CodeSystem', identifier, version)
         except UnresolvedError:
             return None
         return version if instance.version == version and instance.released and not instance.is_head else None
@@ -438,15 +437,15 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
         versions resolve() serves named as stored, and the one it serves without a version.
         """
         found = {}
-        searched = {(row.mnemonic, row.organization_id, row.user_id) for row in visible_versions(
-            'CodeSystem', kwargs, user)}
+        searched = {(row.mnemonic, row.organization_id, row.user_id) for row in
+                    FhirResolver(kwargs, user).visible_versions('CodeSystem')}
         for mnemonic, organization_id, user_id in searched:
             rows = Source.objects.filter(mnemonic=mnemonic, organization_id=organization_id, user_id=user_id)
             head = rows.get(version=HEAD)
             owner_type, owner_id, _, repository_id = head.uri.strip('/').split('/')
             for identifier in (head.canonical_url, f'/{owner_type}/{owner_id}/CodeSystem/{repository_id}/'):
                 try:
-                    default = resolve('CodeSystem', identifier, None, kwargs, user) if identifier else None
+                    default = FhirResolver(kwargs, user).resolve('CodeSystem', identifier, None) if identifier else None
                 except UnresolvedError:
                     continue
                 if not default or (default.mnemonic, default.organization_id, default.user_id) != (
@@ -469,7 +468,7 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
     def served_were_hidden_missing(self, kwargs, user):
         """served(), with the repositories the base doesn't show the caller (their HEAD) deleted, then restored."""
         hidden = Source.objects.filter(version=HEAD).exclude(
-            id__in=viewable_rows(Source, namespace_of(kwargs), user).filter(version=HEAD).values('id'))
+            id__in=FhirResolver(kwargs, user).viewable_rows(Source).filter(version=HEAD).values('id'))
         found = None
         try:
             with transaction.atomic():
@@ -503,7 +502,7 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
                 for uri, codes in listed.items():
                     for code in [None, *(code.rstrip('*') for code in codes)]:
                         try:
-                            resolve('CodeSystem', uri, code, kwargs, user)
+                            FhirResolver(kwargs, user).resolve('CodeSystem', uri, code)
                         except UnresolvedError:
                             unserved.add(uri)
                 self.assertEqual(unserved, self.hidden_collisions(fhir_base, user), (fhir_base, user))
@@ -546,9 +545,10 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
         self.assertEqual(acme[UNREGISTERED], ['v1*'])
         self.assertEqual((acme.get(REDIRECTED), acme.get(code_system_path('Acme', 'local'))),
                          (None, ['v1*']) if self.registry else (['v1*'], None))
-        self.assertEqual(resolve('CodeSystem', REDIRECTED, None, {'org': 'Acme'}).version,
+        self.assertEqual(FhirResolver({'org': 'Acme'}).resolve('CodeSystem', REDIRECTED, None).version,
                          'r1' if self.registry else 'v1')
-        self.assertEqual(resolve('CodeSystem', code_system_path('Acme', 'local'), None, {'org': 'Acme'}).version, 'v1')
+        self.assertEqual(
+            FhirResolver({'org': 'Acme'}).resolve('CodeSystem', code_system_path('Acme', 'local'), None).version, 'v1')
         self.assertNotIn(CIEL, acme)  # the global registry's: resolution falls through to it, but it isn't Acme's
         self.assertEqual(self.code_systems('/orgs/Empty'), {})
 
@@ -563,10 +563,11 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
             ['ICD102019*'] if self.registry else ['ICD102019*', 'v1.0'], ['v1.0*']))
         if self.registry:
             with self.assertRaises(UnresolvedError):
-                resolve('CodeSystem', ICD10, 'v1.0')
+                FhirResolver().resolve('CodeSystem', ICD10, 'v1.0')
         else:
-            self.assertEqual(resolve('CodeSystem', ICD10, 'v1.0').organization, self.sehatapp)
-        self.assertEqual(resolve('CodeSystem', code_system_path('sehatapp', 'ICD-10'), 'v1.0').version, 'v1.0')
+            self.assertEqual(FhirResolver().resolve('CodeSystem', ICD10, 'v1.0').organization, self.sehatapp)
+        self.assertEqual(
+            FhirResolver().resolve('CodeSystem', code_system_path('sehatapp', 'ICD-10'), 'v1.0').version, 'v1.0')
         self.assertEqual(self.code_systems('/orgs/sehatapp'), {ICD10: ['v1.0*']})
 
     def test_a_version_is_listed_as_stored_and_served_by_it(self):
@@ -609,13 +610,14 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
         """F3.2: a source named collections, by /orgs/Acme/CodeSystem/collections/, which the operations resolve."""
         for fhir_base, kwargs in (('/fhir', {}), ('/orgs/Acme', {'org': 'Acme'})):
             self.assertEqual(self.code_systems(fhir_base)['/orgs/Acme/CodeSystem/collections/'], ['v1*'], fhir_base)
-            self.assertEqual(resolve('CodeSystem', '/orgs/Acme/CodeSystem/collections/', None, kwargs).version, 'v1')
+            self.assertEqual(
+                FhirResolver(kwargs).resolve('CodeSystem', '/orgs/Acme/CodeSystem/collections/', None).version, 'v1')
 
     def test_a_code_system_without_a_canonical_url_is_listed_by_its_ocl_path(self):
         """F1.3: as the operations resolve it, and as $expand names its members' system."""
         for fhir_base, kwargs in (('/fhir', {}), ('/orgs/Acme', {'org': 'Acme'})):
             self.assertEqual(self.code_systems(fhir_base)[NAMELESS], ['v1*'], fhir_base)
-            self.assertEqual(resolve('CodeSystem', NAMELESS, None, kwargs).version, 'v1')
+            self.assertEqual(FhirResolver(kwargs).resolve('CodeSystem', NAMELESS, None).version, 'v1')
         self.assertNotIn(NAMELESS, self.code_systems('/orgs/HL7'))  # another owner's
 
     def test_a_hidden_repository_of_the_owner_is_listed_as_missing(self):
@@ -634,22 +636,22 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
                 before[user] = (self.capabilities('/orgs/HL7', user).content, len(queries))
             self.assertEqual(self.code_systems('/orgs/HL7', user)[COLLIDE], ['v1*'], user)
             with self.assertRaises(UnresolvedError):
-                resolve('CodeSystem', COLLIDE, None, {'org': 'HL7'}, user)
+                FhirResolver({'org': 'HL7'}, user).resolve('CodeSystem', COLLIDE, None)
         Source.objects.filter(mnemonic='collide-private', organization=self.hl7).delete()
         for user in others:
             with CaptureQueriesContext(connection) as queries:
                 content = self.capabilities('/orgs/HL7', user).content
             self.assertEqual((content, len(queries)), before[user], user)
-            self.assertEqual(resolve('CodeSystem', COLLIDE, None, {'org': 'HL7'}, user).version, 'v1')
+            self.assertEqual(FhirResolver({'org': 'HL7'}, user).resolve('CodeSystem', COLLIDE, None).version, 'v1')
 
     def test_a_release_is_listed_under_the_url_the_resolver_serves_it_at(self):
         """F1.5: the repository's canonical URL (its HEAD's), not a release's own (open decision DI19)."""
         acme = self.code_systems('/orgs/Acme')
         self.assertEqual(acme[OLD], ['v2*', 'v1'])
         self.assertNotIn(NEW, acme)
-        self.assertEqual(resolve('CodeSystem', OLD, 'v2', {'org': 'Acme'}).version, 'v2')
+        self.assertEqual(FhirResolver({'org': 'Acme'}).resolve('CodeSystem', OLD, 'v2').version, 'v2')
         with self.assertRaises(UnresolvedError):
-            resolve('CodeSystem', NEW, None, {'org': 'Acme'})
+            FhirResolver({'org': 'Acme'}).resolve('CodeSystem', NEW, None)
 
     def test_a_retired_repository_is_not_listed(self):
         """F1.6: the resolver serves no repository whose HEAD is retired, by canonical URL or path."""
@@ -659,7 +661,7 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
             self.assertNotIn('/orgs/Acme/CodeSystem/retired-head/', listed)
             for url in (RETIRED_HEAD, '/orgs/Acme/CodeSystem/retired-head/'):
                 with self.assertRaises(UnresolvedError):
-                    resolve('CodeSystem', url, None, kwargs)
+                    FhirResolver(kwargs).resolve('CodeSystem', url, None)
 
     def test_an_owner_base_shows_the_owners_private_code_systems_to_those_who_may_view_them(self):
         for user in self.users:
@@ -771,7 +773,7 @@ class TerminologyCapabilitiesTimeoutTest(OCLAPITransactionTestCase):
                 cursor.execute('SELECT pg_sleep(1)')
             return []
 
-        with override_settings(FHIR_SEARCH_TIMEOUT_MS=50), patch('core.fhir.capabilities.served_repositories', slow):
+        with override_settings(FHIR_SEARCH_TIMEOUT_MS=50), patch.object(FhirResolver, 'served_repositories', slow):
             response = APIClient().get('/fhir/metadata', {'mode': 'terminology'})
         self.assertEqual(response.status_code, 422, response.data)
         issue = response.data['issue'][0]

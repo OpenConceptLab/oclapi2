@@ -36,8 +36,7 @@ from core.fhir.ops.concepts import (
     code_q, coded_input, display_of, fhir_code, find_concept, has_name, instance_version, is_system_of, mismatch,
     system_of)
 from core.fhir.ops.lookup import code_system_version
-from core.fhir.resolve import UnresolvedError, resolve, viewable_rows
-from core.fhir.utils import namespace_of
+from core.fhir.resolve import UnresolvedError
 from core.sources.models import Source
 
 UNKNOWN_CODE_SYSTEM = 'x-caused-by-unknown-system'  # how CodeSystem $validate-code names an unknown system
@@ -128,11 +127,8 @@ def in_code_system(coding, version, language):
     return found(coding, concept, version.version, language)
 
 
-def validate_code_system(parameters, kwargs, user, instance_id=None):
-    """
-    CodeSystem $validate-code's answer for its FhirParameters at the base `kwargs` names (CodeSystem/{instance_id} at
-    the instance level), for `user`. A url that doesn't resolve answers before the code is required, as it always has.
-    """
+def validate_code_system(parameters, resolver, instance_id=None):
+    """Validate a code in its system; resolve the system before requiring a code."""
     coding = coded_input(parameters, 'url', 'version')
     # the code system validated against: the instance, else url and version, else the coding's
     target = coding._replace(
@@ -140,7 +136,7 @@ def validate_code_system(parameters, kwargs, user, instance_id=None):
     version = None
     if instance_id or target.system:
         try:
-            version = code_system_version(target, kwargs, user, instance_id)
+            version = code_system_version(target, resolver, instance_id)
         except UnresolvedError:
             return unknown_system(target, UNKNOWN_CODE_SYSTEM, version=target.version)
     coding.require('code', 'A code to validate is required.')
@@ -181,7 +177,7 @@ def named_by(system, shown):
         inherited & Q(concept__parent__canonical_url=system))
 
 
-def member(value_set, coding, namespace, user):
+def member(value_set, coding, resolver):
     """
     (the concept, the version of its code system) of the code in the value set version's default expansion, or None:
     a concept with the code (not deleted), of the system (in systemVersion, if named), in a code system version the
@@ -197,10 +193,10 @@ def member(value_set, coding, namespace, user):
     """
     if not value_set.expansion_uri:
         return None
-    concepts_named, versions_named = named_by(coding.system, viewable_rows(Source, namespace, user))
+    concepts_named, versions_named = named_by(coding.system, resolver.viewable_rows(Source))
     concepts = dict(Concept.objects.filter(
         code_q('mnemonic', coding.code), concepts_named,
-        Exists(viewable_rows(Source, namespace, user).filter(id=OuterRef('parent_id'))), is_active=True).values_list(
+        Exists(resolver.viewable_rows(Source).filter(id=OuterRef('parent_id'))), is_active=True).values_list(
         'id', 'versioned_object_id'))
     concept_ids = list(Expansion.concepts.through.objects.filter(
         expansion__uri=value_set.expansion_uri, concept_id__in=concepts).values_list('concept_id', flat=True))
@@ -208,7 +204,7 @@ def member(value_set, coding, namespace, user):
         return None
     release = Q(source__released=True, source__retired=False) & ~Q(source__version=HEAD)
     links = Concept.sources.through.objects.filter(
-        Exists(viewable_rows(Source, namespace, user).filter(id=OuterRef('source_id'))), source__is_active=True)
+        Exists(resolver.viewable_rows(Source).filter(id=OuterRef('source_id'))), source__is_active=True)
     # another version of a member's concept counts only while no release the caller is shown holds the member itself
     rows = links.filter(
         Q(concept_id__in=concept_ids) | ~Exists(links.filter(
@@ -238,14 +234,14 @@ def member(value_set, coding, namespace, user):
     return concept, row[2] if row[3] else None
 
 
-def value_set_version(parameters, kwargs, user, instance_id):
+def value_set_version(parameters, resolver, instance_id):
     """
     The value set version the request names; a url that doesn't resolve is a 422 not-found. At the instance level the id
     names it, and a url or valueSetVersion naming another one is a 400.
     """
     version, url = parameters.text('valueSetVersion'), parameters.text('url')
     if instance_id:
-        value_set = instance_version('ValueSet', instance_id, version, kwargs, user)
+        value_set = instance_version('ValueSet', instance_id, version, resolver)
         if url and not is_system_of(url, value_set):
             raise outcomes.InvalidError(f"'{url}' is not the value set {instance_id} this $validate-code is on.",
                                         expression='url')
@@ -256,41 +252,38 @@ def value_set_version(parameters, kwargs, user, instance_id):
                     expression=expression)
         return value_set
     try:
-        return resolve('ValueSet', url, version, kwargs, user)
+        return resolver.resolve('ValueSet', url, version)
     except UnresolvedError as ex:
         raise outcomes.NotFoundError(
             f"A definition for the value Set '{url}' could not be found", tx_issue_type='not-found',
             message_id='Unable_to_resolve_value_Set_', status_code=status.HTTP_422_UNPROCESSABLE_ENTITY) from ex
 
 
-def validate_value_set(parameters, kwargs, user, instance_id=None):
-    """
-    ValueSet $validate-code's answer for its FhirParameters at the base `kwargs` names (ValueSet/{instance_id} at the
-    instance level), for `user`. A code and its system are required first.
-    """
+def validate_value_set(parameters, resolver, instance_id=None):
+    """Validate value set membership for the resolver's caller; require a code and system first."""
     coding = coded_input(parameters, 'system', 'systemVersion')
     coding.require('code', 'A code to validate is required.')
     coding.require('system', 'system is required with a code: the code system the code is from.')
     language = parameters.text('displayLanguage')
     if not instance_id and not parameters.text('url'):
         try:
-            return in_code_system(coding, resolve('CodeSystem', coding.system, coding.version, kwargs, user), language)
+            return in_code_system(coding, resolver.resolve('CodeSystem', coding.system, coding.version), language)
         except UnresolvedError:
             return unknown_system(coding, UNKNOWN_CODE_SYSTEM, version=coding.version)
 
-    value_set = value_set_version(parameters, kwargs, user, instance_id)
-    hit = member(value_set, coding, namespace_of(kwargs), user)
-    return found(coding, *hit, language) if hit else not_a_member(coding, value_set, kwargs, user, language)
+    value_set = value_set_version(parameters, resolver, instance_id)
+    hit = member(value_set, coding, resolver)
+    return found(coding, *hit, language) if hit else not_a_member(coding, value_set, resolver, language)
 
 
-def not_a_member(coding, value_set, kwargs, user, language):
+def not_a_member(coding, value_set, resolver, language):
     """A code outside the value set: not-in-vs, with what its code system says of it."""
     name = f"{system_of(value_set, value_set.uri)}|{value_set.version}"
     outside = issue(coding, 'code', 'not-in-value-set', 'None_of_the_provided_codes_are_in_the_value_set_one',
                     f"The provided code '{coding.system}#{fhir_code(coding.code)}' was not found in the value set "
                     f"'{name}'")
     try:
-        version = resolve('CodeSystem', coding.system, coding.version, kwargs, user)
+        version = resolver.resolve('CodeSystem', coding.system, coding.version)
     except UnresolvedError:
         return unknown_system(coding, UNKNOWN_VALUE_SET_SYSTEM, outside)
     system = system_of(version, coding.system)

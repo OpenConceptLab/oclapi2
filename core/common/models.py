@@ -751,6 +751,43 @@ class VersionedModel(BaseResourceModel):
         return drop_version(self.uri) + 'versions/'
 
 
+class ReferenceResolution:
+    """
+    How ConceptContainerModel.resolve_reference_expression picks a repository and the version it answers with: the
+    rules $resolveReference has always used. A caller with stricter rules (FHIR's, core.fhir.resolve) passes a
+    subclass; the resolver itself holds none of them.
+    """
+
+    def repository(self, criteria):
+        """The repository a canonical URL or an OCL path matches: the lowest-id one, a Source before a Collection."""
+        from core.repos.models import Repository
+        return Repository.get(criteria)
+
+    def canonical_criteria(self, criteria):
+        """What a repository matching a canonical URL must also be, where no registry entry decides."""
+        return criteria
+
+    def owner_repository(self, owner, url):
+        """The repository of an owner a canonical URL (or url|version) names."""
+        return owner.find_repo_by_canonical_url(url)
+
+    def entry_repository(self, entry):
+        """The repository a registry entry points at now."""
+        return entry.find_repo()
+
+    def version(self, repository, version):
+        """The repository's version named, else its latest release, else itself; None when no version is so named."""
+        if version:
+            return repository.versions.filter(version=decode_string(version)).first()
+        if repository.is_head:
+            return repository.get_latest_released_version() or repository
+        return repository
+
+    def unresolved(self):
+        from core.sources.models import Source
+        return Source()
+
+
 class ConceptContainerModel(VersionedModel, ChecksumModel):
     """
     A sub-resource is an object that exists within the scope of its parent resource.
@@ -1553,8 +1590,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         return instance, resolved_registry_entry
 
     @classmethod
-    def resolve_reference_expression(  # pylint: disable=too-many-arguments,too-many-locals
-            cls, url, namespace=None, version=None, repo_type=None, allow_head=True, heads=None, head_shown=None):
+    def resolve_reference_expression(cls, url, namespace=None, version=None, resolution=None):
         """
         resolves to repository version according to this process:
 
@@ -1579,20 +1615,10 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         2. Else if relative URL provided:
             - Return the repository directly using the relative URL, or return 404 if not found
 
-        Resolving reads only: it never writes a registry entry.
-
-        Two flags make the answer stricter, for FHIR (core.fhir.resolve); their defaults keep the behaviour above:
-        - repo_type (Source or Collection): resolve only to a repository of that class. A canonical URL matches the
-          active, non-retired HEAD of a repository (its current canonical URL) in every step, so a registry entry whose
-          namespace holds no such repository resolves to nothing, and nothing else is tried. A named version must be
-          active. Unresolved is an unsaved repo_type.
-        - allow_head=False: with no version named, the latest released version other than HEAD (even a HEAD flagged
-          released) or nothing. A version named HEAD is still served.
-        - heads (a Q on HEAD rows, with repo_type): without the registry, a canonical URL matches only the HEADs it
-          holds, so a repository the caller isn't shown never stands in for one they are (FHIR's global base).
-        - head_shown (a callable, with repo_type): a HEAD it refuses resolves to nothing before any version of it is
-          read, so a repository the caller isn't shown costs what one that doesn't exist does (FHIR).
+        Resolving reads only: it never writes a registry entry. `resolution` (a ReferenceResolution, the default)
+        decides which repository each step finds and the version the answer is.
         """
+        resolution = resolution or ReferenceResolution()
 
         resolution_url, version, is_canonical = cls.__get_resolution_url(url, version)
         instance = None
@@ -1608,52 +1634,30 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                     owner = SourceContainerMixin.get_object_from_namespace(namespace)
                     if owner:
                         registry_entry = owner.url_registry_entries.filter(is_active=True, url=resolution_url).first()
-                        instance = registry_entry.find_repo(repo_type) if registry_entry else \
-                            owner.find_repo_by_canonical_url(resolution_url, repo_type)
+                        instance = resolution.entry_repository(registry_entry) if registry_entry else \
+                            resolution.owner_repository(owner, resolution_url)
 
                 if is_global_namespace or (not registry_entry and not instance):
                     registry_entry = URLRegistry.get_active_global_entries().filter(url=resolution_url).first()
                     if registry_entry:
-                        instance = registry_entry.find_repo(repo_type)
+                        instance = resolution.entry_repository(registry_entry)
 
-                return cls.resolve_repo(
-                    instance, version, is_canonical, resolution_url, repo_type, allow_head, head_shown), registry_entry
+                return cls.resolve_repo(instance, version, is_canonical, resolution_url, resolution), registry_entry
 
-            criteria &= models.Q(canonical_url=resolution_url)
-            if repo_type:
-                criteria &= models.Q(version=HEAD)
-                if heads is not None:
-                    criteria &= heads
+            criteria = resolution.canonical_criteria(criteria & models.Q(canonical_url=resolution_url))
             if namespace:
                 criteria &= models.Q(models.Q(user__uri=namespace) | models.Q(organization__uri=namespace))
         else:
             criteria &= models.Q(uri=(resolution_url if resolution_url.endswith('/') else resolution_url + '/'))
 
-        from core.repos.models import Repository
         return cls.resolve_repo(
-            Repository.get(criteria, repo_type), version, is_canonical, resolution_url, repo_type, allow_head,
-            head_shown), registry_entry
+            resolution.repository(criteria), version, is_canonical, resolution_url, resolution), registry_entry
 
     @classmethod
     def resolve_repo(  # pylint: disable=too-many-arguments
-            cls, instance, version, is_canonical, resolution_url, repo_type=None, allow_head=True, head_shown=None):
-        if instance:
-            head = instance if repo_type and instance.is_head else None
-            if head and head_shown and not head_shown(head):
-                instance = None
-            elif version:
-                versions = instance.active_versions if repo_type else instance.versions
-                instance = versions.filter(version=decode_string(version)).first()
-            elif instance.is_head:
-                instance = (instance.get_latest_released_version() or instance) if allow_head else \
-                    instance.get_latest_released_version(exclude_head=True)
-            if instance and head:  # the repository's (its HEAD's) access and canonical URL, which FHIR reads too
-                instance.repository_public_access = head.public_access
-                instance.repository_canonical_url = head.canonical_url
-
-        if not instance:
-            from core.sources.models import Source
-            instance = (repo_type or Source)()
+            cls, instance, version, is_canonical, resolution_url, resolution=None):
+        resolution = resolution or ReferenceResolution()
+        instance = (resolution.version(instance, version) if instance else None) or resolution.unresolved()
 
         instance.is_fqdn = is_canonical
         instance.resolution_url = resolution_url

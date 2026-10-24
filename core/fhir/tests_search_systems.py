@@ -25,7 +25,7 @@ from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory
 from core.fhir.mapping_index import LAG_WINDOW
-from core.fhir.resolve import visible_versions
+from core.fhir.resolve import FhirResolver
 from core.fhir.tests_search import SearchCorpusMixin, source, CIEL, ICD10
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
@@ -217,7 +217,7 @@ class SystemSearchCases(SearchCorpusMixin):
         """
         kwargs = {} if base == '/fhir' else {'org': base.rsplit('/', 1)[-1]}
         scope = {'owner_type': set(), 'owner': set(), 'source': set(), 'source_version': {'HEAD'}}
-        for mnemonic, org, username, version in visible_versions('ConceptMap', kwargs, user).values_list(
+        for mnemonic, org, username, version in FhirResolver(kwargs, user).visible_versions('ConceptMap').values_list(
                 'mnemonic', 'organization__mnemonic', 'user__username', 'version'):
             scope['owner_type'].add('Organization' if org else 'User')
             scope['owner'].add((org or username).lower())

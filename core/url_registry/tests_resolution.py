@@ -1,6 +1,6 @@
 """
 The shared canonical resolver (ConceptContainerModel.resolve_reference_expression) with the URL registry toggle off
-and on: today's answers for its existing callers, the flags FHIR resolves with (repo_type, allow_head), reads that
+and on: today's answers for its existing callers, the rules FHIR resolves with, reads that
 never write a registry entry, the registry links kept on the write side instead, and $resolveReference's ?namespace=.
 OpenConceptLab/ocl_online#451.
 """
@@ -18,6 +18,7 @@ from core.common.constants import HEAD
 from core.common.models import ConceptContainerModel
 from core.common.tasks import resolve_url_registry_entries
 from core.common.tests import OCLTestCase, OCLAPITestCase
+from core.fhir.resolve import FhirResolution
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
@@ -78,22 +79,21 @@ class ResolverCorpusMixin:
 class StrictDefaultCases:
     """With the toggle off and on (the toggle classes mix this in)."""
     def test_a_head_flagged_released_is_never_the_strict_default(self):
-        """allow_head=False skips HEAD even when HEAD is flagged released; the default keeps today's answer"""
+        """FHIR skips HEAD as the default even when flagged released; the shared default still serves it."""
         head = source(self.drafts, 'flagged', released=True, canonical_url=FLAGGED)
         GlobalURLRegistryFactory(url=FLAGGED, namespace=self.drafts.uri)  # read only with the toggle on
 
         version, _ = Source.resolve_reference_expression(FLAGGED)
         self.assertEqual(version.id, head.id)
-        for repo_type in (None, Source):
-            version, _ = Source.resolve_reference_expression(FLAGGED, repo_type=repo_type, allow_head=False)
-            self.assertIsNone(version.id)
-            self.assertTrue(version.is_fqdn)
-            version, _ = Source.resolve_reference_expression(
-                FLAGGED, version=HEAD, repo_type=repo_type, allow_head=False)
-            self.assertEqual(version.id, head.id)
+        version, _ = Source.resolve_reference_expression(FLAGGED, resolution=FhirResolution(Source))
+        self.assertIsNone(version.id)
+        self.assertTrue(version.is_fqdn)
+        version, _ = Source.resolve_reference_expression(
+            FLAGGED, version=HEAD, resolution=FhirResolution(Source))
+        self.assertEqual(version.id, head.id)
 
         released = source(self.drafts, 'flagged', 'v1', released=True, canonical_url=FLAGGED)
-        version, _ = Source.resolve_reference_expression(FLAGGED, repo_type=Source, allow_head=False)
+        version, _ = Source.resolve_reference_expression(FLAGGED, resolution=FhirResolution(Source))
         self.assertEqual(version.id, released.id)
 
 
@@ -137,31 +137,31 @@ class ResolverToggleOffTest(StrictDefaultCases, ResolverCorpusMixin, OCLTestCase
         self.assertIsInstance(version, Source)
 
     def test_repo_type_resolves_only_to_that_type(self):
-        version, _ = Source.resolve_reference_expression(PBD, repo_type=Collection)
+        version, _ = Source.resolve_reference_expression(PBD, resolution=FhirResolution(Collection))
         self.assertEqual(version.id, self.pbd_collection_v1.id)
         self.assertIsInstance(version, Collection)
 
-        version, _ = Source.resolve_reference_expression(PBD, repo_type=Source)
+        version, _ = Source.resolve_reference_expression(PBD, resolution=FhirResolution(Source))
         self.assertEqual(version.id, self.pbd_source_v1.id)
 
-        version, _ = Source.resolve_reference_expression(ICD10, repo_type=Collection)
+        version, _ = Source.resolve_reference_expression(ICD10, resolution=FhirResolution(Collection))
         self.assertIsNone(version.id)
         self.assertIsInstance(version, Collection)
 
-        version, _ = Source.resolve_reference_expression(self.pbd_collection.uri, repo_type=Source)
+        version, _ = Source.resolve_reference_expression(self.pbd_collection.uri, resolution=FhirResolution(Source))
         self.assertIsNone(version.id)
-        version, _ = Source.resolve_reference_expression(self.pbd_collection.uri, repo_type=Collection)
+        version, _ = Source.resolve_reference_expression(self.pbd_collection.uri, resolution=FhirResolution(Collection))
         self.assertEqual(version.id, self.pbd_collection_v1.id)
 
     def test_repo_type_matches_the_repository_canonical_on_its_head(self):
         self.sehat_icd.canonical_url = 'http://example.org/new-icd'
         self.sehat_icd.save()
 
-        version, _ = Source.resolve_reference_expression(ICD10, '/orgs/sehatapp/', repo_type=Source)
+        version, _ = Source.resolve_reference_expression(ICD10, '/orgs/sehatapp/', resolution=FhirResolution(Source))
         self.assertIsNone(version.id)
 
         version, _ = Source.resolve_reference_expression(
-            'http://example.org/new-icd', '/orgs/sehatapp/', repo_type=Source)
+            'http://example.org/new-icd', '/orgs/sehatapp/', resolution=FhirResolution(Source))
         self.assertEqual(version.id, self.sehat_icd_v1.id)
 
     def test_repo_type_serves_only_active_versions(self):
@@ -171,7 +171,8 @@ class ResolverToggleOffTest(StrictDefaultCases, ResolverCorpusMixin, OCLTestCase
         version, _ = Source.resolve_reference_expression(ICD10, '/orgs/sehatapp/', 'v1.0')
         self.assertEqual(version.id, self.sehat_icd_v1.id)
 
-        version, _ = Source.resolve_reference_expression(ICD10, '/orgs/sehatapp/', 'v1.0', repo_type=Source)
+        version, _ = Source.resolve_reference_expression(
+            ICD10, '/orgs/sehatapp/', 'v1.0', resolution=FhirResolution(Source))
         self.assertIsNone(version.id)
 
 
@@ -205,11 +206,11 @@ class ResolverToggleOnTest(StrictDefaultCases, ResolverCorpusMixin, OCLTestCase)
         self.assertIsNone(entry)
 
     def test_repo_type_finds_that_type_in_the_entry_namespace(self):
-        version, entry = Source.resolve_reference_expression(PBD, repo_type=Collection)
+        version, entry = Source.resolve_reference_expression(PBD, resolution=FhirResolution(Collection))
         self.assertEqual(version.id, self.pbd_collection_v1.id)
         self.assertEqual(entry, self.pbd_entry)
 
-        version, entry = Source.resolve_reference_expression(PBD, repo_type=Source)
+        version, entry = Source.resolve_reference_expression(PBD, resolution=FhirResolution(Source))
         self.assertEqual(version.id, self.pbd_source_v1.id)
         self.assertEqual(entry, self.pbd_entry)
 
@@ -217,7 +218,7 @@ class ResolverToggleOnTest(StrictDefaultCases, ResolverCorpusMixin, OCLTestCase)
         collection(self.sehatapp, 'icd-vs', canonical_url=ICD10)
         collection(self.sehatapp, 'icd-vs', 'v1', released=True, canonical_url=ICD10)
 
-        version, entry = Source.resolve_reference_expression(ICD10, repo_type=Collection)
+        version, entry = Source.resolve_reference_expression(ICD10, resolution=FhirResolution(Collection))
         self.assertIsNone(version.id)
         self.assertIsInstance(version, Collection)
         self.assertEqual(entry, self.icd_entry)
@@ -225,11 +226,13 @@ class ResolverToggleOnTest(StrictDefaultCases, ResolverCorpusMixin, OCLTestCase)
     def test_an_owner_entry_resolves_by_type_in_its_namespace(self):
         owner_entry = OrganizationURLRegistryFactory(organization=self.sehatapp, url=PBD, namespace=self.padam.uri)
 
-        version, entry = Source.resolve_reference_expression(PBD, '/orgs/sehatapp/', repo_type=Collection)
+        version, entry = Source.resolve_reference_expression(
+            PBD, '/orgs/sehatapp/', resolution=FhirResolution(Collection))
         self.assertEqual(version.id, self.pbd_collection_v1.id)
         self.assertEqual(entry, owner_entry)
 
-        version, entry = Source.resolve_reference_expression(ICD10, '/orgs/sehatapp/', repo_type=Source)
+        version, entry = Source.resolve_reference_expression(
+            ICD10, '/orgs/sehatapp/', resolution=FhirResolution(Source))
         self.assertEqual(version.id, self.sehat_icd_v1.id)
         self.assertIsNone(entry)
 
@@ -240,7 +243,7 @@ class ResolverToggleOnTest(StrictDefaultCases, ResolverCorpusMixin, OCLTestCase)
         version, _ = Source.resolve_reference_expression(ICD10)
         self.assertEqual(version.id, self.who_icd_2019.id)
 
-        version, entry = Source.resolve_reference_expression(ICD10, repo_type=Source)
+        version, entry = Source.resolve_reference_expression(ICD10, resolution=FhirResolution(Source))
         self.assertIsNone(version.id)
         self.assertEqual(entry, self.icd_entry)
 
@@ -250,7 +253,7 @@ class ResolverToggleOnTest(StrictDefaultCases, ResolverCorpusMixin, OCLTestCase)
         with patch.object(URLRegistry, 'save') as save_mock:
             Source.resolve_reference_expression(ICD10)
             Source.resolve_reference_expression(PBD, '/orgs/sehatapp/')
-            Source.resolve_reference_expression(PBD, repo_type=Collection)
+            Source.resolve_reference_expression(PBD, resolution=FhirResolution(Collection))
 
         save_mock.assert_not_called()
         self.icd_entry.refresh_from_db()
@@ -272,8 +275,8 @@ class URLRegistryReadsTest(ResolverCorpusMixin, OCLTestCase):
 
     def test_find_repo(self):
         self.assertEqual(self.entry.find_repo(), self.pbd_source)
-        self.assertEqual(self.entry.find_repo(Source), self.pbd_source)
-        self.assertEqual(self.entry.find_repo(Collection), self.pbd_collection)
+        self.assertEqual(FhirResolution(Source).entry_repository(self.entry), self.pbd_source)
+        self.assertEqual(FhirResolution(Collection).entry_repository(self.entry), self.pbd_collection)
         self.assertIsNone(URLRegistry(url=PBD).find_repo())
 
     def test_lookup_entry_keeps_the_link_and_saves_only_on_a_change(self):

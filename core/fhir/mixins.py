@@ -8,6 +8,7 @@ from core.common.throttling import FhirMinuteThrottle
 from core.fhir import outcomes
 from core.fhir.negotiation import FhirContentNegotiation, FhirVersioning, PARSER_CLASSES, RENDERER_CLASSES
 from core.fhir.parameters import FhirParameters
+from core.fhir.resolve import FhirResolver
 from core.fhir.search import read, search_bundle, within_search_timeout
 from core.fhir.utils import fhir_base_url, namespace_of
 
@@ -41,6 +42,12 @@ class FhirViewMixin:
             response.data = outcomes.normalize_outcomes(response.data)
         return super().finalize_response(request, response, *args, **kwargs)
 
+    def get_fhir_resolver(self):
+        """The resolver shared by this request's operations and serializers."""
+        if not hasattr(self, '_fhir_resolver'):
+            self._fhir_resolver = FhirResolver(self.kwargs, self.request.user)
+        return self._fhir_resolver
+
     def get_fhir_parameters(self):
         return FhirParameters.from_request(self.request)
 
@@ -60,7 +67,7 @@ class FhirOperationView(FhirViewMixin, APIView):
 
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         answer = self.operation(  # pylint: disable=not-callable
-            self.get_fhir_parameters(), self.kwargs, request.user, kwargs.get(self.instance))
+            self.get_fhir_parameters(), self.get_fhir_resolver(), kwargs.get(self.instance))
         return Response(self.adapter(answer))  # pylint: disable=not-callable
 
     post = get
@@ -71,7 +78,8 @@ class FhirRepositoryViewMixin:
     resource_type = None
 
     def get_serializer_context(self):
-        return {**super().get_serializer_context(), 'opaque_ids': namespace_of(self.kwargs) is None}
+        return {**super().get_serializer_context(), 'opaque_ids': namespace_of(self.kwargs) is None,
+                'fhir_resolver': self.get_fhir_resolver()}
 
 
 class FhirSearchMixin(FhirRepositoryViewMixin):

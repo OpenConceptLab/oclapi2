@@ -51,9 +51,8 @@ from core.fhir import outcomes
 from core.fhir.constants import TRANSLATION_TOO_COSTLY
 from core.fhir.ops.concepts import fhir_code, stored_codes
 from core.fhir.parameters import Coding
-from core.fhir.resolve import UnresolvedError, resolve, viewable_rows
+from core.fhir.resolve import UnresolvedError
 from core.fhir.search import within_search_timeout
-from core.fhir.utils import namespace_of
 from core.mappings.models import Mapping
 from core.sources.models import Source
 
@@ -93,7 +92,7 @@ def side_system(canonical, url, uri=None):
         return url
 
 
-def named_sources(systems, namespace, user):
+def named_sources(systems, resolver):
     """
     For each system, the ids of the Source rows the base shows the caller that it names, in one query: those with it as
     their canonical URL; for an OCL path, the repository's rows, whether it has a canonical URL or not (the path is an
@@ -101,7 +100,7 @@ def named_sources(systems, namespace, user):
     by their own indexes.
     """
     paths = {system: (repository_prefixes(system, ('sources',)) or [None])[0] for system in systems}
-    rows = viewable_rows(Source, namespace, user).filter(reduce(or_, (
+    rows = resolver.viewable_rows(Source).filter(reduce(or_, (
         Q(uri__startswith=path) if path else Q(canonical_url=system) for system, path in paths.items())))
     named = {system: [] for system in systems}
     for source_id, canonical, uri in rows.values_list('id', 'canonical_url', 'uri'):
@@ -111,14 +110,14 @@ def named_sources(systems, namespace, user):
     return named
 
 
-def shown_as(side, system, source_ids, namespace, user):
+def shown_as(side, system, source_ids, resolver):
     """
     Q for mappings whose `side` ('from' or 'to') `system` names: their source is one of `source_ids` (named_sources');
     or it isn't one the caller is shown by a canonical URL, and the URL they store names the system, as side_system
     then shows it. The subquery runs only on the mappings whose URL does.
     """
     source, url = f'{side}_source', f'{side}_source_url'
-    unnamed = ~Exists(viewable_rows(Source, namespace, user).filter(
+    unnamed = ~Exists(resolver.viewable_rows(Source).filter(
         id=OuterRef(f'{source}_id'), canonical_url__gt=''))
     paths = repository_prefixes(system, ('sources', 'collections', 'ConceptMap'))
     stored = reduce(or_, (Q(**{f'{url}__startswith': path}) for path in paths)) if paths else Q(**{url: system})
@@ -148,12 +147,12 @@ def of_version(side, version):
     return Q(**{field: version}) | Q(**{f'{field}__isnull': True}) | Q(**{field: ''})
 
 
-def with_side(queryset, side, namespace, user):
+def with_side(queryset, side, resolver):
     """
     Each mapping annotated with whether the base shows the caller its `side`'s source ({side}_shown), and the canonical
     URL that side is then shown by ({side}_canonical, None for none): subqueries run only on the mappings listed.
     """
-    queryset = queryset.annotate(**{f'{side}_shown': Exists(viewable_rows(Source, namespace, user).filter(
+    queryset = queryset.annotate(**{f'{side}_shown': Exists(resolver.viewable_rows(Source).filter(
         id=OuterRef(f'{side}_source_id')))})
     return queryset.annotate(**{f'{side}_canonical': Case(When(
         Q(**{f'{side}_shown': True, f'{side}_source__canonical_url__gt': ''}),
@@ -190,11 +189,11 @@ def read_request(parameters):
 
 
 class Translation:
-    """One $translate request at the base `kwargs` names, for `user`."""
+    """One $translate request for the resolver's base and caller."""
 
-    def __init__(self, parameters, kwargs, user):
+    def __init__(self, parameters, resolver):
         self.request = read_request(parameters)
-        self.kwargs, self.user, self.namespace = kwargs, user, namespace_of(kwargs)
+        self.resolver = resolver
 
     def answer(self):
         """
@@ -234,10 +233,10 @@ class Translation:
         request, system = self.request, self.request.coding.system
         # in this order, whatever their URLs, so the statement's shape is too
         systems = dict.fromkeys([system, request.targetsystem or system, scope_system(request.scope) or system])
-        return named_sources(systems, self.namespace, self.user)
+        return named_sources(systems, self.resolver)
 
     def resolve(self, resource_type, url, version, expression):
-        return resolve(resource_type, url, version, self.kwargs, self.user, expression)
+        return self.resolver.resolve(resource_type, url, version, expression)
 
     def named_concept_map(self):
         """(the ConceptMap version url and conceptMapVersion name, how a match's source names it); else a 404."""
@@ -314,7 +313,7 @@ class Translation:
         mappings = concept_map.get_active_mappings().filter(  # neither retired nor deleted
             of_version(near, request.coding.version), **{f'{near}_concept_code__in': stored_codes(request.coding.code)})
         for side, system in sides.items():
-            mappings = mappings.filter(shown_as(side, system, self.named_sources[system], self.namespace, self.user))
+            mappings = mappings.filter(shown_as(side, system, self.named_sources[system], self.resolver))
         return sorted(mappings.values_list('id', flat=True))
 
     def matches(self, concept_map, named):
@@ -325,7 +324,7 @@ class Translation:
         limit = settings.FHIR_TRANSLATE_MATCH_LIMIT
         near, far = ('to', 'from') if self.request.reverse else ('from', 'to')
         ids = self.match_ids(concept_map, near, far)
-        rows = with_side(Mapping.objects.filter(id__in=ids[:limit + 1]), far, self.namespace, self.user).order_by(
+        rows = with_side(Mapping.objects.filter(id__in=ids[:limit + 1]), far, self.resolver).order_by(
             'id').values('map_type', f'{far}_concept_code', f'{far}_source_url', f'{far}_source__uri', f'{far}_shown',
                          f'{far}_canonical')
         matches = {}
@@ -338,9 +337,6 @@ class Translation:
         return list(matches.values())[:limit], len(ids) > limit
 
 
-def translate(parameters, kwargs, user, _instance_id=None):
-    """
-    A $translate's answer (Translation.answer) for its FhirParameters, at the base `kwargs` names, for `user`, its
-    statements bounded as a search's are (a cancelled one is too costly). It has no instance level.
-    """
-    return within_search_timeout(lambda: Translation(parameters, kwargs, user).answer(), TRANSLATION_TOO_COSTLY)
+def translate(parameters, resolver, _instance_id=None):
+    """Translate for the resolver's caller within the search timeout; there is no instance level."""
+    return within_search_timeout(lambda: Translation(parameters, resolver).answer(), TRANSLATION_TOO_COSTLY)
