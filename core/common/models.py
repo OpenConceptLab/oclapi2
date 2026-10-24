@@ -47,7 +47,7 @@ from .exceptions import Http400, BatchIndexingError
 from .fields import URIField
 from .mixins import SourceContainerMixin
 from .tasks import handle_save, handle_m2m_changed, seed_children_to_new_version, update_validation_schema, \
-    update_source_active_concepts_count, update_source_active_mappings_count
+    update_source_active_concepts_count, update_source_active_mappings_count, resolve_url_registry_entries
 from ..toggles.models import Toggle
 from ..url_registry.constants import URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE
 
@@ -981,16 +981,18 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             entry.unlink()
         return [entry.id for entry in entries]
 
-    @staticmethod
-    def relink_url_registry_entries(entry_ids, canonical_urls):
+    def relink_url_registry_entries(self, entry_ids, canonical_urls):
         """
-        After a delete: every active entry that was linked to a deleted row, and every active entry naming one of the
-        deleted rows' canonical URLs, linked or not, is re-resolved (lookup_entry). A retry of a delete that failed
-        part-way so finds, by URL, the entries the failed attempt unlinked. The link is a cache that resolution never
-        reads, so a failure here only leaves it stale until the next delete, retry or write that relinks.
+        After a delete: every active entry that was linked to a deleted row, and every active entry of this
+        repository's namespace naming one of the deleted rows' canonical URLs, linked or not, is re-resolved
+        (lookup_entry). An entry resolves in its own namespace only, so no other can have pointed at the rows. A retry
+        of a delete that failed part-way so finds, by URL, the entries the failed attempt unlinked. The link is a cache
+        that resolution never reads, so a failure here only leaves it stale until the next delete, retry or write that
+        relinks.
         """
         from core.url_registry.models import URLRegistry
-        for entry in URLRegistry.objects.filter(Q(id__in=entry_ids) | Q(url__in=canonical_urls), is_active=True):
+        for entry in URLRegistry.objects.filter(
+                Q(id__in=entry_ids) | Q(url__in=canonical_urls, namespace=self.parent_url), is_active=True):
             entry.lookup_entry()
 
     @staticmethod
@@ -1447,19 +1449,24 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     def active_url_registry_entries(self):
         return self.url_registry_entries.filter(is_active=True)
 
-    def link_url_registry_entries(self):
+    def url_registry_entries_to_resolve(self):
         """
-        For a repository row (HEAD or version) created with, or given, a canonical URL: the active registry entries
-        that name it in this repository's namespace are pointed at what they resolve to now (lookup_entry: the
-        namespace's lowest-id row with the URL, as the registry has always resolved), so an entry made before the row
-        that answers it gets it. The entries already linked to this row are re-resolved by the
-        resolve_url_registry_entries task.
+        The active registry entries a change to this row's canonical URL may move: those linked to it, and those naming
+        its URL in its namespace, which resolve to the namespace's lowest-id row with the URL.
         """
-        if not self.canonical_url:
-            return
         from core.url_registry.models import URLRegistry
-        for entry in URLRegistry.objects.filter(is_active=True, url=self.canonical_url, namespace=self.parent_url):
-            entry.lookup_entry()
+        linked = Q(repo_type=ContentType.objects.get_for_model(self), repo_id=self.id)
+        named = Q(url=self.canonical_url, namespace=self.parent_url) if self.canonical_url else Q(pk__in=[])
+        return URLRegistry.objects.filter(linked | named, is_active=True)
+
+    def resolve_url_registry_entries_later(self):
+        """
+        For a row created with, or given, a canonical URL: once the change commits, the resolve_url_registry_entries
+        task points the entries it may move at what they resolve to now. The request asks only whether there are any.
+        """
+        if self.url_registry_entries_to_resolve().exists():
+            transaction.on_commit(lambda: resolve_url_registry_entries.apply_async(
+                (self.id, self.resource_type), queue='default', permanent=False))
 
     @cached_property
     def version_export_path(self):

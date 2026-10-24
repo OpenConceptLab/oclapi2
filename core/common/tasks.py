@@ -1181,9 +1181,9 @@ def readd_references_to_expansion_on_references_removal(expansion_id, removed_re
 @app.task(ignore_result=True)
 def resolve_url_registry_entries(repo_id, repo_type):
     repo_klass = get_resource_class_from_resource_name(repo_type)
-    if repo_klass:
-        repo = repo_klass.objects.filter(id=repo_id).first()
-        for entry in repo.active_url_registry_entries:
+    repo = repo_klass.objects.filter(id=repo_id).first() if repo_klass else None
+    if repo:
+        for entry in repo.url_registry_entries_to_resolve():
             entry.lookup_entry()
 
 

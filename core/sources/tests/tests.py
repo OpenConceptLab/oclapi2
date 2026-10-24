@@ -2196,13 +2196,14 @@ class SourceTest(OCLTestCase):
 
         self.assertIsNone(source.get_changelog_task())
 
-    @patch('core.sources.models.resolve_url_registry_entries')
+    @patch('core.common.models.resolve_url_registry_entries')
     def test_save_queues_resolve_url_registry_entries_when_canonical_url_changes(self, resolve_mock):
         source = OrganizationSourceFactory(version=HEAD, canonical_url='https://old.com')
         OrganizationURLRegistryFactory(organization=source.organization, repo=source, url='https://foo.bar.com')
 
         source.canonical_url = 'https://new.com'
-        source.save()
+        with self.captureOnCommitCallbacks(execute=True):
+            source.save()
 
         resolve_mock.apply_async.assert_called_once_with(
             (source.id, source.resource_type), queue='default', permanent=False)
