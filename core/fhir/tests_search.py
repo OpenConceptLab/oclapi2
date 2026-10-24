@@ -565,6 +565,20 @@ class CodeSystemSearchTest(SearchCorpusMixin, OCLTestCase):  # pylint: disable=t
         with self.assertNumQueries(3):  # + the owner
             self.client.get('/orgs/CIEL/CodeSystem/')
 
+    def test_releases_without_a_canonical_url_of_their_own_add_no_query(self):
+        """Each shows its repository's canonical URL from the search's annotation, not from a query of its own."""
+        with CaptureQueriesContext(connection) as before:
+            total = self.client.get('/fhir/CodeSystem/').data['total']
+        org = OrganizationFactory(mnemonic='Unnamed-Releases')
+        source(org, 'codes', canonical_url='https://example.org/unnamed-releases')
+        for version in ('v1', 'v2', 'v3'):
+            source(org, 'codes', version, released=True, canonical_url=None)
+        with self.assertNumQueries(len(before.captured_queries)):
+            bundle = self.client.get('/fhir/CodeSystem/').data
+        self.assertEqual(bundle['total'], total + 3)
+        unnamed = {f'https://example.org/unnamed-releases|{version}' for version in ('v1', 'v2', 'v3')}
+        self.assertLessEqual(unnamed, set(self.keys(bundle)))
+
 
 class ValueSetSearchTest(SearchCorpusMixin, OCLTestCase):
     def test_global_search_and_the_repository_canonical(self):
