@@ -87,10 +87,10 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
         cls.admin = UserProfile.objects.get(username='ocladmin')
         cls.ciel = OrganizationFactory(mnemonic='CIEL')
         cls.hl7 = OrganizationFactory(mnemonic='HL7')
-        cls.fixtures = OrganizationFactory(mnemonic='FHIR-Fixtures', public_access=ACCESS_TYPE_NONE)
+        cls.fixtures_org = OrganizationFactory(mnemonic='FHIR-Fixtures', public_access=ACCESS_TYPE_NONE)
         cls.member = UserProfileFactory(username='fixture-member')
         cls.outsider = UserProfileFactory(username='outsider')
-        cls.fixtures.members.add(cls.member)
+        cls.fixtures_org.members.add(cls.member)
 
         # WHO first, so WHO has the lower ids, as in production (the corpus does the same for ICD-10)
         cls.who_atc = source(cls.who, 'WHOATC', canonical_url=ATC)
@@ -101,14 +101,14 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
         cls.ciel_source = source(cls.ciel, 'CIEL', canonical_url=CIEL)
         cls.ciel_v1 = source(cls.ciel, 'CIEL', 'v2026-09-24', released=True, canonical_url=CIEL)
         cls.fixture = source(
-            cls.fixtures, 'fixture-codes', canonical_url=FIXTURE, public_access=ACCESS_TYPE_NONE)
+            cls.fixtures_org, 'fixture-codes', canonical_url=FIXTURE, public_access=ACCESS_TYPE_NONE)
         cls.fixture_v1 = source(
-            cls.fixtures, 'fixture-codes', '1.0.0', released=True, canonical_url=FIXTURE,
+            cls.fixtures_org, 'fixture-codes', '1.0.0', released=True, canonical_url=FIXTURE,
             public_access=ACCESS_TYPE_NONE)
         cls.fixture_at = source(
-            cls.fixtures, 'codes@fixture', canonical_url=f'{FIXTURE}-at', public_access=ACCESS_TYPE_NONE)
+            cls.fixtures_org, 'codes@fixture', canonical_url=f'{FIXTURE}-at', public_access=ACCESS_TYPE_NONE)
         cls.fixture_at_v1 = source(
-            cls.fixtures, 'codes@fixture', '1.0.0', released=True, canonical_url=f'{FIXTURE}-at',
+            cls.fixtures_org, 'codes@fixture', '1.0.0', released=True, canonical_url=f'{FIXTURE}-at',
             public_access=ACCESS_TYPE_NONE)
         if cls.registry:
             # the curated global registry (design D24): shared canonicals to the owners chosen, none for private repos
@@ -276,14 +276,14 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
         when it names the private copy's namespace, nothing else is tried. Each owner base still finds its own.
         """
         shared = 'http://example.org/shared-codes'
-        private = source(self.fixtures, 'shared', canonical_url=shared, public_access=ACCESS_TYPE_NONE)
-        private_v1 = source(self.fixtures, 'shared', 'v1', released=True, canonical_url=shared,
+        private = source(self.fixtures_org, 'shared', canonical_url=shared, public_access=ACCESS_TYPE_NONE)
+        private_v1 = source(self.fixtures_org, 'shared', 'v1', released=True, canonical_url=shared,
                             public_access=ACCESS_TYPE_NONE)
         source(self.hl7, 'shared', canonical_url=shared)
         public_v1 = source(self.hl7, 'shared', 'v1', released=True, canonical_url=shared)
         self.assertLess(private.id, public_v1.id)
         if self.registry:
-            GlobalURLRegistryFactory(url=shared, namespace=self.fixtures.uri)
+            GlobalURLRegistryFactory(url=shared, namespace=self.fixtures_org.uri)
 
         for user in (ANONYMOUS, self.member, self.admin):
             if self.registry:

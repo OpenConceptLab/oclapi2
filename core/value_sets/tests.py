@@ -1,5 +1,6 @@
 from mock.mock import patch, Mock
 
+from django.test import tag
 from core.collections.models import CollectionReference, Collection, Expansion
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory, UserCollectionFactory
 from core.common.constants import ACCESS_TYPE_NONE
@@ -16,6 +17,7 @@ from core.users.tests.factories import UserProfileFactory
 from core.value_sets.serializers import ValueSetDetailSerializer
 
 
+@tag('es')
 class ValueSetTest(OCLAPITestCase):
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))

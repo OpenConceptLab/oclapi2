@@ -1,7 +1,9 @@
 import datetime
 import json
 import os
+import sys
 import time
+import unittest
 import uuid
 from collections import OrderedDict
 from unittest.mock import patch, Mock, MagicMock, ANY
@@ -15,9 +17,10 @@ from django.contrib.auth.models import AnonymousUser, Group
 from django.core.files.base import File
 from django.core.management import call_command, CommandError
 from django.http import HttpResponse
-from django.test import TestCase, override_settings, RequestFactory
+from django.test import TestCase, override_settings, RequestFactory, tag
 from django.test.runner import DiscoverRunner
 from django.utils import timezone
+from elastic_transport import Transport
 from mock.mock import call
 from requests import ConnectTimeout
 from requests.auth import HTTPBasicAuth
@@ -91,10 +94,50 @@ class CustomTestRunner(ColourRunnerMixin, DiscoverRunner):
     pass
 
 
+# Unset: tests index and search ES. 'off': nothing indexes and any ES request fails, so tests not tagged 'es' can run
+# in parallel. 'record': nothing indexes and ES requests go through; the classes making them are appended to
+# TEST_ES_RECORD_FILE, to find the ones to tag.
+TEST_ES = os.environ.get('TEST_ES')
+TEST_ES_RECORD_FILE = os.environ.get('TEST_ES_RECORD_FILE', 'es_tests.txt')
+
+
+def es_test_class():
+    """The test class on the call stack, as module.QualName, or None."""
+    frame = sys._getframe(1)  # pylint: disable=protected-access
+    while frame:
+        for name in ('self', 'cls'):
+            owner = frame.f_locals.get(name)
+            klass = owner if isinstance(owner, type) else type(owner)
+            if owner is not None and issubclass(klass, unittest.TestCase):
+                return f'{klass.__module__}.{klass.__qualname__}'
+        frame = frame.f_back
+    return None
+
+
+def guard_es_requests(record):
+    perform_request = Transport.perform_request
+
+    def guarded(transport, method, target, *args, **kwargs):
+        test = es_test_class()
+        if not record:
+            raise AssertionError(
+                f"{test or 'This test'} sends {method} {target} to Elasticsearch, which TEST_ES=off forbids: "
+                "tag its class @tag('es')")
+        with open(TEST_ES_RECORD_FILE, 'a', encoding='utf-8') as file:
+            file.write(f'{test}\t{method} {target.split("?")[0]}\n')
+        return perform_request(transport, method, target, *args, **kwargs)
+
+    Transport.perform_request = guarded
+
+
 class SetupTestEnvironment:
     settings.TEST_MODE = True
     settings.ELASTICSEARCH_DSL_AUTOSYNC = True
     settings.ES_SYNC = True
+    if TEST_ES in ('off', 'record'):
+        settings.ELASTICSEARCH_DSL_AUTOSYNC = False
+        settings.ES_SYNC = False
+        guard_es_requests(record=TEST_ES == 'record')
     if settings.ENV == 'ci':
         # No redis service available on CI; use a no-op cache so cache reads/writes are harmless no-ops
         # instead of raising connection errors.
@@ -1330,6 +1373,7 @@ class UtilsTest(OCLTestCase):
         sentence_transformer_mock.return_value.encode.assert_called_once_with(['a'], batch_size=64)
 
 
+@tag('es')
 class BaseModelTest(OCLTestCase):
     def test_is_public_access(self):
         for value in ('View', 'view', 'Edit', 'EDIT'):

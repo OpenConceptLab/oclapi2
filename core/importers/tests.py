@@ -17,7 +17,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db import connection
 from django.db.models import F
-from django.test import override_settings
+from django.test import override_settings, tag
 from django.test.utils import CaptureQueriesContext
 from elasticsearch.helpers import streaming_bulk
 from ijson import JSONError
@@ -1946,6 +1946,7 @@ class BulkImportInlineTest(OCLTestCase):
              ('/orgs/WHO/sources/ICD-10/', 'A01', 'Same As')]
         )
 
+@tag('es')
 class ImportSearchTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()

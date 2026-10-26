@@ -134,6 +134,10 @@ jobs:
           COVERAGE_CORE: sysmon
         run: |
           . venv/bin/activate
-          COVERAGE_FILE=/tmp/.coverage coverage run --parallel-mode --source='core' manage.py test --parallel=1 -v 3 --keepdb
+          nproc
+          # Tests that don't talk to ES run in parallel with indexing off (any ES request fails them); those tagged
+          # 'es' run on one worker against the shared indices
+          COVERAGE_FILE=/tmp/.coverage TEST_ES=off coverage run --parallel-mode --source='core' manage.py test --exclude-tag es --parallel=4 -v 3 --keepdb
+          COVERAGE_FILE=/tmp/.coverage coverage run --parallel-mode --source='core' manage.py test --tag es --parallel=1 -v 3 --keepdb
           COVERAGE_FILE=/tmp/.coverage coverage combine
-          COVERAGE_FILE=/tmp/.coverage coverage report -m --include=core/* --fail-under=96 --sort=cover
+          COVERAGE_FILE=/tmp/.coverage coverage report -m --include=core/* --fail-under=97 --sort=cover

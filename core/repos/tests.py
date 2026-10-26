@@ -2,7 +2,7 @@ import datetime
 from unittest.mock import patch
 
 from django.db import IntegrityError, transaction
-from django.test import override_settings
+from django.test import override_settings, tag
 from django.utils import timezone
 
 from core.collections.documents import CollectionDocument
@@ -18,6 +18,7 @@ from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFa
 from core.users.tests.factories import UserProfileFactory
 
 
+@tag('es')
 class ReposListViewTest(OCLAPITestCase):
     def test_get_200(self):
         CollectionDocument._index.delete()  # pylint: disable=protected-access
@@ -217,6 +218,7 @@ class RepoExportDownloadNameTest(OCLTestCase):
         )
 
 
+@tag('es')
 class UserOrganizationRepoListViewTest(OCLAPITestCase):
     def test_get(self):
         CollectionDocument._index.delete()  # pylint: disable=protected-access
@@ -334,6 +336,7 @@ class RepositoryModelTest(OCLTestCase):
         self.assertEqual(list(merged), [])
 
 
+@tag('es')
 class ReposListViewDbFirstTest(OCLAPITestCase):
     def test_org_scoped_repo_appears_without_es_indexing(self):
         org = OrganizationFactory(mnemonic='db-first-org')
@@ -500,6 +503,7 @@ class OrganizationRepoListViewDbFirstTest(OCLAPITestCase):
         self.assertEqual(response.data, [])
 
 
+@tag('es')
 class OtherUserOrganizationListsTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()

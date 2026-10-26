@@ -4,7 +4,7 @@ from celery_once import AlreadyQueued
 from django.apps import apps
 from django.core.exceptions import ValidationError
 from django.http import QueryDict
-from django.test import override_settings
+from django.test import override_settings, tag
 from mock import patch, Mock
 from mock.mock import ANY
 from rest_framework import status
@@ -777,6 +777,7 @@ class CollectionTest(OCLTestCase):
         self.assertTrue(version1.expansion.is_auto_generated)
 
 
+@tag('es')
 class CollectionReferenceTest(OCLTestCase):
     def test_uri(self):
         org = OrganizationFactory(mnemonic='MyOrg')
@@ -2011,6 +2012,7 @@ class TasksTest(OCLTestCase):
         self.assertEqual(collection.active_concepts, 1)
 
 
+@tag('es')
 class ExpansionTest(OCLTestCase):
     @patch('core.collections.models.seed_children_to_expansion')
     def test_persist_without_mnemonic(self, seed_children_to_expansion_mock):
@@ -2588,6 +2590,7 @@ class ExpansionTest(OCLTestCase):
         full_index_mock.assert_called_once_with([concept.id], [])
 
 
+@tag('es')
 class ExpansionParametersTest(OCLTestCase):
     def test_apply_active_only(self):
         ConceptFactory(id=1, retired=False, mnemonic='active')

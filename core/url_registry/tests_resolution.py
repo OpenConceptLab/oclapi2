@@ -7,7 +7,7 @@ OpenConceptLab/ocl_online#451.
 from contextlib import contextmanager
 
 from django.db import connection
-from django.test import override_settings
+from django.test import override_settings, tag
 from django.test.utils import CaptureQueriesContext
 from mock import patch
 from pydash import get
@@ -318,6 +318,7 @@ def queued_tasks_run(test):
         yield queued
 
 
+@tag('es')
 @override_settings(ES_SYNC=True, ELASTICSEARCH_DSL_AUTOSYNC=True, ELASTICSEARCH_DSL_AUTO_REFRESH=True)
 class URLRegistryLinkTest(OCLAPITestCase):
     """

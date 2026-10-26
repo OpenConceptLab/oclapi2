@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone as dt_timezone
 from django.db import connection
 from django.test.utils import CaptureQueriesContext, override_settings
 from django.utils import timezone
+from django.test import tag
 from elastic_transport import ApiResponseMeta, HttpHeaders, NodeConfig
 from elasticsearch import ApiError, ConnectionError as ESConnectionError, ConnectionTimeout, Elasticsearch, \
     NotFoundError
@@ -512,9 +513,11 @@ class SystemSearchCases(SearchCorpusMixin):
                     self.assertEqual(with_it, self.answers(requests))
 
 
+@tag('es')
 class SystemSearchWithoutRegistryTest(SystemSearchCases, OCLTestCase):
     registry = False
 
 
+@tag('es')
 class SystemSearchWithRegistryTest(SystemSearchCases, OCLTestCase):
     registry = True

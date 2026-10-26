@@ -1,6 +1,7 @@
 from unittest.mock import Mock, ANY
 
 from django.contrib.auth.models import Group
+from django.test import tag
 from mock import patch
 from rest_framework.authtoken.models import Token
 from rest_framework.exceptions import ErrorDetail
@@ -222,6 +223,7 @@ class UserPasswordResetViewTest(OCLAPITestCase):
         self.assertEqual(response.data, {'token': user.get_token()})
 
 
+@tag('es')
 class UserOrganizationListViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
@@ -444,6 +446,7 @@ class UserLoginViewTest(OCLAPITestCase):
         send_verification_email_mock.assert_called_once()
 
 
+@tag('es')
 class UserListViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
