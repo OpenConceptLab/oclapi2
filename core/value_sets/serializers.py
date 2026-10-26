@@ -1,17 +1,18 @@
 import logging
 
+from django.conf import settings
 from rest_framework import serializers
 from rest_framework.fields import CharField, DateField, SerializerMethodField, ChoiceField, DateTimeField, \
     BooleanField, ListField, URLField
 
 from core.code_systems.serializers import CodeSystemConceptSerializer, TextField
-from core.collections.models import Collection, Expansion
+from core.collections.models import Collection
 from core.collections.parsers import CollectionReferenceParser
 from core.collections.serializers import CollectionCreateOrUpdateSerializer
 from core.common.constants import HEAD
 from core.common.fhir_helpers import delete_empty_fields
 from core.common.serializers import StatusField, IdentifierSerializer, ReadSerializerMixin
-from core.parameters.serializers import ParametersSerializer
+from core.fhir.serializers import CanonicalUrlField, FhirRepositorySerializerMixin, TitleField
 from core.value_sets.constants import RESOURCE_TYPE
 
 logger = logging.getLogger('oclapi')
@@ -28,12 +29,6 @@ class ValueSetConceptSerializer(CodeSystemConceptSerializer):
         super().__init__(*args, **kwargs)
         self.fields.pop('definition')
         self.fields.pop('property')
-
-
-class ValueSetExpansionConceptSerializer(CodeSystemConceptSerializer):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.fields.pop('definition')
 
 
 class ValueSetComposeIncludeField(ReadSerializerMixin, serializers.Serializer):
@@ -115,10 +110,11 @@ class ComposeValueSetField(serializers.Field):
         include = []
         exclude = []
 
+        limit = settings.FHIR_VALUE_SET_REFERENCE_LIMIT
+        references = list(value.references.filter(reference_type='concepts').order_by('id')[:limit + 1])
+        self.subsetted = len(references) > limit
         grouped_references = {}
-        for reference in value.references.all():
-            if reference.reference_type != 'concepts':
-                continue
+        for reference in references[:limit]:
             ref_list = grouped_references.get((reference.include, reference.system, reference.version), None)
             if not ref_list:
                 ref_list = []
@@ -144,11 +140,12 @@ class ComposeValueSetField(serializers.Field):
         return None
 
 
-class ValueSetDetailSerializer(serializers.ModelSerializer):
+class ValueSetDetailSerializer(FhirRepositorySerializerMixin, serializers.ModelSerializer):
+    content_field = 'compose'
     resourceType = SerializerMethodField(method_name='get_resource_type')
     id = CharField(source='mnemonic')
-    url = CharField(source='canonical_url', required=False)
-    title = CharField(source='full_name', required=False)
+    url = CanonicalUrlField(source='canonical_url', required=False)
+    title = TitleField(source='full_name', required=False)
     status = StatusField(source='*')
     meta = SerializerMethodField()
     identifier = IdentifierSerializer(many=True, required=False)
@@ -255,6 +252,7 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
             rep = super().to_representation(instance)
             delete_empty_fields(rep)
             IdentifierSerializer.include_ocl_identifier(instance.uri, RESOURCE_TYPE, rep)
+            self.with_fhir_view(instance, rep)
         except (Exception, ):
             msg = f'Failed to represent "{instance.uri}" as {RESOURCE_TYPE}'
             logger.exception(msg)
@@ -276,52 +274,9 @@ class ValueSetDetailSerializer(serializers.ModelSerializer):
         return {'lastUpdated': obj.updated_at}
 
 
-class ValueSetExpansionParametersSerializer(ParametersSerializer):
-    allowed_input_parameters = {
-        'url': 'valueUri',
-        'filter': 'valueString',
-        'date': 'valueDate',
-        'offset': 'valueInteger',
-        'count': 'valueInteger',
-        'activeOnly': 'valueBoolean',
-        'exclude-system': 'valueString',
-        'system-version': 'valueString'
-    }
+class ValueSetExpansionSerializer(ValueSetDetailSerializer):
+    """A value set version as $expand answers it: the read's ValueSet without compose. The view adds the expansion."""
 
-    def update(self, instance, validated_data):
-        pass
-
-    def create(self, validated_data):
-        pass
-
-
-class ValueSetExpansionField(serializers.Field):
-    default_count = 1000
-    default_offset = 0
-    timestamp = DateTimeField()
-
-    def to_internal_value(self, _):
-        return None
-
-    def to_representation(self, value):
-        return {
-            'identifier': value.uri,
-            'timestamp': self.timestamp.to_representation(value.created_at),
-            'total': value.concepts.count(),
-            'offset': self.default_offset,
-            'contains': ValueSetExpansionConceptSerializer(value.concepts.order_by('id')
-                                                           [self.default_offset:self.default_count], many=True).data
-        }
-
-
-class ValueSetExpansionSerializer(serializers.ModelSerializer):
-    resourceType = SerializerMethodField(method_name='get_resource_type')
-    expansion = ValueSetExpansionField(source='*')
-
-    class Meta:
-        model = Expansion
-        fields = ('resourceType', 'id', 'expansion')
-
-    @staticmethod
-    def get_resource_type(_):
-        return RESOURCE_TYPE
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields.pop(self.content_field)

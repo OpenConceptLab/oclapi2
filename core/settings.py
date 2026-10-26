@@ -194,6 +194,7 @@ REDOC_SETTINGS = {
 }
 
 MIDDLEWARE = [
+    'core.middlewares.middlewares.FhirErrorMiddleware',  # outermost: a FHIR path's error is an OperationOutcome
     'django.middleware.gzip.GZipMiddleware',
     'cid.middleware.CidMiddleware',
     'core.middlewares.middlewares.CustomLoggerMiddleware',
@@ -224,6 +225,7 @@ if ENABLE_THROTTLING:
         'match_standard_day': '5000/day',
         'match_core_minute': '1000/minute',
         'match_core_day': '30000/day',
+        'fhir_minute': os.environ.get('FHIR_THROTTLE_RATE', '1000/minute'),  # every caller alike: server protection
     }
     MIDDLEWARE = [*MIDDLEWARE, 'core.middlewares.middlewares.ThrottleHeadersMiddleware']
 
@@ -421,8 +423,6 @@ DISABLE_VALIDATION = os.environ.get('DISABLE_VALIDATION', False)
 API_SUPERUSER_PASSWORD = os.environ.get('API_SUPERUSER_PASSWORD', 'Root123')  # password for ocladmin superuser
 API_SUPERUSER_TOKEN = os.environ.get('API_SUPERUSER_TOKEN', '891b4b17feab99f3ff7e5b5d04ccc5da7aa96da6')
 
-FHIR_VALIDATOR_URL = os.environ.get('FHIR_VALIDATOR_URL', None)
-
 # Redis
 REDIS_CONNECTION_OPTIONS = {
     'socket_timeout': 5.0,
@@ -579,6 +579,16 @@ FLOWER_PASSWORD = os.environ.get('FLOWER_PASSWORD', 'Root123')
 FLOWER_HOST = os.environ.get('FLOWER_HOST', 'flower')
 FLOWER_PORT = os.environ.get('FLOWER_PORT', 5555)
 FHIR_SUBDOMAIN = os.environ.get('FHIR_SUBDOMAIN', None)
+# FHIR's limits: a search page's entries, at most and by default; the database time a search or operation may take,
+# past which it's too costly; what a CodeSystem, ValueSet or ConceptMap read lists (concepts, references, mappings);
+# an $expand page's members, at most and by default; the matches a $translate lists
+FHIR_SEARCH_MAX_COUNT = int(os.environ.get('FHIR_SEARCH_MAX_COUNT', 100))
+FHIR_SEARCH_TIMEOUT_MS = int(os.environ.get('FHIR_SEARCH_TIMEOUT_MS', 5000))
+FHIR_CODE_SYSTEM_CONCEPT_LIMIT = int(os.environ.get('FHIR_CODE_SYSTEM_CONCEPT_LIMIT', 1000))
+FHIR_VALUE_SET_REFERENCE_LIMIT = int(os.environ.get('FHIR_VALUE_SET_REFERENCE_LIMIT', 1000))
+FHIR_CONCEPT_MAP_MAPPING_LIMIT = int(os.environ.get('FHIR_CONCEPT_MAP_MAPPING_LIMIT', 1000))
+FHIR_EXPAND_MAX_COUNT = int(os.environ.get('FHIR_EXPAND_MAX_COUNT', 1000))
+FHIR_TRANSLATE_MATCH_LIMIT = int(os.environ.get('FHIR_TRANSLATE_MATCH_LIMIT', 1000))
 DATA_UPLOAD_MAX_MEMORY_SIZE = 200*1024*1024  # i.e. 200MBs before throwing RequestDataTooBig
 FILE_UPLOAD_MAX_MEMORY_SIZE = 25*1024*1024  # i.e. 25MBs before file is streamed directly to temp file
 
@@ -598,7 +608,8 @@ REPORTS_EMAIL = os.environ.get('REPORTS_EMAIL', 'admin@openconceptlab.org')
 
 if ENV and ENV != 'development':
     # Serving swagger static files (inserted after SecurityMiddleware)
-    MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
+    MIDDLEWARE.insert(MIDDLEWARE.index('django.middleware.gzip.GZipMiddleware') + 1,
+                      'whitenoise.middleware.WhiteNoiseMiddleware')
 
 EMAIL_SUBJECT_PREFIX = os.environ.get('EMAIL_SUBJECT_PREFIX', None)
 if not EMAIL_SUBJECT_PREFIX:

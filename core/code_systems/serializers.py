@@ -13,22 +13,13 @@ from core.common.fhir_helpers import delete_empty_fields
 from core.common.serializers import ReadSerializerMixin, StatusField, IdentifierSerializer
 from core.concepts.models import Concept, ConceptName
 from core.concepts.serializers import ConceptDetailSerializer
-from core.parameters.serializers import ParametersSerializer
+from core.fhir import search as fhir_search
+from core.fhir.serializers import CanonicalUrlField, FhirRepositorySerializerMixin, TitleField
 from core.sources.models import Source
 from core.sources.serializers import SourceCreateOrUpdateSerializer
 
 logger = logging.getLogger('oclapi')
 
-
-class ValidateCodeParametersSerializer(ParametersSerializer):
-    allowed_input_parameters = {
-        'url': 'valueUri',
-        'code': 'valueCode',
-        'display': 'valueString',
-        'version': 'valueString',
-        'systemVersion': 'valueString',
-        'system': 'valueUri'
-    }
 
 class CodeSystemConceptDesignationUseSerializer(serializers.Field):
     def to_internal_value(self, data):
@@ -89,10 +80,10 @@ class CodeSystemConceptDefinitionSerializer(serializers.Field):
         return {'descriptions': [{'description': data, 'locale': settings.DEFAULT_LOCALE, 'locale_preferred': True}]}
 
     def to_representation(self, value):
-        descriptions = value.descriptions_for_default_locale
-        if descriptions and len(descriptions) > 0:
-            return value.descriptions_for_default_locale[0]
-        return None
+        """The first description in the default locale, from the descriptions a read prefetches."""
+        descriptions = [description.name for description in value.descriptions.all()
+                        if description.locale == settings.DEFAULT_LOCALE and not description.retired]
+        return descriptions[0] if descriptions else None
 
 
 class CodeSystemConceptSerializer(ReadSerializerMixin, serializers.Serializer):
@@ -142,6 +133,14 @@ class CodeSystemPropertySerializer(ReadSerializerMixin, serializers.Serializer):
     type = CharField()
 
 
+def listed_concepts(context, source):
+    """A CodeSystem version's (count, concepts) as its read lists them (code_system_concepts), read once."""
+    listed = context.setdefault('listed_concepts', {})
+    if source.id not in listed:
+        listed[source.id] = fhir_search.code_system_concepts(source)
+    return listed[source.id]
+
+
 class CodeSystemConceptField(serializers.Field):
     def to_internal_value(self, data):
         concepts = CodeSystemConceptSerializer(data=data, many=True)
@@ -149,13 +148,9 @@ class CodeSystemConceptField(serializers.Field):
         return {'concepts': concepts.validated_data}
 
     def to_representation(self, value):
-        # limit to 1000 concepts by default
-        # TODO: support graphQL to go around the limit
-        if self.context.get('has_many', False):
-            limit = 25
-        else:
-            limit = 1000
-        return CodeSystemConceptSerializer(value.concepts.order_by('id')[:limit], many=True).data
+        """Every concept, retired ones included, up to the limit; none above it (content not-present)."""
+        concepts = listed_concepts(self.context, value)[1]
+        return CodeSystemConceptSerializer(concepts, many=True).data if concepts else []
 
 
 class TextField(ReadSerializerMixin, serializers.Serializer):
@@ -178,11 +173,12 @@ class TextField(ReadSerializerMixin, serializers.Serializer):
         return super().to_representation(obj)
 
 
-class CodeSystemDetailSerializer(serializers.ModelSerializer):
+class CodeSystemDetailSerializer(FhirRepositorySerializerMixin, serializers.ModelSerializer):
+    content_field = 'concept'
     resourceType = SerializerMethodField(method_name='get_resource_type')
     id = CharField(source='mnemonic')
-    url = CharField(source='canonical_url', required=False)
-    title = CharField(source='full_name', required=False)
+    url = CanonicalUrlField(source='canonical_url', required=False)
+    title = TitleField(source='full_name', required=False)
     status = StatusField(source='*')
     language = CharField(source='default_locale', required=False)
     count = SerializerMethodField(method_name='get_total_count')
@@ -210,21 +206,25 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
                   'copyright', 'revisionDate', 'experimental', 'caseSensitive', 'compositional', 'versionNeeded',
                   'collectionReference', 'hierarchyMeaning', 'concept', 'text', 'filters')
 
-    def __new__(cls, *args, **kwargs):
-        if kwargs.get('many', False):
-            context = kwargs.get('context', {})
-            context.update({'has_many': True})
-            kwargs.update({'context': context})
-
-        return super().__new__(cls, *args, **kwargs)
-
     @staticmethod
     def get_resource_type(_):
         return RESOURCE_TYPE
 
-    @staticmethod
-    def get_total_count(obj):
-        return obj.concepts.count()
+    def get_total_count(self, obj):
+        """A read's concept count; a search's summary has none (it only checks the limit)."""
+        return None if self.context.get('has_many') else listed_concepts(self.context, obj)[0]
+
+    def get_content(self, obj):
+        """
+        complete (or the content mode the CodeSystem was saved with) up to the concept limit, else not-present: a
+        search annotates concepts_over_limit, a read counts them.
+        """
+        over_limit = getattr(obj, 'concepts_over_limit', None)
+        if over_limit is None:
+            over_limit = listed_concepts(self.context, obj)[1] is None
+        if over_limit:
+            return 'not-present'
+        return obj.content_type if obj.content_type in ('example', 'fragment', 'supplement') else 'complete'
 
     @staticmethod
     def get_property(obj):
@@ -264,11 +264,11 @@ class CodeSystemDetailSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         try:
-            if not instance.content_type:
-                instance.content_type = 'complete'
             rep = super().to_representation(instance)
+            rep['content'] = self.get_content(instance)
             delete_empty_fields(rep)
             IdentifierSerializer.include_ocl_identifier(instance.uri, RESOURCE_TYPE, rep)
+            self.with_fhir_view(instance, rep)
         except (Exception, ):
             msg = f'Failed to represent "{instance.uri}" as {RESOURCE_TYPE}'
             logger.exception(msg)

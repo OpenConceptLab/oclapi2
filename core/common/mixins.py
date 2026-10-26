@@ -563,6 +563,8 @@ class ConceptDictionaryUpdateMixin(ConceptDictionaryMixin):
 
 class SourceContainerMixin:
     def find_repo_by_canonical_url(self, canonical_url):
+        """This owner's lowest-id repository row with the canonical URL, a Source before a Collection; `url|version`
+        names a version."""
         url, version = canonical_url_to_url_and_version(canonical_url)
         queryset = self.source_set.filter(canonical_url=url)
         if not queryset.exists():
