@@ -2,6 +2,7 @@ import threading
 import time
 
 from django.db import connection
+from django.test import tag
 from mock import patch
 from mock.mock import Mock, ANY
 from rest_framework.exceptions import ErrorDetail
@@ -826,6 +827,7 @@ class OrganizationOverviewViewTest(OCLAPITestCase):
         self.assertFalse(self.org.is_member(staff))
 
 
+@tag('es')
 class OrganizationSourceListViewTest(OCLAPITestCase):
     def test_get(self):
         user = UserProfileFactory(username='batman')
@@ -890,6 +892,7 @@ class OrganizationSourceListViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 0)
 
 
+@tag('es')
 class OrganizationCollectionListViewTest(OCLAPITestCase):
     def test_get(self):
         user = UserProfileFactory(username='batman')

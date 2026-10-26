@@ -6,7 +6,7 @@ from celery_once import AlreadyQueued
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
-from django.test import override_settings
+from django.test import override_settings, tag
 from mock import patch, Mock, ANY, PropertyMock
 from mock.mock import call
 from rest_framework.exceptions import ErrorDetail
@@ -1763,6 +1763,7 @@ class SourceVersionSummaryViewTest(OCLAPITestCase):
         self.assertEqual(self.source.active_concepts, 2)
 
 
+@tag('es')
 class SourceSummaryViewTest(OCLAPITestCase):
     def index(self):
         self.patch_concept_es_mapping_for_ci()

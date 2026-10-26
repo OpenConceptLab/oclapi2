@@ -1,5 +1,5 @@
 from django.core.cache import cache
-from django.test import override_settings
+from django.test import override_settings, tag
 from rest_framework.exceptions import ErrorDetail
 
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
@@ -970,6 +970,7 @@ class MappingCollectionMembershipViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 0)
 
 
+@tag('es')
 @override_settings(CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}})
 class MappingListCacheTest(OCLAPITestCase):
     """

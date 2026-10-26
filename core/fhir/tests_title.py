@@ -1,3 +1,4 @@
+from django.test import tag
 from core.common.tests import OCLTestCase
 from core.fhir.tests_search import SearchCorpusMixin, collection, source
 from core.orgs.tests.factories import OrganizationFactory
@@ -7,6 +8,7 @@ BARE = 'https://example.org/bare'
 BLANK = 'https://example.org/blank'
 
 
+@tag('es')
 class FhirTitleTest(SearchCorpusMixin, OCLTestCase):
     """The FHIR title is the repository's full name, or its name when it has none (empty or blank)."""
     @classmethod

@@ -4,6 +4,7 @@ from datetime import datetime
 from django.apps import apps
 from django.contrib.auth.models import AnonymousUser, Group, Permission
 from django.http import Http404
+from django.test import tag
 from mock import Mock, patch, ANY
 from rest_framework.authtoken.models import Token
 
@@ -777,6 +778,7 @@ class UserContentSummaryViewTest(OCLAPITestCase):
         self.assertGreaterEqual(response.data['mappings_created'], 1)
 
 
+@tag('es')
 class UserViewsAPITest(OCLAPITestCase):
     def setUp(self):
         super().setUp()

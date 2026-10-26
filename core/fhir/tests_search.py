@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlsplit
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 from django.db import connection, OperationalError
-from django.test import TransactionTestCase
+from django.test import TransactionTestCase, tag
 from django.test.utils import CaptureQueriesContext, override_settings
 from mock import patch
 from rest_framework.test import APIClient
@@ -88,10 +88,10 @@ class SearchCorpusMixin:
         cls.sehatapp = OrganizationFactory(mnemonic='sehatapp')
         cls.ciel = OrganizationFactory(mnemonic='CIEL')
         cls.misc = OrganizationFactory(mnemonic='misc')
-        cls.fixtures = OrganizationFactory(mnemonic='FHIR-Fixtures', public_access=ACCESS_TYPE_NONE)
+        cls.fixtures_org = OrganizationFactory(mnemonic='FHIR-Fixtures', public_access=ACCESS_TYPE_NONE)
         cls.member = UserProfileFactory(username='fixture-member')
         cls.outsider = UserProfileFactory(username='outsider')
-        cls.fixtures.members.add(cls.member)
+        cls.fixtures_org.members.add(cls.member)
         cls.jdoe = UserProfileFactory(username='jdoe')
 
         cls.who_icd = source(cls.who, 'ICD-10-WHO', canonical_url=ICD10, full_name='ICD-10 WHO Edition')
@@ -121,12 +121,12 @@ class SearchCorpusMixin:
             cls.misc, 'gone', 'v1', released=True, retired=True, canonical_url='https://example.org/gone')
         cls.flagged = source(cls.misc, 'flagged', released=True, canonical_url='https://example.org/flagged')
 
-        cls.fixture = source(cls.fixtures, 'fixture-codes', canonical_url=FIXTURE, public_access=ACCESS_TYPE_NONE)
+        cls.fixture = source(cls.fixtures_org, 'fixture-codes', canonical_url=FIXTURE, public_access=ACCESS_TYPE_NONE)
         cls.fixture_v1 = source(
-            cls.fixtures, 'fixture-codes', '1.0.0', released=True, canonical_url=FIXTURE,
+            cls.fixtures_org, 'fixture-codes', '1.0.0', released=True, canonical_url=FIXTURE,
             public_access=ACCESS_TYPE_NONE)
         cls.fixture_v2 = source(
-            cls.fixtures, 'fixture-codes', '2.0.0', released=True, canonical_url=FIXTURE,
+            cls.fixtures_org, 'fixture-codes', '2.0.0', released=True, canonical_url=FIXTURE,
             public_access=ACCESS_TYPE_NONE)
 
         cls.jdoe_codes = source(cls.jdoe, 'my-codes', canonical_url='https://example.org/my-codes')
@@ -205,6 +205,7 @@ class SearchCorpusMixin:
         self.assertOutcome(response, 404, 'not-found', 'not-found')
 
 
+@tag('es')
 class CodeSystemSearchTest(SearchCorpusMixin, OCLTestCase):  # pylint: disable=too-many-public-methods
     PUBLIC_RELEASES = sorted([
         f'{CIEL}|v1', f'{CIEL}|v2', f'{ICD10}|ICD102019', f'{ICD10}|v1.0', 'https://example.org/my-codes|v1'])
@@ -588,6 +589,7 @@ class CodeSystemSearchTest(SearchCorpusMixin, OCLTestCase):  # pylint: disable=t
         self.assertLessEqual(unnamed, set(self.keys(bundle)))
 
 
+@tag('es')
 class ValueSetSearchTest(SearchCorpusMixin, OCLTestCase):
     def test_global_search_and_the_repository_canonical(self):
         bundle = self.search('ValueSet')
@@ -625,6 +627,7 @@ class ValueSetSearchTest(SearchCorpusMixin, OCLTestCase):
             self.client.get('/fhir/ValueSet/')
 
 
+@tag('es')
 class ConceptMapSearchTest(SearchCorpusMixin, OCLTestCase):
     @classmethod
     def setUpTestData(cls):
@@ -712,6 +715,7 @@ class ConceptMapSearchTest(SearchCorpusMixin, OCLTestCase):
             self.assertEqual(self.client.get('/fhir/ConceptMap/', {'target-system': ICD10}).data['total'], 1)
 
 
+@tag('es')
 class ReferencedSourceAccessTest(SearchCorpusMixin, OCLTestCase):
     """
     source-system, target-system (and their -uri forms) and reference look a canonical up only among the sources the
@@ -821,6 +825,7 @@ class ReferencedSourceAccessTest(SearchCorpusMixin, OCLTestCase):
             'id', flat=True))
 
 
+@tag('es')
 class SearchCostTest(SearchCorpusMixin, OCLTestCase):
     """
     A search's cost is bounded: the canonical URLs a parameter names are looked up together, in one query, and a
@@ -873,6 +878,7 @@ class SearchCostTest(SearchCorpusMixin, OCLTestCase):
         self.assertEqual(issue['expression'], ['_id'])
 
 
+@tag('es')
 class VersionIdTest(SearchCorpusMixin, OCLTestCase):
     """
     Every released version has a stable meta.versionId, its opaque id, so an owner-base Bundle with several releases
@@ -909,6 +915,7 @@ class VersionIdTest(SearchCorpusMixin, OCLTestCase):
             self.assertEqual(entry['resource']['meta']['versionId'], entry['resource']['id'])
 
 
+@tag('es')
 class ReadTest(SearchCorpusMixin, OCLTestCase):
     def test_global_read_by_opaque_id(self):
         for resource_type, version in (('CodeSystem', self.who_icd_2019), ('CodeSystem', self.ciel_v1),
@@ -1061,8 +1068,8 @@ class ReadTest(SearchCorpusMixin, OCLTestCase):
                 self.assertIn('LIMIT 3', queries.captured_queries[-1]['sql'])
 
     def test_subsetted_reads_keep_existing_metadata(self):
-        tag = {'system': 'http://example.org/tags', 'code': 'example'}
-        meta = {'lastUpdated': '2026-01-01T00:00:00Z', 'tag': [tag]}
+        example_tag = {'system': 'http://example.org/tags', 'code': 'example'}
+        meta = {'lastUpdated': '2026-01-01T00:00:00Z', 'tag': [example_tag]}
         for code in ('A', 'B'):
             self.ciel_vs_v1.references.create(expression=code, reference_type='concepts', system=CIEL, code=code)
             MappingFactory(parent=self.ciel_source, from_source=self.ciel_source, to_source=self.sehat_icd,
@@ -1076,8 +1083,8 @@ class ReadTest(SearchCorpusMixin, OCLTestCase):
                     patch(f'core.{module}.serializers.{serializer}.get_meta', return_value=meta):
                 resource = self.read(f'/fhir/{resource_type}/{version.id}')
 
-            self.assertEqual(resource['meta'], {**meta, 'versionId': str(version.id), 'tag': [tag, SUBSETTED]})
-            self.assertEqual(meta['tag'], [tag])
+            self.assertEqual(resource['meta'], {**meta, 'versionId': str(version.id), 'tag': [example_tag, SUBSETTED]})
+            self.assertEqual(meta['tag'], [example_tag])
 
     def test_writes_keep_the_owner_check(self):
         client = APIClient()
@@ -1086,6 +1093,7 @@ class ReadTest(SearchCorpusMixin, OCLTestCase):
         self.assertEqual(response.status_code, 404)
 
 
+@tag('es')
 class RepositoryAccessTest(SearchCorpusMixin, OCLTestCase):
     """
     A version is shown only where its repository is too: its HEAD, which governs access to its concepts and mappings,
@@ -1160,6 +1168,7 @@ class RepositoryAccessTest(SearchCorpusMixin, OCLTestCase):
             self.assertIn(f'{url}|{newest}', listed, user)
 
 
+@tag('es')
 class VisibleVersionsTest(SearchCorpusMixin, OCLTestCase):
     """visible_versions is the queryset form of is_visible and has_release: they agree on every row."""
     def test_the_queryset_agrees_with_is_visible_and_has_release(self):

@@ -7,7 +7,7 @@ from celery_once import AlreadyQueued
 from django.apps import apps
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.test import override_settings
+from django.test import override_settings, tag
 from mock import patch, Mock, ANY, PropertyMock, call
 from rest_framework import status
 from rest_framework.response import Response
@@ -2577,6 +2577,7 @@ class IndexSourcePublicAccessTaskTest(OCLTestCase):
         batch_index_mock.assert_not_called()
 
 
+@tag('es')
 class TasksTest(OCLTestCase):
     @patch('core.sources.models.Source.index_children')
     @patch('core.common.tasks.export_source')

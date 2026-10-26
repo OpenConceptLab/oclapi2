@@ -9,7 +9,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection
 from django.test.utils import CaptureQueriesContext
 from django.http import Http404, QueryDict
-from django.test import override_settings
+from django.test import override_settings, tag
 from pydash import omit
 
 from core.collections.models import CollectionReference
@@ -40,6 +40,7 @@ from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
 
+@tag('es')
 class ConceptViewsAPITest(OCLAPITestCase):
     def setUp(self):
         super().setUp()

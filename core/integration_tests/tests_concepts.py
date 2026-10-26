@@ -9,7 +9,7 @@ from django.contrib.auth.models import Group
 from django.core.cache import cache
 from django.db import connection
 from django.db.models import F
-from django.test import override_settings
+from django.test import override_settings, tag
 from django.test.utils import CaptureQueriesContext
 from mock import ANY
 from rest_framework.request import Request
@@ -2924,6 +2924,7 @@ class ConceptCascadeViewTest(OCLAPITestCase):
         )
 
 
+@tag('es')
 class ConceptListViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
@@ -3258,6 +3259,7 @@ class ConceptListViewTest(OCLAPITestCase):
         self.assertEqual([x for x in response.data['facets']['fields']['conceptClass'] if x[0] == 'classA'], [])
 
 
+@tag('es')
 @override_settings(CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}})
 class ConceptListCacheTest(OCLAPITestCase):
     """
@@ -3389,6 +3391,7 @@ class ConceptListCacheTest(OCLAPITestCase):
         self.assertIsNone(cache.get(body_key + '?q=123'))
 
 
+@tag('es')
 class ConceptPropertyFilterViewTest(OCLAPITestCase):
     """
     Property filtering must follow the type declared on the source. A property declared boolean
@@ -4275,6 +4278,7 @@ class CapacityRedisMockMixin:
         super().tearDown()
 
 
+@tag('es')
 class MetadataToConceptsListViewTest(CapacityRedisMockMixin, OCLAPITestCase):
     def setUp(self):
         super().setUp()

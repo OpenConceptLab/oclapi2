@@ -12,6 +12,7 @@ from itertools import product
 
 from django.db import connection
 from django.test.utils import CaptureQueriesContext, override_settings
+from django.test import tag
 from mock import patch
 from rest_framework.test import APIClient
 
@@ -72,11 +73,11 @@ class TranslateCorpusMixin:
         cls.ihtsdo = OrganizationFactory(mnemonic='IHTSDO')
         cls.pih = OrganizationFactory(mnemonic='PIH')
         cls.moh = OrganizationFactory(mnemonic='MOH')
-        cls.fixtures = OrganizationFactory(mnemonic='FHIR-Fixtures', public_access=ACCESS_TYPE_NONE)
+        cls.fixtures_org = OrganizationFactory(mnemonic='FHIR-Fixtures', public_access=ACCESS_TYPE_NONE)
         cls.moh_member = UserProfileFactory(username='moh-member')
         cls.moh.members.add(cls.moh_member)
         cls.member = UserProfileFactory(username='fixture-member')
-        cls.fixtures.members.add(cls.member)
+        cls.fixtures_org.members.add(cls.member)
         cls.outsider = UserProfileFactory(username='outsider')
         cls.jamlung = UserProfileFactory(username='jamlung')
 
@@ -91,8 +92,8 @@ class TranslateCorpusMixin:
             cls.moh, 'private-codes', 'v1', released=True, canonical_url=PRIVATE, public_access=ACCESS_TYPE_NONE)
         cls.pih_source = source(cls.pih, 'PIH', canonical_url=PIH)
         cls.pih_v1 = source(cls.pih, 'PIH', 'v1', released=True, canonical_url=PIH)
-        cls.fixture = source(cls.fixtures, 'fixture-codes', canonical_url=FIXTURE, public_access=ACCESS_TYPE_NONE)
-        cls.fixture_v1 = source(cls.fixtures, 'fixture-codes', '1.0.0', released=True, canonical_url=FIXTURE,
+        cls.fixture = source(cls.fixtures_org, 'fixture-codes', canonical_url=FIXTURE, public_access=ACCESS_TYPE_NONE)
+        cls.fixture_v1 = source(cls.fixtures_org, 'fixture-codes', '1.0.0', released=True, canonical_url=FIXTURE,
                                 public_access=ACCESS_TYPE_NONE)
         cls.dak = source(cls.jamlung, 'Example-DAK-Source', canonical_url=DAK)
         cls.dak_fhir = source(cls.jamlung, 'Example-DAK-Source', 'fhir', released=True, canonical_url=DAK)
@@ -193,6 +194,7 @@ CIEL_113275_V2 = sorted([
     f'{OMOP_PATH}|4154112|relatedto', f'{PRIVATE_PATH}|P1|relatedto'])
 
 
+@tag('es')
 class TranslateMappingsTest(TranslateCorpusMixin, OCLTestCase):
     """What a translation finds: the resolved version's own live mappings of the code, and nothing else."""
 
@@ -472,6 +474,7 @@ class TranslateMappingsWithRegistryTest(TranslateMappingsTest):
     registry = True
 
 
+@tag('es')
 class TranslateRequestTest(TranslateCorpusMixin, OCLTestCase):
     """The request: GET or POST (a Parameters resource, as HAPI sends it), the code in any of its forms."""
 
@@ -548,6 +551,7 @@ class TranslateRequestTest(TranslateCorpusMixin, OCLTestCase):
             400, 'invalid', 'invalid-data')
 
 
+@tag('es')
 class TranslateBoundsTest(TranslateCorpusMixin, OCLTestCase):
     """
     No request reads mappings other than those of the code it names: without a code, or a code without its system, it
@@ -577,6 +581,7 @@ class TranslateBoundsTest(TranslateCorpusMixin, OCLTestCase):
                 self.assertEqual(self.matches(self.answer(response)), [f'{ICD10}|B20|equivalent'], msg)
 
 
+@tag('es')
 class TranslateScopeTest(TranslateCorpusMixin, OCLTestCase):
     """
     source: the value set (or code system) the code was chosen from; in reverse, target is. The other narrows nothing
@@ -781,6 +786,7 @@ class TranslateScopeTest(TranslateCorpusMixin, OCLTestCase):
         self.assertEqual(self.matches(parameters), CIEL_113275_V2)
 
 
+@tag('es')
 class TranslateAccessTest(TranslateCorpusMixin, OCLTestCase):
     """
     Resolution and access are core.fhir.resolve's. A system or ConceptMap the caller isn't shown is unknown to them,
@@ -897,6 +903,7 @@ class TranslateAccessTest(TranslateCorpusMixin, OCLTestCase):
             self.assertEqual(self.matches(parameters), matches, (base, user))
 
 
+@tag('es')
 class TranslateCostTest(TranslateCorpusMixin, OCLTestCase):
     """A fixed number of queries per call, whatever the number of mappings."""
 
@@ -923,6 +930,7 @@ class TranslateCostTest(TranslateCorpusMixin, OCLTestCase):
             self.answer(self.get(system=CIEL, code='no-such-code'))
 
 
+@tag('es')
 class ConceptMapGroupTest(TranslateCorpusMixin, OCLTestCase):
     """
     A ConceptMap read's groups use $translate's relationships, codes and systems (ConceptMapGroupField): a side is named
