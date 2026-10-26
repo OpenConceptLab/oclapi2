@@ -16,7 +16,9 @@
       "is_active": true,
       "name": "URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE",
       "dev": true,
-      "qa": true
+      "qa": true,
+      "staging": true,
+      "production": false
     }
   },
   {

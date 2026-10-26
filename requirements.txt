@@ -2,7 +2,7 @@ Django==5.2.17
 psycopg2==2.9.11
 gunicorn==22.0.0 #production server
 whitenoise==6.5.0 #serving swagger static files
-djangorestframework==3.17.2
+djangorestframework==3.18.2
 pylint==3.3.8
 pydash==7.0.6
 django-cors-headers==4.9.0
@@ -11,6 +11,7 @@ colour_runner==0.1.1
 boto3==1.36.10
 moto==5.0.27
 python-dateutil==2.8.2
+certifi==2026.10.19
 requests==2.33.0
 factory_boy==3.3.0
 # Celery
@@ -24,7 +25,7 @@ django-elasticsearch-dsl==8.0
 drf-yasg==1.21.15
 git+https://github.com/snyaggarwal/django-queryset-csv
 ocldev==0.2.3
-coverage==7.3.0
+coverage==7.16.2
 tblib==2.0.0
 django-ordered-model==3.7.4
 django-health-check==3.17.0
@@ -41,7 +42,7 @@ django-celery-beat==2.9.0
 jsondiff==2.0.0
 django-silk==5.5.0
 azure-storage-blob==12.19.0
-fhir.resources==7.1.0
+fhir.resources[xml]==8.3.0
 ijson==3.2.3
 responses==0.25.0
 pydantic==2.10.6

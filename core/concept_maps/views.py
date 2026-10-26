@@ -1,57 +1,31 @@
 import logging
 
-from django.core.exceptions import ValidationError
-from django.db.models import Q
 from django.http import Http404
-from pydash import get
 
-from core.bundles.serializers import FHIRBundleSerializer
-from core.code_systems.views import FhirParameterRequiredError
 from core.common.constants import HEAD
-from core.common.fhir_helpers import translate_fhir_query
-from core.common.permissions import CanViewConceptDictionary
-from core.common.serializers import IdentifierSerializer
-from core.concept_maps.constants import RESOURCE_TYPE
-from core.concept_maps.serializers import ConceptMapDetailSerializer, ConceptMapParametersSerializer
-from core.concepts.permissions import CanAccessParentDictionary
-from core.mappings.constants import SAME_AS
-from core.mappings.views import MappingListView
+from core.common.permissions import HasOwnership
+from core.concept_maps.serializers import ConceptMapDetailSerializer
+from core.fhir.adapters import r4
+from core.fhir.mixins import FhirOperationView, FhirReadMixin, FhirSearchMixin, FhirViewMixin
+from core.fhir.ops.translate import translate
 from core.sources.views import SourceListView, SourceRetrieveUpdateDestroyView
 
 logger = logging.getLogger('oclapi')
 
 
-class ConceptMapListView(SourceListView):
+class ConceptMapListView(FhirViewMixin, FhirSearchMixin, SourceListView):
+    resource_type = 'ConceptMap'
     serializer_class = ConceptMapDetailSerializer
-
-    @staticmethod
-    def bundle_response(data, paginator):
-        bundle = FHIRBundleSerializer(
-            {'meta': {}, 'total': len(data), 'type': 'searchset', 'entry': FHIRBundleSerializer.convert_to_entry(data)},
-            context={'paginator': paginator}
-        )
-        return bundle.data
-
-    def get_filter_params(self, default_version_to_head=True):
-        return super().get_filter_params(False)
-
-    def apply_query_filters(self, queryset):
-        query_fields = list(self.serializer_class.Meta.fields)
-        queryset = translate_fhir_query(query_fields, self.request.query_params, queryset)
-        return queryset
-
-    def apply_filters(self, queryset):
-        queryset = queryset.exclude(version=HEAD).filter(is_latest_version=True)
-        return self.apply_query_filters(queryset)
 
     def get_serializer_class(self):
         return self.serializer_class
 
     def get_detail_serializer(self, obj):
-        return self.serializer_class(obj)
+        return self.serializer_class(obj, context=self.get_serializer_context())
 
 
-class ConceptMapRetrieveUpdateView(SourceRetrieveUpdateDestroyView):
+class ConceptMapRetrieveUpdateView(FhirViewMixin, FhirReadMixin, SourceRetrieveUpdateDestroyView):
+    resource_type = 'ConceptMap'
     serializer_class = ConceptMapDetailSerializer
 
     def get_filter_params(self, default_version_to_head=True):
@@ -64,146 +38,25 @@ class ConceptMapRetrieveUpdateView(SourceRetrieveUpdateDestroyView):
         return queryset.exclude(version=HEAD)
 
     def get_object(self, queryset=None):
+        """
+        A PUT or PATCH to a ConceptMap that doesn't exist gets None, which creates it, so it needs what a POST needs:
+        staff, the owner, or a member of the owning org (HasOwnership on the owner). Anyone else is refused as they are
+        for an existing one. Any other request for one is a 404 (a read's from FhirReadMixin).
+        """
         try:
             return super().get_object(queryset)
         except Http404:
+            if self.request.method not in ('PUT', 'PATCH'):
+                raise
+            if not HasOwnership().has_object_permission(self.request, self, self.parent_resource):
+                self.permission_denied(self.request)
             return None
 
     def get_detail_serializer(self, obj):
-        return ConceptMapDetailSerializer(obj)
+        return ConceptMapDetailSerializer(obj, context=self.get_serializer_context())
 
 
-class ConceptMapTranslateView(MappingListView):
-    serializer_class = ConceptMapParametersSerializer
-    is_page_size_capped = False  # FHIR paging (`_count`) is decided apart from the list cap
-
-    def get_permissions(self):
-        return [CanAccessParentDictionary(), CanViewConceptDictionary()]
-
-    def get_serializer_class(self):
-        return ConceptMapParametersSerializer
-
-    # $translate answers with the translation of the mappings apply_filters names, and nothing else. The mapping
-    # list's shortcuts (a search, a sort or a faceted filter, facets, search stats, a CSV export) would answer in its
-    # place, and the search ones skip apply_filters, so each is off. Their parameters are ignored like any other this
-    # operation doesn't define.
-    allow_csv_export = False
-
-    def should_perform_es_search(self):
-        return False
-
-    def only_facets(self):
-        return False
-
-    def only_search_stats(self):
-        return False
-
-    def should_include_facets(self):
-        return False
-
-    def verify_scope(self):
-        """
-        Override to not verify scope and allow POSTing for everyone
-        :return: None
-        """
-
-    def apply_filters(self, queryset):
-        # get_serializer renders the answer, so a POSTed Parameters resource is read by the serializer class itself
-        if self.request.method in ['POST', 'PUT']:
-            parameters = self.get_serializer_class()(data=self.request.data)
-        else:
-            parameters = self.get_serializer_class().parse_query_params(self.request.query_params)
-
-        if not parameters.is_valid():
-            raise ValidationError(message=parameters.errors)
-
-        params = parameters.validated_data
-        params = params.get('parameters', {})
-
-        url = params.get('url')
-        code = params.get('code')
-        system = params.get('system')
-        targetsystem = params.get('targetsystem')
-        # TODO: implement 'source' and 'target'
-        if not code:
-            raise FhirParameterRequiredError('A code to translate is required.', expression='code')
-        if not system:
-            raise FhirParameterRequiredError(
-                'system is required with a code: the code system the code is from.', expression='system')
-
-        if url:
-            queryset = queryset.filter(parent__canonical_url=url)
-        queryset = queryset.filter(from_concept_code=code)
-        system_url = IdentifierSerializer.convert_fhir_url_to_ocl_uri(system, 'sources')
-        queryset = queryset.filter(Q(from_source__canonical_url=system) |
-                                   Q(from_source_url=system_url) |
-                                   Q(from_source__uri=system_url))
-        if targetsystem:
-            target_url = IdentifierSerializer.convert_fhir_url_to_ocl_uri(targetsystem, 'sources')
-            queryset = queryset.filter(Q(to_source__canonical_url=targetsystem) |
-                                       Q(to_source_url=target_url) |
-                                       Q(to_source__uri=target_url))
-        return queryset
-
-    def get_serializer(self, *args, **kwargs):
-        instance = get(args, '0')
-        many = kwargs.get('many', False)
-        if many:
-            if isinstance(instance, list) and len(instance) != 0:
-                matches = []
-                for mapping in instance:
-                    equivalence = mapping.map_type
-                    if mapping.map_type == SAME_AS:
-                        equivalence = "equivalent"
-
-                    to_url = None
-                    if mapping.to_source and mapping.to_source.canonical_url:
-                        to_url = mapping.to_source.canonical_url
-                    elif mapping.to_source_url:
-                        to_url = IdentifierSerializer.convert_ocl_uri_to_fhir_url(mapping.to_source_url, RESOURCE_TYPE)
-                    elif mapping.to_source:
-                        to_url = IdentifierSerializer.convert_ocl_uri_to_fhir_url(mapping.to_source.uri, RESOURCE_TYPE)
-
-                    matches.append({
-                        'name': 'match',
-                        'part': [
-                            {
-                                'name': 'equivalence',
-                                'valueCode': equivalence
-                            },
-                            {
-                                'name': 'concept',
-                                'valueCoding': {
-                                    'system': to_url,
-                                    'code': mapping.to_concept_code,
-                                    'userSelected': False
-                                }
-                            }
-                        ]
-                    })
-                return ConceptMapParametersSerializer({'parameter': [
-                        {
-                            'name': 'result',
-                            'valueBoolean': True
-                        },
-                        *matches
-                   ]})
-
-            return ConceptMapParametersSerializer({'parameter': [
-                {
-                    'name': 'result',
-                    'valueBoolean': False
-                }
-            ]})
-        return super().get_serializer(instance, many, *args, **kwargs)
-
-    # Change POST behavior to get
-    def post(self, request, *args, **kwargs):
-        """
-        Change POST behavior to simply list
-        :param request:
-        :param args:
-        :param kwargs:
-        :return: parameters
-        """
-        return self.get(request, *args, **kwargs)
+class ConceptMapTranslateView(FhirOperationView):
+    """ConceptMap/$translate, GET and POST, at the global base and at owner bases: core.fhir.ops.translate, in R4."""
+    operation = staticmethod(translate)
+    adapter = staticmethod(r4.translate_parameters)

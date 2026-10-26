@@ -1,15 +1,20 @@
+import importlib
+
 from django.core.exceptions import ValidationError
+from django.db import connection
+from django.db.migrations.loader import MigrationLoader
 from mock import Mock
 
-from core.collections.tests.factories import OrganizationCollectionFactory
+from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLTestCase, OCLAPITestCase
+from core.events.models import Event
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
 from core.pins.models import Pin
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
-from core.users.models import UserProfile
+from core.users.models import UserProfile, Follow
 from core.users.tests.factories import UserProfileFactory
 
 
@@ -406,3 +411,68 @@ class PinRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         user_pin2.refresh_from_db()
         self.assertEqual(self.user_pin.order, 1)
         self.assertEqual(user_pin2.order, 0)
+
+
+class PinsToFollowsMigrationTest(OCLAPITestCase):
+    def test_migration_turns_my_pins_into_follows(self):  # pylint: disable=too-many-locals
+        migration = importlib.import_module('core.pins.migrations.0005_pins_to_follows')
+        private_org = OrganizationFactory(public_access=ACCESS_TYPE_NONE)
+        public_org = OrganizationFactory()
+        member = UserProfileFactory(organizations=[private_org, public_org])
+        former_member = UserProfileFactory()  # left private_org
+        outsider = UserProfileFactory()
+        admin = UserProfile.objects.get(username='ocladmin')
+        public_source = OrganizationSourceFactory(organization=public_org)
+        public_collection = OrganizationCollectionFactory(organization=public_org)
+        public_version = OrganizationSourceFactory(
+            organization=public_org, mnemonic=public_source.mnemonic, version='v1')
+        private_source = OrganizationSourceFactory(organization=private_org, public_access=ACCESS_TYPE_NONE)
+        public_version_of_private_source = OrganizationSourceFactory(
+            organization=private_org, mnemonic=private_source.mnemonic, version='v1')
+        private_collection = UserCollectionFactory(user=member, public_access=ACCESS_TYPE_NONE)
+        deleted_source = OrganizationSourceFactory(organization=public_org)
+        inactive_collection = OrganizationCollectionFactory(organization=public_org, is_active=False)
+
+        for resource in [
+                public_source, private_source, private_collection, private_org, deleted_source, inactive_collection]:
+            member.pins.create(resource=resource)
+        for resource in [public_source, private_source, private_collection, private_org]:
+            former_member.pins.create(resource=resource)
+        for resource in [public_version, public_version_of_private_source]:
+            outsider.pins.create(resource=resource)
+        # org pins go to their creator, while the creator can view the org too
+        public_org.pins.create(resource=public_source, created_by=member)
+        public_org.pins.create(resource=public_collection, created_by=former_member)
+        public_org.pins.create(resource=private_source, created_by=former_member)
+        private_org.pins.create(resource=public_source, created_by=outsider)
+        private_org.pins.create(resource=private_collection)  # created by ocladmin, a staff user
+        Source.objects.filter(id=deleted_source.id).delete()
+        existing_follow = Follow.objects.create(follower=member, following=public_source)
+        pins = list(Pin.objects.order_by('id').values())
+        event_count = Event.objects.count()
+
+        historical_apps = MigrationLoader(connection).project_state(('pins', '0005_pins_to_follows')).apps
+        migration.create_follows_from_pins(historical_apps, None)
+        migration.create_follows_from_pins(historical_apps, None)  # running it again adds nothing
+
+        def get_followed_uris(user):
+            return sorted(follow.following.uri for follow in user.following.all())
+
+        self.assertEqual(
+            get_followed_uris(member),
+            sorted([public_source.uri, private_source.uri, private_collection.uri, private_org.uri]))
+        self.assertEqual(get_followed_uris(former_member), sorted([public_source.uri, public_collection.uri]))
+        self.assertEqual(get_followed_uris(outsider), [public_version.uri])
+        self.assertEqual(get_followed_uris(admin), [private_collection.uri])
+        self.assertEqual(Follow.objects.count(), 8)
+        self.assertEqual(Follow.objects.get(follower=member, following_id=public_source.id).id, existing_follow.id)
+        self.assertEqual(list(Pin.objects.order_by('id').values()), pins)
+        self.assertEqual(Event.objects.count(), event_count)
+
+        # the follows are what each person's TBv2 My Pins list showed, less the deleted resources
+        for user in [member, former_member, outsider, admin]:
+            response = self.client.get(
+                user.uri + 'pins/?includeCreatorPins=true', HTTP_AUTHORIZATION='Token ' + user.get_token())
+            self.assertEqual(
+                sorted({pin['resource_uri'] for pin in response.data} - {None, inactive_collection.uri}),
+                get_followed_uris(user))

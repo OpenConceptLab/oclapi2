@@ -71,6 +71,8 @@ from core.sources.mixins import SummaryMixin
 from core.tasks.mixins import TaskMixin, IndexingTaskMixin
 from core.tasks.models import Task
 from core.tasks.serializers import TaskBriefSerializer
+from core.toggles.models import Toggle
+from core.url_registry.constants import URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE
 
 logger = logging.getLogger('oclapi')
 
@@ -1310,15 +1312,26 @@ class ReferenceExpressionResolveView(APIView):
     def get_throttles(self):
         return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
+    def get_namespace(self):
+        """
+        ?namespace= is the namespace of every expression that doesn't name its own. Clients such as the Mapper send
+        their project's owner to choose which URL registries apply, so it is used only while the resolver uses the
+        registries. Without them a namespace limits a canonical URL to that owner's repositories, and such a client
+        would stop resolving every canonical URL its owner doesn't hold.
+        """
+        namespace = self.request.query_params.get('namespace')
+        return namespace if namespace and Toggle.get(URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE) else None
+
     def get_results(self):
         data = self.request.data
         if not isinstance(data, list):
             data = [data]
 
         from core.common.models import ConceptContainerModel
+        namespace = self.get_namespace()
         results = []
         for expression in data:
-            instance, registry_entry = ConceptContainerModel.resolve_expression_to_version(expression)
+            instance, registry_entry = ConceptContainerModel.resolve_expression_to_version(expression, namespace)
             if instance:
                 result = {
                     **ReferenceExpressionResolveSerializer(instance).data,
@@ -1345,6 +1358,12 @@ class ReferenceExpressionResolveView(APIView):
         responses={
             200: ReferenceExpressionResolveSerializer(many=True)
         },
+        manual_parameters=[
+            openapi.Parameter(
+                'namespace', openapi.IN_QUERY, type=openapi.TYPE_STRING,
+                description='Namespace (/orgs/{org}/ or /users/{user}/) for the expressions that name none. '
+                            'Used only while canonical URLs resolve through the URL registries')
+        ],
         request_body=openapi.Schema(
             type=openapi.TYPE_ARRAY,
             items=openapi.Schema(

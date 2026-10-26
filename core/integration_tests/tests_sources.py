@@ -1666,6 +1666,30 @@ class ExportSourceTaskTest(OCLAPITestCase):
         import shutil
         shutil.rmtree(latest_temp_dir)
 
+    @patch('core.common.utils.get_export_service')
+    def test_export_source_keeps_checksums(self, export_service_mock):
+        export_service_mock.return_value = Mock(url_for=Mock(return_value='https://s3-url'), upload_file=Mock())
+        source = OrganizationSourceFactory()
+        source_v1 = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', extras={})
+        token = source.created_by.get_token()
+        checksums = source_v1.get_checksums()
+
+        export_source(source_v1.id)  # pylint: disable=no-value-for-parameter
+
+        source_v1.refresh_from_db()
+        self.assertTrue('__export_time' in source_v1.extras)
+        self.assertEqual(source_v1.get_all_checksums(), checksums)
+
+        detail = self.client.get(source_v1.uri, HTTP_AUTHORIZATION='Token ' + token)
+        versions = self.client.get(source.uri + 'versions/', HTTP_AUTHORIZATION='Token ' + token)
+        self.assertEqual(detail.data['checksums'], checksums)
+        self.assertEqual(
+            next(version['checksums'] for version in versions.data if version['id'] == 'v1'), checksums)
+
+        import shutil
+        shutil.rmtree(get_latest_dir_in_path('/tmp/'))
+
 
 class SourceLogoViewTest(OCLAPITestCase):
     def setUp(self):
