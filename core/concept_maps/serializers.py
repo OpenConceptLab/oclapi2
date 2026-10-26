@@ -6,13 +6,15 @@ from rest_framework.fields import CharField, SerializerMethodField, \
     DateTimeField
 
 from core.common.fhir_helpers import delete_empty_fields
-from core.concept_maps.constants import RESOURCE_TYPE
+from core.concept_maps.constants import RESOURCE_TYPE, RELATIONSHIP_MAP_TYPES
 from core.common.constants import HEAD
 from core.common.serializers import StatusField, IdentifierSerializer
-from core.mappings.constants import SAME_AS
+from core.fhir.adapters import r4
+from core.fhir.ops.translate import concept_map_groups, relationship
+from core.fhir.resolve import FhirResolver
+from core.fhir.serializers import CanonicalUrlField, FhirRepositorySerializerMixin
 from core.mappings.models import Mapping
 from core.mappings.serializers import MappingDetailSerializer
-from core.parameters.serializers import ParametersSerializer
 from core.sources.models import Source
 from core.sources.serializers import SourceCreateOrUpdateSerializer
 
@@ -20,14 +22,18 @@ logger = logging.getLogger('oclapi')
 
 
 class ConceptMapGroupField(serializers.Field):
+    """
+    A ConceptMap's groups, one per source and target system, each mapping an element target, with core.fhir.ops.
+    translate's systems (for the caller, at the read's base) and relationships, in R4 (equivalence). Writes store an
+    equivalence as the map type it is.
+    """
+
     def to_internal_value(self, data):
         mappings = []
         for group in data:
             for element in group.get('element', []):
                 for target in element.get('target', []):
-                    map_type = target.get('equivalence')
-                    if map_type == 'equivalent':
-                        map_type = SAME_AS
+                    equivalence = target.get('equivalence')
                     mapping = {
                         'from_source_url': IdentifierSerializer.convert_fhir_url_to_ocl_uri(group.get('source'),
                                                                                             'sources'),
@@ -35,74 +41,27 @@ class ConceptMapGroupField(serializers.Field):
                                                                                           'sources'),
                         'from_concept_code': element.get('code'),
                         'to_concept_code': target.get('code'),
-                        'map_type': map_type
+                        'map_type': RELATIONSHIP_MAP_TYPES.get(relationship(equivalence), equivalence)
                     }
                     mappings.append(mapping)
 
         return {'mappings': mappings}
 
     def to_representation(self, value):
-        # limit to 1000 mappings by default
+        """The groups core.fhir.ops.translate.concept_map_groups makes for the caller at the read's base, in R4."""
         # TODO: support graphQL to go around the limit
-        limit = self.get_limit()
-        mappings = value.get_mappings_queryset().filter(retired=False).order_by('id')[:limit]
-        groups = {}
-        for mapping in mappings:
-            key = (mapping.from_source_url or '') + (mapping.to_source_url or '')
-            group = groups.get(key)
-            if not group:
-                if mapping.from_source and mapping.from_source.canonical_url:
-                    from_url = mapping.from_source.canonical_url
-                else:
-                    from_url = IdentifierSerializer.convert_ocl_uri_to_fhir_url(mapping.from_source_url, RESOURCE_TYPE)
-
-                if mapping.to_source and mapping.to_source.canonical_url:
-                    to_url = mapping.to_source.canonical_url
-                else:
-                    to_url = IdentifierSerializer.convert_ocl_uri_to_fhir_url(mapping.to_source_url, RESOURCE_TYPE)
-
-                group = {
-                    'source': from_url,
-                    'target': to_url
-                }
-                groups.update({key: group})
-            elements = group.get('element')
-            if not elements:
-                elements = []
-                group.update({'element': elements})
-            element = None
-            for candidate in elements:
-                if candidate.get('code') is mapping.from_concept_code:
-                    element = candidate
-                    break
-            if not element:
-                element = {
-                    'code': mapping.from_concept_code,
-                    'target': []
-                }
-                elements.append(element)
-            targets = element.get('target')
-            relationship = mapping.map_type
-            if mapping.map_type == SAME_AS:
-                relationship = 'equivalent'
-            targets.append({
-                'code': mapping.to_concept_code,
-                'equivalence': relationship
-            })
-        return [*groups.values()]
-
-    def get_limit(self):
-        if self.context.get('has_many', False):
-            limit = 25
-        else:
-            limit = 1000
-        return limit
+        view = self.context.get('view')
+        resolver = self.context.get('fhir_resolver') or FhirResolver(
+            getattr(view, 'kwargs', None), getattr(self.context.get('request'), 'user', None))
+        groups, self.subsetted = concept_map_groups(value, resolver)
+        return r4.concept_map_groups(groups)
 
 
-class ConceptMapDetailSerializer(serializers.ModelSerializer):
+class ConceptMapDetailSerializer(FhirRepositorySerializerMixin, serializers.ModelSerializer):
+    content_field = 'group'
     resourceType = SerializerMethodField(method_name='get_resource_type')
     id = CharField(source='mnemonic')
-    url = CharField(source='canonical_url', required=False)
+    url = CanonicalUrlField(source='canonical_url', required=False)
     title = CharField(source='full_name', required=False)
     status = StatusField(source='*')
     language = CharField(source='default_locale', required=False)
@@ -117,14 +76,6 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
                   'version', 'identifier', 'contact', 'jurisdiction', 'name', 'description', 'publisher', 'purpose',
                   'copyright', 'date', 'experimental', 'group')
 
-    def __new__(cls, *args, **kwargs):
-        if kwargs.get('many', False):
-            context = kwargs.get('context', {})
-            context.update({'has_many': True})
-            kwargs.update({'context': context})
-
-        return super().__new__(cls, *args, **kwargs)
-
     @staticmethod
     def get_resource_type(_):
         return RESOURCE_TYPE
@@ -138,6 +89,7 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
             rep = super().to_representation(instance)
             delete_empty_fields(rep)
             IdentifierSerializer.include_ocl_identifier(instance.uri, RESOURCE_TYPE, rep)
+            self.with_fhir_view(instance, rep)
         except (Exception, ):
             msg = f'Failed to represent "{instance.uri}" as {RESOURCE_TYPE}'
             logger.exception(msg)
@@ -259,27 +211,3 @@ class ConceptMapDetailSerializer(serializers.ModelSerializer):
         self._errors.update(errors)
 
         return source
-
-
-class ConceptMapParametersSerializer(ParametersSerializer):
-
-    def update(self, instance, validated_data):
-        pass
-
-    def create(self, validated_data):
-        pass
-
-    allowed_input_parameters = {
-            'url': 'valueUri',
-            'conceptMapVersion': 'valueString',
-            'code': 'valueCode',
-            'system': 'valueUri',
-            'version': 'valueString',
-            'source': 'valueUri',
-            'coding': 'valueCoding',
-            'codeableConcept': 'valueCodeableConcept',
-            'target': 'valueUri',
-            'targetsystem': 'valueUri',
-            # TODO: dependency?
-            'reverse': 'valueBoolean'
-        }
