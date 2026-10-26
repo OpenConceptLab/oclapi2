@@ -57,66 +57,72 @@ class TranslateCorpusMixin:
     """
     registry = False
 
-    def setUp(self):
-        set_registry_toggle(self.registry)
-        super().setUp()
-        self.enterContext(indexing())
-        self.admin = UserProfile.objects.get(username='ocladmin')
-        self.ciel = OrganizationFactory(mnemonic='CIEL')
-        self.who = OrganizationFactory(mnemonic='WHO')
-        self.ihtsdo = OrganizationFactory(mnemonic='IHTSDO')
-        self.pih = OrganizationFactory(mnemonic='PIH')
-        self.moh = OrganizationFactory(mnemonic='MOH')
-        self.fixtures = OrganizationFactory(mnemonic='FHIR-Fixtures', public_access=ACCESS_TYPE_NONE)
-        self.moh_member = UserProfileFactory(username='moh-member')
-        self.moh.members.add(self.moh_member)
-        self.member = UserProfileFactory(username='fixture-member')
-        self.fixtures.members.add(self.member)
-        self.outsider = UserProfileFactory(username='outsider')
-        self.jamlung = UserProfileFactory(username='jamlung')
+    @classmethod
+    def setUpClass(cls):
+        cls.enterClassContext(indexing())
+        super().setUpClass()
 
-        self.ciel_source = source(self.ciel, 'CIEL', canonical_url=CIEL)
-        self.ciel_v1 = source(self.ciel, 'CIEL', 'v1', released=True, canonical_url=CIEL)
-        self.ciel_v2 = source(self.ciel, 'CIEL', 'v2', released=True, canonical_url=CIEL)
-        self.icd = source(self.who, 'ICD-10-WHO', canonical_url=ICD10)
-        self.icd_2019 = source(self.who, 'ICD-10-WHO', 'ICD102019', released=True, canonical_url=ICD10)
-        self.snomed = source(self.ihtsdo, 'SNOMED-CT')
-        self.private = source(self.moh, 'private-codes', canonical_url=PRIVATE, public_access=ACCESS_TYPE_NONE)
-        self.private_v1 = source(
-            self.moh, 'private-codes', 'v1', released=True, canonical_url=PRIVATE, public_access=ACCESS_TYPE_NONE)
-        self.pih_source = source(self.pih, 'PIH', canonical_url=PIH)
-        self.pih_v1 = source(self.pih, 'PIH', 'v1', released=True, canonical_url=PIH)
-        self.fixture = source(self.fixtures, 'fixture-codes', canonical_url=FIXTURE, public_access=ACCESS_TYPE_NONE)
-        self.fixture_v1 = source(self.fixtures, 'fixture-codes', '1.0.0', released=True, canonical_url=FIXTURE,
-                                 public_access=ACCESS_TYPE_NONE)
-        self.dak = source(self.jamlung, 'Example-DAK-Source', canonical_url=DAK)
-        self.dak_fhir = source(self.jamlung, 'Example-DAK-Source', 'fhir', released=True, canonical_url=DAK)
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        set_registry_toggle(cls.registry)
+        cls.admin = UserProfile.objects.get(username='ocladmin')
+        cls.ciel = OrganizationFactory(mnemonic='CIEL')
+        cls.who = OrganizationFactory(mnemonic='WHO')
+        cls.ihtsdo = OrganizationFactory(mnemonic='IHTSDO')
+        cls.pih = OrganizationFactory(mnemonic='PIH')
+        cls.moh = OrganizationFactory(mnemonic='MOH')
+        cls.fixtures = OrganizationFactory(mnemonic='FHIR-Fixtures', public_access=ACCESS_TYPE_NONE)
+        cls.moh_member = UserProfileFactory(username='moh-member')
+        cls.moh.members.add(cls.moh_member)
+        cls.member = UserProfileFactory(username='fixture-member')
+        cls.fixtures.members.add(cls.member)
+        cls.outsider = UserProfileFactory(username='outsider')
+        cls.jamlung = UserProfileFactory(username='jamlung')
 
-        if self.registry:
-            for url, owner in ((CIEL, self.ciel), (ICD10, self.who), (PIH, self.pih), (DAK, self.jamlung)):
+        cls.ciel_source = source(cls.ciel, 'CIEL', canonical_url=CIEL)
+        cls.ciel_v1 = source(cls.ciel, 'CIEL', 'v1', released=True, canonical_url=CIEL)
+        cls.ciel_v2 = source(cls.ciel, 'CIEL', 'v2', released=True, canonical_url=CIEL)
+        cls.icd = source(cls.who, 'ICD-10-WHO', canonical_url=ICD10)
+        cls.icd_2019 = source(cls.who, 'ICD-10-WHO', 'ICD102019', released=True, canonical_url=ICD10)
+        cls.snomed = source(cls.ihtsdo, 'SNOMED-CT')
+        cls.private = source(cls.moh, 'private-codes', canonical_url=PRIVATE, public_access=ACCESS_TYPE_NONE)
+        cls.private_v1 = source(
+            cls.moh, 'private-codes', 'v1', released=True, canonical_url=PRIVATE, public_access=ACCESS_TYPE_NONE)
+        cls.pih_source = source(cls.pih, 'PIH', canonical_url=PIH)
+        cls.pih_v1 = source(cls.pih, 'PIH', 'v1', released=True, canonical_url=PIH)
+        cls.fixture = source(cls.fixtures, 'fixture-codes', canonical_url=FIXTURE, public_access=ACCESS_TYPE_NONE)
+        cls.fixture_v1 = source(cls.fixtures, 'fixture-codes', '1.0.0', released=True, canonical_url=FIXTURE,
+                                public_access=ACCESS_TYPE_NONE)
+        cls.dak = source(cls.jamlung, 'Example-DAK-Source', canonical_url=DAK)
+        cls.dak_fhir = source(cls.jamlung, 'Example-DAK-Source', 'fhir', released=True, canonical_url=DAK)
+
+        if cls.registry:
+            for url, owner in ((CIEL, cls.ciel), (ICD10, cls.who), (PIH, cls.pih), (DAK, cls.jamlung)):
                 GlobalURLRegistryFactory(url=url, namespace=owner.uri)
 
-        self.mapping('SAME-AS', self.icd, 'A00', [self.ciel_v1])  # only in the older release
-        self.mapping('BROADER-THAN', self.icd, 'O02.1', [self.ciel_v1, self.ciel_v2])
-        self.mapping('SAME AS', self.snomed, '371374003', [self.ciel_v2])
-        self.mapping('NOT-SAME-AS', self.icd, 'O03', [self.ciel_v2])
-        self.mapping('MAPS TO', None, '4154112', [self.ciel_v2], to_source_url='/orgs/OHDSI/sources/OMOP-Standard/')
-        self.mapping('Q-AND-A', self.private, 'P1', [self.ciel_v2])
-        self.mapping('SAME-AS', self.icd, 'O99', [self.ciel_v2], retired=True)
-        self.mapping('SAME-AS', self.icd, 'Z99', [])  # HEAD only: never released
-        self.mapping('SAME-AS', self.icd, 'B20', [self.ciel_v2], from_code='138405')
-        self.mapping('SAME-AS', self.pih_source, '7880', [self.pih_v1], parent=self.pih_source,
-                     from_source=self.ciel_source)  # PIH's map of a CIEL code
-        self.mapping('NARROWER-THAN', self.ciel_source, '113275', [self.private_v1], parent=self.private,
-                     from_code='P1')
-        self.mapping('SAME-AS', self.icd, 'F01', [self.fixture_v1], parent=self.fixture, from_code='FX-1')
-        self.mapping('CONCEPT-SET', self.dak, 'ANC.B10.DE73', [self.dak_fhir], parent=self.dak,
-                     from_source=self.ciel_source, from_code='45651')  # from CIEL, as production's DAK maps are
+        cls.mapping('SAME-AS', cls.icd, 'A00', [cls.ciel_v1])  # only in the older release
+        cls.mapping('BROADER-THAN', cls.icd, 'O02.1', [cls.ciel_v1, cls.ciel_v2])
+        cls.mapping('SAME AS', cls.snomed, '371374003', [cls.ciel_v2])
+        cls.mapping('NOT-SAME-AS', cls.icd, 'O03', [cls.ciel_v2])
+        cls.mapping('MAPS TO', None, '4154112', [cls.ciel_v2], to_source_url='/orgs/OHDSI/sources/OMOP-Standard/')
+        cls.mapping('Q-AND-A', cls.private, 'P1', [cls.ciel_v2])
+        cls.mapping('SAME-AS', cls.icd, 'O99', [cls.ciel_v2], retired=True)
+        cls.mapping('SAME-AS', cls.icd, 'Z99', [])  # HEAD only: never released
+        cls.mapping('SAME-AS', cls.icd, 'B20', [cls.ciel_v2], from_code='138405')
+        cls.mapping('SAME-AS', cls.pih_source, '7880', [cls.pih_v1], parent=cls.pih_source,
+                    from_source=cls.ciel_source)  # PIH's map of a CIEL code
+        cls.mapping('NARROWER-THAN', cls.ciel_source, '113275', [cls.private_v1], parent=cls.private,
+                    from_code='P1')
+        cls.mapping('SAME-AS', cls.icd, 'F01', [cls.fixture_v1], parent=cls.fixture, from_code='FX-1')
+        cls.mapping('CONCEPT-SET', cls.dak, 'ANC.B10.DE73', [cls.dak_fhir], parent=cls.dak,
+                    from_source=cls.ciel_source, from_code='45651')  # from CIEL, as production's DAK maps are
 
+    @classmethod
     def mapping(  # pylint: disable=too-many-arguments
-            self, map_type, to_source, to_code, releases, parent=None, from_source=None, from_code='113275', **kwargs):
+            cls, map_type, to_source, to_code, releases, parent=None, from_source=None, from_code='113275', **kwargs):
         """A mapping held by `parent` (CIEL's HEAD by default) and the `releases` listed, from `from_source`'s code."""
-        parent = parent or self.ciel_source
+        parent = parent or cls.ciel_source
         from_source = from_source or parent
         kwargs.setdefault('to_source_url', to_source.uri if to_source else None)
         return MappingFactory(
@@ -577,10 +583,11 @@ class TranslateScopeTest(TranslateCorpusMixin, OCLTestCase):
     (FHIRsmith's reading).
     """
 
-    def setUp(self):
-        super().setUp()
-        for owner, mnemonic, url, code_system, code in ((self.ciel, 'ciel-set', CIEL_VS, self.ciel_source, '113275'),
-                                                        (self.who, 'icd-set', ICD10_VS, self.icd, 'O02.1')):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        for owner, mnemonic, url, code_system, code in ((cls.ciel, 'ciel-set', CIEL_VS, cls.ciel_source, '113275'),
+                                                        (cls.who, 'icd-set', ICD10_VS, cls.icd, 'O02.1')):
             concept = ConceptFactory(parent=code_system, mnemonic=code)
             collection(owner, mnemonic, canonical_url=url)
             value_set = collection(owner, mnemonic, 'v1', released=True, canonical_url=url)
@@ -588,13 +595,13 @@ class TranslateScopeTest(TranslateCorpusMixin, OCLTestCase):
             expansion.concepts.set([concept])
             Collection.objects.filter(id=value_set.id).update(expansion_uri=expansion.uri)
         # MOH's public value set holds a code of its private source and one of SNOMED, which has no canonical URL
-        snomed_code = ConceptFactory(parent=self.snomed, mnemonic='371374003')
-        collection(self.moh, 'mixed-set', canonical_url=MIXED_VS)
-        mixed = collection(self.moh, 'mixed-set', 'v1', released=True, canonical_url=MIXED_VS)
+        snomed_code = ConceptFactory(parent=cls.snomed, mnemonic='371374003')
+        collection(cls.moh, 'mixed-set', canonical_url=MIXED_VS)
+        mixed = collection(cls.moh, 'mixed-set', 'v1', released=True, canonical_url=MIXED_VS)
         expansion = ExpansionFactory(collection_version=mixed)
-        expansion.concepts.set([ConceptFactory(parent=self.private, mnemonic='P1'), snomed_code])
+        expansion.concepts.set([ConceptFactory(parent=cls.private, mnemonic='P1'), snomed_code])
         Collection.objects.filter(id=mixed.id).update(expansion_uri=expansion.uri)
-        self.mapping('SAME-AS', self.icd, 'S371', [self.ciel_v2], from_source=self.snomed, from_code='371374003')
+        cls.mapping('SAME-AS', cls.icd, 'S371', [cls.ciel_v2], from_source=cls.snomed, from_code='371374003')
 
     def test_a_scope_holds_only_the_codes_of_systems_the_caller_is_shown(self):
         """

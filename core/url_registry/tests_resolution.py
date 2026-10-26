@@ -56,24 +56,25 @@ class ResolverCorpusMixin:
     canonical as in production; a Source and a Collection sharing a canonical in one org (padam); a repository with
     no released version.
     """
-    def setUp(self):
-        super().setUp()
-        self.who = OrganizationFactory(mnemonic='WHO')
-        self.sehatapp = OrganizationFactory(mnemonic='sehatapp')
-        self.padam = OrganizationFactory(mnemonic='padam')
-        self.drafts = OrganizationFactory(mnemonic='drafts')
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.who = OrganizationFactory(mnemonic='WHO')
+        cls.sehatapp = OrganizationFactory(mnemonic='sehatapp')
+        cls.padam = OrganizationFactory(mnemonic='padam')
+        cls.drafts = OrganizationFactory(mnemonic='drafts')
 
-        self.who_icd = source(self.who, 'ICD-10-WHO', canonical_url=ICD10)
-        self.who_icd_2019 = source(self.who, 'ICD-10-WHO', 'ICD102019', released=True, canonical_url=None)
-        self.sehat_icd = source(self.sehatapp, 'ICD-10', canonical_url=ICD10)
-        self.sehat_icd_v1 = source(self.sehatapp, 'ICD-10', 'v1.0', released=True, canonical_url=ICD10)
+        cls.who_icd = source(cls.who, 'ICD-10-WHO', canonical_url=ICD10)
+        cls.who_icd_2019 = source(cls.who, 'ICD-10-WHO', 'ICD102019', released=True, canonical_url=None)
+        cls.sehat_icd = source(cls.sehatapp, 'ICD-10', canonical_url=ICD10)
+        cls.sehat_icd_v1 = source(cls.sehatapp, 'ICD-10', 'v1.0', released=True, canonical_url=ICD10)
 
-        self.pbd_source = source(self.padam, 'pbd', canonical_url=PBD)
-        self.pbd_source_v1 = source(self.padam, 'pbd', 'v1', released=True, canonical_url=PBD)
-        self.pbd_collection = collection(self.padam, 'pbd-vs', canonical_url=PBD)
-        self.pbd_collection_v1 = collection(self.padam, 'pbd-vs', 'v1', released=True, canonical_url=PBD)
+        cls.pbd_source = source(cls.padam, 'pbd', canonical_url=PBD)
+        cls.pbd_source_v1 = source(cls.padam, 'pbd', 'v1', released=True, canonical_url=PBD)
+        cls.pbd_collection = collection(cls.padam, 'pbd-vs', canonical_url=PBD)
+        cls.pbd_collection_v1 = collection(cls.padam, 'pbd-vs', 'v1', released=True, canonical_url=PBD)
 
-        self.draft = source(self.drafts, 'draft', canonical_url=DRAFT)
+        cls.draft = source(cls.drafts, 'draft', canonical_url=DRAFT)
 
 
 class StrictDefaultCases:
@@ -99,9 +100,10 @@ class StrictDefaultCases:
 
 class ResolverToggleOffTest(StrictDefaultCases, ResolverCorpusMixin, OCLTestCase):
     """No registry: the lowest-id active repository with the canonical, Source before Collection."""
-    def setUp(self):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
         set_registry_toggle(False)
-        super().setUp()
 
     def test_defaults_keep_todays_answers(self):
         version, entry = Source.resolve_reference_expression(ICD10)
@@ -178,12 +180,13 @@ class ResolverToggleOffTest(StrictDefaultCases, ResolverCorpusMixin, OCLTestCase
 
 class ResolverToggleOnTest(StrictDefaultCases, ResolverCorpusMixin, OCLTestCase):
     """The registry's order: the owner's entry, the owner's repositories, the global entry; nothing else."""
-    def setUp(self):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
         set_registry_toggle(True)
-        super().setUp()
-        self.icd_entry = GlobalURLRegistryFactory(url=ICD10, namespace=self.who.uri)
-        self.pbd_entry = GlobalURLRegistryFactory(url=PBD, namespace=self.padam.uri)
-        GlobalURLRegistryFactory(url=DRAFT, namespace=self.drafts.uri)
+        cls.icd_entry = GlobalURLRegistryFactory(url=ICD10, namespace=cls.who.uri)
+        cls.pbd_entry = GlobalURLRegistryFactory(url=PBD, namespace=cls.padam.uri)
+        GlobalURLRegistryFactory(url=DRAFT, namespace=cls.drafts.uri)
 
     def test_defaults_keep_todays_answers(self):
         version, entry = Source.resolve_reference_expression(ICD10)
@@ -261,9 +264,10 @@ class ResolverToggleOnTest(StrictDefaultCases, ResolverCorpusMixin, OCLTestCase)
 
 
 class URLRegistryReadsTest(ResolverCorpusMixin, OCLTestCase):
-    def setUp(self):
-        super().setUp()
-        self.entry = GlobalURLRegistryFactory(url=PBD, namespace=self.padam.uri)
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.entry = GlobalURLRegistryFactory(url=PBD, namespace=cls.padam.uri)
 
     def test_lookup_reads_without_writing(self):
         with patch.object(URLRegistry, 'save') as save_mock:

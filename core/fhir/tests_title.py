@@ -9,16 +9,17 @@ BLANK = 'https://example.org/blank'
 
 class FhirTitleTest(SearchCorpusMixin, OCLTestCase):
     """The FHIR title is the repository's full name, or its name when it has none (empty or blank)."""
-    def setUp(self):
-        super().setUp()
-        self.titles = OrganizationFactory(mnemonic='titles')
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.titles = OrganizationFactory(mnemonic='titles')
         for make, kind in ((source, 'cs'), (collection, 'vs')):
             for mnemonic, full_name, url in (('titled', 'The Full Name', TITLED), ('bare', '', BARE),
                                               ('blank', ' \t ', BLANK), ('nbsp', '\u00a0', f'{BLANK}/nbsp'),
                                               ('figure-space', '\u2007', f'{BLANK}/figure-space')):
-                make(self.titles, f'{kind}-{mnemonic}', released=True, canonical_url=f'{url}/{kind}',
+                make(cls.titles, f'{kind}-{mnemonic}', released=True, canonical_url=f'{url}/{kind}',
                      full_name=full_name)
-                make(self.titles, f'{kind}-{mnemonic}', 'v1', released=True, canonical_url=f'{url}/{kind}',
+                make(cls.titles, f'{kind}-{mnemonic}', 'v1', released=True, canonical_url=f'{url}/{kind}',
                      full_name=full_name)
 
     def expected(self, kind):

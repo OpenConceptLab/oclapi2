@@ -363,50 +363,51 @@ class TerminologyCapabilitiesCases(OpsCorpusMixin):  # pylint: disable=too-many-
     named collections.
     """
 
-    def setUp(self):  # pylint: disable=too-many-statements
-        super().setUp()
-        self.rest_retired = source(self.hl7, 'restful-interaction', '3.0.1', released=True, retired=True,
-                                   canonical_url=REST)
-        self.hl7_member = UserProfileFactory(username='hl7-member')
-        self.hl7.members.add(self.hl7_member)
-        self.closed = source(self.moh, 'closed', canonical_url=CLOSED, public_access=ACCESS_TYPE_NONE)
-        self.closed_v1 = source(self.moh, 'closed', 'v1', released=True, canonical_url=CLOSED)
-        self.sehatapp = OrganizationFactory(mnemonic='sehatapp')
-        source(self.sehatapp, 'ICD-10', canonical_url=ICD10)
-        source(self.sehatapp, 'ICD-10', 'v1.0', released=True, canonical_url=ICD10)
-        source(self.acme, 'nameless')
-        source(self.acme, 'nameless', 'v1', released=True)
-        source(self.acme, 'draft', canonical_url=DRAFT)
-        source(self.acme, 'draft', 'v1', canonical_url=DRAFT)
-        source(self.acme, 'unregistered', canonical_url=UNREGISTERED)
-        source(self.acme, 'unregistered', 'v1', released=True, canonical_url=UNREGISTERED)
-        source(self.acme, 'renamed', canonical_url=OLD)
-        source(self.acme, 'renamed', 'v1', released=True, canonical_url=None)
-        source(self.acme, 'renamed', 'v2', released=True, canonical_url=NEW)
-        source(self.acme, 'retired-head', canonical_url=RETIRED_HEAD, retired=True)
-        source(self.acme, 'retired-head', 'v1', released=True, canonical_url=RETIRED_HEAD)
-        source(self.acme, 'local', canonical_url=REDIRECTED)
-        source(self.acme, 'local', 'v1', released=True, canonical_url=REDIRECTED)
-        source(self.hl7, 'redirected', canonical_url=REDIRECTED)
-        source(self.hl7, 'redirected', 'r1', released=True, canonical_url=REDIRECTED)
-        OrganizationURLRegistryFactory(organization=self.acme, url=REDIRECTED, namespace=self.hl7.uri)
-        source(self.hl7, 'collide-private', canonical_url=COLLIDE, public_access=ACCESS_TYPE_NONE)
-        source(self.hl7, 'collide-private', 'p1', released=True, canonical_url=COLLIDE,
+    @classmethod
+    def setUpTestData(cls):  # pylint: disable=too-many-statements
+        super().setUpTestData()
+        cls.rest_retired = source(cls.hl7, 'restful-interaction', '3.0.1', released=True, retired=True,
+                                  canonical_url=REST)
+        cls.hl7_member = UserProfileFactory(username='hl7-member')
+        cls.hl7.members.add(cls.hl7_member)
+        cls.closed = source(cls.moh, 'closed', canonical_url=CLOSED, public_access=ACCESS_TYPE_NONE)
+        cls.closed_v1 = source(cls.moh, 'closed', 'v1', released=True, canonical_url=CLOSED)
+        cls.sehatapp = OrganizationFactory(mnemonic='sehatapp')
+        source(cls.sehatapp, 'ICD-10', canonical_url=ICD10)
+        source(cls.sehatapp, 'ICD-10', 'v1.0', released=True, canonical_url=ICD10)
+        source(cls.acme, 'nameless')
+        source(cls.acme, 'nameless', 'v1', released=True)
+        source(cls.acme, 'draft', canonical_url=DRAFT)
+        source(cls.acme, 'draft', 'v1', canonical_url=DRAFT)
+        source(cls.acme, 'unregistered', canonical_url=UNREGISTERED)
+        source(cls.acme, 'unregistered', 'v1', released=True, canonical_url=UNREGISTERED)
+        source(cls.acme, 'renamed', canonical_url=OLD)
+        source(cls.acme, 'renamed', 'v1', released=True, canonical_url=None)
+        source(cls.acme, 'renamed', 'v2', released=True, canonical_url=NEW)
+        source(cls.acme, 'retired-head', canonical_url=RETIRED_HEAD, retired=True)
+        source(cls.acme, 'retired-head', 'v1', released=True, canonical_url=RETIRED_HEAD)
+        source(cls.acme, 'local', canonical_url=REDIRECTED)
+        source(cls.acme, 'local', 'v1', released=True, canonical_url=REDIRECTED)
+        source(cls.hl7, 'redirected', canonical_url=REDIRECTED)
+        source(cls.hl7, 'redirected', 'r1', released=True, canonical_url=REDIRECTED)
+        OrganizationURLRegistryFactory(organization=cls.acme, url=REDIRECTED, namespace=cls.hl7.uri)
+        source(cls.hl7, 'collide-private', canonical_url=COLLIDE, public_access=ACCESS_TYPE_NONE)
+        source(cls.hl7, 'collide-private', 'p1', released=True, canonical_url=COLLIDE,
                public_access=ACCESS_TYPE_NONE)
-        source(self.hl7, 'collide-public', canonical_url=COLLIDE)
-        source(self.hl7, 'collide-public', 'v1', released=True, canonical_url=COLLIDE)
-        plus = source(self.acme, 'plus')
-        plus_releases = [source(self.acme, 'plus', '1.0', released=True),
-                         source(self.acme, 'plus', '2.0+build', released=True)]
+        source(cls.hl7, 'collide-public', canonical_url=COLLIDE)
+        source(cls.hl7, 'collide-public', 'v1', released=True, canonical_url=COLLIDE)
+        plus = source(cls.acme, 'plus')
+        plus_releases = [source(cls.acme, 'plus', '1.0', released=True),
+                         source(cls.acme, 'plus', '2.0+build', released=True)]
         ConceptFactory(parent=plus, mnemonic='P1', sources=plus_releases,
                        names=[concept_name('Plus one', preferred=True)])
-        encoded = source(self.acme, 'encoded')
-        ConceptFactory(parent=encoded, mnemonic='E1', sources=[source(self.acme, 'encoded', 'r%41', released=True)],
+        encoded = source(cls.acme, 'encoded')
+        ConceptFactory(parent=encoded, mnemonic='E1', sources=[source(cls.acme, 'encoded', 'r%41', released=True)],
                        names=[concept_name('Encoded one', preferred=True)])
-        source(self.acme, 'collections')
-        source(self.acme, 'collections', 'v1', released=True)
+        source(cls.acme, 'collections')
+        source(cls.acme, 'collections', 'v1', released=True)
         OrganizationFactory(mnemonic='Empty')
-        self.users = (None, self.outsider, self.moh_member, self.hl7_member, self.jdoe, self.admin)
+        cls.users = (None, cls.outsider, cls.moh_member, cls.hl7_member, cls.jdoe, cls.admin)
 
     def capabilities(self, fhir_base='/fhir', user=None, **params):
         response = client_for(user).get(f'{fhir_base}/metadata', {'mode': 'terminology', **params})

@@ -75,81 +75,89 @@ class SearchCorpusMixin:
     org with two releases; a user's repository; MOH's code system and value set, made private after a public release;
     three value sets with stored expansions.
     """
-    def setUp(self):
-        super().setUp()
-        self.enterContext(indexing())
-        self.client = APIClient()
-        self.admin = UserProfile.objects.get(username='ocladmin')
-        self.who = OrganizationFactory(mnemonic='WHO')
-        self.sehatapp = OrganizationFactory(mnemonic='sehatapp')
-        self.ciel = OrganizationFactory(mnemonic='CIEL')
-        self.misc = OrganizationFactory(mnemonic='misc')
-        self.fixtures = OrganizationFactory(mnemonic='FHIR-Fixtures', public_access=ACCESS_TYPE_NONE)
-        self.member = UserProfileFactory(username='fixture-member')
-        self.outsider = UserProfileFactory(username='outsider')
-        self.fixtures.members.add(self.member)
-        self.jdoe = UserProfileFactory(username='jdoe')
+    @classmethod
+    def setUpClass(cls):
+        cls.enterClassContext(indexing())
+        super().setUpClass()
 
-        self.who_icd = source(self.who, 'ICD-10-WHO', canonical_url=ICD10, full_name='ICD-10 WHO Edition')
-        self.who_icd_2019 = source(
-            self.who, 'ICD-10-WHO', 'ICD102019', released=True, canonical_url=None, full_name='ICD-10 WHO Edition',
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.admin = UserProfile.objects.get(username='ocladmin')
+        cls.who = OrganizationFactory(mnemonic='WHO')
+        cls.sehatapp = OrganizationFactory(mnemonic='sehatapp')
+        cls.ciel = OrganizationFactory(mnemonic='CIEL')
+        cls.misc = OrganizationFactory(mnemonic='misc')
+        cls.fixtures = OrganizationFactory(mnemonic='FHIR-Fixtures', public_access=ACCESS_TYPE_NONE)
+        cls.member = UserProfileFactory(username='fixture-member')
+        cls.outsider = UserProfileFactory(username='outsider')
+        cls.fixtures.members.add(cls.member)
+        cls.jdoe = UserProfileFactory(username='jdoe')
+
+        cls.who_icd = source(cls.who, 'ICD-10-WHO', canonical_url=ICD10, full_name='ICD-10 WHO Edition')
+        cls.who_icd_2019 = source(
+            cls.who, 'ICD-10-WHO', 'ICD102019', released=True, canonical_url=None, full_name='ICD-10 WHO Edition',
             publisher='World Health Organization', identifier=[HL7_OID])
-        self.sehat_icd = source(self.sehatapp, 'ICD-10', canonical_url=ICD10, full_name='ICD-10 for Sehat')
-        self.sehat_icd_v1 = source(
-            self.sehatapp, 'ICD-10', 'v1.0', released=True, canonical_url=ICD10, full_name='ICD-10 for Sehat')
-        self.sehat_icd_v2 = source(self.sehatapp, 'ICD-10', 'v2.0', canonical_url=ICD10)  # newest, unreleased
+        cls.sehat_icd = source(cls.sehatapp, 'ICD-10', canonical_url=ICD10, full_name='ICD-10 for Sehat')
+        cls.sehat_icd_v1 = source(
+            cls.sehatapp, 'ICD-10', 'v1.0', released=True, canonical_url=ICD10, full_name='ICD-10 for Sehat')
+        cls.sehat_icd_v2 = source(cls.sehatapp, 'ICD-10', 'v2.0', canonical_url=ICD10)  # newest, unreleased
 
-        self.ciel_source = source(
-            self.ciel, 'CIEL', canonical_url=CIEL, full_name='Columbia International eHealth Laboratory',
+        cls.ciel_source = source(
+            cls.ciel, 'CIEL', canonical_url=CIEL, full_name='Columbia International eHealth Laboratory',
             description='Concepts for clinical care')
-        self.ciel_v1 = source(
-            self.ciel, 'CIEL', 'v1', released=True, retired=True, canonical_url=CIEL,
+        cls.ciel_v1 = source(
+            cls.ciel, 'CIEL', 'v1', released=True, retired=True, canonical_url=CIEL,
             full_name='Columbia International eHealth Laboratory', description='Concepts for clinical care')
-        self.ciel_v2 = source(
-            self.ciel, 'CIEL', 'v2', released=True, canonical_url=CIEL,
+        cls.ciel_v2 = source(
+            cls.ciel, 'CIEL', 'v2', released=True, canonical_url=CIEL,
             full_name='Columbia International eHealth Laboratory', description='Concepts for clinical care')
 
         # nothing visible comes from these
-        self.draft = source(self.misc, 'draft', canonical_url='https://example.org/draft')
-        self.draft_v1 = source(self.misc, 'draft', 'v1', canonical_url='https://example.org/draft')
-        self.gone = source(self.misc, 'gone', canonical_url='https://example.org/gone')
-        self.gone_v1 = source(
-            self.misc, 'gone', 'v1', released=True, retired=True, canonical_url='https://example.org/gone')
-        self.flagged = source(self.misc, 'flagged', released=True, canonical_url='https://example.org/flagged')
+        cls.draft = source(cls.misc, 'draft', canonical_url='https://example.org/draft')
+        cls.draft_v1 = source(cls.misc, 'draft', 'v1', canonical_url='https://example.org/draft')
+        cls.gone = source(cls.misc, 'gone', canonical_url='https://example.org/gone')
+        cls.gone_v1 = source(
+            cls.misc, 'gone', 'v1', released=True, retired=True, canonical_url='https://example.org/gone')
+        cls.flagged = source(cls.misc, 'flagged', released=True, canonical_url='https://example.org/flagged')
 
-        self.fixture = source(self.fixtures, 'fixture-codes', canonical_url=FIXTURE, public_access=ACCESS_TYPE_NONE)
-        self.fixture_v1 = source(
-            self.fixtures, 'fixture-codes', '1.0.0', released=True, canonical_url=FIXTURE,
+        cls.fixture = source(cls.fixtures, 'fixture-codes', canonical_url=FIXTURE, public_access=ACCESS_TYPE_NONE)
+        cls.fixture_v1 = source(
+            cls.fixtures, 'fixture-codes', '1.0.0', released=True, canonical_url=FIXTURE,
             public_access=ACCESS_TYPE_NONE)
-        self.fixture_v2 = source(
-            self.fixtures, 'fixture-codes', '2.0.0', released=True, canonical_url=FIXTURE,
+        cls.fixture_v2 = source(
+            cls.fixtures, 'fixture-codes', '2.0.0', released=True, canonical_url=FIXTURE,
             public_access=ACCESS_TYPE_NONE)
 
-        self.jdoe_codes = source(self.jdoe, 'my-codes', canonical_url='https://example.org/my-codes')
-        self.jdoe_codes_v1 = source(
-            self.jdoe, 'my-codes', 'v1', released=True, canonical_url='https://example.org/my-codes')
+        cls.jdoe_codes = source(cls.jdoe, 'my-codes', canonical_url='https://example.org/my-codes')
+        cls.jdoe_codes_v1 = source(
+            cls.jdoe, 'my-codes', 'v1', released=True, canonical_url='https://example.org/my-codes')
 
         # repositories made private after a public release: the release keeps its own public access, but its
         # repository (HEAD) is private, so it's shown only at MOH's base, to MOH's members and staff
-        self.moh = OrganizationFactory(mnemonic='MOH')
-        self.moh_member = UserProfileFactory(username='moh-member')
-        self.moh.members.add(self.moh_member)
-        self.hiv = source(self.moh, 'hiv-codes', canonical_url=HIV, public_access=ACCESS_TYPE_NONE)
-        self.hiv_v1 = source(self.moh, 'hiv-codes', 'v1', released=True, canonical_url=None)  # the repository's
+        cls.moh = OrganizationFactory(mnemonic='MOH')
+        cls.moh_member = UserProfileFactory(username='moh-member')
+        cls.moh.members.add(cls.moh_member)
+        cls.hiv = source(cls.moh, 'hiv-codes', canonical_url=HIV, public_access=ACCESS_TYPE_NONE)
+        cls.hiv_v1 = source(cls.moh, 'hiv-codes', 'v1', released=True, canonical_url=None)  # the repository's
 
         # the value sets: sehatapp's draws on its ICD-10 v1.0, the CIEL one on CIEL's HEAD; the released version of
         # the ICD-10 one has no canonical of its own
-        self.icd_vs = collection(self.sehatapp, 'icd10-all', canonical_url=ICD10_VS, full_name='All ICD-10 codes')
-        self.icd_vs_v1 = collection(
-            self.sehatapp, 'icd10-all', 'v1.0', released=True, canonical_url=None, full_name='All ICD-10 codes')
-        self.with_expansion(self.icd_vs_v1, explicit=[self.sehat_icd_v1])
-        self.ciel_vs = collection(self.ciel, 'ciel-set', canonical_url=CIEL_VS)
-        self.ciel_vs_v1 = collection(self.ciel, 'ciel-set', 'v1', released=True, canonical_url=CIEL_VS)
-        self.with_expansion(self.ciel_vs_v1, evaluated=[self.ciel_source])
-        self.ciel_vs_v2 = collection(self.ciel, 'ciel-set', 'v2', canonical_url=CIEL_VS)  # unreleased
-        self.hiv_vs = collection(self.moh, 'hiv-set', canonical_url=HIV_VS, public_access=ACCESS_TYPE_NONE)
-        self.hiv_vs_v1 = collection(self.moh, 'hiv-set', 'v1', released=True, canonical_url=HIV_VS)
-        self.with_expansion(self.hiv_vs_v1, explicit=[self.ciel_v2])
+        cls.icd_vs = collection(cls.sehatapp, 'icd10-all', canonical_url=ICD10_VS, full_name='All ICD-10 codes')
+        cls.icd_vs_v1 = collection(
+            cls.sehatapp, 'icd10-all', 'v1.0', released=True, canonical_url=None, full_name='All ICD-10 codes')
+        cls.with_expansion(cls.icd_vs_v1, explicit=[cls.sehat_icd_v1])
+        cls.ciel_vs = collection(cls.ciel, 'ciel-set', canonical_url=CIEL_VS)
+        cls.ciel_vs_v1 = collection(cls.ciel, 'ciel-set', 'v1', released=True, canonical_url=CIEL_VS)
+        cls.with_expansion(cls.ciel_vs_v1, evaluated=[cls.ciel_source])
+        cls.ciel_vs_v2 = collection(cls.ciel, 'ciel-set', 'v2', canonical_url=CIEL_VS)  # unreleased
+        cls.hiv_vs = collection(cls.moh, 'hiv-set', canonical_url=HIV_VS, public_access=ACCESS_TYPE_NONE)
+        cls.hiv_vs_v1 = collection(cls.moh, 'hiv-set', 'v1', released=True, canonical_url=HIV_VS)
+        cls.with_expansion(cls.hiv_vs_v1, explicit=[cls.ciel_v2])
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient()
 
     @staticmethod
     def with_expansion(collection_version, explicit=(), evaluated=()):
@@ -618,13 +626,14 @@ class ValueSetSearchTest(SearchCorpusMixin, OCLTestCase):
 
 
 class ConceptMapSearchTest(SearchCorpusMixin, OCLTestCase):
-    def setUp(self):
-        super().setUp()
-        icd_code = ConceptFactory(parent=self.sehat_icd, mnemonic='A00')
-        ciel_code = ConceptFactory(parent=self.ciel_source, mnemonic='1427')
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        icd_code = ConceptFactory(parent=cls.sehat_icd, mnemonic='A00')
+        ciel_code = ConceptFactory(parent=cls.ciel_source, mnemonic='1427')
         MappingFactory(
-            parent=self.ciel_source, from_concept=ciel_code, to_concept=icd_code, from_source=self.ciel_source,
-            to_source=self.sehat_icd, from_concept_code='1427', to_concept_code='A00', sources=[self.ciel_v2])
+            parent=cls.ciel_source, from_concept=ciel_code, to_concept=icd_code, from_source=cls.ciel_source,
+            to_source=cls.sehat_icd, from_concept_code='1427', to_concept_code='A00', sources=[cls.ciel_v2])
 
     def test_source_and_target(self):
         everything = self.search('ConceptMap')
@@ -713,19 +722,20 @@ class ReferencedSourceAccessTest(SearchCorpusMixin, OCLTestCase):
     PRIVATE = 'http://moh.example/fhir/CodeSystem/private'
     UNKNOWN = 'http://moh.example/fhir/CodeSystem/unknown'
 
-    def setUp(self):
-        super().setUp()
-        self.private = source(self.moh, 'private-codes', canonical_url=self.PRIVATE, public_access=ACCESS_TYPE_NONE)
-        self.private_v1 = source(self.moh, 'private-codes', 'v1', released=True, canonical_url=self.PRIVATE,
-                                 public_access=ACCESS_TYPE_NONE)
-        self.private_code = ConceptFactory(parent=self.private, mnemonic='P1')
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.private = source(cls.moh, 'private-codes', canonical_url=cls.PRIVATE, public_access=ACCESS_TYPE_NONE)
+        cls.private_v1 = source(cls.moh, 'private-codes', 'v1', released=True, canonical_url=cls.PRIVATE,
+                                public_access=ACCESS_TYPE_NONE)
+        cls.private_code = ConceptFactory(parent=cls.private, mnemonic='P1')
         for _ in range(3):
-            MappingFactory(parent=self.private, from_source=self.private, to_source=self.private,
-                           from_concept=self.private_code, to_concept=self.private_code, sources=[self.private_v1])
+            MappingFactory(parent=cls.private, from_source=cls.private, to_source=cls.private,
+                           from_concept=cls.private_code, to_concept=cls.private_code, sources=[cls.private_v1])
         drawing = 'https://example.org/ValueSet/drawing'  # a public value set whose stored expansion drew on it
-        collection(self.sehatapp, 'drawing', canonical_url=drawing)
-        self.with_expansion(collection(self.sehatapp, 'drawing', 'v1', released=True, canonical_url=drawing),
-                            explicit=[self.private_v1])
+        collection(cls.sehatapp, 'drawing', canonical_url=drawing)
+        cls.with_expansion(collection(cls.sehatapp, 'drawing', 'v1', released=True, canonical_url=drawing),
+                           explicit=[cls.private_v1])
 
     def with_partner(self):
         """
@@ -817,11 +827,12 @@ class SearchCostTest(SearchCorpusMixin, OCLTestCase):
     parameter takes at most MAX_ALTERNATIVES values (its alternatives and repeats together), a search at most
     MAX_SEARCH_ALTERNATIVES; past either the search is too costly, a 400 naming the parameter.
     """
-    def setUp(self):
-        super().setUp()
-        ConceptFactory(parent=self.ciel_source, mnemonic='c19', sources=[self.ciel_v2])
-        MappingFactory(parent=self.ciel_source, from_source=self.ciel_source, to_source=self.sehat_icd,
-                       sources=[self.ciel_v2])
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        ConceptFactory(parent=cls.ciel_source, mnemonic='c19', sources=[cls.ciel_v2])
+        MappingFactory(parent=cls.ciel_source, from_source=cls.ciel_source, to_source=cls.sehat_icd,
+                       sources=[cls.ciel_v2])
 
     @staticmethod
     def alternatives(count, last):
@@ -1082,12 +1093,13 @@ class RepositoryAccessTest(SearchCorpusMixin, OCLTestCase):
     is shown at MOH's base to MOH's members and staff, and nowhere else. A retired release counts only beside a live
     one the caller is shown, and an owner-base read without a version serves the newest release the caller is shown.
     """
-    def setUp(self):
-        super().setUp()
-        ConceptFactory(parent=self.hiv, mnemonic='H1', sources=[self.hiv_v1])
-        MappingFactory(parent=self.hiv, from_source=self.hiv, to_source=self.ciel_source, sources=[self.hiv_v1])
-        self.users = (None, self.outsider, self.member, self.moh_member, self.admin)
-        self.viewers = (self.moh_member, self.admin)
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        ConceptFactory(parent=cls.hiv, mnemonic='H1', sources=[cls.hiv_v1])
+        MappingFactory(parent=cls.hiv, from_source=cls.hiv, to_source=cls.ciel_source, sources=[cls.hiv_v1])
+        cls.users = (None, cls.outsider, cls.member, cls.moh_member, cls.admin)
+        cls.viewers = (cls.moh_member, cls.admin)
 
     def test_search_shows_a_release_where_its_repository_is_shown(self):
         hiv, hiv_set = [f'{HIV}|v1'], [f'{HIV_VS}|v1']

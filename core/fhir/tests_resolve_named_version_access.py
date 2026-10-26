@@ -113,66 +113,69 @@ class AccessCorpusMixin:
     """
     registry = False
 
-    def setUp(self):
-        set_registry_toggle(self.registry)
-        super().setUp()
-        self.admin = UserProfile.objects.get(username='ocladmin')
-        self.lab = OrganizationFactory(mnemonic='Lab')
-        self.lab_member = UserProfileFactory(username='lab-member')
-        self.lab.members.add(self.lab_member)
-        self.outsider = UserProfileFactory(username='outsider')
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        set_registry_toggle(cls.registry)
+        cls.admin = UserProfile.objects.get(username='ocladmin')
+        cls.lab = OrganizationFactory(mnemonic='Lab')
+        cls.lab_member = UserProfileFactory(username='lab-member')
+        cls.lab.members.add(cls.lab_member)
+        cls.outsider = UserProfileFactory(username='outsider')
 
-        self.targets = source(self.lab, 'targets', canonical_url=TARGETS)
-        targets_t1 = source(self.lab, 'targets', 't1', released=True, canonical_url=TARGETS)
+        cls.targets = source(cls.lab, 'targets', canonical_url=TARGETS)
+        targets_t1 = source(cls.lab, 'targets', 't1', released=True, canonical_url=TARGETS)
         for code in ('HID', 'SEC', 'THI'):
-            ConceptFactory(parent=self.targets, mnemonic=code, sources=[targets_t1],
+            ConceptFactory(parent=cls.targets, mnemonic=code, sources=[targets_t1],
                            names=[name(f'Target {code}', preferred=True)])
 
-        self.hidden, hidden_c1 = self.holder('hidden-first', 'Hidden one', 'HID', ['v1', 'secret'], private=True)
-        self.second, _ = self.holder('open-second', 'Second one', 'SEC', ['v1'], private_releases=['v5', 'p9'])
-        self.third, third_c1 = self.holder('open-third', 'Third one', 'THI', ['v2', 'v5'])
+        cls.hidden, hidden_c1 = cls.holder('hidden-first', 'Hidden one', 'HID', ['v1', 'secret'], private=True)
+        cls.second, _ = cls.holder('open-second', 'Second one', 'SEC', ['v1'], private_releases=['v5', 'p9'])
+        cls.third, third_c1 = cls.holder('open-third', 'Third one', 'THI', ['v2', 'v5'])
 
-        self.vs_hidden = collection(self.lab, 'vs-hidden', canonical_url=SETS, public_access=ACCESS_TYPE_NONE)
-        self.vs_hidden_v1 = self.value_set('vs-hidden', 'v1', hidden_c1, public_access=ACCESS_TYPE_NONE)
-        self.vs_hidden_secret = self.value_set('vs-hidden', 'secret', hidden_c1, public_access=ACCESS_TYPE_NONE)
-        self.vs_open = collection(self.lab, 'vs-open', canonical_url=SETS)
-        self.vs_open_v2 = self.value_set('vs-open', 'v2', third_c1, hidden_c1)
+        cls.vs_hidden = collection(cls.lab, 'vs-hidden', canonical_url=SETS, public_access=ACCESS_TYPE_NONE)
+        cls.vs_hidden_v1 = cls.value_set('vs-hidden', 'v1', hidden_c1, public_access=ACCESS_TYPE_NONE)
+        cls.vs_hidden_secret = cls.value_set('vs-hidden', 'secret', hidden_c1, public_access=ACCESS_TYPE_NONE)
+        cls.vs_open = collection(cls.lab, 'vs-open', canonical_url=SETS)
+        cls.vs_open_v2 = cls.value_set('vs-open', 'v2', third_c1, hidden_c1)
 
-        self.alpha = OrganizationFactory(mnemonic='Alpha')
-        self.beta = OrganizationFactory(mnemonic='Beta')
-        self.beta_member = UserProfileFactory(username='beta-member')
-        self.beta.members.add(self.beta_member)
-        source(self.beta, 'beta-shared', canonical_url=SHARED, public_access=ACCESS_TYPE_NONE)
-        self.beta_s1 = source(self.beta, 'beta-shared', 's1', released=True, canonical_url=SHARED,
-                              public_access=ACCESS_TYPE_NONE)
-        source(self.alpha, 'alpha-shared', canonical_url=SHARED)
-        self.alpha_s1 = source(self.alpha, 'alpha-shared', 's1', released=True, canonical_url=SHARED)
+        cls.alpha = OrganizationFactory(mnemonic='Alpha')
+        cls.beta = OrganizationFactory(mnemonic='Beta')
+        cls.beta_member = UserProfileFactory(username='beta-member')
+        cls.beta.members.add(cls.beta_member)
+        source(cls.beta, 'beta-shared', canonical_url=SHARED, public_access=ACCESS_TYPE_NONE)
+        cls.beta_s1 = source(cls.beta, 'beta-shared', 's1', released=True, canonical_url=SHARED,
+                             public_access=ACCESS_TYPE_NONE)
+        source(cls.alpha, 'alpha-shared', canonical_url=SHARED)
+        cls.alpha_s1 = source(cls.alpha, 'alpha-shared', 's1', released=True, canonical_url=SHARED)
 
-        if self.registry:
-            for url, owner in ((HELD, self.lab), (SETS, self.lab), (TARGETS, self.lab), (SHARED, self.alpha)):
+        if cls.registry:
+            for url, owner in ((HELD, cls.lab), (SETS, cls.lab), (TARGETS, cls.lab), (SHARED, cls.alpha)):
                 GlobalURLRegistryFactory(url=url, namespace=owner.uri)
 
     def tearDown(self):
         set_registry_toggle(False)
         super().tearDown()
 
+    @classmethod
     def holder(  # pylint: disable=too-many-arguments
-            self, mnemonic, display, target, releases, private=False, private_releases=()):
+            cls, mnemonic, display, target, releases, private=False, private_releases=()):
         """(HEAD, C1) for a code system of Lab with the canonical HELD, its releases, and a C1 mapping to `target`."""
         access = {'public_access': ACCESS_TYPE_NONE} if private else {}
-        head = source(self.lab, mnemonic, canonical_url=HELD, **access)
-        rows = [source(self.lab, mnemonic, version, released=True, canonical_url=HELD, **access)
+        head = source(cls.lab, mnemonic, canonical_url=HELD, **access)
+        rows = [source(cls.lab, mnemonic, version, released=True, canonical_url=HELD, **access)
                 for version in releases]
-        rows += [source(self.lab, mnemonic, version, released=True, canonical_url=HELD,
+        rows += [source(cls.lab, mnemonic, version, released=True, canonical_url=HELD,
                         public_access=ACCESS_TYPE_NONE) for version in private_releases]
         concept = ConceptFactory(parent=head, mnemonic='C1', sources=rows, names=[name(display, preferred=True)])
         MappingFactory(parent=head, map_type='SAME-AS', from_concept=None, to_concept=None, from_source=head,
-                       from_source_url=head.uri, from_concept_code='C1', to_source=self.targets,
-                       to_source_url=self.targets.uri, to_concept_code=target, sources=rows)
+                       from_source_url=head.uri, from_concept_code='C1', to_source=cls.targets,
+                       to_source_url=cls.targets.uri, to_concept_code=target, sources=rows)
         return head, concept
 
-    def value_set(self, mnemonic, version, *concepts, **kwargs):
-        release = collection(self.lab, mnemonic, version, released=True, canonical_url=SETS, **kwargs)
+    @classmethod
+    def value_set(cls, mnemonic, version, *concepts, **kwargs):
+        release = collection(cls.lab, mnemonic, version, released=True, canonical_url=SETS, **kwargs)
         expansion = ExpansionFactory(mnemonic=f'autoexpand-{mnemonic}-{version}', collection_version=release)
         expansion.concepts.add(*concepts)
         release.expansion_uri = expansion.uri

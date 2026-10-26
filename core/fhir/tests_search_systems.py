@@ -70,30 +70,37 @@ class SystemSearchCases(SearchCorpusMixin):
     """
     registry = False
 
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        set_registry_toggle(cls.registry)
+        if cls.registry:
+            GlobalURLRegistryFactory(url=CIEL, namespace=cls.ciel.uri)
+            GlobalURLRegistryFactory(url=ICD10, namespace=cls.who.uri)
+        cls.ciel_code = ConceptFactory(parent=cls.ciel_source, mnemonic='1427')
+        cls.icd_code = ConceptFactory(parent=cls.sehat_icd, mnemonic='A00')
+        cls.ciel_to_icd = cls.mapping(cls.ciel_source, cls.ciel_code, cls.icd_code, [cls.ciel_v2])
+        cls.my_code = ConceptFactory(parent=cls.jdoe_codes, mnemonic='m1')
+        cls.my_codes_to_ciel = cls.mapping(cls.jdoe_codes, cls.my_code, cls.ciel_code, [cls.jdoe_codes_v1])
+
+        cls.private = source(cls.moh, 'private-codes', canonical_url=PRIVATE, public_access=ACCESS_TYPE_NONE)
+        source(cls.moh, 'private-codes', 'v1', released=True, canonical_url=PRIVATE, public_access=ACCESS_TYPE_NONE)
+        cls.private_code = ConceptFactory(parent=cls.private, mnemonic='P1')
+        cls.partner = OrganizationFactory(mnemonic='Partner')
+        cls.partner_only = UserProfileFactory(username='partner-member')
+        cls.partner.members.add(cls.partner_only)
+        cls.partner_map = source(cls.partner, 'partner-map', canonical_url='https://example.org/partner-map')
+        cls.partner_map_v1 = source(cls.partner, 'partner-map', 'v1', released=True,
+                                    canonical_url='https://example.org/partner-map')
+        own = ConceptFactory(parent=cls.partner_map, mnemonic='X1')
+        cls.mapping(cls.partner_map, own, cls.private_code, [cls.partner_map_v1])
+        cls.mapping(cls.partner_map, cls.private_code, own, [cls.partner_map_v1])
+        cls.corpus_mapping_ids = list(Mapping.objects.values_list('id', flat=True))
+
     def setUp(self):
         super().setUp()
-        set_registry_toggle(self.registry)
-        if self.registry:
-            GlobalURLRegistryFactory(url=CIEL, namespace=self.ciel.uri)
-            GlobalURLRegistryFactory(url=ICD10, namespace=self.who.uri)
-        self.ciel_code = ConceptFactory(parent=self.ciel_source, mnemonic='1427')
-        self.icd_code = ConceptFactory(parent=self.sehat_icd, mnemonic='A00')
-        self.ciel_to_icd = self.mapping(self.ciel_source, self.ciel_code, self.icd_code, [self.ciel_v2])
-        self.my_code = ConceptFactory(parent=self.jdoe_codes, mnemonic='m1')
-        self.my_codes_to_ciel = self.mapping(self.jdoe_codes, self.my_code, self.ciel_code, [self.jdoe_codes_v1])
-
-        self.private = source(self.moh, 'private-codes', canonical_url=PRIVATE, public_access=ACCESS_TYPE_NONE)
-        source(self.moh, 'private-codes', 'v1', released=True, canonical_url=PRIVATE, public_access=ACCESS_TYPE_NONE)
-        self.private_code = ConceptFactory(parent=self.private, mnemonic='P1')
-        self.partner = OrganizationFactory(mnemonic='Partner')
-        self.partner_only = UserProfileFactory(username='partner-member')
-        self.partner.members.add(self.partner_only)
-        self.partner_map = source(self.partner, 'partner-map', canonical_url='https://example.org/partner-map')
-        self.partner_map_v1 = source(self.partner, 'partner-map', 'v1', released=True,
-                                     canonical_url='https://example.org/partner-map')
-        own = ConceptFactory(parent=self.partner_map, mnemonic='X1')
-        self.mapping(self.partner_map, own, self.private_code, [self.partner_map_v1])
-        self.mapping(self.partner_map, self.private_code, own, [self.partner_map_v1])
+        # ES isn't rolled back with the database: index the shared mappings as stored, whatever an earlier test did
+        MappingDocument().update(Mapping.objects.filter(id__in=self.corpus_mapping_ids), refresh=True)
 
     @staticmethod
     def mapping(parent, from_concept, to_concept, sources, **kwargs):

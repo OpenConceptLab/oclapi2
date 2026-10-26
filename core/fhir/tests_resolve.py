@@ -80,39 +80,40 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
     """
     registry = None
 
-    def setUp(self):
-        set_registry_toggle(self.registry)
-        super().setUp()
-        self.admin = UserProfile.objects.get(username='ocladmin')
-        self.ciel = OrganizationFactory(mnemonic='CIEL')
-        self.hl7 = OrganizationFactory(mnemonic='HL7')
-        self.fixtures = OrganizationFactory(mnemonic='FHIR-Fixtures', public_access=ACCESS_TYPE_NONE)
-        self.member = UserProfileFactory(username='fixture-member')
-        self.outsider = UserProfileFactory(username='outsider')
-        self.fixtures.members.add(self.member)
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        set_registry_toggle(cls.registry)
+        cls.admin = UserProfile.objects.get(username='ocladmin')
+        cls.ciel = OrganizationFactory(mnemonic='CIEL')
+        cls.hl7 = OrganizationFactory(mnemonic='HL7')
+        cls.fixtures = OrganizationFactory(mnemonic='FHIR-Fixtures', public_access=ACCESS_TYPE_NONE)
+        cls.member = UserProfileFactory(username='fixture-member')
+        cls.outsider = UserProfileFactory(username='outsider')
+        cls.fixtures.members.add(cls.member)
 
         # WHO first, so WHO has the lower ids, as in production (the corpus does the same for ICD-10)
-        self.who_atc = source(self.who, 'WHOATC', canonical_url=ATC)
-        self.who_atc_2023 = source(self.who, 'WHOATC', '2023AA', released=True, canonical_url=ATC)
-        self.who_atc_2024 = source(self.who, 'WHOATC', 'ATC_2024_01_19', canonical_url=ATC)  # newest, unreleased
-        self.sehat_atc = source(self.sehatapp, 'ATC', canonical_url=ATC)
-        self.sehat_atc_v2 = source(self.sehatapp, 'ATC', 'v2', released=True, canonical_url=ATC)
-        self.ciel_source = source(self.ciel, 'CIEL', canonical_url=CIEL)
-        self.ciel_v1 = source(self.ciel, 'CIEL', 'v2026-09-24', released=True, canonical_url=CIEL)
-        self.fixture = source(
-            self.fixtures, 'fixture-codes', canonical_url=FIXTURE, public_access=ACCESS_TYPE_NONE)
-        self.fixture_v1 = source(
-            self.fixtures, 'fixture-codes', '1.0.0', released=True, canonical_url=FIXTURE,
+        cls.who_atc = source(cls.who, 'WHOATC', canonical_url=ATC)
+        cls.who_atc_2023 = source(cls.who, 'WHOATC', '2023AA', released=True, canonical_url=ATC)
+        cls.who_atc_2024 = source(cls.who, 'WHOATC', 'ATC_2024_01_19', canonical_url=ATC)  # newest, unreleased
+        cls.sehat_atc = source(cls.sehatapp, 'ATC', canonical_url=ATC)
+        cls.sehat_atc_v2 = source(cls.sehatapp, 'ATC', 'v2', released=True, canonical_url=ATC)
+        cls.ciel_source = source(cls.ciel, 'CIEL', canonical_url=CIEL)
+        cls.ciel_v1 = source(cls.ciel, 'CIEL', 'v2026-09-24', released=True, canonical_url=CIEL)
+        cls.fixture = source(
+            cls.fixtures, 'fixture-codes', canonical_url=FIXTURE, public_access=ACCESS_TYPE_NONE)
+        cls.fixture_v1 = source(
+            cls.fixtures, 'fixture-codes', '1.0.0', released=True, canonical_url=FIXTURE,
             public_access=ACCESS_TYPE_NONE)
-        self.fixture_at = source(
-            self.fixtures, 'codes@fixture', canonical_url=f'{FIXTURE}-at', public_access=ACCESS_TYPE_NONE)
-        self.fixture_at_v1 = source(
-            self.fixtures, 'codes@fixture', '1.0.0', released=True, canonical_url=f'{FIXTURE}-at',
+        cls.fixture_at = source(
+            cls.fixtures, 'codes@fixture', canonical_url=f'{FIXTURE}-at', public_access=ACCESS_TYPE_NONE)
+        cls.fixture_at_v1 = source(
+            cls.fixtures, 'codes@fixture', '1.0.0', released=True, canonical_url=f'{FIXTURE}-at',
             public_access=ACCESS_TYPE_NONE)
-        if self.registry:
+        if cls.registry:
             # the curated global registry (design D24): shared canonicals to the owners chosen, none for private repos
-            for url, owner in ((ICD10, self.who), (ATC, self.who), (CIEL, self.ciel), (PBD, self.padam),
-                               (DRAFT, self.drafts)):
+            for url, owner in ((ICD10, cls.who), (ATC, cls.who), (CIEL, cls.ciel), (PBD, cls.padam),
+                               (DRAFT, cls.drafts)):
                 GlobalURLRegistryFactory(url=url, namespace=owner.uri)
 
     def assertUnresolved(  # pylint: disable=invalid-name,too-many-arguments

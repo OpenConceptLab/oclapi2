@@ -303,8 +303,8 @@ class OCLAPITestCase(APITestCase, BaseTestCase):
 
 class OCLTestCase(TestCase, BaseTestCase):
     @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
+    def setUpTestData(cls):
+        super().setUpTestData()
         call_command("loaddata", "core/fixtures/base_entities.yaml", "core/fixtures/ocl_org.yaml")
         call_command("loaddata", "core/fixtures/auth_groups.yaml")
         call_command("loaddata", "core/fixtures/capabilities.yaml")

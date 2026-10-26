@@ -33,31 +33,32 @@ class ConceptVersionCases(OpsCorpusMixin):
     row, which HEAD holds, and a version row in each release. The value set demo-set 1's stored expansion holds the
     versioned-object rows.
     """
-    def setUp(self):
-        super().setUp()
-        self.demo = source(self.acme, 'demo', canonical_url=DEMO)
-        self.demo_v1 = source(self.acme, 'demo', '1', released=True, canonical_url=DEMO)
-        self.demo_v2 = source(self.acme, 'demo', '2', released=True, canonical_url=DEMO)
-        self.demo_v3 = source(self.acme, 'demo', '3', released=True, canonical_url=DEMO,
-                              public_access=ACCESS_TYPE_NONE)
-        self.roots = {}
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.demo = source(cls.acme, 'demo', canonical_url=DEMO)
+        cls.demo_v1 = source(cls.acme, 'demo', '1', released=True, canonical_url=DEMO)
+        cls.demo_v2 = source(cls.acme, 'demo', '2', released=True, canonical_url=DEMO)
+        cls.demo_v3 = source(cls.acme, 'demo', '3', released=True, canonical_url=DEMO,
+                             public_access=ACCESS_TYPE_NONE)
+        cls.roots = {}
         for code in ('A', 'B'):
-            root = ConceptFactory(parent=self.demo, mnemonic=code, names=[name(f'Code {code}', preferred=True)])
-            for release in (self.demo_v1, self.demo_v2, self.demo_v3):
-                ConceptFactory(parent=self.demo, mnemonic=code, version=f'{code}-{release.version}',
+            root = ConceptFactory(parent=cls.demo, mnemonic=code, names=[name(f'Code {code}', preferred=True)])
+            for release in (cls.demo_v1, cls.demo_v2, cls.demo_v3):
+                ConceptFactory(parent=cls.demo, mnemonic=code, version=f'{code}-{release.version}',
                                versioned_object=root, sources=[release],
                                names=[name(f'Code {code} in {release.version}', preferred=True)])
-            self.roots[code] = root
-        self.value_set = collection(self.acme, 'demo-set', '1', released=True, canonical_url=DEMO_SET)
-        collection(self.acme, 'demo-set', canonical_url=DEMO_SET)
-        self.stored = ExpansionFactory(mnemonic='autoexpand-1', collection_version=self.value_set)
-        self.stored.concepts.add(*self.roots.values())
-        self.stored.explicit_source_versions.add(self.demo_v1)
-        self.value_set.expansion_uri = self.stored.uri
-        self.value_set.save()
-        if self.registry:
+            cls.roots[code] = root
+        cls.value_set = collection(cls.acme, 'demo-set', '1', released=True, canonical_url=DEMO_SET)
+        collection(cls.acme, 'demo-set', canonical_url=DEMO_SET)
+        cls.stored = ExpansionFactory(mnemonic='autoexpand-1', collection_version=cls.value_set)
+        cls.stored.concepts.add(*cls.roots.values())
+        cls.stored.explicit_source_versions.add(cls.demo_v1)
+        cls.value_set.expansion_uri = cls.stored.uri
+        cls.value_set.save()
+        if cls.registry:
             for url in (DEMO, DEMO_SET):
-                GlobalURLRegistryFactory(url=url, namespace=self.acme.uri)
+                GlobalURLRegistryFactory(url=url, namespace=cls.acme.uri)
 
     def expanded(self, base='/fhir', user=None, **params):
         """The expansion answered at this base, with the given paging and filtering inputs."""

@@ -72,54 +72,55 @@ class NamedVersionCorpusMixin:  # pylint: disable=too-many-instance-attributes
     """
     registry = False
 
-    def setUp(self):  # pylint: disable=too-many-statements
-        set_registry_toggle(self.registry)
-        super().setUp()
-        self.admin = UserProfile.objects.get(username='ocladmin')
-        self.who = OrganizationFactory(mnemonic='WHO')
-        self.sehatapp = OrganizationFactory(mnemonic='sehatapp')
-        self.hl7 = OrganizationFactory(mnemonic='HL7')
-        self.acme = OrganizationFactory(mnemonic='Acme')
-        self.hl7_member = UserProfileFactory(username='hl7-member')
-        self.hl7.members.add(self.hl7_member)
-        self.outsider = UserProfileFactory(username='outsider')
+    @classmethod
+    def setUpTestData(cls):  # pylint: disable=too-many-statements
+        super().setUpTestData()
+        set_registry_toggle(cls.registry)
+        cls.admin = UserProfile.objects.get(username='ocladmin')
+        cls.who = OrganizationFactory(mnemonic='WHO')
+        cls.sehatapp = OrganizationFactory(mnemonic='sehatapp')
+        cls.hl7 = OrganizationFactory(mnemonic='HL7')
+        cls.acme = OrganizationFactory(mnemonic='Acme')
+        cls.hl7_member = UserProfileFactory(username='hl7-member')
+        cls.hl7.members.add(cls.hl7_member)
+        cls.outsider = UserProfileFactory(username='outsider')
 
-        self.who_icd = source(self.who, 'ICD-10-WHO', canonical_url=ICD10)
-        self.who_2019 = source(self.who, 'ICD-10-WHO', 'ICD102019', released=True, canonical_url=None)
-        self.s204 = ConceptFactory(parent=self.who_icd, mnemonic='S20.4', sources=[self.who_2019], names=[
+        cls.who_icd = source(cls.who, 'ICD-10-WHO', canonical_url=ICD10)
+        cls.who_2019 = source(cls.who, 'ICD-10-WHO', 'ICD102019', released=True, canonical_url=None)
+        cls.s204 = ConceptFactory(parent=cls.who_icd, mnemonic='S20.4', sources=[cls.who_2019], names=[
             name('Other superficial injuries of back wall of thorax', preferred=True)])
-        self.sehat_icd = source(self.sehatapp, 'ICD-10', canonical_url=ICD10)
-        self.sehat_v1 = source(self.sehatapp, 'ICD-10', 'v1.0', released=True, canonical_url=ICD10)
-        self.d642 = ConceptFactory(parent=self.sehat_icd, mnemonic='D64.2', sources=[self.sehat_v1], names=[
+        cls.sehat_icd = source(cls.sehatapp, 'ICD-10', canonical_url=ICD10)
+        cls.sehat_v1 = source(cls.sehatapp, 'ICD-10', 'v1.0', released=True, canonical_url=ICD10)
+        cls.d642 = ConceptFactory(parent=cls.sehat_icd, mnemonic='D64.2', sources=[cls.sehat_v1], names=[
             name('Secondary sideroblastic anaemia due to drugs and toxins', preferred=True)])
-        self.mapping(self.sehat_icd, 'D64.2', self.who_icd, 'S20.4', [self.sehat_v1])
+        cls.mapping(cls.sehat_icd, 'D64.2', cls.who_icd, 'S20.4', [cls.sehat_v1])
 
-        self.sehat_atc = source(self.sehatapp, 'ATC', canonical_url=ATC)
-        self.sehat_atc_v = source(self.sehatapp, 'ATC', '2026-04-25', released=True, canonical_url=ATC)
-        self.who_atc = source(self.who, 'WHOATC', canonical_url=ATC)
-        self.who_atc_2023 = source(self.who, 'WHOATC', '2023AA', released=True, canonical_url=None)
-        ConceptFactory(parent=self.who_atc, mnemonic='R02AB01', sources=[self.who_atc_2023],
+        cls.sehat_atc = source(cls.sehatapp, 'ATC', canonical_url=ATC)
+        cls.sehat_atc_v = source(cls.sehatapp, 'ATC', '2026-04-25', released=True, canonical_url=ATC)
+        cls.who_atc = source(cls.who, 'WHOATC', canonical_url=ATC)
+        cls.who_atc_2023 = source(cls.who, 'WHOATC', '2023AA', released=True, canonical_url=None)
+        ConceptFactory(parent=cls.who_atc, mnemonic='R02AB01', sources=[cls.who_atc_2023],
                        names=[name('neomycin', preferred=True)])
 
-        self.local_a = source(self.hl7, 'local-a', canonical_url=LOCAL)
-        self.local_a1 = source(self.hl7, 'local-a', 'a1', released=True, canonical_url=LOCAL)
-        ConceptFactory(parent=self.local_a, mnemonic='A1', sources=[self.local_a1],
+        cls.local_a = source(cls.hl7, 'local-a', canonical_url=LOCAL)
+        cls.local_a1 = source(cls.hl7, 'local-a', 'a1', released=True, canonical_url=LOCAL)
+        ConceptFactory(parent=cls.local_a, mnemonic='A1', sources=[cls.local_a1],
                        names=[name('A one', preferred=True)])
-        self.local_b = source(self.hl7, 'local-b', canonical_url=LOCAL)
-        self.local_b1 = source(self.hl7, 'local-b', 'b1', released=True, canonical_url=LOCAL)
-        ConceptFactory(parent=self.local_b, mnemonic='B1', sources=[self.local_b1],
+        cls.local_b = source(cls.hl7, 'local-b', canonical_url=LOCAL)
+        cls.local_b1 = source(cls.hl7, 'local-b', 'b1', released=True, canonical_url=LOCAL)
+        ConceptFactory(parent=cls.local_b, mnemonic='B1', sources=[cls.local_b1],
                        names=[name('B one', preferred=True)])
-        self.mapping(self.local_b, 'B1', self.local_a, 'A1', [self.local_b1])
-        self.local_c = source(self.acme, 'local-c', canonical_url=LOCAL)
-        self.local_c1 = source(self.acme, 'local-c', 'c1', released=True, canonical_url=LOCAL)
+        cls.mapping(cls.local_b, 'B1', cls.local_a, 'A1', [cls.local_b1])
+        cls.local_c = source(cls.acme, 'local-c', canonical_url=LOCAL)
+        cls.local_c1 = source(cls.acme, 'local-c', 'c1', released=True, canonical_url=LOCAL)
 
-        self.set_a = collection(self.acme, 'set-a', canonical_url=SETS)
-        self.set_a1 = self.value_set_release('set-a', 'v1', self.s204)
-        self.set_b = collection(self.acme, 'set-b', canonical_url=SETS)
-        self.set_b2 = self.value_set_release('set-b', 'v2', self.d642)
+        cls.set_a = collection(cls.acme, 'set-a', canonical_url=SETS)
+        cls.set_a1 = cls.value_set_release('set-a', 'v1', cls.s204)
+        cls.set_b = collection(cls.acme, 'set-b', canonical_url=SETS)
+        cls.set_b2 = cls.value_set_release('set-b', 'v2', cls.d642)
 
-        if self.registry:
-            for url, owner in ((ICD10, self.who), (ATC, self.who), (LOCAL, self.hl7), (SETS, self.acme)):
+        if cls.registry:
+            for url, owner in ((ICD10, cls.who), (ATC, cls.who), (LOCAL, cls.hl7), (SETS, cls.acme)):
                 GlobalURLRegistryFactory(url=url, namespace=owner.uri)
 
     def tearDown(self):
@@ -133,8 +134,9 @@ class NamedVersionCorpusMixin:  # pylint: disable=too-many-instance-attributes
             from_source_url=parent.uri, from_concept_code=from_code, to_source=to_source, to_source_url=to_source.uri,
             to_concept_code=to_code, sources=releases)
 
-    def value_set_release(self, mnemonic, version, *concepts):
-        release = collection(self.acme, mnemonic, version, released=True, canonical_url=SETS)
+    @classmethod
+    def value_set_release(cls, mnemonic, version, *concepts):
+        release = collection(cls.acme, mnemonic, version, released=True, canonical_url=SETS)
         expansion = ExpansionFactory(mnemonic=f'autoexpand-{version}', collection_version=release)
         expansion.concepts.add(*concepts)
         release.expansion_uri = expansion.uri

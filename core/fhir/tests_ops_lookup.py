@@ -51,73 +51,74 @@ class OpsCorpusMixin:
     """
     registry = False
 
-    def setUp(self):  # pylint: disable=too-many-statements
-        set_registry_toggle(self.registry)
-        super().setUp()
-        self.admin = UserProfile.objects.get(username='ocladmin')
-        self.ciel_org = OrganizationFactory(mnemonic='CIEL')
-        self.who = OrganizationFactory(mnemonic='WHO')
-        self.hl7 = OrganizationFactory(mnemonic='HL7')
-        self.moh = OrganizationFactory(mnemonic='MOH')
-        self.acme = OrganizationFactory(mnemonic='Acme')
-        self.moh_member = UserProfileFactory(username='moh-member')
-        self.moh.members.add(self.moh_member)
-        self.outsider = UserProfileFactory(username='outsider')
-        self.jdoe = UserProfileFactory(username='jdoe')
+    @classmethod
+    def setUpTestData(cls):  # pylint: disable=too-many-statements
+        super().setUpTestData()
+        set_registry_toggle(cls.registry)
+        cls.admin = UserProfile.objects.get(username='ocladmin')
+        cls.ciel_org = OrganizationFactory(mnemonic='CIEL')
+        cls.who = OrganizationFactory(mnemonic='WHO')
+        cls.hl7 = OrganizationFactory(mnemonic='HL7')
+        cls.moh = OrganizationFactory(mnemonic='MOH')
+        cls.acme = OrganizationFactory(mnemonic='Acme')
+        cls.moh_member = UserProfileFactory(username='moh-member')
+        cls.moh.members.add(cls.moh_member)
+        cls.outsider = UserProfileFactory(username='outsider')
+        cls.jdoe = UserProfileFactory(username='jdoe')
 
-        self.ciel = source(self.ciel_org, 'CIEL', canonical_url=CIEL, default_locale='en', supported_locales=['en'])
-        self.ciel_v1 = source(self.ciel_org, 'CIEL', 'v1', released=True, canonical_url=CIEL)
-        self.ciel_v2 = source(self.ciel_org, 'CIEL', 'v2', released=True, canonical_url=CIEL)
-        self.infectious = ConceptFactory(
-            parent=self.ciel, mnemonic='117053', sources=[self.ciel_v1, self.ciel_v2], names=[
+        cls.ciel = source(cls.ciel_org, 'CIEL', canonical_url=CIEL, default_locale='en', supported_locales=['en'])
+        cls.ciel_v1 = source(cls.ciel_org, 'CIEL', 'v1', released=True, canonical_url=CIEL)
+        cls.ciel_v2 = source(cls.ciel_org, 'CIEL', 'v2', released=True, canonical_url=CIEL)
+        cls.infectious = ConceptFactory(
+            parent=cls.ciel, mnemonic='117053', sources=[cls.ciel_v1, cls.ciel_v2], names=[
                 name('Infectious enteritis', preferred=True), name('Entérite infectieuse', 'fr', True),
                 name('enteritis infecciosa', 'es'), name('Enteritis of infectious origin', name_type='Synonym')])
-        self.retired = ConceptFactory(parent=self.ciel, mnemonic='103', retired=True, sources=[self.ciel_v2],
-                                      names=[name('HIV antibody', preferred=True)])
-        self.older = ConceptFactory(parent=self.ciel, mnemonic='999', sources=[self.ciel_v1],
-                                    names=[name('Older code', preferred=True)])
+        cls.retired = ConceptFactory(parent=cls.ciel, mnemonic='103', retired=True, sources=[cls.ciel_v2],
+                                     names=[name('HIV antibody', preferred=True)])
+        cls.older = ConceptFactory(parent=cls.ciel, mnemonic='999', sources=[cls.ciel_v1],
+                                   names=[name('Older code', preferred=True)])
 
-        self.icd = source(self.who, 'ICD-10-WHO', canonical_url=ICD10)
-        self.icd_2019 = source(self.who, 'ICD-10-WHO', 'ICD102019', released=True, canonical_url=None)
-        ConceptFactory(parent=self.icd, mnemonic='S20.4', sources=[self.icd_2019],
+        cls.icd = source(cls.who, 'ICD-10-WHO', canonical_url=ICD10)
+        cls.icd_2019 = source(cls.who, 'ICD-10-WHO', 'ICD102019', released=True, canonical_url=None)
+        ConceptFactory(parent=cls.icd, mnemonic='S20.4', sources=[cls.icd_2019],
                        names=[name('Other superficial injuries of back wall of thorax', preferred=True)])
-        self.rest = source(self.hl7, 'restful-interaction', canonical_url=REST)
-        self.rest_v1 = source(self.hl7, 'restful-interaction', '4.0.1', released=True, canonical_url=REST)
-        self.batch = ConceptFactory(parent=self.rest, mnemonic='batch', sources=[self.rest_v1])
+        cls.rest = source(cls.hl7, 'restful-interaction', canonical_url=REST)
+        cls.rest_v1 = source(cls.hl7, 'restful-interaction', '4.0.1', released=True, canonical_url=REST)
+        cls.batch = ConceptFactory(parent=cls.rest, mnemonic='batch', sources=[cls.rest_v1])
 
-        self.hiv = source(self.moh, 'hiv', canonical_url=HIV, public_access=ACCESS_TYPE_NONE)
-        self.hiv_v1 = source(self.moh, 'hiv', 'v1', released=True, canonical_url=HIV, public_access=ACCESS_TYPE_NONE)
-        self.private_code = ConceptFactory(parent=self.hiv, mnemonic='P1', sources=[self.hiv_v1],
-                                           names=[name('Private code', preferred=True)])
+        cls.hiv = source(cls.moh, 'hiv', canonical_url=HIV, public_access=ACCESS_TYPE_NONE)
+        cls.hiv_v1 = source(cls.moh, 'hiv', 'v1', released=True, canonical_url=HIV, public_access=ACCESS_TYPE_NONE)
+        cls.private_code = ConceptFactory(parent=cls.hiv, mnemonic='P1', sources=[cls.hiv_v1],
+                                          names=[name('Private code', preferred=True)])
 
-        private_shared = source(self.jdoe, 'shared', canonical_url=SHARED, public_access=ACCESS_TYPE_NONE)
-        private_shared_v1 = source(self.jdoe, 'shared', 'v1', released=True, canonical_url=SHARED,
+        private_shared = source(cls.jdoe, 'shared', canonical_url=SHARED, public_access=ACCESS_TYPE_NONE)
+        private_shared_v1 = source(cls.jdoe, 'shared', 'v1', released=True, canonical_url=SHARED,
                                    public_access=ACCESS_TYPE_NONE)
         ConceptFactory(parent=private_shared, mnemonic='S1', sources=[private_shared_v1],
                        names=[name('Private copy', preferred=True)])
-        self.public_shared = source(self.hl7, 'shared', canonical_url=SHARED)
-        self.public_shared_v1 = source(self.hl7, 'shared', 'v1', released=True, canonical_url=SHARED)
-        ConceptFactory(parent=self.public_shared, mnemonic='S1', sources=[self.public_shared_v1],
+        cls.public_shared = source(cls.hl7, 'shared', canonical_url=SHARED)
+        cls.public_shared_v1 = source(cls.hl7, 'shared', 'v1', released=True, canonical_url=SHARED)
+        ConceptFactory(parent=cls.public_shared, mnemonic='S1', sources=[cls.public_shared_v1],
                        names=[name('Public copy', preferred=True)])
 
-        self.newest_private = source(self.hl7, 'newest', canonical_url=NEWEST_PRIVATE)
-        self.newest_public_v1 = source(self.hl7, 'newest', 'v1', released=True, canonical_url=NEWEST_PRIVATE)
-        self.newest_private_v2 = source(self.hl7, 'newest', 'v2', released=True, canonical_url=NEWEST_PRIVATE,
-                                        public_access=ACCESS_TYPE_NONE)
-        ConceptFactory(parent=self.newest_private, mnemonic='N1',
-                       sources=[self.newest_public_v1, self.newest_private_v2], names=[name('N one', preferred=True)])
+        cls.newest_private = source(cls.hl7, 'newest', canonical_url=NEWEST_PRIVATE)
+        cls.newest_public_v1 = source(cls.hl7, 'newest', 'v1', released=True, canonical_url=NEWEST_PRIVATE)
+        cls.newest_private_v2 = source(cls.hl7, 'newest', 'v2', released=True, canonical_url=NEWEST_PRIVATE,
+                                       public_access=ACCESS_TYPE_NONE)
+        ConceptFactory(parent=cls.newest_private, mnemonic='N1',
+                       sources=[cls.newest_public_v1, cls.newest_private_v2], names=[name('N one', preferred=True)])
 
-        self.fevers = collection(self.acme, 'fevers', canonical_url=FEVERS)
-        self.fevers_v1 = collection(self.acme, 'fevers', 'v1', released=True, canonical_url=FEVERS)
-        expansion = ExpansionFactory(mnemonic='autoexpand-v1', collection_version=self.fevers_v1)
-        expansion.concepts.add(self.infectious, self.retired, self.private_code, self.batch)
-        expansion.evaluated_source_versions.add(self.ciel_v2)
-        self.fevers_v1.expansion_uri = expansion.uri
-        self.fevers_v1.save()
+        cls.fevers = collection(cls.acme, 'fevers', canonical_url=FEVERS)
+        cls.fevers_v1 = collection(cls.acme, 'fevers', 'v1', released=True, canonical_url=FEVERS)
+        expansion = ExpansionFactory(mnemonic='autoexpand-v1', collection_version=cls.fevers_v1)
+        expansion.concepts.add(cls.infectious, cls.retired, cls.private_code, cls.batch)
+        expansion.evaluated_source_versions.add(cls.ciel_v2)
+        cls.fevers_v1.expansion_uri = expansion.uri
+        cls.fevers_v1.save()
 
-        if self.registry:
-            for url, owner in ((CIEL, self.ciel_org), (ICD10, self.who), (REST, self.hl7), (SHARED, self.hl7),
-                               (NEWEST_PRIVATE, self.hl7), (FEVERS, self.acme)):
+        if cls.registry:
+            for url, owner in ((CIEL, cls.ciel_org), (ICD10, cls.who), (REST, cls.hl7), (SHARED, cls.hl7),
+                               (NEWEST_PRIVATE, cls.hl7), (FEVERS, cls.acme)):
                 GlobalURLRegistryFactory(url=url, namespace=owner.uri)
 
     @staticmethod
