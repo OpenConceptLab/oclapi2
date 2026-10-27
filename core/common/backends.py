@@ -8,7 +8,8 @@ from mozilla_django_oidc.auth import OIDCAuthenticationBackend
 from pydash import get
 from redis import Sentinel
 
-from core.common.exceptions import DeactivatedAccountLoginRefused, SSOIdentityMismatchRefused
+from core.common.exceptions import DeactivatedAccountLoginRefused, SSOIdentityMismatchRefused, SSOSignInRefused, \
+    SSOUsernameCaseMismatchRefused
 
 logger = logging.getLogger('oclapi')
 
@@ -97,7 +98,7 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
     def authenticate(self, request, **kwargs):
         try:
             return super().authenticate(request, **kwargs)
-        except (DeactivatedAccountLoginRefused, SSOIdentityMismatchRefused):
+        except SSOSignInRefused:
             # the refused identity's tokens were stored in the session before its account was looked up
             for key in ('oidc_access_token', 'oidc_id_token'):
                 request.session.pop(key, None)
@@ -105,11 +106,8 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
 
     def filter_users_by_claims(self, claims):
         """
-        Matches the account linked to the claims' Keycloak id (`sub`), else the one with the claims' username exactly
-        as Keycloak sends it, unless that account is linked to a different Keycloak user. A deactivated account is never
-        matched on its username alone (ocl_online#339): it's reactivated when the claims carry its email, verified by
-        Keycloak, and otherwise the sign-in is refused and the account left untouched. The username can't go to a new
-        account either, since usernames are unique.
+        Matches the account linked to the claims' `sub`, else by username exactly, else ignoring case. A deactivated
+        or case-only match needs the claims' verified email; otherwise the sign-in is refused, never a new account.
         """
         from core.users.models import UserProfile
 
@@ -123,6 +121,8 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         users = UserProfile.objects.filter(sso_id=sub) if sub else UserProfile.objects.none()
         if not users:
             users = UserProfile.objects.filter(username=username)
+            if not users:
+                users = self.filter_users_by_username_ignoring_case(username, claims)
             if users and sub and users[0].sso_id not in (None, sub):
                 logger.warning('OIDC sign-in refused: user %s is linked to another Keycloak user', users[0].id)
                 raise SSOIdentityMismatchRefused()
@@ -135,6 +135,19 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
             user.undelete()
             logger.warning('OIDC sign-in reactivated deactivated user %s on its verified email', user.id)
 
+        return users
+
+    def filter_users_by_username_ignoring_case(self, username, claims):
+        from core.users.models import UserProfile
+
+        users = UserProfile.objects.filter(username__iexact=username)
+        if not users:
+            return users
+        if len(users) > 1 or not self.has_verified_email_of(users[0], claims):
+            logger.warning(
+                'OIDC sign-in refused: users %s match the username only ignoring case, and the claims lack the '
+                'verified email of exactly one', [user.id for user in users])
+            raise SSOUsernameCaseMismatchRefused()
         return users
 
     @staticmethod

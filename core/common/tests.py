@@ -76,7 +76,7 @@ from core.users.constants import CORE_USER_GROUP, GUEST_GROUP
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 from .backends import OCLOIDCAuthenticationBackend
-from .exceptions import SSOIdentityMismatchRefused
+from .exceptions import SSOIdentityMismatchRefused, SSOUsernameCaseMismatchRefused
 from .checksums import Checksum
 from .serializers import IdentifierSerializer
 from .validators import URIValidator
@@ -2811,20 +2811,71 @@ class OCLOIDCAuthenticationBackendTest(OCLTestCase):
         self.backend.update_user(user, {**self.claim, 'sub': 'sub-2'})
         self.assertEqual(user.sso_id, 'sub-1')
 
-    def test_filter_users_by_claims_matches_username_exactly(self):
-        """Keycloak sends usernames in lowercase, and a mixed-case account is never matched, active or not"""
+    def test_filter_users_by_claims_prefers_the_exact_username(self):
         UserProfileFactory(username='Batman', email='batman@gotham.com')
+        batman = UserProfileFactory(username='batman', email='batman@gotham.com')
+
+        with self.assertNumQueries(1):
+            users = self.backend.filter_users_by_claims(self.claim)
+            self.assertEqual(list(users), [batman])
+
+    def test_filter_users_by_claims_matches_username_ignoring_case_with_its_verified_email(self):
+        batman = UserProfileFactory(username='Batman', email=' Batman@Gotham.com')
+
+        users = self.backend.filter_users_by_claims({**self.claim, 'sub': 'sub-1'})
+        self.assertEqual(list(users), [batman])
+        self.backend.update_user(users[0], {**self.claim, 'sub': 'sub-1'})
+
+        batman.refresh_from_db()
+        self.assertEqual(batman.username, 'Batman')
+        self.assertEqual(batman.sso_id, 'sub-1')
+        self.assertEqual(UserProfile.objects.filter(username__iexact='batman').count(), 1)
+
+    def test_filter_users_by_claims_refuses_username_ignoring_case_without_its_verified_email(self):
+        batman = UserProfileFactory(username='Batman', email='batman@gotham.com', first_name='Bat')
+        without_email_verified = {key: value for key, value in self.claim.items() if key != 'email_verified'}
+
+        for claims in [
+                {**self.claim, 'email_verified': False},
+                {**self.claim, 'email_verified': 'true'},
+                without_email_verified,
+                {**self.claim, 'email': 'joker@gotham.com'},
+                {**self.claim, 'email': None},
+                {**self.claim, 'email': ''},
+        ]:
+            with self.subTest(claims=claims):
+                with patch('core.users.models.UserProfile.save') as save_mock:
+                    with self.assertRaises(SSOUsernameCaseMismatchRefused):
+                        self.backend.filter_users_by_claims(claims)
+                save_mock.assert_not_called()
+
+        batman.refresh_from_db()
+        self.assertEqual(batman.first_name, 'Bat')
+        self.assertIsNone(batman.sso_id)
+
+    def test_filter_users_by_claims_refuses_several_accounts_matching_username_ignoring_case(self):
+        UserProfileFactory(username='Batman', email='batman@gotham.com')
+        UserProfileFactory(username='BatMan', email='joker@gotham.com')
+
+        with self.assertRaises(SSOUsernameCaseMismatchRefused):
+            self.backend.filter_users_by_claims(self.claim)
+
+    def test_filter_users_by_claims_refuses_username_ignoring_case_linked_to_a_different_sub(self):
+        UserProfileFactory(username='Batman', email='batman@gotham.com', sso_id='sub-1')
+
+        with self.assertRaises(SSOIdentityMismatchRefused):
+            self.backend.filter_users_by_claims({**self.claim, 'sub': 'sub-2'})
+
+    def test_filter_users_by_claims_reactivates_deactivated_user_ignoring_case_with_its_verified_email(self):
         robin = UserProfileFactory(username='Robin', email='robin@gotham.com')
         robin.deactivate()
 
-        self.assertEqual(self.backend.filter_users_by_claims(self.claim).count(), 0)
-        self.assertEqual(
-            self.backend.filter_users_by_claims(
-                {**self.claim, 'preferred_username': 'robin', 'email': 'robin@gotham.com'}).count(),
-            0
-        )
+        users = self.backend.filter_users_by_claims(
+            {**self.claim, 'preferred_username': 'robin', 'email': 'robin@gotham.com'})
+
+        self.assertEqual(list(users), [robin])
         robin.refresh_from_db()
-        self.assertFalse(robin.is_active)
+        self.assertTrue(robin.is_active)
 
     def test_filter_users_by_claims_reactivates_deactivated_user_with_its_verified_email(self):
         batman = UserProfileFactory(username='batman', email='Batman@Gotham.com ')
@@ -2945,19 +2996,24 @@ class OCLOIDCAuthenticationBackendTest(OCLTestCase):
         self.assertEqual(batman.first_name, 'Bruce')
 
     @patch('core.common.backends.OCLOIDCAuthenticationBackend.get_userinfo')
-    def test_get_or_create_user_leaves_mixed_case_deactivated_user(self, get_userinfo_mock):
-        get_userinfo_mock.return_value = self.claim
+    def test_get_or_create_user_for_mixed_case_user(self, get_userinfo_mock):
         old_batman = UserProfileFactory(username='Batman', email='batman@gotham.com', first_name='Bat')
-        old_batman.deactivate()
 
+        get_userinfo_mock.return_value = {**self.claim, 'email': 'joker@gotham.com'}
+        with patch.object(self.backend, 'create_user') as create_user_mock:
+            with self.assertRaises(SSOUsernameCaseMismatchRefused):
+                self.backend.get_or_create_user('access-token', None, None)
+        create_user_mock.assert_not_called()
+        self.assertEqual(UserProfile.objects.filter(username__iexact='batman').count(), 1)
+
+        get_userinfo_mock.return_value = self.claim
         user = self.backend.get_or_create_user('access-token', None, None)
 
-        self.assertNotEqual(user, old_batman)
-        self.assertEqual(user.username, 'batman')
-        self.assertTrue(user.is_active)
+        self.assertEqual(user, old_batman)
+        self.assertEqual(UserProfile.objects.filter(username__iexact='batman').count(), 1)
         old_batman.refresh_from_db()
-        self.assertFalse(old_batman.is_active)
-        self.assertEqual(old_batman.first_name, 'Bat')
+        self.assertEqual(old_batman.username, 'Batman')
+        self.assertEqual(old_batman.first_name, 'Bruce')
 
     @patch('mozilla_django_oidc.auth.OIDCAuthenticationBackend.authenticate')
     def test_authenticate_fails_and_drops_stored_tokens_when_sign_in_is_refused(self, authenticate_mock):
