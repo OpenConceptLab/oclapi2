@@ -3,6 +3,7 @@ import zipfile
 
 from celery_once import AlreadyQueued
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
 from mock import patch, Mock, ANY
 from mock.mock import PropertyMock
 from rest_framework.exceptions import ErrorDetail
@@ -502,6 +503,26 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data['mappings']), 1)
         self.assertEqual(len(response.data['references']), 1)
 
+    @override_settings(LIST_MAX_LIMIT=1)
+    def test_get_200_with_resources_limit_capped(self):
+        coll = OrganizationCollectionFactory(mnemonic='coll1')
+        expansion = ExpansionFactory(collection_version=coll)
+        coll.expansion_uri = expansion.uri
+        coll.save()
+        expansion.concepts.add(ConceptFactory(), ConceptFactory())
+        expansion.mappings.add(MappingFactory(), MappingFactory())
+
+        response = self.client.get(
+            coll.uri + '?includeConcepts=true&includeMappings=true&limit=1000', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['concepts']), 1)
+        self.assertEqual(len(response.data['mappings']), 1)
+
+        response = self.client.get(coll.uri + 'concepts/?limit=1000', format='json')
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response['num_found'], '2')
+
     def test_get_404(self):
         response = self.client.get(
             '/orgs/foobar/collections/coll1/',
@@ -673,6 +694,20 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
+
+    @override_settings(LIST_MAX_LIMIT=1)
+    def test_get_200_limit_capped(self):
+        CollectionReference(expression='/foo/bar', collection=self.collection).save()
+
+        response = self.client.get(self.collection.uri + 'references/?limit=1000', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response['num_found'], '2')
+        self.assertEqual(response['pages'], '2')
+
+        response = self.client.get(self.collection.uri + 'references/?limit=1000&page=2', format='json')
+        self.assertEqual(len(response.data), 1)
 
     def test_get_200_with_resolved_repo_versions(self):
         duplicate_reference = CollectionReference(

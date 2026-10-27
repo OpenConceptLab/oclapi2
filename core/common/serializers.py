@@ -9,7 +9,7 @@ from core.common.constants import INCLUDE_CONCEPTS_PARAM, INCLUDE_MAPPINGS_PARAM
     INCLUDE_VERBOSE_REFERENCES, INCLUDE_SEARCH_META_PARAM, ACCESS_TYPE_CHOICES, ACCESS_TYPE_VIEW
 from core.common.feeds import DEFAULT_LIMIT
 from core.common.fhir_helpers import to_fhir_path, to_ocl_path
-from core.common.utils import to_int, get_truthy_values, normalize_public_access
+from core.common.utils import to_int, get_truthy_values, normalize_public_access, cap_page_size
 from core.concept_maps.constants import RESOURCE_TYPE as CONCEPT_MAP_RESOURCE_TYPE
 from core.orgs.models import Organization
 from core.users.models import UserProfile
@@ -320,6 +320,8 @@ class AbstractRepoResourcesSerializer(AbstractResourceSerializer):
             self.include_mappings = self.query_params.get(INCLUDE_MAPPINGS_PARAM) in TRUTHY
             self.include_references = self.query_params.get(INCLUDE_VERBOSE_REFERENCES) in TRUTHY
             self.limit = to_int(self.query_params.get(LIMIT_PARAM), DEFAULT_LIMIT)
+            if self.include_concepts or self.include_mappings or self.include_references:
+                self.limit = cap_page_size(self.limit)
             self.offset = to_int(self.query_params.get(OFFSET_PARAM), 0)
         try:
             if not self.include_concepts:
