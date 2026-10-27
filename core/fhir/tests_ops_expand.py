@@ -9,7 +9,6 @@ trace; a fixed number of queries. OpenConceptLab/ocl_online#451.
 import json
 import random
 import re
-import string
 from urllib.parse import quote
 
 from django.db import connection
@@ -180,11 +179,10 @@ class ExpandCases(OpsCorpusMixin):
 
     def test_a_filter_matches_a_word_in_a_name_longer_than_a_btree_entry(self):
         """A name too long for a btree entry, even compressed, is saved, and a filter still matches its words."""
-        noise = random.Random(564)
-        text = ' '.join(''.join(noise.choices(string.ascii_letters + string.digits, k=40)) for _ in range(100))
+        text = random.Random(564).randbytes(3000).hex()  # 3,000 bytes of entropy: no compression fits 2,704
         self.fevers_v1.expansion.concepts.add(ConceptFactory(
             parent=self.ciel, mnemonic='long', sources=[self.ciel_v1, self.ciel_v2],
-            names=[name(f'{text[:2000]} Zebrafish {text[2000:]}', preferred=True)]))
+            names=[name(f'{text} Zebrafish', preferred=True)]))
         expansion = self.expansion(self.expand(url=FEVERS, filter='zebrafish'))
         self.assertEqual((expansion['total'], [member['code'] for member in expansion['contains']]), (1, ['long']))
 
