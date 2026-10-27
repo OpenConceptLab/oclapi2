@@ -9,7 +9,7 @@ from pydash import get
 from redis import Sentinel
 
 from core.common.exceptions import DeactivatedAccountLoginRefused, SSOIdentityMismatchRefused, SSOSignInRefused, \
-    SSOUsernameCaseMismatchRefused
+    SSOUnlinkedAccountRefused, SSOUsernameCaseMismatchRefused
 
 logger = logging.getLogger('oclapi')
 
@@ -106,8 +106,8 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
 
     def filter_users_by_claims(self, claims):
         """
-        Matches the account linked to the claims' `sub`, else by username exactly, else ignoring case. A deactivated
-        or case-only match needs the claims' verified email; otherwise the sign-in is refused, never a new account.
+        Matches the account linked to the claims' `sub`, else by username exactly, else ignoring case. An unlinked,
+        deactivated or case-only match needs the claims' verified email; otherwise the sign-in is refused.
         """
         from core.users.models import UserProfile
 
@@ -123,6 +123,11 @@ class OCLOIDCAuthenticationBackend(OIDCAuthenticationBackend):
             users = UserProfile.objects.filter(username=username)
             if not users:
                 users = self.filter_users_by_username_ignoring_case(username, claims)
+            elif users[0].is_active and not users[0].sso_id and not self.has_verified_email_of(users[0], claims):
+                logger.warning(
+                    'OIDC sign-in refused: user %s is not linked to Keycloak and the claims lack its verified email',
+                    users[0].id)
+                raise SSOUnlinkedAccountRefused()
             if users and sub and users[0].sso_id not in (None, sub):
                 logger.warning('OIDC sign-in refused: user %s is linked to another Keycloak user', users[0].id)
                 raise SSOIdentityMismatchRefused()

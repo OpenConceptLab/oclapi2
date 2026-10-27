@@ -68,6 +68,17 @@ class SSOUsernameCaseMismatchRefused(SSOSignInRefused):
         )
 
 
+class SSOUnlinkedAccountRefused(SSOSignInRefused):
+    default_code = 'sso_unlinked_account'
+
+    def __init__(self):
+        super().__init__(
+            'This username belongs to an existing OCL account that is not linked to your sign-in and does not have '
+            f'your verified email. If it is yours, contact {settings.COMMUNITY_EMAIL} and we will link it to your '
+            'sign-in.'
+        )
+
+
 class BatchIndexingError(Exception):
     """
     Raised once a batched ES indexing run has attempted every batch and one or more failed (ocl_online#241).
