@@ -7,7 +7,8 @@ from django.http import HttpResponse
 from django.test import RequestFactory, SimpleTestCase, override_settings
 from rest_framework.exceptions import AuthenticationFailed
 
-from core.common.exceptions import DeactivatedAccountLoginRefused, SSOIdentityMismatchRefused
+from core.common.exceptions import DeactivatedAccountLoginRefused, SSOIdentityMismatchRefused, \
+    SSOUsernameCaseMismatchRefused
 from core.middlewares.middlewares import RequireAuthenticationMiddleware
 
 
@@ -92,6 +93,15 @@ class RequireAuthenticationMiddlewareTest(SimpleTestCase):
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response['WWW-Authenticate'], 'Bearer realm="api"')
         self.assertIn('different sign-in identity', json.loads(response.content)['detail'])
+
+    @patch('core.middlewares.middlewares.OCLAuthentication.authenticate')
+    def test_rejects_sign_in_refused_for_username_case_mismatch(self, authenticate_mock):
+        authenticate_mock.side_effect = SSOUsernameCaseMismatchRefused()
+
+        response = self.middleware(self.make_request('/user/', HTTP_AUTHORIZATION='Bearer sso-token'))
+
+        self.assertEqual(response.status_code, 401)
+        self.assertIn('different capitalization', json.loads(response.content)['detail'])
 
     def test_blocks_anonymous_request_for_protected_path(self):
         """Anonymous traffic to protected API paths should receive a 403 response."""

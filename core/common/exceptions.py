@@ -28,7 +28,11 @@ class Http403(APIException):
     default_code = 'forbidden'
 
 
-class DeactivatedAccountLoginRefused(AuthenticationFailed):
+class SSOSignInRefused(AuthenticationFailed):
+    pass
+
+
+class DeactivatedAccountLoginRefused(SSOSignInRefused):
     """
     Raised when a Keycloak sign-in's username matches a deactivated account but the claims don't carry that
     account's email, verified by Keycloak (ocl_online#339). The account is left as it was; staff can reactivate it.
@@ -42,7 +46,7 @@ class DeactivatedAccountLoginRefused(AuthenticationFailed):
         )
 
 
-class SSOIdentityMismatchRefused(AuthenticationFailed):
+class SSOIdentityMismatchRefused(SSOSignInRefused):
     """Raised when a Keycloak sign-in's username matches an account already linked to a different Keycloak user."""
     default_code = 'sso_identity_mismatch'
 
@@ -50,6 +54,17 @@ class SSOIdentityMismatchRefused(AuthenticationFailed):
         super().__init__(
             'This username belongs to an OCL account linked to a different sign-in identity. '
             f'Contact {settings.COMMUNITY_EMAIL} for help.'
+        )
+
+
+class SSOUsernameCaseMismatchRefused(SSOSignInRefused):
+    """Raised when a Keycloak sign-in's username matches an account only ignoring case, without its verified email."""
+    default_code = 'sso_username_case_mismatch'
+
+    def __init__(self):
+        super().__init__(
+            'This username belongs to an existing OCL account with different capitalization. If it is yours, '
+            f'contact {settings.COMMUNITY_EMAIL} and we will link it to your sign-in.'
         )
 
 
