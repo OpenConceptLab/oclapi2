@@ -17,12 +17,8 @@ from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
 
-class MappingListViewTest(OCLAPITestCase):
-    def setUp(self):
-        super().setUp()
-        self.user = UserProfileFactory()
-        self.token = self.user.get_token()
-
+@tag('es')
+class MappingListPageSizeTest(OCLAPITestCase):
     @override_settings(LIST_MAX_LIMIT=1)
     def test_page_size_capped(self):
         mapping = MappingFactory()
@@ -39,6 +35,13 @@ class MappingListViewTest(OCLAPITestCase):
         response = self.client.get(mapping.parent.mappings_url + '?limit=1000&page=2')
         self.assertEqual(len(response.data), 1)
         self.assertNotIn('next', response)
+
+
+class MappingListViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = UserProfileFactory()
+        self.token = self.user.get_token()
 
     def test_get_200(self):
         response = self.client.get('/mappings/', format='json')
