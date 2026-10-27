@@ -1192,6 +1192,12 @@ def expire_old_celery_tasks():
     Task.objects.filter(updated_at__lt=timezone.now() - timezone.timedelta(days=7)).delete()
 
 
+@app.task(ignore_result=True)
+def expire_stale_auto_match_runs():
+    from core.map_projects.models import AutomatchRun
+    AutomatchRun.expire_stale()
+
+
 def get_live_indexing_task_ids():
     """
     Task ids currently held by the indexing workers -- executing, prefetched or scheduled.
