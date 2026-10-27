@@ -76,7 +76,7 @@ from core.users.constants import CORE_USER_GROUP, GUEST_GROUP
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 from .backends import OCLOIDCAuthenticationBackend
-from .exceptions import SSOIdentityMismatchRefused, SSOUsernameCaseMismatchRefused
+from .exceptions import SSOIdentityMismatchRefused, SSOUnlinkedAccountRefused, SSOUsernameCaseMismatchRefused
 from .checksums import Checksum
 from .serializers import IdentifierSerializer
 from .validators import URIValidator
@@ -2769,7 +2769,7 @@ class OCLOIDCAuthenticationBackendTest(OCLTestCase):
         user.set_checksums.assert_not_called()
 
     def test_filter_users_by_claims(self):
-        batman = UserProfileFactory(username='batman')
+        batman = UserProfileFactory(username='batman', email='batman@gotham.com')
         UserProfileFactory(username='superman@not-gotham.com')
 
         users = self.backend.filter_users_by_claims(self.claim)
@@ -2796,14 +2796,45 @@ class OCLOIDCAuthenticationBackendTest(OCLTestCase):
         batman.refresh_from_db()
         self.assertEqual(batman.sso_id, 'sub-1')
 
-    def test_filter_users_by_claims_links_unlinked_account_on_username(self):
-        batman = UserProfileFactory(username='batman')
+    def test_filter_users_by_claims_links_unlinked_account_on_username_with_its_verified_email(self):
+        batman = UserProfileFactory(username='batman', email=' Batman@Gotham.com')
 
         users = self.backend.filter_users_by_claims({**self.claim, 'sub': 'sub-1'})
         self.backend.update_user(users[0], {**self.claim, 'sub': 'sub-1'})
 
         batman.refresh_from_db()
         self.assertEqual(batman.sso_id, 'sub-1')
+
+    def test_filter_users_by_claims_refuses_unlinked_account_on_username_without_its_verified_email(self):
+        batman = UserProfileFactory(username='batman', email='batman@gotham.com', first_name='Bat')
+        without_email_verified = {key: value for key, value in self.claim.items() if key != 'email_verified'}
+
+        for claims in [
+                {**self.claim, 'email_verified': False},
+                {**self.claim, 'email_verified': 'true'},
+                without_email_verified,
+                {**self.claim, 'email': 'joker@gotham.com'},
+                {**self.claim, 'email': None},
+                {**self.claim, 'email': ''},
+        ]:
+            for sub_claims in [claims, {**claims, 'sub': 'sub-1'}]:
+                with self.subTest(claims=sub_claims):
+                    with patch('core.users.models.UserProfile.save') as save_mock:
+                        with self.assertRaises(SSOUnlinkedAccountRefused):
+                            self.backend.filter_users_by_claims(sub_claims)
+                    save_mock.assert_not_called()
+
+        batman.refresh_from_db()
+        self.assertEqual(batman.email, 'batman@gotham.com')
+        self.assertEqual(batman.first_name, 'Bat')
+        self.assertIsNone(batman.sso_id)
+
+    def test_filter_users_by_claims_matches_linked_account_on_username_without_sub(self):
+        batman = UserProfileFactory(username='batman', email='batman@gotham.com', sso_id='sub-1')
+
+        users = self.backend.filter_users_by_claims({**self.claim, 'email': 'joker@gotham.com'})
+
+        self.assertEqual(list(users), [batman])
 
     def test_update_user_keeps_a_stored_sso_id(self):
         user = Mock(sso_id='sub-1')
@@ -2939,7 +2970,7 @@ class OCLOIDCAuthenticationBackendTest(OCLTestCase):
                 self.assertFalse(collection.is_active)
 
     def test_filter_users_by_claims_looks_up_the_user_once(self):
-        UserProfileFactory(username='batman')
+        UserProfileFactory(username='batman', email='batman@gotham.com')
 
         with self.assertNumQueries(1):
             users = self.backend.filter_users_by_claims(self.claim)
@@ -2958,8 +2989,8 @@ class OCLOIDCAuthenticationBackendTest(OCLTestCase):
 
     @patch('core.common.backends.OCLOIDCAuthenticationBackend.get_userinfo')
     def test_get_or_create_user_for_active_user(self, get_userinfo_mock):
-        get_userinfo_mock.return_value = self.claim
-        batman = UserProfileFactory(username='batman', email='old@gotham.com', first_name='Bat')
+        get_userinfo_mock.return_value = {**self.claim, 'sub': 'sub-1'}
+        batman = UserProfileFactory(username='batman', email='old@gotham.com', first_name='Bat', sso_id='sub-1')
 
         user = self.backend.get_or_create_user('access-token', None, None)
 
@@ -2993,6 +3024,29 @@ class OCLOIDCAuthenticationBackendTest(OCLTestCase):
         self.assertEqual(user, batman)
         batman.refresh_from_db()
         self.assertTrue(batman.is_active)
+        self.assertEqual(batman.first_name, 'Bruce')
+
+    @patch('core.common.backends.OCLOIDCAuthenticationBackend.get_userinfo')
+    def test_get_or_create_user_for_unlinked_user(self, get_userinfo_mock):
+        batman = UserProfileFactory(username='batman', email='batman@gotham.com', first_name='Bat')
+
+        get_userinfo_mock.return_value = {**self.claim, 'sub': 'sub-1', 'email': 'joker@gotham.com'}
+        with patch.object(self.backend, 'update_user') as update_user_mock, \
+                patch.object(self.backend, 'create_user') as create_user_mock:
+            with self.assertRaises(SSOUnlinkedAccountRefused):
+                self.backend.get_or_create_user('access-token', None, None)
+        update_user_mock.assert_not_called()
+        create_user_mock.assert_not_called()
+        batman.refresh_from_db()
+        self.assertIsNone(batman.sso_id)
+        self.assertEqual(batman.email, 'batman@gotham.com')
+
+        get_userinfo_mock.return_value = {**self.claim, 'sub': 'sub-1'}
+        user = self.backend.get_or_create_user('access-token', None, None)
+
+        self.assertEqual(user, batman)
+        batman.refresh_from_db()
+        self.assertEqual(batman.sso_id, 'sub-1')
         self.assertEqual(batman.first_name, 'Bruce')
 
     @patch('core.common.backends.OCLOIDCAuthenticationBackend.get_userinfo')
