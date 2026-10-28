@@ -1293,6 +1293,10 @@ def default_expansion_parameters():
 class Expansion(VersionCompareMixin, BaseResourceModel):
     # expansions are rebuilt in place and are too dynamic to be worth persisting a changelog for
     PERSIST_CHANGELOG = False
+    REPO_VERSION_RELATIONS = (
+        'explicit_source_versions', 'evaluated_source_versions',
+        'explicit_collection_versions', 'evaluated_collection_versions'
+    )
 
     class Meta:
         db_table = 'collection_expansions'
@@ -1899,10 +1903,6 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         return [repo_version]
 
     def get_resolved_repo_version_diff_with_latest_updates(self):
-        rels = [
-            'explicit_source_versions', 'evaluated_source_versions',
-            'explicit_collection_versions', 'evaluated_collection_versions'
-        ]
         diff = {}
 
         def update_diffs(rel):
@@ -1914,10 +1914,77 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 if resolved and resolved.url != version.url:
                     diff[version.url] = resolved.url
 
-        for relation in rels:
+        for relation in self.REPO_VERSION_RELATIONS:
             update_diffs(relation)
 
         return diff
+
+    def dry_run_rebuild(self):
+        """What a rebuild would change. Rolled back, so nothing is saved or indexed"""
+        before = self.get_rebuild_snapshot()
+        with transaction.atomic():
+            started_at = time.time()
+            self.seed_children(index=False, force_reevaluate=True)
+            seconds = round(time.time() - started_at, 2)
+            after = self.get_rebuild_snapshot()
+            transaction.set_rollback(True)
+        self.refresh_from_db()
+        return {'expansion': self.uri, 'seconds': seconds, **self.diff_rebuild_snapshots(before, after)}
+
+    def get_rebuild_snapshot(self):
+        return {
+            'concepts': dict(self.concepts.values_list('versioned_object_id', 'uri')),
+            'mappings': dict(self.mappings.values_list('versioned_object_id', 'uri')),
+            **{
+                relation: sorted(get(self, relation).values_list('uri', flat=True))
+                for relation in self.REPO_VERSION_RELATIONS
+            },
+            'unresolved_repo_versions': list(self.unresolved_repo_versions or []),
+        }
+
+    def diff_rebuild_snapshots(self, before, after):
+        diff = {'references': {}, 'unattributed': []}
+        for resource_type in ('concepts', 'mappings'):
+            changes = self.diff_members(before[resource_type], after[resource_type])
+            references = self.get_references_by_versioned_object(resource_type, list(changes))
+            for versioned_object_id, change in changes.items():
+                change = {'type': resource_type, **change}
+                expressions = references.get(versioned_object_id)
+                if not expressions:
+                    diff['unattributed'].append(change)
+                for expression in expressions or []:
+                    diff['references'].setdefault(expression, []).append(change)
+            diff[resource_type] = {
+                status: len([change for change in changes.values() if change['status'] == status])
+                for status in ('added', 'removed', 'changed')
+            }
+        for field in [*self.REPO_VERSION_RELATIONS, 'unresolved_repo_versions']:
+            if before[field] != after[field]:
+                diff[field] = {'before': before[field], 'after': after[field]}
+        return diff
+
+    @staticmethod
+    def diff_members(before, after):
+        changes = {}
+        for versioned_object_id in before.keys() | after.keys():
+            old, new = before.get(versioned_object_id), after.get(versioned_object_id)
+            if old != new:
+                status = 'added' if not old else 'removed' if not new else 'changed'
+                changes[versioned_object_id] = {'status': status, 'before': old, 'after': new}
+        return changes
+
+    def get_references_by_versioned_object(self, resource_type, versioned_object_ids):
+        """Expressions of this collection version's references whose resolved resources hold each versioned object"""
+        resource = 'concept' if resource_type == 'concepts' else 'mapping'
+        through = ReferencedConcept if resource == 'concept' else ReferencedMapping
+        rows = through.objects.filter(
+            reference__collection_id=self.collection_version_id,
+            **{f'{resource}__versioned_object_id__in': versioned_object_ids}
+        ).values_list(f'{resource}__versioned_object_id', 'reference__expression').distinct()
+        references = {}
+        for versioned_object_id, expression in rows:
+            references.setdefault(versioned_object_id, []).append(expression)
+        return references
 
     def _get_resources_index_collection_fields(self):
         return {

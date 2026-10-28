@@ -1,8 +1,10 @@
 import importlib
+from io import StringIO
 
 from celery_once import AlreadyQueued
 from django.apps import apps
 from django.core.exceptions import ValidationError
+from django.core.management import call_command, CommandError
 from django.http import QueryDict
 from django.test import override_settings, tag
 from mock import patch, Mock
@@ -2847,6 +2849,65 @@ class ExpansionTest(OCLTestCase):
 
         self.assertEqual(list(expansion.concepts.all()), [old])
         self.assertEqual(list(expansion.explicit_source_versions.all()), [v1])
+
+    def test_dry_run_rebuild_reports_changes_per_reference_without_saving(self):
+        source, old, v1, v2 = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection, expansion, reference = self._expansion_with_resource_version_reference(source, old)
+        self._rebuild(collection, expansion)
+
+        with override_settings(ENV='production'):
+            report = expansion.dry_run_rebuild()
+
+        removed = {'type': 'concepts', 'status': 'removed', 'before': old.uri, 'after': None}
+        self.assertEqual(report['expansion'], expansion.uri)
+        self.assertEqual(report['concepts'], {'added': 0, 'removed': 1, 'changed': 0})
+        self.assertEqual(report['references'], {reference.expression: [removed]})
+        self.assertEqual(report['unattributed'], [])
+        self.assertEqual(report['explicit_source_versions'], {'before': [v1.uri], 'after': [v2.uri]})
+        self.assertEqual(list(expansion.concepts.all()), [old])
+        self.assertEqual(list(expansion.explicit_source_versions.all()), [v1])
+
+    def test_dry_run_rebuild_without_changes(self):
+        source, old, _, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection, expansion, _ = self._expansion_with_resource_version_reference(source, old)
+        self._rebuild(collection, expansion)
+
+        report = expansion.dry_run_rebuild()
+
+        self.assertEqual(report['concepts'], {'added': 0, 'removed': 0, 'changed': 0})
+        self.assertEqual(report['references'], {})
+        self.assertNotIn('explicit_source_versions', report)
+
+    def test_diff_members(self):
+        self.assertEqual(
+            Expansion.diff_members(
+                {1: '/c/1/v1/', 2: '/c/2/v1/', 3: '/c/3/v1/'}, {1: '/c/1/v1/', 2: '/c/2/v2/', 4: '/c/4/'}),
+            {
+                2: {'status': 'changed', 'before': '/c/2/v1/', 'after': '/c/2/v2/'},
+                3: {'status': 'removed', 'before': '/c/3/v1/', 'after': None},
+                4: {'status': 'added', 'before': None, 'after': '/c/4/'},
+            }
+        )
+
+    def test_dry_run_expansions_command(self):
+        source, old, _, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection, expansion, reference = self._expansion_with_resource_version_reference(source, old)
+        self._rebuild(collection, expansion)
+        out = StringIO()
+
+        call_command(
+            'dry_run_expansions', collection.uri, '--env', 'production', stdout=out)
+
+        output = out.getvalue()
+        self.assertIn(expansion.uri, output)
+        self.assertIn('concepts: 0 added, 1 removed, 0 changed', output)
+        self.assertIn(f'{reference.expression}: 1 member(s) would change', output)
+        self.assertEqual(list(expansion.concepts.all()), [old])
+
+        with self.assertRaises(CommandError):
+            call_command('dry_run_expansions', stdout=out)
+        with self.assertRaises(CommandError):
+            call_command('dry_run_expansions', collection.uri, '--env', 'nowhere', stdout=out)
 
     def test_load_collection_source_versions_from_expansion(self):
         source, old, v1, v2 = CollectionReferenceTest.source_with_replaced_concept_version()
