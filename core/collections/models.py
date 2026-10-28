@@ -949,8 +949,8 @@ class CollectionReference(models.Model):
                         continue
                 val = filter_def['value']
                 if filter_def['property'] == 'q':
-                    self._apply_search(search, val, document)
-                if filter_def['property'].startswith('extras.'):
+                    search = self._apply_search(search, val, document)
+                elif filter_def['property'].startswith('extras.'):
                     search = search.filter("match", **{filter_def["property"]: filter_def["value"]})
                 else:
                     search = search.filter("match", **{to_snake_case(filter_def["property"]): filter_def["value"]})

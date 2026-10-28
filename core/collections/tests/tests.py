@@ -1459,8 +1459,9 @@ class CollectionReferenceTest(OCLTestCase):
 
     def test_get_concepts_applies_es_filter_with_q_property(self):
         source = OrganizationSourceFactory()
-        concept = ConceptFactory(parent=source)
-        ConceptDocument().update([concept])
+        concept = ConceptFactory(parent=source, mnemonic='renal-failure')
+        other_concept = ConceptFactory(parent=source, mnemonic='headache')
+        ConceptDocument().update([concept, other_concept])
 
         reference = CollectionReference(
             system=source.uri, created_by=source.created_by,
@@ -1469,7 +1470,18 @@ class CollectionReferenceTest(OCLTestCase):
 
         concepts, _mappings = reference.get_concepts()
 
-        self.assertIsNotNone(concepts)
+        self.assertEqual(list(concepts.values_list('id', flat=True)), [concept.id])
+
+    def test_get_concepts_applies_es_filter_with_q_property_under_release_returns_its_resource_versions(self):
+        source, _, concept, concept_version = self.released_source_with_concepts()
+        reference = CollectionReference(
+            system=source.uri, created_by=source.created_by,
+            filter=[{'property': 'q', 'value': concept.mnemonic, 'op': '='}]
+        )
+
+        concepts, _ = reference.get_concepts()
+
+        self.assertEqual(list(concepts.values_list('id', flat=True)), [concept_version.id])
 
     def test_get_concepts_returns_empty_queryset_when_filters_return_none(self):
         source = OrganizationSourceFactory()
