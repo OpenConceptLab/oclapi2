@@ -16,7 +16,8 @@ from core.collections.constants import (
     CONCEPT_PREFERRED_NAME_UNIQUE_PER_COLLECTION_AND_LOCALE, COLLECTION_VERSION_TYPE,
     REFERENCE_TYPE_CHOICES, CONCEPT_REFERENCE_TYPE, MAPPING_REFERENCE_TYPE, SOURCE_MAPPINGS, SOURCE_TO_CONCEPTS,
     TRANSFORM_TO_RESOURCE_VERSIONS, COLLECTION_REFERENCE_TYPE, TRANSFORM_TO_EXTENSIONAL,
-    RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE, UNRESOLVED_RESOURCE_VERSION_TYPE)
+    RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE, UNRESOLVED_RESOURCE_VERSION_TYPE,
+    INTENSIONAL_REFERENCE_RESOURCE_VERSIONS_TOGGLE)
 from core.collections.parsers import CollectionReferenceParser
 from core.collections.translators import CollectionReferenceTranslator
 from core.collections.utils import is_concept, is_mapping
@@ -959,7 +960,8 @@ class CollectionReference(models.Model):
                 pks += es_to_pks(search_within_queryset.params(request_timeout=ES_REQUEST_TIMEOUT_ASYNC))
             if pks:
                 resource_versions = resource_klass.objects.filter(id__in=set(pks))
-                if self.version or self.valueset or self.is_static_transform:
+                if self.version or self.valueset or self.is_static_transform or \
+                        self.is_intensional_resource_versions_on():
                     return resource_versions
                 return resource_klass.objects.filter(
                     id__in=resource_versions.values_list('versioned_object_id', flat=True))
@@ -1017,6 +1019,10 @@ class CollectionReference(models.Model):
     @property
     def is_resource_versioned(self):
         return bool(self.system and self.code and self.resource_version)
+
+    @staticmethod
+    def is_intensional_resource_versions_on():
+        return bool(Toggle.get(INTENSIONAL_REFERENCE_RESOURCE_VERSIONS_TOGGLE))
 
     @staticmethod
     def is_resource_version_repo_resolution_on():
