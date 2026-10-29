@@ -798,7 +798,7 @@ class SourceChildMixin(ChecksumModel):
             instance.set_collection_source_version(versions)
 
     @classmethod
-    def load_expansion_source_versions(cls, instances, expansion):
+    def load_expansion_source_versions(cls, instances, expansion):  # pylint: disable=too-many-locals
         """The source versions holding each row: those the expansion is locked to, else recorded, else all of them"""
         recorded_ids = {version.id for version in expansion.recorded_source_versions}
         locked_ids = {version.id for version in expansion.recorded_evaluated_source_versions}
