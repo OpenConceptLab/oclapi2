@@ -17,7 +17,7 @@ from core.collections.constants import (
     REFERENCE_TYPE_CHOICES, CONCEPT_REFERENCE_TYPE, MAPPING_REFERENCE_TYPE, SOURCE_MAPPINGS, SOURCE_TO_CONCEPTS,
     TRANSFORM_TO_RESOURCE_VERSIONS, COLLECTION_REFERENCE_TYPE, TRANSFORM_TO_EXTENSIONAL,
     RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE, UNRESOLVED_RESOURCE_VERSION_TYPE,
-    INTENSIONAL_REFERENCE_RESOURCE_VERSIONS_TOGGLE)
+    INTENSIONAL_REFERENCE_RESOURCE_VERSIONS_TOGGLE, EXPANSION_LOCKED_REPO_VERSION_TOGGLE)
 from core.collections.parsers import CollectionReferenceParser
 from core.collections.translators import CollectionReferenceTranslator
 from core.collections.utils import is_concept, is_mapping
@@ -291,6 +291,7 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
         if self.expansion_uri:
             self.expansion.add_references(added_references)
+        self.__dict__.pop('locked_source_versions', None)
         if user and user.is_authenticated:
             self.updated_by = user
         self.save()
@@ -366,6 +367,11 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             return self.expansions.filter(uri=self.expansion_uri).first()
 
         return None
+
+    @cached_property
+    def locked_source_versions(self):
+        expansion = self.expansion
+        return list(expansion.evaluated_source_versions.filter(is_active=True).order_by('-id')) if expansion else []
 
     @property
     def active_references(self):
@@ -1003,9 +1009,22 @@ class CollectionReference(models.Model):
     @cached_property
     def resolve_system_version(self):
         version = self.resolve_expression_system_version
-        if version and self.should_resolve_to_repo_version_with_resource_version():
-            return self.find_repo_version_with_resource_version(version) or version
+        if not version:
+            return version
+        locked_versions = self.get_locked_system_versions(version)
+        if self.should_resolve_to_repo_version_with_resource_version():
+            return self.find_repo_version_with_resource_version(version, locked_versions) or version
+        if locked_versions and not self.resource_version and not self.names_repo_version:
+            return locked_versions[0]
         return version
+
+    def get_locked_system_versions(self, version):
+        if not self.collection_id or not self.is_expansion_locked_repo_version_on():
+            return []
+        return [
+            locked for locked in self.collection.locked_source_versions
+            if drop_version(locked.uri) == drop_version(version.uri)
+        ]
 
     @cached_property
     def resolve_expression_system_version(self):
@@ -1023,6 +1042,10 @@ class CollectionReference(models.Model):
     @staticmethod
     def is_intensional_resource_versions_on():
         return bool(Toggle.get(INTENSIONAL_REFERENCE_RESOURCE_VERSIONS_TOGGLE))
+
+    @staticmethod
+    def is_expansion_locked_repo_version_on():
+        return bool(Toggle.get(EXPANSION_LOCKED_REPO_VERSION_TOGGLE))
 
     @staticmethod
     def is_resource_version_repo_resolution_on():
@@ -1624,6 +1647,9 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         should_reevaluate = force_reevaluate or (attempt_reevaluate and not self.is_auto_generated)
 
         resolve_by_resource_version = CollectionReference.is_resource_version_repo_resolution_on()
+        use_any_lock = CollectionReference.is_expansion_locked_repo_version_on()
+        lock_filters = {} if use_any_lock else {'released': True, 'retired': False}
+        should_write_back = use_any_lock and self.is_default_for_collection_version
         locked_system_versions = []
         if resolve_by_resource_version:
             locked_system_versions = list(self.evaluated_source_versions.all())
@@ -1694,8 +1720,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                     )
                     if not existing_evaluated_system_version:
                         existing_evaluated_system_version = self.evaluated_source_versions.filter(
-                            uri__startswith=drop_version(_system_version.uri),
-                            released=True, is_active=True, retired=False
+                            uri__startswith=drop_version(_system_version.uri), is_active=True, **lock_filters
                         ).order_by('-id').first()
                     if existing_evaluated_system_version:
                         _system_version = existing_evaluated_system_version
@@ -1731,6 +1756,9 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                         not (_mappings if ref.is_mapping else _concepts).exists():
                     unresolved_repo_versions.append(ref.to_unresolved_resource_version())
                     return ref.concepts.filter(), ref.mappings.filter()
+                if should_write_back and ref.id and ref_system_versions:
+                    ref.concepts.set(_concepts)
+                    ref.mappings.set(_mappings)
             else:
                 _concepts = ref.concepts.filter()
                 _mappings = ref.mappings.filter()
@@ -1837,7 +1865,51 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         if mappings:
             self.index_mappings(mappings)
 
+    @property
+    def is_default_for_collection_version(self):
+        return self.collection_version.expansion_uri in (None, self.uri)
+
+    def get_head_expansion_to_copy(self):
+        collection_version = self.collection_version
+        if collection_version.is_head or not self.is_auto_generated or \
+                not CollectionReference.is_expansion_locked_repo_version_on():
+            return None
+        # only while the version is being created, never for an older version's later expansion
+        newer_versions = collection_version.versions.exclude(version=HEAD).filter(
+            created_at__gt=collection_version.created_at)
+        if newer_versions.exists():
+            return None
+        head = collection_version.head
+        return get(head, 'expansion')
+
+    def copy_from(self, expansion, index=True):
+        concept_ids = self.get_member_ids_without_head_resources(expansion.concepts, Concept)
+        mapping_ids = self.get_member_ids_without_head_resources(expansion.mappings, Mapping)
+        self.concepts.add(*concept_ids)
+        self.mappings.add(*mapping_ids)
+        for relation in self.REPO_VERSION_RELATIONS:
+            getattr(self, relation).set(getattr(expansion, relation).all())
+        self.parameters = expansion.parameters
+        self.unresolved_repo_versions = expansion.unresolved_repo_versions
+        self.save(update_fields=['parameters', 'unresolved_repo_versions'])
+        if index:
+            self.index_resources(concept_ids, mapping_ids)
+
+    @staticmethod
+    def get_member_ids_without_head_resources(members, klass):
+        """members' ids, with each HEAD resource replaced by its latest resource version"""
+        head_ids = set(members.filter(id=F('versioned_object_id')).values_list('id', flat=True))
+        latest_by_head = dict(
+            klass.objects.filter(versioned_object_id__in=head_ids, is_latest_version=True).exclude(
+                id=F('versioned_object_id')).values_list('versioned_object_id', 'id'))
+        ids = set(members.values_list('id', flat=True))
+        return list((ids - set(latest_by_head)) | set(latest_by_head.values()))
+
     def seed_children(self, index=True, force_reevaluate=False):
+        head_expansion = None if force_reevaluate else self.get_head_expansion_to_copy()
+        if head_expansion:
+            self.copy_from(head_expansion, index)
+            return
         self.add_references(
             references=self.collection_version.references,
             index=index,
