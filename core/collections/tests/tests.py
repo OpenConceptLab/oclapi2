@@ -2206,8 +2206,9 @@ class TasksTest(OCLTestCase):
             organization=collection.organization, version='v1', mnemonic=collection.mnemonic)
         return expansion, concept, collection_v1
 
+    @patch('core.collections.models.batch_index_resources')
     @patch('core.common.tasks.export_collection')
-    def test_seed_children_task_swaps_head_resources_in_references(self, _):
+    def test_seed_children_task_swaps_head_resources_in_references(self, _, batch_index_resources_mock):
         expansion, concept, collection_v1 = self.head_with_head_concept_member()
         self.assertEqual(list(expansion.concepts.all()), [concept])
 
@@ -2221,6 +2222,8 @@ class TasksTest(OCLTestCase):
 
         collection_v1.delete_references([reference.expression])
         self.assertFalse(collection_v1.expansion.concepts.exists())
+        batch_index_resources_mock.apply_async.assert_called_once_with(
+            ('concept', {'id__in': [latest.id]}), queue='indexing', permanent=False)
 
     @patch('core.common.tasks.export_collection')
     def test_seed_children_task_waits_while_head_expansion_is_processing(self, _):
