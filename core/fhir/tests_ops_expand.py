@@ -7,6 +7,7 @@ displayLanguage and includeDesignations; FHIRsmith's errors; members of code sys
 trace; a fixed number of queries. OpenConceptLab/ocl_online#451.
 """
 import json
+import random
 import re
 from urllib.parse import quote
 
@@ -175,6 +176,15 @@ class ExpandCases(OpsCorpusMixin):
         self.assertEqual(expansion['parameter'], [
             {'name': 'filter', 'valueString': 'infect'}, {'name': 'activeOnly', 'valueBoolean': True},
             {'name': 'count', 'valueInteger': 1}, *used(*USED)])
+
+    def test_a_filter_matches_a_word_in_a_name_longer_than_a_btree_entry(self):
+        """A name too long for a btree entry, even compressed, is saved, and a filter still matches its words."""
+        text = random.Random(564).randbytes(3000).hex()  # 3,000 bytes of entropy: no compression fits 2,704
+        self.fevers_v1.expansion.concepts.add(ConceptFactory(
+            parent=self.ciel, mnemonic='long', sources=[self.ciel_v1, self.ciel_v2],
+            names=[name(f'{text} Zebrafish', preferred=True)]))
+        expansion = self.expansion(self.expand(url=FEVERS, filter='zebrafish'))
+        self.assertEqual((expansion['total'], [member['code'] for member in expansion['contains']]), (1, ['long']))
 
     def test_display_language_and_designations(self):
         expansion = self.expansion(self.expand(url=FEVERS, displayLanguage='fr', includeDesignations='true', count='1'))

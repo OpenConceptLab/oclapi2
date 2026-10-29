@@ -67,6 +67,9 @@ NON_ASCII_CHARACTER = ('(?:%c[2-9a-f]|%d[0-9a-f])%[89ab][0-9a-f]'
                        '|%[89a-f][0-9a-f]')
 STORED = 'OCL serves the expansion it stores for the value set version'
 VERSIONS = f'Choosing code system versions is not supported: {STORED}, made from the versions used-codesystem names.'
+# A btree entry holds at most 2,704 bytes, so the covering index on names (concepts migration 0092) holds the names of
+# at most this many bytes, and a small one (0093) finds the longer ones
+INDEXED_NAME_BYTES = 2000
 NOT_SUPPORTED = {  # R4 $expand inputs that need an expansion computed for the request
     'valueSet': f'An inline valueSet is not supported: {STORED}, named by url.',
     'context': 'The context parameter is not supported.',
@@ -185,6 +188,19 @@ def code_has_word(word):
         default=False, output_field=BooleanField())
 
 
+def name_has_word(word):
+    """
+    Whether one of a member's names has a word starting with `word`, ignoring case (Postgres's \\m). Matched in two
+    halves, names of at most INDEXED_NAME_BYTES and longer ones, so that each half is answered by an index instead of
+    reading every member's names from the table.
+    """
+    names = ConceptName.objects.annotate(
+        name_bytes=Func('name', function='OCTET_LENGTH', output_field=IntegerField())
+    ).filter(concept_id=OuterRef('id'), name__iregex=rf'\m{word}')
+    return Exists(names.filter(name_bytes__lte=INDEXED_NAME_BYTES)) | Exists(
+        names.filter(name_bytes__gt=INDEXED_NAME_BYTES))
+
+
 def expand(parameters, resolver, instance_id=None):
     """Expand the named value set for the resolver's base and caller."""
     inputs = Inputs(parameters)
@@ -252,8 +268,7 @@ class Expander:
             members = members.filter(retired=False)
         # \m: a word starts here; \w characters need no escaping in a regex
         for word in WORD.findall(self.inputs.filter or ''):
-            members = members.filter(Q(code_has_word(word)) | Exists(ConceptName.objects.filter(
-                concept_id=OuterRef('id'), name__iregex=rf'\m{word}')))
+            members = members.filter(Q(code_has_word(word)) | name_has_word(word))
         return members
 
     def live_releases(self):
