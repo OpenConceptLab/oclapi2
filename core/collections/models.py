@@ -6,7 +6,7 @@ from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from django.db.models import UniqueConstraint, F, QuerySet, Max
+from django.db.models import UniqueConstraint, F, QuerySet, Max, Case, When, Value
 from django.utils import timezone
 from django.utils.functional import cached_property
 from pydash import get, compact, find
@@ -342,7 +342,7 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
         return mapping_uris
 
-    def cascade_children_to_expansion(self, expansion_data=None, index=True, sync=False):  # pylint: disable=arguments-differ
+    def cascade_children_to_expansion(self, expansion_data=None, index=True, sync=False, copy_head=False):  # pylint: disable=arguments-differ
         if not expansion_data:
             expansion_data = {}
         should_auto_expand = self.should_auto_expand
@@ -353,7 +353,8 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         if 'created_by_id' not in expansion_data:
             expansion_data['created_by_id'] = self.created_by_id
             expansion_data['updated_by_id'] = self.created_by_id
-        expansion = Expansion.persist(index=index, collection_version=self, sync=sync, **expansion_data)
+        expansion = Expansion.persist(
+            index=index, collection_version=self, sync=sync, copy_head=copy_head, **expansion_data)
 
         if should_auto_expand and not self.expansion_uri:
             self.expansion_uri = expansion.uri
@@ -1650,6 +1651,8 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         use_any_lock = CollectionReference.is_expansion_locked_repo_version_on()
         lock_filters = {} if use_any_lock else {'released': True, 'retired': False}
         should_write_back = use_any_lock and self.is_default_for_collection_version
+        resolved_ref_ids = []
+        unresolved_ref_ids = []
         locked_system_versions = []
         if resolve_by_resource_version:
             locked_system_versions = list(self.evaluated_source_versions.all())
@@ -1756,9 +1759,10 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                         not (_mappings if ref.is_mapping else _concepts).exists():
                     unresolved_repo_versions.append(ref.to_unresolved_resource_version())
                     return ref.concepts.filter(), ref.mappings.filter()
-                if should_write_back and ref.id and ref_system_versions:
+                if should_write_back and ref.id and (ref_system_versions or ref.system):
                     ref.concepts.set(_concepts)
                     ref.mappings.set(_mappings)
+                    (resolved_ref_ids if ref_system_versions else unresolved_ref_ids).append(ref.id)
             else:
                 _concepts = ref.concepts.filter()
                 _mappings = ref.mappings.filter()
@@ -1798,6 +1802,8 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                     else:
                         batch_index_resources.apply_async(('mapping', filters), queue='indexing', permanent=False)
 
+        CollectionReference.objects.filter(id__in=resolved_ref_ids).update(last_resolved_at=timezone.now())
+        CollectionReference.objects.filter(id__in=unresolved_ref_ids).update(last_resolved_at=None)
         self.explicit_collection_versions.add(*compact(explicit_valueset_versions))
         self.explicit_source_versions.add(*compact(explicit_system_versions))
         self.evaluated_collection_versions.add(*compact(evaluated_valueset_versions))
@@ -1868,28 +1874,19 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
     @property
     def is_default_for_collection_version(self):
         collection_version = self.collection_version
-        return self.is_default or (
-            collection_version.expansion_uri is None and collection_version.should_auto_expand and
-            self.is_auto_generated)
+        return self.is_default or (collection_version.expansion_uri is None and collection_version.should_auto_expand)
 
     def get_head_expansion_to_copy(self):
         collection_version = self.collection_version
-        if collection_version.is_head or not self.is_auto_generated or \
-                not CollectionReference.is_expansion_locked_repo_version_on():
+        if collection_version.is_head or not CollectionReference.is_expansion_locked_repo_version_on():
             return None
-        # only while the version is being created, never for an older version's later expansion
-        newer_versions = collection_version.versions.exclude(version=HEAD).filter(
-            created_at__gt=collection_version.created_at)
-        if newer_versions.exists():
-            return None
-        head = collection_version.head
-        return get(head, 'expansion')
+        head_expansion = get(collection_version.head, 'expansion')
+        # a processing expansion may be partly seeded, so the version is built from its references instead
+        return None if get(head_expansion, 'is_processing', True) else head_expansion
 
     def copy_from(self, expansion, index=True):
-        concept_ids = self.get_member_ids_without_head_resources(expansion.concepts, Concept)
-        mapping_ids = self.get_member_ids_without_head_resources(expansion.mappings, Mapping)
-        self.concepts.add(*concept_ids)
-        self.mappings.add(*mapping_ids)
+        concept_ids = self.copy_members_without_head_resources(expansion.concepts, Concept)
+        mapping_ids = self.copy_members_without_head_resources(expansion.mappings, Mapping)
         for relation in self.REPO_VERSION_RELATIONS:
             getattr(self, relation).set(getattr(expansion, relation).all())
         self.parameters = expansion.parameters
@@ -1898,18 +1895,29 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         if index:
             self.index_resources(concept_ids, mapping_ids)
 
+    def copy_members_without_head_resources(self, members, klass):
+        """Adds members with each HEAD resource replaced by its latest resource version, in references too"""
+        latest_by_head = self.get_latest_versions_of_head_resources(members, klass)
+        ids = list((set(members.values_list('id', flat=True)) - set(latest_by_head)) | set(latest_by_head.values()))
+        relation = 'concepts' if klass == Concept else 'mappings'
+        getattr(self, relation).add(*ids)
+        if latest_by_head:
+            field = f'{klass.__name__.lower()}_id'
+            getattr(CollectionReference, relation).through.objects.filter(
+                reference__collection_id=self.collection_version_id, **{f'{field}__in': list(latest_by_head)}
+            ).update(**{field: Case(*[When(**{field: head_id}, then=Value(latest_id))
+                                      for head_id, latest_id in latest_by_head.items()])})
+        return ids
+
     @staticmethod
-    def get_member_ids_without_head_resources(members, klass):
-        """members' ids, with each HEAD resource replaced by its latest resource version"""
-        head_ids = set(members.filter(id=F('versioned_object_id')).values_list('id', flat=True))
-        latest_by_head = dict(
+    def get_latest_versions_of_head_resources(members, klass):
+        head_ids = members.filter(id=F('versioned_object_id')).values_list('id', flat=True)
+        return dict(
             klass.objects.filter(versioned_object_id__in=head_ids, is_latest_version=True).exclude(
                 id=F('versioned_object_id')).values_list('versioned_object_id', 'id'))
-        ids = set(members.values_list('id', flat=True))
-        return list((ids - set(latest_by_head)) | set(latest_by_head.values()))
 
-    def seed_children(self, index=True, force_reevaluate=False):
-        head_expansion = None if force_reevaluate else self.get_head_expansion_to_copy()
+    def seed_children(self, index=True, force_reevaluate=False, copy_head=False):
+        head_expansion = self.get_head_expansion_to_copy() if copy_head and not force_reevaluate else None
         if head_expansion:
             self.copy_from(head_expansion, index)
             return
@@ -1951,6 +1959,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
     @classmethod
     def persist(cls, index, **kwargs):
         sync = kwargs.pop('sync', False)
+        task_kwargs = {'copy_head': True} if kwargs.pop('copy_head', False) else {}
         expansion = cls(**kwargs)
         temp_version = not bool(expansion.mnemonic)
         if temp_version:
@@ -1965,10 +1974,11 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
 
         task = Task.new(queue='indexing', username=expansion.created_by, name=seed_children_to_expansion.__name__)
         if get(settings, 'TEST_MODE', False) or sync:
-            seed_children_to_expansion(expansion.id, index)
+            seed_children_to_expansion(expansion.id, index, **task_kwargs)
         else:
             seed_children_to_expansion.apply_async(
-                (expansion.id, index), queue=task.queue, task_id=task.id, persist_args=True)
+                (expansion.id, index), queue=task.queue, task_id=task.id, persist_args=True,
+                **({'kwargs': task_kwargs} if task_kwargs else {}))
 
         return expansion
 

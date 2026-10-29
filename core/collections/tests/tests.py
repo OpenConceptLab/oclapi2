@@ -2193,6 +2193,57 @@ class TasksTest(OCLTestCase):
         self.assertEqual(list(copy.evaluated_source_versions.all()), [concept.parent])
         self.assertEqual(copy.parameters, expansion.parameters)
 
+    @staticmethod
+    def head_with_head_concept_member():
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='autoexpand-HEAD')
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        concept = ConceptFactory()
+        collection.add_expressions({'expressions': [concept.uri]}, collection.created_by)
+        collection_v1 = OrganizationCollectionFactory(
+            organization=collection.organization, version='v1', mnemonic=collection.mnemonic)
+        return expansion, concept, collection_v1
+
+    @patch('core.common.tasks.export_collection')
+    def test_seed_children_task_swaps_head_resources_in_references(self, _):
+        expansion, concept, collection_v1 = self.head_with_head_concept_member()
+        self.assertEqual(list(expansion.concepts.all()), [concept])
+
+        seed_children_to_new_version('collection', collection_v1.id, False)  # pylint: disable=no-value-for-parameter
+
+        collection_v1.refresh_from_db()
+        latest = concept.get_latest_version()
+        reference = collection_v1.references.first()
+        self.assertEqual(list(collection_v1.expansion.concepts.all()), [latest])
+        self.assertEqual(list(reference.concepts.all()), [latest])
+
+        collection_v1.delete_references([reference.expression])
+        self.assertFalse(collection_v1.expansion.concepts.exists())
+
+    @patch('core.common.tasks.export_collection')
+    def test_seed_children_task_builds_from_references_while_head_expansion_is_processing(self, _):
+        expansion, concept, collection_v1 = self.head_with_head_concept_member()
+        Expansion.objects.filter(id=expansion.id).update(is_processing=True)
+
+        seed_children_to_new_version('collection', collection_v1.id, False)  # pylint: disable=no-value-for-parameter
+
+        collection_v1.refresh_from_db()
+        self.assertEqual(list(collection_v1.expansion.concepts.all()), [concept])
+
+    def test_expansion_created_later_does_not_copy_head_expansion(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.concepts.add(ConceptFactory())
+        collection_v1 = OrganizationCollectionFactory(
+            organization=collection.organization, version='v1', mnemonic=collection.mnemonic)
+
+        later = Expansion.persist(index=False, collection_version=collection_v1, mnemonic='autoexpand-v1')
+
+        self.assertFalse(later.concepts.exists())
+
     @patch('core.common.tasks.export_collection')
     def test_seed_children_task_builds_from_references_with_toggle_off(self, _):
         collection = OrganizationCollectionFactory()
@@ -2373,17 +2424,44 @@ class ExpansionTest(OCLTestCase):
         self.assertFalse(expansion.is_default_for_collection_version)
         self.assertFalse(reference.concepts.exists())
 
-    def test_get_member_ids_without_head_resources(self):
+    def test_get_latest_versions_of_head_resources(self):
         concept = ConceptFactory()
-        latest = concept.get_latest_version()
         other = ConceptFactory().get_latest_version()
         collection = OrganizationCollectionFactory()
         expansion = ExpansionFactory(collection_version=collection)
         expansion.concepts.add(concept, other)
 
         self.assertEqual(
-            sorted(Expansion.get_member_ids_without_head_resources(expansion.concepts, Concept)),
-            sorted([latest.id, other.id]))
+            Expansion.get_latest_versions_of_head_resources(expansion.concepts, Concept),
+            {concept.id: concept.get_latest_version().id})
+
+    def test_is_default_for_collection_version(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='custom')
+        self.assertTrue(expansion.is_default_for_collection_version)
+
+        other = ExpansionFactory(collection_version=collection, mnemonic='other')
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        self.assertTrue(Expansion.objects.get(id=expansion.id).is_default_for_collection_version)
+        self.assertFalse(Expansion.objects.get(id=other.id).is_default_for_collection_version)
+
+    def test_rebuild_clears_references_resolved_resources_when_named_version_is_gone(self):
+        _, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection = self.locked_auto_expansion(v1)
+        collection.add_expressions({'expressions': [f'{v1.uri}concepts/{old.mnemonic}/']}, collection.created_by)
+        reference = collection.references.first()
+
+        collection.expansion.seed_children(index=False, force_reevaluate=True)
+        reference.refresh_from_db()
+        self.assertEqual(list(reference.concepts.all()), [old])
+        self.assertIsNotNone(reference.last_resolved_at)
+
+        Source.objects.filter(id=v1.id).delete()
+        collection.expansion.seed_children(index=False, force_reevaluate=True)
+        reference.refresh_from_db()
+        self.assertFalse(reference.concepts.exists())
+        self.assertIsNone(reference.last_resolved_at)
 
     @patch('core.collections.models.seed_children_to_expansion')
     def test_persist_with_mnemonic(self, seed_children_to_expansion_mock):

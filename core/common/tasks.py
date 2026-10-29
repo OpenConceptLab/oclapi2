@@ -436,7 +436,7 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                 else:
                     instance.index_children(sync=False, user=instance.created_by)
             elif autoexpand:
-                instance.cascade_children_to_expansion(index=True, sync=sync)
+                instance.cascade_children_to_expansion(index=True, sync=sync, copy_head=True)
                 instance.update_children_counts(sync)
 
             if export:
@@ -461,11 +461,11 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
 
 
 @app.task
-def seed_children_to_expansion(expansion_id, index=True, force_reevaluate=False):
+def seed_children_to_expansion(expansion_id, index=True, force_reevaluate=False, copy_head=False):
     from core.collections.models import Expansion
     expansion = Expansion.objects.filter(id=expansion_id).first()
     if expansion:
-        expansion.seed_children(index=index, force_reevaluate=force_reevaluate)
+        expansion.seed_children(index=index, force_reevaluate=force_reevaluate, copy_head=copy_head)
         expansion.clear_processing(True)
 
 
