@@ -1867,7 +1867,10 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
 
     @property
     def is_default_for_collection_version(self):
-        return self.collection_version.expansion_uri in (None, self.uri)
+        collection_version = self.collection_version
+        return self.is_default or (
+            collection_version.expansion_uri is None and collection_version.should_auto_expand and
+            self.is_auto_generated)
 
     def get_head_expansion_to_copy(self):
         collection_version = self.collection_version

@@ -2360,6 +2360,19 @@ class ExpansionTest(OCLTestCase):
 
         self.assertEqual(list(reference.concepts.all()), [old])
 
+    def test_reevaluating_a_manual_expansion_without_default_keeps_references_resolved_resources(self):
+        _, old, _, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection = OrganizationCollectionFactory(autoexpand_head=False)
+        collection.add_expressions({'expressions': [old.versioned_object.uri]}, collection.created_by)
+        reference = collection.references.first()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='manual')
+
+        expansion.add_references(collection.references.all())
+
+        self.assertTrue(expansion.concepts.exists())
+        self.assertFalse(expansion.is_default_for_collection_version)
+        self.assertFalse(reference.concepts.exists())
+
     def test_get_member_ids_without_head_resources(self):
         concept = ConceptFactory()
         latest = concept.get_latest_version()
