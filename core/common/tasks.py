@@ -460,11 +460,14 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
             instance.remove_processing(task_id)
 
 
-@app.task
-def seed_children_to_expansion(expansion_id, index=True, force_reevaluate=False, copy_head=False):
+@app.task(bind=True)
+def seed_children_to_expansion(self, expansion_id, index=True, force_reevaluate=False, copy_head=False):  # pylint: disable=too-many-arguments
     from core.collections.models import Expansion
     expansion = Expansion.objects.filter(id=expansion_id).first()
     if expansion:
+        # copying a HEAD expansion that is being built would freeze it half-seeded, so wait for it
+        if copy_head and expansion.is_head_expansion_processing:
+            raise self.retry(countdown=300, max_retries=288)
         expansion.seed_children(index=index, force_reevaluate=force_reevaluate, copy_head=copy_head)
         expansion.clear_processing(True)
 

@@ -1,6 +1,7 @@
 import importlib
 from io import StringIO
 
+from celery.exceptions import Retry
 from celery_once import AlreadyQueued
 from django.apps import apps
 from django.core.exceptions import ValidationError
@@ -2222,14 +2223,34 @@ class TasksTest(OCLTestCase):
         self.assertFalse(collection_v1.expansion.concepts.exists())
 
     @patch('core.common.tasks.export_collection')
-    def test_seed_children_task_builds_from_references_while_head_expansion_is_processing(self, _):
-        expansion, concept, collection_v1 = self.head_with_head_concept_member()
+    def test_seed_children_task_waits_while_head_expansion_is_processing(self, _):
+        expansion, _, collection_v1 = self.head_with_head_concept_member()
         Expansion.objects.filter(id=expansion.id).update(is_processing=True)
 
-        seed_children_to_new_version('collection', collection_v1.id, False)  # pylint: disable=no-value-for-parameter
+        with self.assertRaises(Retry):
+            seed_children_to_new_version('collection', collection_v1.id, False)  # pylint: disable=no-value-for-parameter
 
-        collection_v1.refresh_from_db()
-        self.assertEqual(list(collection_v1.expansion.concepts.all()), [concept])
+        self.assertFalse(Expansion.objects.filter(collection_version=collection_v1, concepts__isnull=False).exists())
+
+    def test_copy_members_without_head_resources_in_batches(self):
+        expansion, concept, collection_v1 = self.head_with_head_concept_member()
+        other = ConceptFactory().get_latest_version()
+        expansion.concepts.add(other)
+        copy = ExpansionFactory(collection_version=collection_v1)
+
+        ids = copy.copy_members_without_head_resources(expansion.concepts, Concept, batch_size=1)
+
+        self.assertEqual(sorted(ids), sorted([concept.get_latest_version().id, other.id]))
+        self.assertEqual(sorted(copy.concepts.values_list('id', flat=True)), sorted(ids))
+
+    @patch('core.collections.models.seed_children_to_expansion')
+    def test_persist_passes_copy_head_positionally(self, seed_mock):
+        seed_mock.__name__ = 'seed_children_to_expansion'
+        collection = OrganizationCollectionFactory()
+
+        expansion = Expansion.persist(index=False, collection_version=collection, copy_head=True)
+
+        seed_mock.assert_called_once_with(expansion.id, False, False, True)
 
     def test_expansion_created_later_does_not_copy_head_expansion(self):
         collection = OrganizationCollectionFactory()

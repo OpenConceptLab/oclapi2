@@ -36,7 +36,7 @@ from core.common.utils import drop_version, to_owner_uri, generate_temp_version,
     get_resource_class_from_resource_name, to_snake_case, \
     es_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
     get_truthy_values, get_falsy_values, get_current_authorized_user, to_camel_case, to_parent_kwargs_from_uri, \
-    is_versioned_uri, canonical_url_to_url_and_version
+    is_versioned_uri, canonical_url_to_url_and_version, chunks
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -1880,9 +1880,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         collection_version = self.collection_version
         if collection_version.is_head or not CollectionReference.is_expansion_locked_repo_version_on():
             return None
-        head_expansion = get(collection_version.head, 'expansion')
-        # a processing expansion may be partly seeded, so the version is built from its references instead
-        return None if get(head_expansion, 'is_processing', True) else head_expansion
+        return get(collection_version.head, 'expansion')
 
     def copy_from(self, expansion, index=True):
         concept_ids = self.copy_members_without_head_resources(expansion.concepts, Concept)
@@ -1895,19 +1893,28 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         if index:
             self.index_resources(concept_ids, mapping_ids)
 
-    def copy_members_without_head_resources(self, members, klass):
+    def copy_members_without_head_resources(self, members, klass, batch_size=5000):
         """Adds members with each HEAD resource replaced by its latest resource version, in references too"""
-        latest_by_head = self.get_latest_versions_of_head_resources(members, klass)
-        ids = list((set(members.values_list('id', flat=True)) - set(latest_by_head)) | set(latest_by_head.values()))
         relation = 'concepts' if klass == Concept else 'mappings'
-        getattr(self, relation).add(*ids)
-        if latest_by_head:
-            field = f'{klass.__name__.lower()}_id'
-            getattr(CollectionReference, relation).through.objects.filter(
-                reference__collection_id=self.collection_version_id, **{f'{field}__in': list(latest_by_head)}
-            ).update(**{field: Case(*[When(**{field: head_id}, then=Value(latest_id))
-                                      for head_id, latest_id in latest_by_head.items()])})
-        return ids
+        field = f'{klass.__name__.lower()}_id'
+        reference_rows = getattr(CollectionReference, relation).through.objects.filter(
+            reference__collection_id=self.collection_version_id)
+        copied_ids = []
+        for batch in chunks(list(members.values_list('id', flat=True)), batch_size):
+            latest_by_head = self.get_latest_versions_of_head_resources(klass.objects.filter(id__in=batch), klass)
+            ids = list((set(batch) - set(latest_by_head)) | set(latest_by_head.values()))
+            getattr(self, relation).add(*ids)
+            if latest_by_head:
+                reference_rows.filter(**{f'{field}__in': list(latest_by_head)}).update(
+                    **{field: Case(*[When(**{field: head_id}, then=Value(latest_id))
+                                     for head_id, latest_id in latest_by_head.items()])})
+            copied_ids += ids
+        return copied_ids
+
+    @property
+    def is_head_expansion_processing(self):
+        head_expansion = get(self.collection_version.head, 'expansion')
+        return bool(get(head_expansion, 'is_processing'))
 
     @staticmethod
     def get_latest_versions_of_head_resources(members, klass):
@@ -1959,7 +1966,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
     @classmethod
     def persist(cls, index, **kwargs):
         sync = kwargs.pop('sync', False)
-        task_kwargs = {'copy_head': True} if kwargs.pop('copy_head', False) else {}
+        copy_head = kwargs.pop('copy_head', False)
         expansion = cls(**kwargs)
         temp_version = not bool(expansion.mnemonic)
         if temp_version:
@@ -1973,12 +1980,12 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             expansion.save()
 
         task = Task.new(queue='indexing', username=expansion.created_by, name=seed_children_to_expansion.__name__)
+        # positional, so a rerun from the persisted args still copies HEAD
+        task_args = (expansion.id, index, False, True) if copy_head else (expansion.id, index)
         if get(settings, 'TEST_MODE', False) or sync:
-            seed_children_to_expansion(expansion.id, index, **task_kwargs)
+            seed_children_to_expansion(*task_args)
         else:
-            seed_children_to_expansion.apply_async(
-                (expansion.id, index), queue=task.queue, task_id=task.id, persist_args=True,
-                **({'kwargs': task_kwargs} if task_kwargs else {}))
+            seed_children_to_expansion.apply_async(task_args, queue=task.queue, task_id=task.id, persist_args=True)
 
         return expansion
 
