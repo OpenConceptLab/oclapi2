@@ -955,6 +955,36 @@ class CollectionReferenceTest(OCLTestCase):
         self.assertEqual(reference.find_repo_version_with_resource_version(source), v2)
         self.assertEqual(reference.find_repo_version_with_resource_version(source, [v1]), v1)
 
+    def test_get_repo_versions_holding_resource_versions_matches_lookup_per_reference(self):
+        source, old, v1, v2 = self.source_with_replaced_concept_version()
+        new = Concept.objects.get(versioned_object_id=old.versioned_object_id, version='new')
+        old.sources.add(v2)
+        mapping = MappingFactory(parent=source)
+        mapping_version = mapping.get_latest_version()
+        mapping_version.sources.add(v1)
+        references = [
+            self._resource_version_reference(source, old),
+            self._resource_version_reference(source, new),
+            self._resource_version_reference(source, old),
+            CollectionReference(
+                expression=mapping_version.uri, collection=OrganizationCollectionFactory(), system=source.uri,
+                code=str(mapping.mnemonic), resource_version=mapping_version.version, reference_type='mappings'),
+        ]
+        references[2].resource_version = 'missing'
+
+        holding_versions = CollectionReference.get_repo_versions_holding_resource_versions(references, source)
+
+        self.assertEqual(holding_versions[references[0].resource_version_key], [v2, v1])
+        self.assertEqual(holding_versions[references[3].resource_version_key], [v1, source])
+        self.assertNotIn(references[2].resource_version_key, holding_versions)
+        for reference in references:
+            self.assertEqual(
+                holding_versions.get(reference.resource_version_key, []),
+                list(reference.get_repo_versions_with_resource_version(source)))
+            self.assertEqual(
+                reference.find_repo_version_with_resource_version(source, [v1], holding_versions),
+                reference.find_repo_version_with_resource_version(source, [v1]))
+
     def test_get_resolved_repo_versions_serialized_from_expansion(self):
         source = OrganizationSourceFactory()
         v1 = OrganizationSourceFactory(
@@ -2763,6 +2793,26 @@ class ExpansionTest(OCLTestCase):
             expansion.add_references(collection.references.all())
 
         self.assertEqual(list(expansion.concepts.all()), [old])
+        self.assertEqual(list(expansion.explicit_source_versions.all()), [v1])
+
+    def test_add_references_looks_up_holding_versions_once_per_repository(self):
+        source, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection, expansion, _ = self._expansion_with_resource_version_reference(source, old)
+        other = ConceptFactory(parent=source, mnemonic='c2').get_latest_version()
+        other.sources.add(v1)
+        reference = CollectionReference(
+            expression=other.uri, collection=collection, system=source.uri, code=other.mnemonic,
+            resource_version=other.version)
+        reference.evaluate()
+        reference.save()
+
+        with patch.object(
+                CollectionReference, 'get_repo_versions_holding_resource_versions',
+                wraps=CollectionReference.get_repo_versions_holding_resource_versions) as lookup:
+            self._rebuild(collection, expansion)
+
+        self.assertEqual(lookup.call_count, 1)
+        self.assertEqual(sorted(expansion.concepts.values_list('id', flat=True)), sorted([old.id, other.id]))
         self.assertEqual(list(expansion.explicit_source_versions.all()), [v1])
 
     def test_dry_run_rebuild_reports_changes_per_reference_without_saving(self):

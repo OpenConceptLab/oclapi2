@@ -1043,15 +1043,46 @@ class CollectionReference(models.Model):
             'type': UNRESOLVED_RESOURCE_VERSION_TYPE
         }
 
+    @property
+    def resource_version_key(self):
+        code = self.code if self.is_mapping else decode_string(self.code)
+        return self.is_mapping, code, self.resource_version
+
     def get_repo_versions_with_resource_version(self, repo_version):
         relation = MAPPING_REFERENCE_TYPE if self.is_mapping else CONCEPT_REFERENCE_TYPE
-        code = self.code if self.is_mapping else decode_string(self.code)
+        _, code, resource_version = self.resource_version_key
         return repo_version.active_versions.filter(
-            **{f'{relation}__mnemonic': code, f'{relation}__version': self.resource_version}).distinct()
+            **{f'{relation}__mnemonic': code, f'{relation}__version': resource_version}).distinct()
 
-    def find_repo_version_with_resource_version(self, repo_version, locked_versions=None):
+    @staticmethod
+    def get_repo_versions_holding_resource_versions(references, repo_version):
+        """Per resource_version_key, the active versions of repo_version's repository holding it, newest first"""
+        versions = list(repo_version.active_versions)
+        version_ids = [version.id for version in versions]
+        keys = {reference.resource_version_key for reference in references}
+        holder_ids = {}
+        for of_mappings, klass in ((False, Concept), (True, Mapping)):
+            pairs = {
+                (code, resource_version) for key_of_mappings, code, resource_version in keys
+                if key_of_mappings == of_mappings
+            }
+            if not pairs:
+                continue
+            resource = 'mapping' if of_mappings else 'concept'
+            rows = klass.sources.through.objects.filter(**{
+                'source_id__in': version_ids,
+                f'{resource}__mnemonic__in': {code for code, _ in pairs},
+                f'{resource}__version__in': {resource_version for _, resource_version in pairs},
+            }).values_list(f'{resource}__mnemonic', f'{resource}__version', 'source_id')
+            for code, resource_version, source_id in rows:
+                if (code, resource_version) in pairs:
+                    holder_ids.setdefault((of_mappings, code, resource_version), set()).add(source_id)
+        return {key: [version for version in versions if version.id in ids] for key, ids in holder_ids.items()}
+
+    def find_repo_version_with_resource_version(self, repo_version, locked_versions=None, holding_versions=None):
         """Locked version, else newest release, else HEAD, else newest retired/unreleased version holding it"""
-        versions = list(self.get_repo_versions_with_resource_version(repo_version))
+        versions = list(self.get_repo_versions_with_resource_version(repo_version)) if holding_versions is None \
+            else holding_versions.get(self.resource_version_key, [])
         locked_ids = {version.id for version in locked_versions or []}
         return (
             find(versions, lambda version: version.id in locked_ids) or
@@ -1586,6 +1617,10 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             # resource-versioned references last, so they can reuse the lock the others set
             include_refs = sorted(
                 include_refs, key=lambda ref: ref.can_resolve_to_repo_version_with_resource_version)
+        pinned_refs = [
+            ref for ref in [*include_refs, *exclude_refs] if ref.can_resolve_to_repo_version_with_resource_version
+        ] if resolve_by_resource_version else []
+        _holding_versions_cache = {}
 
         include_system_versions = []
         system_versions = self.parameters.get(ExpansionParameters.INCLUDE_SYSTEM)
@@ -1607,8 +1642,12 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                     _system_version_cache[__cache_key] = ref.resolve_expression_system_version
                 _version = _system_version_cache[__cache_key]
                 if _version and resolve_by_resource_version and ref.can_resolve_to_repo_version_with_resource_version:
+                    if _version.id not in _holding_versions_cache:
+                        _holding_versions_cache[_version.id] = \
+                            CollectionReference.get_repo_versions_holding_resource_versions(pinned_refs, _version)
                     return ref.find_repo_version_with_resource_version(
-                        _version, [*evaluated_system_versions, *locked_system_versions]) or _version
+                        _version, [*evaluated_system_versions, *locked_system_versions],
+                        _holding_versions_cache[_version.id]) or _version
                 return _version
             return None
 
@@ -1676,7 +1715,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                         _mappings = _mappings.union(__mappings)
                     _mappings = Mapping.objects.filter(id__in=_mappings.values_list('id', flat=True))
                 if resolve_by_resource_version and ref.is_resource_versioned and \
-                        not _concepts.exists() and not _mappings.exists():
+                        not (_mappings if ref.is_mapping else _concepts).exists():
                     unresolved_repo_versions.append(ref.to_unresolved_resource_version())
                     return ref.concepts.filter(), ref.mappings.filter()
             else:
