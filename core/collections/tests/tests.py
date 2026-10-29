@@ -1489,8 +1489,9 @@ class CollectionReferenceTest(OCLTestCase):
 
     def test_get_concepts_applies_es_filter_with_q_property(self):
         source = OrganizationSourceFactory()
-        concept = ConceptFactory(parent=source)
-        ConceptDocument().update([concept])
+        concept = ConceptFactory(parent=source, mnemonic='renal-failure')
+        other_concept = ConceptFactory(parent=source, mnemonic='headache')
+        ConceptDocument().update([concept, other_concept])
 
         reference = CollectionReference(
             system=source.uri, created_by=source.created_by,
@@ -1499,7 +1500,18 @@ class CollectionReferenceTest(OCLTestCase):
 
         concepts, _mappings = reference.get_concepts()
 
-        self.assertIsNotNone(concepts)
+        self.assertEqual(list(concepts.values_list('id', flat=True)), [concept.id])
+
+    def test_get_concepts_applies_es_filter_with_q_property_under_release_returns_its_resource_versions(self):
+        source, _, concept, concept_version = self.released_source_with_concepts()
+        reference = CollectionReference(
+            system=source.uri, created_by=source.created_by,
+            filter=[{'property': 'q', 'value': concept.mnemonic, 'op': '='}]
+        )
+
+        concepts, _ = reference.get_concepts()
+
+        self.assertEqual(list(concepts.values_list('id', flat=True)), [concept_version.id])
 
     def test_get_concepts_returns_empty_queryset_when_filters_return_none(self):
         source = OrganizationSourceFactory()
@@ -1533,6 +1545,77 @@ class CollectionReferenceTest(OCLTestCase):
         mappings = reference.get_mappings()
 
         self.assertEqual(list(mappings.values_list('id', flat=True)), [mapping.id])
+
+    @staticmethod
+    def released_source_with_concepts():
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source, concept_class='Diagnosis')
+        other_concept = ConceptFactory(parent=source, concept_class='Procedure')
+        release = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+        versions = [concept.get_latest_version(), other_concept.get_latest_version()]
+        release.concepts.add(*versions)
+        ConceptDocument().update([concept, other_concept, *versions])
+        return source, release, concept, versions[0]
+
+    def test_get_concepts_applies_es_filter_under_release_returns_its_resource_versions(self):
+        source, _, concept, concept_version = self.released_source_with_concepts()
+        reference = CollectionReference(
+            system=source.uri, created_by=source.created_by,
+            filter=[{'property': 'concept_class', 'value': 'Diagnosis', 'op': '='}]
+        )
+
+        concepts, _ = reference.get_concepts()
+        self.assertEqual(list(concepts.values_list('id', flat=True)), [concept_version.id])
+
+        with patch.object(CollectionReference, 'is_intensional_resource_versions_on', return_value=False):
+            concepts, _ = reference.get_concepts()
+        self.assertEqual(list(concepts.values_list('id', flat=True)), [concept.id])
+
+    def test_get_concepts_applies_es_filter_under_head_returns_head_concepts(self):
+        source, _, concept, _ = self.released_source_with_concepts()
+        reference = CollectionReference(
+            system=source.uri, version='HEAD', created_by=source.created_by,
+            filter=[{'property': 'concept_class', 'value': 'Diagnosis', 'op': '='}]
+        )
+
+        concepts, _ = reference.get_concepts()
+
+        self.assertEqual(list(concepts.values_list('id', flat=True)), [concept.id])
+
+    def test_get_concepts_applies_es_filter_under_release_with_cascade(self):
+        source, release, concept, concept_version = self.released_source_with_concepts()
+        mapping = MappingFactory(
+            parent=source, from_concept=concept, to_concept=ConceptFactory(parent=source), map_type='SAME-AS')
+        mapping_version = mapping.get_latest_version()
+        release.mappings.add(mapping_version)
+        reference = CollectionReference(
+            system=source.uri, created_by=source.created_by, cascade='sourcemappings',
+            filter=[{'property': 'concept_class', 'value': 'Diagnosis', 'op': '='}]
+        )
+
+        concepts, mappings = reference.get_concepts()
+
+        self.assertEqual(list(concepts.values_list('id', flat=True)), [concept_version.id])
+        self.assertEqual(list(mappings.values_list('id', flat=True)), [mapping_version.id])
+
+    def test_get_mappings_applies_es_filter_under_release_returns_its_resource_versions(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source)
+        mapping = MappingFactory(from_concept=concept, to_concept=concept, parent=source, map_type='SAME-AS')
+        mapping_version = mapping.get_latest_version()
+        release = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+        release.mappings.add(mapping_version)
+        MappingDocument().update([mapping, mapping_version])
+        reference = CollectionReference(
+            system=source.uri, created_by=source.created_by, reference_type='mappings',
+            filter=[{'property': 'map_type', 'value': 'SAME-AS', 'op': '='}]
+        )
+
+        mappings = reference.get_mappings()
+
+        self.assertEqual(list(mappings.values_list('id', flat=True)), [mapping_version.id])
 
     def test_get_mappings_returns_empty_queryset_when_filters_return_none(self):
         source = OrganizationSourceFactory()
@@ -2782,6 +2865,20 @@ class ExpansionTest(OCLTestCase):
             'url': reference.expression, 'namespace': None, 'version': old.version,
             'type': 'reference.resource_version'
         }])
+
+    def test_rebuild_with_filter_reference_under_release_adds_its_resource_versions(self):
+        source, release, _, concept_version = CollectionReferenceTest.released_source_with_concepts()
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        reference = CollectionReference(
+            expression=source.uri, collection=collection, system=source.uri, created_by=source.created_by,
+            filter=[{'property': 'concept_class', 'value': 'Diagnosis', 'op': '='}])
+        reference.save()
+
+        self._rebuild(collection, expansion)
+
+        self.assertEqual(list(expansion.concepts.all()), [concept_version])
+        self.assertEqual(list(expansion.evaluated_source_versions.all()), [release])
 
     def test_add_references_reuses_locked_version_holding_resource_version(self):
         source, old, v1, v2 = CollectionReferenceTest.source_with_replaced_concept_version()
