@@ -1087,7 +1087,7 @@ class UserViewsAPITest(OCLAPITestCase):
             self.assertNotIn('pins', user_data)
 
     @patch('core.users.models.UserProfile.get_all_permissions', return_value=set())
-    @patch('core.users.models.UserProfile.get_capability_usage', return_value=0)
+    @patch('core.capabilities.policy.GroupLimitPolicy.get_usage', return_value={'used': 0})
     def test_user_detail_does_not_compute_plan_for_other_users(self, usage_mock, permissions_mock):
         user = UserProfileFactory(username='planusageuser')
         other_user = UserProfileFactory(username='planusageother')

@@ -1,4 +1,5 @@
 import datetime
+import importlib
 import json
 import os
 import sys
@@ -19,6 +20,7 @@ from django.core.management import call_command, CommandError
 from django.http import HttpResponse
 from django.test import TestCase, override_settings, RequestFactory, tag
 from django.test.runner import DiscoverRunner
+from django.urls import clear_url_caches, resolve
 from django.utils import timezone
 from elastic_transport import Transport
 from mock.mock import call
@@ -3647,3 +3649,22 @@ class ESSplitIndexCommandTest(OCLTestCase):
         target = client.indices.split.call_args[1]['target']
         client.indices.delete.assert_called_once_with(index=target, ignore_unavailable=True)
         client.indices.put_settings.assert_called_once_with(index='concepts', settings={'index.blocks.write': None})
+
+
+class ExtraURLConfsTest(OCLTestCase):
+    def tearDown(self):
+        from core import urls
+        importlib.reload(urls)
+        clear_url_caches()
+        super().tearDown()
+
+    def test_extra_urlconfs_are_included_after_the_core_routes(self):
+        from core import urls
+        from core.capabilities.views import CapabilityConsumeView
+        with patch('core.settings.OCL_EXTRA_URLCONFS', ['core.capabilities.urls']):
+            importlib.reload(urls)
+        clear_url_caches()
+
+        self.assertEqual(resolve('/consume/').func.view_class, CapabilityConsumeView)
+        self.assertEqual(resolve('/capabilities/consume/').func.view_class, CapabilityConsumeView)
+        self.assertEqual(urls.urlpatterns[-1].urlconf_name.__name__, 'core.capabilities.urls')

@@ -27,9 +27,8 @@ from core.common.constants import (
     HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE, LIST_DEFAULT_LIMIT)
 from core.common.exceptions import Http400, Http403, Http409
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
-from core.capabilities.constants import CAPABILITY_EXCEEDED_ERROR_CODE, CAPABILITY_NOT_ENTITLED_ERROR_CODE, \
-    MAPPER_MATCH_OPERATIONS_CAPABILITY, MAPPER_MATCH_OPERATIONS_CAPABILITY_ID
-from core.capabilities.exceptions import CapabilityExceeded
+from core.capabilities.constants import MAPPER_MATCH_OPERATIONS_CAPABILITY_ID
+from core.capabilities.exceptions import UsageRefused
 from core.capacity.constants import ENDPOINT_MATCH, ENDPOINT_RERANK
 from core.capacity.limiter import CapacityLimitMixin
 from core.common.permissions import CanUseMapper
@@ -46,7 +45,7 @@ from core.common.swagger_parameters import (
 from core.common.tasks import delete_concept, make_hierarchy
 from core.common.throttling import ThrottleUtil
 from core.common.utils import (generate_temp_version, get_truthy_values, to_int,
-                               drop_version, get_falsy_values, parse_id, get_event_metadata)
+                               drop_version, get_falsy_values, parse_id, get_event_metadata, get_capability_policy)
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
 from core.concepts.constants import (
@@ -1265,38 +1264,32 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
 
     def match(self, request):
         rows = request.data.get('rows')
-        consumed_units = 0
+        usage_event, already_consumed = None, False
         if isinstance(rows, list) and rows:
             algorithm_id, map_project = get_match_operations_attribution(request)
             try:
-                request.user.check_and_consume_capability(
+                usage_event, already_consumed = request.user.check_and_consume_capability(
                     MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, units=len(rows), action='match_concepts',
                     algorithm=algorithm_id, map_project=map_project
                 )
-                consumed_units = len(rows)
-            except CapabilityExceeded as ex:
-                not_entitled = ex.not_entitled
+            except UsageRefused as ex:
                 return Response(
                     {
-                        'detail': 'You do not have Mapper match access.' if not_entitled else
+                        'detail': 'You do not have Mapper match access.' if ex.not_entitled else
                         'Match operation limit reached.',
-                        'error_code': CAPABILITY_NOT_ENTITLED_ERROR_CODE[MAPPER_MATCH_OPERATIONS_CAPABILITY]
-                        if not_entitled else CAPABILITY_EXCEEDED_ERROR_CODE[MAPPER_MATCH_OPERATIONS_CAPABILITY],
-                        'limit': None if not_entitled else ex.limit, 'used': ex.used,
+                        **ex.detail,
                     },
                     status=status.HTTP_403_FORBIDDEN
                 )
-        # Consumption happens before the search so an over-quota caller is rejected
-        # without paying for an ES query it was never going to get results from. If the
-        # search itself then fails, that's not a successful match - refund the units so
-        # a flaky ES call doesn't silently burn an unrecoverable chunk of a capped,
-        # never-reset allowance.
+        # Consumption happens before the search so a caller over its limit is rejected
+        # without an ES query it was never going to get results from. If the search
+        # itself then fails, that's not a successful match - reverse the units so a
+        # flaky ES call doesn't use them up.
         try:
             results = self.filter_queryset()
         except Exception:
-            if consumed_units:
-                from core.capabilities.models import UsageCounter
-                UsageCounter.refund(request.user, MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, units=consumed_units)
+            if usage_event and not already_consumed:  # a replay consumed nothing
+                get_capability_policy().reverse(usage_event, usage_event.units)
             raise
         response = Response(results)
         # num_returned is picked up by the analytics middleware as

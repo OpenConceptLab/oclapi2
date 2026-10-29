@@ -6,29 +6,35 @@ from core.capabilities.constants import (
 )
 
 
-class CapabilityExceeded(APIException):
+class UsageRefused(APIException):
     """
-    An APIException (not a plain Exception) so that a call site which forgets to
-    catch this - there is more than one check_and_consume_capability() caller -
-    fails as a 403 under DRF's default exception handler instead of an uncaught 500.
-    Existing callers still catch it explicitly to build their own structured
-    {detail, error_code, limit, used} response; this only changes the failure mode
-    for whichever call site doesn't.
+    A capability policy refused a use. `detail` is the refusal body, sent as the policy built it: a call site adds
+    only its own sentence as `detail`, when the policy gave none.
+    An APIException, so a call site that doesn't catch it fails as a 403 rather than a 500.
     """
     status_code = status.HTTP_403_FORBIDDEN
     default_code = 'capability_limit_reached'
 
-    def __init__(self, capability_name, limit, used, requested):  # pylint: disable=super-init-not-called
-        self.capability_name = capability_name
-        self.limit = limit
-        self.used = used
-        self.requested = requested
-        self.detail = f'{capability_name}: {used}+{requested} > {limit}'
+    def __init__(self, detail, not_entitled=False):  # pylint: disable=super-init-not-called
+        # set directly (as MapProjectCapacityExceeded does), so numbers stay numbers in the JSON
+        self.detail = detail
+        self.not_entitled = not_entitled
 
-    @property
-    def not_entitled(self):
+
+class CapabilityExceeded(UsageRefused):
+    """GroupLimitPolicy's refusal: no limit or a blocked one (not entitled), or not enough left."""
+
+    def __init__(self, capability_name, limit, used):
         # None = no row anywhere, -1 = blocked: both are "not available", never a count
-        return self.limit is None or self.limit < 0
+        not_entitled = limit is None or limit < 0
+        super().__init__(
+            {
+                'error_code': CAPABILITY_NOT_ENTITLED_ERROR_CODE.get(capability_name, 'capability_not_entitled')
+                if not_entitled else CAPABILITY_EXCEEDED_ERROR_CODE.get(capability_name, 'capability_limit_reached'),
+                'limit': None if not_entitled else limit, 'used': used,
+            },
+            not_entitled=not_entitled
+        )
 
 
 class MapProjectCapacityExceeded(APIException):
