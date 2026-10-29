@@ -54,5 +54,17 @@
       "staging": false,
       "production": true
     }
+  },
+  {
+    "pk": 9,
+    "model": "toggles.toggle",
+    "fields": {
+      "is_active": true,
+      "name": "RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE",
+      "dev": true,
+      "qa": true,
+      "staging": true,
+      "production": false
+    }
   }
 ]

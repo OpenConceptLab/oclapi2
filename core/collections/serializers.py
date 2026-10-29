@@ -584,6 +584,7 @@ class CollectionReferenceSerializer(ModelSerializer):
         self.include_resolved_repo_versions = False
         self.resolved_system_version_cache = {}
         self.resolved_valueset_version_cache = {}
+        self.expansion_cache = {}
         if params:
             self.query_params = params.dict()
             self.include_resolved_repo_versions = self.query_params.get(INCLUDE_RESOLVED_REPO_VERSIONS) in TRUTHY
@@ -601,7 +602,7 @@ class CollectionReferenceSerializer(ModelSerializer):
         if not self.include_resolved_repo_versions:
             return None
         return obj.get_resolved_repo_versions_serialized(
-            self.resolved_system_version_cache, self.resolved_valueset_version_cache
+            self.resolved_system_version_cache, self.resolved_valueset_version_cache, self.expansion_cache
         )
 
 

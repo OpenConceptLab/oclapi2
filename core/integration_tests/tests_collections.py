@@ -734,6 +734,28 @@ class CollectionReferencesViewTest(OCLAPITestCase):
                 [self.concept.parent.uri]
             )
 
+    def test_get_200_with_resolved_repo_versions_from_expansion(self):
+        source = self.concept.parent
+        v1 = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+        OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v2', released=True)
+        reference = CollectionReference(
+            expression=f'{source.uri}concepts/{self.concept.mnemonic}/', collection=self.collection,
+            system=source.uri, code=self.concept.mnemonic)
+        reference.save()
+        self.expansion.evaluated_source_versions.add(v1)
+
+        response = self.client.get(
+            self.collection.uri + 'references/?includeResolvedRepoVersions=true', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {item['expression']: [version['version_url'] for version in item['resolved_repo_versions']]
+             for item in response.data},
+            {reference.expression: [v1.uri], self.reference.expression: [source.uri]}
+        )
+
     def test_delete_400(self):
         response = self.client.delete(
             self.collection.uri + 'references/',
@@ -4218,6 +4240,33 @@ class CollectionVersionExpansionViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.collection.expansions.count(), 1)
 
+
+    def test_post_re_evaluate_keeps_resource_version_held_by_older_release(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source, mnemonic='c1')
+        old = concept.get_latest_version()
+        ConceptFactory(parent=source, mnemonic='c1', versioned_object=concept, version='new')
+        old.sources.remove(source)
+        v1 = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+        OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v2', released=True)
+        old.sources.add(v1)
+        reference = CollectionReference(
+            expression=old.uri, collection=self.collection, system=source.uri, code='c1',
+            resource_version=old.version)
+        reference.evaluate()
+        reference.save()
+        self.expansion_default.concepts.add(old)
+
+        response = self.client.post(
+            self.expansion_default.url + 're-evaluate/',
+            HTTP_AUTHORIZATION='Token ' + self.collection.created_by.get_token(),
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(list(self.expansion_default.concepts.all()), [old])
+        self.assertEqual(list(self.expansion_default.explicit_source_versions.all()), [v1])
 
 class CollectionVersionExpansionsViewTest(OCLAPITestCase):
     def setUp(self):
