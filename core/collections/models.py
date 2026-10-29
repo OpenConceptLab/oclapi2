@@ -1083,6 +1083,11 @@ class CollectionReference(models.Model):
         """Locked version, else newest release, else HEAD, else newest retired/unreleased version holding it"""
         versions = list(self.get_repo_versions_with_resource_version(repo_version)) if holding_versions is None \
             else holding_versions.get(self.resource_version_key, [])
+        return self.pick_repo_version_with_resource_version(versions, locked_versions)
+
+    @staticmethod
+    def pick_repo_version_with_resource_version(versions, locked_versions=None):
+        """From versions holding a resource version, newest first: locked, else release, else HEAD, else newest"""
         locked_ids = {version.id for version in locked_versions or []}
         return (
             find(versions, lambda version: version.id in locked_ids) or
@@ -1257,6 +1262,8 @@ class CollectionReference(models.Model):
     def _get_resolved_system_versions(self, system_version_cache=None, expansion_cache=None):
         """The source versions its collection version's expansion recorded for it, else resolved now"""
         expansion = self.get_default_expansion(expansion_cache)
+        if expansion and expansion.is_unresolved_resource_version(self):
+            return []
         version = self._get_expression_system_version(system_version_cache)
         if expansion and version:
             recorded = expansion.get_source_versions_resolved_by(self, version)
@@ -1930,10 +1937,18 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         if reference.is_versionless_expression:
             return self.get_versions_of_repo(self.recorded_evaluated_source_versions, repo_version) or explicit
         if reference.can_resolve_to_repo_version_with_resource_version:
-            holding_ids = set(reference.get_repo_versions_with_resource_version(repo_version).values_list(
-                'id', flat=True))
-            return [version for version in explicit if version.id in holding_ids][:1] or explicit
+            recorded_ids = {version.id for version in explicit}
+            holders = [
+                version for version in reference.get_repo_versions_with_resource_version(repo_version)
+                if version.id in recorded_ids
+            ]
+            locked = self.get_versions_of_repo(self.recorded_evaluated_source_versions, repo_version)
+            return compact([CollectionReference.pick_repo_version_with_resource_version(holders, locked)]) or explicit
         return [repo_version]
+
+    def is_unresolved_resource_version(self, reference):
+        return reference.is_resource_versioned and reference.to_unresolved_resource_version() in (
+            self.unresolved_repo_versions or [])
 
     def get_resolved_repo_version_diff_with_latest_updates(self):
         diff = {}

@@ -2874,6 +2874,77 @@ class ExpansionTest(OCLTestCase):
         with self.assertRaises(CommandError):
             call_command('dry_run_expansions', collection.uri, '--env', 'nowhere', stdout=out)
 
+    def _source_with_pins_in_releases(self):
+        """c1's pinned version is held by v1 and v3, c2's only by v1"""
+        source = OrganizationSourceFactory()
+        c1 = ConceptFactory(parent=source, mnemonic='c1').get_latest_version()
+        c2 = ConceptFactory(parent=source, mnemonic='c2').get_latest_version()
+        kwargs = {'mnemonic': source.mnemonic, 'organization': source.organization, 'released': True}
+        v1 = OrganizationSourceFactory(version='v1', **kwargs)
+        v3 = OrganizationSourceFactory(version='v3', **kwargs)
+        c1.sources.add(v1, v3)
+        c2.sources.add(v1)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        return source, collection, expansion, c1, c2, v1, v3
+
+    @staticmethod
+    def _pin(collection, source, concept_version):
+        reference = CollectionReference(
+            expression=concept_version.uri, collection=collection, system=source.uri,
+            code=concept_version.mnemonic, resource_version=concept_version.version)
+        reference.evaluate()
+        reference.save()
+        return reference
+
+    def test_resolved_repo_versions_of_pinned_reference_match_rebuild(self):
+        source, collection, expansion, c1, c2, v1, v3 = self._source_with_pins_in_releases()
+        reference = self._pin(collection, source, c1)
+        self._pin(collection, source, c2)
+
+        self._rebuild(collection, expansion)
+
+        self.assertEqual(
+            sorted(expansion.explicit_source_versions.values_list('id', flat=True)), sorted([v1.id, v3.id]))
+        reference = CollectionReference.objects.get(id=reference.id)
+        self.assertEqual(reference.resolve_system_version, v3)
+        self.assertEqual(
+            [version['version'] for version in reference.get_resolved_repo_versions_serialized()], ['v3'])
+
+    def test_resolved_repo_versions_of_unresolved_pinned_reference_are_empty(self):
+        source, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection, expansion, reference = self._expansion_with_resource_version_reference(source, old)
+        old.sources.remove(v1)
+        other = ConceptFactory(parent=source, mnemonic='c2').get_latest_version()
+        other.sources.add(v1)
+        self._pin(collection, source, other)
+
+        self._rebuild(collection, expansion)
+
+        self.assertTrue(expansion.is_unresolved_resource_version(reference))
+        self.assertEqual(list(expansion.explicit_source_versions.all()), [v1])
+        reference = CollectionReference.objects.get(id=reference.id)
+        self.assertEqual(reference.get_resolved_repo_versions_serialized(), [])
+
+    def test_load_collection_source_versions_prefers_locked_holder(self):
+        source, collection, expansion, c1, _, v1, v3 = self._source_with_pins_in_releases()
+        expansion.evaluated_source_versions.add(v1)
+        c3 = ConceptFactory(parent=source, mnemonic='c3').get_latest_version()
+        c3.sources.add(v3)
+        self._pin(collection, source, c1)
+        self._pin(collection, source, c3)
+
+        with patch.object(Expansion, 'index_resources'):
+            expansion.add_references(collection.references.all())
+
+        self.assertEqual(
+            sorted(expansion.explicit_source_versions.values_list('id', flat=True)), sorted([v1.id, v3.id]))
+        member = Concept.objects.get(id=c1.id)
+        Concept.load_collection_source_versions([member], collection)
+        self.assertEqual(member._collection_source_version, v1)  # pylint: disable=protected-access
+
     def test_load_collection_source_versions_from_expansion(self):
         source, old, v1, v2 = CollectionReferenceTest.source_with_replaced_concept_version()
         new = Concept.objects.get(versioned_object_id=old.versioned_object_id, version='new')
