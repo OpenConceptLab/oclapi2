@@ -799,8 +799,9 @@ class SourceChildMixin(ChecksumModel):
 
     @classmethod
     def load_expansion_source_versions(cls, instances, expansion):
-        """The source versions holding each row: those the expansion recorded, else all of them"""
+        """The source versions holding each row: those the expansion is locked to, else recorded, else all of them"""
         recorded_ids = {version.id for version in expansion.recorded_source_versions}
+        locked_ids = {version.id for version in expansion.recorded_evaluated_source_versions}
         sources_field = cls._meta.get_field('sources')
         row_field = sources_field.m2m_field_name()
         holding = cls.sources.through.objects.filter(
@@ -814,7 +815,9 @@ class SourceChildMixin(ChecksumModel):
         for instance in instances:
             source_ids = source_ids_by_row.get(instance.id, [])
             recorded = [source_id for source_id in source_ids if source_id in recorded_ids]
-            instance.set_collection_source_version([versions[source_id] for source_id in recorded or source_ids])
+            locked = [source_id for source_id in recorded if source_id in locked_ids]
+            instance.set_collection_source_version(
+                [versions[source_id] for source_id in locked or recorded or source_ids])
 
     def set_collection_source_version(self, versions):
         newest = max(versions, key=lambda version: version.created_at, default=None)
