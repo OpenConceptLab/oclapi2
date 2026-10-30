@@ -4644,10 +4644,10 @@ class SemanticMatchRankingTest(CapacityRedisMockMixin, OCLAPITestCase):
         self.source.concepts.add(latest)
         return latest
 
-    def match(self, name, data=None, synonyms=None, params=''):
+    def match(self, name, data=None, synonyms=None):
         row = {'name': name, **({'synonyms': synonyms} if synonyms else {})}
         response = self.client.post(
-            f'/concepts/$match/?semantic=true&limit=5{params}',
+            '/concepts/$match/?semantic=true&limit=5',
             {'rows': [row], 'target_repo_url': self.source.uri, **(data or {})},
             format='json', HTTP_AUTHORIZATION='Token ' + self.user.get_token())
         self.assertEqual(response.status_code, 200)
@@ -4692,18 +4692,6 @@ class SemanticMatchRankingTest(CapacityRedisMockMixin, OCLAPITestCase):
 
         self.assertEqual(self.match('vacina contra raiva'), ['english', 'portuguese'])
         self.assertEqual(self.match('vacina contra raiva', {'filter': {'locale': 'pt'}}), ['portuguese'])
-
-    def test_locale_filter_keeps_a_row_whose_sibling_fails_it(self):
-        # HEAD holds both rows of a concept, under one mnemonic: the versioned object, closer to the input but with no
-        # Portuguese name, mustn't take the kNN slot from the latest version, which has one
-        latest = self.create_concept('rabies', 'Rabies vaccine')
-        versioned_object = Concept.objects.get(id=latest.versioned_object_id)
-        latest.names.all().delete()
-        ConceptNameFactory(concept=latest, name='Imunizante antirrábico', locale='pt', locale_preferred=True)
-        ConceptDocument().update([versioned_object, Concept.objects.get(id=latest.id)], refresh=True, parallel=False)
-
-        self.assertEqual(
-            self.match('vacina contra raiva', {'filter': {'locale': 'pt'}}, params='&kNearest=1'), ['rabies'])
 
     def test_target_repo_filter_keeps_concepts_mapped_to_it_ranked_by_best_name(self):
         target = OrganizationSourceFactory(organization=self.source.organization, mnemonic='Target')

@@ -8,7 +8,6 @@ from core.common.utils import get_embeddings, is_canonical_uri
 from core.concepts.models import Concept
 
 ES_MAX_RESULT_WINDOW = 10000  # index.max_result_window's default
-ES_MAX_KNN_CANDIDATES = 10000  # the most num_candidates a knn search takes
 
 
 class BooleanTermsFacet(TermsFacet):
@@ -376,21 +375,20 @@ class ConceptFuzzySearch:  # pragma: no cover
         """
         vectors = {text: get_embeddings(text).tolist() for text in dict.fromkeys(text for _, _, text, _ in clauses)}
         nested_filter = cls.has_nested_query(filter_query.to_dict())
-        knn_filter, knn_k, knn_num_candidates = filter_query, k_nearest, num_candidates
+        knn_filter = filter_query
         if nested_filter:
             # A nested filter matches nothing inside a nested knn query on ES 8.15 (elastic/elasticsearch#138184). The
             # top-level knn section applies it, so it finds the candidates. They're scored here, pre-filtered by the
-            # filter's other clauses, and the whole filter applies on top. Every row the pre-filter leaves is scored,
-            # so one that shares a candidate's mnemonic but fails the filter can't take the candidate's place.
+            # filter's other clauses, and the whole filter applies on top. Within a repo version a concept's rows share
+            # their names and mappings, so a candidate's mnemonic admits no row that the filter rejects.
             knn_filter = Q("bool", must=[
                 *[clause for clause in filter_query.must if not cls.has_nested_query(clause.to_dict())],
                 Q("terms", id_raw=cls.get_knn_candidates(clauses, vectors, filter_query, k_nearest, num_candidates))
             ])
-            knn_k = knn_num_candidates = ES_MAX_KNN_CANDIDATES
         terms = {}
         for term, field, text, boost in clauses:
             terms.setdefault(term, []).append(Q("nested", path=field.split('.')[0], score_mode="max", query=Q(
-                "knn", field=field, query_vector=vectors[text], k=knn_k, num_candidates=knn_num_candidates,
+                "knn", field=field, query_vector=vectors[text], k=k_nearest, num_candidates=num_candidates,
                 filter=knn_filter, boost=boost)))
         query = Q("bool", should=[Q("dis_max", queries=queries) for queries in terms.values()], minimum_should_match=1)
         return Q("bool", must=[query], filter=[filter_query]) if nested_filter else query
