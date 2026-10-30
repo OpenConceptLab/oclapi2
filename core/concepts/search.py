@@ -374,10 +374,7 @@ class ConceptFuzzySearch:  # pragma: no cover
         terms (its name and each synonym, with their lexical variants) a concept scores by its best-matching name, not
         the sum over its names (OpenConceptLab/ocl_online#592), and the terms add up. Each text is encoded once.
         """
-        vectors = {}
-        for _, _, text, _ in clauses:
-            if text not in vectors:
-                vectors[text] = get_embeddings(text).tolist()
+        vectors = {text: get_embeddings(text).tolist() for text in dict.fromkeys(text for _, _, text, _ in clauses)}
         nested_filter = cls.has_nested_query(filter_query.to_dict())
         knn_filter, knn_k, knn_num_candidates = filter_query, k_nearest, num_candidates
         if nested_filter:
