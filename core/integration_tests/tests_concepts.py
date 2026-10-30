@@ -4644,10 +4644,10 @@ class SemanticMatchRankingTest(CapacityRedisMockMixin, OCLAPITestCase):
         self.source.concepts.add(latest)
         return latest
 
-    def match(self, name, data=None, synonyms=None):
+    def match(self, name, data=None, synonyms=None, params=''):
         row = {'name': name, **({'synonyms': synonyms} if synonyms else {})}
         response = self.client.post(
-            '/concepts/$match/?semantic=true&limit=5',
+            f'/concepts/$match/?semantic=true&limit=5{params}',
             {'rows': [row], 'target_repo_url': self.source.uri, **(data or {})},
             format='json', HTTP_AUTHORIZATION='Token ' + self.user.get_token())
         self.assertEqual(response.status_code, 200)
@@ -4692,6 +4692,23 @@ class SemanticMatchRankingTest(CapacityRedisMockMixin, OCLAPITestCase):
 
         self.assertEqual(self.match('vacina contra raiva'), ['english', 'portuguese'])
         self.assertEqual(self.match('vacina contra raiva', {'filter': {'locale': 'pt'}}), ['portuguese'])
+
+    def test_target_repo_filter_with_a_collection_keeps_the_row_in_the_collection(self):
+        # HEAD holds both rows of a concept, under one mnemonic, and only the latest version is in the collection: the
+        # versioned object, indexed first, mustn't take the kNN slot and then fail the collection filter
+        target = OrganizationSourceFactory(organization=self.source.organization, mnemonic='Target')
+        latest = self.create_concept('rabies', 'Rabies vaccine')
+        target_concept = ConceptFactory(parent=target)
+        MappingFactory(
+            parent=self.source, from_concept=latest, to_concept=target_concept, to_source_url=target.uri,
+            to_concept_code=target_concept.mnemonic)
+        collection = OrganizationCollectionFactory(organization=self.source.organization)
+        ExpansionFactory(collection_version=collection).concepts.add(latest)
+        ConceptDocument().update(
+            [Concept.objects.get(id=latest.versioned_object_id), latest], refresh=True, parallel=False)
+
+        filters = {'collection': collection.mnemonic, 'target_repo': target.uri}
+        self.assertEqual(self.match('vacina contra raiva', {'filter': filters}, params='&kNearest=1'), ['rabies'])
 
     def test_target_repo_filter_keeps_concepts_mapped_to_it_ranked_by_best_name(self):
         target = OrganizationSourceFactory(organization=self.source.organization, mnemonic='Target')

@@ -379,10 +379,11 @@ class ConceptFuzzySearch:  # pragma: no cover
         if nested_filter:
             # A nested filter matches nothing inside a nested knn query on ES 8.15 (elastic/elasticsearch#138184). The
             # top-level knn section applies it, so it finds the candidates. They're scored here, pre-filtered by the
-            # filter's other clauses, and the whole filter applies on top. Within a repo version a concept's rows share
-            # their names and mappings, so a candidate's mnemonic admits no row that the filter rejects.
+            # filter without its nested parts, and the whole filter applies on top. Within a repo version a concept's
+            # rows share their names and mappings, so a candidate's mnemonic admits no row that only they would reject.
+            outer = cls.without_nested(filter_query.to_dict())
             knn_filter = Q("bool", must=[
-                *[clause for clause in filter_query.must if not cls.has_nested_query(clause.to_dict())],
+                *([Q(outer)] if outer else []),
                 Q("terms", id_raw=cls.get_knn_candidates(clauses, vectors, filter_query, k_nearest, num_candidates))
             ])
         terms = {}
@@ -413,6 +414,26 @@ class ConceptFuzzySearch:  # pragma: no cover
         if isinstance(query, list):
             return any(cls.has_nested_query(value) for value in query)
         return False
+
+    @classmethod
+    def without_nested(cls, query):
+        """
+        A query dict loosened to have no nested query, so it matches everything the query does: a must or filter clause
+        with one is loosened too, and a should or must_not group with one is dropped. None when nothing is left.
+        """
+        if 'bool' not in query:
+            return None if cls.has_nested_query(query) else query
+        loosened = {}
+        for occur, value in query['bool'].items():
+            if occur in ('must', 'filter'):
+                kept = [c for c in map(cls.without_nested, value if isinstance(value, list) else [value]) if c]
+                if kept:
+                    loosened[occur] = kept
+            elif occur not in ('should', 'must_not') or not cls.has_nested_query(value):
+                loosened[occur] = value
+        if 'should' not in loosened:
+            loosened.pop('minimum_should_match', None)
+        return {'bool': loosened} if {'must', 'filter', 'should', 'must_not'} & set(loosened) else None
 
     @classmethod
     def get_mapped_code_queries(cls, data, map_config):
