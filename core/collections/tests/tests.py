@@ -2274,6 +2274,35 @@ class TasksTest(OCLTestCase):
 
         self.assertFalse(copy.concepts.exists())
 
+    def test_copy_from_takes_references_resolved_resources_from_head(self):
+        expansion, _, collection_v1 = self.head_with_head_concept_member()
+        collection_v1.seed_references()
+        head_reference = expansion.collection_version.references.first()
+        other = ConceptFactory().get_latest_version()
+        head_reference.concepts.set([other])
+        expansion.concepts.set([other])
+        copy = ExpansionFactory(collection_version=collection_v1)
+
+        self.assertTrue(copy.copy_from(expansion, index=False))
+
+        self.assertEqual(list(collection_v1.references.first().concepts.all()), [other])
+        self.assertEqual(list(copy.concepts.all()), [other])
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.common.models.seed_children_to_new_version')
+    def test_persist_new_version_sync_seeds_after_commit(self, seed_mock):
+        collection = OrganizationCollectionFactory()
+        collection_v1 = Collection(
+            version='v1', mnemonic=collection.mnemonic, organization=collection.organization)
+
+        with self.captureOnCommitCallbacks(execute=False) as callbacks:
+            Collection.persist_new_version(collection_v1, collection.created_by, sync=True)
+
+        seed_mock.assert_not_called()
+        self.assertEqual(len(callbacks), 1)
+        callbacks[0]()
+        seed_mock.assert_called_once_with('collection', collection_v1.id, True, True)
+
     @patch('core.collections.models.Collection.save_changelog_and_comparison')
     @patch('core.collections.models.Expansion.wait_until_processed')
     def test_changelog_waits_for_versions_expansions(self, wait_mock, save_mock):

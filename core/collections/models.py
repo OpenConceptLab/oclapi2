@@ -1896,8 +1896,10 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             expansion.refresh_from_db()
             if expansion.is_processing:
                 raise self.HeadExpansionProcessing(expansion.uri)
-            if not self.has_same_references_as(expansion.collection_version):
+            head_reference_ids = self.get_head_reference_ids(expansion.collection_version)
+            if head_reference_ids is None:
                 return False
+            self.copy_reference_members(head_reference_ids)
             concept_ids = self.copy_members_without_head_resources(expansion.concepts, Concept)
             mapping_ids = self.copy_members_without_head_resources(expansion.mappings, Mapping)
             for relation in self.REPO_VERSION_RELATIONS:
@@ -1909,10 +1911,29 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             self.index_resources(concept_ids, mapping_ids)
         return True
 
-    def has_same_references_as(self, collection):
-        def get_expressions(_collection):
-            return sorted(_collection.references.values_list('expression', 'include'))
-        return get_expressions(self.collection_version) == get_expressions(collection)
+    def get_head_reference_ids(self, head):
+        """{HEAD reference id: version reference id} by expression and include, None if the references differ"""
+        def get_ids_by_key(collection):
+            rows = list(collection.references.values_list('id', 'expression', 'include'))
+            ids_by_key = {(expression, include): _id for _id, expression, include in rows}
+            return ids_by_key if len(ids_by_key) == len(rows) else None
+
+        head_ids, version_ids = get_ids_by_key(head), get_ids_by_key(self.collection_version)
+        if head_ids is None or version_ids is None or head_ids.keys() != version_ids.keys():
+            return None
+        return {head_ids[key]: version_ids[key] for key in head_ids}
+
+    @staticmethod
+    def copy_reference_members(head_reference_ids, batch_size=5000):
+        """Replaces each version reference's concepts and mappings with its HEAD reference's"""
+        for relation in ('concepts', 'mappings'):
+            through = getattr(CollectionReference, relation).through
+            field = f'{relation[:-1]}_id'
+            through.objects.filter(reference_id__in=list(head_reference_ids.values())).delete()
+            rows = through.objects.filter(reference_id__in=list(head_reference_ids)).values_list('reference_id', field)
+            for batch in chunks(list(rows), batch_size):
+                through.objects.bulk_create(
+                    [through(reference_id=head_reference_ids[ref_id], **{field: _id}) for ref_id, _id in batch])
 
     def copy_members_without_head_resources(self, members, klass, batch_size=5000):
         """Adds members with each HEAD resource replaced by its latest resource version, in references too"""
