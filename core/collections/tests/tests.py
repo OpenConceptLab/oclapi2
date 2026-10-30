@@ -28,7 +28,7 @@ from core.collections.utils import is_mapping, is_concept, is_version_specified,
     get_concept_by_expression
 from core.common.constants import OPENMRS_VALIDATION_SCHEMA, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, \
     RETIRED_ACCESS_TYPE_EDIT
-from core.common.tasks import add_references, seed_children_to_new_version
+from core.common.tasks import add_references, seed_children_to_new_version, collection_version_compare
 from core.common.tasks import update_collection_active_concepts_count
 from core.common.tasks import update_collection_active_mappings_count
 from core.common.tests import OCLTestCase, OCLAPITestCase
@@ -2245,6 +2245,49 @@ class TasksTest(OCLTestCase):
 
         self.assertEqual(sorted(ids), sorted([concept.get_latest_version().id, other.id]))
         self.assertEqual(sorted(copy.concepts.values_list('id', flat=True)), sorted(ids))
+
+    def test_copy_from_builds_from_references_when_head_references_changed(self):
+        expansion, concept, collection_v1 = self.head_with_head_concept_member()
+        collection_v1.seed_references()
+        head = expansion.collection_version
+        other = ConceptFactory()
+        head.add_expressions({'expressions': [other.uri]}, head.created_by)
+        self.assertEqual(expansion.concepts.count(), 2)
+        copy = ExpansionFactory(collection_version=collection_v1)
+
+        self.assertFalse(copy.copy_from(expansion, index=False))
+        self.assertFalse(copy.concepts.exists())
+
+        copy.seed_children(index=False, copy_head=True)
+
+        self.assertEqual(list(copy.concepts.all()), [concept])
+
+    def test_copy_from_raises_when_head_is_processing_in_its_snapshot(self):
+        expansion, _, collection_v1 = self.head_with_head_concept_member()
+        collection_v1.seed_references()
+        copy = ExpansionFactory(collection_version=collection_v1)
+        stale_head = Expansion.objects.get(id=expansion.id)
+        Expansion.objects.filter(id=expansion.id).update(is_processing=True)
+
+        with self.assertRaises(Expansion.HeadExpansionProcessing):
+            copy.copy_from(stale_head, index=False)
+
+        self.assertFalse(copy.concepts.exists())
+
+    @patch('core.collections.models.Collection.save_changelog_and_comparison')
+    @patch('core.collections.models.Expansion.wait_until_processed')
+    def test_changelog_waits_for_versions_expansions(self, wait_mock, save_mock):
+        collection = OrganizationCollectionFactory()
+        collection_v1 = OrganizationCollectionFactory(
+            organization=collection.organization, version='v1', mnemonic=collection.mnemonic)
+        expansion = ExpansionFactory(collection_version=collection_v1)
+        collection_v1.expansion_uri = expansion.uri
+        collection_v1.save()
+
+        collection_version_compare(collection.uri, collection_v1.uri, True, 4, 'json', True)
+
+        wait_mock.assert_called_once()
+        save_mock.assert_called_once_with(collection.uri, collection_v1.uri)
 
     @patch('core.collections.models.seed_children_to_expansion')
     def test_persist_passes_copy_head_positionally(self, seed_mock):

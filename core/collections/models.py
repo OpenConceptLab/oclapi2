@@ -1360,6 +1360,9 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         'explicit_collection_versions', 'evaluated_collection_versions'
     )
 
+    class HeadExpansionProcessing(Exception):
+        pass
+
     class Meta:
         db_table = 'collection_expansions'
         indexes = [
@@ -1883,15 +1886,33 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         return get(collection_version.head, 'expansion')
 
     def copy_from(self, expansion, index=True):
-        concept_ids = self.copy_members_without_head_resources(expansion.concepts, Concept)
-        mapping_ids = self.copy_members_without_head_resources(expansion.mappings, Mapping)
-        for relation in self.REPO_VERSION_RELATIONS:
-            getattr(self, relation).set(getattr(expansion, relation).all())
-        self.parameters = expansion.parameters
-        self.unresolved_repo_versions = expansion.unresolved_repo_versions
-        self.save(update_fields=['parameters', 'unresolved_repo_versions'])
+        """Copies from one snapshot of HEAD. False when HEAD's references no longer match this version's"""
+        connection = transaction.get_connection()
+        is_outermost = not connection.in_atomic_block
+        with transaction.atomic():
+            if is_outermost:
+                with connection.cursor() as cursor:
+                    cursor.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
+            expansion.refresh_from_db()
+            if expansion.is_processing:
+                raise self.HeadExpansionProcessing(expansion.uri)
+            if not self.has_same_references_as(expansion.collection_version):
+                return False
+            concept_ids = self.copy_members_without_head_resources(expansion.concepts, Concept)
+            mapping_ids = self.copy_members_without_head_resources(expansion.mappings, Mapping)
+            for relation in self.REPO_VERSION_RELATIONS:
+                getattr(self, relation).set(getattr(expansion, relation).all())
+            self.parameters = expansion.parameters
+            self.unresolved_repo_versions = expansion.unresolved_repo_versions
+            self.save(update_fields=['parameters', 'unresolved_repo_versions'])
         if index:
             self.index_resources(concept_ids, mapping_ids)
+        return True
+
+    def has_same_references_as(self, collection):
+        def get_expressions(_collection):
+            return sorted(_collection.references.values_list('expression', 'include'))
+        return get_expressions(self.collection_version) == get_expressions(collection)
 
     def copy_members_without_head_resources(self, members, klass, batch_size=5000):
         """Adds members with each HEAD resource replaced by its latest resource version, in references too"""
@@ -1911,11 +1932,6 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             copied_ids += ids
         return copied_ids
 
-    @property
-    def is_head_expansion_processing(self):
-        head_expansion = get(self.collection_version.head, 'expansion')
-        return bool(get(head_expansion, 'is_processing'))
-
     @staticmethod
     def get_latest_versions_of_head_resources(members, klass):
         head_ids = members.filter(id=F('versioned_object_id')).values_list('id', flat=True)
@@ -1925,8 +1941,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
 
     def seed_children(self, index=True, force_reevaluate=False, copy_head=False):
         head_expansion = self.get_head_expansion_to_copy() if copy_head and not force_reevaluate else None
-        if head_expansion:
-            self.copy_from(head_expansion, index)
+        if head_expansion and self.copy_from(head_expansion, index):
             return
         self.add_references(
             references=self.collection_version.references,

@@ -465,10 +465,11 @@ def seed_children_to_expansion(self, expansion_id, index=True, force_reevaluate=
     from core.collections.models import Expansion
     expansion = Expansion.objects.filter(id=expansion_id).first()
     if expansion:
-        # copying a HEAD expansion that is being built would freeze it half-seeded, so wait for it
-        if copy_head and expansion.is_head_expansion_processing:
-            raise self.retry(countdown=300, max_retries=288)
-        expansion.seed_children(index=index, force_reevaluate=force_reevaluate, copy_head=copy_head)
+        try:
+            expansion.seed_children(index=index, force_reevaluate=force_reevaluate, copy_head=copy_head)
+        except Expansion.HeadExpansionProcessing as ex:
+            # copying a HEAD expansion that is being built would freeze it half-seeded, so wait for it
+            raise self.retry(countdown=300, max_retries=288) from ex
         expansion.clear_processing(True)
 
 
@@ -1266,6 +1267,10 @@ def collection_version_compare(
         version1_uri, version2_uri, is_changelog, verbosity, format_type='json', save_both=False):
     from core.collections.models import Collection
     if save_both:
+        # a new version's expansion can still be seeding, and its changelog would miss those members
+        for version in Collection.objects.filter(uri__in=[version1_uri, version2_uri], expansion_uri__isnull=False):
+            if version.expansion:
+                version.expansion.wait_until_processed()
         Collection.save_changelog_and_comparison(version1_uri, version2_uri)
         return 1
     return Collection.run_diff(version1_uri, version2_uri, is_changelog, verbosity, format_type)
