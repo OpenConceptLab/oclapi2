@@ -1254,8 +1254,11 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 obj.sibling_versions.update(is_latest_version=False)
 
             task_args = (obj.resource_type.lower(), obj.id, not is_test_mode, sync)
-            if is_test_mode or sync:
+            if is_test_mode:
                 seed_children_to_new_version(*task_args)
+            elif sync:
+                # after commit, so seeding can read HEAD in a transaction of its own
+                transaction.on_commit(lambda: seed_children_to_new_version(*task_args))
             else:
                 from core.tasks.models import Task
                 task = Task.new(

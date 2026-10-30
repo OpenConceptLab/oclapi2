@@ -436,7 +436,7 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                 else:
                     instance.index_children(sync=False, user=instance.created_by)
             elif autoexpand:
-                instance.cascade_children_to_expansion(index=True, sync=sync)
+                instance.cascade_children_to_expansion(index=True, sync=sync, copy_head=True)
                 instance.update_children_counts(sync)
 
             if export:
@@ -460,12 +460,16 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
             instance.remove_processing(task_id)
 
 
-@app.task
-def seed_children_to_expansion(expansion_id, index=True, force_reevaluate=False):
+@app.task(bind=True)
+def seed_children_to_expansion(self, expansion_id, index=True, force_reevaluate=False, copy_head=False):  # pylint: disable=too-many-arguments
     from core.collections.models import Expansion
     expansion = Expansion.objects.filter(id=expansion_id).first()
     if expansion:
-        expansion.seed_children(index=index, force_reevaluate=force_reevaluate)
+        try:
+            expansion.seed_children(index=index, force_reevaluate=force_reevaluate, copy_head=copy_head)
+        except Expansion.HeadExpansionProcessing as ex:
+            # copying a HEAD expansion that is being built would freeze it half-seeded, so wait for it
+            raise self.retry(countdown=300, max_retries=288) from ex
         expansion.clear_processing(True)
 
 
@@ -1263,6 +1267,10 @@ def collection_version_compare(
         version1_uri, version2_uri, is_changelog, verbosity, format_type='json', save_both=False):
     from core.collections.models import Collection
     if save_both:
+        # a new version's expansion can still be seeding, and its changelog would miss those members
+        for version in Collection.objects.filter(uri__in=[version1_uri, version2_uri], expansion_uri__isnull=False):
+            if version.expansion:
+                version.expansion.wait_until_processed()
         Collection.save_changelog_and_comparison(version1_uri, version2_uri)
         return 1
     return Collection.run_diff(version1_uri, version2_uri, is_changelog, verbosity, format_type)
