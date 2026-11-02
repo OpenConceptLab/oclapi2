@@ -178,7 +178,7 @@ class MinIO(CloudStorageServiceInterface):
                 prefix = prefix[:-1]
             objects = self.client.list_objects(bucket_name=self.bucket_name, prefix=prefix, recursive=True)
             return [
-                {'Key': obj.object_name} for obj in objects
+                {'Key': obj.object_name, 'LastModified': obj.last_modified} for obj in objects
                 if not key_pattern or re.fullmatch(key_pattern, obj.object_name)]
         except S3Error as e:
             raise Exception(f"Could not fetch keys from bucket {self.bucket_name}. Error: {e}") from e  # pylint: disable=broad-exception-raised

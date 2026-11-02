@@ -537,8 +537,8 @@ class MinIOTest(TestCase):
         # Mock list_objects method
         mock_client = mock_minio_client.return_value
         mock_client.list_objects = MagicMock(return_value=[
-            MagicMock(object_name="test-file1.txt"),
-            MagicMock(object_name="test-file2.txt")
+            MagicMock(object_name="test-file1.txt", last_modified="t1"),
+            MagicMock(object_name="test-file2.txt", last_modified="t2")
         ])
 
         client = MinIO()
@@ -546,22 +546,26 @@ class MinIOTest(TestCase):
         keys = client._MinIO__fetch_keys(prefix="test/", delimiter='/')  # pylint: disable=protected-access
 
         # Assert that the correct keys were fetched
-        self.assertEqual(keys, [{'Key': "test-file1.txt"}, {'Key': "test-file2.txt"}])
+        self.assertEqual(keys, [
+            {'Key': "test-file1.txt", 'LastModified': "t1"}, {'Key': "test-file2.txt", 'LastModified': "t2"}])
         mock_client.list_objects.assert_called_once_with(bucket_name="bucket", prefix="test", recursive=True)
 
         # Call the __fetch_keys method
         keys = client._MinIO__fetch_keys(prefix="test/", delimiter='')  # pylint: disable=protected-access
 
         # Assert that the correct keys were fetched
-        self.assertEqual(keys, [{'Key': "test-file1.txt"}, {'Key': "test-file2.txt"}])
+        self.assertEqual(keys, [
+            {'Key': "test-file1.txt", 'LastModified': "t1"}, {'Key': "test-file2.txt", 'LastModified': "t2"}])
         mock_client.list_objects.assert_called_with(bucket_name="bucket", prefix="test/", recursive=True)
 
     @patch("core.services.storages.cloud.minio.Minio")
     def test_key_pattern(self, mock_minio_client):
-        own = Mock(object_name='foo/v1.8.2026-10-01_090000.zip')
-        sibling = Mock(object_name='foo/v1.8.24.1.2026-10-02_090000.zip')
+        now = timezone.now()
+        older = Mock(object_name='foo/v1.8.2026-09-30_090000.zip', last_modified=now - timedelta(days=2))
+        own = Mock(object_name='foo/v1.8.2026-10-01_090000.zip', last_modified=now - timedelta(days=1))
+        sibling = Mock(object_name='foo/v1.8.24.1.2026-10-02_090000.zip', last_modified=now)
         mock_client = mock_minio_client.return_value
-        mock_client.list_objects = MagicMock(side_effect=lambda **kwargs: iter([own, sibling]))
+        mock_client.list_objects = MagicMock(side_effect=lambda **kwargs: iter([older, own, sibling]))
         mock_client.remove_objects = MagicMock(return_value=[])
         key_pattern = r'foo/v1\.8\.(\d{4})-(\d{2})-(\d{2})_(\d{6})\.zip'
         client = MinIO()
@@ -572,7 +576,7 @@ class MinIOTest(TestCase):
         client.delete_objects('foo/v1.8.', key_pattern=key_pattern)
 
         deleted = list(mock_client.remove_objects.call_args.kwargs['delete_object_list'])
-        self.assertEqual([d._name for d in deleted], [own.object_name])  # pylint: disable=protected-access
+        self.assertEqual([d._name for d in deleted], [older.object_name, own.object_name])  # pylint: disable=protected-access
 
     @patch("core.services.storages.cloud.minio.Minio")
     def test_delete_objects(self, mock_minio_client):
