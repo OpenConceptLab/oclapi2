@@ -1,5 +1,9 @@
 import datetime
+import io
 from unittest.mock import patch
+
+import boto3
+from moto import mock_aws
 
 from django.db import IntegrityError, transaction
 from django.test import override_settings, tag
@@ -11,6 +15,7 @@ from core.collections.tests.factories import OrganizationCollectionFactory, User
 from core.common.constants import HEAD
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.orgs.tests.factories import OrganizationFactory
+from core.services.storages.cloud.aws import S3
 from core.repos.models import RepoExternalExport, Repository, VersionChangelog, VersionChecksumMap
 from core.sources.documents import SourceDocument
 from core.sources.models import Source
@@ -219,6 +224,57 @@ class RepoExportDownloadNameTest(OCLTestCase):
 
 
 @tag('es')
+@mock_aws
+class RepoExportSiblingVersionsTest(OCLTestCase):
+    def setUp(self):
+        super().setUp()
+        boto3.resource('s3', region_name='us-east-1').create_bucket(Bucket='oclapi2-dev')
+        org = OrganizationFactory(mnemonic='PIH')
+        self.v1_8 = OrganizationSourceFactory(organization=org, mnemonic='PIH', version='1.8')
+        self.v1_8_24 = OrganizationSourceFactory(organization=org, mnemonic='PIH', version='1.8.24')
+        self.v1_8_24_1 = OrganizationSourceFactory(organization=org, mnemonic='PIH', version='1.8.24.1')
+        self.s3 = S3()
+
+    def upload(self, version, timestamp):
+        key = version.get_version_export_path(suffix=f'{timestamp}.zip')
+        self.s3.upload(key, io.BytesIO(b'content'))
+        return key
+
+    @staticmethod
+    def remaining_keys():
+        return sorted(
+            obj.key for obj in boto3.resource('s3', region_name='us-east-1').Bucket('oclapi2-dev').objects.all())
+
+    def test_get_export_path_ignores_sibling_versions(self):
+        own_key = self.upload(self.v1_8_24, '2026-10-01_090000')
+        self.upload(self.v1_8_24_1, '2026-10-02_090000')
+
+        self.assertEqual(self.v1_8_24.get_export_path(), own_key)
+
+    def test_has_export_ignores_sibling_versions(self):
+        self.upload(self.v1_8_24, '2026-10-01_090000')
+        self.upload(self.v1_8_24_1, '2026-10-02_090000')
+
+        self.assertFalse(self.v1_8.has_export())
+        self.assertTrue(self.v1_8_24.has_export())
+        self.assertTrue(self.v1_8_24_1.has_export())
+
+    def test_has_export_with_legacy_key(self):
+        self.s3.upload(self.v1_8.get_version_export_path(suffix='20260930123456.zip'), io.BytesIO(b'content'))
+
+        self.assertTrue(self.v1_8.has_export())
+
+    def test_delete_export_paths_leaves_sibling_exports(self):
+        self.upload(self.v1_8, '2026-10-01_090000')
+        self.upload(self.v1_8, '2026-10-03_090000')
+        key_1_8_24 = self.upload(self.v1_8_24, '2026-10-01_090000')
+        key_1_8_24_1 = self.upload(self.v1_8_24_1, '2026-10-02_090000')
+
+        self.v1_8.delete_export_paths(self.v1_8.get_export_paths_to_delete(), sync=True)
+
+        self.assertEqual(self.remaining_keys(), sorted([key_1_8_24, key_1_8_24_1]))
+
+
 class UserOrganizationRepoListViewTest(OCLAPITestCase):
     def test_get(self):
         CollectionDocument._index.delete()  # pylint: disable=protected-access

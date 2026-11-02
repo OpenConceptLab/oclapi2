@@ -1,4 +1,5 @@
 import base64
+import re
 
 from azure.storage.blob import BlobServiceClient, ContentSettings, BlobPrefix
 from django.conf import settings
@@ -30,29 +31,33 @@ class BlobStorage(CloudStorageServiceInterface):
         except:  # pylint: disable=bare-except
             return False
 
-    def has_path(self, prefix='/', delimiter='/'):
+    def has_path(self, prefix='/', delimiter='/', key_pattern=None):
         try:
             blobs = self._fetch_blobs(prefix, delimiter)
-            return any(blob.name.startswith(prefix) for blob in blobs if not isinstance(blob, BlobPrefix))
+            return any(
+                blob.name.startswith(prefix) and self._matches(blob.name, key_pattern)
+                for blob in blobs if not isinstance(blob, BlobPrefix))
         except:  # pylint: disable=bare-except
             return False
 
-    def get_last_key_from_path(self, prefix='/', delimiter=''):
+    def get_last_key_from_path(self, prefix='/', delimiter='', key_pattern=None):
         try:
             if delimiter and not prefix.endswith(delimiter):
                 prefix = prefix + delimiter
             blobs = self._fetch_blobs(prefix, delimiter)
-            blob_names = [[blob.name, blob.last_modified] for blob in blobs if not isinstance(blob, BlobPrefix)]
+            blob_names = [
+                [blob.name, blob.last_modified] for blob in blobs
+                if not isinstance(blob, BlobPrefix) and self._matches(blob.name, key_pattern)]
             return sorted(
                 blob_names, key=lambda x: x[1], reverse=True)[0][0] if len(blob_names) > 1 else blob_names[0][0]
         except:  # pylint: disable=bare-except
             return None
 
-    def delete_objects(self, path):
+    def delete_objects(self, path, key_pattern=None):
         count_deleted = 0
         try:
             for blob in self._fetch_blobs(path, ''):
-                if not isinstance(blob, BlobPrefix):
+                if not isinstance(blob, BlobPrefix) and self._matches(blob.name, key_pattern):
                     self._remove(blob.name)
                     count_deleted += 1
             return count_deleted
@@ -139,6 +144,10 @@ class BlobStorage(CloudStorageServiceInterface):
         if delimiter and prefix.endswith(delimiter):
             prefix = prefix[:-1]
         return self.client.walk_blobs(name_starts_with=prefix, delimiter=delimiter)
+
+    @staticmethod
+    def _matches(name, key_pattern):
+        return not key_pattern or bool(re.fullmatch(key_pattern, name))
 
     def _remove(self, blob_name):
         return self.__get_blob_client(blob_name).delete_blob()

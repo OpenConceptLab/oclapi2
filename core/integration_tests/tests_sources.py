@@ -1,6 +1,10 @@
+import io
 import json
 import time
 import zipfile
+
+import boto3
+from moto import mock_aws
 
 from celery_once import AlreadyQueued
 from django.core.cache import cache
@@ -32,6 +36,7 @@ from core.orgs.models import Organization
 from core.sources.models import Source, CloneLimitExceeded
 from core.sources.serializers import SourceDetailSerializer, SourceVersionExportSerializer
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
+from core.services.storages.cloud.aws import S3
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -1154,7 +1159,8 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 204)
-        s3_has_path_mock.assert_called_once_with("users/username/username_source1_v1.")
+        s3_has_path_mock.assert_called_once_with(
+            "users/username/username_source1_v1.", key_pattern=ANY)
 
     @patch('core.services.storages.cloud.aws.S3.url_for')
     @patch('core.services.storages.cloud.aws.S3.exists')
@@ -1193,8 +1199,10 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response['Location'], 'https://signed.example/v1.zip')
-        s3_has_path_mock.assert_called_once_with("users/username/username_source1_v1.")
-        s3_get_last_key_from_path_mock.assert_called_once_with("users/username/username_source1_v1.")
+        s3_has_path_mock.assert_called_once_with(
+            "users/username/username_source1_v1.", key_pattern=ANY)
+        s3_get_last_key_from_path_mock.assert_called_once_with(
+            "users/username/username_source1_v1.", key_pattern=ANY)
         s3_url_for_mock.assert_called_once_with(
             f'users/username/username_source1_v1.{self.v1_updated_at}.zip',
             filename=f'users_username_sources_source1_v1_{self.v1_updated_at}.zip'
@@ -1297,7 +1305,8 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response['URL'], self.source_v1.uri + 'export/')
-        s3_has_path_mock.assert_called_once_with("users/username/username_source1_v1.")
+        s3_has_path_mock.assert_called_once_with(
+            "users/username/username_source1_v1.", key_pattern=ANY)
 
     @patch('core.sources.views.export_source')
     @patch('core.services.storages.cloud.aws.S3.exists')
@@ -1326,7 +1335,8 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 202)
-        s3_has_path_mock.assert_called_once_with("users/username/username_source1_v1.")
+        s3_has_path_mock.assert_called_once_with(
+            "users/username/username_source1_v1.", key_pattern=ANY)
         export_source_mock.apply_async.assert_called_once_with((self.source_v1.id,), queue='default', task_id=ANY)
 
     @patch('core.sources.views.export_source')
@@ -1372,7 +1382,8 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 409)
-        s3_has_path_mock.assert_called_once_with("users/username/username_source1_v1.")
+        s3_has_path_mock.assert_called_once_with(
+            "users/username/username_source1_v1.", key_pattern=ANY)
         export_source_mock.apply_async.assert_called_once_with((self.source_v1.id,), queue='default', task_id=ANY)
 
     def test_delete_405(self):
@@ -1449,6 +1460,72 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 401)
         s3_remove_mock.assert_not_called()
+
+def signed_url_for(_, key, filename=None):  # pylint: disable=unused-argument
+    return f'https://signed.example/{key}'
+
+
+@mock_aws
+class SourceVersionExportSiblingVersionsViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        boto3.resource('s3', region_name='us-east-1').create_bucket(Bucket='oclapi2-dev')
+        self.owner = UserProfileFactory(username='owner')
+        self.owner_token = self.owner.get_token()
+        self.other = UserProfileFactory(username='other')
+        self.other_token = self.other.get_token()
+        self.v1_8 = UserSourceFactory(user=self.owner, mnemonic='src', version='1.8')
+        self.v1_8_24 = UserSourceFactory(user=self.owner, mnemonic='src', version='1.8.24')
+        self.v1_8_24_1 = UserSourceFactory(user=self.owner, mnemonic='src', version='1.8.24.1')
+
+    def upload(self, version, timestamp):
+        key = version.get_version_export_path(suffix=f'{timestamp}.zip')
+        S3().upload(key, io.BytesIO(b'content'))
+        return key
+
+    def get_export(self, version, token):
+        return self.client.get(version.uri + 'export/', HTTP_AUTHORIZATION='Token ' + token, format='json')
+
+    @patch('core.services.storages.cloud.aws.S3.url_for', signed_url_for)
+    def test_get_serves_own_export_not_sibling(self):
+        own_key = self.upload(self.v1_8_24, '2026-10-01_090000')
+        self.upload(self.v1_8_24_1, '2026-10-02_090000')
+
+        response = self.get_export(self.v1_8_24, self.owner_token)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], f'https://signed.example/{own_key}')
+
+    @patch('core.services.storages.cloud.aws.S3.url_for', signed_url_for)
+    def test_get_204_when_only_siblings_have_exports(self):
+        self.upload(self.v1_8_24, '2026-10-01_090000')
+        self.upload(self.v1_8_24_1, '2026-10-02_090000')
+
+        response = self.get_export(self.v1_8, self.owner_token)
+
+        self.assertEqual(response.status_code, 204)
+
+    @patch('core.services.storages.cloud.aws.S3.url_for', signed_url_for)
+    def test_get_does_not_serve_private_sibling_export(self):
+        self.v1_8_24.public_access = 'None'
+        self.v1_8_24.save()
+        self.upload(self.v1_8_24, '2026-10-01_090000')
+
+        response = self.get_export(self.v1_8, self.other_token)
+
+        self.assertEqual(response.status_code, 204)
+
+    @patch('core.sources.views.export_source')
+    def test_post_exports_when_only_siblings_have_exports(self, export_source_mock):
+        export_source_mock.__name__ = 'export_source'
+        self.upload(self.v1_8_24, '2026-10-01_090000')
+
+        response = self.client.post(
+            self.v1_8.uri + 'export/', HTTP_AUTHORIZATION='Token ' + self.owner_token, format='json')
+
+        self.assertEqual(response.status_code, 202)
+        export_source_mock.apply_async.assert_called_once_with((self.v1_8.id,), queue='default', task_id=ANY)
+
 
 
 class SourceVersionExternalExportViewTest(OCLAPITestCase):

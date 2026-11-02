@@ -4,6 +4,7 @@ import json
 import mimetypes
 import os
 import random
+import re
 import shutil
 import tempfile
 import time
@@ -353,7 +354,8 @@ def write_export_file(
     s3_key = version.version_export_path
     export_service = get_export_service()
     if version.is_head:
-        export_service.delete_objects(version.get_version_export_path(suffix=None))
+        export_prefix = version.get_version_export_path(suffix=None)
+        export_service.delete_objects(export_prefix, key_pattern=get_export_key_pattern(export_prefix))
 
     upload_status_code = export_service.upload_file(
         key=s3_key, file_path=file_path, binary=True, metadata={'ContentType': 'application/zip'},
@@ -1027,3 +1029,12 @@ def encode_texts(texts):
     if settings.LM_DISABLED:
         return [None] * len(texts)
     return list(get_lm_model().encode([str(text) for text in texts], batch_size=settings.LM_ENCODE_BATCH_SIZE))
+
+
+EXPORT_KEY_TIMESTAMP_PATTERN = r'(\d{4})-?(\d{2})-?(\d{2})_?(\d{6})\.zip'
+
+
+def get_export_key_pattern(prefix):
+    if not prefix or not prefix.endswith('.'):
+        return None
+    return re.escape(prefix) + EXPORT_KEY_TIMESTAMP_PATTERN

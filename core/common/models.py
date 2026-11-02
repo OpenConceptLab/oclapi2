@@ -29,7 +29,7 @@ from core.common.tasks import update_collection_active_concepts_count, update_co
 from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version, \
     to_parent_uri, is_canonical_uri, get_export_service, from_string_to_date, get_truthy_values, \
     canonical_url_to_url_and_version, get_current_authorized_user, encode_string, decode_string, \
-    normalize_public_access
+    normalize_public_access, get_export_key_pattern, EXPORT_KEY_TIMESTAMP_PATTERN
 from core.common.utils import to_owner_uri
 from core.common.constants import VERSION_UNCOPYABLE_EXTRAS
 from core.settings import DEFAULT_LOCALE
@@ -1556,7 +1556,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         if self.is_head:
             return self.version_export_path
         service = get_export_service()
-        return service.get_last_key_from_path(self.get_version_export_path(suffix=None)) or self.version_export_path
+        prefix = self.get_version_export_path(suffix=None)
+        return service.get_last_key_from_path(
+            prefix, key_pattern=get_export_key_pattern(prefix)) or self.version_export_path
 
     def get_export_download_name(self, export_path):
         """
@@ -1569,8 +1571,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         # current (2026-09-30_123456) or legacy (20260930123456) key timestamp, anchored to the prefix because a key
         # listed under it can be another version's (1.8.24.1's under 1.8.24's)
         match = re.fullmatch(
-            re.escape(self.get_version_export_path(suffix=None)) + r'(\d{4})-?(\d{2})-?(\d{2})_?(\d{6})\.zip',
-            export_path)
+            re.escape(self.get_version_export_path(suffix=None)) + EXPORT_KEY_TIMESTAMP_PATTERN, export_path)
         if not match:
             return None
 
@@ -1586,7 +1587,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         service = get_export_service()
         if self.is_head:
             return service.exists(self.version_export_path)
-        return service.has_path(self.get_version_export_path(suffix=None))
+        prefix = self.get_version_export_path(suffix=None)
+        return service.has_path(prefix, key_pattern=get_export_key_pattern(prefix))
 
     def can_view_all_content(self, user):
         if get(user, 'is_anonymous'):

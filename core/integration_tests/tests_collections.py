@@ -2799,7 +2799,8 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 204)
-        s3_has_path_mock.assert_called_once_with("users/username/username_coll_v1.")
+        s3_has_path_mock.assert_called_once_with(
+            "users/username/username_coll_v1.", key_pattern=ANY)
 
     @patch('core.services.storages.cloud.aws.S3.url_for')
     @patch('core.services.storages.cloud.aws.S3.get_last_key_from_path')
@@ -2817,8 +2818,10 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response['Location'], 'https://signed.example/coll-v1.zip')
-        s3_has_path_mock.assert_called_once_with("users/username/username_coll_v1.")
-        s3_get_last_key_from_path_mock.assert_called_once_with("users/username/username_coll_v1.")
+        s3_has_path_mock.assert_called_once_with(
+            "users/username/username_coll_v1.", key_pattern=ANY)
+        s3_get_last_key_from_path_mock.assert_called_once_with(
+            "users/username/username_coll_v1.", key_pattern=ANY)
         s3_url_for_mock.assert_called_once_with(
             f'users/username/username_coll_v1.{self.v1_updated_at}.zip',
             filename=f'users_username_collections_coll_v1_{self.v1_updated_at}.zip'
@@ -2908,7 +2911,8 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response['URL'], self.collection_v1.uri + 'export/')
-        s3_has_path_mock.assert_called_once_with("users/username/username_coll_v1.")
+        s3_has_path_mock.assert_called_once_with(
+            "users/username/username_coll_v1.", key_pattern=ANY)
 
     @patch('core.collections.views.export_collection')
     @patch('core.services.storages.cloud.aws.S3.exists')
@@ -2937,7 +2941,8 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 202)
-        s3_has_path_mock.assert_called_once_with("users/username/username_coll_v1.")
+        s3_has_path_mock.assert_called_once_with(
+            "users/username/username_coll_v1.", key_pattern=ANY)
         export_collection_mock.apply_async.assert_called_once_with(
             (self.collection_v1.id,), task_id=ANY, queue='default')
         self.assertEqual(
@@ -2974,7 +2979,8 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 409)
-        s3_has_path_mock.assert_called_once_with("users/username/username_coll_v1.")
+        s3_has_path_mock.assert_called_once_with(
+            "users/username/username_coll_v1.", key_pattern=ANY)
         export_collection_mock.apply_async.assert_called_once_with(
             (self.collection_v1.id,), task_id=ANY, queue='default')
         self.assertEqual(
