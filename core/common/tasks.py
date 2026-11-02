@@ -417,7 +417,11 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                     instance.snapshot = CollectionDetailSerializer(head).data
                 instance.save(update_fields=['snapshot'])
             instance.get_checksums(recalculate=True)
-            instance.seed_references()
+            seed_from_head = is_collection and autoexpand and instance.can_seed_from_head_expansion()
+            if seed_from_head:
+                instance.seed_from_head_expansion()
+            else:
+                instance.seed_references()
             if is_source:
                 instance.seed_concepts(index=False)
                 instance.seed_mappings(index=False)
@@ -436,7 +440,8 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                 else:
                     instance.index_children(sync=False, user=instance.created_by)
             elif autoexpand:
-                instance.cascade_children_to_expansion(index=True, sync=sync, copy_head=True)
+                if not seed_from_head:
+                    instance.cascade_children_to_expansion(index=True, sync=sync)
                 instance.update_children_counts(sync)
 
             if export:
@@ -460,16 +465,12 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
             instance.remove_processing(task_id)
 
 
-@app.task(bind=True)
-def seed_children_to_expansion(self, expansion_id, index=True, force_reevaluate=False, copy_head=False):  # pylint: disable=too-many-arguments
+@app.task
+def seed_children_to_expansion(expansion_id, index=True, force_reevaluate=False):
     from core.collections.models import Expansion
     expansion = Expansion.objects.filter(id=expansion_id).first()
     if expansion:
-        try:
-            expansion.seed_children(index=index, force_reevaluate=force_reevaluate, copy_head=copy_head)
-        except Expansion.HeadExpansionProcessing as ex:
-            # copying a HEAD expansion that is being built would freeze it half-seeded, so wait for it
-            raise self.retry(countdown=300, max_retries=288) from ex
+        expansion.seed_children(index=index, force_reevaluate=force_reevaluate)
         expansion.clear_processing(True)
 
 
@@ -1174,12 +1175,16 @@ def generate_source_resources_checksums(repo_id, only_latest=False):  # pragma: 
 
 
 @app.task(ignore_result=True)
-def readd_references_to_expansion_on_references_removal(expansion_id, removed_reference_ids):
+def readd_references_to_expansion_on_references_removal(expansion_id, removed_reference_ids, process_id=None):
     from core.collections.models import Expansion
     expansion = Expansion.objects.filter(id=expansion_id).first()
-    if expansion and removed_reference_ids:
-        reference_to_readd = expansion.collection_version.references.exclude(id__in=removed_reference_ids)
-        expansion.add_references(reference_to_readd, True, True, False)
+    try:
+        if expansion and removed_reference_ids:
+            reference_to_readd = expansion.collection_version.references.exclude(id__in=removed_reference_ids)
+            expansion.add_references(reference_to_readd, True, True, False)
+    finally:
+        if expansion and process_id:
+            expansion.collection_version.remove_processing(process_id)
 
 
 @app.task(ignore_result=True)
@@ -1267,10 +1272,6 @@ def collection_version_compare(
         version1_uri, version2_uri, is_changelog, verbosity, format_type='json', save_both=False):
     from core.collections.models import Collection
     if save_both:
-        # a new version's expansion can still be seeding, and its changelog would miss those members
-        for version in Collection.objects.filter(uri__in=[version1_uri, version2_uri], expansion_uri__isnull=False):
-            if version.expansion:
-                version.expansion.wait_until_processed()
         Collection.save_changelog_and_comparison(version1_uri, version2_uri)
         return 1
     return Collection.run_diff(version1_uri, version2_uri, is_changelog, verbosity, format_type)

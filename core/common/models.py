@@ -1244,7 +1244,13 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             return errors
 
         is_test_mode = get(settings, 'TEST_MODE', False)
+        # a synchronous seed from HEAD runs in this transaction, so it needs this transaction's snapshot
+        is_repeatable_read = sync and not is_test_mode and not transaction.get_connection().in_atomic_block and \
+            obj.can_seed_from_head_expansion()
         with transaction.atomic():
+            if is_repeatable_read:
+                with transaction.get_connection().cursor() as cursor:
+                    cursor.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
             # Serialize version creation with destructive child operations on the HEAD repository.
             head = cls.objects.select_for_update().get(id=head.id)
             obj.update_version_data(head)
@@ -1254,11 +1260,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 obj.sibling_versions.update(is_latest_version=False)
 
             task_args = (obj.resource_type.lower(), obj.id, not is_test_mode, sync)
-            if is_test_mode:
+            if is_test_mode or sync:
                 seed_children_to_new_version(*task_args)
-            elif sync:
-                # after commit, so seeding can read HEAD in a transaction of its own
-                transaction.on_commit(lambda: seed_children_to_new_version(*task_args))
             else:
                 from core.tasks.models import Task
                 task = Task.new(
@@ -1286,6 +1289,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     def index_resources_for_self_as_latest_released(self, only_update=False):  # pylint: disable=unused-argument
         pass
+
+    def can_seed_from_head_expansion(self):
+        return False
 
     @classmethod
     def persist_changes(cls, obj, updated_by, original_schema, **kwargs):  # pylint: disable=too-many-locals,too-many-branches
