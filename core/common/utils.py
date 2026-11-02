@@ -1035,6 +1035,10 @@ EXPORT_KEY_TIMESTAMP_PATTERN = r'(\d{4})-?(\d{2})-?(\d{2})_?(\d{6})\.zip'
 
 
 def get_export_key_pattern(prefix):
+    """
+    Pattern for a version's own export keys under its dot-terminated export prefix, so a sibling version's keys
+    (1.8.24.1 under 1.8.24.) don't match. Other paths (external exports, map project files) get None: no filtering.
+    """
     if not prefix or not prefix.endswith('.'):
         return None
     return re.escape(prefix) + EXPORT_KEY_TIMESTAMP_PATTERN

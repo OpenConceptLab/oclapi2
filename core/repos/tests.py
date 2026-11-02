@@ -223,7 +223,6 @@ class RepoExportDownloadNameTest(OCLTestCase):
         )
 
 
-@tag('es')
 @mock_aws
 class RepoExportSiblingVersionsTest(OCLTestCase):
     def setUp(self):
@@ -275,6 +274,7 @@ class RepoExportSiblingVersionsTest(OCLTestCase):
         self.assertEqual(self.remaining_keys(), sorted([key_1_8_24, key_1_8_24_1]))
 
 
+@tag('es')
 class UserOrganizationRepoListViewTest(OCLAPITestCase):
     def test_get(self):
         CollectionDocument._index.delete()  # pylint: disable=protected-access

@@ -95,9 +95,9 @@ class S3(CloudStorageServiceInterface):
     def delete_objects(self, path, key_pattern=None):  # pragma: no cover
         try:
             keys = self.__filter_keys(self.__fetch_keys(prefix=path), key_pattern)
-            if keys:
+            for start in range(0, len(keys), 1000):
                 self.__resource().meta.client.delete_objects(
-                    Bucket=settings.AWS_STORAGE_BUCKET_NAME, Delete={'Objects': keys})
+                    Bucket=settings.AWS_STORAGE_BUCKET_NAME, Delete={'Objects': keys[start:start + 1000]})
         except:  # pylint: disable=bare-except
             pass
 
@@ -174,8 +174,10 @@ class S3(CloudStorageServiceInterface):
     def __fetch_keys(self, prefix='/', delimiter='/', verbose=False):  # pragma: no cover
         prefix = prefix[1:] if prefix.startswith(delimiter) else prefix
         s3_resource = self.__resource()
-        objects = s3_resource.meta.client.list_objects(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Prefix=prefix)
-        content = objects.get('Contents', [])
+        paginator = s3_resource.meta.client.get_paginator('list_objects')
+        content = []
+        for page in paginator.paginate(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Prefix=prefix):
+            content.extend(page.get('Contents', []))
         if verbose:
             return content
         return [{'Key': k} for k in [obj['Key'] for obj in content]]
