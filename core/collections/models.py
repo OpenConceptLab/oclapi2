@@ -903,10 +903,13 @@ class CollectionReference(models.Model):
         return list({reference.expression: reference for reference in references}.values())
 
     def __get_repo_and_resource_version(self, resource, is_intensional, is_extensional, locked_version=None):
+        if locked_version:
+            is_head = locked_version.is_head
+            return locked_version.version, resource.version if is_intensional and is_head else None
         repo_version = self.version
         resource_version = None
         if not self.version and self.transform:
-            repo_version = get(locked_version, 'version') or get(resource.latest_source_version, 'version') or HEAD
+            repo_version = get(resource.latest_source_version, 'version') or HEAD
             is_head = repo_version == HEAD
             if is_intensional and is_head:
                 resource_version = resource.version
@@ -941,9 +944,11 @@ class CollectionReference(models.Model):
         references = []
 
         if self.should_generate_multiple_references():
+            # read before get_concepts, whose transform sets version to the resource's latest release
+            is_versionless = not self.version
             concepts, mappings = self.get_concepts()
             system_version = self.resolve_system_version
-            locked_version = system_version if system_version and system_version.id in [
+            locked_version = system_version if is_versionless and system_version and system_version.id in [
                 locked.id for locked in self.get_locked_system_versions(system_version)] else None
             references += self.__generate_references_for_type(concepts, 'concepts', locked_version)
             references += self.__generate_references_for_type(mappings, 'mappings', locked_version)
