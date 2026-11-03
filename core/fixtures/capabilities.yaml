@@ -33,3 +33,8 @@
   fields:
     name: clone.resources_per_call
     description: Most concepts + mappings one $clone call may create
+- model: "capabilities.capability"
+  pk: 8
+  fields:
+    name: ai_assistant.decision_calls
+    description: Number of AI Assistant invocations run on a decision model (cheaper, separate from ai_assistant.calls)
