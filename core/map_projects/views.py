@@ -2,6 +2,7 @@ from django.db import transaction
 from django.db.models import CharField, Q
 from django.db.models.functions import Cast
 from django.shortcuts import get_object_or_404
+from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
 from rest_framework.generics import RetrieveUpdateDestroyAPIView, RetrieveAPIView, CreateAPIView, \
     RetrieveUpdateAPIView
@@ -10,6 +11,7 @@ from rest_framework.response import Response
 from core.capabilities.constants import CAPABILITY_EXCEEDED_ERROR_CODE, CAPABILITY_NOT_ENTITLED_ERROR_CODE, \
     MAPPER_PROJECTS_CAPABILITY_ID, MAPPER_ROWS_PER_PROJECT_CAPABILITY, MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID
 from core.capabilities.exceptions import MapProjectCapacityExceeded
+from core.common.swagger_parameters import q_param
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin
 from core.common.permissions import CanEditConceptDictionary, CanCreateOrgMapProjects, \
     CanUseCustomMapperAlgorithms, HasMapProjectParentOwnership, HasMapProjectCapacity
@@ -80,6 +82,7 @@ class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListW
                 Q(name__icontains=search_query) | Q(id_text__icontains=search_query))
         return super().filter_queryset_by_public_access(queryset)
 
+    @swagger_auto_schema(manual_parameters=[q_param])
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
 

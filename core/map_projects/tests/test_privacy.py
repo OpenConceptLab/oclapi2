@@ -43,6 +43,19 @@ class MapProjectPrivacyTest(MapProjectAbstractViewTest):
         user_orgs_url = f'/users/{self.user.username}/orgs/map-projects/?q=kenya'
         self.assertEqual(len(self.get_list(user_orgs_url, self.user).data), 1)
 
+    def test_user_list_search_pages_the_filtered_set(self):
+        for name in ['Malaria A', 'Malaria B', 'Malaria C', 'Kenya HIV']:
+            MapProjectFactory(user=self.user, name=name)
+        url = f'/users/{self.user.username}/map-projects/?q=malaria&limit=1&page=2'
+
+        response = self.get_list(url, self.user)
+
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['name'], 'Malaria B')
+        self.assertEqual(response['num_found'], '3')
+        self.assertEqual(response['pages'], '3')
+        self.assertEqual(len(self.get_list(url, UserProfileFactory()).data), 0)
+
     @patch('core.services.storages.cloud.aws.S3.upload')
     def test_post_is_private_by_default(self, _upload_mock):
         url = f'/users/{self.user.username}/map-projects/'
