@@ -3559,3 +3559,54 @@ class RepoExportCollidingVersionsViewTest(OCLAPITestCase):
         self.assertNotEqual(collection.get_version_export_path(), other.get_version_export_path())
         self.upload(other)
         self.assertFalse(collection.has_export())
+
+    @patch('core.collections.views.export_collection')
+    @patch('core.sources.views.export_source')
+    def test_post_for_private_collection_and_public_source(self, export_source_mock, export_collection_mock):
+        export_source_mock.__name__ = 'export_source'
+        export_collection_mock.__name__ = 'export_collection'
+        private_collection = UserCollectionFactory(
+            user=self.owner, mnemonic='repo', version='1.8', public_access='None')
+        self.upload(private_collection)
+
+        self.assertEqual(self.request('post', self.public_source, self.other_token).status_code, 202)
+        export_source_mock.apply_async.assert_called_once()
+        export_collection_mock.apply_async.assert_not_called()
+
+        self.assertIn(self.request('post', private_collection, self.other_token).status_code, (403, 404))
+        export_collection_mock.apply_async.assert_not_called()
+        self.assertEqual(
+            self.request('post', private_collection, self.owner_token, '?noRedirect=true').status_code, 204)
+        export_collection_mock.apply_async.assert_not_called()
+
+    @patch('core.services.storages.cloud.aws.S3.url_for', signed_url_for)
+    def test_get_and_delete_for_private_collection_and_public_source(self):
+        private_collection = UserCollectionFactory(
+            user=self.owner, mnemonic='repo', version='1.8', public_access='None')
+        source_key = self.upload(self.public_source)
+        collection_key = self.upload(private_collection)
+
+        self.assertIn(self.request('get', private_collection, self.other_token).status_code, (403, 404))
+        response = self.request('get', self.public_source, self.other_token)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], f'https://signed.example/{source_key}')
+        self.assertEqual(self.request('delete', private_collection, self.other_token).status_code, 403)
+        self.assertTrue(private_collection.has_export())
+        self.assertEqual(self.request('delete', private_collection, self.owner_token).status_code, 204)
+        self.assertEqual(self.public_source.get_export_path(), source_key)
+        self.assertNotEqual(source_key, collection_key)
+
+    def test_legacy_export_of_version_and_expansion_lookalike_is_not_served(self):
+        public = UserCollectionFactory(user=self.owner, mnemonic='coll', version='a_b', public_access='View')
+        private = UserCollectionFactory(user=self.owner, mnemonic='coll', version='a', public_access='None')
+        expansion = ExpansionFactory(collection_version=private, mnemonic='b')
+        private.expansion_uri = expansion.uri
+        private.save()
+        legacy = public.get_legacy_version_export_path(suffix='2026-10-01_090000.zip')
+        self.assertEqual(legacy, private.get_legacy_version_export_path(suffix='2026-10-01_090000.zip'))
+        S3().upload(legacy, io.BytesIO(b'content'))
+
+        self.assertFalse(public.owns_legacy_export_path())
+        self.assertFalse(private.owns_legacy_export_path())
+        self.assertFalse(public.has_export())
+        self.assertFalse(private.has_export())

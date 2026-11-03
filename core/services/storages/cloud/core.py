@@ -55,11 +55,13 @@ class CloudStorageServiceInterface:
         """
         Returns the keys under prefix that match key_pattern
         """
+        raise NotImplementedError
 
     def copy(self, source_key, target_key):
         """
         Copies an object to another key
         """
+        raise NotImplementedError
 
     def remove(self, key):
         """

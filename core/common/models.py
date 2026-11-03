@@ -1559,7 +1559,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         return path
 
-    def get_legacy_version_export_path(self, suffix='*'):
+    def get_legacy_version_export_path(self, suffix='*', with_expansion=True):
         """
         Pre-unique export key prefix. It has no repo type and forces a 'v' on the version, so versions '1.8' and 'v1.8',
         or a source and a collection of the same name, build the same one.
@@ -1572,7 +1572,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         owner_mnemonic = owner.mnemonic
         owner_type = f'{owner.get_url_kwarg()}s'
         path = f"{owner_type}/{owner_mnemonic}/{owner_mnemonic}_{self.mnemonic}_{version}"
-        expansion = get(self, 'expansion.mnemonic')
+        expansion = get(self, 'expansion.mnemonic') if with_expansion else None
         if expansion:
             path = f"{path}_{expansion}"
         path = f'{path}.'
@@ -1585,19 +1585,25 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     def owns_legacy_export_path(self):
         """
         True when no other source or collection version builds this version's legacy export prefix, so the keys
-        under it can only be its own.
+        under it can only be its own. Underscores in the old format also let a version stand in for an expansion
+        (version 'a_b' and version 'a' with expansion 'b'), so every version of the owner whose mnemonic could
+        be part of the prefix is compared, not only this one's name variants.
         """
         from core.sources.models import Source
         from core.collections.models import Collection
 
         legacy_path = self.get_legacy_version_export_path(suffix=None)
-        bare_version = re.sub(r'^[vV]', '', self.version)
+        mnemonic = str(self.mnemonic)
+        mnemonics = [mnemonic[:i] for i in range(1, len(mnemonic) + 1)]
+        mnemonic_criteria = Q(mnemonic__in=mnemonics) | Q(mnemonic__startswith=mnemonic)
         for model in (Source, Collection):
             candidates = model.objects.filter(
-                mnemonic=self.mnemonic, organization_id=self.organization_id, user_id=self.user_id
-            ).filter(Q(version__iexact=bare_version) | Q(version__iexact=f'v{bare_version}'))
+                mnemonic_criteria, organization_id=self.organization_id, user_id=self.user_id)
             for candidate in candidates:
-                if candidate.id != self.id and candidate.get_legacy_version_export_path(suffix=None) == legacy_path:
+                if isinstance(self, model) and candidate.id == self.id:
+                    continue
+                base = candidate.get_legacy_version_export_path(suffix=None, with_expansion=False).rstrip('.')
+                if legacy_path.startswith(base) and candidate.get_legacy_version_export_path(suffix=None) == legacy_path:
                     return False
         return True
 

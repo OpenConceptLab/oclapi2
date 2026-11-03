@@ -6,6 +6,7 @@ from io import BytesIO
 
 from django.utils.http import content_disposition_header
 from minio import Minio, S3Error
+from minio.commonconfig import CopySource
 from minio.deleteobjects import DeleteObject
 from pydash import get
 
@@ -209,6 +210,22 @@ class MinIO(CloudStorageServiceInterface):
                 raise Exception(f"Could not delete object {error.code}. {error.message}. Error: {error}")  # pylint: disable=broad-exception-raised
         except S3Error as e:
             raise Exception(f"Error occurred during delete operation. Error: {e}") from e  # pylint: disable=broad-exception-raised
+
+    def get_keys(self, prefix, key_pattern=None):
+        try:
+            return [
+                obj.object_name for obj in self.client.list_objects(
+                    bucket_name=self.bucket_name, prefix=prefix, recursive=True)
+                if not key_pattern or re.fullmatch(key_pattern, obj.object_name)]
+        except S3Error as e:
+            raise Exception(f"Could not list keys under {prefix}. Error: {e}") from e  # pylint: disable=broad-exception-raised
+
+    def copy(self, source_key, target_key):
+        try:
+            self.client.copy_object(
+                self.bucket_name, target_key, CopySource(self.bucket_name, source_key))
+        except S3Error as e:
+            raise Exception(f"Could not copy {source_key} to {target_key}. Error: {e}") from e  # pylint: disable=broad-exception-raised
 
     def remove(self, key):
         """
