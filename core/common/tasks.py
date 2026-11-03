@@ -417,10 +417,9 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                     instance.snapshot = CollectionDetailSerializer(head).data
                 instance.save(update_fields=['snapshot'])
             instance.get_checksums(recalculate=True)
-            seed_from_head = is_collection and autoexpand and instance.can_seed_from_head_expansion()
-            if seed_from_head:
+            seed_from_head = is_collection and autoexpand and instance.can_seed_from_head_expansion() and \
                 instance.seed_from_head_expansion()
-            else:
+            if not seed_from_head:
                 instance.seed_references()
             if is_source:
                 instance.seed_concepts(index=False)
@@ -1175,16 +1174,12 @@ def generate_source_resources_checksums(repo_id, only_latest=False):  # pragma: 
 
 
 @app.task(ignore_result=True)
-def readd_references_to_expansion_on_references_removal(expansion_id, removed_reference_ids, process_id=None):
+def readd_references_to_expansion_on_references_removal(expansion_id, removed_reference_ids):
     from core.collections.models import Expansion
     expansion = Expansion.objects.filter(id=expansion_id).first()
-    try:
-        if expansion and removed_reference_ids:
-            reference_to_readd = expansion.collection_version.references.exclude(id__in=removed_reference_ids)
-            expansion.add_references(reference_to_readd, True, True, False)
-    finally:
-        if expansion and process_id:
-            expansion.collection_version.remove_processing(process_id)
+    if expansion and removed_reference_ids:
+        reference_to_readd = expansion.collection_version.references.exclude(id__in=removed_reference_ids)
+        expansion.add_references(reference_to_readd, True, True, False)
 
 
 @app.task(ignore_result=True)

@@ -1,11 +1,12 @@
 import time
 
+from celery.states import SUCCESS
 from celery_once import AlreadyQueued
 from dirtyfields import DirtyFieldsMixin
 from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
-from django.db import models, transaction
+from django.db import models, transaction, OperationalError
 from django.db.models import UniqueConstraint, F, QuerySet, Max, OuterRef, Subquery, Exists
 from django.utils import timezone
 from django.utils.functional import cached_property
@@ -317,14 +318,16 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
     def delete_references(self, expressions):
         if expressions == ALL:  # Deprecated: Old way
-            references_to_be_deleted = self.references
-            if self.expansion_uri:
-                self.expansion.delete_expressions(expressions)
-        else:
-            references_to_be_deleted = self.references.filter(expression__in=expressions)
-            if self.expansion_uri:
-                self.expansion.delete_references(references_to_be_deleted)
+            # one transaction, so no one sees the expansion emptied while the references remain
+            with transaction.atomic():
+                if self.expansion_uri:
+                    self.expansion.delete_expressions(expressions)
+                self.references.all().delete()
+            return
 
+        references_to_be_deleted = self.references.filter(expression__in=expressions)
+        if self.expansion_uri:
+            self.expansion.delete_references(references_to_be_deleted)
         references_to_be_deleted.all().delete()
 
     def get_cascaded_mapping_uris_from_concept_expressions(self, expressions):
@@ -373,10 +376,6 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         expansion = self.expansion if CollectionReference.is_expansion_locked_repo_version_on() else None
         return list(expansion.evaluated_source_versions.filter(is_active=True).order_by('-id')) if expansion else []
 
-    @property
-    def has_pending_expansion_readd(self):
-        return any(str(_id).startswith(Expansion.READD_PROCESS_PREFIX) for _id in self._background_process_ids or [])
-
     def can_seed_from_head_expansion(self):
         return bool(
             not self.is_head and self.should_auto_expand and CollectionReference.is_expansion_locked_repo_version_on()
@@ -384,54 +383,73 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         )
 
     def seed_from_head_expansion(self, index=True):
+        """False when HEAD has no expansion to copy, so the version seeds as without one"""
+        is_outermost = not transaction.get_connection().in_atomic_block
+        attempts = 3 if is_outermost else 1
+        for attempt in range(1, attempts + 1):
+            try:
+                expansion = self.seed_from_head_expansion_in_snapshot(is_outermost)
+                break
+            except OperationalError as ex:
+                if attempt == attempts or not self.is_serialization_failure(ex):
+                    raise
+                self.refresh_from_db()
+                self.__dict__.pop('locked_source_versions', None)
+        if not expansion:
+            return False
+        if index:
+            expansion.index_resources(
+                list(expansion.concepts.values_list('id', flat=True)),
+                list(expansion.mappings.values_list('id', flat=True)))
+        return True
+
+    def seed_from_head_expansion_in_snapshot(self, is_outermost):
         """References and expansion copied from HEAD in one transaction, so both come from the same HEAD state"""
-        connection = transaction.get_connection()
-        is_outermost = not connection.in_atomic_block
         with transaction.atomic():
             if is_outermost:
-                with connection.cursor() as cursor:
+                with transaction.get_connection().cursor() as cursor:
                     cursor.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
-            if self.expansions.exists():
-                return None
+            mnemonic = Expansion.get_auto_expand_mnemonic(self.version)
+            expansion = self.expansions.filter(mnemonic=mnemonic).first()
+            if expansion:
+                return expansion
             head = self.head
-            head_expansion = Expansion.objects.get(uri=head.expansion_uri)
+            head_expansion = Expansion.objects.filter(uri=head.expansion_uri).first() if head.expansion_uri else None
+            if not head_expansion:
+                return None
             self.seed_references()
             expansion = Expansion(
-                mnemonic=Expansion.get_auto_expand_mnemonic(self.version), collection_version=self,
-                parameters=head_expansion.parameters, created_by_id=self.created_by_id,
-                updated_by_id=self.created_by_id)
+                mnemonic=mnemonic, collection_version=self, parameters=head_expansion.parameters,
+                created_by_id=self.created_by_id, updated_by_id=self.created_by_id)
             expansion.clean()
             expansion.full_clean()
             expansion.save()
             for relation in Expansion.REPO_VERSION_RELATIONS:
                 getattr(expansion, relation).set(getattr(head_expansion, relation).all())
-            self.expansion_uri = expansion.uri
-            self.save()
-            if head_expansion.is_processing or head.has_pending_expansion_readd:
+            if not self.expansion_uri:
+                self.expansion_uri = expansion.uri
+                self.save()
+            if head_expansion.is_processing or head_expansion.has_pending_readd:
                 # HEAD's expansion is mid-build, so evaluate this version's references against HEAD's locks
-                expansion.add_references(self.references.all(), index=False, force_reevaluate=True)
+                references = list(self.references.all())
+                for reference in references:
+                    reference._async = True  # pylint: disable=protected-access
+                expansion.add_references(references, index=False, force_reevaluate=True)
             else:
                 expansion.copy_members_from(head_expansion)
                 expansion.unresolved_repo_versions = head_expansion.unresolved_repo_versions
                 expansion.save(update_fields=['unresolved_repo_versions'])
-            self.replace_head_resources()
-        if index:
-            expansion.index_resources(
-                list(expansion.concepts.values_list('id', flat=True)),
-                list(expansion.mappings.values_list('id', flat=True)))
+            self.replace_head_resources(expansion)
         return expansion
 
-    def replace_head_resources(self):
+    def replace_head_resources(self, expansion):
         """In this version's references and expansion, each HEAD resource becomes its latest resource version"""
-        expansion = self.expansion
         for field, klass in (('concept', Concept), ('mapping', Mapping)):
             through = getattr(CollectionReference, f'{field}s').through
             Expansion.replace_head_rows(
                 through.objects.filter(reference__collection_id=self.id), 'reference', field, klass)
-            if expansion:
-                through = getattr(Expansion, f'{field}s').through
-                Expansion.replace_head_rows(
-                    through.objects.filter(expansion_id=expansion.id), 'expansion', field, klass)
+            through = getattr(Expansion, f'{field}s').through
+            Expansion.replace_head_rows(through.objects.filter(expansion_id=expansion.id), 'expansion', field, klass)
 
     @property
     def active_references(self):
@@ -1419,8 +1437,6 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         'explicit_collection_versions', 'evaluated_collection_versions'
     )
 
-    READD_PROCESS_PREFIX = 'readd-'
-
     class Meta:
         db_table = 'collection_expansions'
         indexes = [
@@ -1631,23 +1647,29 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 queryset.set(queryset.exclude(**filters))
                 batch_index_resources.apply_async((rel, filters), queue='indexing', permanent=False)
 
-        readd_process_id = None
-        if bool(concept_ids or mapping_ids) and CollectionReference.is_expansion_locked_repo_version_on():
-            # until the re-add finishes, this expansion lacks members other references hold
-            readd_process_id = f'{self.READD_PROCESS_PREFIX}{generate_temp_version()}'
-            self.collection_version.add_processing(readd_process_id)
+        is_test_mode = get(settings, 'TEST_MODE', False)
+        removed_reference_ids = [ref.id for ref in self.to_ref_list(references)]
+        readd_task = readd_references_to_expansion_on_references_removal
+        readd_record = None
+        if bool(concept_ids or mapping_ids) and not is_test_mode and \
+                CollectionReference.is_expansion_locked_repo_version_on():
+            # recorded before members go, so new versions don't copy this expansion until the re-add succeeds
+            from core.tasks.models import Task
+            readd_record = Task.new(
+                queue='default', user=self.collection_version.updated_by, name=readd_task.__name__,
+                args=[self.id, removed_reference_ids])
 
         process(self.concepts, 'concept', concept_ids)
         process(self.mappings, 'mapping', mapping_ids)
 
         if bool(concept_ids or mapping_ids):
-            removed_reference_ids = [ref.id for ref in self.to_ref_list(references)]
-            readd_task = readd_references_to_expansion_on_references_removal
-            if get(settings, 'TEST_MODE', False):
-                readd_task(self.id, removed_reference_ids, readd_process_id)
-            else:
+            if is_test_mode:
+                readd_task(self.id, removed_reference_ids)
+            elif readd_record:
                 readd_task.apply_async(
-                    (self.id, removed_reference_ids, readd_process_id), queue='default', permanent=False)
+                    (self.id, removed_reference_ids), queue='default', task_id=readd_record.id, persist_args=True)
+            else:
+                readd_task.apply_async((self.id, removed_reference_ids), queue='default', permanent=False)
 
     def delete_expressions(self, expressions):  # Deprecated: Old way, must use delete_references instead
         concepts_filters = None
@@ -1672,12 +1694,13 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 self.mappings.set(self.mappings.exclude(**mappings_filters))
 
         if not get(settings, 'TEST_MODE', False):
+            # after commit, so indexing doesn't read members a surrounding transaction hasn't removed yet
             if concepts_filters:
-                batch_index_resources.apply_async(
-                        ('concept', concepts_filters), queue='indexing', permanent=False)
+                transaction.on_commit(lambda: batch_index_resources.apply_async(
+                    ('concept', concepts_filters), queue='indexing', permanent=False))
             if mappings_filters:
-                batch_index_resources.apply_async(
-                    ('mapping', mappings_filters), queue='indexing', permanent=False)
+                transaction.on_commit(lambda: batch_index_resources.apply_async(
+                    ('mapping', mappings_filters), queue='indexing', permanent=False))
 
     def add_references(  # pylint: disable=too-many-locals,too-many-statements,too-many-branches,too-many-arguments
             self, references, index=True, is_adding_all=False, attempt_reevaluate=True, force_reevaluate=False):
@@ -1813,7 +1836,9 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             _mappings = Mapping.objects.none()
 
             if should_reevaluate:
-                for _system_version in ref_system_versions:
+                # with no system, a reference evaluates against the value sets it names
+                is_valueset_only = use_any_lock and not ref.system and bool(ref.valueset)
+                for _system_version in ([None] if is_valueset_only else ref_system_versions):
                     if ref.is_mapping:
                         _mappings = _mappings.union(ref.get_mappings(_system_version))
                     else:
@@ -1827,10 +1852,12 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                         not (_mappings if ref.is_mapping else _concepts).exists():
                     unresolved_repo_versions.append(ref.to_unresolved_resource_version())
                     return ref.concepts.filter(), ref.mappings.filter()
-                if should_write_back and ref.id and (ref_system_versions or ref.system):
+                if should_write_back and ref.id and (ref_system_versions or ref.system or is_valueset_only):
                     ref.concepts.set(_concepts)
                     ref.mappings.set(_mappings)
-                    (resolved_ref_ids if ref_system_versions else unresolved_ref_ids).append(ref.id)
+                    is_resolved = ref_system_versions or (
+                        is_valueset_only and (_explicit_valueset_versions or _evaluated_valueset_versions))
+                    (resolved_ref_ids if is_resolved else unresolved_ref_ids).append(ref.id)
             else:
                 _concepts = ref.concepts.filter()
                 _mappings = ref.mappings.filter()
@@ -1944,6 +1971,14 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         collection_version = self.collection_version
         return self.is_default or (collection_version.expansion_uri is None and collection_version.should_auto_expand)
 
+    @property
+    def has_pending_readd(self):
+        """A reference removal leaves this expansion short until its re-add succeeds"""
+        from core.tasks.models import Task
+        return Task.objects.filter(
+            name__iendswith=readd_references_to_expansion_on_references_removal.__name__, args__0=self.id
+        ).exclude(state=SUCCESS).exists()
+
     def copy_members_from(self, expansion):
         for relation in ('concepts', 'mappings'):
             through = getattr(Expansion, relation).through
@@ -1962,8 +1997,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         ).exclude(id=F('versioned_object_id')).values('id')[:1]
         head_rows = rows.filter(**{f'{field}_id': F(f'{field}__versioned_object_id')}).annotate(
             latest_id=Subquery(latest)).filter(latest_id__isnull=False)
-        holds_latest = rows.model.objects.filter(
-            **{f'{owner}_id': OuterRef(f'{owner}_id'), f'{field}_id': OuterRef('latest_id')})
+        holds_latest = rows.filter(**{f'{owner}_id': OuterRef(f'{owner}_id'), f'{field}_id': OuterRef('latest_id')})
         duplicate_ids = list(head_rows.filter(Exists(holds_latest)).values_list('id', flat=True))
         if duplicate_ids:
             rows.model.objects.filter(id__in=duplicate_ids)._raw_delete(rows.db)  # pylint: disable=protected-access
