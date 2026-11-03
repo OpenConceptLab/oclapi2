@@ -2271,7 +2271,9 @@ class TasksTest(OCLTestCase):
 
     def test_has_pending_readd_until_the_readd_succeeds(self):
         expansion = ExpansionFactory(collection_version=OrganizationCollectionFactory())
-        task = Task.new(name='readd_references_to_expansion_on_references_removal', args=[expansion.id, [1]])
+        task = Task.new(
+            user=expansion.collection_version.created_by,
+            name='readd_references_to_expansion_on_references_removal', args=[expansion.id, [1]])
         self.assertTrue(expansion.has_pending_readd)
 
         Task.objects.filter(id=task.id).update(state='FAILURE')
