@@ -314,9 +314,7 @@ class CollectionReferenceView(CollectionBaseView, RetrieveAPIView, DestroyAPIVie
     def destroy(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         reference = self.get_object()
         collection = reference.collection
-        if collection.expansion_uri:
-            collection.expansion.delete_references(reference)
-        reference.delete()
+        collection.remove_references(collection.references.filter(id=reference.id))
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -503,10 +501,7 @@ class CollectionReferencesView(
         if expressions:
             instance.delete_references(expressions)
         if reference_ids:
-            references = instance.references.filter(id__in=reference_ids)
-            if instance.expansion_uri:
-                instance.expansion.delete_references(references)
-            references.delete()
+            instance.remove_references(instance.references.filter(id__in=reference_ids))
 
         return Response({'message': OK_MESSAGE}, status=status.HTTP_204_NO_CONTENT)
 

@@ -783,10 +783,7 @@ class ReferenceImporter(BaseResourceImporter):
                         to_delete += references
 
                 if to_delete:
-                    references = collection.references.filter(id__in=[ref.id for ref in to_delete])
-                    if collection.expansion_uri:
-                        collection.expansion.delete_references(references)
-                    references.delete()
+                    collection.remove_references(collection.references.filter(id__in=[ref.id for ref in to_delete]))
                     return DELETED
                 return NOT_FOUND
             return PERMISSION_DENIED

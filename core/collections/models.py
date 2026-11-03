@@ -272,6 +272,10 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         total_references = []
         for reference in references:
             reference.expression = reference.build_expression()
+            # before generating, so cascade-and-transform resolves against this collection's locks
+            reference.collection = self
+            reference._async = _async  # pylint: disable=protected-access
+            reference.clear_resolution_cache()
             total_references += reference.generate_references()
         total_references = CollectionReference.dedupe_by_expression(total_references)
         for reference in total_references:
@@ -293,6 +297,7 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         if self.expansion_uri:
             self.expansion.add_references(added_references)
         self.__dict__.pop('locked_source_versions', None)
+        self.__dict__.pop('locked_collection_versions', None)
         if user and user.is_authenticated:
             self.updated_by = user
         self.save()
@@ -325,10 +330,14 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 self.references.all().delete()
             return
 
-        references_to_be_deleted = self.references.filter(expression__in=expressions)
-        if self.expansion_uri:
-            self.expansion.delete_references(references_to_be_deleted)
-        references_to_be_deleted.all().delete()
+        self.remove_references(self.references.filter(expression__in=expressions))
+
+    def remove_references(self, references):
+        """Members and references go in one transaction, so no one sees one gone without the other"""
+        with transaction.atomic():
+            if self.expansion_uri:
+                self.expansion.delete_references(references)
+            references.delete()
 
     def get_cascaded_mapping_uris_from_concept_expressions(self, expressions):
         mapping_uris = []
@@ -356,11 +365,14 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         if 'created_by_id' not in expansion_data:
             expansion_data['created_by_id'] = self.created_by_id
             expansion_data['updated_by_id'] = self.created_by_id
-        expansion = Expansion.persist(index=index, collection_version=self, sync=sync, **expansion_data)
+        claim_default = should_auto_expand and not self.expansion_uri
+        expansion = Expansion.persist(
+            index=index, collection_version=self, sync=sync, claim_default=claim_default, **expansion_data)
 
-        if should_auto_expand and not self.expansion_uri:
-            self.expansion_uri = expansion.uri
-            self.save()
+        if claim_default:
+            self.refresh_from_db(fields=['expansion_uri'])
+            if self.expansion_uri == expansion.uri:
+                self.save()
 
         return expansion
 
@@ -373,8 +385,15 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
     @cached_property
     def locked_source_versions(self):
+        return self.get_locked_repo_versions('evaluated_source_versions')
+
+    @cached_property
+    def locked_collection_versions(self):
+        return self.get_locked_repo_versions('evaluated_collection_versions')
+
+    def get_locked_repo_versions(self, relation):
         expansion = self.expansion if CollectionReference.is_expansion_locked_repo_version_on() else None
-        return list(expansion.evaluated_source_versions.filter(is_active=True).order_by('-id')) if expansion else []
+        return list(getattr(expansion, relation).filter(is_active=True).order_by('-id')) if expansion else []
 
     def can_seed_from_head_expansion(self):
         return bool(
@@ -395,6 +414,7 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                     raise
                 self.refresh_from_db()
                 self.__dict__.pop('locked_source_versions', None)
+                self.__dict__.pop('locked_collection_versions', None)
         if not expansion:
             return False
         if index:
@@ -882,11 +902,11 @@ class CollectionReference(models.Model):
     def dedupe_by_expression(references):
         return list({reference.expression: reference for reference in references}.values())
 
-    def __get_repo_and_resource_version(self, resource, is_intensional, is_extensional):
+    def __get_repo_and_resource_version(self, resource, is_intensional, is_extensional, locked_version=None):
         repo_version = self.version
         resource_version = None
         if not self.version and self.transform:
-            repo_version = get(resource.latest_source_version, 'version') or HEAD
+            repo_version = get(locked_version, 'version') or get(resource.latest_source_version, 'version') or HEAD
             is_head = repo_version == HEAD
             if is_intensional and is_head:
                 resource_version = resource.version
@@ -896,14 +916,14 @@ class CollectionReference(models.Model):
             resource_version = resource.version
         return repo_version, resource_version
 
-    def __generate_references_for_type(self, queryset, resource_type):
+    def __generate_references_for_type(self, queryset, resource_type, locked_version=None):
         references = []
         is_extensional = self.is_extensional_transform
         is_intensional = self.is_static_transform
 
         for resource in queryset:
             repo_version, resource_version = self.__get_repo_and_resource_version(
-                resource, is_intensional, is_extensional)
+                resource, is_intensional, is_extensional, locked_version)
 
             references.append(CollectionReference(
                 expression=resource.uri,
@@ -922,8 +942,11 @@ class CollectionReference(models.Model):
 
         if self.should_generate_multiple_references():
             concepts, mappings = self.get_concepts()
-            references += self.__generate_references_for_type(concepts, 'concepts')
-            references += self.__generate_references_for_type(mappings, 'mappings')
+            system_version = self.resolve_system_version
+            locked_version = system_version if system_version and system_version.id in [
+                locked.id for locked in self.get_locked_system_versions(system_version)] else None
+            references += self.__generate_references_for_type(concepts, 'concepts', locked_version)
+            references += self.__generate_references_for_type(mappings, 'mappings', locked_version)
         else:
             references.append(self)
         return references
@@ -1209,10 +1232,31 @@ class CollectionReference(models.Model):
         if isinstance(self.valueset, list):
             for valueset in self.valueset:  # pylint: disable=not-an-iterable
                 if valueset:
-                    version, _ = Collection.resolve_reference_expression(valueset, self.namespace)
+                    version = self.resolve_valueset_version(valueset)
                     if version.id:
                         versions.append(version)
         return versions
+
+    @staticmethod
+    def is_explicit_valueset(valueset):
+        if is_canonical_uri(valueset):
+            return bool(get(valueset.split('|'), '1')) if '|' in valueset else False
+        return valueset != drop_version(valueset)
+
+    def resolve_valueset_version(self, valueset):
+        """A value set named without a version resolves to the collection's locked version of it, if any"""
+        version, _ = Collection.resolve_reference_expression(valueset, self.namespace)
+        if version.id and self.collection_id and not self.is_explicit_valueset(valueset):
+            return next((
+                locked for locked in self.collection.locked_collection_versions
+                if drop_version(locked.uri) == drop_version(version.uri)
+            ), version)
+        return version
+
+    def clear_resolution_cache(self):
+        for attr in ('resolve_system_version', 'resolve_expression_system_version', 'resolve_valueset_versions',
+                     'resolve_valueset_versions_with_unresolved'):
+            self.__dict__.pop(attr, None)
 
     @cached_property
     def resolve_valueset_versions_with_unresolved(self):
@@ -1222,13 +1266,8 @@ class CollectionReference(models.Model):
         if isinstance(self.valueset, list):
             for valueset in self.valueset:  # pylint: disable=not-an-iterable
                 if valueset:
-                    if is_canonical_uri(valueset):
-                        is_explicit = bool(get(valueset.split('|'), '1')) if '|' in valueset else False
-                    else:
-                        is_explicit = valueset != drop_version(valueset)
-                    is_evaluated = not is_explicit
-                    to_add = evaluated if is_evaluated else explicit
-                    version, _ = Collection.resolve_reference_expression(valueset, self.namespace)
+                    to_add = explicit if self.is_explicit_valueset(valueset) else evaluated
+                    version = self.resolve_valueset_version(valueset)
                     if version.id:
                         to_add.append(version)
                     else:
@@ -1645,7 +1684,8 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 ids = compact(set(ids))
                 filters = {'id__in': ids}
                 queryset.set(queryset.exclude(**filters))
-                batch_index_resources.apply_async((rel, filters), queue='indexing', permanent=False)
+                transaction.on_commit(
+                    lambda: batch_index_resources.apply_async((rel, filters), queue='indexing', permanent=False))
 
         is_test_mode = get(settings, 'TEST_MODE', False)
         removed_reference_ids = [ref.id for ref in self.to_ref_list(references)]
@@ -1662,13 +1702,15 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         process(self.mappings, 'mapping', mapping_ids)
 
         if bool(concept_ids or mapping_ids):
+            # after commit, so the re-add never runs while the removed references are still there
             if is_test_mode:
                 readd_task(self.id, removed_reference_ids)
             elif readd_record:
-                readd_task.apply_async(
-                    (self.id, removed_reference_ids), queue='default', task_id=readd_record.id, persist_args=True)
+                transaction.on_commit(lambda: readd_task.apply_async(
+                    (self.id, removed_reference_ids), queue='default', task_id=readd_record.id, persist_args=True))
             else:
-                readd_task.apply_async((self.id, removed_reference_ids), queue='default', permanent=False)
+                transaction.on_commit(lambda: readd_task.apply_async(
+                    (self.id, removed_reference_ids), queue='default', permanent=False))
 
     def delete_expressions(self, expressions):  # Deprecated: Old way, must use delete_references instead
         concepts_filters = None
@@ -1740,7 +1782,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         resolve_by_resource_version = CollectionReference.is_resource_version_repo_resolution_on()
         use_any_lock = CollectionReference.is_expansion_locked_repo_version_on()
         lock_filters = {} if use_any_lock else {'released': True, 'retired': False}
-        should_write_back = use_any_lock and self.is_default_for_collection_version
+        should_write_back = use_any_lock and self.is_default
         resolved_ref_ids = []
         unresolved_ref_ids = []
         locked_system_versions = []
@@ -1966,11 +2008,6 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             self.index_mappings(mappings)
 
     @property
-    def is_default_for_collection_version(self):
-        collection_version = self.collection_version
-        return self.is_default or (collection_version.expansion_uri is None and collection_version.should_auto_expand)
-
-    @property
     def has_pending_readd(self):
         """A reference removal leaves this expansion short until its re-add succeeds"""
         return Task.objects.filter(
@@ -2040,6 +2077,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
     @classmethod
     def persist(cls, index, **kwargs):
         sync = kwargs.pop('sync', False)
+        claim_default = kwargs.pop('claim_default', False)
         expansion = cls(**kwargs)
         temp_version = not bool(expansion.mnemonic)
         if temp_version:
@@ -2051,6 +2089,12 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         if temp_version and expansion.id:
             expansion.mnemonic = expansion.id
             expansion.save()
+        if claim_default:
+            # before seeding, so the seed knows it builds the version's default expansion
+            Collection.objects.filter(
+                models.Q(expansion_uri__isnull=True) | models.Q(expansion_uri=''), id=expansion.collection_version_id
+            ).update(expansion_uri=expansion.uri)
+            expansion.collection_version.refresh_from_db(fields=['expansion_uri'])
 
         task = Task.new(queue='indexing', username=expansion.created_by, name=seed_children_to_expansion.__name__)
         if get(settings, 'TEST_MODE', False) or sync:
