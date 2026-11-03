@@ -11,6 +11,7 @@ from django.core.files.base import ContentFile
 from django.test import TestCase
 from django.utils import timezone
 from minio.deleteobjects import DeleteError
+from minio.error import S3Error
 from mock.mock import call
 from moto import mock_aws
 
@@ -489,6 +490,71 @@ class MinIOTest(TestCase):
 
         # Assert that the put_object method was called with correct parameters
         mock_client.put_object.assert_called_once()
+
+    @patch("core.services.storages.cloud.minio.Minio")
+    def test_upload(self, mock_minio_client):
+        mock_client = mock_minio_client.return_value
+        client = MinIO()
+        file = io.BytesIO(b'a,b\n1,2\n')
+
+        result = client.upload('map_projects/1/input.csv', file)
+
+        self.assertEqual(result, 204)
+        mock_client.put_object.assert_called_once_with(
+            bucket_name="bucket", object_name='map_projects/1/input.csv', data=file, length=8, part_size=0,
+            content_type='text/csv'
+        )
+
+    @patch("core.services.storages.cloud.minio.Minio")
+    def test_upload_only_sends_the_remaining_bytes(self, mock_minio_client):
+        mock_client = mock_minio_client.return_value
+        file = io.BytesIO(b'0123456789')
+        file.seek(4)
+
+        MinIO().upload('key.bin', file)
+
+        self.assertEqual(mock_client.put_object.call_args.kwargs['length'], 6)
+        self.assertEqual(file.tell(), 4)  # position is restored for put_object to read
+
+    @patch("core.services.storages.cloud.minio.Minio")
+    def test_upload_content_type_precedence(self, mock_minio_client):
+        mock_client = mock_minio_client.return_value
+        client = MinIO()
+
+        client.upload('key.csv', io.BytesIO(b'x'), headers={'Content-Type': 'application/x-header'},
+                      metadata={'ContentType': 'application/x-metadata'})
+        self.assertEqual(mock_client.put_object.call_args.kwargs['content_type'], 'application/x-header')
+
+        client.upload('key.csv', io.BytesIO(b'x'), metadata={'ContentType': 'application/x-metadata'})
+        self.assertEqual(mock_client.put_object.call_args.kwargs['content_type'], 'application/x-metadata')
+
+        client.upload('key', io.BytesIO(b'x'))
+        self.assertEqual(mock_client.put_object.call_args.kwargs['content_type'], 'application/octet-stream')
+
+    @patch("core.services.storages.cloud.minio.Minio")
+    def test_upload_non_seekable_stream(self, mock_minio_client):
+        mock_client = mock_minio_client.return_value
+        stream = Mock(spec=['read', 'seekable'])
+        stream.seekable.return_value = False
+
+        result = MinIO().upload('key.bin', stream, headers={'content-type': 'application/octet-stream'})
+
+        self.assertEqual(result, 204)
+        mock_client.put_object.assert_called_once_with(
+            bucket_name="bucket", object_name='key.bin', data=stream, length=-1,
+            part_size=MinIO.UNKNOWN_LENGTH_PART_SIZE, content_type='application/octet-stream'
+        )
+
+    @patch("core.services.storages.cloud.minio.Minio")
+    def test_upload_failure(self, mock_minio_client):
+        mock_client = mock_minio_client.return_value
+        mock_client.put_object.side_effect = S3Error(
+            'AccessDenied', 'Access Denied', 'key.csv', 'req', 'host', Mock())
+
+        with self.assertRaises(Exception) as ctx:
+            MinIO().upload('key.csv', io.BytesIO(b'x'))
+
+        self.assertIn('Could not upload key.csv to MinIO', str(ctx.exception))
 
     @patch("core.services.storages.cloud.minio.Minio")
     def test_url_for(self, mock_minio_client):

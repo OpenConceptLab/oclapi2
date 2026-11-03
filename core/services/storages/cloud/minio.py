@@ -1,5 +1,6 @@
 import base64
 import mimetypes
+import os
 import re
 from io import BytesIO
 
@@ -13,6 +14,9 @@ from core.services.storages.cloud.core import CloudStorageServiceInterface
 
 
 class MinIO(CloudStorageServiceInterface):
+    # Part size used when the upload length is unknown (non seekable stream)
+    UNKNOWN_LENGTH_PART_SIZE = 10 * 1024 * 1024
+
     def __init__(self):
         super().__init__()
         self.endpoint = settings.MINIO_ENDPOINT
@@ -35,6 +39,52 @@ class MinIO(CloudStorageServiceInterface):
         # Ensure the bucket exists
         if not self.client.bucket_exists(self.bucket_name):
             self.client.make_bucket(self.bucket_name)
+
+    @staticmethod
+    def __content_type(key, headers, metadata):
+        """
+        Resolves the content type from the headers, then from the S3 style metadata
+        ({'ContentType': ...}) that callers share with S3, then from the key extension.
+        """
+        header_type = next((v for k, v in (headers or {}).items() if k.lower() == 'content-type'), None)
+        return header_type or get(metadata or {}, 'ContentType') or mimetypes.guess_type(key)[0] \
+            or 'application/octet-stream'
+
+    @staticmethod
+    def __remaining_length(file_content):
+        """
+        Returns the number of bytes left to read from a seekable file object,
+        or None for a non seekable stream (e.g. a raw HTTP response).
+        """
+        try:
+            if not file_content.seekable():
+                return None
+            position = file_content.tell()
+            end = file_content.seek(0, os.SEEK_END)
+            file_content.seek(position)
+            return end - position
+        except (AttributeError, OSError, ValueError):
+            return None
+
+    def upload(self, key, file_content, headers=None, metadata=None):
+        """
+        Uploads a file object to key, streaming it instead of loading it in memory.
+        Same contract as the S3 service: returns 204 on success and raises on failure.
+        headers/metadata are only used for the content type; the S3 style metadata
+        callers pass (e.g. ContentType) is not MinIO user metadata.
+        """
+        length = self.__remaining_length(file_content)
+        # an unknown length (-1) needs an explicit multipart part size (MinIO minimum is 5MiB)
+        size_args = {'length': length, 'part_size': 0} if length is not None else {
+            'length': -1, 'part_size': self.UNKNOWN_LENGTH_PART_SIZE}
+        try:
+            self.client.put_object(
+                bucket_name=self.bucket_name, object_name=key, data=file_content,
+                content_type=self.__content_type(key, headers, metadata), **size_args
+            )
+            return 204  # Success, no content
+        except S3Error as e:
+            raise Exception(f"Could not upload {key} to MinIO. Error: {e}") from e  # pylint: disable=broad-exception-raised
 
     def upload_file(self, key, file_path=None, headers=None, binary=False, metadata=None):  # pylint: disable=too-many-arguments
         """
