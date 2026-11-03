@@ -1,5 +1,6 @@
 import datetime
 import io
+import re
 from unittest.mock import patch
 
 import boto3
@@ -15,6 +16,8 @@ from core.collections.tests.factories import OrganizationCollectionFactory, User
 from core.common.constants import HEAD
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.orgs.tests.factories import OrganizationFactory
+from core.common.tasks import delete_s3_objects
+from core.common.utils import get_export_key_pattern
 from core.services.storages.cloud.aws import S3
 from core.repos.models import RepoExternalExport, Repository, VersionChangelog, VersionChecksumMap
 from core.sources.documents import SourceDocument
@@ -262,6 +265,25 @@ class RepoExportSiblingVersionsTest(OCLTestCase):
         self.s3.upload(self.v1_8.get_version_export_path(suffix='20260930123456.zip'), io.BytesIO(b'content'))
 
         self.assertTrue(self.v1_8.has_export())
+
+    def test_delete_s3_objects_without_key_pattern_removes_every_key_under_path(self):
+        self.s3.upload('map_projects/1/terms.', io.BytesIO(b'content'))
+        self.s3.upload('map_projects/1/terms.csv', io.BytesIO(b'content'))
+
+        delete_s3_objects('map_projects/1/terms.')
+
+        self.assertEqual(self.remaining_keys(), [])
+
+    def test_get_export_key_pattern(self):
+        pattern = get_export_key_pattern('orgs/PIH/PIH_PIH_v1.8.')
+
+        for key in ['orgs/PIH/PIH_PIH_v1.8.2026-10-01_090000.zip', 'orgs/PIH/PIH_PIH_v1.8.20261001090000.zip']:
+            self.assertTrue(re.fullmatch(pattern, key))
+        for key in [
+            'orgs/PIH/PIH_PIH_v1.8.24.2026-10-01_090000.zip', 'orgs/PIH/PIH_PIH_v1.8.24.1.2026-10-01_090000.zip',
+            'orgs/PIH/PIH_PIH_v1x8.2026-10-01_090000.zip', 'orgs/PIH/PIH_PIH_v1.8.2026-10-01_090000.zip.bak',
+        ]:
+            self.assertIsNone(re.fullmatch(pattern, key))
 
     def test_delete_export_paths_leaves_sibling_exports(self):
         self.upload(self.v1_8, '2026-10-01_090000')

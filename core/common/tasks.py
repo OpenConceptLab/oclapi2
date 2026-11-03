@@ -26,7 +26,7 @@ from core.common import ERRBIT_LOGGER
 from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_RESET_MAIL_SUBJECT
 from core.common.exceptions import BatchIndexingError
 from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service, \
-    get_date_range_label, get_export_key_pattern
+    get_date_range_label
 from core.concepts.embeddings import sync_concept_vectors
 from core.reports.models import ResourceUsageReport
 from core.tasks.models import QueueOnceCustomTask, Task
@@ -1040,9 +1040,9 @@ def update_collection_active_mappings_count(collection_id):
 
 
 @app.task
-def delete_s3_objects(path):
+def delete_s3_objects(path, key_pattern=None):
     if path:
-        get_export_service().delete_objects(path, key_pattern=get_export_key_pattern(path))
+        get_export_service().delete_objects(path, key_pattern=key_pattern)
 
 
 @app.task(ignore_result=True)

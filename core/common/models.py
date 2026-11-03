@@ -1043,16 +1043,17 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         VersionChecksumMap.objects.filter(version_url__in=urls).delete()
 
     def get_export_paths_to_delete(self):
-        return [self.get_version_export_path(suffix=None)] + list(
-            self.external_exports.values_list('file_path', flat=True))
+        prefix = self.get_version_export_path(suffix=None)
+        return [(prefix, get_export_key_pattern(prefix))] + [
+            (path, None) for path in self.external_exports.values_list('file_path', flat=True)]
 
     @staticmethod
     def delete_export_paths(export_paths, sync=False):
-        for export_path in export_paths:
+        for export_path, key_pattern in export_paths:
             if sync:
-                delete_s3_objects(export_path)
+                delete_s3_objects(export_path, key_pattern)
             else:
-                delete_s3_objects.apply_async((export_path,), queue='default', permanent=False)
+                delete_s3_objects.apply_async((export_path, key_pattern), queue='default', permanent=False)
 
     def get_concepts_cache_keys(self):
         return self.__get_resources_cache_keys('concepts')
@@ -1568,8 +1569,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         right after this version's prefix gets no name (None), and the download keeps its storage name. Characters
         that aren't safe in a filename become '-'.
         """
-        # current (2026-09-30_123456) or legacy (20260930123456) key timestamp, anchored to the prefix because a key
-        # listed under it can be another version's (1.8.24.1's under 1.8.24's)
+        # current (2026-09-30_123456) or legacy (20260930123456) key timestamp
         match = re.fullmatch(
             re.escape(self.get_version_export_path(suffix=None)) + EXPORT_KEY_TIMESTAMP_PATTERN, export_path)
         if not match:
