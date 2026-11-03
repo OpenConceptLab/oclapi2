@@ -1603,7 +1603,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 if isinstance(self, model) and candidate.id == self.id:
                     continue
                 base = candidate.get_legacy_version_export_path(suffix=None, with_expansion=False).rstrip('.')
-                if legacy_path.startswith(base) and candidate.get_legacy_version_export_path(suffix=None) == legacy_path:
+                same_path = candidate.get_legacy_version_export_path(suffix=None) == legacy_path
+                if legacy_path.startswith(base) and same_path:
                     return False
         return True
 

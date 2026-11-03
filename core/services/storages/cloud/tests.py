@@ -453,6 +453,33 @@ class BlobStorageTest(TestCase):
         self.assertEqual(keys, [own.name])
         target.start_copy_from_url.assert_called_once_with('https://source-url')
 
+    @patch('core.services.storages.cloud.azure.time.sleep')
+    @patch('core.services.storages.cloud.azure.BlobServiceClient')
+    def test_copy_waits_for_pending_copy(self, blob_service_client, sleep_mock):
+        properties = [Mock(copy=Mock(status=status)) for status in ('pending', 'pending', 'success')]
+        target = Mock(get_blob_properties=Mock(side_effect=properties))
+        container_client_mock = Mock(get_blob_client=Mock(side_effect=[target, Mock(url='https://source-url')]))
+        container_mock = Mock(get_container_client=Mock(return_value=container_client_mock))
+        blob_service_client.from_connection_string = Mock(return_value=container_mock)
+
+        BlobStorage().copy('foo/old', 'foo/new')
+
+        self.assertEqual(sleep_mock.call_count, 2)
+
+    @patch('core.services.storages.cloud.azure.time.sleep')
+    @patch('core.services.storages.cloud.azure.BlobServiceClient')
+    def test_copy_raises_when_copy_fails_or_times_out(self, blob_service_client, sleep_mock):  # pylint: disable=unused-argument
+        for status in ('failed', 'pending'):
+            target = Mock(get_blob_properties=Mock(return_value=Mock(copy=Mock(status=status))))
+            container_client_mock = Mock(get_blob_client=Mock(side_effect=[target, Mock(url='https://source-url')]))
+            container_mock = Mock(get_container_client=Mock(return_value=container_client_mock))
+            blob_service_client.from_connection_string = Mock(return_value=container_mock)
+            storage = BlobStorage()
+            storage.COPY_TIMEOUT_SECONDS = 0
+
+            with self.assertRaises(Exception):
+                storage.copy('foo/old', 'foo/new')
+
     @patch('core.services.storages.cloud.azure.BlobServiceClient')
     def test_remove(self, blob_service_client):
         blob1 = Mock()
