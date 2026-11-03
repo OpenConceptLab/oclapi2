@@ -1,4 +1,6 @@
 from django.db import transaction
+from django.db.models import CharField, Q
+from django.db.models.functions import Cast
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.generics import RetrieveUpdateDestroyAPIView, RetrieveAPIView, CreateAPIView, \
@@ -70,6 +72,13 @@ class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListW
                 'lookup_config', 'input_locales'
             )
         return self.filter_queryset_by_public_access(self.filter_queryset_by_owner(queryset))
+
+    def filter_queryset_by_public_access(self, queryset):
+        search_query = self.request.query_params.get('q', '').strip()
+        if search_query:
+            queryset = queryset.annotate(id_text=Cast('id', CharField())).filter(
+                Q(name__icontains=search_query) | Q(id_text__icontains=search_query))
+        return super().filter_queryset_by_public_access(queryset)
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
