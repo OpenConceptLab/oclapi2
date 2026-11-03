@@ -3008,8 +3008,8 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
     @patch('core.collections.models.Collection.version_export_path', new_callable=PropertyMock)
     @patch('core.collections.models.Collection.has_export')
-    @patch('core.services.storages.cloud.aws.S3.remove')
-    def test_delete_204_head(self, s3_remove_mock, has_export_mock, export_path_mock):
+    @patch('core.services.storages.cloud.aws.S3.delete_objects')
+    def test_delete_204_head(self, s3_delete_objects_mock, has_export_mock, export_path_mock):
         has_export_mock.return_value = True
         export_path_mock.return_value = 'head/export/path'
         response = self.client.delete(
@@ -3019,7 +3019,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 204)
-        s3_remove_mock.assert_called_once_with('head/export/path')
+        s3_delete_objects_mock.assert_called()
 
 
 def signed_url_for(_, key, filename=None):  # pylint: disable=unused-argument

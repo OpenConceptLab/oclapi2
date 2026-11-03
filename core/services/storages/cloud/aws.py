@@ -101,6 +101,14 @@ class S3(CloudStorageServiceInterface):
         except:  # pylint: disable=bare-except
             pass
 
+    def get_keys(self, prefix, key_pattern=None):
+        return [key['Key'] for key in self.__filter_keys(self.__fetch_keys(prefix), key_pattern)]
+
+    def copy(self, source_key, target_key):
+        self.__resource().meta.client.copy_object(
+            Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=target_key,
+            CopySource={'Bucket': settings.AWS_STORAGE_BUCKET_NAME, 'Key': source_key})
+
     def remove(self, key):
         try:
             return self.__get_connection().delete_object(

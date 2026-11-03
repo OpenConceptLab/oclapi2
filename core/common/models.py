@@ -1,6 +1,7 @@
 import logging
 import re
 import time
+from urllib.parse import quote
 
 from celery.result import AsyncResult
 from celery_once import AlreadyQueued
@@ -1044,13 +1045,22 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         from core.repos.models import VersionChecksumMap
         VersionChecksumMap.objects.filter(version_url__in=urls).delete()
 
-    def get_export_paths_to_delete(self):
+    def get_export_key_prefixes(self):
         prefix = self.get_version_export_path(suffix=None)
-        paths = [(prefix, get_export_key_pattern(prefix))]
+        prefixes = [(prefix, get_export_key_pattern(prefix))]
         if self.owns_legacy_export_path():
             legacy_prefix = self.get_legacy_version_export_path(suffix=None)
-            paths.append((legacy_prefix, get_export_key_pattern(legacy_prefix)))
-        return paths + [(path, None) for path in self.external_exports.values_list('file_path', flat=True)]
+            prefixes.append((legacy_prefix, get_export_key_pattern(legacy_prefix)))
+        return prefixes
+
+    def delete_export_keys(self):
+        service = get_export_service()
+        for prefix, key_pattern in self.get_export_key_prefixes():
+            service.delete_objects(prefix, key_pattern=key_pattern)
+
+    def get_export_paths_to_delete(self):
+        return self.get_export_key_prefixes() + [
+            (path, None) for path in self.external_exports.values_list('file_path', flat=True)]
 
     @staticmethod
     def delete_export_paths(export_paths, sync=False):
@@ -1537,11 +1547,12 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     def get_version_export_path(self, suffix='*'):
         owner = self.parent
         owner_type = f'{owner.get_url_kwarg()}s'
-        path = f"{owner_type}/{owner.mnemonic}/{self.resource_type.lower()}s/{self.mnemonic}/{self.version}"
+        # each dynamic part is one segment, so a version like 'a/b' can't pass for version 'a' with expansion 'b'
+        parts = [owner.mnemonic, f'{self.resource_type.lower()}s', self.mnemonic, self.version]
         expansion = get(self, 'expansion.mnemonic')
         if expansion:
-            path = f"{path}/{expansion}"
-        path = f'{path}.'
+            parts.append(expansion)
+        path = f"{owner_type}/" + '/'.join(quote(part, safe='') for part in parts) + '.'
 
         if suffix:
             path += suffix
@@ -1580,7 +1591,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         from core.collections.models import Collection
 
         legacy_path = self.get_legacy_version_export_path(suffix=None)
-        bare_version = self.version[1:] if self.version.lower().startswith('v') else self.version
+        bare_version = re.sub(r'^[vV]', '', self.version)
         for model in (Source, Collection):
             candidates = model.objects.filter(
                 mnemonic=self.mnemonic, organization_id=self.organization_id, user_id=self.user_id

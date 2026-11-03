@@ -6,6 +6,7 @@ from unittest.mock import patch
 import boto3
 from moto import mock_aws
 
+from django.core.management import call_command
 from django.db import IntegrityError, transaction
 from django.test import override_settings, tag
 from django.utils import timezone
@@ -310,6 +311,28 @@ class RepoExportSiblingVersionsTest(OCLTestCase):
 
         self.v1_8.delete_export_paths(self.v1_8.get_export_paths_to_delete(), sync=True)
         self.assertEqual(self.remaining_keys(), [legacy])
+
+    def test_migrate_export_keys_moves_unshared_and_skips_shared_legacy_keys(self):
+        out = io.StringIO()
+        legacy = self.v1_8.get_legacy_version_export_path(suffix='2026-10-01_090000.zip')
+        self.s3.upload(legacy, io.BytesIO(b'content'))
+        shared_owner = OrganizationSourceFactory(organization=self.v1_8.organization, mnemonic='X', version='1.0')
+        OrganizationSourceFactory(organization=self.v1_8.organization, mnemonic='X', version='v1.0')
+        shared = shared_owner.get_legacy_version_export_path(suffix='2026-10-01_090000.zip')
+        self.s3.upload(shared, io.BytesIO(b'content'))
+
+        call_command('migrate_export_keys', stdout=out)
+
+        self.assertEqual(
+            self.remaining_keys(),
+            sorted([self.v1_8.get_version_export_path(suffix='2026-10-01_090000.zip'), shared]))
+        self.assertIn('Shared, skipped', out.getvalue())
+
+        call_command('migrate_export_keys', f'--assign={shared_owner.get_legacy_version_export_path(suffix=None)}='
+                     f'{shared_owner.uri}', stdout=out)
+
+        self.assertIn(shared_owner.get_version_export_path(suffix='2026-10-01_090000.zip'), self.remaining_keys())
+        self.assertNotIn(shared, self.remaining_keys())
 
     def test_delete_s3_objects_without_key_pattern_removes_every_key_under_path(self):
         self.s3.upload('map_projects/1/terms.', io.BytesIO(b'content'))

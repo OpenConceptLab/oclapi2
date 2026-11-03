@@ -51,6 +51,16 @@ class CloudStorageServiceInterface:
         Deletes all objects in path
         """
 
+    def get_keys(self, prefix, key_pattern=None):
+        """
+        Returns the keys under prefix that match key_pattern
+        """
+
+    def copy(self, source_key, target_key):
+        """
+        Copies an object to another key
+        """
+
     def remove(self, key):
         """
         Removes object
