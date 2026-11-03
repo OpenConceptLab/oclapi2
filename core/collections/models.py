@@ -1654,7 +1654,6 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         if bool(concept_ids or mapping_ids) and not is_test_mode and \
                 CollectionReference.is_expansion_locked_repo_version_on():
             # recorded before members go, so new versions don't copy this expansion until the re-add succeeds
-            from core.tasks.models import Task
             readd_record = Task.new(
                 queue='default', user=self.collection_version.updated_by, name=readd_task.__name__,
                 args=[self.id, removed_reference_ids])
@@ -1974,7 +1973,6 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
     @property
     def has_pending_readd(self):
         """A reference removal leaves this expansion short until its re-add succeeds"""
-        from core.tasks.models import Task
         return Task.objects.filter(
             name__iendswith=readd_references_to_expansion_on_references_removal.__name__, args__0=self.id
         ).exclude(state=SUCCESS).exists()
