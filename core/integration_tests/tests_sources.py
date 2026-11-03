@@ -1454,6 +1454,22 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         s3_remove_mock.assert_called_once_with('v1/export/path')
 
+    @mock_aws
+    def test_delete_204_removes_export_stored_before_last_child_update(self):
+        boto3.resource('s3', region_name='us-east-1').create_bucket(Bucket='oclapi2-dev')
+        key = self.source_v1.get_version_export_path(suffix='2020-01-01_000000.zip')
+        self.assertNotEqual(key, self.source_v1.version_export_path)
+        S3().upload(key, io.BytesIO(b'content'))
+
+        response = self.client.delete(
+            self.source_v1.uri + 'export/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(self.source_v1.has_export())
+
     @patch('core.sources.models.Source.version_export_path', new_callable=PropertyMock)
     @patch('core.sources.models.Source.has_export')
     @patch('core.services.storages.cloud.aws.S3.remove')
