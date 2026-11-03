@@ -3031,6 +3031,7 @@ class CollectionVersionExportSiblingVersionsViewTest(OCLAPITestCase):
         boto3.resource('s3', region_name='us-east-1').create_bucket(Bucket='oclapi2-dev')
         self.owner = UserProfileFactory(username='owner')
         self.owner_token = self.owner.get_token()
+        self.head = UserCollectionFactory(user=self.owner, mnemonic='coll')
         self.v1_8 = UserCollectionFactory(user=self.owner, mnemonic='coll', version='1.8')
         self.v1_8_24 = UserCollectionFactory(user=self.owner, mnemonic='coll', version='1.8.24')
         self.v1_8_24_1 = UserCollectionFactory(user=self.owner, mnemonic='coll', version='1.8.24.1')

@@ -1479,6 +1479,7 @@ class SourceVersionExportSiblingVersionsViewTest(OCLAPITestCase):
         self.owner_token = self.owner.get_token()
         self.other = UserProfileFactory(username='other')
         self.other_token = self.other.get_token()
+        self.head = UserSourceFactory(user=self.owner, mnemonic='src')
         self.v1_8 = UserSourceFactory(user=self.owner, mnemonic='src', version='1.8')
         self.v1_8_24 = UserSourceFactory(user=self.owner, mnemonic='src', version='1.8.24')
         self.v1_8_24_1 = UserSourceFactory(user=self.owner, mnemonic='src', version='1.8.24.1')
