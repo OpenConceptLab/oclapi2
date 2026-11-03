@@ -429,10 +429,12 @@ class SourceRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertFalse(Source.objects.filter(id=source.id).exists())
         self.assertFalse(Source.objects.filter(mnemonic='source').exists())
-        head_prefix = f'orgs/{self.organization.mnemonic}/{self.organization.mnemonic}_source_vHEAD.'
-        delete_s3_objects_mock.apply_async.assert_called_once_with(
-            (head_prefix, get_export_key_pattern(head_prefix)), queue='default', permanent=False
-        )
+        head_prefix = f'orgs/{self.organization.mnemonic}/sources/source/HEAD.'
+        legacy_head_prefix = f'orgs/{self.organization.mnemonic}/{self.organization.mnemonic}_source_vHEAD.'
+        self.assertEqual(delete_s3_objects_mock.apply_async.call_count, 2)
+        for prefix in (head_prefix, legacy_head_prefix):
+            delete_s3_objects_mock.apply_async.assert_any_call(
+                (prefix, get_export_key_pattern(prefix)), queue='default', permanent=False)
 
 
 class SourceVersionListViewTest(OCLAPITestCase):
@@ -786,10 +788,12 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.source.versions.count(), 1)
         self.assertFalse(self.source.versions.filter(version='v1').exists())
-        v1_prefix = f'orgs/{self.source.parent.mnemonic}/{self.source.parent.mnemonic}_{self.source.mnemonic}_v1.'
-        delete_s3_objects_mock.apply_async.assert_called_once_with(
-            (v1_prefix, get_export_key_pattern(v1_prefix)), queue='default', permanent=False
-        )
+        owner = self.source.parent.mnemonic
+        self.assertEqual(delete_s3_objects_mock.apply_async.call_count, 2)
+        mnemonic = self.source.mnemonic
+        for v1_prefix in (f'orgs/{owner}/sources/{mnemonic}/v1.', f'orgs/{owner}/{owner}_{mnemonic}_v1.'):
+            delete_s3_objects_mock.apply_async.assert_any_call(
+                (v1_prefix, get_export_key_pattern(v1_prefix)), queue='default', permanent=False)
 
     @patch('core.common.models.delete_s3_objects')
     def test_version_delete_204_referenced_in_private_collection(self, delete_s3_objects_mock):
@@ -812,10 +816,12 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.source.versions.count(), 1)
         self.assertFalse(self.source.versions.filter(version='v1').exists())
-        v1_prefix = f'orgs/{self.source.parent.mnemonic}/{self.source.parent.mnemonic}_{self.source.mnemonic}_v1.'
-        delete_s3_objects_mock.apply_async.assert_called_once_with(
-            (v1_prefix, get_export_key_pattern(v1_prefix)), queue='default', permanent=False
-        )
+        owner = self.source.parent.mnemonic
+        self.assertEqual(delete_s3_objects_mock.apply_async.call_count, 2)
+        mnemonic = self.source.mnemonic
+        for v1_prefix in (f'orgs/{owner}/sources/{mnemonic}/v1.', f'orgs/{owner}/{owner}_{mnemonic}_v1.'):
+            delete_s3_objects_mock.apply_async.assert_any_call(
+                (v1_prefix, get_export_key_pattern(v1_prefix)), queue='default', permanent=False)
 
         source_v2 = OrganizationSourceFactory(
             mnemonic=self.source.mnemonic, organization=self.organization, version='v2',
@@ -1147,7 +1153,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 204)
-        s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.v1_updated_at}.zip")
+        s3_exists_mock.assert_any_call(f"users/username/sources/source1/HEAD.{self.v1_updated_at}.zip")
 
     @patch('core.services.storages.cloud.aws.S3.has_path')
     def test_get_204_version(self, s3_has_path_mock):
@@ -1160,8 +1166,8 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 204)
-        s3_has_path_mock.assert_called_once_with(
-            "users/username/username_source1_v1.", key_pattern=SOURCE_EXPORT_KEY_PATTERN)
+        s3_has_path_mock.assert_any_call(
+            "users/username/sources/source1/v1.", key_pattern=SOURCE_EXPORT_KEY_PATTERN)
 
     @patch('core.services.storages.cloud.aws.S3.url_for')
     @patch('core.services.storages.cloud.aws.S3.exists')
@@ -1177,9 +1183,9 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response['Location'], 'https://signed.example/head.zip')
-        s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
+        s3_exists_mock.assert_any_call(f"users/username/sources/source1/HEAD.{self.HEAD_updated_at}.zip")
         s3_url_for_mock.assert_called_once_with(
-            f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip",
+            f"users/username/sources/source1/HEAD.{self.HEAD_updated_at}.zip",
             filename=f"users_username_sources_source1_HEAD_{self.HEAD_updated_at}.zip"
         )
 
@@ -1189,7 +1195,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
     def test_get_302_version(self, s3_has_path_mock, s3_get_last_key_from_path_mock, s3_url_for_mock):
         s3_url_for_mock.return_value = 'https://signed.example/v1.zip'
         s3_has_path_mock.return_value = True
-        s3_get_last_key_from_path_mock.return_value = f'users/username/username_source1_v1.{self.v1_updated_at}.zip'
+        s3_get_last_key_from_path_mock.return_value = f'users/username/sources/source1/v1.{self.v1_updated_at}.zip'
 
         with self.assertLogs('oclapi', level='INFO') as logs:
             response = self.client.get(
@@ -1200,16 +1206,16 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response['Location'], 'https://signed.example/v1.zip')
-        s3_has_path_mock.assert_called_once_with(
-            "users/username/username_source1_v1.", key_pattern=SOURCE_EXPORT_KEY_PATTERN)
+        s3_has_path_mock.assert_any_call(
+            "users/username/sources/source1/v1.", key_pattern=SOURCE_EXPORT_KEY_PATTERN)
         s3_get_last_key_from_path_mock.assert_called_once_with(
-            "users/username/username_source1_v1.", key_pattern=SOURCE_EXPORT_KEY_PATTERN)
+            "users/username/sources/source1/v1.", key_pattern=SOURCE_EXPORT_KEY_PATTERN)
         s3_url_for_mock.assert_called_once_with(
-            f'users/username/username_source1_v1.{self.v1_updated_at}.zip',
+            f'users/username/sources/source1/v1.{self.v1_updated_at}.zip',
             filename=f'users_username_sources_source1_v1_{self.v1_updated_at}.zip'
         )
         self.assertIn(
-            f'INFO:oclapi:Export users/username/username_source1_v1.{self.v1_updated_at}.zip downloads as '
+            f'INFO:oclapi:Export users/username/sources/source1/v1.{self.v1_updated_at}.zip downloads as '
             f'users_username_sources_source1_v1_{self.v1_updated_at}.zip',
             logs.output
         )
@@ -1228,9 +1234,9 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.data, {'detail': 'Export exists but could not generate a download URL.'})
-        s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
+        s3_exists_mock.assert_any_call(f"users/username/sources/source1/HEAD.{self.HEAD_updated_at}.zip")
         s3_url_for_mock.assert_called_once_with(
-            f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip",
+            f"users/username/sources/source1/HEAD.{self.HEAD_updated_at}.zip",
             filename=f"users_username_sources_source1_HEAD_{self.HEAD_updated_at}.zip"
         )
 
@@ -1293,7 +1299,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response['URL'], self.source.uri + 'export/')
-        s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
+        s3_exists_mock.assert_any_call(f"users/username/sources/source1/HEAD.{self.HEAD_updated_at}.zip")
 
     @patch('core.services.storages.cloud.aws.S3.has_path')
     def test_post_303_version(self, s3_has_path_mock):
@@ -1306,8 +1312,8 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response['URL'], self.source_v1.uri + 'export/')
-        s3_has_path_mock.assert_called_once_with(
-            "users/username/username_source1_v1.", key_pattern=SOURCE_EXPORT_KEY_PATTERN)
+        s3_has_path_mock.assert_any_call(
+            "users/username/sources/source1/v1.", key_pattern=SOURCE_EXPORT_KEY_PATTERN)
 
     @patch('core.sources.views.export_source')
     @patch('core.services.storages.cloud.aws.S3.exists')
@@ -1321,7 +1327,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 202)
-        s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
+        s3_exists_mock.assert_any_call(f"users/username/sources/source1/HEAD.{self.HEAD_updated_at}.zip")
         export_source_mock.apply_async.assert_called_once_with((self.source.id,), queue='default', task_id=ANY)
 
     @patch('core.sources.views.export_source')
@@ -1336,8 +1342,8 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 202)
-        s3_has_path_mock.assert_called_once_with(
-            "users/username/username_source1_v1.", key_pattern=SOURCE_EXPORT_KEY_PATTERN)
+        s3_has_path_mock.assert_any_call(
+            "users/username/sources/source1/v1.", key_pattern=SOURCE_EXPORT_KEY_PATTERN)
         export_source_mock.apply_async.assert_called_once_with((self.source_v1.id,), queue='default', task_id=ANY)
 
     @patch('core.sources.views.export_source')
@@ -1367,7 +1373,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 409)
-        s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
+        s3_exists_mock.assert_any_call(f"users/username/sources/source1/HEAD.{self.HEAD_updated_at}.zip")
         export_source_mock.apply_async.assert_called_once_with((self.source.id,), queue='default', task_id=ANY)
 
     @patch('core.sources.views.export_source')
@@ -1383,8 +1389,8 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 409)
-        s3_has_path_mock.assert_called_once_with(
-            "users/username/username_source1_v1.", key_pattern=SOURCE_EXPORT_KEY_PATTERN)
+        s3_has_path_mock.assert_any_call(
+            "users/username/sources/source1/v1.", key_pattern=SOURCE_EXPORT_KEY_PATTERN)
         export_source_mock.apply_async.assert_called_once_with((self.source_v1.id,), queue='default', task_id=ANY)
 
     def test_delete_405(self):
@@ -1463,7 +1469,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         s3_remove_mock.assert_not_called()
 
 
-SOURCE_EXPORT_KEY_PATTERN = r'users/username/username_source1_v1\.(\d{4})-?(\d{2})-?(\d{2})_?(\d{6})\.zip'
+SOURCE_EXPORT_KEY_PATTERN = r'users/username/sources/source1/v1\.(\d{4})-?(\d{2})-?(\d{2})_?(\d{6})\.zip'
 
 
 def signed_url_for(_, key, filename=None):  # pylint: disable=unused-argument

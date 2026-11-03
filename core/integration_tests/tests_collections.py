@@ -554,13 +554,13 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(coll.versions.count(), 0)
         self.assertFalse(Collection.objects.filter(mnemonic='coll1').exists())
-        self.assertEqual(delete_s3_objects_mock.apply_async.call_count, 2)
-        head_prefix = f'orgs/{coll.organization.mnemonic}/{coll.organization.mnemonic}_coll1_vHEAD.'
-        v1_prefix = f'orgs/{coll.organization.mnemonic}/{coll.organization.mnemonic}_coll1_v1.'
-        delete_s3_objects_mock.apply_async.assert_any_call(
-            (head_prefix, get_export_key_pattern(head_prefix)), queue='default', permanent=False)
-        delete_s3_objects_mock.apply_async.assert_any_call(
-            (v1_prefix, get_export_key_pattern(v1_prefix)), queue='default', permanent=False)
+        owner = coll.organization.mnemonic
+        self.assertEqual(delete_s3_objects_mock.apply_async.call_count, 4)
+        for prefix in (
+                f'orgs/{owner}/collections/coll1/HEAD.', f'orgs/{owner}/collections/coll1/v1.',
+                f'orgs/{owner}/{owner}_coll1_vHEAD.', f'orgs/{owner}/{owner}_coll1_v1.'):
+            delete_s3_objects_mock.apply_async.assert_any_call(
+                (prefix, get_export_key_pattern(prefix)), queue='default', permanent=False)
 
     @patch('core.collections.views.delete_collection')
     def test_delete_202(self, delete_collection_task_mock):  # async delete
@@ -2563,9 +2563,11 @@ class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.collection.versions.count(), 1)
         self.assertTrue(self.collection.versions.first().is_latest_version)
-        v1_prefix = f'users/{self.collection.parent.mnemonic}/{self.collection.parent.mnemonic}_coll_v1.'
-        delete_s3_objects_mock.apply_async.assert_called_once_with(
-            (v1_prefix, get_export_key_pattern(v1_prefix)), queue='default', permanent=False)
+        owner = self.collection.parent.mnemonic
+        self.assertEqual(delete_s3_objects_mock.apply_async.call_count, 2)
+        for v1_prefix in (f'users/{owner}/collections/coll/v1.', f'users/{owner}/{owner}_coll_v1.'):
+            delete_s3_objects_mock.apply_async.assert_any_call(
+                (v1_prefix, get_export_key_pattern(v1_prefix)), queue='default', permanent=False)
 
 
 class CollectionLatestVersionRetrieveUpdateViewTest(OCLAPITestCase):
@@ -2759,7 +2761,7 @@ class CollectionExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 404)
 
 
-COLLECTION_EXPORT_KEY_PATTERN = r'users/username/username_coll_v1\.(\d{4})-?(\d{2})-?(\d{2})_?(\d{6})\.zip'
+COLLECTION_EXPORT_KEY_PATTERN = r'users/username/collections/coll/v1\.(\d{4})-?(\d{2})-?(\d{2})_?(\d{6})\.zip'
 
 
 class CollectionVersionExportViewTest(OCLAPITestCase):
@@ -2794,7 +2796,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 204)
-        s3_exists_mock.assert_called_once_with(f"users/username/username_coll_vHEAD.{self.HEAD_updated_at}.zip")
+        s3_exists_mock.assert_any_call(f"users/username/collections/coll/HEAD.{self.HEAD_updated_at}.zip")
 
     @patch('core.services.storages.cloud.aws.S3.has_path')
     def test_get_204_for_version(self, s3_has_path_mock):
@@ -2807,8 +2809,8 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 204)
-        s3_has_path_mock.assert_called_once_with(
-            "users/username/username_coll_v1.", key_pattern=COLLECTION_EXPORT_KEY_PATTERN)
+        s3_has_path_mock.assert_any_call(
+            "users/username/collections/coll/v1.", key_pattern=COLLECTION_EXPORT_KEY_PATTERN)
 
     @patch('core.services.storages.cloud.aws.S3.url_for')
     @patch('core.services.storages.cloud.aws.S3.get_last_key_from_path')
@@ -2816,7 +2818,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
     def test_get_302_version(self, s3_has_path_mock, s3_get_last_key_from_path_mock, s3_url_for_mock):
         s3_has_path_mock.return_value = True
         s3_url_for_mock.return_value = 'https://signed.example/coll-v1.zip'
-        s3_get_last_key_from_path_mock.return_value = f'users/username/username_coll_v1.{self.v1_updated_at}.zip'
+        s3_get_last_key_from_path_mock.return_value = f'users/username/collections/coll/v1.{self.v1_updated_at}.zip'
 
         response = self.client.get(
             self.collection_v1.uri + 'export/',
@@ -2826,12 +2828,12 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response['Location'], 'https://signed.example/coll-v1.zip')
-        s3_has_path_mock.assert_called_once_with(
-            "users/username/username_coll_v1.", key_pattern=COLLECTION_EXPORT_KEY_PATTERN)
+        s3_has_path_mock.assert_any_call(
+            "users/username/collections/coll/v1.", key_pattern=COLLECTION_EXPORT_KEY_PATTERN)
         s3_get_last_key_from_path_mock.assert_called_once_with(
-            "users/username/username_coll_v1.", key_pattern=COLLECTION_EXPORT_KEY_PATTERN)
+            "users/username/collections/coll/v1.", key_pattern=COLLECTION_EXPORT_KEY_PATTERN)
         s3_url_for_mock.assert_called_once_with(
-            f'users/username/username_coll_v1.{self.v1_updated_at}.zip',
+            f'users/username/collections/coll/v1.{self.v1_updated_at}.zip',
             filename=f'users_username_collections_coll_v1_{self.v1_updated_at}.zip'
         )
 
@@ -2849,9 +2851,9 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response['Location'], 'https://signed.example/coll-head.zip')
-        s3_exists_mock.assert_called_once_with(f"users/username/username_coll_vHEAD.{self.HEAD_updated_at}.zip")
+        s3_exists_mock.assert_any_call(f"users/username/collections/coll/HEAD.{self.HEAD_updated_at}.zip")
         s3_url_for_mock.assert_called_once_with(
-            f"users/username/username_coll_vHEAD.{self.HEAD_updated_at}.zip",
+            f"users/username/collections/coll/HEAD.{self.HEAD_updated_at}.zip",
             filename=f"users_username_collections_coll_HEAD_{self.HEAD_updated_at}.zip"
         )
 
@@ -2869,9 +2871,9 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.data, {'detail': 'Export exists but could not generate a download URL.'})
-        s3_exists_mock.assert_called_once_with(f"users/username/username_coll_vHEAD.{self.HEAD_updated_at}.zip")
+        s3_exists_mock.assert_any_call(f"users/username/collections/coll/HEAD.{self.HEAD_updated_at}.zip")
         s3_url_for_mock.assert_called_once_with(
-            f"users/username/username_coll_vHEAD.{self.HEAD_updated_at}.zip",
+            f"users/username/collections/coll/HEAD.{self.HEAD_updated_at}.zip",
             filename=f"users_username_collections_coll_HEAD_{self.HEAD_updated_at}.zip"
         )
 
@@ -2906,7 +2908,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response['URL'], self.collection.uri + 'export/')
-        s3_exists_mock.assert_called_once_with(f"users/username/username_coll_vHEAD.{self.HEAD_updated_at}.zip")
+        s3_exists_mock.assert_any_call(f"users/username/collections/coll/HEAD.{self.HEAD_updated_at}.zip")
 
     @patch('core.services.storages.cloud.aws.S3.has_path')
     def test_post_303_version(self, s3_has_path_mock):
@@ -2919,8 +2921,8 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response['URL'], self.collection_v1.uri + 'export/')
-        s3_has_path_mock.assert_called_once_with(
-            "users/username/username_coll_v1.", key_pattern=COLLECTION_EXPORT_KEY_PATTERN)
+        s3_has_path_mock.assert_any_call(
+            "users/username/collections/coll/v1.", key_pattern=COLLECTION_EXPORT_KEY_PATTERN)
 
     @patch('core.collections.views.export_collection')
     @patch('core.services.storages.cloud.aws.S3.exists')
@@ -2934,7 +2936,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 202)
-        s3_exists_mock.assert_called_once_with(f"users/username/username_coll_vHEAD.{self.HEAD_updated_at}.zip")
+        s3_exists_mock.assert_any_call(f"users/username/collections/coll/HEAD.{self.HEAD_updated_at}.zip")
         export_collection_mock.apply_async.assert_called_once_with((self.collection.id,), task_id=ANY, queue='default')
 
     @patch('core.collections.views.export_collection')
@@ -2949,8 +2951,8 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 202)
-        s3_has_path_mock.assert_called_once_with(
-            "users/username/username_coll_v1.", key_pattern=COLLECTION_EXPORT_KEY_PATTERN)
+        s3_has_path_mock.assert_any_call(
+            "users/username/collections/coll/v1.", key_pattern=COLLECTION_EXPORT_KEY_PATTERN)
         export_collection_mock.apply_async.assert_called_once_with(
             (self.collection_v1.id,), task_id=ANY, queue='default')
         self.assertEqual(
@@ -2969,7 +2971,7 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 409)
-        s3_exists_mock.assert_called_once_with(f"users/username/username_coll_vHEAD.{self.HEAD_updated_at}.zip")
+        s3_exists_mock.assert_any_call(f"users/username/collections/coll/HEAD.{self.HEAD_updated_at}.zip")
         export_collection_mock.apply_async.assert_called_once_with((self.collection.id,), task_id=ANY, queue='default')
         self.assertEqual(
             Task.objects.filter(created_by=self.admin, state='PENDING', name='export_collection').count(), 0)
@@ -2987,8 +2989,8 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 409)
-        s3_has_path_mock.assert_called_once_with(
-            "users/username/username_coll_v1.", key_pattern=COLLECTION_EXPORT_KEY_PATTERN)
+        s3_has_path_mock.assert_any_call(
+            "users/username/collections/coll/v1.", key_pattern=COLLECTION_EXPORT_KEY_PATTERN)
         export_collection_mock.apply_async.assert_called_once_with(
             (self.collection_v1.id,), task_id=ANY, queue='default')
         self.assertEqual(

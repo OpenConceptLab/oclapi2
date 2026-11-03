@@ -905,6 +905,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     def get_last_child_update_from_export_url(self, export_url):
         generic_path = self.get_version_export_path(suffix=None)
+        if generic_path not in export_url:
+            generic_path = self.get_legacy_version_export_path(suffix=None)
         try:
             last_child_updated_at = export_url.split(generic_path)[1].split('?')[0].replace('.zip', '')
             return from_string_to_date(last_child_updated_at.replace('_', ' ')).isoformat()
@@ -1044,8 +1046,11 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     def get_export_paths_to_delete(self):
         prefix = self.get_version_export_path(suffix=None)
-        return [(prefix, get_export_key_pattern(prefix))] + [
-            (path, None) for path in self.external_exports.values_list('file_path', flat=True)]
+        paths = [(prefix, get_export_key_pattern(prefix))]
+        if self.owns_legacy_export_path():
+            legacy_prefix = self.get_legacy_version_export_path(suffix=None)
+            paths.append((legacy_prefix, get_export_key_pattern(legacy_prefix)))
+        return paths + [(path, None) for path in self.external_exports.values_list('file_path', flat=True)]
 
     @staticmethod
     def delete_export_paths(export_paths, sync=False):
@@ -1530,6 +1535,24 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         return self.get_version_export_path(suffix=f"{last_update}.zip")
 
     def get_version_export_path(self, suffix='*'):
+        owner = self.parent
+        owner_type = f'{owner.get_url_kwarg()}s'
+        path = f"{owner_type}/{owner.mnemonic}/{self.resource_type.lower()}s/{self.mnemonic}/{self.version}"
+        expansion = get(self, 'expansion.mnemonic')
+        if expansion:
+            path = f"{path}/{expansion}"
+        path = f'{path}.'
+
+        if suffix:
+            path += suffix
+
+        return path
+
+    def get_legacy_version_export_path(self, suffix='*'):
+        """
+        Pre-unique export key prefix. It has no repo type and forces a 'v' on the version, so versions '1.8' and 'v1.8',
+        or a source and a collection of the same name, build the same one.
+        """
         version = self.version
         if not version.lower().startswith('v'):
             version = f"v{version}"
@@ -1548,18 +1571,49 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         return path
 
+    def owns_legacy_export_path(self):
+        """
+        True when no other source or collection version builds this version's legacy export prefix, so the keys
+        under it can only be its own.
+        """
+        from core.sources.models import Source
+        from core.collections.models import Collection
+
+        legacy_path = self.get_legacy_version_export_path(suffix=None)
+        bare_version = self.version[1:] if self.version.lower().startswith('v') else self.version
+        for model in (Source, Collection):
+            candidates = model.objects.filter(
+                mnemonic=self.mnemonic, organization_id=self.organization_id, user_id=self.user_id
+            ).filter(Q(version__iexact=bare_version) | Q(version__iexact=f'v{bare_version}'))
+            for candidate in candidates:
+                if candidate.id != self.id and candidate.get_legacy_version_export_path(suffix=None) == legacy_path:
+                    return False
+        return True
+
     def get_external_export_path(self, key, filename):
         base_path = self.get_version_export_path(suffix=None).rstrip('.')
         safe_filename = get_valid_filename(filename)
         return f"{base_path}/external/{key}_{safe_filename}"
 
     def get_export_path(self):
-        if self.is_head:
-            return self.version_export_path
         service = get_export_service()
+        if self.is_head:
+            if service.exists(self.version_export_path):
+                return self.version_export_path
+            legacy = self.__legacy_head_export_path()
+            if service.exists(legacy) and self.owns_legacy_export_path():
+                return legacy
+            return self.version_export_path
         prefix = self.get_version_export_path(suffix=None)
-        return service.get_last_key_from_path(
-            prefix, key_pattern=get_export_key_pattern(prefix)) or self.version_export_path
+        key = service.get_last_key_from_path(prefix, key_pattern=get_export_key_pattern(prefix))
+        if not key and self.owns_legacy_export_path():
+            legacy_prefix = self.get_legacy_version_export_path(suffix=None)
+            key = service.get_last_key_from_path(legacy_prefix, key_pattern=get_export_key_pattern(legacy_prefix))
+        return key or self.version_export_path
+
+    def __legacy_head_export_path(self):
+        last_update = self.last_child_update.strftime('%Y-%m-%d_%H%M%S')
+        return self.get_legacy_version_export_path(suffix=f"{last_update}.zip")
 
     def get_export_download_name(self, export_path):
         """
@@ -1571,7 +1625,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         """
         # current (2026-09-30_123456) or legacy (20260930123456) key timestamp
         match = re.fullmatch(
-            re.escape(self.get_version_export_path(suffix=None)) + EXPORT_KEY_TIMESTAMP_PATTERN, export_path)
+            re.escape(self.get_version_export_path(suffix=None)) + EXPORT_KEY_TIMESTAMP_PATTERN, export_path
+        ) or re.fullmatch(
+            re.escape(self.get_legacy_version_export_path(suffix=None)) + EXPORT_KEY_TIMESTAMP_PATTERN, export_path)
         if not match:
             return None
 
@@ -1586,9 +1642,14 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     def has_export(self):
         service = get_export_service()
         if self.is_head:
-            return service.exists(self.version_export_path)
+            return service.exists(self.version_export_path) or (
+                service.exists(self.__legacy_head_export_path()) and self.owns_legacy_export_path())
         prefix = self.get_version_export_path(suffix=None)
-        return service.has_path(prefix, key_pattern=get_export_key_pattern(prefix))
+        if service.has_path(prefix, key_pattern=get_export_key_pattern(prefix)):
+            return True
+        legacy_prefix = self.get_legacy_version_export_path(suffix=None)
+        return service.has_path(
+            legacy_prefix, key_pattern=get_export_key_pattern(legacy_prefix)) and self.owns_legacy_export_path()
 
     def can_view_all_content(self, user):
         if get(user, 'is_anonymous'):
