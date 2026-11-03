@@ -72,7 +72,7 @@ def element_type(annotation):
     while True:
         origin = typing.get_origin(annotation)
         if origin in (typing.Union, types.UnionType):
-            annotation = next(arg for arg in typing.get_args(annotation) if arg is not type(None))
+            annotation = next(arg for arg in typing.get_args(annotation) if arg is not types.NoneType)
         elif origin is list:
             repeats, annotation = True, typing.get_args(annotation)[0]
         elif origin is typing.Annotated:
