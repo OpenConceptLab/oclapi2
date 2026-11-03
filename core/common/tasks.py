@@ -417,7 +417,10 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                     instance.snapshot = CollectionDetailSerializer(head).data
                 instance.save(update_fields=['snapshot'])
             instance.get_checksums(recalculate=True)
-            instance.seed_references()
+            seed_from_head = is_collection and autoexpand and instance.can_seed_from_head_expansion() and \
+                instance.seed_from_head_expansion()
+            if not seed_from_head:
+                instance.seed_references()
             if is_source:
                 instance.seed_concepts(index=False)
                 instance.seed_mappings(index=False)
@@ -436,7 +439,8 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                 else:
                     instance.index_children(sync=False, user=instance.created_by)
             elif autoexpand:
-                instance.cascade_children_to_expansion(index=True, sync=sync)
+                if not seed_from_head:
+                    instance.cascade_children_to_expansion(index=True, sync=sync)
                 instance.update_children_counts(sync)
 
             if export:

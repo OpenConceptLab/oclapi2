@@ -11,7 +11,7 @@ from django.contrib.postgres.fields import ArrayField
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
-from django.db import models, IntegrityError, transaction
+from django.db import models, IntegrityError, OperationalError, transaction
 from django.db.models import Value, Q, Count, Func
 from django.db.models.expressions import CombinedExpression, F
 from django.utils import timezone
@@ -1245,7 +1245,30 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             return errors
 
         is_test_mode = get(settings, 'TEST_MODE', False)
+        # a synchronous seed from HEAD runs in this transaction, so it needs this transaction's snapshot
+        is_repeatable_read = sync and not is_test_mode and not transaction.get_connection().in_atomic_block and \
+            obj.can_seed_from_head_expansion()
+        attempts = 3 if is_repeatable_read else 1
+        for attempt in range(1, attempts + 1):
+            try:
+                cls.persist_new_version_in_transaction(obj, head, user, sync, is_repeatable_read, **kwargs)
+                break
+            except OperationalError as ex:
+                if attempt == attempts or not cls.is_serialization_failure(ex):
+                    raise
+                # rolled back, so start again as an unsaved version
+                obj.id = None
+                obj._state.adding = True  # pylint: disable=protected-access
+
+        return errors
+
+    @classmethod
+    def persist_new_version_in_transaction(cls, obj, head, user, sync, is_repeatable_read, **kwargs):  # pylint: disable=too-many-arguments
+        is_test_mode = get(settings, 'TEST_MODE', False)
         with transaction.atomic():
+            if is_repeatable_read:
+                with transaction.get_connection().cursor() as cursor:
+                    cursor.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
             # Serialize version creation with destructive child operations on the HEAD repository.
             head = cls.objects.select_for_update().get(id=head.id)
             obj.update_version_data(head)
@@ -1280,10 +1303,15 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
                 transaction.on_commit(enqueue_seed_task)
 
-        return errors
+    @staticmethod
+    def is_serialization_failure(ex):
+        return getattr(ex.__cause__, 'pgcode', None) == '40001'
 
     def index_resources_for_self_as_latest_released(self, only_update=False):  # pylint: disable=unused-argument
         pass
+
+    def can_seed_from_head_expansion(self):
+        return False
 
     @classmethod
     def persist_changes(cls, obj, updated_by, original_schema, **kwargs):  # pylint: disable=too-many-locals,too-many-branches
