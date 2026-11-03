@@ -1,5 +1,10 @@
 import datetime
+import io
+import re
 from unittest.mock import patch
+
+import boto3
+from moto import mock_aws
 
 from django.db import IntegrityError, transaction
 from django.test import override_settings, tag
@@ -11,6 +16,9 @@ from core.collections.tests.factories import OrganizationCollectionFactory, User
 from core.common.constants import HEAD
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.orgs.tests.factories import OrganizationFactory
+from core.common.tasks import delete_s3_objects
+from core.common.utils import get_export_key_pattern
+from core.services.storages.cloud.aws import S3
 from core.repos.models import RepoExternalExport, Repository, VersionChangelog, VersionChecksumMap
 from core.sources.documents import SourceDocument
 from core.sources.models import Source
@@ -216,6 +224,76 @@ class RepoExportDownloadNameTest(OCLTestCase):
             source_v1.get_export_download_name(export_path),
             'orgs_PIH_sources_PIH_1.0-beta-draft-x-100-_2026-09-30_123456.zip'
         )
+
+
+@mock_aws
+class RepoExportSiblingVersionsTest(OCLTestCase):
+    def setUp(self):
+        super().setUp()
+        boto3.resource('s3', region_name='us-east-1').create_bucket(Bucket='oclapi2-dev')
+        org = OrganizationFactory(mnemonic='PIH')
+        self.v1_8 = OrganizationSourceFactory(organization=org, mnemonic='PIH', version='1.8')
+        self.v1_8_24 = OrganizationSourceFactory(organization=org, mnemonic='PIH', version='1.8.24')
+        self.v1_8_24_1 = OrganizationSourceFactory(organization=org, mnemonic='PIH', version='1.8.24.1')
+        self.s3 = S3()
+
+    def upload(self, version, timestamp):
+        key = version.get_version_export_path(suffix=f'{timestamp}.zip')
+        self.s3.upload(key, io.BytesIO(b'content'))
+        return key
+
+    @staticmethod
+    def remaining_keys():
+        return sorted(
+            obj.key for obj in boto3.resource('s3', region_name='us-east-1').Bucket('oclapi2-dev').objects.all())
+
+    def test_get_export_path_ignores_sibling_versions(self):
+        own_key = self.upload(self.v1_8_24, '2026-10-01_090000')
+        self.upload(self.v1_8_24_1, '2026-10-02_090000')
+
+        self.assertEqual(self.v1_8_24.get_export_path(), own_key)
+
+    def test_has_export_ignores_sibling_versions(self):
+        self.upload(self.v1_8_24, '2026-10-01_090000')
+        self.upload(self.v1_8_24_1, '2026-10-02_090000')
+
+        self.assertFalse(self.v1_8.has_export())
+        self.assertTrue(self.v1_8_24.has_export())
+        self.assertTrue(self.v1_8_24_1.has_export())
+
+    def test_has_export_with_legacy_key(self):
+        self.s3.upload(self.v1_8.get_version_export_path(suffix='20260930123456.zip'), io.BytesIO(b'content'))
+
+        self.assertTrue(self.v1_8.has_export())
+
+    def test_delete_s3_objects_without_key_pattern_removes_every_key_under_path(self):
+        self.s3.upload('map_projects/1/terms.', io.BytesIO(b'content'))
+        self.s3.upload('map_projects/1/terms.csv', io.BytesIO(b'content'))
+
+        delete_s3_objects('map_projects/1/terms.')
+
+        self.assertEqual(self.remaining_keys(), [])
+
+    def test_get_export_key_pattern(self):
+        pattern = get_export_key_pattern('orgs/PIH/PIH_PIH_v1.8.')
+
+        for key in ['orgs/PIH/PIH_PIH_v1.8.2026-10-01_090000.zip', 'orgs/PIH/PIH_PIH_v1.8.20261001090000.zip']:
+            self.assertTrue(re.fullmatch(pattern, key))
+        for key in [
+            'orgs/PIH/PIH_PIH_v1.8.24.2026-10-01_090000.zip', 'orgs/PIH/PIH_PIH_v1.8.24.1.2026-10-01_090000.zip',
+            'orgs/PIH/PIH_PIH_v1x8.2026-10-01_090000.zip', 'orgs/PIH/PIH_PIH_v1.8.2026-10-01_090000.zip.bak',
+        ]:
+            self.assertIsNone(re.fullmatch(pattern, key))
+
+    def test_delete_export_paths_leaves_sibling_exports(self):
+        self.upload(self.v1_8, '2026-10-01_090000')
+        self.upload(self.v1_8, '2026-10-03_090000')
+        key_1_8_24 = self.upload(self.v1_8_24, '2026-10-01_090000')
+        key_1_8_24_1 = self.upload(self.v1_8_24_1, '2026-10-02_090000')
+
+        self.v1_8.delete_export_paths(self.v1_8.get_export_paths_to_delete(), sync=True)
+
+        self.assertEqual(self.remaining_keys(), sorted([key_1_8_24, key_1_8_24_1]))
 
 
 @tag('es')

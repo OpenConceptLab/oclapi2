@@ -1,4 +1,5 @@
 import base64
+import re
 
 import boto3
 from botocore.config import Config
@@ -83,20 +84,20 @@ class S3(CloudStorageServiceInterface):
 
         return True
 
-    def has_path(self, prefix='/', delimiter='/'):
-        return len(self.__fetch_keys(prefix, delimiter)) > 0
+    def has_path(self, prefix='/', delimiter='/', key_pattern=None):
+        return len(self.__filter_keys(self.__fetch_keys(prefix, delimiter), key_pattern)) > 0
 
-    def get_last_key_from_path(self, prefix='/', delimiter='/'):
-        keys = self.__fetch_keys(prefix, delimiter, True)
+    def get_last_key_from_path(self, prefix='/', delimiter='/', key_pattern=None):
+        keys = self.__filter_keys(self.__fetch_keys(prefix, delimiter, True), key_pattern)
         key = sorted(keys, key=lambda k: k.get('LastModified'), reverse=True)[0] if len(keys) > 1 else get(keys, '0')
         return get(key, 'Key')
 
-    def delete_objects(self, path):  # pragma: no cover
+    def delete_objects(self, path, key_pattern=None):  # pragma: no cover
         try:
-            keys = self.__fetch_keys(prefix=path)
-            if keys:
+            keys = self.__filter_keys(self.__fetch_keys(prefix=path), key_pattern)
+            for start in range(0, len(keys), 1000):
                 self.__resource().meta.client.delete_objects(
-                    Bucket=settings.AWS_STORAGE_BUCKET_NAME, Delete={'Objects': keys})
+                    Bucket=settings.AWS_STORAGE_BUCKET_NAME, Delete={'Objects': keys[start:start + 1000]})
         except:  # pylint: disable=bare-except
             pass
 
@@ -164,11 +165,19 @@ class S3(CloudStorageServiceInterface):
         return None
 
     # protected
+    @staticmethod
+    def __filter_keys(keys, key_pattern):
+        if not key_pattern:
+            return keys
+        return [key for key in keys if re.fullmatch(key_pattern, key['Key'])]
+
     def __fetch_keys(self, prefix='/', delimiter='/', verbose=False):  # pragma: no cover
         prefix = prefix[1:] if prefix.startswith(delimiter) else prefix
         s3_resource = self.__resource()
-        objects = s3_resource.meta.client.list_objects(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Prefix=prefix)
-        content = objects.get('Contents', [])
+        paginator = s3_resource.meta.client.get_paginator('list_objects')
+        content = []
+        for page in paginator.paginate(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Prefix=prefix):
+            content.extend(page.get('Contents', []))
         if verbose:
             return content
         return [{'Key': k} for k in [obj['Key'] for obj in content]]

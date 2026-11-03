@@ -2145,7 +2145,7 @@ class TaskTest(OCLTestCase):
         s3_mock = Mock(delete_objects=Mock())
         export_service_mock.return_value = s3_mock
         delete_s3_objects('/some/path')
-        s3_mock.delete_objects.assert_called_once_with('/some/path')
+        s3_mock.delete_objects.assert_called_once_with('/some/path', key_pattern=None)
 
     @patch('core.importers.models.BulkImportParallelRunner.run')
     def test_bulk_import_parallel_inline_invalid_json(self, import_run_mock):

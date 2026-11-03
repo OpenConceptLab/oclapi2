@@ -1,6 +1,7 @@
 import base64
 import mimetypes
 import os
+import re
 from io import BytesIO
 
 from django.utils.http import content_disposition_header
@@ -176,29 +177,31 @@ class MinIO(CloudStorageServiceInterface):
         except:  # pylint: disable=bare-except
             return False
 
-    def has_path(self, prefix='/', delimiter='/'):
-        return len(self.__fetch_keys(prefix, delimiter)) > 0
+    def has_path(self, prefix='/', delimiter='/', key_pattern=None):
+        return len(self.__fetch_keys(prefix, delimiter, key_pattern)) > 0
 
-    def get_last_key_from_path(self, prefix='/', delimiter='/'):
+    def get_last_key_from_path(self, prefix='/', delimiter='/', key_pattern=None):
         """
         Fetches the last object key under the given prefix.
         """
         try:
-            keys = self.__fetch_keys(prefix, delimiter)
+            keys = self.__fetch_keys(prefix, delimiter, key_pattern)
             key = sorted(keys, key=lambda k: k.get('LastModified'), reverse=True)[0] if len(keys) > 1 else get(keys,
                                                                                                                '0')
             return get(key, 'Key')
         except S3Error as e:
             raise Exception(f"Could not fetch last key from path {prefix}. Error: {e}") from e  # pylint: disable=broad-exception-raised
 
-    def delete_objects(self, path):
+    def delete_objects(self, path, key_pattern=None):
         """
         Deletes multiple objects from MinIO.
         """
         try:
             delete_object_list = map(
                 lambda x: DeleteObject(x.object_name),
-                self.client.list_objects(bucket_name=self.bucket_name, prefix=path, recursive=True),
+                filter(
+                    lambda x: not key_pattern or re.fullmatch(key_pattern, x.object_name),
+                    self.client.list_objects(bucket_name=self.bucket_name, prefix=path, recursive=True)),
             )
             errors = self.client.remove_objects(bucket_name=self.bucket_name, delete_object_list=delete_object_list)
 
@@ -216,7 +219,7 @@ class MinIO(CloudStorageServiceInterface):
         except S3Error as e:
             raise Exception(f"Could not delete file {key} from MinIO. Error: {e}") from e  # pylint: disable=broad-exception-raised
 
-    def __fetch_keys(self, prefix, delimiter):
+    def __fetch_keys(self, prefix, delimiter, key_pattern=None):
         """
         Fetches all object keys under a given prefix.
         """
@@ -224,7 +227,9 @@ class MinIO(CloudStorageServiceInterface):
             if delimiter and prefix.endswith(delimiter):
                 prefix = prefix[:-1]
             objects = self.client.list_objects(bucket_name=self.bucket_name, prefix=prefix, recursive=True)
-            return [{'Key': k} for k in [obj.object_name for obj in objects]]
+            return [
+                {'Key': obj.object_name, 'LastModified': obj.last_modified} for obj in objects
+                if not key_pattern or re.fullmatch(key_pattern, obj.object_name)]
         except S3Error as e:
             raise Exception(f"Could not fetch keys from bucket {self.bucket_name}. Error: {e}") from e  # pylint: disable=broad-exception-raised
 

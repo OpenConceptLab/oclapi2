@@ -22,6 +22,27 @@ from core.services.storages.cloud.minio import MinIO
 
 class S3Test(TestCase):
     @mock_aws
+    def test_key_pattern_applies_across_pages(self):
+        _conn = boto3.resource('s3', region_name='us-east-1')
+        _conn.create_bucket(Bucket='oclapi2-dev')
+        s3 = S3()
+        bucket = _conn.Bucket('oclapi2-dev')
+        for n in range(1001):
+            bucket.put_object(Key=f'orgs/PIH/PIH_PIH_v1.8.1{n:04d}', Body=b'content')
+        target = 'orgs/PIH/PIH_PIH_v1.8.2026-10-01_090000.zip'
+        s3.upload(target, io.BytesIO(b'content'))
+        prefix = 'orgs/PIH/PIH_PIH_v1.8.'
+        key_pattern = r'orgs/PIH/PIH_PIH_v1\.8\.(\d{4})-?(\d{2})-?(\d{2})_?(\d{6})\.zip'
+
+        self.assertTrue(s3.has_path(prefix, key_pattern=key_pattern))
+        self.assertEqual(s3.get_last_key_from_path(prefix, key_pattern=key_pattern), target)
+
+        s3.delete_objects(prefix, key_pattern=key_pattern)
+
+        self.assertFalse(s3.exists(target))
+        self.assertTrue(s3.exists('orgs/PIH/PIH_PIH_v1.8.10000'))
+
+    @mock_aws
     def test_upload(self):
         _conn = boto3.resource('s3', region_name='us-east-1')
         _conn.create_bucket(Bucket='oclapi2-dev')
@@ -371,6 +392,27 @@ class BlobStorageTest(TestCase):
         container_client_mock.walk_blobs.assert_called_once_with(name_starts_with='foo/bar/', delimiter='')
 
     @patch('core.services.storages.cloud.azure.BlobServiceClient')
+    def test_key_pattern(self, blob_service_client):
+        now = timezone.now()
+        own = Mock(last_modified=now - timedelta(days=1))
+        own.name = 'foo/v1.8.2026-10-01_090000.zip'
+        sibling = Mock(last_modified=now)
+        sibling.name = 'foo/v1.8.24.1.2026-10-02_090000.zip'
+        client_mock = Mock(delete_blob=Mock())
+        container_client_mock = Mock(
+            walk_blobs=Mock(side_effect=lambda **kwargs: [own, sibling]),
+            get_blob_client=Mock(return_value=client_mock))
+        container_mock = Mock(get_container_client=Mock(return_value=container_client_mock))
+        blob_service_client.from_connection_string = Mock(return_value=container_mock)
+        key_pattern = r'foo/v1\.8\.(\d{4})-(\d{2})-(\d{2})_(\d{6})\.zip'
+        storage = BlobStorage()
+
+        self.assertTrue(storage.has_path('foo/v1.8.', key_pattern=key_pattern))
+        self.assertEqual(storage.get_last_key_from_path('foo/v1.8.', key_pattern=key_pattern), own.name)
+        self.assertEqual(storage.delete_objects('foo/v1.8.', key_pattern=key_pattern), 1)
+        container_client_mock.get_blob_client.assert_called_once_with(blob=own.name)
+
+    @patch('core.services.storages.cloud.azure.BlobServiceClient')
     def test_delete_objects(self, blob_service_client):
         blob1 = Mock()
         blob1.name = 'foo/bar/foobar.json'
@@ -561,8 +603,8 @@ class MinIOTest(TestCase):
         # Mock list_objects method
         mock_client = mock_minio_client.return_value
         mock_client.list_objects = MagicMock(return_value=[
-            MagicMock(object_name="test-file1.txt"),
-            MagicMock(object_name="test-file2.txt")
+            MagicMock(object_name="test-file1.txt", last_modified="t1"),
+            MagicMock(object_name="test-file2.txt", last_modified="t2")
         ])
 
         client = MinIO()
@@ -570,15 +612,37 @@ class MinIOTest(TestCase):
         keys = client._MinIO__fetch_keys(prefix="test/", delimiter='/')  # pylint: disable=protected-access
 
         # Assert that the correct keys were fetched
-        self.assertEqual(keys, [{'Key': "test-file1.txt"}, {'Key': "test-file2.txt"}])
+        self.assertEqual(keys, [
+            {'Key': "test-file1.txt", 'LastModified': "t1"}, {'Key': "test-file2.txt", 'LastModified': "t2"}])
         mock_client.list_objects.assert_called_once_with(bucket_name="bucket", prefix="test", recursive=True)
 
         # Call the __fetch_keys method
         keys = client._MinIO__fetch_keys(prefix="test/", delimiter='')  # pylint: disable=protected-access
 
         # Assert that the correct keys were fetched
-        self.assertEqual(keys, [{'Key': "test-file1.txt"}, {'Key': "test-file2.txt"}])
+        self.assertEqual(keys, [
+            {'Key': "test-file1.txt", 'LastModified': "t1"}, {'Key': "test-file2.txt", 'LastModified': "t2"}])
         mock_client.list_objects.assert_called_with(bucket_name="bucket", prefix="test/", recursive=True)
+
+    @patch("core.services.storages.cloud.minio.Minio")
+    def test_key_pattern(self, mock_minio_client):
+        now = timezone.now()
+        older = Mock(object_name='foo/v1.8.2026-09-30_090000.zip', last_modified=now - timedelta(days=2))
+        own = Mock(object_name='foo/v1.8.2026-10-01_090000.zip', last_modified=now - timedelta(days=1))
+        sibling = Mock(object_name='foo/v1.8.24.1.2026-10-02_090000.zip', last_modified=now)
+        mock_client = mock_minio_client.return_value
+        mock_client.list_objects = MagicMock(side_effect=lambda **kwargs: iter([older, own, sibling]))
+        mock_client.remove_objects = MagicMock(return_value=[])
+        key_pattern = r'foo/v1\.8\.(\d{4})-(\d{2})-(\d{2})_(\d{6})\.zip'
+        client = MinIO()
+
+        self.assertTrue(client.has_path('foo/v1.8.', key_pattern=key_pattern))
+        self.assertEqual(client.get_last_key_from_path('foo/v1.8.', key_pattern=key_pattern), own.object_name)
+
+        client.delete_objects('foo/v1.8.', key_pattern=key_pattern)
+
+        deleted = list(mock_client.remove_objects.call_args.kwargs['delete_object_list'])
+        self.assertEqual([d._name for d in deleted], [older.object_name, own.object_name])  # pylint: disable=protected-access
 
     @patch("core.services.storages.cloud.minio.Minio")
     def test_delete_objects(self, mock_minio_client):

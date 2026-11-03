@@ -1040,9 +1040,9 @@ def update_collection_active_mappings_count(collection_id):
 
 
 @app.task
-def delete_s3_objects(path):
+def delete_s3_objects(path, key_pattern=None):
     if path:
-        get_export_service().delete_objects(path)
+        get_export_service().delete_objects(path, key_pattern=key_pattern)
 
 
 @app.task(ignore_result=True)

@@ -36,17 +36,17 @@ class CloudStorageServiceInterface:
         Checks if key (object) exists
         """
 
-    def has_path(self, prefix='/', delimiter='/'):
+    def has_path(self, prefix='/', delimiter='/', key_pattern=None):
         """
         Checks if path exists
         """
 
-    def get_last_key_from_path(self, prefix='/', delimiter='/'):
+    def get_last_key_from_path(self, prefix='/', delimiter='/', key_pattern=None):
         """
         Returns last key from path
         """
 
-    def delete_objects(self, path):
+    def delete_objects(self, path, key_pattern=None):
         """
         Deletes all objects in path
         """

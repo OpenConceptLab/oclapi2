@@ -1,5 +1,9 @@
+import io
 import json
 import zipfile
+
+import boto3
+from moto import mock_aws
 
 from celery_once import AlreadyQueued
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -12,16 +16,17 @@ from core.collections.models import CollectionReference, Collection
 from core.collections.serializers import CollectionVersionExportSerializer, CollectionReferenceDetailSerializer
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory, ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE
-from core.common.tasks import export_collection
+from core.common.tasks import export_collection, delete_s3_objects
 from core.common.tests import OCLAPITestCase
 from core.integration_tests.tests_access_control import PrivateHeadVersionAccessMixin
-from core.common.utils import get_latest_dir_in_path, drop_version
+from core.common.utils import get_latest_dir_in_path, drop_version, get_export_key_pattern
 from core.concepts.models import Concept
 from core.concepts.serializers import ConceptVersionExportSerializer, ConceptListSerializer
 from core.concepts.tests.factories import ConceptFactory
 from core.mappings.serializers import MappingListSerializer, MappingVersionExportSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
+from core.services.storages.cloud.aws import S3
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.tasks.models import Task
@@ -550,12 +555,12 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(coll.versions.count(), 0)
         self.assertFalse(Collection.objects.filter(mnemonic='coll1').exists())
         self.assertEqual(delete_s3_objects_mock.apply_async.call_count, 2)
+        head_prefix = f'orgs/{coll.organization.mnemonic}/{coll.organization.mnemonic}_coll1_vHEAD.'
+        v1_prefix = f'orgs/{coll.organization.mnemonic}/{coll.organization.mnemonic}_coll1_v1.'
         delete_s3_objects_mock.apply_async.assert_any_call(
-            (f'orgs/{coll.organization.mnemonic}/{coll.organization.mnemonic}_coll1_vHEAD.',),
-            queue='default', permanent=False)
+            (head_prefix, get_export_key_pattern(head_prefix)), queue='default', permanent=False)
         delete_s3_objects_mock.apply_async.assert_any_call(
-            (f'orgs/{coll.organization.mnemonic}/{coll.organization.mnemonic}_coll1_v1.',),
-            queue='default', permanent=False)
+            (v1_prefix, get_export_key_pattern(v1_prefix)), queue='default', permanent=False)
 
     @patch('core.collections.views.delete_collection')
     def test_delete_202(self, delete_collection_task_mock):  # async delete
@@ -2558,9 +2563,9 @@ class CollectionVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.collection.versions.count(), 1)
         self.assertTrue(self.collection.versions.first().is_latest_version)
+        v1_prefix = f'users/{self.collection.parent.mnemonic}/{self.collection.parent.mnemonic}_coll_v1.'
         delete_s3_objects_mock.apply_async.assert_called_once_with(
-            (f'users/{self.collection.parent.mnemonic}/{self.collection.parent.mnemonic}_coll_v1.',),
-            queue='default', permanent=False)
+            (v1_prefix, get_export_key_pattern(v1_prefix)), queue='default', permanent=False)
 
 
 class CollectionLatestVersionRetrieveUpdateViewTest(OCLAPITestCase):
@@ -2754,6 +2759,9 @@ class CollectionExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 404)
 
 
+COLLECTION_EXPORT_KEY_PATTERN = r'users/username/username_coll_v1\.(\d{4})-?(\d{2})-?(\d{2})_?(\d{6})\.zip'
+
+
 class CollectionVersionExportViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
@@ -2799,7 +2807,8 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 204)
-        s3_has_path_mock.assert_called_once_with("users/username/username_coll_v1.")
+        s3_has_path_mock.assert_called_once_with(
+            "users/username/username_coll_v1.", key_pattern=COLLECTION_EXPORT_KEY_PATTERN)
 
     @patch('core.services.storages.cloud.aws.S3.url_for')
     @patch('core.services.storages.cloud.aws.S3.get_last_key_from_path')
@@ -2817,8 +2826,10 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response['Location'], 'https://signed.example/coll-v1.zip')
-        s3_has_path_mock.assert_called_once_with("users/username/username_coll_v1.")
-        s3_get_last_key_from_path_mock.assert_called_once_with("users/username/username_coll_v1.")
+        s3_has_path_mock.assert_called_once_with(
+            "users/username/username_coll_v1.", key_pattern=COLLECTION_EXPORT_KEY_PATTERN)
+        s3_get_last_key_from_path_mock.assert_called_once_with(
+            "users/username/username_coll_v1.", key_pattern=COLLECTION_EXPORT_KEY_PATTERN)
         s3_url_for_mock.assert_called_once_with(
             f'users/username/username_coll_v1.{self.v1_updated_at}.zip',
             filename=f'users_username_collections_coll_v1_{self.v1_updated_at}.zip'
@@ -2908,7 +2919,8 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response['URL'], self.collection_v1.uri + 'export/')
-        s3_has_path_mock.assert_called_once_with("users/username/username_coll_v1.")
+        s3_has_path_mock.assert_called_once_with(
+            "users/username/username_coll_v1.", key_pattern=COLLECTION_EXPORT_KEY_PATTERN)
 
     @patch('core.collections.views.export_collection')
     @patch('core.services.storages.cloud.aws.S3.exists')
@@ -2937,7 +2949,8 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 202)
-        s3_has_path_mock.assert_called_once_with("users/username/username_coll_v1.")
+        s3_has_path_mock.assert_called_once_with(
+            "users/username/username_coll_v1.", key_pattern=COLLECTION_EXPORT_KEY_PATTERN)
         export_collection_mock.apply_async.assert_called_once_with(
             (self.collection_v1.id,), task_id=ANY, queue='default')
         self.assertEqual(
@@ -2974,7 +2987,8 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 409)
-        s3_has_path_mock.assert_called_once_with("users/username/username_coll_v1.")
+        s3_has_path_mock.assert_called_once_with(
+            "users/username/username_coll_v1.", key_pattern=COLLECTION_EXPORT_KEY_PATTERN)
         export_collection_mock.apply_async.assert_called_once_with(
             (self.collection_v1.id,), task_id=ANY, queue='default')
         self.assertEqual(
@@ -3004,6 +3018,63 @@ class CollectionVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 204)
         s3_remove_mock.assert_called_once_with('head/export/path')
+
+
+def signed_url_for(_, key, filename=None):  # pylint: disable=unused-argument
+    return f'https://signed.example/{key}'
+
+
+@mock_aws
+class CollectionVersionExportSiblingVersionsViewTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        boto3.resource('s3', region_name='us-east-1').create_bucket(Bucket='oclapi2-dev')
+        self.owner = UserProfileFactory(username='owner')
+        self.owner_token = self.owner.get_token()
+        self.head = UserCollectionFactory(user=self.owner, mnemonic='coll')
+        self.v1_8 = UserCollectionFactory(user=self.owner, mnemonic='coll', version='1.8')
+        self.v1_8_24 = UserCollectionFactory(user=self.owner, mnemonic='coll', version='1.8.24')
+        self.v1_8_24_1 = UserCollectionFactory(user=self.owner, mnemonic='coll', version='1.8.24.1')
+
+    def upload(self, version, timestamp):
+        key = version.get_version_export_path(suffix=f'{timestamp}.zip')
+        S3().upload(key, io.BytesIO(b'content'))
+        return key
+
+    def get_export(self, version):
+        return self.client.get(version.uri + 'export/', HTTP_AUTHORIZATION='Token ' + self.owner_token, format='json')
+
+    @patch('core.services.storages.cloud.aws.S3.url_for', signed_url_for)
+    def test_get_serves_own_export_not_sibling(self):
+        own_key = self.upload(self.v1_8_24, '2026-10-01_090000')
+        self.upload(self.v1_8_24_1, '2026-10-02_090000')
+
+        response = self.get_export(self.v1_8_24)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], f'https://signed.example/{own_key}')
+
+    @patch('core.services.storages.cloud.aws.S3.url_for', signed_url_for)
+    def test_get_204_when_only_siblings_have_exports(self):
+        self.upload(self.v1_8_24, '2026-10-01_090000')
+        self.upload(self.v1_8_24_1, '2026-10-02_090000')
+
+        self.assertEqual(self.get_export(self.v1_8).status_code, 204)
+
+    @patch('core.common.models.delete_s3_objects')
+    def test_delete_version_leaves_sibling_exports(self, delete_s3_objects_mock):
+        delete_s3_objects_mock.apply_async.side_effect = lambda args, **kwargs: delete_s3_objects(*args)
+        self.upload(self.v1_8, '2026-10-01_090000')
+        key_1_8_24 = self.upload(self.v1_8_24, '2026-10-01_090000')
+        key_1_8_24_1 = self.upload(self.v1_8_24_1, '2026-10-02_090000')
+
+        response = self.client.delete(
+            self.v1_8.uri, HTTP_AUTHORIZATION='Token ' + self.owner_token, format='json')
+
+        self.assertEqual(response.status_code, 204)
+        remaining = sorted(
+            obj.key for obj in boto3.resource('s3', region_name='us-east-1').Bucket('oclapi2-dev').objects.all())
+        self.assertEqual(remaining, sorted([key_1_8_24, key_1_8_24_1]))
 
 
 class CollectionVersionExternalExportViewTest(OCLAPITestCase):
