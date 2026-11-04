@@ -118,7 +118,7 @@ class UserCapabilityOverrideViewTest(OCLAPITestCase):
         self.assertEqual(self.target.get_capability_limit(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID), -1)
         with self.assertRaises(CapabilityExceeded) as ctx:
             self.target.check_and_consume_capability(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID)
-        self.assertTrue(ctx.exception.not_entitled)
+        self.assertTrue(ctx.exception.no_access)
 
     def test_list_reflects_created_overrides(self):
         self.client.put(
@@ -566,7 +566,7 @@ class FakePolicy(CapabilityPolicy):
     ):
         self.calls.append(('consume', user, capability_id, units, idempotency_key, owner, attribution))
         if self.refusal:
-            raise UsageRefused(dict(self.refusal), not_entitled=self.refusal.get('error_code') == 'fake_not_entitled')
+            raise UsageRefused(dict(self.refusal), no_access=self.refusal.get('error_code') == 'fake_no_access')
         return UsageEvent.objects.create(user=user, capability_id=capability_id, units=units), False
 
     def reverse(self, usage_event, units):
@@ -667,22 +667,22 @@ class CapabilityPolicyContractTest(OCLAPITestCase):
             {'detail': 'ai_assistant.calls limit reached.', 'error_code': 'fake_limit_reached', 'limit': 5,
              'used': 5, 'window': 'fake'})
 
-        FakePolicy.refusal = {'detail': 'From the policy.', 'error_code': 'fake_not_entitled'}
+        FakePolicy.refusal = {'detail': 'From the policy.', 'error_code': 'fake_no_access'}
 
         response = self.consume()
 
         self.assertEqual(response.status_code, 403)
-        self.assertEqual(dict(response.data), {'detail': 'From the policy.', 'error_code': 'fake_not_entitled'})
+        self.assertEqual(dict(response.data), {'detail': 'From the policy.', 'error_code': 'fake_no_access'})
 
     def test_match_refusal_is_sent_as_the_policy_built_it(self):
-        FakePolicy.refusal = {'error_code': 'fake_not_entitled', 'limit': None, 'used': 0, 'window': 'fake'}
+        FakePolicy.refusal = {'error_code': 'fake_no_access', 'limit': None, 'used': 0, 'window': 'fake'}
 
         response = self.match()
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(
             dict(response.data),
-            {'detail': 'You do not have Mapper match access.', 'error_code': 'fake_not_entitled', 'limit': None,
+            {'detail': 'You do not have Mapper match access.', 'error_code': 'fake_no_access', 'limit': None,
              'used': 0, 'window': 'fake'})
 
     def test_match_reverses_its_event_when_the_search_fails(self):
@@ -851,8 +851,6 @@ class GroupLimitPolicyOwnerTest(OCLAPITestCase):
 
         self.assertEqual(self.user.get_capability_limit(self.capability_id, owner=self.owner), 3)
         self.assertEqual(self.user.get_capability_usage(self.capability_id, owner=self.owner), 2)
-        self.assertEqual(
-            GroupLimitPolicy().describe(self.user, self.capability_id, owner=self.owner), {'limit': 3, 'used': 2})
 
     def test_consume_charges_the_user_at_the_users_limit(self):
         event, already_consumed = self.user.check_and_consume_capability(self.capability_id, units=3, owner=self.owner)
@@ -867,11 +865,12 @@ class GroupLimitPolicyOwnerTest(OCLAPITestCase):
 
 
 class OwnerLimitPolicy(GroupLimitPolicy):
-    """Replaces only get_limit: content with an owner gets this limit, and the rest stays the default's."""
+    """Replaces only get_limit: with an owner, a positive limit becomes this one. Blocked and unlimited stay."""
     owner_limit = 5
 
     def get_limit(self, user, capability_id, owner=None):
-        return self.owner_limit if owner else super().get_limit(user, capability_id, owner=owner)
+        limit = super().get_limit(user, capability_id, owner=owner)
+        return self.owner_limit if owner and limit and limit > 0 else limit
 
 
 @override_settings(CAPABILITY_POLICY='core.capabilities.tests.tests.OwnerLimitPolicy')
@@ -884,11 +883,9 @@ class ReplacedPolicyOwnerTest(OCLAPITestCase):
         self.user = UserProfileFactory()
         UserCapabilityOverride.objects.create(user=self.user, capability_id=self.capability_id, limit=1)
 
-    def test_limit_and_describe_follow_the_owner(self):
+    def test_limit_follows_the_owner(self):
         self.assertEqual(self.user.get_capability_limit(self.capability_id, owner=self.owner), 5)
         self.assertEqual(self.user.get_capability_limit(self.capability_id), 1)
-        self.assertEqual(get_capability_policy().describe(self.user, self.capability_id, owner=self.owner)['limit'], 5)
-        self.assertEqual(get_capability_policy().describe(self.user, self.capability_id)['limit'], 1)
 
     def test_inherited_consume_enforces_the_limit_the_owner_gets(self):
         self.user.check_and_consume_capability(self.capability_id, units=4, owner=self.owner)

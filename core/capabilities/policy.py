@@ -19,8 +19,10 @@ class CapabilityPolicy:
     Decides and records the use of capabilities. settings.CAPABILITY_POLICY names the class in use, and
     get_capability_policy() returns one.
 
-    `user` is who is acting. `owner`, optional, is the user or organization whose content the use is for: a call site
-    takes it from the content, never from the request. A policy may decide or count by it.
+    `user` is who is acting. `owner`, optional, is the user or organization whose content the use is for. A call site
+    takes it from that content, never from a request field. A request can name content that isn't the user's, so a
+    policy that decides by `owner` first checks that `user` may act for it. Windows, counters, events and reversals
+    stay per user.
     """
 
     def get_limit(self, user, capability_id, owner=None):
@@ -121,6 +123,7 @@ class GroupLimitPolicy(CapabilityPolicy):
         """
         0 is unlimited and always succeeds; -1 is the kill switch (a per-user override blocks just that user).
         With an `idempotency_key` already consumed, consumes nothing and returns that event, even past the limit.
+        Counts on `user`'s counter, even when a subclass's get_limit() answers by `owner`.
         """
         limit = self.get_limit(user, capability_id, owner=owner)
 

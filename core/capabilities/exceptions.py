@@ -15,25 +15,25 @@ class UsageRefused(APIException):
     status_code = status.HTTP_403_FORBIDDEN
     default_code = 'capability_limit_reached'
 
-    def __init__(self, detail, not_entitled=False):  # pylint: disable=super-init-not-called
+    def __init__(self, detail, no_access=False):  # pylint: disable=super-init-not-called
         # set directly (as MapProjectCapacityExceeded does), so numbers stay numbers in the JSON
         self.detail = detail
-        self.not_entitled = not_entitled
+        self.no_access = no_access
 
 
 class CapabilityExceeded(UsageRefused):
-    """GroupLimitPolicy's refusal: no limit or a blocked one (not entitled), or not enough left."""
+    """GroupLimitPolicy's refusal: no limit or a blocked one, or not enough left."""
 
     def __init__(self, capability_name, limit, used):
         # None = no row anywhere, -1 = blocked: both are "not available", never a count
-        not_entitled = limit is None or limit < 0
+        no_access = limit is None or limit < 0
         super().__init__(
             {
                 'error_code': CAPABILITY_NOT_ENTITLED_ERROR_CODE.get(capability_name, 'capability_not_entitled')
-                if not_entitled else CAPABILITY_EXCEEDED_ERROR_CODE.get(capability_name, 'capability_limit_reached'),
-                'limit': None if not_entitled else limit, 'used': used,
+                if no_access else CAPABILITY_EXCEEDED_ERROR_CODE.get(capability_name, 'capability_limit_reached'),
+                'limit': None if no_access else limit, 'used': used,
             },
-            not_entitled=not_entitled
+            no_access=no_access
         )
 
 

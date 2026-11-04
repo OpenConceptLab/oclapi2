@@ -1275,7 +1275,7 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
             except UsageRefused as ex:
                 return Response(
                     {
-                        'detail': 'You do not have Mapper match access.' if ex.not_entitled else
+                        'detail': 'You do not have Mapper match access.' if ex.no_access else
                         'Match operation limit reached.',
                         **ex.detail,
                     },

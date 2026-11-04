@@ -100,7 +100,7 @@ class CapabilityConsumeView(CapabilityBaseView):
         except UsageRefused as ex:
             return Response(
                 {
-                    'detail': f'You do not have access to {capability_name}.' if ex.not_entitled else
+                    'detail': f'You do not have access to {capability_name}.' if ex.no_access else
                     f'{capability_name} limit reached.',
                     **ex.detail,
                 },
