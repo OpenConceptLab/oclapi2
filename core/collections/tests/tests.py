@@ -2371,6 +2371,103 @@ class TasksTest(OCLTestCase):
             callback()
         self.assertTrue(readd_mock.apply_async.called)
 
+    @staticmethod
+    def collection_with_referenced_member():
+        concept = ConceptFactory()
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.concepts.add(concept)
+        reference = CollectionReference(expression=concept.uri, collection=collection)
+        reference.save()
+        reference.concepts.add(concept)
+        return collection, expansion, reference
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.collections.models.batch_index_resources')
+    @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
+    def test_remove_references_with_toggle_off_queues_at_once_before_deleting(self, readd_mock, batch_index_mock):
+        collection, _, reference = self.collection_with_referenced_member()
+        reference_existed = []
+        readd_mock.apply_async.side_effect = lambda *args, **kwargs: reference_existed.append(
+            CollectionReference.objects.filter(id=reference.id).exists())
+
+        with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False), \
+                self.captureOnCommitCallbacks() as callbacks:
+            collection.remove_references(collection.references.all())
+
+        self.assertEqual(callbacks, [])
+        self.assertTrue(batch_index_mock.apply_async.called)
+        readd_mock.apply_async.assert_called_once_with(
+            (collection.expansion.id, [reference.id]), queue='default', permanent=False)
+        self.assertEqual(reference_existed, [True])
+        self.assertFalse(
+            Task.objects.filter(name__iendswith='readd_references_to_expansion_on_references_removal').exists())
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.collections.models.batch_index_resources')
+    @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
+    def test_remove_references_queues_readd_when_indexing_fails(self, readd_mock, batch_index_mock):
+        readd_mock.__name__ = 'readd_references_to_expansion_on_references_removal'
+        batch_index_mock.apply_async.side_effect = Exception('broker down')
+        collection, _, _ = self.collection_with_referenced_member()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            collection.remove_references(collection.references.all())
+
+        self.assertTrue(batch_index_mock.apply_async.called)
+        self.assertTrue(readd_mock.apply_async.called)
+
+    @patch('core.collections.models.transaction.atomic')
+    def test_atomic_when_locked(self, atomic_mock):
+        CollectionReference.atomic_when_locked()
+        atomic_mock.assert_called_once()
+
+        atomic_mock.reset_mock()
+        with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False):
+            CollectionReference.atomic_when_locked()
+        atomic_mock.assert_not_called()
+
+    def test_add_references_sets_lock_context_before_generating_only_with_toggle_on(self):
+        concept = ConceptFactory()
+        for is_locked in (True, False):
+            collection = OrganizationCollectionFactory()
+            with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=is_locked), \
+                    patch.object(CollectionReference, 'clear_resolution_cache') as clear_mock:
+                collection.add_references(
+                    [CollectionReference(expression=concept.uri, created_by=collection.created_by)],
+                    collection.created_by, True)
+            self.assertEqual(clear_mock.called, is_locked)
+
+    def test_cascade_children_to_expansion_claims_default_only_with_toggle_on(self):
+        for is_locked in (True, False):
+            collection = OrganizationCollectionFactory()
+            Collection.objects.filter(id=collection.id).update(expansion_uri=None)
+            collection.refresh_from_db()
+            with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=is_locked), \
+                    patch.object(Expansion, 'persist', wraps=Expansion.persist) as persist_mock:
+                expansion = collection.cascade_children_to_expansion(index=False)
+            self.assertEqual(persist_mock.call_args.kwargs['claim_default'], is_locked)
+            collection.refresh_from_db()
+            self.assertEqual(collection.expansion_uri, expansion.uri)
+
+    def test_add_references_keeps_an_explicitly_named_valueset_version_against_a_lock(self):
+        valueset = OrganizationCollectionFactory()
+        locked, _ = self.valueset_release(valueset, 'r1')
+        named, named_concept = self.valueset_release(valueset, 'r2')
+        Collection.objects.filter(id=named.id).update(released=False)
+        head = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=head, mnemonic='autoexpand-HEAD')
+        expansion.evaluated_collection_versions.add(locked)
+        head.expansion_uri = expansion.uri
+        head.save()
+
+        head.add_expressions({'expressions': [named.uri + 'concepts/']}, head.created_by)
+
+        self.assertEqual(list(expansion.concepts.all()), [named_concept])
+        self.assertEqual(list(head.references.first().concepts.all()), [named_concept])
+
     @patch('core.common.tasks.export_collection')
     def test_seed_from_head_expansion_seeds_when_another_expansion_exists(self, _):
         expansion, concept, collection_v1 = self.head_with_head_concept_member()
@@ -2647,6 +2744,16 @@ class ExpansionTest(OCLTestCase):
         self.assertEqual(
             sorted(rows.values_list('concept_id', flat=True)),
             sorted([concept.get_latest_version().id, duplicated.get_latest_version().id, other.id]))
+
+    def test_is_explicit_valueset(self):
+        uri = '/orgs/org/collections/coll/'
+        for valueset in (f'{uri}|r2', f'{uri}r2/', f'{uri}r2', 'http://x.org/vs|r2'):
+            self.assertTrue(CollectionReference.is_explicit_valueset(valueset), valueset)
+        for valueset in (uri, uri[:-1], 'http://x.org/vs', 'http://x.org/vs|'):
+            self.assertFalse(CollectionReference.is_explicit_valueset(valueset), valueset)
+
+        self.assertFalse(CollectionReference.is_explicit_valueset(f'{uri}|r2', all_forms=False))
+        self.assertTrue(CollectionReference.is_explicit_valueset(f'{uri}r2/', all_forms=False))
 
     def test_persist_claims_default_only_when_asked_and_unset(self):
         collection = OrganizationCollectionFactory()
