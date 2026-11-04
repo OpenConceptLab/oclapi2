@@ -1,13 +1,12 @@
 import logging
 
 from django.conf import settings
-from django.db import transaction
 from rest_framework import serializers
 from rest_framework.fields import CharField, DateField, SerializerMethodField, ChoiceField, DateTimeField, \
     BooleanField, ListField, URLField
 
 from core.code_systems.serializers import CodeSystemConceptSerializer, TextField
-from core.collections.models import Collection
+from core.collections.models import Collection, CollectionReference
 from core.collections.parsers import CollectionReferenceParser
 from core.collections.serializers import CollectionCreateOrUpdateSerializer
 from core.common.constants import HEAD
@@ -179,7 +178,7 @@ class ValueSetDetailSerializer(FhirRepositorySerializerMixin, serializers.ModelS
         references = validated_data.get('references', [])
         if references:
             # atomic, so a version created meanwhile doesn't see the references without their expansion members
-            with transaction.atomic():
+            with CollectionReference.atomic_when_locked():
                 _, errors = collection.add_references(references, user)
             if errors:
                 self._errors.update(errors)
@@ -234,7 +233,7 @@ class ValueSetDetailSerializer(FhirRepositorySerializerMixin, serializers.ModelS
         new_references = [reference for reference in new_references if reference not in existing_references]
 
         if new_references:
-            with transaction.atomic():
+            with CollectionReference.atomic_when_locked():
                 _, errors = collection.add_references(new_references, user)
             if errors:
                 self._errors.update(errors)

@@ -1,4 +1,5 @@
 import time
+from contextlib import nullcontext
 
 from celery.states import SUCCESS
 from celery_once import AlreadyQueued
@@ -270,12 +271,14 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         errors = {}
         added_references = []
         total_references = []
+        is_locked = CollectionReference.is_expansion_locked_repo_version_on()
         for reference in references:
             reference.expression = reference.build_expression()
-            # before generating, so cascade-and-transform resolves against this collection's locks
-            reference.collection = self
-            reference._async = _async  # pylint: disable=protected-access
-            reference.clear_resolution_cache()
+            if is_locked:
+                # before generating, so cascade-and-transform resolves against this collection's locks
+                reference.collection = self
+                reference._async = _async  # pylint: disable=protected-access
+                reference.clear_resolution_cache()
             total_references += reference.generate_references()
         total_references = CollectionReference.dedupe_by_expression(total_references)
         for reference in total_references:
@@ -324,7 +327,7 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     def delete_references(self, expressions):
         if expressions == ALL:  # Deprecated: Old way
             # one transaction, so no one sees the expansion emptied while the references remain
-            with transaction.atomic():
+            with CollectionReference.atomic_when_locked():
                 if self.expansion_uri:
                     self.expansion.delete_expressions(expressions)
                 self.references.all().delete()
@@ -334,7 +337,7 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
     def remove_references(self, references):
         """Members and references go in one transaction, so no one sees one gone without the other"""
-        with transaction.atomic():
+        with CollectionReference.atomic_when_locked():
             if self.expansion_uri:
                 self.expansion.delete_references(references)
             references.delete()
@@ -365,7 +368,8 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         if 'created_by_id' not in expansion_data:
             expansion_data['created_by_id'] = self.created_by_id
             expansion_data['updated_by_id'] = self.created_by_id
-        claim_default = should_auto_expand and not self.expansion_uri
+        claim_default = should_auto_expand and not self.expansion_uri and \
+            CollectionReference.is_expansion_locked_repo_version_on()
         expansion = Expansion.persist(
             index=index, collection_version=self, sync=sync, claim_default=claim_default, **expansion_data)
 
@@ -373,6 +377,9 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             self.refresh_from_db(fields=['expansion_uri'])
             if self.expansion_uri == expansion.uri:
                 self.save()
+        elif should_auto_expand and not self.expansion_uri:
+            self.expansion_uri = expansion.uri
+            self.save()
 
         return expansion
 
@@ -1153,6 +1160,19 @@ class CollectionReference(models.Model):
     def is_expansion_locked_repo_version_on():
         return bool(Toggle.get(EXPANSION_LOCKED_REPO_VERSION_TOGGLE))
 
+    @classmethod
+    def atomic_when_locked(cls):
+        """A transaction with the locked repo version toggle on; with it off, none, as before"""
+        return transaction.atomic() if cls.is_expansion_locked_repo_version_on() else nullcontext()
+
+    @classmethod
+    def on_commit_when_locked(cls, callback):
+        """After commit with the toggle on, isolated from other callbacks' failures; with it off, at once"""
+        if cls.is_expansion_locked_repo_version_on():
+            transaction.on_commit(callback, robust=True)
+        else:
+            callback()
+
     @staticmethod
     def is_resource_version_repo_resolution_on():
         return bool(Toggle.get(RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE))
@@ -1243,10 +1263,14 @@ class CollectionReference(models.Model):
         return versions
 
     @staticmethod
-    def is_explicit_valueset(valueset):
+    def is_explicit_valueset(valueset, all_forms=True):
+        """A version after '|', in either URI form, or in a relative URI's path with or without its trailing slash"""
+        url, _, version = valueset.partition('|')
         if is_canonical_uri(valueset):
-            return bool(get(valueset.split('|'), '1')) if '|' in valueset else False
-        return valueset != drop_version(valueset)
+            return bool(version)
+        if not all_forms:
+            return valueset != drop_version(valueset)
+        return bool(version) or is_versioned_uri(url if url.endswith('/') else url + '/')
 
     def resolve_valueset_version(self, valueset):
         """A value set named without a version resolves to the collection's locked version of it, if any"""
@@ -1271,7 +1295,9 @@ class CollectionReference(models.Model):
         if isinstance(self.valueset, list):
             for valueset in self.valueset:  # pylint: disable=not-an-iterable
                 if valueset:
-                    to_add = explicit if self.is_explicit_valueset(valueset) else evaluated
+                    # with the toggle off, classified as before
+                    to_add = explicit if self.is_explicit_valueset(
+                        valueset, self.is_expansion_locked_repo_version_on()) else evaluated
                     version = self.resolve_valueset_version(valueset)
                     if version.id:
                         to_add.append(version)
@@ -1689,7 +1715,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 ids = compact(set(ids))
                 filters = {'id__in': ids}
                 queryset.set(queryset.exclude(**filters))
-                transaction.on_commit(
+                CollectionReference.on_commit_when_locked(
                     lambda: batch_index_resources.apply_async((rel, filters), queue='indexing', permanent=False))
 
         is_test_mode = get(settings, 'TEST_MODE', False)
@@ -1707,15 +1733,14 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         process(self.mappings, 'mapping', mapping_ids)
 
         if bool(concept_ids or mapping_ids):
-            # after commit, so the re-add never runs while the removed references are still there
             if is_test_mode:
                 readd_task(self.id, removed_reference_ids)
             elif readd_record:
+                # after commit, so the re-add never runs while the removed references are still there
                 transaction.on_commit(lambda: readd_task.apply_async(
                     (self.id, removed_reference_ids), queue='default', task_id=readd_record.id, persist_args=True))
             else:
-                transaction.on_commit(lambda: readd_task.apply_async(
-                    (self.id, removed_reference_ids), queue='default', permanent=False))
+                readd_task.apply_async((self.id, removed_reference_ids), queue='default', permanent=False)
 
     def delete_expressions(self, expressions):  # Deprecated: Old way, must use delete_references instead
         concepts_filters = None
@@ -1740,12 +1765,12 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 self.mappings.set(self.mappings.exclude(**mappings_filters))
 
         if not get(settings, 'TEST_MODE', False):
-            # after commit, so indexing doesn't read members a surrounding transaction hasn't removed yet
+            # with the toggle on, after commit, so indexing doesn't read members not yet removed
             if concepts_filters:
-                transaction.on_commit(lambda: batch_index_resources.apply_async(
+                CollectionReference.on_commit_when_locked(lambda: batch_index_resources.apply_async(
                     ('concept', concepts_filters), queue='indexing', permanent=False))
             if mappings_filters:
-                transaction.on_commit(lambda: batch_index_resources.apply_async(
+                CollectionReference.on_commit_when_locked(lambda: batch_index_resources.apply_async(
                     ('mapping', mappings_filters), queue='indexing', permanent=False))
 
     def add_references(  # pylint: disable=too-many-locals,too-many-statements,too-many-branches,too-many-arguments
