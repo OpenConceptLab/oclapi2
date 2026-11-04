@@ -1,4 +1,3 @@
-from celery.states import PENDING, REVOKED
 from django.http import Http404
 from drf_yasg.utils import swagger_auto_schema, no_body
 from pydash import compact
@@ -9,7 +8,6 @@ from rest_framework.response import Response
 
 from core.common.exceptions import Http400
 from core.common.mixins import ListWithHeadersMixin
-from core.common.tasks import readd_references_to_expansion_on_references_removal
 from core.common.swagger_parameters import page_param, verbose_param, task_state_param, limit_param, \
     task_start_date_param, q_param
 from core.common.utils import from_string_to_date, get_truthy_values
@@ -88,26 +86,10 @@ class TaskRerunView(BaseAPIView):
     @swagger_auto_schema(request_body=no_body, responses={202: TaskListSerializer})
     def post(self, request, task_id):  # pylint: disable=unused-argument
         task = get_object_or_404(Task.objects.all(), id=task_id)
-        snapshot = task.claim_readd_references_for_rerun()
-        if snapshot is None:
-            raise Http400('Only a failed or revoked re-add can be rerun.')
-        # a revoked id stays revoked on the workers, so it reruns as a new record
-        rerun = Task.new(
-            queue=task.queue, user=task.created_by, name=readd_references_to_expansion_on_references_removal.name,
-            args=task.args
-        ) if snapshot['state'] == REVOKED else task
         try:
-            rerun.rerun(force=True)
-        except Exception as ex:  # pylint: disable=broad-except
-            if rerun is not task:
-                rerun.delete()
-            Task.objects.filter(id=task.id, state=PENDING).update(**snapshot)
-            if isinstance(ex, ValueError):
-                raise Http400(str(ex)) from ex
-            raise
-        if rerun is not task:
-            task.delete()
-        rerun.refresh_from_db()
+            rerun = task.rerun_readd_references()
+        except ValueError as ex:
+            raise Http400(str(ex)) from ex
         return Response(TaskListSerializer(rerun).data, status=status.HTTP_202_ACCEPTED)
 
 

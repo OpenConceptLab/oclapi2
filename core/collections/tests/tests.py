@@ -2301,15 +2301,16 @@ class TasksTest(OCLTestCase):
         name = 'core.common.tasks.readd_references_to_expansion_on_references_removal'
         user = expansion.collection_version.created_by
         older = Task.new(user=user, name=name, args=[expansion.id, [1]], state='FAILURE')
+        older_running = Task.new(user=user, name=name, args=[expansion.id, [4]], state='STARTED')
         older_other = Task.new(user=user, name=name, args=[other.id, [1]], state='FAILURE')
         current = Task.new(user=user, name=name, args=[expansion.id, [2]], state='STARTED')
         newer = Task.new(user=user, name=name, args=[expansion.id, [3]], state='PENDING')
 
         current.clear_superseded_readd_references_tasks()
 
-        remaining = set(Task.objects.filter(id__in=[older.id, older_other.id, current.id, newer.id]).values_list(
-            'id', flat=True))
-        self.assertEqual(remaining, {older_other.id, current.id, newer.id})
+        remaining = set(Task.objects.filter(
+            id__in=[older.id, older_running.id, older_other.id, current.id, newer.id]).values_list('id', flat=True))
+        self.assertEqual(remaining, {older_running.id, older_other.id, current.id, newer.id})
 
     @patch('core.common.tasks.export_collection')
     def test_seed_children_task_evaluates_valueset_references_while_head_expansion_is_processing(self, _):

@@ -152,7 +152,7 @@ class ImportRetrieveDestroyMixin(BaseAPIView):
             return Response(status=status.HTTP_404_NOT_FOUND)
         if not task.has_access(request.user):
             return Response(status=status.HTTP_403_FORBIDDEN)
-        if task.is_finished:
+        if task.is_finished and task.is_readd_references_task:
             return Response({'errors': ['Task is already finished.']}, status=status.HTTP_400_BAD_REQUEST)
 
         try:

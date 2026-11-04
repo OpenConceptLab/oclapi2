@@ -768,6 +768,16 @@ class TaskAPITest(OCLAPITestCase):
         self.assertEqual((new_task.name, new_task.args), (self.READD, [1, [2]]))
         rerun_mock.assert_called_once_with(force=True)
 
+    def test_rerun_revoked_readd_keeps_the_original_when_creating_the_new_record_fails(self):
+        task = self.readd_task('rerun-revoked-new-fail-task-id', state=REVOKED)
+
+        with patch.object(Task, 'new', side_effect=db.OperationalError('db down')):
+            with self.assertRaises(db.OperationalError):
+                self.post_rerun(task.id)
+
+        task.refresh_from_db()
+        self.assertEqual(task.state, REVOKED)
+
     def test_rerun_revoked_readd_failure_keeps_the_original(self):
         task = self.readd_task('rerun-revoked-fail-task-id', state=REVOKED)
         before = Task.objects.count()
