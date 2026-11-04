@@ -972,8 +972,29 @@ class AnyArgumentsPolicy(GroupLimitPolicy):
     def get_limit(self, user, capability_id, *, owner=None):  # pylint: disable=arguments-differ
         return 0
 
-    def get_usage(self, *args, **kwargs):  # pylint: disable=arguments-differ
+    def get_usage(self, *args, **kwargs):  # pylint: disable=arguments-differ,unused-argument
         return {'used': None}
+
+
+class KeywordUnitsPolicy(GroupLimitPolicy):
+    """Takes `units` only by name, which the check allows: call sites must pass it that way."""
+
+    def consume(  # pylint: disable=too-many-arguments,arguments-differ
+            self, user, capability_id, *, units=1, idempotency_key=None, owner=None, **attribution
+    ):
+        return super().consume(user, capability_id, units, idempotency_key=idempotency_key, owner=owner, **attribution)
+
+
+@override_settings(CAPABILITY_POLICY='core.capabilities.tests.tests.KeywordUnitsPolicy')
+class CallSitesFitTheCheckTest(OCLAPITestCase):
+    def test_a_policy_the_check_passes_can_be_called(self):
+        user = UserProfileFactory()
+        UserCapabilityOverride.objects.create(user=user, capability_id=MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, limit=0)
+
+        self.assertEqual(check_capability_policy(), [])
+
+        event, _ = user.check_and_consume_capability(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, units=2)
+        self.assertEqual(event.units, 2)
 
 
 class CapabilityPolicyInterfaceTest(SimpleTestCase):

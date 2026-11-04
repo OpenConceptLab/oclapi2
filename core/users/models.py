@@ -256,7 +256,7 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
             idempotency_key=None, owner=None
     ):
         return get_capability_policy().consume(
-            self, capability_id, units, idempotency_key=idempotency_key, owner=owner, action=action,
+            self, capability_id, units=units, idempotency_key=idempotency_key, owner=owner, action=action,
             algorithm=algorithm, map_project=map_project, run=run
         )
 
