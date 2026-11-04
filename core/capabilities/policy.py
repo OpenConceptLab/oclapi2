@@ -18,13 +18,16 @@ class CapabilityPolicy:
     """
     Decides and records the use of capabilities. settings.CAPABILITY_POLICY names the class in use, and
     get_capability_policy() returns one.
+
+    `user` is who is acting. `owner`, optional, is the user or organization whose content the use is for: a call site
+    takes it from the content, never from the request. A policy may decide or count by it.
     """
 
-    def get_limit(self, user, capability_id):
+    def get_limit(self, user, capability_id, owner=None):
         """None = no access, -1 = blocked, 0 = unlimited, N > 0 = the limit."""
         raise NotImplementedError
 
-    def get_usage(self, user, capability_id):
+    def get_usage(self, user, capability_id, owner=None):
         """`used` (None where nothing accumulates), plus any other fields the policy reports."""
         raise NotImplementedError
 
@@ -32,7 +35,9 @@ class CapabilityPolicy:
         """When the usage window counting now began. None is one window that never ends."""
         return None
 
-    def consume(self, user, capability_id, units=1, *, idempotency_key=None, **attribution):
+    def consume(  # pylint: disable=too-many-arguments
+            self, user, capability_id, units=1, *, idempotency_key=None, owner=None, **attribution
+    ):
         """
         Checks and records `units` in one transaction. Returns (usage_event, already_consumed). Raises UsageRefused,
         whose `detail` is the refusal body.
@@ -43,15 +48,18 @@ class CapabilityPolicy:
         """Takes back up to `units` of an event's use. Returns the units taken back."""
         raise NotImplementedError
 
-    def describe(self, user, capability_id):
+    def describe(self, user, capability_id, owner=None):
         """What usage reports send: `limit`, then every usage field."""
-        return {'limit': self.get_limit(user, capability_id), **self.get_usage(user, capability_id)}
+        return {
+            'limit': self.get_limit(user, capability_id, owner=owner),
+            **self.get_usage(user, capability_id, owner=owner)
+        }
 
 
 class GroupLimitPolicy(CapabilityPolicy):
-    """Limits from a per-user override, else from the user's groups."""
+    """Limits from a per-user override, else from the user's groups. Ignores `owner`: all of it is the user's."""
 
-    def get_limit(self, user, capability_id):
+    def get_limit(self, user, capability_id, owner=None):
         """
         There is no implicit-unlimited fallback: None means no override and no group row for this user, and
         consume() treats it as blocked. A new capability, or a new group, needs its limit configured (even to 0).
@@ -98,7 +106,7 @@ class GroupLimitPolicy(CapabilityPolicy):
             return AUTHORING_CAPABILITY_DEFAULT_LIMITS[capability_id]
         return limit
 
-    def get_usage(self, user, capability_id):
+    def get_usage(self, user, capability_id, owner=None):
         if capability_id in AUTHORING_CAPABILITY_IDS or capability_id == MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID:
             # per-request and per-project limits: nothing accumulates per user
             return {'used': None}
@@ -107,12 +115,14 @@ class GroupLimitPolicy(CapabilityPolicy):
             return {'used': user.map_projects_used}
         return {'used': UsageCounter.get_used(user, capability_id, self.get_window_start(user, capability_id))}
 
-    def consume(self, user, capability_id, units=1, *, idempotency_key=None, **attribution):
+    def consume(  # pylint: disable=too-many-arguments
+            self, user, capability_id, units=1, *, idempotency_key=None, owner=None, **attribution
+    ):
         """
         0 is unlimited and always succeeds; -1 is the kill switch (a per-user override blocks just that user).
         With an `idempotency_key` already consumed, consumes nothing and returns that event, even past the limit.
         """
-        limit = self.get_limit(user, capability_id)
+        limit = self.get_limit(user, capability_id, owner=owner)
 
         with transaction.atomic():
             # the account first, so a user's requests serialize even when they count in different windows. No key

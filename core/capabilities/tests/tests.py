@@ -19,6 +19,7 @@ from core.capabilities.models import Capability, GroupCapability, UsageCounter, 
 from core.capabilities.policy import CapabilityPolicy, GroupLimitPolicy
 from core.common.tests import OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.common.utils import get_capability_policy
+from core.orgs.tests.factories import OrganizationFactory
 from core.users.constants import PREVIEW_GROUP, PREVIEW_GRANDFATHERED_GROUP
 from core.users.tests.factories import UserProfileFactory
 
@@ -548,20 +549,22 @@ class FakePolicy(CapabilityPolicy):
     refusal = None
     window_start = datetime(2030, 1, 1, tzinfo=dt_timezone.utc)
 
-    def get_limit(self, user, capability_id):
-        self.calls.append(('get_limit', user, capability_id))
+    def get_limit(self, user, capability_id, owner=None):
+        self.calls.append(('get_limit', user, capability_id, owner))
         return 7
 
-    def get_usage(self, user, capability_id):
-        self.calls.append(('get_usage', user, capability_id))
+    def get_usage(self, user, capability_id, owner=None):
+        self.calls.append(('get_usage', user, capability_id, owner))
         return {'used': 3, 'window': 'fake'}
 
     def get_window_start(self, user, capability_id):
         self.calls.append(('get_window_start', user, capability_id))
         return self.window_start
 
-    def consume(self, user, capability_id, units=1, *, idempotency_key=None, **attribution):
-        self.calls.append(('consume', user, capability_id, units, idempotency_key, attribution))
+    def consume(  # pylint: disable=too-many-arguments
+            self, user, capability_id, units=1, *, idempotency_key=None, owner=None, **attribution
+    ):
+        self.calls.append(('consume', user, capability_id, units, idempotency_key, owner, attribution))
         if self.refusal:
             raise UsageRefused(dict(self.refusal), not_entitled=self.refusal.get('error_code') == 'fake_not_entitled')
         return UsageEvent.objects.create(user=user, capability_id=capability_id, units=units), False
@@ -605,8 +608,33 @@ class CapabilityPolicyContractTest(OCLAPITestCase):
         self.assertEqual(event.units, 2)
         self.assertEqual(
             self.calls('consume'),
-            [('consume', self.user, MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, 2, 'key',
+            [('consume', self.user, MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, 2, 'key', None,
               {'action': 'act', 'algorithm': 'alg', 'map_project': None, 'run': None})])
+
+    def test_the_owner_reaches_the_policy(self):
+        owner = OrganizationFactory()
+        capability_id = MAPPER_MATCH_OPERATIONS_CAPABILITY_ID
+
+        self.user.get_capability_limit(capability_id, owner=owner)
+        self.user.get_capability_usage(capability_id, owner=owner)
+        self.user.check_and_consume_capability(capability_id, owner=owner)
+        self.assertEqual(self.calls('get_limit'), [('get_limit', self.user, capability_id, owner)])
+        self.assertEqual(self.calls('get_usage'), [('get_usage', self.user, capability_id, owner)])
+        self.assertEqual(self.calls('consume')[0][5], owner)
+
+        FakePolicy.calls = []
+        self.assertEqual(
+            FakePolicy().describe(self.user, capability_id, owner=owner), {'limit': 7, 'used': 3, 'window': 'fake'})
+        self.assertEqual(
+            FakePolicy.calls,
+            [('get_limit', self.user, capability_id, owner), ('get_usage', self.user, capability_id, owner)])
+
+    def test_a_consume_request_cannot_name_the_owner(self):
+        response = self.consume(owner=OrganizationFactory().mnemonic)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(self.calls('consume')[0][5])
+        self.assertNotIn('owner', self.calls('consume')[0][6])
 
     def test_user_capabilities_report_every_usage_field(self):
         response = self.client.get(
@@ -806,3 +834,69 @@ class GroupLimitPolicyDefaultWindowTest(OCLAPITestCase):
             list(UsageCounter.objects.filter(user=user).values_list('window_start', 'used')), [(None, 2)])
         self.assertEqual(get_capability_policy().reverse(event, 2), 2)
         self.assertEqual(user.get_capability_usage(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID), 0)
+
+
+class GroupLimitPolicyOwnerTest(OCLAPITestCase):
+    """The default policy decides and counts by the user, whoever owns the content."""
+    capability_id = MAPPER_MATCH_OPERATIONS_CAPABILITY_ID
+
+    def setUp(self):
+        super().setUp()
+        self.owner = OrganizationFactory()
+        self.user = UserProfileFactory()
+        UserCapabilityOverride.objects.create(user=self.user, capability_id=self.capability_id, limit=3)
+
+    def test_limit_and_usage_ignore_the_owner(self):
+        self.user.check_and_consume_capability(self.capability_id, units=2)
+
+        self.assertEqual(self.user.get_capability_limit(self.capability_id, owner=self.owner), 3)
+        self.assertEqual(self.user.get_capability_usage(self.capability_id, owner=self.owner), 2)
+        self.assertEqual(
+            GroupLimitPolicy().describe(self.user, self.capability_id, owner=self.owner), {'limit': 3, 'used': 2})
+
+    def test_consume_charges_the_user_at_the_users_limit(self):
+        event, already_consumed = self.user.check_and_consume_capability(self.capability_id, units=3, owner=self.owner)
+
+        self.assertFalse(already_consumed)
+        self.assertEqual((event.user, event.units), (self.user, 3))
+        self.assertEqual(
+            list(UsageCounter.objects.filter(capability_id=self.capability_id).values_list('user', 'used')),
+            [(self.user.id, 3)])
+        with self.assertRaises(CapabilityExceeded):
+            self.user.check_and_consume_capability(self.capability_id, owner=self.owner)
+
+
+class OwnerLimitPolicy(GroupLimitPolicy):
+    """Replaces only get_limit: content with an owner gets this limit, and the rest stays the default's."""
+    owner_limit = 5
+
+    def get_limit(self, user, capability_id, owner=None):
+        return self.owner_limit if owner else super().get_limit(user, capability_id, owner=owner)
+
+
+@override_settings(CAPABILITY_POLICY='core.capabilities.tests.tests.OwnerLimitPolicy')
+class ReplacedPolicyOwnerTest(OCLAPITestCase):
+    capability_id = MAPPER_MATCH_OPERATIONS_CAPABILITY_ID
+
+    def setUp(self):
+        super().setUp()
+        self.owner = OrganizationFactory()
+        self.user = UserProfileFactory()
+        UserCapabilityOverride.objects.create(user=self.user, capability_id=self.capability_id, limit=1)
+
+    def test_limit_and_describe_follow_the_owner(self):
+        self.assertEqual(self.user.get_capability_limit(self.capability_id, owner=self.owner), 5)
+        self.assertEqual(self.user.get_capability_limit(self.capability_id), 1)
+        self.assertEqual(get_capability_policy().describe(self.user, self.capability_id, owner=self.owner)['limit'], 5)
+        self.assertEqual(get_capability_policy().describe(self.user, self.capability_id)['limit'], 1)
+
+    def test_inherited_consume_enforces_the_limit_the_owner_gets(self):
+        self.user.check_and_consume_capability(self.capability_id, units=4, owner=self.owner)
+
+        with self.assertRaises(CapabilityExceeded):
+            self.user.check_and_consume_capability(self.capability_id)
+        with self.assertRaises(CapabilityExceeded):
+            self.user.check_and_consume_capability(self.capability_id, units=2, owner=self.owner)
+
+        self.user.check_and_consume_capability(self.capability_id, owner=self.owner)
+        self.assertEqual(self.user.get_capability_usage(self.capability_id), 5)

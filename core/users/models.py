@@ -244,19 +244,19 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
         return Capability.objects.all()
 
     # Limits and usage are decided by settings.CAPABILITY_POLICY (core.capabilities.policy)
-    def get_capability_limit(self, capability_id):
-        return get_capability_policy().get_limit(self, capability_id)
+    def get_capability_limit(self, capability_id, owner=None):
+        return get_capability_policy().get_limit(self, capability_id, owner=owner)
 
-    def get_capability_usage(self, capability_id):
-        return get_capability_policy().get_usage(self, capability_id)['used']
+    def get_capability_usage(self, capability_id, owner=None):
+        return get_capability_policy().get_usage(self, capability_id, owner=owner)['used']
 
     def check_and_consume_capability(  # pylint: disable=too-many-arguments
             self, capability_id, units=1, action='', algorithm=None, map_project=None, run=None,
-            idempotency_key=None
+            idempotency_key=None, owner=None
     ):
         return get_capability_policy().consume(
-            self, capability_id, units, idempotency_key=idempotency_key, action=action, algorithm=algorithm,
-            map_project=map_project, run=run
+            self, capability_id, units, idempotency_key=idempotency_key, owner=owner, action=action,
+            algorithm=algorithm, map_project=map_project, run=run
         )
 
     def log_capability_event(  # pylint: disable=too-many-arguments
