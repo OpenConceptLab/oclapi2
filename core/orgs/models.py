@@ -29,8 +29,10 @@ class OrganizationMember(models.Model):
 
     userprofile = models.ForeignKey('users.UserProfile', on_delete=models.CASCADE, related_name='org_memberships')
     organization = models.ForeignKey('orgs.Organization', on_delete=models.CASCADE, related_name='memberships')
+    # A new member is a plain member. Only a row inserted without a role gets the column's default: code older than
+    # this column, as during a rollout or after a rollback, where any member could do everything an admin can.
     role = models.ForeignKey(
-        Role, on_delete=models.PROTECT, related_name='memberships', default=ROLE_MEMBER_ID, db_default=ROLE_MEMBER_ID)
+        Role, on_delete=models.PROTECT, related_name='memberships', default=ROLE_MEMBER_ID, db_default=ROLE_ADMIN_ID)
 
 
 class Organization(BaseResourceModel, SourceContainerMixin, ChecksumModel):

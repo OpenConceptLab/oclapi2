@@ -596,7 +596,7 @@ class OrganizationMemberViewTest(OCLAPITestCase):
     def test_delete_404(self):
         response = self.client.delete(
             f'/orgs/{self.org.mnemonic}/members/foobar/',
-            HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
+            HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
 
@@ -607,7 +607,7 @@ class OrganizationMemberViewTest(OCLAPITestCase):
 class OrganizationMemberRemovalConcurrencyTest(OCLAPITransactionTestCase):
     """Runs two removals at once, on separate connections, to check that every org keeps a member."""
 
-    def test_two_members_removing_each_other_at_once_leave_one_member(self):
+    def test_two_members_leaving_at_once_leave_one_member(self):
         alice = UserProfileFactory(username='alice')
         bob = UserProfileFactory(username='bob')
         org = OrganizationFactory(mnemonic='race-org', created_by=alice, updated_by=alice)
@@ -623,20 +623,20 @@ class OrganizationMemberRemovalConcurrencyTest(OCLAPITransactionTestCase):
         barrier = threading.Barrier(2)
         statuses = {}
 
-        def remove(actor, target):
+        def leave(actor):
             try:
                 client = APIClient()
                 barrier.wait()
                 response = client.delete(
-                    f'/orgs/race-org/members/{target}/', HTTP_AUTHORIZATION='Token ' + tokens[actor])
+                    f'/orgs/race-org/members/{actor}/', HTTP_AUTHORIZATION='Token ' + tokens[actor])
                 statuses[actor] = response.status_code
             finally:
                 connection.close()
 
         with patch.object(Organization, 'is_only_member', slow_is_only_member):
             threads = [
-                threading.Thread(target=remove, args=('alice', 'bob')),
-                threading.Thread(target=remove, args=('bob', 'alice')),
+                threading.Thread(target=leave, args=('alice', )),
+                threading.Thread(target=leave, args=('bob', )),
             ]
             for thread in threads:
                 thread.start()
@@ -1042,7 +1042,7 @@ class OrganizationMemberRoleSearchTest(OCLAPITestCase):
 class OrganizationAdminConcurrencyTest(OCLAPITransactionTestCase):
     """Runs two demotions at once, on separate connections, to check that every org keeps an admin."""
 
-    def test_two_admins_demoting_each_other_at_once_leave_one_admin(self):
+    def test_two_admins_demoting_themselves_at_once_leave_one_admin(self):
         alice = UserProfileFactory(username='alice')
         bob = UserProfileFactory(username='bob')
         org = OrganizationFactory(mnemonic='race-org', created_by=alice, updated_by=alice)
@@ -1058,12 +1058,12 @@ class OrganizationAdminConcurrencyTest(OCLAPITransactionTestCase):
         barrier = threading.Barrier(2)
         statuses = {}
 
-        def demote(actor, target):
+        def demote_self(actor):
             try:
                 client = APIClient()
                 barrier.wait()
                 response = client.put(
-                    f'/orgs/race-org/members/{target}/', {'role': ROLE_MEMBER}, format='json',
+                    f'/orgs/race-org/members/{actor}/', {'role': ROLE_MEMBER}, format='json',
                     HTTP_AUTHORIZATION='Token ' + tokens[actor])
                 statuses[actor] = response.status_code
             finally:
@@ -1071,8 +1071,8 @@ class OrganizationAdminConcurrencyTest(OCLAPITransactionTestCase):
 
         with patch.object(Organization, 'is_last_admin', slow_is_last_admin):
             threads = [
-                threading.Thread(target=demote, args=('alice', 'bob')),
-                threading.Thread(target=demote, args=('bob', 'alice')),
+                threading.Thread(target=demote_self, args=('alice', )),
+                threading.Thread(target=demote_self, args=('bob', )),
             ]
             for thread in threads:
                 thread.start()
@@ -1081,6 +1081,53 @@ class OrganizationAdminConcurrencyTest(OCLAPITransactionTestCase):
 
         self.assertEqual(sorted(statuses.values()), [204, 409])
         self.assertEqual(org.memberships.filter(role__name=ROLE_ADMIN).count(), 1)
+
+
+class OrganizationDemotedAdminConcurrencyTest(OCLAPITransactionTestCase):
+    """A request that was waiting for the org's lock uses the rights its sender has once it gets the lock."""
+
+    def test_an_admin_being_demoted_cannot_promote_themselves_back(self):
+        alice = UserProfileFactory(username='alice')
+        bob = UserProfileFactory(username='bob')
+        org = OrganizationFactory(mnemonic='race-org', created_by=alice, updated_by=alice)
+        org.set_member_role(bob, ROLE_ADMIN)
+        tokens = {'alice': alice.get_token(), 'bob': bob.get_token()}
+        is_last_admin = Organization.is_last_admin
+        alice_holds_the_lock = threading.Event()
+
+        def slow_is_last_admin(organization, user_profile):
+            result = is_last_admin(organization, user_profile)
+            alice_holds_the_lock.set()
+            time.sleep(1)  # bob's request starts and waits for the lock
+            return result
+
+        statuses = {}
+
+        def send(actor, role):
+            try:
+                response = APIClient().put(
+                    '/orgs/race-org/members/bob/', {'role': role}, format='json',
+                    HTTP_AUTHORIZATION='Token ' + tokens[actor])
+                statuses[actor] = response.status_code
+            finally:
+                connection.close()
+
+        def promote_once_alice_holds_the_lock():
+            alice_holds_the_lock.wait(timeout=5)
+            send('bob', ROLE_ADMIN)
+
+        with patch.object(Organization, 'is_last_admin', slow_is_last_admin):
+            threads = [
+                threading.Thread(target=send, args=('alice', ROLE_MEMBER)),
+                threading.Thread(target=promote_once_alice_holds_the_lock),
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+        self.assertEqual(statuses, {'alice': 204, 'bob': 403})
+        self.assertEqual(org.get_member_role(bob), ROLE_MEMBER)
 
 
 class OrganizationExtrasViewTest(OCLAPITestCase):

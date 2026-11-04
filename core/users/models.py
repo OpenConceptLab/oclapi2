@@ -190,6 +190,11 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
         return self.organizations.count()
 
     @property
+    def orgs_needing_this_admin(self):
+        """The orgs that would be left with no active admin without this user."""
+        return [org for org in self.organizations.all() if org.is_last_admin(self)]
+
+    @property
     def owned_orgs_count(self):
         return self.organizations.filter(created_by=self).count()
 

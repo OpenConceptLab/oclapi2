@@ -28,6 +28,7 @@ from core.common.swagger_parameters import last_login_before_param, last_login_s
 from core.common.utils import parse_updated_since_param, from_string_to_date, get_truthy_values, \
     get_resource_class_from_resource_uri
 from core.common.views import BaseAPIView, BaseLogoView
+from core.orgs.constants import CANNOT_REMOVE_LAST_ADMIN
 from core.orgs.models import Organization
 from core.services.auth.core import AuthService
 from core.services.auth.openid import OpenIDAuthService
@@ -485,6 +486,12 @@ class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.Updat
         if self.user_is_self:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
         if self.is_hard_delete_requested():
+            orgs = obj.orgs_needing_this_admin
+            if orgs:
+                return Response(
+                    {'detail': CANNOT_REMOVE_LAST_ADMIN, 'orgs': [org.mnemonic for org in orgs]},
+                    status=status.HTTP_409_CONFLICT
+                )
             try:
                 obj.delete()
             except Exception as ex:

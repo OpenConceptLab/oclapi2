@@ -56,15 +56,7 @@ class Migration(migrations.Migration):
             model_name='organizationmember',
             name='role',
             field=models.ForeignKey(
-                default=1, on_delete=django.db.models.deletion.PROTECT, related_name='memberships', to='orgs.role'),
-        ),
-        # From here on a new member is a plain member. The column keeps that default for inserts from code that
-        # doesn't know the column yet, as during a rollout or a rollback.
-        migrations.AlterField(
-            model_name='organizationmember',
-            name='role',
-            field=models.ForeignKey(
-                db_default=2, default=2, on_delete=django.db.models.deletion.PROTECT, related_name='memberships',
+                db_default=1, default=2, on_delete=django.db.models.deletion.PROTECT, related_name='memberships',
                 to='orgs.role'),
         ),
     ]

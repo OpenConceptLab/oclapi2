@@ -3,6 +3,7 @@ import importlib
 from django.apps import apps
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import ValidationError
+from django.db import connection
 from django.db.models import ProtectedError
 from mock import patch, Mock
 
@@ -138,6 +139,19 @@ class OrganizationTest(OCLTestCase):
 
         self.assertFalse(org.set_member_role(user))
         self.assertEqual(org.get_member_role(user), ROLE_ADMIN)
+
+    def test_an_insert_that_names_no_role_is_an_admin(self):
+        """Code older than the role column inserts this way, during a rollout or after a rollback."""
+        org = OrganizationFactory()
+        user = UserProfileFactory()
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'INSERT INTO user_profiles_organizations (userprofile_id, organization_id) VALUES (%s, %s)',
+                [user.id, org.id]
+            )
+
+        self.assertTrue(org.is_admin(user))
 
     def test_a_membership_in_use_keeps_its_role(self):
         org = OrganizationFactory()

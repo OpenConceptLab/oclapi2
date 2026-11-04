@@ -205,7 +205,6 @@ class OrganizationClientConfigsView(ResourceClientConfigsView):
 class OrganizationMemberView(generics.GenericAPIView):
     userprofile = None
     user_in_org = False
-    user_is_admin = False
     serializer_class = UserDetailSerializer
 
     def get_throttles(self):
@@ -225,7 +224,6 @@ class OrganizationMemberView(generics.GenericAPIView):
             self.user_in_org = request.user.is_staff or (
                 request.user.is_authenticated and self.organization.is_member(request.user)
             )
-            self.user_is_admin = self.organization.has_admin_access(request.user)
         except UserProfile.DoesNotExist:  # pragma: no cover
             pass
         super().initial(request, *args, **kwargs)
@@ -244,16 +242,16 @@ class OrganizationMemberView(generics.GenericAPIView):
         """Adds the user to the org or changes their role. With no role, an existing member keeps theirs."""
         if not self.userprofile:
             return Response(status=status.HTTP_404_NOT_FOUND)
-        if not self.user_is_admin:
-            return Response(status=status.HTTP_403_FORBIDDEN)
 
         role = get(request.data, 'role')
-        if role is not None and role not in ROLES:
-            return Response({'role': [INVALID_ROLE]}, status=status.HTTP_400_BAD_REQUEST)
-
         with transaction.atomic():
-            # Locks the org so that concurrent changes can't each see another admin and leave it with none.
+            # Locks the org so that concurrent changes can't each see another admin and leave it with none, or act on
+            # rights their sender has just lost.
             Organization.objects.select_for_update().get(id=self.organization.id)
+            if not self.organization.has_admin_access(request.user):
+                return Response(status=status.HTTP_403_FORBIDDEN)
+            if role is not None and role not in ROLES:
+                return Response({'role': [INVALID_ROLE]}, status=status.HTTP_400_BAD_REQUEST)
             if role == ROLE_MEMBER and self.organization.is_last_admin(self.userprofile):
                 return Response({'detail': CANNOT_REMOVE_LAST_ADMIN}, status=status.HTTP_409_CONFLICT)
             joined = self.organization.set_member_role(self.userprofile, role)
@@ -272,15 +270,17 @@ class OrganizationMemberView(generics.GenericAPIView):
         Removes the user from the org. An admin can remove anyone and a member can leave, unless that would leave
         the org with no member or no admin.
         """
-        is_leaving = self.user_in_org and request.user == self.userprofile
-        if not request.user.is_staff and not self.user_is_admin and not is_leaving:
+        if not request.user.is_staff and not self.user_in_org:
             return Response(status=status.HTTP_403_FORBIDDEN)
         if not self.organization or not self.userprofile:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
         with transaction.atomic():
-            # Locks the org so that concurrent changes can't each see another member or admin and leave it with none.
+            # Locks the org so that concurrent changes can't each see another member or admin and leave it with none,
+            # or act on rights their sender has just lost.
             Organization.objects.select_for_update().get(id=self.organization.id)
+            if request.user != self.userprofile and not self.organization.has_admin_access(request.user):
+                return Response(status=status.HTTP_403_FORBIDDEN)
             if self.organization.is_only_member(self.userprofile):
                 return Response({'detail': CANNOT_REMOVE_ONLY_MEMBER}, status=status.HTTP_409_CONFLICT)
             if self.organization.is_last_admin(self.userprofile):
