@@ -21,7 +21,6 @@ from dateutil import parser
 from django.conf import settings
 from django.urls import NoReverseMatch, reverse, get_resolver
 from django.utils import timezone
-from django.utils.module_loading import import_string
 from djqscsv import csv_file_for
 from pydash import flatten, compact, get
 from requests import ConnectTimeout
@@ -908,10 +907,6 @@ def get_export_service():
     klass = parts[-1]
     mod = __import__('.'.join(parts[0:-1]), fromlist=[klass])
     return getattr(mod, klass)()
-
-
-def get_capability_policy():
-    return import_string(settings.CAPABILITY_POLICY)()
 
 
 def get_start_of_month(date=timezone.now().date()):

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from core.common.utils import get_capability_policy
+from core.capabilities.policy import get_capability_policy
 
 
 class CapabilitySerializer(serializers.Serializer):  # pylint: disable=abstract-method

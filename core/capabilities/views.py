@@ -7,10 +7,11 @@ from rest_framework.views import APIView
 
 from core.capabilities.constants import CAPABILITY_ID_BY_NAME
 from core.capabilities.exceptions import UsageRefused
-from core.capabilities.models import UsageCounter, UserCapabilityOverride
+from core.capabilities.models import UserCapabilityOverride
+from core.capabilities.policy import get_capability_policy
 from core.capabilities.serializers import UserCapabilityOverrideSerializer
 from core.common.mixins import ListWithHeadersMixin
-from core.common.utils import parse_id, get_capability_policy
+from core.common.utils import parse_id
 from core.common.views import BaseAPIView
 
 
@@ -133,7 +134,7 @@ class CapabilityConsumeView(CapabilityBaseView):
 
 class CapabilityRefundView(CapabilityBaseView):
     """
-    Manual ledger correction (see UsageCounter.refund) - e.g. staff fixing an
+    Manual ledger correction (see CapabilityPolicy.refund) - e.g. staff fixing an
     over-count after a bug. Staff-only, and operates on a user given explicitly
     in the request body: this is an admin tool for correcting ANY user's
     ledger, not a per-request refund a service would issue against its own
@@ -162,7 +163,7 @@ class CapabilityRefundView(CapabilityBaseView):
             return error_response
 
         policy = get_capability_policy()
-        UsageCounter.refund(user, capability_id, units=units, window_start=policy.get_window_start(user, capability_id))
+        policy.refund(user, capability_id, units=units)
 
         return Response(
             {

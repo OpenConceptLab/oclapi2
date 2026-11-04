@@ -1,7 +1,10 @@
 import logging
+from abc import ABC, abstractmethod
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.utils.module_loading import import_string
 
 from core.capabilities.constants import (
     AUTHORING_CAPABILITY_DEFAULT_LIMITS, AUTHORING_CAPABILITY_IDS, CAPABILITY_NAME_BY_ID,
@@ -14,10 +17,14 @@ from core.users.constants import PREVIEW_GROUP
 logger = logging.getLogger('oclapi')
 
 
-class CapabilityPolicy:
+def get_capability_policy():
+    return import_string(settings.CAPABILITY_POLICY)()
+
+
+class CapabilityPolicy(ABC):
     """
-    Decides and records the use of capabilities. settings.CAPABILITY_POLICY names the class in use, and
-    get_capability_policy() returns one.
+    Decides and records the use of capabilities. settings.CAPABILITY_POLICY names the class in use,
+    get_capability_policy() returns one, and core.capabilities.checks checks it at start-up.
 
     `user` is who is acting. `owner`, optional, is the user or organization whose content the use is for. A call site
     takes it from that content, never from a request field. A request can name content that isn't the user's, so a
@@ -25,18 +32,15 @@ class CapabilityPolicy:
     stay per user.
     """
 
+    @abstractmethod
     def get_limit(self, user, capability_id, owner=None):
         """None = no access, -1 = blocked, 0 = unlimited, N > 0 = the limit."""
-        raise NotImplementedError
 
+    @abstractmethod
     def get_usage(self, user, capability_id, owner=None):
         """`used` (None where nothing accumulates), plus any other fields the policy reports."""
-        raise NotImplementedError
 
-    def get_window_start(self, user, capability_id):  # pylint: disable=unused-argument
-        """When the usage window counting now began. None is one window that never ends."""
-        return None
-
+    @abstractmethod
     def consume(  # pylint: disable=too-many-arguments
             self, user, capability_id, units=1, *, idempotency_key=None, owner=None, **attribution
     ):
@@ -44,11 +48,14 @@ class CapabilityPolicy:
         Checks and records `units` in one transaction. Returns (usage_event, already_consumed). Raises UsageRefused,
         whose `detail` is the refusal body.
         """
-        raise NotImplementedError
 
+    @abstractmethod
     def reverse(self, usage_event, units):
         """Takes back up to `units` of an event's use. Returns the units taken back."""
-        raise NotImplementedError
+
+    @abstractmethod
+    def refund(self, user, capability_id, units=1):
+        """A staff correction, where there's no event to reverse: takes up to `units` off what `user` has used now."""
 
     def describe(self, user, capability_id, owner=None):
         """What usage reports send: `limit`, then every usage field."""
@@ -60,6 +67,10 @@ class CapabilityPolicy:
 
 class GroupLimitPolicy(CapabilityPolicy):
     """Limits from a per-user override, else from the user's groups. Ignores `owner`: all of it is the user's."""
+
+    def get_window_start(self, user, capability_id):  # pylint: disable=unused-argument
+        """When the usage window counting now began. None is one window that never ends."""
+        return None
 
     def get_limit(self, user, capability_id, owner=None):
         """
@@ -139,12 +150,12 @@ class GroupLimitPolicy(CapabilityPolicy):
                 return event, True
 
             if limit is None or (limit and counter.used + units > limit):
-                raise self.build_refusal(user, capability_id, limit, counter.used, units)
+                raise CapabilityExceeded(CAPABILITY_NAME_BY_ID.get(capability_id, capability_id), limit, counter.used)
 
             return counter.consume(units, idempotency_key=idempotency_key, **attribution), False
 
-    def build_refusal(self, user, capability_id, limit, used, units):  # pylint: disable=too-many-arguments,unused-argument
-        return CapabilityExceeded(CAPABILITY_NAME_BY_ID.get(capability_id, capability_id), limit, used)
-
     def reverse(self, usage_event, units):
         return usage_event.reverse(units)
+
+    def refund(self, user, capability_id, units=1):
+        UsageCounter.refund(user, capability_id, units=units, window_start=self.get_window_start(user, capability_id))

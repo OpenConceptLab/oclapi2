@@ -29,6 +29,7 @@ from core.common.exceptions import Http400, Http403, Http409
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.capabilities.constants import MAPPER_MATCH_OPERATIONS_CAPABILITY_ID
 from core.capabilities.exceptions import UsageRefused
+from core.capabilities.policy import get_capability_policy
 from core.capacity.constants import ENDPOINT_MATCH, ENDPOINT_RERANK
 from core.capacity.limiter import CapacityLimitMixin
 from core.common.permissions import CanUseMapper
@@ -45,7 +46,7 @@ from core.common.swagger_parameters import (
 from core.common.tasks import delete_concept, make_hierarchy
 from core.common.throttling import ThrottleUtil
 from core.common.utils import (generate_temp_version, get_truthy_values, to_int,
-                               drop_version, get_falsy_values, parse_id, get_event_metadata, get_capability_policy)
+                               drop_version, get_falsy_values, parse_id, get_event_metadata)
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
 from core.concepts.constants import (

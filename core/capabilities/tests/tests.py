@@ -4,11 +4,13 @@ from io import StringIO
 from unittest.mock import patch
 
 from django.contrib.auth.models import Group, Permission
+from django.core.checks.registry import registry
 from django.core.management import call_command, CommandError
 from django.db import connection
-from django.test import override_settings
+from django.test import SimpleTestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 
+from core.capabilities.checks import check_capability_policy
 from core.capabilities.constants import (
     AI_ASSISTANT_CALLS_CAPABILITY_ID, AI_ASSISTANT_CHANGE_COMMENTS_CAPABILITY_ID,
     CLONE_RESOURCES_PER_CALL_CAPABILITY_ID, IMPORTS_FILE_SIZE_CAPABILITY_ID,
@@ -16,9 +18,8 @@ from core.capabilities.constants import (
 )
 from core.capabilities.exceptions import CapabilityExceeded, UsageRefused
 from core.capabilities.models import Capability, GroupCapability, UsageCounter, UsageEvent, UserCapabilityOverride
-from core.capabilities.policy import CapabilityPolicy, GroupLimitPolicy
+from core.capabilities.policy import CapabilityPolicy, GroupLimitPolicy, get_capability_policy
 from core.common.tests import OCLAPITestCase, PREVIEW_GROUP_NAME
-from core.common.utils import get_capability_policy
 from core.orgs.tests.factories import OrganizationFactory
 from core.users.constants import PREVIEW_GROUP, PREVIEW_GRANDFATHERED_GROUP
 from core.users.tests.factories import UserProfileFactory
@@ -547,7 +548,6 @@ class FakePolicy(CapabilityPolicy):
     """Records every call, and answers with values GroupLimitPolicy never gives."""
     calls = []
     refusal = None
-    window_start = datetime(2030, 1, 1, tzinfo=dt_timezone.utc)
 
     def get_limit(self, user, capability_id, owner=None):
         self.calls.append(('get_limit', user, capability_id, owner))
@@ -556,10 +556,6 @@ class FakePolicy(CapabilityPolicy):
     def get_usage(self, user, capability_id, owner=None):
         self.calls.append(('get_usage', user, capability_id, owner))
         return {'used': 3, 'window': 'fake'}
-
-    def get_window_start(self, user, capability_id):
-        self.calls.append(('get_window_start', user, capability_id))
-        return self.window_start
 
     def consume(  # pylint: disable=too-many-arguments
             self, user, capability_id, units=1, *, idempotency_key=None, owner=None, **attribution
@@ -572,6 +568,9 @@ class FakePolicy(CapabilityPolicy):
     def reverse(self, usage_event, units):
         self.calls.append(('reverse', usage_event, units))
         return units
+
+    def refund(self, user, capability_id, units=1):
+        self.calls.append(('refund', user, capability_id, units))
 
 
 @override_settings(CAPABILITY_POLICY='core.capabilities.tests.tests.FakePolicy')
@@ -705,11 +704,8 @@ class CapabilityPolicyContractTest(OCLAPITestCase):
         self.assertEqual(len(self.calls('consume')), 1)
         self.assertEqual(self.calls('reverse'), [])
 
-    def test_staff_refund_corrects_the_policy_window(self):
+    def test_staff_refund_goes_through_the_policy(self):
         staff = UserProfileFactory(is_staff=True)
-        UsageCounter.objects.create(
-            user=self.user, capability_id=AI_ASSISTANT_CALLS_CAPABILITY_ID, window_start=FakePolicy.window_start,
-            used=5)
         UsageCounter.objects.create(user=self.user, capability_id=AI_ASSISTANT_CALLS_CAPABILITY_ID, used=5)
 
         response = self.client.post(
@@ -720,9 +716,17 @@ class CapabilityPolicyContractTest(OCLAPITestCase):
         self.assertEqual(
             dict(response.data),
             {'user': self.user.username, 'capability': 'ai_assistant.calls', 'limit': 7, 'used': 3, 'window': 'fake'})
-        self.assertEqual(
-            dict(UsageCounter.objects.filter(user=self.user).values_list('window_start', 'used')),
-            {FakePolicy.window_start: 3, None: 5})
+        self.assertEqual(self.calls('refund'), [('refund', self.user, AI_ASSISTANT_CALLS_CAPABILITY_ID, 2)])
+        # the correction is the policy's to make
+        self.assertEqual(UsageCounter.objects.get(user=self.user).used, 5)
+
+    def test_refund_is_for_staff(self):
+        response = self.client.post(
+            '/capabilities/refund/', data={'user': self.user.username, 'capability': 'ai_assistant.calls'},
+            format='json', HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.calls('refund'), [])
 
 
 class WindowedPolicy(GroupLimitPolicy):
@@ -799,6 +803,15 @@ class GroupLimitPolicyWindowTest(OCLAPITestCase):
         self.assertEqual(event.reversed_units, 3)
         self.assertEqual(self.used_by_window(), {self.first_window: 0})
 
+    def test_refund_corrects_the_window_counting_now(self):
+        self.consume(units=3)
+        WindowedPolicy.window_start = self.second_window
+        self.consume(units=3)
+
+        WindowedPolicy().refund(self.user, MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, units=2)
+
+        self.assertEqual(self.used_by_window(), {self.first_window: 3, self.second_window: 1})
+
 
 class GroupLimitPolicyDefaultWindowTest(OCLAPITestCase):
     def test_consume_locks_the_account_without_blocking_foreign_key_checks(self):
@@ -834,6 +847,20 @@ class GroupLimitPolicyDefaultWindowTest(OCLAPITestCase):
             list(UsageCounter.objects.filter(user=user).values_list('window_start', 'used')), [(None, 2)])
         self.assertEqual(get_capability_policy().reverse(event, 2), 2)
         self.assertEqual(user.get_capability_usage(MAPPER_MATCH_OPERATIONS_CAPABILITY_ID), 0)
+
+    def test_staff_refund_lowers_the_counter_and_never_below_zero(self):
+        user = UserProfileFactory()
+        UsageCounter.objects.create(user=user, capability_id=AI_ASSISTANT_CALLS_CAPABILITY_ID, used=3)
+        staff_token = 'Token ' + UserProfileFactory(is_staff=True).get_token()
+
+        for units, used in ((2, 1), (5, 0)):
+            response = self.client.post(
+                '/capabilities/refund/',
+                data={'user': user.username, 'capability': 'ai_assistant.calls', 'units': units},
+                format='json', HTTP_AUTHORIZATION=staff_token)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data['used'], used)
 
 
 class GroupLimitPolicyOwnerTest(OCLAPITestCase):
@@ -897,3 +924,65 @@ class ReplacedPolicyOwnerTest(OCLAPITestCase):
 
         self.user.check_and_consume_capability(self.capability_id, owner=self.owner)
         self.assertEqual(self.user.get_capability_usage(self.capability_id), 5)
+
+
+class PartialPolicy(CapabilityPolicy):
+    """Implements everything except reverse() and refund()."""
+
+    def get_limit(self, user, capability_id, owner=None):
+        return 0
+
+    def get_usage(self, user, capability_id, owner=None):
+        return {'used': None}
+
+    def consume(  # pylint: disable=too-many-arguments
+            self, user, capability_id, units=1, *, idempotency_key=None, owner=None, **attribution
+    ):
+        return None, False
+
+
+class CapabilityPolicyInterfaceTest(SimpleTestCase):
+    def test_a_policy_missing_a_method_cannot_be_made(self):
+        for policy in (CapabilityPolicy, PartialPolicy):
+            with self.subTest(policy=policy), self.assertRaises(TypeError):
+                policy()  # pylint: disable=abstract-class-instantiated
+
+    @override_settings(CAPABILITY_POLICY='core.capabilities.policy.GroupLimitPolicy')
+    def test_the_setting_names_the_policy_in_use(self):
+        self.assertIsInstance(get_capability_policy(), GroupLimitPolicy)
+
+
+class CapabilityPolicyCheckTest(SimpleTestCase):
+    def errors(self, path):
+        with override_settings(CAPABILITY_POLICY=path):
+            return check_capability_policy()
+
+    def test_it_runs_at_start_up(self):
+        self.assertIn(check_capability_policy, registry.get_checks())
+
+    def test_the_default_passes(self):
+        self.assertEqual(self.errors('core.capabilities.policy.GroupLimitPolicy'), [])
+
+    def test_a_policy_that_does_not_import_fails(self):
+        for path in ('core.capabilities.policy.NoSuchPolicy', 'no_such_package.policy.Policy'):
+            with self.subTest(path):
+                self.assertEqual([error.id for error in self.errors(path)], ['capabilities.E001'])
+
+    def test_a_policy_whose_module_fails_to_load_fails(self):
+        with patch('core.capabilities.checks.import_string', side_effect=RuntimeError('not in INSTALLED_APPS')):
+            self.assertEqual(
+                [error.id for error in self.errors('core.capabilities.policy.GroupLimitPolicy')], ['capabilities.E001'])
+
+    def test_something_other_than_a_policy_fails(self):
+        for path in ('django.contrib.auth.models.Group', 'core.capabilities.policy.logger'):
+            with self.subTest(path):
+                self.assertEqual([error.id for error in self.errors(path)], ['capabilities.E002'])
+
+    def test_a_policy_missing_a_method_fails_and_names_it(self):
+        error, = self.errors('core.capabilities.tests.tests.PartialPolicy')
+
+        self.assertEqual(error.id, 'capabilities.E003')
+        self.assertIn('refund, reverse', error.msg)
+
+        error, = self.errors('core.capabilities.policy.CapabilityPolicy')
+        self.assertEqual(error.id, 'capabilities.E003')

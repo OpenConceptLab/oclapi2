@@ -22,7 +22,7 @@ class UsageRefused(APIException):
 
 
 class CapabilityExceeded(UsageRefused):
-    """GroupLimitPolicy's refusal: no limit or a blocked one, or not enough left."""
+    """The refusal by limit: no limit or a blocked one, or not enough left."""
 
     def __init__(self, capability_name, limit, used):
         # None = no row anywhere, -1 = blocked: both are "not available", never a count

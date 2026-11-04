@@ -10,10 +10,11 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from rest_framework.authtoken.models import Token
 
+from core.capabilities.policy import get_capability_policy
 from core.common.mixins import SourceContainerMixin
 from core.common.models import BaseModel, CommonLogoModel
 from core.common.tasks import send_user_verification_email, send_user_reset_password_email
-from core.common.utils import web_url, get_capability_policy
+from core.common.utils import web_url
 from core.users.constants import STAFF_GROUP, SUPERADMIN_GROUP, GUEST_GROUP, CORE_USER_GROUP
 from .constants import USER_OBJECT_TYPE
 from ..common.checksums import ChecksumModel
