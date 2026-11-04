@@ -115,6 +115,9 @@ class CollectionTest(OCLTestCase):
             head.get_version_export_path(suffix=None),
             v1.get_version_export_path(suffix=None),
             v2.get_version_export_path(suffix=None),
+            head.get_legacy_version_export_path(suffix=None),
+            v1.get_legacy_version_export_path(suffix=None),
+            v2.get_legacy_version_export_path(suffix=None),
             'v1/external/report.zip',
             'v2/external/report.zip',
         ])
