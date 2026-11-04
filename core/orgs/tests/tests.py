@@ -3,6 +3,7 @@ import importlib
 from django.apps import apps
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import ValidationError
+from django.db.models import ProtectedError
 from mock import patch, Mock
 
 from core.collections.models import Collection, CollectionReference, Expansion
@@ -13,9 +14,9 @@ from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
 from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
-from core.orgs.constants import ORG_OBJECT_TYPE
+from core.orgs.constants import ORG_OBJECT_TYPE, ROLE_ADMIN, ROLE_MEMBER
 from core.orgs.documents import OrganizationDocument
-from core.orgs.models import Organization
+from core.orgs.models import Organization, Role
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
@@ -51,6 +52,99 @@ class OrganizationTest(OCLTestCase):
         source = OrganizationSourceFactory(organization=org)
         for user in (member, outsider):
             self.assertEqual(source.has_parent_edit_access(user), org.has_edit_access(user))
+
+    def test_creator_is_an_admin(self):
+        creator = UserProfileFactory()
+        org = OrganizationFactory(created_by=creator, updated_by=creator)
+
+        self.assertTrue(org.is_member(creator))
+        self.assertTrue(org.is_admin(creator))
+
+    def test_saving_again_does_not_change_the_role_of_the_creator(self):
+        creator = UserProfileFactory()
+        org = OrganizationFactory(created_by=creator, updated_by=creator)
+        org.set_member_role(creator, ROLE_MEMBER)
+
+        org.save()
+
+        self.assertFalse(org.is_admin(creator))
+
+    def test_a_member_added_directly_is_not_an_admin(self):
+        org = OrganizationFactory()
+        member = UserProfileFactory()
+
+        org.members.add(member)
+
+        self.assertTrue(org.is_member(member))
+        self.assertFalse(org.is_admin(member))
+
+    def test_has_admin_access(self):
+        org = OrganizationFactory()
+        member, admin, outsider = UserProfileFactory(), UserProfileFactory(), UserProfileFactory()
+        org.members.add(member)
+        org.set_member_role(admin, ROLE_ADMIN)
+
+        self.assertTrue(org.has_admin_access(admin))
+        self.assertTrue(org.has_admin_access(UserProfileFactory(is_staff=True)))
+        self.assertFalse(org.has_admin_access(member))
+        self.assertFalse(org.has_admin_access(outsider))
+        self.assertFalse(org.has_admin_access(AnonymousUser()))
+        self.assertFalse(org.has_admin_access(None))
+
+    def test_is_last_admin(self):
+        creator = UserProfileFactory()
+        org = OrganizationFactory(created_by=creator, updated_by=creator)
+        member = UserProfileFactory(organizations=[org])
+
+        self.assertTrue(org.is_last_admin(creator))
+        self.assertFalse(org.is_last_admin(member))
+        self.assertFalse(org.is_last_admin(UserProfileFactory()))
+        self.assertFalse(org.is_last_admin(None))
+
+        org.set_member_role(member, ROLE_ADMIN)
+
+        self.assertFalse(org.is_last_admin(creator))
+        self.assertFalse(org.is_last_admin(member))
+
+    def test_is_last_admin_ignores_deactivated_admins(self):
+        creator = UserProfileFactory()
+        org = OrganizationFactory(created_by=creator, updated_by=creator)
+        deactivated = UserProfileFactory(is_active=False)
+        org.set_member_role(deactivated, ROLE_ADMIN)
+
+        self.assertTrue(org.is_last_admin(creator))
+        self.assertFalse(org.is_last_admin(deactivated))
+
+    def test_get_member_role(self):
+        creator = UserProfileFactory()
+        org = OrganizationFactory(created_by=creator, updated_by=creator)
+        member = UserProfileFactory(organizations=[org])
+
+        self.assertEqual(org.get_member_role(creator), ROLE_ADMIN)
+        self.assertEqual(org.get_member_role(member), ROLE_MEMBER)
+        self.assertIsNone(org.get_member_role(UserProfileFactory()))
+        self.assertIsNone(org.get_member_role(AnonymousUser()))
+        self.assertIsNone(org.get_member_role(None))
+
+    def test_set_member_role(self):
+        org = OrganizationFactory()
+        user = UserProfileFactory()
+
+        self.assertTrue(org.set_member_role(user))
+        self.assertEqual(org.get_member_role(user), ROLE_MEMBER)
+
+        self.assertFalse(org.set_member_role(user, ROLE_ADMIN))
+        self.assertEqual(org.get_member_role(user), ROLE_ADMIN)
+
+        self.assertFalse(org.set_member_role(user))
+        self.assertEqual(org.get_member_role(user), ROLE_ADMIN)
+
+    def test_a_membership_in_use_keeps_its_role(self):
+        org = OrganizationFactory()
+        org.members.add(UserProfileFactory())
+
+        with self.assertRaises(ProtectedError):
+            Role.objects.get(name=ROLE_MEMBER).delete()
 
     def test_members(self):
         org = Organization(id=123)

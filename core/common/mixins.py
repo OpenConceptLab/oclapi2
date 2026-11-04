@@ -384,6 +384,7 @@ class PathWalkerMixin:
     A Mixin with methods that help resolve a resource path to a resource object
     """
     path_info = None
+    is_parent_lookup = False  # this view is only finding the parent of what the request is for
 
     @staticmethod
     def get_parent_in_path(path_info, levels=1):
@@ -404,7 +405,7 @@ class PathWalkerMixin:
     @staticmethod
     def get_object_for_path(path_info, request):
         callback, _, callback_kwargs = resolve(path_info)
-        view = callback.cls(request=request, kwargs=callback_kwargs)
+        view = callback.cls(request=request, kwargs=callback_kwargs, is_parent_lookup=True)
         view.initialize(request, path_info, **callback_kwargs)
         return view.get_object()
 

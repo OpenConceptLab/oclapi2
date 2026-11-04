@@ -249,6 +249,7 @@ class UserListView(UserBaseView,
                    ListWithHeadersMixin,
                    mixins.CreateModelMixin):
     allow_csv_export = False  # user rows carry private account fields
+    organization = None
 
     def get_serializer_class(self):
         if self.request.query_params.get('summary') in TRUTHY and self.request.method == 'GET':
@@ -264,6 +265,12 @@ class UserListView(UserBaseView,
         if self.request.method in ['POST', 'DELETE']:
             return [IsAdminUser()]
         return []
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        if self.organization:
+            context['member_roles'] = self.organization.member_roles
+        return context
 
     def can_view(self, organization):
         user = self.request.user
@@ -284,6 +291,7 @@ class UserListView(UserBaseView,
 
             if not self.can_view(organization):
                 return Response(status=status.HTTP_403_FORBIDDEN)
+            self.organization = organization
             queryset = organization.members
             if not self.should_include_inactive():
                 queryset = queryset.filter(is_active=True)

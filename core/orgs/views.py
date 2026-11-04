@@ -13,14 +13,15 @@ from core.client_configs.views import ResourceClientConfigsView
 from core.collections.views import CollectionListView
 from core.common.constants import NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, HEAD, UPDATED_BY_USERNAME_PARAM
 from core.common.mixins import ListWithHeadersMixin
-from core.common.permissions import HasPrivateAccess, CanViewConceptDictionary
+from core.common.permissions import CanAdministerOrganization, CanViewConceptDictionary, HasPrivateAccess
 from core.common.swagger_parameters import org_no_members_param
 from core.common.tasks import delete_organization
 from core.common.throttling import ThrottleUtil
 from core.common.utils import parse_updated_since_param, get_truthy_values
 from core.common.views import BaseAPIView, BaseLogoView
 from core.map_projects.views import MapProjectListView
-from core.orgs.constants import NO_MEMBERS, CANNOT_REMOVE_ONLY_MEMBER
+from core.orgs.constants import NO_MEMBERS, CANNOT_REMOVE_ONLY_MEMBER, CANNOT_REMOVE_LAST_ADMIN, INVALID_ROLE, \
+    ROLES, ROLE_MEMBER
 from core.orgs.documents import OrganizationDocument
 from core.orgs.models import Organization
 from core.orgs.serializers import OrganizationDetailSerializer, OrganizationListSerializer, \
@@ -109,11 +110,16 @@ class OrganizationBaseView(BaseAPIView, RetrieveAPIView, DestroyAPIView):
     queryset = Organization.objects.filter(is_active=True)
 
     def get_permissions(self):
-        """Reads follow the org's public access. Writes need staff or membership of the org."""
+        """
+        Reads follow the org's public access. Writes need staff or an admin of the org. Editing one of the org's
+        repositories looks the org up here with the same request, and needs only a member.
+        """
         if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionary(), ]
+        if self.is_parent_lookup:
+            return [HasPrivateAccess(), ]
 
-        return [HasPrivateAccess(), ]
+        return [CanAdministerOrganization(), ]
 
 
 class OrganizationLogoView(OrganizationBaseView, BaseLogoView):
@@ -193,12 +199,13 @@ class OrganizationClientConfigsView(ResourceClientConfigsView):
     lookup_field = 'org'
     model = Organization
     queryset = Organization.objects.filter(is_active=True)
-    edit_permission_class = HasPrivateAccess
+    edit_permission_class = CanAdministerOrganization
 
 
 class OrganizationMemberView(generics.GenericAPIView):
     userprofile = None
     user_in_org = False
+    user_is_admin = False
     serializer_class = UserDetailSerializer
 
     def get_throttles(self):
@@ -218,6 +225,7 @@ class OrganizationMemberView(generics.GenericAPIView):
             self.user_in_org = request.user.is_staff or (
                 request.user.is_authenticated and self.organization.is_member(request.user)
             )
+            self.user_is_admin = self.organization.has_admin_access(request.user)
         except UserProfile.DoesNotExist:  # pragma: no cover
             pass
         super().initial(request, *args, **kwargs)
@@ -233,32 +241,50 @@ class OrganizationMemberView(generics.GenericAPIView):
         return Response(status=status.HTTP_404_NOT_FOUND)  # pragma: no cover
 
     def put(self, request, **kwargs):  # pylint: disable=unused-argument
+        """Adds the user to the org or changes their role. With no role, an existing member keeps theirs."""
         if not self.userprofile:
             return Response(status=status.HTTP_404_NOT_FOUND)
-        if not self.user_in_org:
+        if not self.user_is_admin:
             return Response(status=status.HTTP_403_FORBIDDEN)
 
-        self.userprofile.organizations.add(self.organization)
-        # ES Index
-        self.organization.save()
-        self.userprofile.save()
-        from core.events.models import Event
-        Event.record(self.organization, Event.JOINED, self.userprofile, request.user)
+        role = get(request.data, 'role')
+        if role is not None and role not in ROLES:
+            return Response({'role': [INVALID_ROLE]}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            # Locks the org so that concurrent changes can't each see another admin and leave it with none.
+            Organization.objects.select_for_update().get(id=self.organization.id)
+            if role == ROLE_MEMBER and self.organization.is_last_admin(self.userprofile):
+                return Response({'detail': CANNOT_REMOVE_LAST_ADMIN}, status=status.HTTP_409_CONFLICT)
+            joined = self.organization.set_member_role(self.userprofile, role)
+
+        if joined:
+            # ES Index
+            self.organization.save()
+            self.userprofile.save()
+            from core.events.models import Event
+            Event.record(self.organization, Event.JOINED, self.userprofile, request.user)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     def delete(self, request, **kwargs):  # pylint: disable=unused-argument
-        """Removes the user from the org, unless they are its only member: every org keeps at least one."""
-        if not request.user.is_staff and not self.user_in_org:
+        """
+        Removes the user from the org. An admin can remove anyone and a member can leave, unless that would leave
+        the org with no member or no admin.
+        """
+        is_leaving = self.user_in_org and request.user == self.userprofile
+        if not request.user.is_staff and not self.user_is_admin and not is_leaving:
             return Response(status=status.HTTP_403_FORBIDDEN)
         if not self.organization or not self.userprofile:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
         with transaction.atomic():
-            # Locks the org so that concurrent removals can't each see another member and leave it with none.
+            # Locks the org so that concurrent changes can't each see another member or admin and leave it with none.
             Organization.objects.select_for_update().get(id=self.organization.id)
             if self.organization.is_only_member(self.userprofile):
                 return Response({'detail': CANNOT_REMOVE_ONLY_MEMBER}, status=status.HTTP_409_CONFLICT)
+            if self.organization.is_last_admin(self.userprofile):
+                return Response({'detail': CANNOT_REMOVE_LAST_ADMIN}, status=status.HTTP_409_CONFLICT)
             self.userprofile.organizations.remove(self.organization)
 
         # ES Index
@@ -306,11 +332,11 @@ class OrganizationExtrasBaseView(APIView):
         return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
     def get_permissions(self):
-        """Reads follow the org's public access. Writes need staff or membership of the org."""
+        """Reads follow the org's public access. Writes need staff or an admin of the org."""
         if self.request.method in ['GET', 'HEAD']:
             return [IsAuthenticated(), CanViewConceptDictionary()]
 
-        return [IsAuthenticated(), HasPrivateAccess()]
+        return [IsAuthenticated(), CanAdministerOrganization()]
 
     def get_object(self):
         instance = Organization.objects.filter(is_active=True, mnemonic=self.kwargs['org']).first()

@@ -3,6 +3,7 @@ import time
 
 from django.db import connection
 from django.test import override_settings, tag
+from django.test.utils import CaptureQueriesContext
 from mock import patch
 from mock.mock import Mock, ANY
 from rest_framework.exceptions import ErrorDetail
@@ -12,6 +13,8 @@ from core.collections.documents import CollectionDocument
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT
 from core.common.tests import OCLAPITestCase, OCLAPITransactionTestCase
+from core.events.models import Event
+from core.orgs.constants import ROLE_ADMIN, ROLE_MEMBER
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.documents import SourceDocument
@@ -175,7 +178,8 @@ class OrganizationListViewTest(OCLAPITestCase):
 class OrganizationDetailViewTest(OCLAPITestCase):
     def setUp(self):
         self.org = OrganizationFactory(name='Stark Enterprises')
-        self.user = UserProfileFactory(organizations=[self.org])
+        self.user = UserProfileFactory()
+        self.org.set_member_role(self.user, ROLE_ADMIN)
         self.superuser = UserProfile.objects.get(is_superuser=True)
         self.token = self.user.get_token()
 
@@ -534,11 +538,12 @@ class OrganizationMemberViewTest(OCLAPITestCase):
     def test_delete_204_creator(self):
         creator = UserProfileFactory()
         org = OrganizationFactory(created_by=creator, updated_by=creator)
-        member = UserProfileFactory(organizations=[org])
+        other_admin = UserProfileFactory()
+        org.set_member_role(other_admin, ROLE_ADMIN)
 
         response = self.client.delete(
             f'/orgs/{org.mnemonic}/members/{creator.username}/',
-            HTTP_AUTHORIZATION='Token ' + member.get_token(),
+            HTTP_AUTHORIZATION='Token ' + other_admin.get_token(),
             format='json'
         )
 
@@ -548,11 +553,12 @@ class OrganizationMemberViewTest(OCLAPITestCase):
     def test_delete_204_last_editor(self):
         self.org.updated_by = self.user
         self.org.save()
-        member = UserProfileFactory(organizations=[self.org])
+        admin = UserProfileFactory()
+        self.org.set_member_role(admin, ROLE_ADMIN)
 
         response = self.client.delete(
             f'/orgs/{self.org.mnemonic}/members/{self.user.username}/',
-            HTTP_AUTHORIZATION='Token ' + member.get_token(),
+            HTTP_AUTHORIZATION='Token ' + admin.get_token(),
             format='json'
         )
 
@@ -590,7 +596,7 @@ class OrganizationMemberViewTest(OCLAPITestCase):
     def test_delete_404(self):
         response = self.client.delete(
             f'/orgs/{self.org.mnemonic}/members/foobar/',
-            HTTP_AUTHORIZATION='Token ' + self.token,
+            HTTP_AUTHORIZATION='Token ' + self.superuser.get_token(),
             format='json'
         )
 
@@ -605,7 +611,7 @@ class OrganizationMemberRemovalConcurrencyTest(OCLAPITransactionTestCase):
         alice = UserProfileFactory(username='alice')
         bob = UserProfileFactory(username='bob')
         org = OrganizationFactory(mnemonic='race-org', created_by=alice, updated_by=alice)
-        org.members.add(bob)
+        org.set_member_role(bob, ROLE_ADMIN)
         tokens = {'alice': alice.get_token(), 'bob': bob.get_token()}
         is_only_member = Organization.is_only_member
 
@@ -641,6 +647,442 @@ class OrganizationMemberRemovalConcurrencyTest(OCLAPITransactionTestCase):
         self.assertEqual(org.members.count(), 1)
 
 
+class OrganizationAdminOnlyTest(OCLAPITestCase):
+    """Editing or deleting an org needs an admin of it, or staff. A plain member gets a 403 and changes nothing."""
+    ACTIONS = (
+        ('put', '/orgs/stark/', {'name': 'Wayne'}, 200),
+        ('patch', '/orgs/stark/', {'name': 'Wayne'}, 200),
+        ('post', '/orgs/stark/logo/', {'base64': 'base64-data'}, 200),
+        ('delete', '/orgs/stark/logo/', None, 204),
+        ('put', '/orgs/stark/overview/', {'overview': {'foo': 'bar'}}, 200),
+        ('delete', '/orgs/stark/overview/', None, 204),
+        ('put', '/orgs/stark/extras/foo/', {'foo': 'baz'}, 200),
+        ('delete', '/orgs/stark/extras/foo/', None, 204),
+        ('post', '/orgs/stark/client-configs/', {'name': 'custom', 'config': {'tabs': [{'default': True}]}}, 201),
+        ('delete', '/orgs/stark/?inline=true', None, 204),
+    )
+
+    def setUp(self):
+        super().setUp()
+        self.org = OrganizationFactory(
+            mnemonic='stark', name='Stark', extras={'foo': 'bar'}, overview={'foo': 'bar'}, logo_path='logo.png')
+        self.member = UserProfileFactory(organizations=[self.org])
+        self.admin = UserProfileFactory(organizations=[self.org])
+        self.org.set_member_role(self.admin, ROLE_ADMIN)
+
+    def request(self, method, url, data, user):
+        return getattr(self.client, method)(url, data, HTTP_AUTHORIZATION='Token ' + user.get_token(), format='json')
+
+    @staticmethod
+    def get_state():
+        return Organization.objects.filter(mnemonic='stark').values(
+            'name', 'extras', 'overview', 'logo_path').first()
+
+    def test_member_is_refused(self):
+        before = self.get_state()
+        for method, url, data, _ in self.ACTIONS:
+            with self.subTest(method=method, url=url):
+                self.assertEqual(self.request(method, url, data, self.member).status_code, 403)
+                self.assertEqual(self.get_state(), before)
+        self.assertEqual(self.org.client_configs.count(), 0)
+
+    @patch('core.services.storages.cloud.aws.S3.upload_base64', Mock(return_value='orgs/stark/logo.png'))
+    def test_admin_is_allowed(self):
+        for method, url, data, expected_status in self.ACTIONS:
+            with self.subTest(method=method, url=url):
+                self.assertEqual(self.request(method, url, data, self.admin).status_code, expected_status)
+        self.assertFalse(Organization.objects.filter(mnemonic='stark').exists())
+
+    @patch('core.services.storages.cloud.aws.S3.upload_base64', Mock(return_value='orgs/stark/logo.png'))
+    def test_staff_who_is_not_a_member_is_allowed(self):
+        staff = UserProfileFactory(is_staff=True)
+        for method, url, data, expected_status in self.ACTIONS:
+            with self.subTest(method=method, url=url):
+                self.assertEqual(self.request(method, url, data, staff).status_code, expected_status)
+        self.assertFalse(Organization.objects.filter(mnemonic='stark').exists())
+
+
+class OrganizationMemberRepositoryAccessTest(OCLAPITestCase):
+    """A plain member keeps everything they have on the org's repositories, private ones included."""
+    def setUp(self):
+        super().setUp()
+        self.org = OrganizationFactory(mnemonic='stark', public_access=ACCESS_TYPE_NONE)
+        self.member = UserProfileFactory(organizations=[self.org])
+        self.source = OrganizationSourceFactory(
+            organization=self.org, mnemonic='private-source', public_access=ACCESS_TYPE_NONE)
+        self.auth = {'HTTP_AUTHORIZATION': 'Token ' + self.member.get_token()}
+
+    def test_views_the_private_org_and_its_private_repository(self):
+        self.assertEqual(self.client.get('/orgs/stark/', **self.auth).status_code, 200)
+        self.assertEqual(self.client.get('/orgs/stark/sources/private-source/', **self.auth).status_code, 200)
+
+    def test_creates_a_repository(self):
+        response = self.client.post(
+            '/orgs/stark/sources/',
+            {'id': 'new-source', 'name': 'New', 'short_code': 'new', 'public_access': ACCESS_TYPE_NONE},
+            format='json', **self.auth
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+    def test_edits_a_private_repository(self):
+        collection = OrganizationCollectionFactory(
+            organization=self.org, mnemonic='private-collection', public_access=ACCESS_TYPE_NONE)
+
+        for method, url, repo in (
+                ('put', '/orgs/stark/sources/private-source/', self.source),
+                ('patch', '/orgs/stark/sources/private-source/', self.source),
+                ('put', '/orgs/stark/collections/private-collection/', collection),
+                ('patch', '/orgs/stark/collections/private-collection/', collection),
+        ):
+            with self.subTest(method=method, url=url):
+                name = f'Renamed by {method}'
+
+                response = getattr(self.client, method)(url, {'name': name}, format='json', **self.auth)
+
+                self.assertEqual(response.status_code, 200)
+                repo.refresh_from_db()
+                self.assertEqual(repo.name, name)
+
+    def test_is_refused_editing_a_repository_outside_the_org(self):
+        stranger = {'HTTP_AUTHORIZATION': 'Token ' + UserProfileFactory().get_token()}
+
+        response = self.client.put(
+            '/orgs/stark/sources/private-source/', {'name': 'Renamed'}, format='json', **stranger)
+
+        self.assertEqual(response.status_code, 403)
+        self.source.refresh_from_db()
+        self.assertNotEqual(self.source.name, 'Renamed')
+
+    @patch('core.common.models.delete_s3_objects', Mock())
+    def test_deletes_a_repository(self):
+        response = self.client.delete('/orgs/stark/sources/private-source/?inline=true', **self.auth)
+
+        self.assertEqual(response.status_code, 204)
+
+    def test_manages_exports_of_a_repository(self):
+        self.assertTrue(self.member.is_admin_for(self.source))
+        self.assertFalse(UserProfileFactory().is_admin_for(self.source))
+
+    def test_is_refused_outside_the_org(self):
+        stranger = {'HTTP_AUTHORIZATION': 'Token ' + UserProfileFactory().get_token()}
+
+        self.assertEqual(self.client.get('/orgs/stark/sources/private-source/', **stranger).status_code, 403)
+
+
+class OrganizationMemberRoleTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.admin = UserProfileFactory()
+        self.org = OrganizationFactory(mnemonic='stark', created_by=self.admin, updated_by=self.admin)
+        self.member = UserProfileFactory(organizations=[self.org])
+
+    def put(self, target, data=None, actor=None):
+        return self.client.put(
+            f'/orgs/stark/members/{target.username}/', data, format='json',
+            HTTP_AUTHORIZATION='Token ' + (actor or self.admin).get_token())
+
+    def delete(self, target, actor=None):
+        return self.client.delete(
+            f'/orgs/stark/members/{target.username}/', HTTP_AUTHORIZATION='Token ' + (actor or self.admin).get_token())
+
+    def get_role(self, user):
+        return self.org.get_member_role(user)
+
+    def test_put_adds_a_new_member_as_member_by_default(self):
+        user = UserProfileFactory()
+
+        response = self.put(user)
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(self.get_role(user), ROLE_MEMBER)
+        self.assertEqual(Event.objects.filter(event_type=Event.JOINED, object_url=user.uri).count(), 1)
+
+    def test_put_adds_a_new_member_as_admin(self):
+        user = UserProfileFactory()
+
+        self.assertEqual(self.put(user, {'role': ROLE_ADMIN}).status_code, 204)
+        self.assertEqual(self.get_role(user), ROLE_ADMIN)
+
+    def test_put_without_a_role_keeps_an_existing_admin_as_admin(self):
+        self.org.set_member_role(self.member, ROLE_ADMIN)
+
+        self.assertEqual(self.put(self.member).status_code, 204)
+        self.assertEqual(self.get_role(self.member), ROLE_ADMIN)
+
+    def test_put_on_an_existing_member_records_no_second_joined_event(self):
+        self.assertEqual(self.put(self.member, {'role': ROLE_ADMIN}).status_code, 204)
+        self.assertEqual(self.put(self.member).status_code, 204)
+
+        self.assertFalse(Event.objects.filter(event_type=Event.JOINED, object_url=self.member.uri).exists())
+
+    def test_put_promotes_and_demotes(self):
+        self.assertEqual(self.put(self.member, {'role': ROLE_ADMIN}).status_code, 204)
+        self.assertEqual(self.get_role(self.member), ROLE_ADMIN)
+
+        self.assertEqual(self.put(self.member, {'role': ROLE_MEMBER}).status_code, 204)
+        self.assertEqual(self.get_role(self.member), ROLE_MEMBER)
+
+    def test_put_400_for_a_role_that_does_not_exist(self):
+        user = UserProfileFactory()
+        for role in ('owner', '', 1, ['admin'], {'name': 'admin'}):
+            with self.subTest(role=role):
+                response = self.put(user, {'role': role})
+
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(list(response.data), ['role'])
+                self.assertFalse(self.org.is_member(user))
+
+    def test_put_403_for_a_member(self):
+        user = UserProfileFactory()
+
+        self.assertEqual(self.put(user, actor=self.member).status_code, 403)
+        self.assertFalse(self.org.is_member(user))
+
+    def test_put_403_for_a_member_promoting_themselves(self):
+        self.assertEqual(self.put(self.member, {'role': ROLE_ADMIN}, actor=self.member).status_code, 403)
+        self.assertEqual(self.get_role(self.member), ROLE_MEMBER)
+
+    def test_put_403_for_a_stranger(self):
+        stranger = UserProfileFactory()
+
+        self.assertEqual(self.put(stranger, {'role': ROLE_ADMIN}, actor=stranger).status_code, 403)
+        self.assertFalse(self.org.is_member(stranger))
+
+    def test_put_by_staff_who_is_not_a_member(self):
+        staff = UserProfileFactory(is_staff=True)
+
+        self.assertEqual(self.put(self.member, {'role': ROLE_ADMIN}, actor=staff).status_code, 204)
+        self.assertEqual(self.get_role(self.member), ROLE_ADMIN)
+        self.assertFalse(self.org.is_member(staff))
+
+    def test_put_409_demoting_the_last_admin(self):
+        response = self.put(self.admin, {'role': ROLE_MEMBER})
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data, {'detail': 'Cannot remove or demote the last admin of an organization.'})
+        self.assertEqual(self.get_role(self.admin), ROLE_ADMIN)
+
+    def test_put_409_demoting_the_last_admin_by_staff(self):
+        staff = UserProfileFactory(is_staff=True)
+
+        self.assertEqual(self.put(self.admin, {'role': ROLE_MEMBER}, actor=staff).status_code, 409)
+        self.assertEqual(self.get_role(self.admin), ROLE_ADMIN)
+
+    def test_put_409_demoting_the_last_active_admin(self):
+        deactivated = UserProfileFactory(organizations=[self.org], is_active=False)
+        self.org.set_member_role(deactivated, ROLE_ADMIN)
+
+        self.assertEqual(self.put(self.admin, {'role': ROLE_MEMBER}).status_code, 409)
+
+    def test_put_demotes_an_admin_when_another_remains(self):
+        self.org.set_member_role(self.member, ROLE_ADMIN)
+
+        self.assertEqual(self.put(self.admin, {'role': ROLE_MEMBER}).status_code, 204)
+        self.assertEqual(self.get_role(self.admin), ROLE_MEMBER)
+
+    def test_delete_by_an_admin(self):
+        self.assertEqual(self.delete(self.member).status_code, 204)
+        self.assertFalse(self.org.is_member(self.member))
+
+    def test_delete_403_for_a_member_removing_someone_else(self):
+        other = UserProfileFactory(organizations=[self.org])
+
+        self.assertEqual(self.delete(other, actor=self.member).status_code, 403)
+        self.assertEqual(self.delete(self.admin, actor=self.member).status_code, 403)
+        self.assertTrue(self.org.is_member(other))
+        self.assertTrue(self.org.is_member(self.admin))
+
+    def test_delete_lets_a_member_leave(self):
+        self.assertEqual(self.delete(self.member, actor=self.member).status_code, 204)
+        self.assertFalse(self.org.is_member(self.member))
+
+    def test_delete_lets_an_admin_leave_when_another_remains(self):
+        self.org.set_member_role(self.member, ROLE_ADMIN)
+
+        self.assertEqual(self.delete(self.admin, actor=self.admin).status_code, 204)
+        self.assertFalse(self.org.is_member(self.admin))
+
+    def test_delete_409_for_the_last_admin(self):
+        for actor in (self.admin, UserProfileFactory(is_staff=True)):
+            with self.subTest(actor=actor.username):
+                response = self.delete(self.admin, actor=actor)
+
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(
+                    response.data, {'detail': 'Cannot remove or demote the last admin of an organization.'})
+                self.assertTrue(self.org.is_member(self.admin))
+
+    def test_delete_409_when_the_only_other_admin_is_deactivated(self):
+        deactivated = UserProfileFactory(organizations=[self.org], is_active=False)
+        self.org.set_member_role(deactivated, ROLE_ADMIN)
+
+        self.assertEqual(self.delete(self.admin, actor=self.admin).status_code, 409)
+        self.assertTrue(self.org.is_member(self.admin))
+
+    def test_delete_removes_a_deactivated_admin(self):
+        deactivated = UserProfileFactory(organizations=[self.org], is_active=False)
+        self.org.set_member_role(deactivated, ROLE_ADMIN)
+
+        self.assertEqual(self.delete(deactivated).status_code, 204)
+        self.assertFalse(self.org.is_member(deactivated))
+
+    def test_a_demoted_admin_loses_the_rights_at_once(self):
+        self.org.set_member_role(self.member, ROLE_ADMIN)
+        self.org.set_member_role(self.member, ROLE_MEMBER)
+
+        response = self.client.put(
+            '/orgs/stark/', {'name': 'Wayne'}, format='json',
+            HTTP_AUTHORIZATION='Token ' + self.member.get_token())
+
+        self.assertEqual(response.status_code, 403)
+
+
+class OrganizationMemberRoleReadTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.admin = UserProfileFactory(username='the-admin')
+        self.org = OrganizationFactory(mnemonic='stark', created_by=self.admin, updated_by=self.admin)
+        self.member = UserProfileFactory(username='the-member', organizations=[self.org])
+
+    def test_members_list_has_each_role_in_every_shape(self):
+        for params in ('', '?verbose=true', '?summary=true'):
+            with self.subTest(params=params):
+                response = self.client.get(f'/orgs/stark/members/{params}')
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    {row['username']: row['role'] for row in response.data},
+                    {'the-admin': 'admin', 'the-member': 'member'}
+                )
+
+    def test_users_alias_of_the_members_list_has_each_role(self):
+        response = self.client.get('/orgs/stark/users/')
+
+        self.assertEqual({row['username']: row['role'] for row in response.data},
+                         {'the-admin': 'admin', 'the-member': 'member'})
+
+    def test_role_is_from_this_org_not_another(self):
+        other = OrganizationFactory(mnemonic='other', created_by=self.member, updated_by=self.member)
+        other.members.add(self.admin)
+
+        response = self.client.get('/orgs/other/members/')
+
+        self.assertEqual({row['username']: row['role'] for row in response.data},
+                         {'the-admin': 'member', 'the-member': 'admin'})
+
+    def test_role_query_does_not_grow_with_the_members(self):
+        def count_role_queries():
+            with CaptureQueriesContext(connection) as context:
+                self.assertEqual(self.client.get('/orgs/stark/members/').status_code, 200)
+            return len([query for query in context.captured_queries if 'org_roles' in query['sql']])
+
+        self.assertEqual(count_role_queries(), 1)
+
+        UserProfileFactory(organizations=[self.org])
+        UserProfileFactory(organizations=[self.org])
+
+        self.assertEqual(count_role_queries(), 1)
+
+    def test_user_lists_outside_an_org_have_no_role(self):
+        response = self.client.get(
+            '/users/', HTTP_AUTHORIZATION='Token ' + self.admin.get_token())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data)
+        self.assertFalse(any('role' in row for row in response.data))
+
+    def test_org_detail_has_the_role_of_the_requester(self):
+        for user, expected in (
+                (self.admin, 'admin'),
+                (self.member, 'member'),
+                (UserProfileFactory(), None),
+                (UserProfileFactory(is_staff=True), None),
+        ):
+            with self.subTest(user=user.username):
+                response = self.client.get('/orgs/stark/', HTTP_AUTHORIZATION='Token ' + user.get_token())
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.data['user_role'], expected)
+
+    def test_org_detail_has_no_role_for_anonymous(self):
+        response = self.client.get('/orgs/stark/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.data['user_role'])
+
+    def test_creating_an_org_makes_the_creator_its_admin(self):
+        user = UserProfileFactory()
+
+        response = self.client.post(
+            '/orgs/', {'id': 'new-org', 'name': 'New'}, format='json',
+            HTTP_AUTHORIZATION='Token ' + user.get_token())
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['user_role'], 'admin')
+        self.assertTrue(Organization.objects.get(mnemonic='new-org').is_admin(user))
+
+
+@tag('es')
+class OrganizationMemberRoleSearchTest(OCLAPITestCase):
+    def test_search_results_have_each_role(self):
+        admin = UserProfileFactory(username='searchable-admin')
+        org = OrganizationFactory(mnemonic='stark', created_by=admin, updated_by=admin)
+        member = UserProfileFactory(username='searchable-member', organizations=[org])
+        admin.save()
+        member.save()
+
+        response = self.client.get('/orgs/stark/members/?q=searchable')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual({row['username']: row['role'] for row in response.data},
+                         {'searchable-admin': 'admin', 'searchable-member': 'member'})
+
+
+class OrganizationAdminConcurrencyTest(OCLAPITransactionTestCase):
+    """Runs two demotions at once, on separate connections, to check that every org keeps an admin."""
+
+    def test_two_admins_demoting_each_other_at_once_leave_one_admin(self):
+        alice = UserProfileFactory(username='alice')
+        bob = UserProfileFactory(username='bob')
+        org = OrganizationFactory(mnemonic='race-org', created_by=alice, updated_by=alice)
+        org.set_member_role(bob, ROLE_ADMIN)
+        tokens = {'alice': alice.get_token(), 'bob': bob.get_token()}
+        is_last_admin = Organization.is_last_admin
+
+        def slow_is_last_admin(organization, user_profile):
+            result = is_last_admin(organization, user_profile)
+            time.sleep(0.5)  # widens the gap between the check and the change
+            return result
+
+        barrier = threading.Barrier(2)
+        statuses = {}
+
+        def demote(actor, target):
+            try:
+                client = APIClient()
+                barrier.wait()
+                response = client.put(
+                    f'/orgs/race-org/members/{target}/', {'role': ROLE_MEMBER}, format='json',
+                    HTTP_AUTHORIZATION='Token ' + tokens[actor])
+                statuses[actor] = response.status_code
+            finally:
+                connection.close()
+
+        with patch.object(Organization, 'is_last_admin', slow_is_last_admin):
+            threads = [
+                threading.Thread(target=demote, args=('alice', 'bob')),
+                threading.Thread(target=demote, args=('bob', 'alice')),
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+        self.assertEqual(sorted(statuses.values()), [204, 409])
+        self.assertEqual(org.memberships.filter(role__name=ROLE_ADMIN).count(), 1)
+
+
 class OrganizationExtrasViewTest(OCLAPITestCase):
     def test_get_200(self):
         org = OrganizationFactory(extras={})
@@ -673,7 +1115,8 @@ class OrganizationExtraRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         super().setUp()
         self.extras = {'foo': 'bar', 'tao': 'ching'}
         self.organization = OrganizationFactory(extras=self.extras)
-        self.user = UserProfileFactory(organizations=[self.organization])
+        self.user = UserProfileFactory()
+        self.organization.set_member_role(self.user, ROLE_ADMIN)
         self.token = self.user.get_token()
 
     def test_get_200(self):
@@ -753,7 +1196,8 @@ class OrganizationLogoViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
         self.organization = OrganizationFactory(mnemonic='org-1')
-        self.user = UserProfileFactory(organizations=[self.organization])
+        self.user = UserProfileFactory()
+        self.organization.set_member_role(self.user, ROLE_ADMIN)
         self.token = self.user.get_token()
 
     @patch('core.services.storages.cloud.aws.S3.upload_base64')
@@ -781,7 +1225,8 @@ class OrganizationLogoViewTest(OCLAPITestCase):
 class OrganizationOverviewViewTest(OCLAPITestCase):
     def setUp(self):
         self.org = OrganizationFactory(name='Stark Enterprises')
-        self.user = UserProfileFactory(organizations=[self.org])
+        self.user = UserProfileFactory()
+        self.org.set_member_role(self.user, ROLE_ADMIN)
         self.superuser = UserProfile.objects.get(is_superuser=True)
         self.token = self.user.get_token()
 

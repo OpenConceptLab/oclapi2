@@ -49,6 +49,15 @@ class HasOwnership(BasePermission):
         return False
 
 
+class CanAdministerOrganization(BasePermission):
+    """
+    The user is staff or an admin of the referenced organization. Its repositories don't need this: any member
+    can edit them.
+    """
+    def has_object_permission(self, request, view, obj):
+        return obj.has_admin_access(request.user)
+
+
 class CanViewConceptDictionary(HasPrivateAccess):
     """
     The user can view this source. A version is viewable only while its HEAD is too, as a version keeps the

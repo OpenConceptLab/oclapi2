@@ -91,6 +91,7 @@ class OrganizationDetailSerializer(AbstractResourceSerializer):
     members_url = serializers.URLField(read_only=True)
     extras = serializers.JSONField(required=False, allow_null=True)
     client_configs = SerializerMethodField()
+    user_role = SerializerMethodField()
 
     class Meta:
         model = Organization
@@ -98,7 +99,7 @@ class OrganizationDetailSerializer(AbstractResourceSerializer):
             'type', 'uuid', 'id', 'public_access', 'name', 'company', 'website', 'location', 'members',
             'created_on', 'updated_on', 'url', 'extras', 'members_url', 'created_by', 'updated_by', 'location',
             'sources_url', 'public_sources', 'collections_url', 'public_collections', 'logo_url', 'description',
-            'client_configs', 'text', 'overview'
+            'client_configs', 'text', 'overview', 'user_role'
         )
 
     def __init__(self, *args, **kwargs):
@@ -118,6 +119,10 @@ class OrganizationDetailSerializer(AbstractResourceSerializer):
     def get_client_configs(self, obj):
         return ClientConfigSerializer(obj.client_configs.filter(
             is_active=True), many=True).data if self.include_client_configs else None
+
+    def get_user_role(self, obj):
+        """The requester's role in the org, for clients to decide which controls to show."""
+        return obj.get_member_role(get(self, 'context.request.user'))
 
     def update(self, instance, validated_data):
         request_user = self.context['request'].user
