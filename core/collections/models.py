@@ -1,7 +1,6 @@
 import time
 from contextlib import nullcontext
 
-from celery.states import SUCCESS
 from celery_once import AlreadyQueued
 from dirtyfields import DirtyFieldsMixin
 from django.conf import settings
@@ -28,7 +27,7 @@ from core.common.constants import (
     ACCESS_TYPE_VIEW,
     ES_REQUEST_TIMEOUT, ES_REQUEST_TIMEOUT_ASYNC, HEAD, ALL, EXCLUDE_WILDCARD_SEARCH_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM,
     SEARCH_MAP_CODES_PARAM, INCLUDE_SEARCH_META_PARAM, VERBOSE_PARAM, NAMESPACE_INVALID_CHAR_REGEX,
-    CONSECUTIVE_HYPHENS_REGEX)
+    CONSECUTIVE_HYPHENS_REGEX, SERIALIZATION_RETRY_ATTEMPTS)
 from core.common.es import ESScript
 from core.common.models import ConceptContainerModel, BaseResourceModel
 from core.common.search import CustomESSearch
@@ -411,7 +410,7 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     def seed_from_head_expansion(self, index=True):
         """False when HEAD has no expansion to copy, so the version seeds as without one"""
         is_outermost = not transaction.get_connection().in_atomic_block
-        attempts = 3 if is_outermost else 1
+        attempts = SERIALIZATION_RETRY_ATTEMPTS if is_outermost else 1
         for attempt in range(1, attempts + 1):
             try:
                 expansion = self.seed_from_head_expansion_in_snapshot(is_outermost)
@@ -1726,7 +1725,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 CollectionReference.is_expansion_locked_repo_version_on():
             # recorded before members go, so new versions don't copy this expansion until the re-add succeeds
             readd_record = Task.new(
-                queue='default', user=self.collection_version.updated_by, name=readd_task.__name__,
+                queue='default', user=self.collection_version.updated_by, name=readd_task.name,
                 args=[self.id, removed_reference_ids])
 
         process(self.concepts, 'concept', concept_ids)
@@ -2040,9 +2039,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
     @property
     def has_pending_readd(self):
         """A reference removal leaves this expansion short until its re-add succeeds"""
-        return Task.objects.filter(
-            name__iendswith=readd_references_to_expansion_on_references_removal.__name__, args__0=self.id
-        ).exclude(state=SUCCESS).exists()
+        return Task.unfinished_readd_references_tasks().filter(args__0=self.id).exists()
 
     def copy_members_from(self, expansion):
         for relation in ('concepts', 'mappings'):

@@ -672,6 +672,125 @@ class TaskAPITest(OCLAPITestCase):
         self.assertEqual(response.status_code, 400)
 
 
+    READD = 'core.common.tasks.readd_references_to_expansion_on_references_removal'
+
+    def readd_task(self, task_id, state=FAILURE, **kwargs):
+        task = Task(id=task_id, name=self.READD, state=state, args=[1, [2]], created_by=self.user, **kwargs)
+        task.save()
+        return task
+
+    def post_rerun(self, task_id, token=None):
+        return self.client.post(f'/tasks/{task_id}/rerun/', HTTP_AUTHORIZATION='Token ' + (token or self.token))
+
+    def test_rerun_failed_readd(self):
+        task = self.readd_task('rerun-task-id')
+
+        with patch.object(Task, 'rerun') as rerun_mock:
+            response = self.post_rerun(task.id)
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data['id'], task.id)
+        rerun_mock.assert_called_once_with(force=True)
+
+    def test_rerun_other_tasks_rejected(self):
+        for index, state in enumerate((FAILURE, REVOKED)):
+            task = Task(id=f'rerun-other-task-id-{index}', name='x', state=state, created_by=self.user)
+            task.save()
+
+            with patch.object(Task, 'rerun') as rerun_mock:
+                response = self.post_rerun(task.id)
+
+            self.assertEqual(response.status_code, 400)
+            rerun_mock.assert_not_called()
+            task.refresh_from_db()
+            self.assertEqual(task.state, state)
+
+    def test_rerun_succeeded_or_unfinished_readd_rejected(self):
+        for state in (SUCCESS, STARTED, PENDING):
+            task = self.readd_task(f'rerun-{state}-task-id', state=state)
+
+            with patch.object(Task, 'rerun') as rerun_mock:
+                response = self.post_rerun(task.id)
+
+            self.assertEqual(response.status_code, 400)
+            rerun_mock.assert_not_called()
+
+    def test_rerun_unknown_task(self):
+        self.assertEqual(self.post_rerun('missing-task-id').status_code, 404)
+
+    def test_rerun_requires_staff(self):
+        owner = UserProfileFactory()
+        task = Task(id='rerun-owned-task-id', name=self.READD, state=FAILURE, args=[1, [2]], created_by=owner)
+        task.save()
+
+        with patch.object(Task, 'rerun') as rerun_mock:
+            response = self.post_rerun(task.id, owner.get_token())
+
+        self.assertEqual(response.status_code, 403)
+        rerun_mock.assert_not_called()
+
+    def test_rerun_claims_the_task_so_a_second_request_is_rejected(self):
+        task = self.readd_task('rerun-claim-task-id')
+
+        with patch.object(Task, 'rerun') as rerun_mock:
+            first = self.post_rerun(task.id)
+            second = self.post_rerun(task.id)
+
+        self.assertEqual(first.status_code, 202)
+        self.assertEqual(second.status_code, 400)
+        rerun_mock.assert_called_once_with(force=True)
+
+    def test_rerun_restores_the_failure_when_requeue_fails(self):
+        task = self.readd_task('rerun-restore-task-id', error_message='boom', traceback='trace', retry=2)
+
+        for error, expected_status in ((ValueError('not registered'), 400), (ConnectionError('broker down'), 500)):
+            with patch.object(Task, 'rerun', side_effect=error):
+                if expected_status == 500:
+                    with self.assertRaises(ConnectionError):
+                        self.post_rerun(task.id)
+                else:
+                    self.assertEqual(self.post_rerun(task.id).status_code, expected_status)
+
+            task.refresh_from_db()
+            self.assertEqual(
+                (task.state, task.error_message, task.traceback, task.retry), (FAILURE, 'boom', 'trace', 2))
+
+    def test_rerun_revoked_readd_as_a_new_record(self):
+        task = self.readd_task('rerun-revoked-task-id', state=REVOKED)
+
+        with patch.object(Task, 'rerun') as rerun_mock:
+            response = self.post_rerun(task.id)
+
+        self.assertEqual(response.status_code, 202)
+        self.assertNotEqual(response.data['id'], task.id)
+        self.assertFalse(Task.objects.filter(id=task.id).exists())
+        new_task = Task.objects.get(id=response.data['id'])
+        self.assertEqual((new_task.name, new_task.args), (self.READD, [1, [2]]))
+        rerun_mock.assert_called_once_with(force=True)
+
+    def test_rerun_revoked_readd_keeps_the_original_when_creating_the_new_record_fails(self):
+        task = self.readd_task('rerun-revoked-new-fail-task-id', state=REVOKED)
+
+        with patch.object(Task, 'new', side_effect=db.OperationalError('db down')):
+            with self.assertRaises(db.OperationalError):
+                self.post_rerun(task.id)
+
+        task.refresh_from_db()
+        self.assertEqual(task.state, REVOKED)
+
+    def test_rerun_revoked_readd_failure_keeps_the_original(self):
+        task = self.readd_task('rerun-revoked-fail-task-id', state=REVOKED)
+        before = Task.objects.count()
+
+        with patch.object(Task, 'rerun', side_effect=ValueError('not registered')):
+            response = self.post_rerun(task.id)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Task.objects.count(), before)
+        task.refresh_from_db()
+        self.assertEqual(task.state, REVOKED)
+
+
 class TaskMixinTest(OCLTestCase):
     class DummyView(TaskMixin):
         def __init__(self, user, is_async=False, is_inline=False):

@@ -8,7 +8,7 @@ from celery.states import PENDING, ALL_STATES, FAILURE, RETRY, SUCCESS, REJECTED
 from celery.worker.request import Request
 from celery_once import QueueOnce, AlreadyQueued
 from django.contrib.postgres.fields import ArrayField
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 from pydash import get
 
@@ -43,6 +43,9 @@ class Task(models.Model):
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     children = ArrayField(models.TextField(), null=True, blank=True, default=list)
+    READD_REFERENCES_TASK_NAME = 'core.common.tasks.readd_references_to_expansion_on_references_removal'
+    RERUN_RESTORED_FIELDS = (
+        'state', 'result', 'summary', 'error_message', 'traceback', 'retry', 'started_at', 'finished_at', 'children')
 
     @property
     def result_all(self):
@@ -69,6 +72,10 @@ class Task(models.Model):
     @property
     def is_finished(self):
         return self.state in (SUCCESS, FAILURE)
+
+    @property
+    def is_readd_references_task(self):
+        return (self.name or '').endswith(self.READD_REFERENCES_TASK_NAME.rsplit('.', 1)[-1])
 
     @property
     def is_success(self):
@@ -281,6 +288,50 @@ class Task(models.Model):
     @staticmethod
     def queue_criteria(queue):
         return models.Q(queue=queue) | models.Q(id__endswith=f'~{queue}')
+
+    @classmethod
+    def unfinished_readd_references_tasks(cls):
+        return cls.objects.filter(
+            name__iendswith=cls.READD_REFERENCES_TASK_NAME.rsplit('.', 1)[-1]).exclude(state=SUCCESS)
+
+    def clear_superseded_readd_references_tasks(self):
+        """A successful re-add rebuilds the whole expansion, so earlier unfinished re-adds no longer matter"""
+        self.unfinished_readd_references_tasks().filter(
+            args__0=get(self.args, '0'), created_at__lt=self.created_at, state__in=(FAILURE, REVOKED)).delete()
+
+    def claim_readd_references_for_rerun(self):
+        """Marks a failed or revoked re-add as PENDING for one caller; returns its previous fields, else None"""
+        with transaction.atomic():
+            locked = self.unfinished_readd_references_tasks().select_for_update().filter(
+                id=self.id, state__in=(FAILURE, REVOKED)).first()
+            if not locked:
+                return None
+            snapshot = {field: getattr(locked, field) for field in self.RERUN_RESTORED_FIELDS}
+            Task.objects.filter(id=self.id).update(state=PENDING)
+        self.refresh_from_db()
+        return snapshot
+
+    def rerun_readd_references(self):
+        """Reruns a failed or revoked re-add and returns the record that now holds it; ValueError if not eligible"""
+        snapshot = self.claim_readd_references_for_rerun()
+        if snapshot is None:
+            raise ValueError('Only a failed or revoked re-add can be rerun.')
+        rerun = self
+        try:
+            if snapshot['state'] == REVOKED:
+                # a revoked id stays revoked on the workers, so it reruns as a new record
+                rerun = Task.new(
+                    queue=self.queue, user=self.created_by, name=self.READD_REFERENCES_TASK_NAME, args=self.args)
+            rerun.rerun(force=True)
+        except Exception:
+            if rerun is not self:
+                rerun.delete()
+            Task.objects.filter(id=self.id, state=PENDING).update(**snapshot)
+            raise
+        if rerun is not self:
+            self.delete()
+        rerun.refresh_from_db()
+        return rerun
 
     @classmethod
     def find(cls, **kwargs):

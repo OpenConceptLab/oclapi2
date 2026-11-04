@@ -32,7 +32,7 @@ from core.common.utils import reverse_resource, reverse_resource_version, parse_
     canonical_url_to_url_and_version, get_current_authorized_user, encode_string, decode_string, \
     normalize_public_access, get_export_key_pattern, EXPORT_KEY_TIMESTAMP_PATTERN
 from core.common.utils import to_owner_uri
-from core.common.constants import VERSION_UNCOPYABLE_EXTRAS
+from core.common.constants import VERSION_UNCOPYABLE_EXTRAS, SERIALIZATION_RETRY_ATTEMPTS
 from core.settings import DEFAULT_LOCALE
 from . import ERRBIT_LOGGER
 from .checksums import ChecksumModel
@@ -1263,7 +1263,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         # a synchronous seed from HEAD runs in this transaction, so it needs this transaction's snapshot
         is_repeatable_read = sync and not is_test_mode and not transaction.get_connection().in_atomic_block and \
             obj.can_seed_from_head_expansion()
-        attempts = 3 if is_repeatable_read else 1
+        attempts = SERIALIZATION_RETRY_ATTEMPTS if is_repeatable_read else 1
         for attempt in range(1, attempts + 1):
             try:
                 cls.persist_new_version_in_transaction(obj, head, user, sync, is_repeatable_read, **kwargs)
