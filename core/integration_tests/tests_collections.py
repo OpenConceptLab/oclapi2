@@ -2066,6 +2066,10 @@ class CollectionReferencesPreviewTest(OCLAPITestCase):
         )
 
     def test_post_expression_with_cascade_to_concepts(self):
+        def normalized(refs):  # concept order within a reference is not guaranteed
+            return [{**ref, 'concepts': sorted(ref['concepts'], key=lambda c: c['uuid'])}
+                    for ref in sorted(refs, key=lambda ref: ref['reference'])]
+
         source1 = OrganizationSourceFactory()
         source2 = OrganizationSourceFactory()
         concept1 = ConceptFactory(parent=source1, mnemonic='concept1')
@@ -2108,8 +2112,8 @@ class CollectionReferencesPreviewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(
-            sorted(response.data, key=lambda ref: ref['reference']),
-            [
+            normalized(response.data),
+            normalized([
                 {
                     'reference': concept1.get_latest_version().uri,
                     'concepts': ConceptListSerializer([concept1.get_latest_version(), concept2], many=True).data,
@@ -2118,7 +2122,7 @@ class CollectionReferencesPreviewTest(OCLAPITestCase):
                     'mappings_count': 1,
                     'exclude': False
                 }
-            ]
+            ])
         )
 
         response = self.client.post(
@@ -2134,8 +2138,8 @@ class CollectionReferencesPreviewTest(OCLAPITestCase):
 
         self.assertEqual(len(response.data), 1)
         self.assertEqual(
-            sorted(response.data, key=lambda ref: ref['reference']),
-            [
+            normalized(response.data),
+            normalized([
                 {
                     'reference': concept4.get_latest_version().uri,
                     'concepts': ConceptListSerializer([concept3, concept4.get_latest_version()], many=True).data,
@@ -2144,7 +2148,7 @@ class CollectionReferencesPreviewTest(OCLAPITestCase):
                     'mappings_count': 1,
                     'exclude': False
                 }
-            ]
+            ])
         )
 
         random_concept = ConceptFactory()
