@@ -4023,6 +4023,18 @@ class BulkImportViewTest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 403)
 
+    def test_delete_finished_task_rejected(self):
+        task = Task.objects.create(
+            id='finished-import-task', name='bulk_import_test', state='SUCCESS', created_by=self.superuser)
+
+        with patch.object(Task, 'revoke') as revoke_mock:
+            response = self.client.delete(
+                '/importers/bulk-import/', {'task_id': task.id}, HTTP_AUTHORIZATION='Token ' + self.token,
+                format='json')
+
+        self.assertEqual(response.status_code, 400)
+        revoke_mock.assert_not_called()
+
     @patch.object(ImportContentParser, 'parse', side_effect=Exception('parse boom'))
     def test_post_parallel_inline_parse_exception(self, _parse_mock):
         response = self.client.post(

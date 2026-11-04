@@ -1181,6 +1181,14 @@ def readd_references_to_expansion_on_references_removal(expansion_id, removed_re
     if expansion and removed_reference_ids:
         reference_to_readd = expansion.collection_version.references.exclude(id__in=removed_reference_ids)
         expansion.add_references(reference_to_readd, True, True, False)
+        clear_superseded_readd_tasks(expansion_id)
+
+
+def clear_superseded_readd_tasks(expansion_id):
+    """A successful re-add rebuilds the whole expansion, so earlier unfinished re-adds no longer matter"""
+    current = Task.objects.filter(id=get(current_task, 'request.id')).first()
+    if current:
+        unfinished_readd_tasks().filter(args__0=expansion_id, created_at__lt=current.created_at).delete()
 
 
 @app.task(ignore_result=True)

@@ -1725,7 +1725,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 CollectionReference.is_expansion_locked_repo_version_on():
             # recorded before members go, so new versions don't copy this expansion until the re-add succeeds
             readd_record = Task.new(
-                queue='default', user=self.collection_version.updated_by, name=readd_task.__name__,
+                queue='default', user=self.collection_version.updated_by, name=readd_task.name,
                 args=[self.id, removed_reference_ids])
 
         process(self.concepts, 'concept', concept_ids)

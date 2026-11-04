@@ -15,6 +15,7 @@ from rest_framework.response import Response
 
 from core.collections.constants import SOURCE_TO_CONCEPTS, TRANSFORM_TO_RESOURCE_VERSIONS
 from core.collections.documents import CollectionDocument
+from core.common.constants import SERIALIZATION_RETRY_ATTEMPTS
 from core.collections.models import CollectionReference, Collection, Expansion
 from core.collections.models import ExpansionParameters, ExpansionSystemParameter
 from core.collections.parsers import CollectionReferenceExpressionStringParser, \
@@ -28,7 +29,7 @@ from core.collections.utils import is_mapping, is_concept, is_version_specified,
     get_concept_by_expression
 from core.common.constants import OPENMRS_VALIDATION_SCHEMA, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, \
     RETIRED_ACCESS_TYPE_EDIT
-from core.common.tasks import add_references, seed_children_to_new_version
+from core.common.tasks import add_references, seed_children_to_new_version, clear_superseded_readd_tasks
 from core.common.tasks import update_collection_active_concepts_count
 from core.common.tasks import update_collection_active_mappings_count
 from core.common.tests import OCLTestCase, OCLAPITestCase
@@ -2255,7 +2256,7 @@ class TasksTest(OCLTestCase):
     @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
     @patch('core.common.tasks.export_collection')
     def test_seed_children_task_evaluates_references_while_a_removal_awaits_its_readd(self, _, readd_mock, __):
-        readd_mock.__name__ = 'readd_references_to_expansion_on_references_removal'
+        readd_mock.name = 'core.common.tasks.readd_references_to_expansion_on_references_removal'
         source = OrganizationSourceFactory()
         shared = ConceptFactory(parent=source, mnemonic='shared')
         other = ConceptFactory(parent=source, mnemonic='other')
@@ -2293,6 +2294,23 @@ class TasksTest(OCLTestCase):
 
         Task.objects.filter(id=task.id).update(state='SUCCESS')
         self.assertFalse(expansion.has_pending_readd)
+
+    def test_successful_readd_clears_only_older_unfinished_readds_of_that_expansion(self):
+        expansion = ExpansionFactory(collection_version=OrganizationCollectionFactory())
+        other = ExpansionFactory(collection_version=OrganizationCollectionFactory())
+        name = 'core.common.tasks.readd_references_to_expansion_on_references_removal'
+        user = expansion.collection_version.created_by
+        older = Task.new(user=user, name=name, args=[expansion.id, [1]], state='FAILURE')
+        older_other = Task.new(user=user, name=name, args=[other.id, [1]], state='FAILURE')
+        current = Task.new(user=user, name=name, args=[expansion.id, [2]], state='STARTED')
+        newer = Task.new(user=user, name=name, args=[expansion.id, [3]], state='PENDING')
+
+        with patch('core.common.tasks.current_task', Mock(request=Mock(id=current.id))):
+            clear_superseded_readd_tasks(expansion.id)
+
+        remaining = set(Task.objects.filter(id__in=[older.id, older_other.id, current.id, newer.id]).values_list(
+            'id', flat=True))
+        self.assertEqual(remaining, {older_other.id, current.id, newer.id})
 
     @patch('core.common.tasks.export_collection')
     def test_seed_children_task_evaluates_valueset_references_while_head_expansion_is_processing(self, _):
@@ -2360,7 +2378,7 @@ class TasksTest(OCLTestCase):
     @patch('core.collections.models.batch_index_resources')
     @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
     def test_remove_references_queues_readd_after_the_references_are_gone(self, readd_mock, _):
-        readd_mock.__name__ = 'readd_references_to_expansion_on_references_removal'
+        readd_mock.name = 'core.common.tasks.readd_references_to_expansion_on_references_removal'
         concept = ConceptFactory()
         collection = OrganizationCollectionFactory()
         expansion = ExpansionFactory(collection_version=collection)
@@ -2419,7 +2437,7 @@ class TasksTest(OCLTestCase):
     @patch('core.collections.models.batch_index_resources')
     @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
     def test_remove_references_queues_readd_when_indexing_fails(self, readd_mock, batch_index_mock):
-        readd_mock.__name__ = 'readd_references_to_expansion_on_references_removal'
+        readd_mock.name = 'core.common.tasks.readd_references_to_expansion_on_references_removal'
         batch_index_mock.apply_async.side_effect = Exception('broker down')
         collection, _, _ = self.collection_with_referenced_member()
 
@@ -2532,7 +2550,7 @@ class TasksTest(OCLTestCase):
         self.assertEqual(callbacks, [])
 
     @override_settings(TEST_MODE=False)
-    def test_persist_new_version_retries_serialization_failures_for_five_overlapping_versions(self):
+    def test_persist_new_version_retries_serialization_failures_for_overlapping_versions(self):
         collection = OrganizationCollectionFactory()
         collection_v1 = Collection(
             version='v1', mnemonic=collection.mnemonic, organization=collection.organization)
@@ -2540,21 +2558,21 @@ class TasksTest(OCLTestCase):
         failure.__cause__ = serialization_cause()
         calls = []
 
-        def conflict_four_times(*_, **__):
+        def conflict_until_last_attempt(*_, **__):
             calls.append(1)
-            if len(calls) < 5:
+            if len(calls) < SERIALIZATION_RETRY_ATTEMPTS:
                 raise failure
 
         with patch.object(Collection, 'can_seed_from_head_expansion', return_value=True), \
                 patch('core.common.models.transaction.get_connection', return_value=Mock(in_atomic_block=False)), \
-                patch.object(Collection, 'persist_new_version_in_transaction', side_effect=conflict_four_times):
+                patch.object(Collection, 'persist_new_version_in_transaction', side_effect=conflict_until_last_attempt):
             errors = Collection.persist_new_version(collection_v1, collection.created_by, sync=True)
 
         self.assertEqual(errors, {})
-        self.assertEqual(len(calls), 5)
+        self.assertEqual(len(calls), SERIALIZATION_RETRY_ATTEMPTS)
 
     @override_settings(TEST_MODE=False)
-    def test_persist_new_version_gives_up_after_five_serialization_failures(self):
+    def test_persist_new_version_gives_up_after_the_serialization_retry_attempts(self):
         collection = OrganizationCollectionFactory()
         collection_v1 = Collection(
             version='v1', mnemonic=collection.mnemonic, organization=collection.organization)
@@ -2568,26 +2586,27 @@ class TasksTest(OCLTestCase):
             with self.assertRaises(OperationalError):
                 Collection.persist_new_version(collection_v1, collection.created_by, sync=True)
 
-        self.assertEqual(in_transaction.call_count, 5)
+        self.assertEqual(in_transaction.call_count, SERIALIZATION_RETRY_ATTEMPTS)
 
-    def test_seed_from_head_expansion_retries_serialization_failures_five_times(self):
+    def test_seed_from_head_expansion_retries_serialization_failures(self):
         collection_v1 = OrganizationCollectionFactory(version='v1')
         failure = OperationalError('could not serialize access')
         failure.__cause__ = serialization_cause()
         expansion = ExpansionFactory(collection_version=collection_v1)
         calls = []
 
-        def conflict_four_times(*_, **__):
+        def conflict_until_last_attempt(*_, **__):
             calls.append(1)
-            if len(calls) < 5:
+            if len(calls) < SERIALIZATION_RETRY_ATTEMPTS:
                 raise failure
             return expansion
 
         with patch('core.collections.models.transaction.get_connection', return_value=Mock(in_atomic_block=False)), \
-                patch.object(Collection, 'seed_from_head_expansion_in_snapshot', side_effect=conflict_four_times):
+                patch.object(
+                    Collection, 'seed_from_head_expansion_in_snapshot', side_effect=conflict_until_last_attempt):
             self.assertTrue(collection_v1.seed_from_head_expansion(index=False))
 
-        self.assertEqual(len(calls), 5)
+        self.assertEqual(len(calls), SERIALIZATION_RETRY_ATTEMPTS)
 
     def test_expansion_created_later_does_not_copy_head_expansion(self):
         collection = OrganizationCollectionFactory()
@@ -3193,7 +3212,7 @@ class ExpansionTest(OCLTestCase):
     @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
     @patch('core.collections.models.batch_index_resources')
     def test_delete_references_not_test_mode_queues_readd_task(self, batch_index_mock, readd_task_mock):
-        readd_task_mock.__name__ = 'readd_references_to_expansion_on_references_removal'
+        readd_task_mock.name = 'core.common.tasks.readd_references_to_expansion_on_references_removal'
         batch_index_mock.apply_async = Mock()
         collection = OrganizationCollectionFactory()
         concept1 = ConceptFactory()
@@ -3206,7 +3225,8 @@ class ExpansionTest(OCLTestCase):
         with self.captureOnCommitCallbacks(execute=True):
             expansion.delete_references(reference)
 
-        task = Task.objects.get(name='readd_references_to_expansion_on_references_removal', args__0=expansion.id)
+        task = Task.objects.get(
+            name='core.common.tasks.readd_references_to_expansion_on_references_removal', args__0=expansion.id)
         readd_task_mock.apply_async.assert_called_once_with(
             (expansion.id, [reference.id]), queue='default', task_id=task.id, persist_args=True)
         self.assertTrue(expansion.has_pending_readd)
