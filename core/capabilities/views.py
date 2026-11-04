@@ -92,11 +92,13 @@ class CapabilityConsumeView(CapabilityBaseView):
             return error_response
         map_project, run = self.get_owned_map_project_and_run()
 
+        # one policy for the whole response, so what it reports is what it counted
+        policy = get_capability_policy()
         try:
-            event, already_consumed = request.user.check_and_consume_capability(
-                capability_id, units=units,
+            event, already_consumed = policy.consume(
+                request.user, capability_id, units=units, idempotency_key=idempotency_key,
                 action=request.data.get('action', ''), algorithm=request.data.get('algorithm'),
-                map_project=map_project, run=run, idempotency_key=idempotency_key,
+                map_project=map_project, run=run,
             )
         except UsageRefused as ex:
             return Response(
@@ -111,7 +113,7 @@ class CapabilityConsumeView(CapabilityBaseView):
         return Response(
             {
                 'capability': capability_name,
-                **get_capability_policy().describe(request.user, capability_id),
+                **policy.describe(request.user, capability_id),
                 'usage_event_id': event.id,
                 'units': event.units,
                 'already_consumed': already_consumed,

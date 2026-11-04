@@ -548,6 +548,10 @@ class FakePolicy(CapabilityPolicy):
     """Records every call, and answers with values GroupLimitPolicy never gives."""
     calls = []
     refusal = None
+    made = 0
+
+    def __init__(self):
+        type(self).made += 1
 
     def get_limit(self, user, capability_id, owner=None):
         self.calls.append(('get_limit', user, capability_id, owner))
@@ -581,6 +585,7 @@ class CapabilityPolicyContractTest(OCLAPITestCase):
         super().setUp()
         FakePolicy.calls = []
         FakePolicy.refusal = None
+        FakePolicy.made = 0
         self.user = UserProfileFactory()
         self.user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))  # mapper.use, for $match
 
@@ -719,6 +724,53 @@ class CapabilityPolicyContractTest(OCLAPITestCase):
         self.assertEqual(self.calls('refund'), [('refund', self.user, AI_ASSISTANT_CALLS_CAPABILITY_ID, 2)])
         # the correction is the policy's to make
         self.assertEqual(UsageCounter.objects.get(user=self.user).used, 5)
+
+    def test_a_consume_response_comes_from_the_policy_that_consumed(self):
+        response = self.consume()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(self.calls('consume')), 1)
+        self.assertEqual(len(self.calls('get_usage')), 1)
+        self.assertEqual(FakePolicy.made, 1)
+
+    def test_a_match_that_fails_is_reversed_by_the_policy_that_consumed(self):
+        from core.concepts.views import MetadataToConceptsListView
+        with patch.object(MetadataToConceptsListView, 'filter_queryset', side_effect=ValueError('es down')):
+            with self.assertRaises(ValueError):
+                self.match()
+
+        self.assertEqual(len(self.calls('reverse')), 1)
+        self.assertEqual(FakePolicy.made, 1)
+
+    def test_a_staff_refund_response_comes_from_the_policy_that_refunded(self):
+        response = self.client.post(
+            '/capabilities/refund/', data={'user': self.user.username, 'capability': 'ai_assistant.calls'},
+            format='json', HTTP_AUTHORIZATION='Token ' + UserProfileFactory(is_staff=True).get_token())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(FakePolicy.made, 1)
+
+    def test_a_list_of_capabilities_comes_from_one_policy(self):
+        response = self.client.get(
+            '/user/?includeCapabilities=true', HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertGreater(len(response.json()['capabilities']), 1)
+        self.assertEqual(len(self.calls('get_usage')), len(response.json()['capabilities']))
+        self.assertEqual(FakePolicy.made, 1)
+
+    def test_a_list_of_overrides_comes_from_one_policy(self):
+        for capability_id in (AI_ASSISTANT_CALLS_CAPABILITY_ID, MAPPER_MATCH_OPERATIONS_CAPABILITY_ID):
+            UserCapabilityOverride.objects.create(user=self.user, capability_id=capability_id, limit=5)
+        FakePolicy.made = 0
+
+        response = self.client.get(
+            f'/users/{self.user.username}/capabilities/overrides/',
+            HTTP_AUTHORIZATION='Token ' + UserProfileFactory(is_staff=True).get_token())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 2)
+        self.assertEqual(FakePolicy.made, 1)
 
     def test_refund_is_for_staff(self):
         response = self.client.post(

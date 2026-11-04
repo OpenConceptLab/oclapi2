@@ -1266,11 +1266,13 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
     def match(self, request):
         rows = request.data.get('rows')
         usage_event, already_consumed = None, False
+        # one policy for the whole operation, so a failed search is reversed by the policy that consumed
+        policy = get_capability_policy()
         if isinstance(rows, list) and rows:
             algorithm_id, map_project = get_match_operations_attribution(request)
             try:
-                usage_event, already_consumed = request.user.check_and_consume_capability(
-                    MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, units=len(rows), action='match_concepts',
+                usage_event, already_consumed = policy.consume(
+                    request.user, MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, units=len(rows), action='match_concepts',
                     algorithm=algorithm_id, map_project=map_project
                 )
             except UsageRefused as ex:
@@ -1290,7 +1292,7 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
             results = self.filter_queryset()
         except Exception:
             if usage_event and not already_consumed:  # a replay consumed nothing
-                get_capability_policy().reverse(usage_event, usage_event.units)
+                policy.reverse(usage_event, usage_event.units)
             raise
         response = Response(results)
         # num_returned is picked up by the analytics middleware as
