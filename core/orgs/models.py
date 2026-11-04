@@ -27,12 +27,11 @@ class OrganizationMember(models.Model):
         db_table = 'user_profiles_organizations'
         unique_together = ('userprofile', 'organization')
 
-    userprofile = models.ForeignKey('users.UserProfile', on_delete=models.CASCADE, related_name='org_memberships')
+    userprofile = models.ForeignKey('users.UserProfile', on_delete=models.CASCADE)
     organization = models.ForeignKey('orgs.Organization', on_delete=models.CASCADE, related_name='memberships')
     # A new member is a plain member. Only a row inserted without a role gets the column's default: code older than
     # this column, as during a rollout or after a rollback, where any member could do everything an admin can.
-    role = models.ForeignKey(
-        Role, on_delete=models.PROTECT, related_name='memberships', default=ROLE_MEMBER_ID, db_default=ROLE_ADMIN_ID)
+    role = models.ForeignKey(Role, on_delete=models.PROTECT, default=ROLE_MEMBER_ID, db_default=ROLE_ADMIN_ID)
 
 
 class Organization(BaseResourceModel, SourceContainerMixin, ChecksumModel):
@@ -94,8 +93,7 @@ class Organization(BaseResourceModel, SourceContainerMixin, ChecksumModel):
         return user.is_staff or self.is_member(user)
 
     def is_admin(self, user_profile):
-        return bool(user_profile) and self.memberships.filter(
-            userprofile_id=user_profile.id, role_id=ROLE_ADMIN_ID).exists()
+        return self.memberships.filter(userprofile_id=user_profile.id, role_id=ROLE_ADMIN_ID).exists()
 
     def has_admin_access(self, user):
         """Whether `user` may edit or delete the org and manage its members: staff and its admins."""

@@ -73,6 +73,11 @@ class OrganizationDetailAccessTest(AccessTestMixin, OCLAPITestCase):
 
     def test_member_cannot_edit(self):
         self.assert_not_renamed(self.rename(self.member), 403)
+        self.assert_not_renamed(self.request('patch', self.org.uri, self.member, {'name': 'Renamed'}), 403)
+
+    def test_member_cannot_delete(self):
+        self.assertEqual(self.request('delete', self.org.uri + '?inline=true', self.member).status_code, 403)
+        self.assertTrue(Organization.objects.filter(id=self.org.id).exists())
 
     def test_admin_can_edit(self):
         self.assert_renamed(self.rename(self.admin))

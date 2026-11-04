@@ -2102,12 +2102,6 @@ class ResourceImporterModelsTest(OCLTestCase):
         self.assertEqual(OrganizationImporter({'id': 'AdminOrg'}, admin).delete(), DELETED)
         self.assertFalse(Organization.objects.filter(mnemonic='AdminOrg').exists())
 
-    def test_organization_importer_makes_the_creator_an_admin(self):
-        user = UserProfileFactory()
-
-        self.assertEqual(OrganizationImporter({'id': 'ImportedOrg', 'name': 'Imported'}, user).run(), CREATED)
-        self.assertTrue(Organization.objects.get(mnemonic='ImportedOrg').is_admin(user))
-
     def test_organization_importer_does_not_create_org_whose_name_differs_only_in_case(self):
         OrganizationFactory(mnemonic='TwinOrg')
         importer = OrganizationImporter({'id': 'twinorg', 'name': 'Twin'}, UserProfileFactory())

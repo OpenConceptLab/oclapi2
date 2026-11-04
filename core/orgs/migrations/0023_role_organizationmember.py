@@ -41,8 +41,7 @@ class Migration(migrations.Migration):
                             on_delete=django.db.models.deletion.CASCADE, related_name='memberships',
                             to='orgs.organization')),
                         ('userprofile', models.ForeignKey(
-                            on_delete=django.db.models.deletion.CASCADE, related_name='org_memberships',
-                            to=settings.AUTH_USER_MODEL)),
+                            on_delete=django.db.models.deletion.CASCADE, to=settings.AUTH_USER_MODEL)),
                     ],
                     options={
                         'db_table': 'user_profiles_organizations',
@@ -56,7 +55,6 @@ class Migration(migrations.Migration):
             model_name='organizationmember',
             name='role',
             field=models.ForeignKey(
-                db_default=1, default=2, on_delete=django.db.models.deletion.PROTECT, related_name='memberships',
-                to='orgs.role'),
+                db_default=1, default=2, on_delete=django.db.models.deletion.PROTECT, to='orgs.role'),
         ),
     ]
