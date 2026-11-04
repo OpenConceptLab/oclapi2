@@ -15,6 +15,7 @@ from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage
 from django.core.management import call_command
 from django.core.paginator import Paginator
+from django.db import DatabaseError
 from django.db.models import Exists, OuterRef, F
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -1100,22 +1101,22 @@ def post_import_update_resource_counts():
     uncounted_concepts = Concept.objects.filter(_counted__isnull=True)
     sources = Source.objects.filter(id__in=uncounted_concepts.values_list('parent_id', flat=True))
     for source in sources:
-        source.update_concepts_count(sync=True)
         try:
+            source.update_concepts_count(sync=True)
             uncounted_concepts.filter(parent_id=source.id).update(_counted=True)
-        except:  # pylint: disable=bare-except
-            pass
+        except DatabaseError as ex:  # source may have been deleted since the query
+            logger.warning('Skipping concepts count for source %s: %s', source.id, ex)
 
     uncounted_mappings = Mapping.objects.filter(_counted__isnull=True)
     sources = Source.objects.filter(
         id__in=uncounted_mappings.values_list('parent_id', flat=True))
 
     for source in sources:
-        source.update_mappings_count(sync=True)
         try:
+            source.update_mappings_count(sync=True)
             uncounted_mappings.filter(parent_id=source.id).update(_counted=True)
-        except:  # pylint: disable=bare-except
-            pass
+        except DatabaseError as ex:  # source may have been deleted since the query
+            logger.warning('Skipping mappings count for source %s: %s', source.id, ex)
 
 
 @app.task(ignore_result=True)
