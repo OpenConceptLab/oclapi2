@@ -681,7 +681,7 @@ class TaskAPITest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.data['id'], task.id)
-        rerun_mock.assert_called_once_with()
+        rerun_mock.assert_called_once_with(force=True)
 
     def test_rerun_succeeded_task_rejected(self):
         task = Task(id='rerun-success-task-id', name='x', state=SUCCESS, created_by=self.user)
@@ -705,6 +705,29 @@ class TaskAPITest(OCLAPITestCase):
         response = self.client.post('/tasks/missing-task-id/rerun/', HTTP_AUTHORIZATION='Token ' + self.token)
 
         self.assertEqual(response.status_code, 404)
+
+    def test_rerun_claims_the_task_so_a_second_request_is_rejected(self):
+        task = Task(id='rerun-claim-task-id', name='x', state=FAILURE, created_by=self.user)
+        task.save()
+
+        with patch.object(Task, 'rerun') as rerun_mock:
+            first = self.client.post(f'/tasks/{task.id}/rerun/', HTTP_AUTHORIZATION='Token ' + self.token)
+            second = self.client.post(f'/tasks/{task.id}/rerun/', HTTP_AUTHORIZATION='Token ' + self.token)
+
+        self.assertEqual(first.status_code, 202)
+        self.assertEqual(second.status_code, 400)
+        rerun_mock.assert_called_once_with(force=True)
+
+    def test_rerun_restores_state_when_requeue_fails(self):
+        task = Task(id='rerun-restore-task-id', name='x', state=FAILURE, created_by=self.user)
+        task.save()
+
+        with patch.object(Task, 'rerun', side_effect=ValueError('Task x is not registered.')):
+            response = self.client.post(f'/tasks/{task.id}/rerun/', HTTP_AUTHORIZATION='Token ' + self.token)
+
+        self.assertEqual(response.status_code, 400)
+        task.refresh_from_db()
+        self.assertEqual(task.state, FAILURE)
 
     def test_rerun_requires_staff(self):
         owner = UserProfileFactory()

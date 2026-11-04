@@ -1,4 +1,4 @@
-from celery.states import SUCCESS
+from celery.states import FAILURE, PENDING, REVOKED
 from django.http import Http404
 from drf_yasg.utils import swagger_auto_schema, no_body
 from pydash import compact
@@ -87,11 +87,14 @@ class TaskRerunView(BaseAPIView):
     @swagger_auto_schema(request_body=no_body, responses={202: TaskListSerializer})
     def post(self, request, task_id):  # pylint: disable=unused-argument
         task = get_object_or_404(Task.objects.all(), id=task_id)
-        if task.state == SUCCESS:
-            raise Http400('Task already succeeded.')
+        previous_state = task.state
+        claimed = Task.objects.filter(id=task.id, state__in=(FAILURE, REVOKED)).update(state=PENDING)
+        if not claimed:
+            raise Http400('Only a failed or revoked task can be rerun.')
         try:
-            task.rerun()
+            task.rerun(force=True)
         except ValueError as ex:
+            Task.objects.filter(id=task.id).update(state=previous_state)
             raise Http400(str(ex)) from ex
         task.refresh_from_db()
         return Response(TaskListSerializer(task).data, status=status.HTTP_202_ACCEPTED)
