@@ -29,7 +29,7 @@ from core.collections.utils import is_mapping, is_concept, is_version_specified,
     get_concept_by_expression
 from core.common.constants import OPENMRS_VALIDATION_SCHEMA, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, \
     RETIRED_ACCESS_TYPE_EDIT
-from core.common.tasks import add_references, seed_children_to_new_version, clear_superseded_readd_tasks
+from core.common.tasks import add_references, seed_children_to_new_version
 from core.common.tasks import update_collection_active_concepts_count
 from core.common.tasks import update_collection_active_mappings_count
 from core.common.tests import OCLTestCase, OCLAPITestCase
@@ -2305,8 +2305,7 @@ class TasksTest(OCLTestCase):
         current = Task.new(user=user, name=name, args=[expansion.id, [2]], state='STARTED')
         newer = Task.new(user=user, name=name, args=[expansion.id, [3]], state='PENDING')
 
-        with patch('core.common.tasks.current_task', Mock(request=Mock(id=current.id))):
-            clear_superseded_readd_tasks(expansion.id)
+        current.clear_superseded_readd_references_tasks()
 
         remaining = set(Task.objects.filter(id__in=[older.id, older_other.id, current.id, newer.id]).values_list(
             'id', flat=True))

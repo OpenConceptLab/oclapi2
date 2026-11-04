@@ -1,5 +1,4 @@
-from celery.states import FAILURE, PENDING, REVOKED
-from django.db import transaction
+from celery.states import PENDING, REVOKED
 from django.http import Http404
 from drf_yasg.utils import swagger_auto_schema, no_body
 from pydash import compact
@@ -10,7 +9,7 @@ from rest_framework.response import Response
 
 from core.common.exceptions import Http400
 from core.common.mixins import ListWithHeadersMixin
-from core.common.tasks import unfinished_readd_tasks, readd_references_to_expansion_on_references_removal
+from core.common.tasks import readd_references_to_expansion_on_references_removal
 from core.common.swagger_parameters import page_param, verbose_param, task_state_param, limit_param, \
     task_start_date_param, q_param
 from core.common.utils import from_string_to_date, get_truthy_values
@@ -85,14 +84,12 @@ class TaskView(AbstractTaskView, DestroyAPIView):
 
 class TaskRerunView(BaseAPIView):
     permission_classes = (IsAdminUser,)
-    restored_fields = (
-        'state', 'result', 'summary', 'error_message', 'traceback', 'retry', 'started_at', 'finished_at', 'children')
 
     @swagger_auto_schema(request_body=no_body, responses={202: TaskListSerializer})
     def post(self, request, task_id):  # pylint: disable=unused-argument
-        get_object_or_404(Task.objects.all(), id=task_id)
-        task, snapshot = self.claim(task_id)
-        if not task:
+        task = get_object_or_404(Task.objects.all(), id=task_id)
+        snapshot = task.claim_readd_references_for_rerun()
+        if snapshot is None:
             raise Http400('Only a failed or revoked re-add can be rerun.')
         # a revoked id stays revoked on the workers, so it reruns as a new record
         rerun = Task.new(
@@ -112,17 +109,6 @@ class TaskRerunView(BaseAPIView):
             task.delete()
         rerun.refresh_from_db()
         return Response(TaskListSerializer(rerun).data, status=status.HTTP_202_ACCEPTED)
-
-    @classmethod
-    def claim(cls, task_id):
-        with transaction.atomic():
-            task = unfinished_readd_tasks().select_for_update().filter(
-                id=task_id, state__in=(FAILURE, REVOKED)).first()
-            if not task:
-                return None, None
-            snapshot = {field: getattr(task, field) for field in cls.restored_fields}
-            Task.objects.filter(id=task.id).update(state=PENDING)
-        return task, snapshot
 
 
 class UserTaskListView(AbstractTaskListView):
