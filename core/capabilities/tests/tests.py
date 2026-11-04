@@ -941,7 +941,53 @@ class PartialPolicy(CapabilityPolicy):
         return None, False
 
 
+class NarrowRefundPolicy(GroupLimitPolicy):
+    """refund() can't take `units`."""
+
+    def refund(self, user, capability_id):  # pylint: disable=arguments-differ
+        return None
+
+
+class NoOwnerPolicy(GroupLimitPolicy):
+    """get_limit() can't take `owner`, as a policy written before it couldn't."""
+
+    def get_limit(self, user, capability_id):  # pylint: disable=arguments-differ
+        return 0
+
+
+class RequiredInitPolicy(GroupLimitPolicy):
+    def __init__(self, setting):
+        self.setting = setting
+
+
+class OptionalInitPolicy(GroupLimitPolicy):
+    def __init__(self, setting=None, **options):
+        self.setting = setting
+        self.options = options
+
+
+class AnyArgumentsPolicy(GroupLimitPolicy):
+    """Every call fits, and `owner` is taken only by name, as call sites pass it."""
+
+    def get_limit(self, user, capability_id, *, owner=None):  # pylint: disable=arguments-differ
+        return 0
+
+    def get_usage(self, *args, **kwargs):  # pylint: disable=arguments-differ
+        return {'used': None}
+
+
 class CapabilityPolicyInterfaceTest(SimpleTestCase):
+    def test_a_method_left_to_the_interface_says_so(self):
+        for call in (
+                lambda: CapabilityPolicy.get_limit(None, None, None),
+                lambda: CapabilityPolicy.get_usage(None, None, None),
+                lambda: CapabilityPolicy.consume(None, None, None),
+                lambda: CapabilityPolicy.reverse(None, None, None),
+                lambda: CapabilityPolicy.refund(None, None, None),
+        ):
+            with self.assertRaises(NotImplementedError):
+                call()
+
     def test_a_policy_missing_a_method_cannot_be_made(self):
         for policy in (CapabilityPolicy, PartialPolicy):
             with self.subTest(policy=policy), self.assertRaises(TypeError):
@@ -986,3 +1032,25 @@ class CapabilityPolicyCheckTest(SimpleTestCase):
 
         error, = self.errors('core.capabilities.policy.CapabilityPolicy')
         self.assertEqual(error.id, 'capabilities.E003')
+
+    def test_a_method_that_cannot_take_the_interface_s_arguments_fails_and_is_named(self):
+        for path, misfits in (
+                ('core.capabilities.tests.tests.NarrowRefundPolicy', 'refund'),
+                ('core.capabilities.tests.tests.NoOwnerPolicy', 'get_limit'),
+                ('core.capabilities.tests.tests.RequiredInitPolicy', '__init__'),
+        ):
+            with self.subTest(path):
+                error, = self.errors(path)
+                self.assertEqual(error.id, 'capabilities.E004')
+                self.assertIn(misfits, error.msg)
+
+    def test_a_policy_is_not_made_by_the_check(self):
+        with patch.object(GroupLimitPolicy, '__init__', side_effect=RuntimeError('read at start-up')) as init:
+            self.assertEqual(check_capability_policy(), [])
+        init.assert_not_called()
+
+    def test_a_policy_that_takes_the_arguments_another_way_passes(self):
+        for path in ('core.capabilities.tests.tests.AnyArgumentsPolicy',
+                     'core.capabilities.tests.tests.OptionalInitPolicy'):
+            with self.subTest(path):
+                self.assertEqual(self.errors(path), [])

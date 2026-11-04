@@ -35,10 +35,12 @@ class CapabilityPolicy(ABC):
     @abstractmethod
     def get_limit(self, user, capability_id, owner=None):
         """None = no access, -1 = blocked, 0 = unlimited, N > 0 = the limit."""
+        raise NotImplementedError
 
     @abstractmethod
     def get_usage(self, user, capability_id, owner=None):
         """`used` (None where nothing accumulates), plus any other fields the policy reports."""
+        raise NotImplementedError
 
     @abstractmethod
     def consume(  # pylint: disable=too-many-arguments
@@ -48,14 +50,17 @@ class CapabilityPolicy(ABC):
         Checks and records `units` in one transaction. Returns (usage_event, already_consumed). Raises UsageRefused,
         whose `detail` is the refusal body.
         """
+        raise NotImplementedError
 
     @abstractmethod
     def reverse(self, usage_event, units):
         """Takes back up to `units` of an event's use. Returns the units taken back."""
+        raise NotImplementedError
 
     @abstractmethod
     def refund(self, user, capability_id, units=1):
         """A staff correction, where there's no event to reverse: takes up to `units` off what `user` has used now."""
+        raise NotImplementedError
 
     def describe(self, user, capability_id, owner=None):
         """What usage reports send: `limit`, then every usage field."""
