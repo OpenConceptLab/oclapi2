@@ -1,9 +1,12 @@
 import base64
 import mimetypes
+import os
+import re
 from io import BytesIO
 
 from django.utils.http import content_disposition_header
 from minio import Minio, S3Error
+from minio.commonconfig import CopySource
 from minio.deleteobjects import DeleteObject
 from pydash import get
 
@@ -12,6 +15,9 @@ from core.services.storages.cloud.core import CloudStorageServiceInterface
 
 
 class MinIO(CloudStorageServiceInterface):
+    # Part size used when the upload length is unknown (non seekable stream)
+    UNKNOWN_LENGTH_PART_SIZE = 10 * 1024 * 1024
+
     def __init__(self):
         super().__init__()
         self.endpoint = settings.MINIO_ENDPOINT
@@ -34,6 +40,52 @@ class MinIO(CloudStorageServiceInterface):
         # Ensure the bucket exists
         if not self.client.bucket_exists(self.bucket_name):
             self.client.make_bucket(self.bucket_name)
+
+    @staticmethod
+    def __content_type(key, headers, metadata):
+        """
+        Resolves the content type from the headers, then from the S3 style metadata
+        ({'ContentType': ...}) that callers share with S3, then from the key extension.
+        """
+        header_type = next((v for k, v in (headers or {}).items() if k.lower() == 'content-type'), None)
+        return header_type or get(metadata or {}, 'ContentType') or mimetypes.guess_type(key)[0] \
+            or 'application/octet-stream'
+
+    @staticmethod
+    def __remaining_length(file_content):
+        """
+        Returns the number of bytes left to read from a seekable file object,
+        or None for a non seekable stream (e.g. a raw HTTP response).
+        """
+        try:
+            if not file_content.seekable():
+                return None
+            position = file_content.tell()
+            end = file_content.seek(0, os.SEEK_END)
+            file_content.seek(position)
+            return end - position
+        except (AttributeError, OSError, ValueError):
+            return None
+
+    def upload(self, key, file_content, headers=None, metadata=None):
+        """
+        Uploads a file object to key, streaming it instead of loading it in memory.
+        Same contract as the S3 service: returns 204 on success and raises on failure.
+        headers/metadata are only used for the content type; the S3 style metadata
+        callers pass (e.g. ContentType) is not MinIO user metadata.
+        """
+        length = self.__remaining_length(file_content)
+        # an unknown length (-1) needs an explicit multipart part size (MinIO minimum is 5MiB)
+        size_args = {'length': length, 'part_size': 0} if length is not None else {
+            'length': -1, 'part_size': self.UNKNOWN_LENGTH_PART_SIZE}
+        try:
+            self.client.put_object(
+                bucket_name=self.bucket_name, object_name=key, data=file_content,
+                content_type=self.__content_type(key, headers, metadata), **size_args
+            )
+            return 204  # Success, no content
+        except S3Error as e:
+            raise Exception(f"Could not upload {key} to MinIO. Error: {e}") from e  # pylint: disable=broad-exception-raised
 
     def upload_file(self, key, file_path=None, headers=None, binary=False, metadata=None):  # pylint: disable=too-many-arguments
         """
@@ -126,29 +178,31 @@ class MinIO(CloudStorageServiceInterface):
         except:  # pylint: disable=bare-except
             return False
 
-    def has_path(self, prefix='/', delimiter='/'):
-        return len(self.__fetch_keys(prefix, delimiter)) > 0
+    def has_path(self, prefix='/', delimiter='/', key_pattern=None):
+        return len(self.__fetch_keys(prefix, delimiter, key_pattern)) > 0
 
-    def get_last_key_from_path(self, prefix='/', delimiter='/'):
+    def get_last_key_from_path(self, prefix='/', delimiter='/', key_pattern=None):
         """
         Fetches the last object key under the given prefix.
         """
         try:
-            keys = self.__fetch_keys(prefix, delimiter)
+            keys = self.__fetch_keys(prefix, delimiter, key_pattern)
             key = sorted(keys, key=lambda k: k.get('LastModified'), reverse=True)[0] if len(keys) > 1 else get(keys,
                                                                                                                '0')
             return get(key, 'Key')
         except S3Error as e:
             raise Exception(f"Could not fetch last key from path {prefix}. Error: {e}") from e  # pylint: disable=broad-exception-raised
 
-    def delete_objects(self, path):
+    def delete_objects(self, path, key_pattern=None):
         """
         Deletes multiple objects from MinIO.
         """
         try:
             delete_object_list = map(
                 lambda x: DeleteObject(x.object_name),
-                self.client.list_objects(bucket_name=self.bucket_name, prefix=path, recursive=True),
+                filter(
+                    lambda x: not key_pattern or re.fullmatch(key_pattern, x.object_name),
+                    self.client.list_objects(bucket_name=self.bucket_name, prefix=path, recursive=True)),
             )
             errors = self.client.remove_objects(bucket_name=self.bucket_name, delete_object_list=delete_object_list)
 
@@ -156,6 +210,22 @@ class MinIO(CloudStorageServiceInterface):
                 raise Exception(f"Could not delete object {error.code}. {error.message}. Error: {error}")  # pylint: disable=broad-exception-raised
         except S3Error as e:
             raise Exception(f"Error occurred during delete operation. Error: {e}") from e  # pylint: disable=broad-exception-raised
+
+    def get_keys(self, prefix, key_pattern=None):
+        try:
+            return [
+                obj.object_name for obj in self.client.list_objects(
+                    bucket_name=self.bucket_name, prefix=prefix, recursive=True)
+                if not key_pattern or re.fullmatch(key_pattern, obj.object_name)]
+        except S3Error as e:
+            raise Exception(f"Could not list keys under {prefix}. Error: {e}") from e  # pylint: disable=broad-exception-raised
+
+    def copy(self, source_key, target_key):
+        try:
+            self.client.copy_object(
+                self.bucket_name, target_key, CopySource(self.bucket_name, source_key))
+        except S3Error as e:
+            raise Exception(f"Could not copy {source_key} to {target_key}. Error: {e}") from e  # pylint: disable=broad-exception-raised
 
     def remove(self, key):
         """
@@ -166,7 +236,7 @@ class MinIO(CloudStorageServiceInterface):
         except S3Error as e:
             raise Exception(f"Could not delete file {key} from MinIO. Error: {e}") from e  # pylint: disable=broad-exception-raised
 
-    def __fetch_keys(self, prefix, delimiter):
+    def __fetch_keys(self, prefix, delimiter, key_pattern=None):
         """
         Fetches all object keys under a given prefix.
         """
@@ -174,7 +244,9 @@ class MinIO(CloudStorageServiceInterface):
             if delimiter and prefix.endswith(delimiter):
                 prefix = prefix[:-1]
             objects = self.client.list_objects(bucket_name=self.bucket_name, prefix=prefix, recursive=True)
-            return [{'Key': k} for k in [obj.object_name for obj in objects]]
+            return [
+                {'Key': obj.object_name, 'LastModified': obj.last_modified} for obj in objects
+                if not key_pattern or re.fullmatch(key_pattern, obj.object_name)]
         except S3Error as e:
             raise Exception(f"Could not fetch keys from bucket {self.bucket_name}. Error: {e}") from e  # pylint: disable=broad-exception-raised
 

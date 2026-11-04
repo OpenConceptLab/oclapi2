@@ -71,6 +71,8 @@ from core.sources.mixins import SummaryMixin
 from core.tasks.mixins import TaskMixin, IndexingTaskMixin
 from core.tasks.models import Task
 from core.tasks.serializers import TaskBriefSerializer
+from core.toggles.models import Toggle
+from core.url_registry.constants import URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE
 
 logger = logging.getLogger('oclapi')
 
@@ -312,9 +314,7 @@ class CollectionReferenceView(CollectionBaseView, RetrieveAPIView, DestroyAPIVie
     def destroy(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         reference = self.get_object()
         collection = reference.collection
-        if collection.expansion_uri:
-            collection.expansion.delete_references(reference)
-        reference.delete()
+        collection.remove_references(collection.references.filter(id=reference.id))
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -351,6 +351,7 @@ class CollectionReferenceResolveView(CollectionReferenceAbstractResourcesView): 
 
 
 class CollectionReferenceConceptsView(CollectionReferenceAbstractResourcesView):
+    is_page_size_capped = True
     is_searchable = True
     document_model = ConceptDocument
     es_fields = Concept.es_fields
@@ -365,6 +366,7 @@ class CollectionReferenceConceptsView(CollectionReferenceAbstractResourcesView):
 
 
 class CollectionReferenceMappingsView(CollectionReferenceAbstractResourcesView):
+    is_page_size_capped = True
     is_searchable = True
     document_model = MappingDocument
     es_fields = Mapping.es_fields
@@ -428,6 +430,8 @@ class CollectionReferencesView(
     CollectionBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, DestroyAPIView, ListWithHeadersMixin,
     TaskMixin, CollectionReferencesMixin
 ):
+    is_page_size_capped = True
+
     def get_serializer_class(self):
         if self.is_verbose():
             return CollectionReferenceDetailSerializer
@@ -497,10 +501,7 @@ class CollectionReferencesView(
         if expressions:
             instance.delete_references(expressions)
         if reference_ids:
-            references = instance.references.filter(id__in=reference_ids)
-            if instance.expansion_uri:
-                instance.expansion.delete_references(references)
-            references.delete()
+            instance.remove_references(instance.references.filter(id__in=reference_ids))
 
         return Response({'message': OK_MESSAGE}, status=status.HTTP_204_NO_CONTENT)
 
@@ -666,6 +667,8 @@ class CollectionReferencesPreview(CollectionBaseView):
 
 
 class CollectionVersionReferencesView(CollectionVersionBaseView, ListWithHeadersMixin, CollectionReferencesMixin):
+    is_page_size_capped = True
+
     def get_serializer_class(self):
         if self.is_verbose():
             return CollectionReferenceDetailSerializer
@@ -986,6 +989,7 @@ class CollectionVersionExpansionChildrenView(CollectionVersionExpansionBaseView,
 
 
 class CollectionVersionExpansionConceptsView(CollectionVersionExpansionChildrenView):
+    is_page_size_capped = True
     is_searchable = True
     document_model = ConceptDocument
     es_fields = Concept.es_fields
@@ -1001,6 +1005,7 @@ class CollectionVersionExpansionConceptsView(CollectionVersionExpansionChildrenV
 
 
 class CollectionVersionExpansionMappingsView(CollectionVersionExpansionChildrenView):
+    is_page_size_capped = True
     is_searchable = True
     document_model = MappingDocument
     es_fields = Mapping.es_fields
@@ -1036,6 +1041,7 @@ class ExpansionMappingsIndexView(ExpansionResourcesIndexView):
 
 
 class CollectionVersionConceptsView(CollectionBaseView, ListWithHeadersMixin):
+    is_page_size_capped = True
     is_searchable = True
     document_model = ConceptDocument
     es_fields = Concept.es_fields
@@ -1112,6 +1118,8 @@ class CollectionVersionConceptCascadeView(ConceptCascadeView, CollectionVersionC
 
 
 class CollectionVersionConceptMappingsView(CollectionVersionConceptRetrieveView, ListWithHeadersMixin):
+    is_page_size_capped = True
+
     def get_queryset(self):
         queryset = self.apply_filters(super().get_queryset())
         expansion = self.get_expansion()
@@ -1136,6 +1144,7 @@ class CollectionVersionConceptMappingsView(CollectionVersionConceptRetrieveView,
 
 
 class CollectionVersionMappingsView(CollectionBaseView, ListWithHeadersMixin):
+    is_page_size_capped = True
     is_searchable = True
     document_model = MappingDocument
     es_fields = Mapping.es_fields
@@ -1298,15 +1307,26 @@ class ReferenceExpressionResolveView(APIView):
     def get_throttles(self):
         return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
 
+    def get_namespace(self):
+        """
+        ?namespace= is the namespace of every expression that doesn't name its own. Clients such as the Mapper send
+        their project's owner to choose which URL registries apply, so it is used only while the resolver uses the
+        registries. Without them a namespace limits a canonical URL to that owner's repositories, and such a client
+        would stop resolving every canonical URL its owner doesn't hold.
+        """
+        namespace = self.request.query_params.get('namespace')
+        return namespace if namespace and Toggle.get(URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE) else None
+
     def get_results(self):
         data = self.request.data
         if not isinstance(data, list):
             data = [data]
 
         from core.common.models import ConceptContainerModel
+        namespace = self.get_namespace()
         results = []
         for expression in data:
-            instance, registry_entry = ConceptContainerModel.resolve_expression_to_version(expression)
+            instance, registry_entry = ConceptContainerModel.resolve_expression_to_version(expression, namespace)
             if instance:
                 result = {
                     **ReferenceExpressionResolveSerializer(instance).data,
@@ -1333,6 +1353,12 @@ class ReferenceExpressionResolveView(APIView):
         responses={
             200: ReferenceExpressionResolveSerializer(many=True)
         },
+        manual_parameters=[
+            openapi.Parameter(
+                'namespace', openapi.IN_QUERY, type=openapi.TYPE_STRING,
+                description='Namespace (/orgs/{org}/ or /users/{user}/) for the expressions that name none. '
+                            'Used only while canonical URLs resolve through the URL registries')
+        ],
         request_body=openapi.Schema(
             type=openapi.TYPE_ARRAY,
             items=openapi.Schema(

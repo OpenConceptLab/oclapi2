@@ -4,6 +4,7 @@ import json
 import mimetypes
 import os
 import random
+import re
 import shutil
 import tempfile
 import time
@@ -28,7 +29,7 @@ from requests.auth import HTTPBasicAuth
 from rest_framework.utils import encoders
 
 from core.common.constants import UPDATED_SINCE_PARAM, BULK_IMPORT_QUEUES_COUNT, CURRENT_USER, REQUEST_URL, \
-    TEMP_PREFIX, HEAD, EXPORT_TIME_EXTRA, RETIRED_ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW
+    TEMP_PREFIX, HEAD, EXPORT_TIME_EXTRA, RETIRED_ACCESS_TYPE_EDIT, ACCESS_TYPE_VIEW, LIST_DEFAULT_LIMIT
 from core.settings import EXPORT_SERVICE
 
 
@@ -354,7 +355,7 @@ def write_export_file(
     s3_key = version.version_export_path
     export_service = get_export_service()
     if version.is_head:
-        export_service.delete_objects(version.get_version_export_path(suffix=None))
+        version.delete_export_keys()
 
     upload_status_code = export_service.upload_file(
         key=s3_key, file_path=file_path, binary=True, metadata={'ContentType': 'application/zip'},
@@ -933,6 +934,11 @@ def to_int(value, default_value):
         return default_value
 
 
+def cap_page_size(limit):
+    """`limit` as an int, at most settings.LIST_MAX_LIMIT: it keeps one page of a heavy list a short request."""
+    return min(to_int(limit, LIST_DEFAULT_LIMIT), settings.LIST_MAX_LIMIT)
+
+
 def parse_id(value):
     # Plain ASCII digits within bigint range only: '²'.isdigit() is True but int('²') raises (a 500).
     if isinstance(value, int) and not isinstance(value, bool):
@@ -1027,3 +1033,14 @@ def encode_texts(texts):
     if settings.LM_DISABLED:
         return [None] * len(texts)
     return list(get_lm_model().encode([str(text) for text in texts], batch_size=settings.LM_ENCODE_BATCH_SIZE))
+
+
+EXPORT_KEY_TIMESTAMP_PATTERN = r'(\d{4})-?(\d{2})-?(\d{2})_?(\d{6})\.zip'
+
+
+def get_export_key_pattern(prefix):
+    """
+    Pattern for a version's own export keys under its export prefix, so a sibling version's keys
+    (1.8.24.1 under 1.8.24.) don't match.
+    """
+    return re.escape(prefix) + EXPORT_KEY_TIMESTAMP_PATTERN

@@ -21,7 +21,7 @@ class BundleLinkSerializer(CommonSerializer):
 
 
 class BundleMetaSerializer(CommonSerializer):
-    lastUpdated = DateTimeField(read_only=True, default=datetime.now())
+    lastUpdated = DateTimeField(read_only=True, default=datetime.now)
 
 
 class BundleExtensionSerializer(CommonSerializer):
@@ -33,7 +33,9 @@ class BundleExtensionSerializer(CommonSerializer):
 
 
 class BundleEntrySerializer(CommonSerializer):
+    fullUrl = CharField(required=False)
     resource = JSONField()
+    search = JSONField(required=False)
 
 
 class FHIRBundleSerializer(CommonSerializer):
@@ -53,17 +55,29 @@ class FHIRBundleSerializer(CommonSerializer):
         return 'Bundle'
 
     @classmethod
-    def convert_to_entry(cls, resources):
+    def convert_to_entry(cls, resources, base_url):
+        """
+        Searchset entries: each resource a match with its fullUrl (base_url is the base and resource type), and a
+        resource that couldn't be represented (an OperationOutcome) an outcome.
+        """
         entry = []
         for resource in resources:
-            entry.append({'resource': resource})
+            if resource.get('resourceType') == 'OperationOutcome':
+                entry.append({'resource': resource, 'search': {'mode': 'outcome'}})
+            else:
+                entry.append(
+                    {'fullUrl': f"{base_url}/{resource['id']}", 'resource': resource, 'search': {'mode': 'match'}})
         return entry
 
     def get_link(self, _):
+        """self, previous and next, for the page the paginator holds; only self without one (_count=0)"""
         paginator = self.context.get('paginator')
+        if paginator is None:
+            return BundleLinkSerializer(
+                [{'relation': 'self', 'url': self.context['request'].build_absolute_uri()}], many=True).data
         links = [{'relation': 'self', 'url': paginator.get_current_page_url()}]
         if paginator.has_previous():
-            links.append({'relation': 'prev', 'url': paginator.get_previous_page_url()})
+            links.append({'relation': 'previous', 'url': paginator.get_previous_page_url()})
         if paginator.has_next():
             links.append({'relation': 'next', 'url': paginator.get_next_page_url()})
         return BundleLinkSerializer(links, many=True).data

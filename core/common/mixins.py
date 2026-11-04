@@ -29,7 +29,6 @@ from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion, CanEditConceptDictionary
-from core.users.constants import LIST_UNPAGINATED_PERMISSION
 from .checksums import ChecksumModel
 from .exceptions import Http403, UnpaginatedListLimitReached
 from .utils import write_csv_to_s3, get_query_params_from_url_string, compact_dict_by_values, \
@@ -339,17 +338,17 @@ class ListWithHeadersMixin(ListModelMixin):
     def should_compress(self):
         """
         `Compress: true` returns the whole list, unpaginated (a zip). Anyone may, for up to MAX_UNPAGINATED_RESULTS
-        results; bigger lists need `users.list_unpaginated` (ocl_online#230).
+        results (a capped list: settings.LIST_MAX_LIMIT); bigger lists need `users.list_unpaginated`.
         """
         if self.request.META.get(HTTP_COMPRESS_HEADER, False) not in TRUTHY:
             return False
-        user = self.request.user
-        if user.is_staff or user.has_perm(LIST_UNPAGINATED_PERMISSION):
+        if self.can_list_unpaginated():
             return True
         total = self.total_count or (
             self.object_list.count() if isinstance(self.object_list, QuerySet) else len(self.object_list))
-        if total > MAX_UNPAGINATED_RESULTS:
-            raise UnpaginatedListLimitReached(MAX_UNPAGINATED_RESULTS, total)
+        max_results = settings.LIST_MAX_LIMIT if get(self, 'is_page_size_capped') else MAX_UNPAGINATED_RESULTS
+        if total > max_results:
+            raise UnpaginatedListLimitReached(max_results, total)
         return True
 
     def get_object_ids(self):
@@ -563,6 +562,8 @@ class ConceptDictionaryUpdateMixin(ConceptDictionaryMixin):
 
 class SourceContainerMixin:
     def find_repo_by_canonical_url(self, canonical_url):
+        """This owner's lowest-id repository row with the canonical URL, a Source before a Collection; `url|version`
+        names a version."""
         url, version = canonical_url_to_url_and_version(canonical_url)
         queryset = self.source_set.filter(canonical_url=url)
         if not queryset.exists():
@@ -776,9 +777,14 @@ class SourceChildMixin(ChecksumModel):
     @classmethod
     def load_collection_source_versions(cls, instances, collection):
         """
-        Sets each row's _collection_source_version: the newest source version its references in this collection
-        resolved to, as TBv3 shows a collection's rows, or None when they resolved to HEAD or to no source version.
+        Sets each row's _collection_source_version: the newest source version holding it that the collection version's
+        expansion recorded (else that its references resolved to), or None when that is HEAD or no source version.
         """
+        expansion = collection.expansion
+        if expansion:
+            cls.load_expansion_source_versions(instances, expansion)
+            return
+
         reference_ids = {instance.id: instance.get_collection_reference_ids(collection) for instance in instances}
         references = cls._meta.get_field('references').related_model.objects.in_bulk(
             {reference_id for ids in reference_ids.values() for reference_id in ids})
@@ -789,9 +795,33 @@ class SourceChildMixin(ChecksumModel):
                 references[reference_id]._get_resolved_system_version(resolved)  # pylint: disable=protected-access
                 for reference_id in reference_ids[instance.id]
             )
-            newest = max(versions, key=lambda version: version.created_at, default=None)
-            # pylint: disable=protected-access
-            instance._collection_source_version = None if get(newest, 'version') == HEAD else newest
+            instance.set_collection_source_version(versions)
+
+    @classmethod
+    def load_expansion_source_versions(cls, instances, expansion):  # pylint: disable=too-many-locals
+        """The source versions holding each row: those the expansion is locked to, else recorded, else all of them"""
+        recorded_ids = {version.id for version in expansion.recorded_source_versions}
+        locked_ids = {version.id for version in expansion.recorded_evaluated_source_versions}
+        sources_field = cls._meta.get_field('sources')
+        row_field = sources_field.m2m_field_name()
+        holding = cls.sources.through.objects.filter(
+            **{f'{row_field}_id__in': [instance.id for instance in instances]}
+        ).values_list(f'{row_field}_id', 'source_id')
+        source_ids_by_row = {}
+        for row_id, source_id in holding:
+            source_ids_by_row.setdefault(row_id, []).append(source_id)
+        versions = sources_field.related_model.objects.in_bulk(
+            {source_id for source_ids in source_ids_by_row.values() for source_id in source_ids})
+        for instance in instances:
+            source_ids = source_ids_by_row.get(instance.id, [])
+            recorded = [source_id for source_id in source_ids if source_id in recorded_ids]
+            locked = [source_id for source_id in recorded if source_id in locked_ids]
+            instance.set_collection_source_version(
+                [versions[source_id] for source_id in locked or recorded or source_ids])
+
+    def set_collection_source_version(self, versions):
+        newest = max(versions, key=lambda version: version.created_at, default=None)
+        self._collection_source_version = None if get(newest, 'version') == HEAD else newest
 
     def calculate_uri(self):
         uri = self.parent.uri + self.resource_type.lower() + 's/' + str(self.mnemonic) + '/'
@@ -1286,7 +1316,7 @@ class ConceptContainerExportMixin:
             return HttpResponseForbidden()
 
         if version.has_export():
-            get_export_service().remove(version.version_export_path)
+            version.delete_export_keys()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         return Response(status=status.HTTP_404_NOT_FOUND)

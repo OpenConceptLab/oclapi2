@@ -12,7 +12,7 @@ from unittest.mock import patch, Mock
 
 import numpy
 from django.core.management import call_command, CommandError
-from django.test import override_settings
+from django.test import override_settings, tag
 from elasticsearch.helpers import streaming_bulk
 from elasticsearch_dsl.connections import connections
 
@@ -149,6 +149,7 @@ class VectorTestMixin:
         )})
 
 
+@tag('es')
 @override_settings(LM_MODEL_NAME=MODEL)
 class ConceptDocumentVectorsTest(VectorTestMixin, OCLTestCase):
     def test_vectors_when_head_is_semantic(self):
@@ -227,6 +228,7 @@ class ConceptDocumentVectorsTest(VectorTestMixin, OCLTestCase):
         self.assertIn('v1', data['source_version'])
 
 
+@tag('es')
 @override_settings(LM_MODEL_NAME=MODEL)
 class VectorReuseTest(VectorTestMixin, OCLTestCase):
     def setUp(self):
@@ -318,6 +320,7 @@ class VectorReuseTest(VectorTestMixin, OCLTestCase):
             self.assert_vectors(concept, [f'Name {index}', f'Synonym {index}', 'Shared'])
 
 
+@tag('es')
 @override_settings(LM_MODEL_NAME=MODEL)
 class VersionVectorSyncTest(VectorTestMixin, OCLTestCase):
     """HEAD isn't semantic: only a version's own flag decides whether its docs carry vectors."""
@@ -517,6 +520,7 @@ class VersionVectorSyncTest(VectorTestMixin, OCLTestCase):
         self.assert_vectors(self.own, ['Cholera', 'Asiatic cholera'])
 
 
+@tag('es')
 @override_settings(LM_MODEL_NAME=MODEL)
 class ReindexKeepsSharedVectorsTest(VectorTestMixin, OCLTestCase):
     """HEAD isn't semantic, and a release that shares HEAD's rows is: rebuilding those rows keeps their vectors."""
@@ -902,6 +906,7 @@ class VersionCreateInheritsVectorizationTest(OCLAPITestCase):
         self.assertEqual(sorted(stored), LLM)
 
 
+@tag('es')
 class ConceptVectorMappingCommandTest(OCLTestCase):
     """The deploy step that adds the vector provenance fields to an existing concepts index (mapped as before #247)."""
     def setUp(self):

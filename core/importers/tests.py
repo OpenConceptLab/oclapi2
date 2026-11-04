@@ -15,9 +15,9 @@ from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
-from django.db import connection
+from django.db import connection, DatabaseError
 from django.db.models import F
-from django.test import override_settings
+from django.test import override_settings, tag
 from django.test.utils import CaptureQueriesContext
 from elasticsearch.helpers import streaming_bulk
 from ijson import JSONError
@@ -1946,6 +1946,7 @@ class BulkImportInlineTest(OCLTestCase):
              ('/orgs/WHO/sources/ICD-10/', 'A01', 'Same As')]
         )
 
+@tag('es')
 class ImportSearchTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
@@ -4120,6 +4121,30 @@ class TasksTest(OCLTestCase):
 
         update_concepts_count_mock.assert_called_once_with(sync=True)
         update_mappings_count_mock.assert_called_once_with(sync=True)
+
+    @patch('core.sources.models.Source.update_concepts_count')
+    @patch('core.sources.models.Source.update_mappings_count')
+    def test_post_import_update_resource_counts_skips_failing_source(
+            self, update_mappings_count_mock, update_concepts_count_mock):
+        source1 = OrganizationSourceFactory()
+        source2 = OrganizationSourceFactory()
+        concept1 = ConceptFactory(_counted=None, parent=source1)
+        concept2 = ConceptFactory(_counted=None, parent=source2)
+        mapping1 = MappingFactory(_counted=None, parent=source1)
+        mapping2 = MappingFactory(_counted=None, parent=source2)
+
+        update_concepts_count_mock.side_effect = [DatabaseError('gone'), None]
+        update_mappings_count_mock.side_effect = [DatabaseError('gone'), None]
+
+        post_import_update_resource_counts()
+
+        self.assertEqual(update_concepts_count_mock.call_count, 2)
+        self.assertEqual(update_mappings_count_mock.call_count, 2)
+        for resource in (concept1, concept2, mapping1, mapping2):
+            resource.refresh_from_db()
+        # first source (in query order) fails and is skipped, the other is still counted
+        self.assertEqual(sum(1 for c in (concept1, concept2) if c._counted), 1)  # pylint: disable=protected-access
+        self.assertEqual(sum(1 for m in (mapping1, mapping2) if m._counted), 1)  # pylint: disable=protected-access
 
     @patch('core.importers.models.BulkImportInline')
     def test_bulk_import_parts_inline(self, bulk_import_inline_mock):

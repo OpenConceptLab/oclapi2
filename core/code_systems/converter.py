@@ -1,4 +1,4 @@
-from fhir.resources.codesystem import CodeSystem
+from fhir.resources.R4B.codesystem import CodeSystem  # R4B models are the R4 wire models
 
 from core.settings import DEFAULT_LOCALE
 from core.sources.models import Source
@@ -32,7 +32,7 @@ class CodeSystemConverter:
             'language': source.default_locale,
             'count': source.active_concepts,
         }
-        return CodeSystem(**code_system).dict()
+        return CodeSystem(**code_system).model_dump()
 
     @staticmethod
     def from_fhir(code_system):

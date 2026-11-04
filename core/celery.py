@@ -33,6 +33,10 @@ app.conf.CELERYBEAT_SCHEDULE = {
         'task': 'core.common.tasks.expire_old_celery_tasks',
         'schedule': crontab(0, 1),  # Run at 1 am
     },
+    'expire-stale-auto-match-runs': {
+        'task': 'core.common.tasks.expire_stale_auto_match_runs',
+        'schedule': timedelta(hours=1),
+    },
     'rerun-indexing-job': {
         'task': 'core.common.tasks.rerun_indexing_job',
         'schedule': timedelta(minutes=15),

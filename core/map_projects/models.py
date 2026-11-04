@@ -6,6 +6,7 @@ from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models, IntegrityError
 from django.db.models import Sum
+from django.utils import timezone
 from pydash import get
 
 from core.common.constants import PERSIST_NEW_ERROR_MESSAGE, ACCESS_TYPE_CHOICES, ACCESS_TYPE_NONE
@@ -347,3 +348,15 @@ class AutomatchRun(BaseModel):
 
     def calculate_uri(self):
         return f"/auto-match-runs/{self.id or generate_temp_version()}/"
+
+    # A run the client never closed, e.g. its tab closed before the create
+    # response arrived. The Mapper PATCHes a run only when it ends, so this must
+    # outlast the longest run.
+    STALE_AFTER = timezone.timedelta(hours=24)
+
+    @classmethod
+    def expire_stale(cls, older_than=None):
+        now = timezone.now()
+        return cls.objects.filter(
+            completion_status=cls.RUNNING, updated_at__lt=now - (older_than or cls.STALE_AFTER)
+        ).update(completion_status=cls.CANCELLED, completed_at=now, updated_at=now)

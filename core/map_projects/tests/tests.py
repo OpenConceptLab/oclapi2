@@ -3,12 +3,13 @@ import json
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError
+from django.utils import timezone
 from mock import patch, ANY, Mock
 from rest_framework.test import APIRequestFactory
 
 from core.common.constants import PERSIST_NEW_ERROR_MESSAGE
 from core.common.tests import OCLAPITestCase, OCLTestCase, PREVIEW_GROUP_NAME
-from core.map_projects.models import MapProject
+from core.map_projects.models import MapProject, AutomatchRun
 from core.map_projects.views import AutomatchRunListView
 from core.map_projects.tests.factories import MapProjectFactory, AutomatchRunFactory
 from core.orgs.tests.factories import OrganizationFactory
@@ -797,3 +798,46 @@ class AutomatchRunViewTest(MapProjectAbstractViewTest):
         response = self.client.get(
             '/auto-match-runs/99999999/', HTTP_AUTHORIZATION='Token ' + self.user.get_token())
         self.assertEqual(response.status_code, 404)
+
+
+class AutomatchRunExpireStaleTest(OCLTestCase):
+    @staticmethod
+    def make_run(age, **kwargs):
+        run = AutomatchRunFactory(**kwargs)
+        AutomatchRun.objects.filter(id=run.id).update(updated_at=timezone.now() - age)
+        return run
+
+    def test_expire_stale_cancels_only_old_running_runs(self):
+        stale = self.make_run(timezone.timedelta(hours=25))
+        recent = self.make_run(timezone.timedelta(hours=1))
+        finished = self.make_run(timezone.timedelta(hours=25), completion_status=AutomatchRun.COMPLETED)
+
+        self.assertEqual(AutomatchRun.expire_stale(), 1)
+
+        stale.refresh_from_db()
+        recent.refresh_from_db()
+        finished.refresh_from_db()
+        self.assertEqual(stale.completion_status, AutomatchRun.CANCELLED)
+        self.assertIsNotNone(stale.completed_at)
+        self.assertGreater(stale.updated_at, timezone.now() - timezone.timedelta(minutes=1))
+        self.assertEqual(recent.completion_status, AutomatchRun.RUNNING)
+        self.assertIsNone(recent.completed_at)
+        self.assertEqual(finished.completion_status, AutomatchRun.COMPLETED)
+        self.assertIsNone(finished.completed_at)
+
+    def test_expire_stale_with_custom_age(self):
+        run = self.make_run(timezone.timedelta(hours=2))
+
+        self.assertEqual(AutomatchRun.expire_stale(older_than=timezone.timedelta(hours=1)), 1)
+
+        run.refresh_from_db()
+        self.assertEqual(run.completion_status, AutomatchRun.CANCELLED)
+
+    def test_task(self):
+        from core.common.tasks import expire_stale_auto_match_runs
+        run = self.make_run(timezone.timedelta(days=2))
+
+        expire_stale_auto_match_runs()
+
+        run.refresh_from_db()
+        self.assertEqual(run.completion_status, AutomatchRun.CANCELLED)

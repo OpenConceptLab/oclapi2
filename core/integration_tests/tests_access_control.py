@@ -4,6 +4,7 @@ import zipfile
 
 from mock import patch, Mock
 
+from django.test import tag
 from core.client_configs.models import ClientConfig
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection, CollectionReference
@@ -275,6 +276,7 @@ class OrganizationResourceSearchAccessMixin:
         self.assertIn(self.get_key(self.private_resource), self.search_keys(self.member))
 
 
+@tag('es')
 class OrganizationSourceListAccessTest(
         OrganizationResourceSearchAccessMixin, OrganizationResourceListAccessMixin, OCLAPITestCase):
     resources = 'sources'
@@ -284,6 +286,7 @@ class OrganizationSourceListAccessTest(
         return OrganizationSourceFactory(organization=self.org, public_access=public_access)
 
 
+@tag('es')
 class OrganizationCollectionListAccessTest(
         OrganizationResourceSearchAccessMixin, OrganizationResourceListAccessMixin, OCLAPITestCase):
     resources = 'collections'

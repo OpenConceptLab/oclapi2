@@ -8,7 +8,7 @@ from rest_framework.mixins import CreateModelMixin
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 
-from core.common.constants import HEAD, ACCESS_TYPE_NONE, LIMIT_PARAM, LIST_DEFAULT_LIMIT
+from core.common.constants import HEAD, ACCESS_TYPE_NONE, LIST_DEFAULT_LIMIT
 from core.common.exceptions import Http400
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.common.swagger_parameters import (
@@ -44,6 +44,7 @@ class MappingBaseView(SourceChildCommonBaseView):
 
 
 class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
+    is_page_size_capped = True
     serializer_class = MappingListSerializer
 
     def get_permissions(self):
@@ -90,7 +91,7 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
                 queryset = Mapping.apply_attribute_based_filters(
                     queryset, self.params).filter(is_active=True)
             else:
-                limit = to_int(self.params.get(LIMIT_PARAM), LIST_DEFAULT_LIMIT)
+                limit = to_int(self.limit, LIST_DEFAULT_LIMIT)  # capped, so later pages start where the first ended
                 page = to_int(self.params.get('page'), 1)
                 offset = (page - 1) * limit
                 through_qs = Mapping.sources.through.objects.filter(source_id=parent.id)
@@ -313,6 +314,7 @@ class MappingReactivateView(MappingBaseView, UpdateAPIView):
 
 
 class MappingVersionsView(MappingBaseView, ConceptDictionaryMixin, ListWithHeadersMixin):
+    is_page_size_capped = True
     permission_classes = (CanViewParentDictionary,)
 
     def get_queryset(self):

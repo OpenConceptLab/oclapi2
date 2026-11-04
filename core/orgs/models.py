@@ -64,6 +64,12 @@ class Organization(BaseResourceModel, SourceContainerMixin, ChecksumModel):
     def is_member(self, user_profile):
         return user_profile and self.members.filter(id=user_profile.id).exists()
 
+    def has_edit_access(self, user):
+        """Whether `user` may edit the org's repositories, and so view its private ones: staff and its members."""
+        if not (user and user.is_authenticated):
+            return False
+        return user.is_staff or self.is_member(user)
+
     def is_only_member(self, user_profile):
         """True if `user_profile` is the org's only member. Every org keeps at least one member."""
         return bool(self.is_member(user_profile)) and not self.members.exclude(id=user_profile.id).exists()

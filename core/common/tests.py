@@ -2,7 +2,9 @@ import datetime
 import importlib
 import json
 import os
+import sys
 import time
+import unittest
 import uuid
 from collections import OrderedDict
 from unittest.mock import patch, Mock, MagicMock, ANY
@@ -16,10 +18,11 @@ from django.contrib.auth.models import AnonymousUser, Group
 from django.core.files.base import File
 from django.core.management import call_command, CommandError
 from django.http import HttpResponse
-from django.test import TestCase, override_settings, RequestFactory
+from django.test import TestCase, override_settings, RequestFactory, tag
 from django.test.runner import DiscoverRunner
 from django.urls import clear_url_caches, resolve
 from django.utils import timezone
+from elastic_transport import Transport
 from mock.mock import call
 from requests import ConnectTimeout
 from requests.auth import HTTPBasicAuth
@@ -64,7 +67,7 @@ from core.common.utils import (
     split_list_by_condition, is_zip_file, get_date_range_label, get_prev_month, from_string_to_date, get_end_of_month,
     get_start_of_month, es_id_in, web_url, get_queue_task_names, get_resource_class_from_resource_uri, encode_string,
     to_parent_kwargs_from_uri, reverse_resource, reverse_resource_version, write_export_file, queue_bulk_import,
-    get_bulk_import_celery_once_lock_key, generic_sort, get_embeddings, encode_texts, get_lm_model)
+    get_bulk_import_celery_once_lock_key, generic_sort, get_embeddings, encode_texts, get_lm_model, cap_page_size)
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.mappings.documents import MappingDocument
@@ -75,12 +78,10 @@ from core.users.constants import CORE_USER_GROUP, GUEST_GROUP
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 from .backends import OCLOIDCAuthenticationBackend
-from .exceptions import SSOIdentityMismatchRefused
+from .exceptions import SSOIdentityMismatchRefused, SSOUnlinkedAccountRefused, SSOUsernameCaseMismatchRefused
 from .checksums import Checksum
-from .fhir_helpers import translate_fhir_query
 from .serializers import IdentifierSerializer
 from .validators import URIValidator
-from ..code_systems.serializers import CodeSystemDetailSerializer
 from ..concepts.serializers import ConceptDetailSerializer
 from ..concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from ..mappings.serializers import MappingDetailSerializer
@@ -95,10 +96,50 @@ class CustomTestRunner(ColourRunnerMixin, DiscoverRunner):
     pass
 
 
+# Unset: tests index and search ES. 'off': nothing indexes and any ES request fails, so tests not tagged 'es' can run
+# in parallel. 'record': nothing indexes and ES requests go through; the classes making them are appended to
+# TEST_ES_RECORD_FILE, to find the ones to tag.
+TEST_ES = os.environ.get('TEST_ES')
+TEST_ES_RECORD_FILE = os.environ.get('TEST_ES_RECORD_FILE', 'es_tests.txt')
+
+
+def es_test_class():
+    """The test class on the call stack, as module.QualName, or None."""
+    frame = sys._getframe(1)  # pylint: disable=protected-access
+    while frame:
+        for name in ('self', 'cls'):
+            owner = frame.f_locals.get(name)
+            klass = owner if isinstance(owner, type) else type(owner)
+            if owner is not None and issubclass(klass, unittest.TestCase):
+                return f'{klass.__module__}.{klass.__qualname__}'
+        frame = frame.f_back
+    return None
+
+
+def guard_es_requests(record):
+    perform_request = Transport.perform_request
+
+    def guarded(transport, method, target, *args, **kwargs):
+        test = es_test_class()
+        if not record:
+            raise AssertionError(
+                f"{test or 'This test'} sends {method} {target} to Elasticsearch, which TEST_ES=off forbids: "
+                "tag its class @tag('es')")
+        with open(TEST_ES_RECORD_FILE, 'a', encoding='utf-8') as file:
+            file.write(f'{test}\t{method} {target.split("?")[0]}\n')
+        return perform_request(transport, method, target, *args, **kwargs)
+
+    Transport.perform_request = guarded
+
+
 class SetupTestEnvironment:
     settings.TEST_MODE = True
     settings.ELASTICSEARCH_DSL_AUTOSYNC = True
     settings.ES_SYNC = True
+    if TEST_ES in ('off', 'record'):
+        settings.ELASTICSEARCH_DSL_AUTOSYNC = False
+        settings.ES_SYNC = False
+        guard_es_requests(record=TEST_ES == 'record')
     if settings.ENV == 'ci':
         # No redis service available on CI; use a no-op cache so cache reads/writes are harmless no-ops
         # instead of raising connection errors.
@@ -307,8 +348,8 @@ class OCLAPITestCase(APITestCase, BaseTestCase):
 
 class OCLTestCase(TestCase, BaseTestCase):
     @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
+    def setUpTestData(cls):
+        super().setUpTestData()
         call_command("loaddata", "core/fixtures/base_entities.yaml", "core/fixtures/ocl_org.yaml")
         call_command("loaddata", "core/fixtures/auth_groups.yaml")
         call_command("loaddata", "core/fixtures/capabilities.yaml")
@@ -325,57 +366,6 @@ class OCLTestCase(TestCase, BaseTestCase):
     def setUp(self):
         super().setUp()
         self.maxDiff = None
-
-
-class FhirHelpersTest(OCLTestCase):
-    def test_language_to_default_locale(self):
-        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
-        query_params = {'language': 'eng'}
-        query_set = Source.objects.all()
-
-        query_set = translate_fhir_query(query_fields, query_params, query_set)
-        self.assertTrue('"sources"."default_locale" = eng' in str(query_set.query))
-
-    def test_status_retired(self):
-        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
-        query_params = {'status': 'retired'}
-        query_set = Source.objects.all()
-
-        query_set = translate_fhir_query(query_fields, query_params, query_set)
-        self.assertTrue('WHERE "sources"."retired"' in str(query_set.query))
-
-    def test_status_active(self):
-        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
-        query_params = {'status': 'active'}
-        query_set = Source.objects.all()
-
-        query_set = translate_fhir_query(query_fields, query_params, query_set)
-        self.assertTrue('WHERE "sources"."released"' in str(query_set.query))
-
-    def test_status_draft(self):
-        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
-        query_params = {'status': 'draft'}
-        query_set = Source.objects.all()
-
-        query_set = translate_fhir_query(query_fields, query_params, query_set)
-        self.assertTrue('WHERE NOT "sources"."released"' in str(query_set.query))
-
-    def test_title_to_full_name(self):
-        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
-        query_params = {'title': 'some title'}
-        query_set = Source.objects.all()
-
-        query_set = translate_fhir_query(query_fields, query_params, query_set)
-        self.assertTrue('WHERE "sources"."full_name" = some title' in str(query_set.query))
-
-    def test_other_fields(self):
-        query_fields = list(CodeSystemDetailSerializer.Meta.fields)
-        query_params = {'version': 'v1', 'id': '2'}
-        query_set = Source.objects.all()
-
-        query_set = translate_fhir_query(query_fields, query_params, query_set)
-        self.assertTrue('"sources"."version" = v1' in str(query_set.query))
-        self.assertTrue('"sources"."id" = 2' in str(query_set.query))
 
 
 class IdentifierSerializerTest(OCLTestCase):
@@ -452,6 +442,37 @@ class IdentifierSerializerTest(OCLTestCase):
                          'system': 'http://hl7.org/fhir/v2/0203'}],
                      'text': 'Accession ID'},
                  'value': '/orgs/OCL/Code/1/'}])
+
+    def test_convert_ocl_uri_to_fhir_url_renames_only_the_repository_type_segment(self):
+        convert = IdentifierSerializer.convert_ocl_uri_to_fhir_url
+        for uri, resource_type, expected in (
+                ('/orgs/Acme/sources/collections/', 'CodeSystem', '/orgs/Acme/CodeSystem/collections/'),
+                ('/orgs/Acme/collections/sources/', 'ValueSet', '/orgs/Acme/ValueSet/sources/'),
+                ('/orgs/sources/sources/codes/', 'CodeSystem', '/orgs/sources/CodeSystem/codes/'),
+                ('/users/collections/collections/set/v1/', 'ValueSet', '/users/collections/ValueSet/set/'),
+                # as before for every other name
+                ('/orgs/CIEL/sources/CIEL/', 'CodeSystem', '/orgs/CIEL/CodeSystem/CIEL/'),
+                ('/orgs/CIEL/sources/CIEL/v1/concepts/1/', 'ConceptMap', '/orgs/CIEL/ConceptMap/CIEL/'),
+                ('/users/jo/collections/vs/', 'ValueSet', '/users/jo/ValueSet/vs/'),
+                ('/orgs/CIEL/CodeSystem/CIEL/', 'CodeSystem', '/orgs/CIEL/CodeSystem/CIEL/'),
+                ('http://example.org/fhir/CodeSystem/x', 'CodeSystem', 'http://example.org/fhir/CodeSystem/x'),
+                (None, 'CodeSystem', None)):
+            self.assertEqual(convert(uri, resource_type), expected, uri)
+        with self.assertRaisesMessage(ValidationError, 'given: /orgs/CIEL/sources/'):
+            convert('/orgs/CIEL/sources/', 'CodeSystem')
+
+    def test_convert_fhir_url_to_ocl_uri_renames_only_the_resource_type_segment(self):
+        convert = IdentifierSerializer.convert_fhir_url_to_ocl_uri
+        for url, kind, expected in (
+                ('/orgs/CIEL/CodeSystem/CIEL/', 'sources', '/orgs/CIEL/sources/CIEL/'),
+                ('/users/jo/ValueSet/vs/v1/', 'collections', '/users/jo/collections/vs/v1/'),
+                ('/orgs/CIEL/ConceptMap/CIEL', 'sources', '/orgs/CIEL/sources/CIEL'),
+                # an owner or a repository with a resource type's name keeps it
+                ('/orgs/CodeSystem/ConceptMap/ValueSet/', 'sources', '/orgs/CodeSystem/sources/ValueSet/'),
+                ('/orgs/CIEL/sources/CIEL/', 'sources', '/orgs/CIEL/sources/CIEL/'),
+                ('http://example.org/fhir/CodeSystem/x', 'sources', 'http://example.org/fhir/CodeSystem/x'),
+                (None, 'sources', None)):
+            self.assertEqual(convert(url, kind), expected, url)
 
 
 class UtilsTest(OCLTestCase):
@@ -984,6 +1005,15 @@ class UtilsTest(OCLTestCase):
             [1, 'foobar', 1, 'foobar', [{'a': 1}, {'b': 'foobar'}]]
         )
 
+    def test_cap_page_size(self):
+        self.assertEqual(cap_page_size('1000'), 100)
+        self.assertEqual(cap_page_size('100'), 100)
+        self.assertEqual(cap_page_size(40), 40)
+        self.assertEqual(cap_page_size(None), 25)
+        self.assertEqual(cap_page_size('0'), 25)
+        with override_settings(LIST_MAX_LIMIT=1):
+            self.assertEqual(cap_page_size('10'), 1)
+
     def test_chunks(self):
         self.assertEqual(list(chunks([], 1000)), [])
         self.assertEqual(list(chunks([1, 2, 3, 4], 3)), [[1, 2, 3], [4]])
@@ -1345,7 +1375,18 @@ class UtilsTest(OCLTestCase):
         sentence_transformer_mock.return_value.encode.assert_called_once_with(['a'], batch_size=64)
 
 
+@tag('es')
 class BaseModelTest(OCLTestCase):
+    def test_is_public_access(self):
+        for value in ('View', 'view', 'Edit', 'EDIT'):
+            self.assertTrue(BaseModel.is_public_access(value), value)
+        for value in ('None', None, ''):
+            self.assertFalse(BaseModel.is_public_access(value), value)
+        # the stored values a queryset reads as public are those it reads as public
+        for value in BaseModel.PUBLIC_ACCESS_VALUES:
+            self.assertTrue(BaseModel.is_public_access(value), value)
+        self.assertTrue(OrganizationSourceFactory(public_access='Edit').public_can_view)
+
     def test_model_name(self):
         self.assertEqual(Concept().model_name, 'Concept')
         self.assertEqual(Source().model_name, 'Source')
@@ -2106,7 +2147,7 @@ class TaskTest(OCLTestCase):
         s3_mock = Mock(delete_objects=Mock())
         export_service_mock.return_value = s3_mock
         delete_s3_objects('/some/path')
-        s3_mock.delete_objects.assert_called_once_with('/some/path')
+        s3_mock.delete_objects.assert_called_once_with('/some/path', key_pattern=None)
 
     @patch('core.importers.models.BulkImportParallelRunner.run')
     def test_bulk_import_parallel_inline_invalid_json(self, import_run_mock):
@@ -2730,7 +2771,7 @@ class OCLOIDCAuthenticationBackendTest(OCLTestCase):
         user.set_checksums.assert_not_called()
 
     def test_filter_users_by_claims(self):
-        batman = UserProfileFactory(username='batman')
+        batman = UserProfileFactory(username='batman', email='batman@gotham.com')
         UserProfileFactory(username='superman@not-gotham.com')
 
         users = self.backend.filter_users_by_claims(self.claim)
@@ -2757,8 +2798,8 @@ class OCLOIDCAuthenticationBackendTest(OCLTestCase):
         batman.refresh_from_db()
         self.assertEqual(batman.sso_id, 'sub-1')
 
-    def test_filter_users_by_claims_links_unlinked_account_on_username(self):
-        batman = UserProfileFactory(username='batman')
+    def test_filter_users_by_claims_links_unlinked_account_on_username_with_its_verified_email(self):
+        batman = UserProfileFactory(username='batman', email=' Batman@Gotham.com')
 
         users = self.backend.filter_users_by_claims({**self.claim, 'sub': 'sub-1'})
         self.backend.update_user(users[0], {**self.claim, 'sub': 'sub-1'})
@@ -2766,26 +2807,108 @@ class OCLOIDCAuthenticationBackendTest(OCLTestCase):
         batman.refresh_from_db()
         self.assertEqual(batman.sso_id, 'sub-1')
 
+    def test_filter_users_by_claims_refuses_unlinked_account_on_username_without_its_verified_email(self):
+        batman = UserProfileFactory(username='batman', email='batman@gotham.com', first_name='Bat')
+        without_email_verified = {key: value for key, value in self.claim.items() if key != 'email_verified'}
+
+        for claims in [
+                {**self.claim, 'email_verified': False},
+                {**self.claim, 'email_verified': 'true'},
+                without_email_verified,
+                {**self.claim, 'email': 'joker@gotham.com'},
+                {**self.claim, 'email': None},
+                {**self.claim, 'email': ''},
+        ]:
+            for sub_claims in [claims, {**claims, 'sub': 'sub-1'}]:
+                with self.subTest(claims=sub_claims):
+                    with patch('core.users.models.UserProfile.save') as save_mock:
+                        with self.assertRaises(SSOUnlinkedAccountRefused):
+                            self.backend.filter_users_by_claims(sub_claims)
+                    save_mock.assert_not_called()
+
+        batman.refresh_from_db()
+        self.assertEqual(batman.email, 'batman@gotham.com')
+        self.assertEqual(batman.first_name, 'Bat')
+        self.assertIsNone(batman.sso_id)
+
+    def test_filter_users_by_claims_matches_linked_account_on_username_without_sub(self):
+        batman = UserProfileFactory(username='batman', email='batman@gotham.com', sso_id='sub-1')
+
+        users = self.backend.filter_users_by_claims({**self.claim, 'email': 'joker@gotham.com'})
+
+        self.assertEqual(list(users), [batman])
+
     def test_update_user_keeps_a_stored_sso_id(self):
         user = Mock(sso_id='sub-1')
         user.is_dirty.return_value = False
         self.backend.update_user(user, {**self.claim, 'sub': 'sub-2'})
         self.assertEqual(user.sso_id, 'sub-1')
 
-    def test_filter_users_by_claims_matches_username_exactly(self):
-        """Keycloak sends usernames in lowercase, and a mixed-case account is never matched, active or not"""
+    def test_filter_users_by_claims_prefers_the_exact_username(self):
         UserProfileFactory(username='Batman', email='batman@gotham.com')
+        batman = UserProfileFactory(username='batman', email='batman@gotham.com')
+
+        with self.assertNumQueries(1):
+            users = self.backend.filter_users_by_claims(self.claim)
+            self.assertEqual(list(users), [batman])
+
+    def test_filter_users_by_claims_matches_username_ignoring_case_with_its_verified_email(self):
+        batman = UserProfileFactory(username='Batman', email=' Batman@Gotham.com')
+
+        users = self.backend.filter_users_by_claims({**self.claim, 'sub': 'sub-1'})
+        self.assertEqual(list(users), [batman])
+        self.backend.update_user(users[0], {**self.claim, 'sub': 'sub-1'})
+
+        batman.refresh_from_db()
+        self.assertEqual(batman.username, 'Batman')
+        self.assertEqual(batman.sso_id, 'sub-1')
+        self.assertEqual(UserProfile.objects.filter(username__iexact='batman').count(), 1)
+
+    def test_filter_users_by_claims_refuses_username_ignoring_case_without_its_verified_email(self):
+        batman = UserProfileFactory(username='Batman', email='batman@gotham.com', first_name='Bat')
+        without_email_verified = {key: value for key, value in self.claim.items() if key != 'email_verified'}
+
+        for claims in [
+                {**self.claim, 'email_verified': False},
+                {**self.claim, 'email_verified': 'true'},
+                without_email_verified,
+                {**self.claim, 'email': 'joker@gotham.com'},
+                {**self.claim, 'email': None},
+                {**self.claim, 'email': ''},
+        ]:
+            with self.subTest(claims=claims):
+                with patch('core.users.models.UserProfile.save') as save_mock:
+                    with self.assertRaises(SSOUsernameCaseMismatchRefused):
+                        self.backend.filter_users_by_claims(claims)
+                save_mock.assert_not_called()
+
+        batman.refresh_from_db()
+        self.assertEqual(batman.first_name, 'Bat')
+        self.assertIsNone(batman.sso_id)
+
+    def test_filter_users_by_claims_refuses_several_accounts_matching_username_ignoring_case(self):
+        UserProfileFactory(username='Batman', email='batman@gotham.com')
+        UserProfileFactory(username='BatMan', email='joker@gotham.com')
+
+        with self.assertRaises(SSOUsernameCaseMismatchRefused):
+            self.backend.filter_users_by_claims(self.claim)
+
+    def test_filter_users_by_claims_refuses_username_ignoring_case_linked_to_a_different_sub(self):
+        UserProfileFactory(username='Batman', email='batman@gotham.com', sso_id='sub-1')
+
+        with self.assertRaises(SSOIdentityMismatchRefused):
+            self.backend.filter_users_by_claims({**self.claim, 'sub': 'sub-2'})
+
+    def test_filter_users_by_claims_reactivates_deactivated_user_ignoring_case_with_its_verified_email(self):
         robin = UserProfileFactory(username='Robin', email='robin@gotham.com')
         robin.deactivate()
 
-        self.assertEqual(self.backend.filter_users_by_claims(self.claim).count(), 0)
-        self.assertEqual(
-            self.backend.filter_users_by_claims(
-                {**self.claim, 'preferred_username': 'robin', 'email': 'robin@gotham.com'}).count(),
-            0
-        )
+        users = self.backend.filter_users_by_claims(
+            {**self.claim, 'preferred_username': 'robin', 'email': 'robin@gotham.com'})
+
+        self.assertEqual(list(users), [robin])
         robin.refresh_from_db()
-        self.assertFalse(robin.is_active)
+        self.assertTrue(robin.is_active)
 
     def test_filter_users_by_claims_reactivates_deactivated_user_with_its_verified_email(self):
         batman = UserProfileFactory(username='batman', email='Batman@Gotham.com ')
@@ -2849,7 +2972,7 @@ class OCLOIDCAuthenticationBackendTest(OCLTestCase):
                 self.assertFalse(collection.is_active)
 
     def test_filter_users_by_claims_looks_up_the_user_once(self):
-        UserProfileFactory(username='batman')
+        UserProfileFactory(username='batman', email='batman@gotham.com')
 
         with self.assertNumQueries(1):
             users = self.backend.filter_users_by_claims(self.claim)
@@ -2868,8 +2991,8 @@ class OCLOIDCAuthenticationBackendTest(OCLTestCase):
 
     @patch('core.common.backends.OCLOIDCAuthenticationBackend.get_userinfo')
     def test_get_or_create_user_for_active_user(self, get_userinfo_mock):
-        get_userinfo_mock.return_value = self.claim
-        batman = UserProfileFactory(username='batman', email='old@gotham.com', first_name='Bat')
+        get_userinfo_mock.return_value = {**self.claim, 'sub': 'sub-1'}
+        batman = UserProfileFactory(username='batman', email='old@gotham.com', first_name='Bat', sso_id='sub-1')
 
         user = self.backend.get_or_create_user('access-token', None, None)
 
@@ -2906,19 +3029,47 @@ class OCLOIDCAuthenticationBackendTest(OCLTestCase):
         self.assertEqual(batman.first_name, 'Bruce')
 
     @patch('core.common.backends.OCLOIDCAuthenticationBackend.get_userinfo')
-    def test_get_or_create_user_leaves_mixed_case_deactivated_user(self, get_userinfo_mock):
-        get_userinfo_mock.return_value = self.claim
-        old_batman = UserProfileFactory(username='Batman', email='batman@gotham.com', first_name='Bat')
-        old_batman.deactivate()
+    def test_get_or_create_user_for_unlinked_user(self, get_userinfo_mock):
+        batman = UserProfileFactory(username='batman', email='batman@gotham.com', first_name='Bat')
 
+        get_userinfo_mock.return_value = {**self.claim, 'sub': 'sub-1', 'email': 'joker@gotham.com'}
+        with patch.object(self.backend, 'update_user') as update_user_mock, \
+                patch.object(self.backend, 'create_user') as create_user_mock:
+            with self.assertRaises(SSOUnlinkedAccountRefused):
+                self.backend.get_or_create_user('access-token', None, None)
+        update_user_mock.assert_not_called()
+        create_user_mock.assert_not_called()
+        batman.refresh_from_db()
+        self.assertIsNone(batman.sso_id)
+        self.assertEqual(batman.email, 'batman@gotham.com')
+
+        get_userinfo_mock.return_value = {**self.claim, 'sub': 'sub-1'}
         user = self.backend.get_or_create_user('access-token', None, None)
 
-        self.assertNotEqual(user, old_batman)
-        self.assertEqual(user.username, 'batman')
-        self.assertTrue(user.is_active)
+        self.assertEqual(user, batman)
+        batman.refresh_from_db()
+        self.assertEqual(batman.sso_id, 'sub-1')
+        self.assertEqual(batman.first_name, 'Bruce')
+
+    @patch('core.common.backends.OCLOIDCAuthenticationBackend.get_userinfo')
+    def test_get_or_create_user_for_mixed_case_user(self, get_userinfo_mock):
+        old_batman = UserProfileFactory(username='Batman', email='batman@gotham.com', first_name='Bat')
+
+        get_userinfo_mock.return_value = {**self.claim, 'email': 'joker@gotham.com'}
+        with patch.object(self.backend, 'create_user') as create_user_mock:
+            with self.assertRaises(SSOUsernameCaseMismatchRefused):
+                self.backend.get_or_create_user('access-token', None, None)
+        create_user_mock.assert_not_called()
+        self.assertEqual(UserProfile.objects.filter(username__iexact='batman').count(), 1)
+
+        get_userinfo_mock.return_value = self.claim
+        user = self.backend.get_or_create_user('access-token', None, None)
+
+        self.assertEqual(user, old_batman)
+        self.assertEqual(UserProfile.objects.filter(username__iexact='batman').count(), 1)
         old_batman.refresh_from_db()
-        self.assertFalse(old_batman.is_active)
-        self.assertEqual(old_batman.first_name, 'Bat')
+        self.assertEqual(old_batman.username, 'Batman')
+        self.assertEqual(old_batman.first_name, 'Bruce')
 
     @patch('mozilla_django_oidc.auth.OIDCAuthenticationBackend.authenticate')
     def test_authenticate_fails_and_drops_stored_tokens_when_sign_in_is_refused(self, authenticate_mock):

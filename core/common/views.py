@@ -26,7 +26,7 @@ from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST, \
     BRIEF_PARAM, ES_REQUEST_TIMEOUT, INCLUDE_INACTIVE, FHIR_LIMIT_PARAM, RAW_PARAM, SEARCH_MAP_CODES_PARAM, \
     INCLUDE_SEARCH_META_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM, EXCLUDE_WILDCARD_SEARCH_PARAM, UPDATED_BY_USERNAME_PARAM, \
-    CANONICAL_URL_REQUEST_PARAM, CHECKSUMS_PARAM, ACCESS_TYPE_NONE
+    CANONICAL_URL_REQUEST_PARAM, CHECKSUMS_PARAM, ACCESS_TYPE_NONE, HTTP_COMPRESS_HEADER
 from core.common.exceptions import Http400
 from core.common.mixins import PathWalkerMixin
 from core.common.search import CustomESSearch, EXACT_OWNER_FIELD
@@ -34,10 +34,10 @@ from core.common.serializers import RootSerializer
 from core.common.swagger_parameters import all_resource_query_param
 from core.common.throttling import ThrottleUtil
 from core.common.utils import compact_dict_by_values, to_snake_case, parse_updated_since_param, \
-    to_int, get_falsy_values, get_truthy_values, format_url_for_search
+    to_int, get_falsy_values, get_truthy_values, format_url_for_search, cap_page_size
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.orgs.constants import ORG_OBJECT_TYPE
-from core.users.constants import USER_OBJECT_TYPE
+from core.users.constants import USER_OBJECT_TYPE, LIST_UNPAGINATED_PERMISSION
 
 TRUTHY = get_truthy_values()
 
@@ -52,6 +52,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     pk_field = 'mnemonic'
     user_is_self = False
     is_searchable = False
+    is_page_size_capped = False  # concept, mapping and reference lists: `limit` is capped at settings.LIST_MAX_LIMIT
     limit = LIST_DEFAULT_LIMIT
     default_filters = {}
     sort_asc_param = 'sortAsc'
@@ -130,6 +131,20 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         params = request.query_params.dict()
         self.validate_pagination_params(request, params)
         self.limit = params.get(LIMIT_PARAM, None) or params.get(FHIR_LIMIT_PARAM, None) or LIST_DEFAULT_LIMIT
+        self.limit = self.cap_limit(self.limit)
+
+    def cap_limit(self, limit):
+        """`limit`, capped on a capped list, except for checksums and for a `Compress` by someone allowed any size,
+         whose results must not be pre-sliced to one page."""
+        if not self.is_page_size_capped or (self.is_brief() and self.is_checksums()) or (
+                self.request.META.get(HTTP_COMPRESS_HEADER, False) in TRUTHY and self.can_list_unpaginated()):
+            return limit
+        return cap_page_size(limit)
+
+    def can_list_unpaginated(self):
+        """Staff, or `users.list_unpaginated`: `Compress` returns any size of list."""
+        user = self.request.user
+        return user.is_staff or user.has_perm(LIST_UNPAGINATED_PERMISSION)
 
     @staticmethod
     def validate_pagination_params(request, params):
@@ -1205,10 +1220,9 @@ class SourceChildCommonBaseView(BaseAPIView):
     def __set_params(self):
         self.params = self.__get_params()
         if self.params:
-            self.limit = to_int(
-                CSV_DEFAULT_LIMIT if self.params.get('csv') else self.params.get(LIMIT_PARAM),
-                LIST_DEFAULT_LIMIT
-            )
+            # `limit` as initialize read (and capped) it; `_count` isn't read here
+            limit = self.limit if self.params.get(LIMIT_PARAM) else self.cap_limit(LIST_DEFAULT_LIMIT)
+            self.limit = to_int(CSV_DEFAULT_LIMIT if self.params.get('csv') else limit, LIST_DEFAULT_LIMIT)
 
 
 class SourceChildExtrasBaseView:

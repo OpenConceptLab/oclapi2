@@ -121,13 +121,22 @@ apps_param = openapi.Parameter(
     'apps', openapi.IN_FORM, description="App Names (comma separated)", type=openapi.TYPE_STRING
 )
 ids_param = openapi.Parameter(
-    'ids', openapi.IN_FORM, description="Resource Ids", type=openapi.TYPE_STRING
+    'ids', openapi.IN_FORM, type=openapi.TYPE_STRING,
+    description="Selects rows by internal id (comma-separated, e.g. 1,2,3), not by mnemonic"
 )
 uri_param = openapi.Parameter(
-    'uri', openapi.IN_FORM, description="Relative URI", type=openapi.TYPE_STRING
+    'uri', openapi.IN_FORM, type=openapi.TYPE_STRING,
+    description="Selects every row whose URI contains this text, ignoring case"
 )
 filter_param = openapi.Parameter(
-    'filter', openapi.IN_FORM, description="Generic Filter", type=openapi.TYPE_OBJECT
+    'filter', openapi.IN_FORM, type=openapi.TYPE_STRING,
+    description='Selects rows by a non-empty JSON object of field lookups, e.g. {"id__in": [1, 2]} or '
+                '{"updated_at__gte": "2026-10-01T00:00:00Z"}'
+)
+update_indexed_param = openapi.Parameter(
+    'update_indexed', openapi.IN_FORM, type=openapi.TYPE_BOOLEAN, default=False,
+    description="Concepts and mappings: sets _index=true on the selected rows after indexing. Only true or 1 "
+                "turn it on"
 )
 resources_body_param = openapi.Parameter(
     'resource', openapi.IN_PATH, type=openapi.TYPE_STRING,

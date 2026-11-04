@@ -1,4 +1,5 @@
 from django.contrib.auth.models import Group
+from django.test import tag
 from mock import patch
 
 from core.common.constants import ACCESS_TYPE_NONE
@@ -57,6 +58,7 @@ class StopSearch(Exception):
     pass
 
 
+@tag('es')
 class MatchAccessTest(SearchResolutionAccessBaseTest):
     @patch('core.concepts.views.MetadataToConceptsListView.get_repo_params')
     def test_match_search_is_limited_to_visible_repos(self, get_repo_params_mock):
@@ -162,6 +164,7 @@ class MatchAccessTest(SearchResolutionAccessBaseTest):
         self.assertEqual(search_mock.call_args[0][2]['source_version'], 'HEAD')
 
 
+@tag('es')
 class RepoSearchOwnerCaseTest(SearchResolutionAccessBaseTest):
     def test_repo_search_excludes_private_content_of_owner_whose_name_differs_only_in_case(self):
         self.patch_concept_es_mapping_for_ci()
@@ -190,6 +193,7 @@ class RepoSearchOwnerCaseTest(SearchResolutionAccessBaseTest):
         self.assertEqual(search('mappings'), set())
 
 
+@tag('es')
 class RepoListSearchOwnerCaseTest(SearchResolutionAccessBaseTest):
     def test_repo_list_search_excludes_private_repos_of_owner_whose_name_differs_only_in_case(self):
         own_org = OrganizationFactory(mnemonic='resolveorg', public_access=ACCESS_TYPE_NONE)

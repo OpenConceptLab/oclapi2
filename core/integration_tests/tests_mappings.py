@@ -1,5 +1,5 @@
 from django.core.cache import cache
-from django.test import override_settings
+from django.test import override_settings, tag
 from rest_framework.exceptions import ErrorDetail
 
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
@@ -15,6 +15,26 @@ from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import UserSourceFactory, OrganizationSourceFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
+
+
+@tag('es')
+class MappingListPageSizeTest(OCLAPITestCase):
+    @override_settings(LIST_MAX_LIMIT=1)
+    def test_page_size_capped(self):
+        mapping = MappingFactory()
+        MappingFactory(parent=mapping.parent)
+        MappingDocument().update(mapping.parent.mappings_set.all())
+
+        for url in (mapping.parent.mappings_url, '/mappings/'):
+            response = self.client.get(url + '?limit=1000')
+            self.assertEqual(response.status_code, 200, url)
+            self.assertEqual(len(response.data), 1, url)
+            self.assertEqual(response['num_returned'], '1', url)
+            self.assertEqual(response['pages'], '2', url)
+
+        response = self.client.get(mapping.parent.mappings_url + '?limit=1000&page=2')
+        self.assertEqual(len(response.data), 1)
+        self.assertNotIn('next', response)
 
 
 class MappingListViewTest(OCLAPITestCase):
@@ -970,6 +990,7 @@ class MappingCollectionMembershipViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 0)
 
 
+@tag('es')
 @override_settings(CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}})
 class MappingListCacheTest(OCLAPITestCase):
     """

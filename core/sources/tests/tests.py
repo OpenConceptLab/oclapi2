@@ -7,7 +7,7 @@ from celery_once import AlreadyQueued
 from django.apps import apps
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.test import override_settings
+from django.test import override_settings, tag
 from mock import patch, Mock, ANY, PropertyMock, call
 from rest_framework import status
 from rest_framework.response import Response
@@ -557,9 +557,10 @@ class SourceTest(OCLTestCase):
 
         v1.delete(force=True, sync=True)
 
-        self.assertEqual(delete_s3_objects_mock.call_count, 2)
+        self.assertEqual(delete_s3_objects_mock.call_count, 3)
         called_paths = sorted(call.args[0] for call in delete_s3_objects_mock.call_args_list)
-        self.assertEqual(called_paths, sorted([expected_export_path, 'v1/external/report.zip']))
+        self.assertEqual(called_paths, sorted([
+            expected_export_path, v1.get_legacy_version_export_path(suffix=None), 'v1/external/report.zip']))
 
     @patch('core.common.models.delete_s3_objects')
     def test_delete_head_clears_export_and_external_export_s3_objects_for_all_versions(
@@ -576,6 +577,9 @@ class SourceTest(OCLTestCase):
             head.get_version_export_path(suffix=None),
             v1.get_version_export_path(suffix=None),
             v2.get_version_export_path(suffix=None),
+            head.get_legacy_version_export_path(suffix=None),
+            v1.get_legacy_version_export_path(suffix=None),
+            v2.get_legacy_version_export_path(suffix=None),
             'v1/external/report.zip',
             'v2/external/report.zip',
         ])
@@ -1050,6 +1054,21 @@ class SourceTest(OCLTestCase):
         )
 
         self.assertEqual(source.get_latest_released_version(), source_v2)
+
+    def test_get_latest_released_version_can_exclude_a_released_head(self):
+        source = OrganizationSourceFactory(released=True)
+
+        self.assertEqual(source.get_latest_released_version(), source)
+        self.assertIsNone(source.get_latest_released_version(exclude_head=True))
+
+        source_v1 = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True
+        )
+        OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v2', released=True, retired=True
+        )
+
+        self.assertEqual(source.get_latest_released_version(exclude_head=True), source_v1)
 
     def test_get_version(self):
         source = OrganizationSourceFactory()
@@ -2181,13 +2200,14 @@ class SourceTest(OCLTestCase):
 
         self.assertIsNone(source.get_changelog_task())
 
-    @patch('core.sources.models.resolve_url_registry_entries')
+    @patch('core.common.models.resolve_url_registry_entries')
     def test_save_queues_resolve_url_registry_entries_when_canonical_url_changes(self, resolve_mock):
         source = OrganizationSourceFactory(version=HEAD, canonical_url='https://old.com')
         OrganizationURLRegistryFactory(organization=source.organization, repo=source, url='https://foo.bar.com')
 
         source.canonical_url = 'https://new.com'
-        source.save()
+        with self.captureOnCommitCallbacks(execute=True):
+            source.save()
 
         resolve_mock.apply_async.assert_called_once_with(
             (source.id, source.resource_type), queue='default', permanent=False)
@@ -2561,6 +2581,7 @@ class IndexSourcePublicAccessTaskTest(OCLTestCase):
         batch_index_mock.assert_not_called()
 
 
+@tag('es')
 class TasksTest(OCLTestCase):
     @patch('core.sources.models.Source.index_children')
     @patch('core.common.tasks.export_source')

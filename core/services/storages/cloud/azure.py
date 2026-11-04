@@ -1,4 +1,6 @@
 import base64
+import re
+import time
 
 from azure.storage.blob import BlobServiceClient, ContentSettings, BlobPrefix
 from django.conf import settings
@@ -9,6 +11,8 @@ from core.services.storages.cloud.core import CloudStorageServiceInterface
 
 
 class BlobStorage(CloudStorageServiceInterface):
+    COPY_TIMEOUT_SECONDS = 300
+    COPY_POLL_SECONDS = 1
     def __init__(self):
         super().__init__()
         self.account_name = settings.AZURE_STORAGE_ACCOUNT_NAME
@@ -30,34 +34,54 @@ class BlobStorage(CloudStorageServiceInterface):
         except:  # pylint: disable=bare-except
             return False
 
-    def has_path(self, prefix='/', delimiter='/'):
+    def has_path(self, prefix='/', delimiter='/', key_pattern=None):
         try:
             blobs = self._fetch_blobs(prefix, delimiter)
-            return any(blob.name.startswith(prefix) for blob in blobs if not isinstance(blob, BlobPrefix))
+            return any(
+                blob.name.startswith(prefix) and self._matches(blob.name, key_pattern)
+                for blob in blobs if not isinstance(blob, BlobPrefix))
         except:  # pylint: disable=bare-except
             return False
 
-    def get_last_key_from_path(self, prefix='/', delimiter=''):
+    def get_last_key_from_path(self, prefix='/', delimiter='', key_pattern=None):
         try:
             if delimiter and not prefix.endswith(delimiter):
                 prefix = prefix + delimiter
             blobs = self._fetch_blobs(prefix, delimiter)
-            blob_names = [[blob.name, blob.last_modified] for blob in blobs if not isinstance(blob, BlobPrefix)]
+            blob_names = [
+                [blob.name, blob.last_modified] for blob in blobs
+                if not isinstance(blob, BlobPrefix) and self._matches(blob.name, key_pattern)]
             return sorted(
                 blob_names, key=lambda x: x[1], reverse=True)[0][0] if len(blob_names) > 1 else blob_names[0][0]
         except:  # pylint: disable=bare-except
             return None
 
-    def delete_objects(self, path):
+    def delete_objects(self, path, key_pattern=None):
         count_deleted = 0
         try:
             for blob in self._fetch_blobs(path, ''):
-                if not isinstance(blob, BlobPrefix):
+                if not isinstance(blob, BlobPrefix) and self._matches(blob.name, key_pattern):
                     self._remove(blob.name)
                     count_deleted += 1
             return count_deleted
         except:  # pylint: disable=bare-except
             return count_deleted
+
+    def get_keys(self, prefix, key_pattern=None):
+        return [
+            blob.name for blob in self._fetch_blobs(prefix, '')
+            if not isinstance(blob, BlobPrefix) and self._matches(blob.name, key_pattern)]
+
+    def copy(self, source_key, target_key):
+        target = self.__get_blob_client(target_key)
+        target.start_copy_from_url(self.__get_blob_client(source_key).url)
+        deadline = time.monotonic() + self.COPY_TIMEOUT_SECONDS
+        status = target.get_blob_properties().copy.status
+        while status == 'pending' and time.monotonic() < deadline:
+            time.sleep(self.COPY_POLL_SECONDS)
+            status = target.get_blob_properties().copy.status
+        if status != 'success':
+            raise Exception(f'Could not copy {source_key} to {target_key}: {status}')  # pylint: disable=broad-exception-raised
 
     def remove(self, key):
         try:
@@ -139,6 +163,10 @@ class BlobStorage(CloudStorageServiceInterface):
         if delimiter and prefix.endswith(delimiter):
             prefix = prefix[:-1]
         return self.client.walk_blobs(name_starts_with=prefix, delimiter=delimiter)
+
+    @staticmethod
+    def _matches(name, key_pattern):
+        return not key_pattern or bool(re.fullmatch(key_pattern, name))
 
     def _remove(self, blob_name):
         return self.__get_blob_client(blob_name).delete_blob()

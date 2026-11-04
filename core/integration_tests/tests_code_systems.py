@@ -220,6 +220,7 @@ class CodeSystemsTest(OCLAPITestCase):
                                  'type': 'Coding'
                              }],
                 'meta': {
+                    'versionId': ANY,
                     'lastUpdated': ANY
                 },
                 'version': '07/14/2020',

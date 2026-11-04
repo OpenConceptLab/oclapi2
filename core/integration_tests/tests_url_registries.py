@@ -1,5 +1,6 @@
 from rest_framework.exceptions import ErrorDetail
 
+from django.test import tag
 from core.common.tests import OCLAPITestCase
 from core.orgs.tests.factories import OrganizationFactory
 from core.url_registry.factories import GlobalURLRegistryFactory, OrganizationURLRegistryFactory, UserURLRegistryFactory
@@ -9,6 +10,7 @@ from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
 
+@tag('es')
 class URLRegistriesViewTest(OCLAPITestCase):
     def test_post_global_registry(self):
         user = UserProfile.objects.get(username='ocladmin')

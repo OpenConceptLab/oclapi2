@@ -1,16 +1,18 @@
 import logging
 import re
 import time
+from urllib.parse import quote
 
 from celery.result import AsyncResult
 from celery_once import AlreadyQueued
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericRelation
+from django.contrib.contenttypes.models import ContentType
 from django.contrib.postgres.fields import ArrayField
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
-from django.db import models, IntegrityError, transaction
+from django.db import models, IntegrityError, OperationalError, transaction
 from django.db.models import Value, Q, Count, Func
 from django.db.models.expressions import CombinedExpression, F
 from django.utils import timezone
@@ -28,7 +30,7 @@ from core.common.tasks import update_collection_active_concepts_count, update_co
 from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version, \
     to_parent_uri, is_canonical_uri, get_export_service, from_string_to_date, get_truthy_values, \
     canonical_url_to_url_and_version, get_current_authorized_user, encode_string, decode_string, \
-    normalize_public_access
+    normalize_public_access, get_export_key_pattern, EXPORT_KEY_TIMESTAMP_PATTERN
 from core.common.utils import to_owner_uri
 from core.common.constants import VERSION_UNCOPYABLE_EXTRAS
 from core.settings import DEFAULT_LOCALE
@@ -40,14 +42,15 @@ from .constants import (
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
     CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, OPENMRS_VALIDATION_SCHEMA, VALIDATION_SCHEMAS,
     DEFAULT_VALIDATION_SCHEMA, ES_REQUEST_TIMEOUT, UPDATED_BY_USERNAME_PARAM, ES_RETRYABLE_ERROR_TYPES,
-    INDEX_BATCH_SIZE)
+    INDEX_BATCH_SIZE, RETIRED_ACCESS_TYPE_EDIT)
 from .es import ESScript
 from .exceptions import Http400, BatchIndexingError
 from .fields import URIField
 from .mixins import SourceContainerMixin
 from .tasks import handle_save, handle_m2m_changed, seed_children_to_new_version, update_validation_schema, \
-    update_source_active_concepts_count, update_source_active_mappings_count
+    update_source_active_concepts_count, update_source_active_mappings_count, resolve_url_registry_entries
 from ..toggles.models import Toggle
+from ..url_registry.constants import URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE
 
 TRUTHY = get_truthy_values()
 
@@ -301,9 +304,17 @@ class BaseModel(models.Model):
     def is_versioned(self):
         return False
 
+    # the stored public_access values that let the public view, for querysets (is_public_access reads the same)
+    PUBLIC_ACCESS_VALUES = (ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT)
+
+    @staticmethod
+    def is_public_access(public_access):
+        """Whether a public_access value lets the public view: View, or the retired Edit."""
+        return (normalize_public_access(public_access) or '').lower() == ACCESS_TYPE_VIEW.lower()
+
     @property
     def public_can_view(self):
-        return normalize_public_access(self.public_access).lower() == ACCESS_TYPE_VIEW.lower()
+        return self.is_public_access(self.public_access)
 
     @property
     def resource_type(self):
@@ -712,8 +723,12 @@ class VersionedModel(BaseResourceModel):
     def get_last_version(self):
         return self.active_versions.order_by('-created_at').first()
 
-    def get_latest_released_version(self):
-        return self.released_versions.filter(retired=False).order_by('-created_at').first()
+    def get_latest_released_version(self, exclude_head=False):
+        """The newest released version that isn't retired; exclude_head skips a HEAD flagged released"""
+        versions = self.released_versions.filter(retired=False)
+        if exclude_head:
+            versions = versions.exclude(version=HEAD)
+        return versions.order_by('-created_at').first()
 
     def get_prev_released_version(self):
         return self.released_versions.exclude(id=self.id).order_by('-created_at').first()
@@ -735,6 +750,43 @@ class VersionedModel(BaseResourceModel):
     @property
     def versions_url(self):
         return drop_version(self.uri) + 'versions/'
+
+
+class ReferenceResolution:
+    """
+    How ConceptContainerModel.resolve_reference_expression picks a repository and the version it answers with: the
+    rules $resolveReference has always used. A caller with stricter rules (FHIR's, core.fhir.resolve) passes a
+    subclass; the resolver itself holds none of them.
+    """
+
+    def repository(self, criteria):
+        """The repository a canonical URL or an OCL path matches: the lowest-id one, a Source before a Collection."""
+        from core.repos.models import Repository
+        return Repository.get(criteria)
+
+    def canonical_criteria(self, criteria):
+        """What a repository matching a canonical URL must also be, where no registry entry decides."""
+        return criteria
+
+    def owner_repository(self, owner, url):
+        """The repository of an owner a canonical URL (or url|version) names."""
+        return owner.find_repo_by_canonical_url(url)
+
+    def entry_repository(self, entry):
+        """The repository a registry entry points at now."""
+        return entry.find_repo()
+
+    def version(self, repository, version):
+        """The repository's version named, else its latest release, else itself; None when no version is so named."""
+        if version:
+            return repository.versions.filter(version=decode_string(version)).first()
+        if repository.is_head:
+            return repository.get_latest_released_version() or repository
+        return repository
+
+    def unresolved(self):
+        from core.sources.models import Source
+        return Source()
 
 
 class ConceptContainerModel(VersionedModel, ChecksumModel):
@@ -854,6 +906,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     def get_last_child_update_from_export_url(self, export_url):
         generic_path = self.get_version_export_path(suffix=None)
+        if generic_path not in export_url:
+            generic_path = self.get_legacy_version_export_path(suffix=None)
         try:
             last_child_updated_at = export_url.split(generic_path)[1].split('?')[0].replace('.zip', '')
             return from_string_to_date(last_child_updated_at.replace('_', ' ')).isoformat()
@@ -922,13 +976,16 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     def delete(self, using=None, keep_parents=False, force=False, sync=False):  # pylint: disable=arguments-differ
         export_paths = self.get_export_paths_to_delete()
         deleted_urls = [self.url]
+        deleted_ids = [self.id]
+        canonical_urls = {self.canonical_url}
         if self.is_head:
             other_versions = list(self.versions.exclude(id=self.id))
             for other_version in other_versions:
                 other_version.clear_cache()
                 export_paths += other_version.get_export_paths_to_delete()
                 deleted_urls.append(other_version.url)
-            self.versions.exclude(id=self.id).delete()
+                deleted_ids.append(other_version.id)
+                canonical_urls.add(other_version.canonical_url)
         elif self.is_latest_version:
             prev_version = self.prev_version
             if not force and not prev_version:
@@ -936,6 +993,10 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             if prev_version:
                 prev_version.is_latest_version = True
                 prev_version.save()
+
+        registry_entry_ids = self.unlink_url_registry_entries(deleted_ids)
+        if self.is_head:
+            self.versions.exclude(id=self.id).delete()
 
         self.delete_pins()
         self.delete_following()
@@ -945,6 +1006,34 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         super().delete(using=using, keep_parents=keep_parents)
         self.delete_export_paths(export_paths, sync)
         self.post_delete_actions()
+        self.relink_url_registry_entries(registry_entry_ids, canonical_urls - {None, ''})
+
+    def unlink_url_registry_entries(self, repo_ids):
+        """
+        Unlinks (saved, so reindexed) the registry entries linked to these rows of this repository before the rows
+        are deleted: url_registry_entries is a GenericRelation, which would delete them with the rows. Returns
+        their ids for relink_url_registry_entries.
+        """
+        from core.url_registry.models import URLRegistry
+        entries = list(URLRegistry.objects.filter(
+            repo_type=ContentType.objects.get_for_model(self), repo_id__in=repo_ids))
+        for entry in entries:
+            entry.unlink()
+        return [entry.id for entry in entries]
+
+    def relink_url_registry_entries(self, entry_ids, canonical_urls):
+        """
+        After a delete: every active entry that was linked to a deleted row, and every active entry of this
+        repository's namespace naming one of the deleted rows' canonical URLs, linked or not, is re-resolved
+        (lookup_entry). An entry resolves in its own namespace only, so no other can have pointed at the rows. A retry
+        of a delete that failed part-way so finds, by URL, the entries the failed attempt unlinked. The link is a cache
+        that resolution never reads, so a failure here only leaves it stale until the next delete, retry or write that
+        relinks.
+        """
+        from core.url_registry.models import URLRegistry
+        for entry in URLRegistry.objects.filter(
+                Q(id__in=entry_ids) | Q(url__in=canonical_urls, namespace=self.parent_url), is_active=True):
+            entry.lookup_entry()
 
     @staticmethod
     def delete_version_changelogs(urls):
@@ -956,17 +1045,30 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         from core.repos.models import VersionChecksumMap
         VersionChecksumMap.objects.filter(version_url__in=urls).delete()
 
+    def get_export_key_prefixes(self):
+        prefix = self.get_version_export_path(suffix=None)
+        prefixes = [(prefix, get_export_key_pattern(prefix))]
+        if self.owns_legacy_export_path():
+            legacy_prefix = self.get_legacy_version_export_path(suffix=None)
+            prefixes.append((legacy_prefix, get_export_key_pattern(legacy_prefix)))
+        return prefixes
+
+    def delete_export_keys(self):
+        service = get_export_service()
+        for prefix, key_pattern in self.get_export_key_prefixes():
+            service.delete_objects(prefix, key_pattern=key_pattern)
+
     def get_export_paths_to_delete(self):
-        return [self.get_version_export_path(suffix=None)] + list(
-            self.external_exports.values_list('file_path', flat=True))
+        return self.get_export_key_prefixes() + [
+            (path, None) for path in self.external_exports.values_list('file_path', flat=True)]
 
     @staticmethod
     def delete_export_paths(export_paths, sync=False):
-        for export_path in export_paths:
+        for export_path, key_pattern in export_paths:
             if sync:
-                delete_s3_objects(export_path)
+                delete_s3_objects(export_path, key_pattern)
             else:
-                delete_s3_objects.apply_async((export_path,), queue='default', permanent=False)
+                delete_s3_objects.apply_async((export_path, key_pattern), queue='default', permanent=False)
 
     def get_concepts_cache_keys(self):
         return self.__get_resources_cache_keys('concepts')
@@ -1017,7 +1119,29 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     active_concepts_queryset = property(get_active_concepts)
     active_mappings_queryset = property(get_active_mappings)
 
+    # how resolve_reference_expression found this instance: by a canonical URL (is_fqdn) or an OCL path, and the URL
+    is_fqdn = False
+    resolution_url = None
+
+    @cached_property
+    def repository_head(self):
+        """The repository's HEAD: itself for a HEAD, else its active HEAD, or None."""
+        return self.head
+
+    @cached_property
+    def repository_public_access(self):
+        """The public_access of the repository, its active HEAD's, or None without one. A query may annotate it."""
+        head = self.repository_head
+        return head.public_access if head and head.is_active else None
+
+    @cached_property
+    def repository_canonical_url(self):
+        """The canonical URL of the repository, its HEAD's. A query may annotate it."""
+        head = self.repository_head
+        return head.canonical_url if head else None
+
     def has_parent_edit_access(self, user):
+        """The owner's has_edit_access, without reading a user-owned repository's owner."""
         if user.is_staff:
             return True
 
@@ -1136,7 +1260,30 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             return errors
 
         is_test_mode = get(settings, 'TEST_MODE', False)
+        # a synchronous seed from HEAD runs in this transaction, so it needs this transaction's snapshot
+        is_repeatable_read = sync and not is_test_mode and not transaction.get_connection().in_atomic_block and \
+            obj.can_seed_from_head_expansion()
+        attempts = 3 if is_repeatable_read else 1
+        for attempt in range(1, attempts + 1):
+            try:
+                cls.persist_new_version_in_transaction(obj, head, user, sync, is_repeatable_read, **kwargs)
+                break
+            except OperationalError as ex:
+                if attempt == attempts or not cls.is_serialization_failure(ex):
+                    raise
+                # rolled back, so start again as an unsaved version
+                obj.id = None
+                obj._state.adding = True  # pylint: disable=protected-access
+
+        return errors
+
+    @classmethod
+    def persist_new_version_in_transaction(cls, obj, head, user, sync, is_repeatable_read, **kwargs):  # pylint: disable=too-many-arguments
+        is_test_mode = get(settings, 'TEST_MODE', False)
         with transaction.atomic():
+            if is_repeatable_read:
+                with transaction.get_connection().cursor() as cursor:
+                    cursor.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
             # Serialize version creation with destructive child operations on the HEAD repository.
             head = cls.objects.select_for_update().get(id=head.id)
             obj.update_version_data(head)
@@ -1171,10 +1318,15 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
                 transaction.on_commit(enqueue_seed_task)
 
-        return errors
+    @staticmethod
+    def is_serialization_failure(ex):
+        return getattr(ex.__cause__, 'pgcode', None) == '40001'
 
     def index_resources_for_self_as_latest_released(self, only_update=False):  # pylint: disable=unused-argument
         pass
+
+    def can_seed_from_head_expansion(self):
+        return False
 
     @classmethod
     def persist_changes(cls, obj, updated_by, original_schema, **kwargs):  # pylint: disable=too-many-locals,too-many-branches
@@ -1395,9 +1547,25 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         return False
 
-    @property
-    def active_url_registry_entries(self):
-        return self.url_registry_entries.filter(is_active=True)
+    def url_registry_entries_to_resolve(self):
+        """
+        The active registry entries a change to this row's canonical URL may move: those linked to it, and those naming
+        its URL in its namespace, which resolve to the namespace's lowest-id row with the URL.
+        """
+        from core.url_registry.models import URLRegistry
+        linked = Q(repo_type=ContentType.objects.get_for_model(self), repo_id=self.id)
+        named = Q(url=self.canonical_url, namespace=self.parent_url) if self.canonical_url else Q(pk__in=[])
+        return URLRegistry.objects.filter(linked | named, is_active=True)
+
+    def resolve_url_registry_entries_later(self):
+        """
+        For a row created with, or given, a canonical URL: once the change commits, the resolve_url_registry_entries
+        task points the entries it may move at what they resolve to now. The request asks only whether there are any.
+        """
+        if self.url_registry_entries_to_resolve().exists():
+            args = (self.id, self.resource_type)  # this row's, whatever the instance becomes before the commit
+            transaction.on_commit(
+                lambda: resolve_url_registry_entries.apply_async(args, queue='default', permanent=False))
 
     @cached_property
     def version_export_path(self):
@@ -1405,6 +1573,25 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         return self.get_version_export_path(suffix=f"{last_update}.zip")
 
     def get_version_export_path(self, suffix='*'):
+        owner = self.parent
+        owner_type = f'{owner.get_url_kwarg()}s'
+        # each dynamic part is one segment, so a version like 'a/b' can't pass for version 'a' with expansion 'b'
+        parts = [owner.mnemonic, f'{self.resource_type.lower()}s', self.mnemonic, self.version]
+        expansion = get(self, 'expansion.mnemonic')
+        if expansion:
+            parts.append(expansion)
+        path = f"{owner_type}/" + '/'.join(quote(part, safe='') for part in parts) + '.'
+
+        if suffix:
+            path += suffix
+
+        return path
+
+    def get_legacy_version_export_path(self, suffix='*', with_expansion=True):
+        """
+        Pre-unique export key prefix. It has no repo type and forces a 'v' on the version, so versions '1.8' and 'v1.8',
+        or a source and a collection of the same name, build the same one.
+        """
         version = self.version
         if not version.lower().startswith('v'):
             version = f"v{version}"
@@ -1413,7 +1600,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         owner_mnemonic = owner.mnemonic
         owner_type = f'{owner.get_url_kwarg()}s'
         path = f"{owner_type}/{owner_mnemonic}/{owner_mnemonic}_{self.mnemonic}_{version}"
-        expansion = get(self, 'expansion.mnemonic')
+        expansion = get(self, 'expansion.mnemonic') if with_expansion else None
         if expansion:
             path = f"{path}_{expansion}"
         path = f'{path}.'
@@ -1423,16 +1610,56 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         return path
 
+    def owns_legacy_export_path(self):
+        """
+        True when no other source or collection version builds this version's legacy export prefix, so the keys
+        under it can only be its own. Underscores in the old format also let a version stand in for an expansion
+        (version 'a_b' and version 'a' with expansion 'b'), so every version of the owner whose mnemonic could
+        be part of the prefix is compared, not only this one's name variants.
+        """
+        from core.sources.models import Source
+        from core.collections.models import Collection
+
+        legacy_path = self.get_legacy_version_export_path(suffix=None)
+        mnemonic = str(self.mnemonic)
+        mnemonics = [mnemonic[:i] for i in range(1, len(mnemonic) + 1)]
+        mnemonic_criteria = Q(mnemonic__in=mnemonics) | Q(mnemonic__startswith=mnemonic)
+        for model in (Source, Collection):
+            candidates = model.objects.filter(
+                mnemonic_criteria, organization_id=self.organization_id, user_id=self.user_id)
+            for candidate in candidates:
+                if isinstance(self, model) and candidate.id == self.id:
+                    continue
+                base = candidate.get_legacy_version_export_path(suffix=None, with_expansion=False).rstrip('.')
+                same_path = candidate.get_legacy_version_export_path(suffix=None) == legacy_path
+                if legacy_path.startswith(base) and same_path:
+                    return False
+        return True
+
     def get_external_export_path(self, key, filename):
         base_path = self.get_version_export_path(suffix=None).rstrip('.')
         safe_filename = get_valid_filename(filename)
         return f"{base_path}/external/{key}_{safe_filename}"
 
     def get_export_path(self):
-        if self.is_head:
-            return self.version_export_path
         service = get_export_service()
-        return service.get_last_key_from_path(self.get_version_export_path(suffix=None)) or self.version_export_path
+        if self.is_head:
+            if service.exists(self.version_export_path):
+                return self.version_export_path
+            legacy = self.__legacy_head_export_path()
+            if service.exists(legacy) and self.owns_legacy_export_path():
+                return legacy
+            return self.version_export_path
+        prefix = self.get_version_export_path(suffix=None)
+        key = service.get_last_key_from_path(prefix, key_pattern=get_export_key_pattern(prefix))
+        if not key and self.owns_legacy_export_path():
+            legacy_prefix = self.get_legacy_version_export_path(suffix=None)
+            key = service.get_last_key_from_path(legacy_prefix, key_pattern=get_export_key_pattern(legacy_prefix))
+        return key or self.version_export_path
+
+    def __legacy_head_export_path(self):
+        last_update = self.last_child_update.strftime('%Y-%m-%d_%H%M%S')
+        return self.get_legacy_version_export_path(suffix=f"{last_update}.zip")
 
     def get_export_download_name(self, export_path):
         """
@@ -1442,11 +1669,11 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         right after this version's prefix gets no name (None), and the download keeps its storage name. Characters
         that aren't safe in a filename become '-'.
         """
-        # current (2026-09-30_123456) or legacy (20260930123456) key timestamp, anchored to the prefix because a key
-        # listed under it can be another version's (1.8.24.1's under 1.8.24's)
+        # current (2026-09-30_123456) or legacy (20260930123456) key timestamp
         match = re.fullmatch(
-            re.escape(self.get_version_export_path(suffix=None)) + r'(\d{4})-?(\d{2})-?(\d{2})_?(\d{6})\.zip',
-            export_path)
+            re.escape(self.get_version_export_path(suffix=None)) + EXPORT_KEY_TIMESTAMP_PATTERN, export_path
+        ) or re.fullmatch(
+            re.escape(self.get_legacy_version_export_path(suffix=None)) + EXPORT_KEY_TIMESTAMP_PATTERN, export_path)
         if not match:
             return None
 
@@ -1461,8 +1688,14 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     def has_export(self):
         service = get_export_service()
         if self.is_head:
-            return service.exists(self.version_export_path)
-        return service.has_path(self.get_version_export_path(suffix=None))
+            return service.exists(self.version_export_path) or (
+                service.exists(self.__legacy_head_export_path()) and self.owns_legacy_export_path())
+        prefix = self.get_version_export_path(suffix=None)
+        if service.has_path(prefix, key_pattern=get_export_key_pattern(prefix)):
+            return True
+        legacy_prefix = self.get_legacy_version_export_path(suffix=None)
+        return service.has_path(
+            legacy_prefix, key_pattern=get_export_key_pattern(legacy_prefix)) and self.owns_legacy_export_path()
 
     def can_view_all_content(self, user):
         if get(user, 'is_anonymous'):
@@ -1472,22 +1705,22 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         ) or self.public_can_view or self.user_id == user.id or self.organization.members.filter(id=user.id).exists()
 
     @classmethod
-    def resolve_expression_to_version(cls, expression):
+    def resolve_expression_to_version(cls, expression, namespace=None):
+        """`namespace` is the namespace of an expression that doesn't name its own (a dict without the key, or a url)"""
         url = expression
-        namespace = None
         version = None
         instance = None
         resolved_registry_entry = None
         if isinstance(expression, dict) and get(expression, 'url'):
             url = expression['url']
-            namespace = expression.get('namespace', None)
+            namespace = expression.get('namespace', namespace)
             version = expression.get('version', None)
         if url:
             instance, resolved_registry_entry = cls.resolve_reference_expression(url, namespace, version)
         return instance, resolved_registry_entry
 
     @classmethod
-    def resolve_reference_expression(cls, url, namespace=None, version=None):
+    def resolve_reference_expression(cls, url, namespace=None, version=None, resolution=None):
         """
         resolves to repository version according to this process:
 
@@ -1511,7 +1744,11 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 is defined somewhere else in OCL)
         2. Else if relative URL provided:
             - Return the repository directly using the relative URL, or return 404 if not found
+
+        Resolving reads only: it never writes a registry entry. `resolution` (a ReferenceResolution, the default)
+        decides which repository each step finds and the version the answer is.
         """
+        resolution = resolution or ReferenceResolution()
 
         resolution_url, version, is_canonical = cls.__get_resolution_url(url, version)
         instance = None
@@ -1521,42 +1758,36 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         from core.url_registry.models import URLRegistry
         registry_entry = None
         if is_canonical:
-            if Toggle.get('URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE'):
+            if Toggle.get(URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE):
                 registry_entry = None
                 if not is_global_namespace:
                     owner = SourceContainerMixin.get_object_from_namespace(namespace)
                     if owner:
                         registry_entry = owner.url_registry_entries.filter(is_active=True, url=resolution_url).first()
-                        instance = registry_entry.lookup_entry() if registry_entry else owner.find_repo_by_canonical_url(  # pylint: disable=line-too-long
-                            resolution_url)
+                        instance = resolution.entry_repository(registry_entry) if registry_entry else \
+                            resolution.owner_repository(owner, resolution_url)
 
                 if is_global_namespace or (not registry_entry and not instance):
                     registry_entry = URLRegistry.get_active_global_entries().filter(url=resolution_url).first()
                     if registry_entry:
-                        instance = registry_entry.lookup_entry()
+                        instance = resolution.entry_repository(registry_entry)
 
-                return cls.resolve_repo(instance, version, is_canonical, resolution_url), registry_entry
+                return cls.resolve_repo(instance, version, is_canonical, resolution_url, resolution), registry_entry
 
-            criteria &= models.Q(canonical_url=resolution_url)
+            criteria = resolution.canonical_criteria(criteria & models.Q(canonical_url=resolution_url))
             if namespace:
                 criteria &= models.Q(models.Q(user__uri=namespace) | models.Q(organization__uri=namespace))
         else:
             criteria &= models.Q(uri=(resolution_url if resolution_url.endswith('/') else resolution_url + '/'))
 
-        from core.repos.models import Repository
-        return cls.resolve_repo(Repository.get(criteria), version, is_canonical, resolution_url), registry_entry
+        return cls.resolve_repo(
+            resolution.repository(criteria), version, is_canonical, resolution_url, resolution), registry_entry
 
     @classmethod
-    def resolve_repo(cls, instance, version, is_canonical, resolution_url):
-        if instance:
-            if version:
-                instance = instance.versions.filter(version=decode_string(version)).first()
-            elif instance.is_head:
-                instance = instance.get_latest_released_version() or instance
-
-        if not instance:
-            from core.sources.models import Source
-            instance = Source()
+    def resolve_repo(  # pylint: disable=too-many-arguments
+            cls, instance, version, is_canonical, resolution_url, resolution=None):
+        resolution = resolution or ReferenceResolution()
+        instance = (resolution.version(instance, version) if instance else None) or resolution.unresolved()
 
         instance.is_fqdn = is_canonical
         instance.resolution_url = resolution_url

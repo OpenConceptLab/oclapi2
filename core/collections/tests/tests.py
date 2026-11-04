@@ -1,10 +1,12 @@
 import importlib
+from io import StringIO
 
 from celery_once import AlreadyQueued
 from django.apps import apps
 from django.core.exceptions import ValidationError
+from django.core.management import call_command, CommandError
 from django.http import QueryDict
-from django.test import override_settings
+from django.test import override_settings, tag
 from mock import patch, Mock
 from mock.mock import ANY
 from rest_framework import status
@@ -113,6 +115,9 @@ class CollectionTest(OCLTestCase):
             head.get_version_export_path(suffix=None),
             v1.get_version_export_path(suffix=None),
             v2.get_version_export_path(suffix=None),
+            head.get_legacy_version_export_path(suffix=None),
+            v1.get_legacy_version_export_path(suffix=None),
+            v2.get_legacy_version_export_path(suffix=None),
             'v1/external/report.zip',
             'v2/external/report.zip',
         ])
@@ -219,8 +224,9 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection.expansion.mappings.count(), 1)
         self.assertEqual(collection.references.count(), 3)
 
-        collection.delete_references(
-            [concept2.get_latest_version().uri, concept2.uri, mapping.get_latest_version().uri, mapping.uri])
+        with self.captureOnCommitCallbacks(execute=True):
+            collection.delete_references(
+                [concept2.get_latest_version().uri, concept2.uri, mapping.get_latest_version().uri, mapping.uri])
 
         self.assertEqual(collection.expansion.concepts.count(), 1)
         self.assertEqual(collection.expansion.mappings.count(), 0)
@@ -637,7 +643,8 @@ class CollectionTest(OCLTestCase):
         collection = OrganizationCollectionFactory(canonical_url='http://old.canonical.url')
         URLRegistry.objects.create(url='http://foo-registry.com', repo=collection, is_active=True)
 
-        with patch('core.collections.models.resolve_url_registry_entries') as resolve_mock:
+        with patch('core.common.models.resolve_url_registry_entries') as resolve_mock, \
+                self.captureOnCommitCallbacks(execute=True):
             collection.canonical_url = 'http://new.canonical.url'
             collection.save()
 
@@ -776,6 +783,7 @@ class CollectionTest(OCLTestCase):
         self.assertTrue(version1.expansion.is_auto_generated)
 
 
+@tag('es')
 class CollectionReferenceTest(OCLTestCase):
     def test_uri(self):
         org = OrganizationFactory(mnemonic='MyOrg')
@@ -877,6 +885,165 @@ class CollectionReferenceTest(OCLTestCase):
             second_reference.get_resolved_repo_versions_serialized(system_version_cache=system_version_cache)
 
         self.assertEqual(mock.call_count, 1)
+
+    @staticmethod
+    def source_with_replaced_concept_version():
+        """old: the concept version only v1 holds; new: its replacement, in HEAD and v2"""
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source, mnemonic='c1')
+        old = concept.get_latest_version()
+        new = ConceptFactory(parent=source, mnemonic='c1', versioned_object=concept, version='new')
+        old.sources.remove(source)
+        v1 = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+        v2 = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v2', released=True)
+        old.sources.add(v1)
+        new.sources.add(v2)
+        return source, old, v1, v2
+
+    @staticmethod
+    def _resource_version_reference(source, concept_version, **kwargs):
+        return CollectionReference(
+            expression=concept_version.uri, collection=OrganizationCollectionFactory(), system=source.uri,
+            code=concept_version.mnemonic, resource_version=concept_version.version, **kwargs)
+
+    def test_resolve_system_version_to_release_with_resource_version(self):
+        source, old, v1, _ = self.source_with_replaced_concept_version()
+        reference = self._resource_version_reference(source, old)
+
+        self.assertEqual(reference.resolve_system_version, v1)
+        self.assertEqual(list(reference.get_concepts()[0]), [old])
+
+    def test_resolve_system_version_to_latest_release_with_toggle_off(self):
+        source, old, _, v2 = self.source_with_replaced_concept_version()
+        reference = self._resource_version_reference(source, old)
+
+        with patch.object(CollectionReference, 'is_resource_version_repo_resolution_on', return_value=False):
+            self.assertEqual(reference.resolve_system_version, v2)
+            self.assertEqual(list(reference.get_concepts()[0]), [])
+
+    def test_resolve_system_version_to_head_then_retired_or_unreleased(self):
+        source, old, v1, _ = self.source_with_replaced_concept_version()
+        old.sources.add(source)
+        self.assertEqual(self._resource_version_reference(source, old).resolve_system_version, v1)
+
+        old.sources.remove(v1)
+        self.assertEqual(self._resource_version_reference(source, old).resolve_system_version, source)
+
+        old.sources.set([v1])
+        Source.objects.filter(id=v1.id).update(retired=True)
+        self.assertEqual(self._resource_version_reference(source, old).resolve_system_version.id, v1.id)
+
+        Source.objects.filter(id=v1.id).update(retired=False, released=False)
+        self.assertEqual(self._resource_version_reference(source, old).resolve_system_version.id, v1.id)
+
+    def test_resolve_system_version_without_any_version_holding_resource_version(self):
+        source, old, v1, v2 = self.source_with_replaced_concept_version()
+        old.sources.remove(v1)
+
+        self.assertEqual(self._resource_version_reference(source, old).resolve_system_version, v2)
+
+    def test_resolve_system_version_keeps_named_repo_version(self):
+        source, old, _, v2 = self.source_with_replaced_concept_version()
+
+        self.assertEqual(self._resource_version_reference(source, old, version='v2').resolve_system_version, v2)
+        self.assertEqual(
+            self._resource_version_reference(Source.objects.get(id=v2.id), old).resolve_system_version, v2)
+
+    def test_find_repo_version_with_resource_version_prefers_locked_version(self):
+        source, old, v1, v2 = self.source_with_replaced_concept_version()
+        old.sources.add(v2)
+        reference = self._resource_version_reference(source, old)
+
+        self.assertEqual(reference.find_repo_version_with_resource_version(source), v2)
+        self.assertEqual(reference.find_repo_version_with_resource_version(source, [v1]), v1)
+
+    def test_resolve_system_version_to_expansion_locked_version(self):
+        source, _, v1, v2 = self.source_with_replaced_concept_version()
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.evaluated_source_versions.add(v1)
+
+        def resolve(**kwargs):
+            return CollectionReference(
+                system=source.uri, collection=Collection.objects.get(id=collection.id), **kwargs
+            ).resolve_system_version
+
+        self.assertEqual(resolve(), v1)
+        self.assertEqual(resolve(version='v2'), v2)
+        with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False):
+            self.assertEqual(resolve(), v2)
+
+        expansion.evaluated_source_versions.set([source])
+        self.assertEqual(resolve(), source)
+
+    def test_get_repo_versions_holding_resource_versions_matches_lookup_per_reference(self):
+        source, old, v1, v2 = self.source_with_replaced_concept_version()
+        new = Concept.objects.get(versioned_object_id=old.versioned_object_id, version='new')
+        old.sources.add(v2)
+        mapping = MappingFactory(parent=source)
+        mapping_version = mapping.get_latest_version()
+        mapping_version.sources.add(v1)
+        references = [
+            self._resource_version_reference(source, old),
+            self._resource_version_reference(source, new),
+            self._resource_version_reference(source, old),
+            CollectionReference(
+                expression=mapping_version.uri, collection=OrganizationCollectionFactory(), system=source.uri,
+                code=str(mapping.mnemonic), resource_version=mapping_version.version, reference_type='mappings'),
+        ]
+        references[2].resource_version = 'missing'
+
+        holding_versions = CollectionReference.get_repo_versions_holding_resource_versions(references, source)
+
+        self.assertEqual(holding_versions[references[0].resource_version_key], [v2, v1])
+        self.assertEqual(holding_versions[references[3].resource_version_key], [v1, source])
+        self.assertNotIn(references[2].resource_version_key, holding_versions)
+        for reference in references:
+            self.assertEqual(
+                holding_versions.get(reference.resource_version_key, []),
+                list(reference.get_repo_versions_with_resource_version(source)))
+            self.assertEqual(
+                reference.find_repo_version_with_resource_version(source, [v1], holding_versions),
+                reference.find_repo_version_with_resource_version(source, [v1]))
+
+    def test_get_resolved_repo_versions_serialized_from_expansion(self):
+        source = OrganizationSourceFactory()
+        v1 = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+        v2 = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v2', released=True)
+        collection = OrganizationCollectionFactory()
+        reference = CollectionReference(
+            expression=f'{source.uri}concepts/foo/', collection=collection, system=source.uri, code='foo')
+
+        self.assertEqual([item['version_url'] for item in reference.get_resolved_repo_versions_serialized()], [v2.uri])
+
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.evaluated_source_versions.add(v1)
+
+        self.assertEqual([item['version_url'] for item in reference.get_resolved_repo_versions_serialized()], [v1.uri])
+
+    def test_get_resolved_repo_versions_serialized_from_expansion_without_evaluated_versions(self):
+        source, old, v1, v2 = self.source_with_replaced_concept_version()
+        reference = self._resource_version_reference(source, old)
+        versionless_reference = CollectionReference(
+            expression=f'{source.uri}concepts/c1/', collection=reference.collection, system=source.uri, code='c1')
+        expansion = ExpansionFactory(collection_version=reference.collection)
+        reference.collection.expansion_uri = expansion.uri
+        reference.collection.save()
+        expansion.explicit_source_versions.add(v1, v2)
+
+        self.assertEqual(
+            [item['version_url'] for item in reference.get_resolved_repo_versions_serialized()], [v1.uri])
+        self.assertCountEqual(
+            [item['version_url'] for item in versionless_reference.get_resolved_repo_versions_serialized()],
+            [v1.uri, v2.uri])
 
     def test_reference_as_concept_version(self):
         collection = OrganizationCollectionFactory()
@@ -1347,8 +1514,9 @@ class CollectionReferenceTest(OCLTestCase):
 
     def test_get_concepts_applies_es_filter_with_q_property(self):
         source = OrganizationSourceFactory()
-        concept = ConceptFactory(parent=source)
-        ConceptDocument().update([concept])
+        concept = ConceptFactory(parent=source, mnemonic='renal-failure')
+        other_concept = ConceptFactory(parent=source, mnemonic='headache')
+        ConceptDocument().update([concept, other_concept])
 
         reference = CollectionReference(
             system=source.uri, created_by=source.created_by,
@@ -1357,7 +1525,18 @@ class CollectionReferenceTest(OCLTestCase):
 
         concepts, _mappings = reference.get_concepts()
 
-        self.assertIsNotNone(concepts)
+        self.assertEqual(list(concepts.values_list('id', flat=True)), [concept.id])
+
+    def test_get_concepts_applies_es_filter_with_q_property_under_release_returns_its_resource_versions(self):
+        source, _, concept, concept_version = self.released_source_with_concepts()
+        reference = CollectionReference(
+            system=source.uri, created_by=source.created_by,
+            filter=[{'property': 'q', 'value': concept.mnemonic, 'op': '='}]
+        )
+
+        concepts, _ = reference.get_concepts()
+
+        self.assertEqual(list(concepts.values_list('id', flat=True)), [concept_version.id])
 
     def test_get_concepts_returns_empty_queryset_when_filters_return_none(self):
         source = OrganizationSourceFactory()
@@ -1391,6 +1570,77 @@ class CollectionReferenceTest(OCLTestCase):
         mappings = reference.get_mappings()
 
         self.assertEqual(list(mappings.values_list('id', flat=True)), [mapping.id])
+
+    @staticmethod
+    def released_source_with_concepts():
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source, concept_class='Diagnosis')
+        other_concept = ConceptFactory(parent=source, concept_class='Procedure')
+        release = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+        versions = [concept.get_latest_version(), other_concept.get_latest_version()]
+        release.concepts.add(*versions)
+        ConceptDocument().update([concept, other_concept, *versions])
+        return source, release, concept, versions[0]
+
+    def test_get_concepts_applies_es_filter_under_release_returns_its_resource_versions(self):
+        source, _, concept, concept_version = self.released_source_with_concepts()
+        reference = CollectionReference(
+            system=source.uri, created_by=source.created_by,
+            filter=[{'property': 'concept_class', 'value': 'Diagnosis', 'op': '='}]
+        )
+
+        concepts, _ = reference.get_concepts()
+        self.assertEqual(list(concepts.values_list('id', flat=True)), [concept_version.id])
+
+        with patch.object(CollectionReference, 'is_intensional_resource_versions_on', return_value=False):
+            concepts, _ = reference.get_concepts()
+        self.assertEqual(list(concepts.values_list('id', flat=True)), [concept.id])
+
+    def test_get_concepts_applies_es_filter_under_head_returns_head_concepts(self):
+        source, _, concept, _ = self.released_source_with_concepts()
+        reference = CollectionReference(
+            system=source.uri, version='HEAD', created_by=source.created_by,
+            filter=[{'property': 'concept_class', 'value': 'Diagnosis', 'op': '='}]
+        )
+
+        concepts, _ = reference.get_concepts()
+
+        self.assertEqual(list(concepts.values_list('id', flat=True)), [concept.id])
+
+    def test_get_concepts_applies_es_filter_under_release_with_cascade(self):
+        source, release, concept, concept_version = self.released_source_with_concepts()
+        mapping = MappingFactory(
+            parent=source, from_concept=concept, to_concept=ConceptFactory(parent=source), map_type='SAME-AS')
+        mapping_version = mapping.get_latest_version()
+        release.mappings.add(mapping_version)
+        reference = CollectionReference(
+            system=source.uri, created_by=source.created_by, cascade='sourcemappings',
+            filter=[{'property': 'concept_class', 'value': 'Diagnosis', 'op': '='}]
+        )
+
+        concepts, mappings = reference.get_concepts()
+
+        self.assertEqual(list(concepts.values_list('id', flat=True)), [concept_version.id])
+        self.assertEqual(list(mappings.values_list('id', flat=True)), [mapping_version.id])
+
+    def test_get_mappings_applies_es_filter_under_release_returns_its_resource_versions(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source)
+        mapping = MappingFactory(from_concept=concept, to_concept=concept, parent=source, map_type='SAME-AS')
+        mapping_version = mapping.get_latest_version()
+        release = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+        release.mappings.add(mapping_version)
+        MappingDocument().update([mapping, mapping_version])
+        reference = CollectionReference(
+            system=source.uri, created_by=source.created_by, reference_type='mappings',
+            filter=[{'property': 'map_type', 'value': 'SAME-AS', 'op': '='}]
+        )
+
+        mappings = reference.get_mappings()
+
+        self.assertEqual(list(mappings.values_list('id', flat=True)), [mapping_version.id])
 
     def test_get_mappings_returns_empty_queryset_when_filters_return_none(self):
         source = OrganizationSourceFactory()
@@ -1924,6 +2174,385 @@ class TasksTest(OCLTestCase):
         self.assertEqual(expansion.mappings.count(), 1)
         export_collection_task.apply_async.assert_not_called()
 
+    @patch('core.common.tasks.export_collection')
+    def test_seed_children_task_copies_head_expansion(self, _):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, parameters={'activeOnly': True})
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        concept = ConceptFactory()
+        mapping_version = MappingFactory().get_latest_version()
+        expansion.concepts.add(concept)
+        expansion.mappings.add(mapping_version)
+        expansion.evaluated_source_versions.add(concept.parent)
+        collection_v1 = OrganizationCollectionFactory(
+            organization=collection.organization, version='v1', mnemonic=collection.mnemonic)
+
+        seed_children_to_new_version('collection', collection_v1.id, False)  # pylint: disable=no-value-for-parameter
+
+        collection_v1.refresh_from_db()
+        copy = collection_v1.expansion
+        self.assertEqual(list(copy.concepts.all()), [concept.get_latest_version()])
+        self.assertEqual(list(copy.mappings.all()), [mapping_version])
+        self.assertEqual(list(copy.evaluated_source_versions.all()), [concept.parent])
+        self.assertEqual(copy.parameters, expansion.parameters)
+
+    @staticmethod
+    def head_with_head_concept_member():
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='autoexpand-HEAD')
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        concept = ConceptFactory()
+        collection.add_expressions({'expressions': [concept.uri]}, collection.created_by)
+        collection_v1 = OrganizationCollectionFactory(
+            organization=collection.organization, version='v1', mnemonic=collection.mnemonic)
+        return expansion, concept, collection_v1
+
+    @patch('core.collections.models.batch_index_resources')
+    @patch('core.common.tasks.export_collection')
+    def test_seed_children_task_swaps_head_resources_in_references(self, _, batch_index_resources_mock):
+        expansion, concept, collection_v1 = self.head_with_head_concept_member()
+        self.assertEqual(list(expansion.concepts.all()), [concept])
+
+        seed_children_to_new_version('collection', collection_v1.id, False)  # pylint: disable=no-value-for-parameter
+
+        collection_v1.refresh_from_db()
+        latest = concept.get_latest_version()
+        reference = collection_v1.references.first()
+        self.assertEqual(list(collection_v1.expansion.concepts.all()), [latest])
+        self.assertEqual(list(reference.concepts.all()), [latest])
+
+        with self.captureOnCommitCallbacks(execute=True):
+            collection_v1.delete_references([reference.expression])
+        self.assertFalse(collection_v1.expansion.concepts.exists())
+        batch_index_resources_mock.apply_async.assert_called_once_with(
+            ('concept', {'id__in': [latest.id]}), queue='indexing', permanent=False)
+
+    @patch('core.common.tasks.export_collection')
+    def test_seed_children_task_evaluates_references_while_head_expansion_is_processing(self, _):
+        expansion, concept, collection_v1 = self.head_with_head_concept_member()
+        Expansion.objects.filter(id=expansion.id).update(is_processing=True, parameters={'activeOnly': True})
+
+        seed_children_to_new_version('collection', collection_v1.id, False)  # pylint: disable=no-value-for-parameter
+
+        collection_v1.refresh_from_db()
+        latest = concept.get_latest_version()
+        copy = collection_v1.expansion
+        self.assertFalse(copy.is_processing)
+        self.assertEqual(copy.parameters, {'activeOnly': True})
+        self.assertEqual(list(copy.concepts.all()), [latest])
+        self.assertEqual(list(collection_v1.references.first().concepts.all()), [latest])
+
+    @patch('core.collections.models.batch_index_resources')
+    @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
+    @patch('core.common.tasks.export_collection')
+    def test_seed_children_task_evaluates_references_while_a_removal_awaits_its_readd(self, _, readd_mock, __):
+        readd_mock.__name__ = 'readd_references_to_expansion_on_references_removal'
+        source = OrganizationSourceFactory()
+        shared = ConceptFactory(parent=source, mnemonic='shared')
+        other = ConceptFactory(parent=source, mnemonic='other')
+        head = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=head, mnemonic='autoexpand-HEAD')
+        head.expansion_uri = expansion.uri
+        head.save()
+        head.add_expressions({'expressions': [shared.uri]}, head.created_by)
+        head.add_expressions({'expressions': [source.uri + 'concepts/']}, head.created_by)
+
+        with override_settings(TEST_MODE=False), self.captureOnCommitCallbacks(execute=True):
+            head.delete_references([shared.uri])
+        self.assertTrue(readd_mock.apply_async.called)
+        self.assertTrue(expansion.has_pending_readd)
+        self.assertEqual(list(expansion.concepts.values_list('mnemonic', flat=True)), ['other'])
+
+        collection_v1 = OrganizationCollectionFactory(
+            organization=head.organization, version='v1', mnemonic=head.mnemonic)
+        seed_children_to_new_version('collection', collection_v1.id, False)  # pylint: disable=no-value-for-parameter
+
+        collection_v1.refresh_from_db()
+        self.assertEqual(
+            sorted(collection_v1.expansion.concepts.values_list('id', flat=True)),
+            sorted([shared.get_latest_version().id, other.get_latest_version().id]))
+
+    def test_has_pending_readd_until_the_readd_succeeds(self):
+        expansion = ExpansionFactory(collection_version=OrganizationCollectionFactory())
+        task = Task.new(
+            user=expansion.collection_version.created_by,
+            name='readd_references_to_expansion_on_references_removal', args=[expansion.id, [1]])
+        self.assertTrue(expansion.has_pending_readd)
+
+        Task.objects.filter(id=task.id).update(state='FAILURE')
+        self.assertTrue(expansion.has_pending_readd)
+
+        Task.objects.filter(id=task.id).update(state='SUCCESS')
+        self.assertFalse(expansion.has_pending_readd)
+
+    @patch('core.common.tasks.export_collection')
+    def test_seed_children_task_evaluates_valueset_references_while_head_expansion_is_processing(self, _):
+        valueset = OrganizationCollectionFactory()
+        valueset_expansion = ExpansionFactory(collection_version=valueset)
+        valueset.expansion_uri = valueset_expansion.uri
+        valueset.save()
+        concept = ConceptFactory().get_latest_version()
+        valueset_expansion.concepts.add(concept)
+        head = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=head, mnemonic='autoexpand-HEAD', is_processing=True)
+        head.expansion_uri = expansion.uri
+        head.save()
+        reference = CollectionReference(
+            expression=valueset.uri, collection=head, valueset=[valueset.uri], reference_type='concepts')
+        reference.clean()
+        reference.save()
+        reference.concepts.add(concept)
+        collection_v1 = OrganizationCollectionFactory(
+            organization=head.organization, version='v1', mnemonic=head.mnemonic)
+
+        seed_children_to_new_version('collection', collection_v1.id, False)  # pylint: disable=no-value-for-parameter
+
+        collection_v1.refresh_from_db()
+        self.assertEqual(list(collection_v1.expansion.concepts.all()), [concept])
+        self.assertEqual(list(collection_v1.references.first().concepts.all()), [concept])
+
+    @staticmethod
+    def valueset_release(valueset, version):
+        release = OrganizationCollectionFactory(
+            organization=valueset.organization, mnemonic=valueset.mnemonic, version=version, released=True)
+        expansion = ExpansionFactory(collection_version=release)
+        release.expansion_uri = expansion.uri
+        release.save()
+        concept = ConceptFactory().get_latest_version()
+        expansion.concepts.add(concept)
+        return release, concept
+
+    @patch('core.common.tasks.export_collection')
+    def test_seed_children_task_keeps_head_valueset_lock_while_head_expansion_is_processing(self, _):
+        valueset = OrganizationCollectionFactory()
+        locked, locked_concept = self.valueset_release(valueset, 'v1')
+        newer, _ = self.valueset_release(valueset, 'v2')
+        head = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=head, mnemonic='autoexpand-HEAD', is_processing=True)
+        expansion.evaluated_collection_versions.add(locked)
+        head.expansion_uri = expansion.uri
+        head.save()
+        reference = CollectionReference(
+            expression=valueset.uri, collection=head, valueset=[valueset.uri], reference_type='concepts')
+        reference.clean()
+        reference.save()
+        collection_v1 = OrganizationCollectionFactory(
+            organization=head.organization, version='v1', mnemonic=head.mnemonic)
+
+        seed_children_to_new_version('collection', collection_v1.id, False)  # pylint: disable=no-value-for-parameter
+
+        collection_v1.refresh_from_db()
+        copy = collection_v1.expansion
+        self.assertEqual(list(copy.concepts.all()), [locked_concept])
+        self.assertEqual(list(copy.evaluated_collection_versions.all()), [locked])
+        self.assertNotIn(newer, copy.evaluated_collection_versions.all())
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.collections.models.batch_index_resources')
+    @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
+    def test_remove_references_queues_readd_after_the_references_are_gone(self, readd_mock, _):
+        readd_mock.__name__ = 'readd_references_to_expansion_on_references_removal'
+        concept = ConceptFactory()
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.concepts.add(concept)
+        reference = CollectionReference(expression=concept.uri, collection=collection)
+        reference.save()
+        reference.concepts.add(concept)
+
+        with self.captureOnCommitCallbacks() as callbacks:
+            collection.remove_references(collection.references.all())
+            self.assertFalse(readd_mock.apply_async.called)
+
+        self.assertFalse(collection.references.exists())
+        self.assertFalse(expansion.concepts.exists())
+        for callback in callbacks:
+            callback()
+        self.assertTrue(readd_mock.apply_async.called)
+
+    @staticmethod
+    def collection_with_referenced_member():
+        concept = ConceptFactory()
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.concepts.add(concept)
+        reference = CollectionReference(expression=concept.uri, collection=collection)
+        reference.save()
+        reference.concepts.add(concept)
+        return collection, expansion, reference
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.collections.models.batch_index_resources')
+    @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
+    def test_remove_references_with_toggle_off_queues_at_once_before_deleting(self, readd_mock, batch_index_mock):
+        collection, _, reference = self.collection_with_referenced_member()
+        reference_existed = []
+        readd_mock.apply_async.side_effect = lambda *args, **kwargs: reference_existed.append(
+            CollectionReference.objects.filter(id=reference.id).exists())
+
+        with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False), \
+                self.captureOnCommitCallbacks() as callbacks:
+            collection.remove_references(collection.references.all())
+
+        self.assertEqual(callbacks, [])
+        self.assertTrue(batch_index_mock.apply_async.called)
+        readd_mock.apply_async.assert_called_once_with(
+            (collection.expansion.id, [reference.id]), queue='default', permanent=False)
+        self.assertEqual(reference_existed, [True])
+        self.assertFalse(
+            Task.objects.filter(name__iendswith='readd_references_to_expansion_on_references_removal').exists())
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.collections.models.batch_index_resources')
+    @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
+    def test_remove_references_queues_readd_when_indexing_fails(self, readd_mock, batch_index_mock):
+        readd_mock.__name__ = 'readd_references_to_expansion_on_references_removal'
+        batch_index_mock.apply_async.side_effect = Exception('broker down')
+        collection, _, _ = self.collection_with_referenced_member()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            collection.remove_references(collection.references.all())
+
+        self.assertTrue(batch_index_mock.apply_async.called)
+        self.assertTrue(readd_mock.apply_async.called)
+
+    @patch('core.collections.models.transaction.atomic')
+    def test_atomic_when_locked(self, atomic_mock):
+        CollectionReference.atomic_when_locked()
+        atomic_mock.assert_called_once()
+
+        atomic_mock.reset_mock()
+        with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False):
+            CollectionReference.atomic_when_locked()
+        atomic_mock.assert_not_called()
+
+    def test_add_references_sets_lock_context_before_generating_only_with_toggle_on(self):
+        concept = ConceptFactory()
+        for is_locked in (True, False):
+            collection = OrganizationCollectionFactory()
+            with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=is_locked), \
+                    patch.object(CollectionReference, 'clear_resolution_cache') as clear_mock:
+                collection.add_references(
+                    [CollectionReference(expression=concept.uri, created_by=collection.created_by)],
+                    collection.created_by, True)
+            self.assertEqual(clear_mock.called, is_locked)
+
+    def test_cascade_children_to_expansion_claims_default_only_with_toggle_on(self):
+        for is_locked in (True, False):
+            collection = OrganizationCollectionFactory()
+            Collection.objects.filter(id=collection.id).update(expansion_uri=None)
+            collection.refresh_from_db()
+            with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=is_locked), \
+                    patch.object(Expansion, 'persist', wraps=Expansion.persist) as persist_mock:
+                expansion = collection.cascade_children_to_expansion(index=False)
+            self.assertEqual(persist_mock.call_args.kwargs['claim_default'], is_locked)
+            collection.refresh_from_db()
+            self.assertEqual(collection.expansion_uri, expansion.uri)
+
+    def test_add_references_keeps_an_explicitly_named_valueset_version_against_a_lock(self):
+        valueset = OrganizationCollectionFactory()
+        locked, _ = self.valueset_release(valueset, 'r1')
+        named, named_concept = self.valueset_release(valueset, 'r2')
+        Collection.objects.filter(id=named.id).update(released=False)
+        head = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=head, mnemonic='autoexpand-HEAD')
+        expansion.evaluated_collection_versions.add(locked)
+        head.expansion_uri = expansion.uri
+        head.save()
+
+        head.add_expressions({'expressions': [named.uri + 'concepts/']}, head.created_by)
+
+        self.assertEqual(list(expansion.concepts.all()), [named_concept])
+        self.assertEqual(list(head.references.first().concepts.all()), [named_concept])
+
+    @patch('core.common.tasks.export_collection')
+    def test_seed_from_head_expansion_seeds_when_another_expansion_exists(self, _):
+        expansion, concept, collection_v1 = self.head_with_head_concept_member()
+        ExpansionFactory(collection_version=collection_v1, mnemonic='posted')
+
+        seed_children_to_new_version('collection', collection_v1.id, False)  # pylint: disable=no-value-for-parameter
+
+        self.assertEqual(collection_v1.references.count(), 1)
+        autoexpansion = collection_v1.expansions.get(mnemonic='autoexpand-v1')
+        self.assertEqual(list(autoexpansion.concepts.all()), [concept.get_latest_version()])
+        self.assertEqual(expansion.concepts.count(), 1)
+
+    @patch('core.common.tasks.export_collection')
+    def test_seed_from_head_expansion_is_a_no_op_once_seeded(self, _):
+        expansion, concept, collection_v1 = self.head_with_head_concept_member()
+        seed_children_to_new_version('collection', collection_v1.id, False)  # pylint: disable=no-value-for-parameter
+        expansion.concepts.add(ConceptFactory().get_latest_version())
+        collection_v1.refresh_from_db()
+
+        self.assertTrue(collection_v1.seed_from_head_expansion())
+
+        self.assertEqual(collection_v1.references.count(), 1)
+        self.assertEqual(list(collection_v1.expansion.concepts.all()), [concept.get_latest_version()])
+
+    @patch('core.common.tasks.export_collection')
+    def test_seed_from_head_expansion_converts_head_resources_held_only_by_references(self, _):
+        expansion, concept, collection_v1 = self.head_with_head_concept_member()
+        latest = concept.get_latest_version()
+        expansion.concepts.set([latest])
+        head_reference = expansion.collection_version.references.first()
+        head_reference.concepts.add(latest)
+        self.assertEqual(sorted(head_reference.concepts.values_list('id', flat=True)), sorted([concept.id, latest.id]))
+
+        seed_children_to_new_version('collection', collection_v1.id, False)  # pylint: disable=no-value-for-parameter
+
+        collection_v1.refresh_from_db()
+        reference = collection_v1.references.first()
+        self.assertEqual(list(reference.concepts.values_list('id', flat=True)), [latest.id])
+        self.assertEqual(list(collection_v1.expansion.concepts.all()), [latest])
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.common.models.seed_children_to_new_version')
+    def test_persist_new_version_sync_seeds_inline(self, seed_mock):
+        collection = OrganizationCollectionFactory()
+        collection_v1 = Collection(
+            version='v1', mnemonic=collection.mnemonic, organization=collection.organization)
+
+        with self.captureOnCommitCallbacks(execute=False) as callbacks:
+            Collection.persist_new_version(collection_v1, collection.created_by, sync=True)
+
+        seed_mock.assert_called_once_with('collection', collection_v1.id, True, True)
+        self.assertEqual(callbacks, [])
+
+    def test_expansion_created_later_does_not_copy_head_expansion(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.concepts.add(ConceptFactory())
+        collection_v1 = OrganizationCollectionFactory(
+            organization=collection.organization, version='v1', mnemonic=collection.mnemonic)
+
+        later = Expansion.persist(index=False, collection_version=collection_v1, mnemonic='autoexpand-v1')
+
+        self.assertFalse(later.concepts.exists())
+
+    @patch('core.common.tasks.export_collection')
+    def test_seed_children_task_builds_from_references_with_toggle_off(self, _):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.concepts.add(ConceptFactory())
+        collection_v1 = OrganizationCollectionFactory(
+            organization=collection.organization, version='v1', mnemonic=collection.mnemonic)
+
+        with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False):
+            seed_children_to_new_version('collection', collection_v1.id, False)  # pylint: disable=no-value-for-parameter
+
+        collection_v1.refresh_from_db()
+        self.assertEqual(collection_v1.expansion.concepts.count(), 0)
+
     @patch('core.collections.models.index_expansion_mappings')
     @patch('core.collections.models.index_expansion_concepts')
     @patch('core.common.tasks.collection_version_compare')
@@ -2010,6 +2639,7 @@ class TasksTest(OCLTestCase):
         self.assertEqual(collection.active_concepts, 1)
 
 
+@tag('es')
 class ExpansionTest(OCLTestCase):
     @patch('core.collections.models.seed_children_to_expansion')
     def test_persist_without_mnemonic(self, seed_children_to_expansion_mock):
@@ -2022,6 +2652,141 @@ class ExpansionTest(OCLTestCase):
         self.assertEqual(expansion.id, expansion.mnemonic)
         self.assertEqual(expansion.collection_version, collection)
         seed_children_to_expansion_mock.assert_called_once_with(expansion.id, False)
+
+    @staticmethod
+    def locked_auto_expansion(lock):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='autoexpand-HEAD')
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.evaluated_source_versions.add(lock)
+        return collection
+
+    def test_add_references_generates_cascaded_references_within_locked_version(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source)
+        v1 = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+        v2 = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v2', released=True)
+        concept.get_latest_version().sources.add(v1, v2)
+        collection = self.locked_auto_expansion(v1)
+
+        collection.add_references([CollectionReference(
+            system=source.uri, code=concept.mnemonic, reference_type='concepts', created_by=collection.created_by,
+            cascade={'method': SOURCE_TO_CONCEPTS}, transform=TRANSFORM_TO_RESOURCE_VERSIONS)], collection.created_by)
+
+        self.assertEqual(list(collection.references.values_list('version', flat=True)), ['v1'])
+
+    def test_add_references_resolves_within_locked_version(self):
+        source, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        expression = {'expressions': [old.versioned_object.uri]}
+
+        collection = self.locked_auto_expansion(v1)
+        collection.add_expressions(expression, collection.created_by)
+        self.assertEqual(list(collection.expansion.concepts.all()), [old])
+        self.assertEqual(list(collection.expansion.evaluated_source_versions.all()), [v1])
+
+        with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False):
+            collection = self.locked_auto_expansion(v1)
+            collection.add_expressions(expression, collection.created_by)
+            self.assertNotIn(old, collection.expansion.concepts.all())
+            self.assertEqual(list(collection.expansion.evaluated_source_versions.all()), [v1])
+
+        collection = self.locked_auto_expansion(source)
+        collection.add_expressions(expression, collection.created_by)
+        self.assertEqual(list(collection.expansion.evaluated_source_versions.all()), [source])
+
+    def test_rebuild_writes_resolved_resources_back_to_references(self):
+        _, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection = self.locked_auto_expansion(v1)
+        collection.add_expressions({'expressions': [old.versioned_object.uri]}, collection.created_by)
+        reference = collection.references.first()
+        self.assertEqual(list(reference.concepts.all()), [old])
+
+        collection.expansion.seed_children(index=False, force_reevaluate=True)
+
+        self.assertEqual(list(reference.concepts.all()), list(collection.expansion.concepts.all()))
+        self.assertNotIn(old, reference.concepts.all())
+
+    def test_rebuild_keeps_references_resolved_resources_with_toggle_off(self):
+        _, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection = self.locked_auto_expansion(v1)
+        collection.add_expressions({'expressions': [old.versioned_object.uri]}, collection.created_by)
+        reference = collection.references.first()
+
+        with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False):
+            collection.expansion.seed_children(index=False, force_reevaluate=True)
+
+        self.assertEqual(list(reference.concepts.all()), [old])
+
+    def test_reevaluating_a_manual_expansion_without_default_keeps_references_resolved_resources(self):
+        _, old, _, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection = OrganizationCollectionFactory(autoexpand_head=False)
+        collection.add_expressions({'expressions': [old.versioned_object.uri]}, collection.created_by)
+        reference = collection.references.first()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='manual')
+
+        expansion.add_references(collection.references.all())
+
+        self.assertTrue(expansion.concepts.exists())
+        self.assertFalse(expansion.is_default)
+        self.assertFalse(reference.concepts.exists())
+
+    def test_replace_head_rows(self):
+        concept = ConceptFactory()
+        duplicated = ConceptFactory()
+        other = ConceptFactory().get_latest_version()
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        expansion.concepts.add(concept, duplicated, duplicated.get_latest_version(), other)
+        rows = Expansion.concepts.through.objects.filter(expansion_id=expansion.id)
+
+        Expansion.replace_head_rows(rows, 'expansion', 'concept', Concept)
+
+        self.assertEqual(
+            sorted(rows.values_list('concept_id', flat=True)),
+            sorted([concept.get_latest_version().id, duplicated.get_latest_version().id, other.id]))
+
+    def test_is_explicit_valueset(self):
+        uri = '/orgs/org/collections/coll/'
+        for valueset in (f'{uri}|r2', f'{uri}r2/', f'{uri}r2', 'http://x.org/vs|r2'):
+            self.assertTrue(CollectionReference.is_explicit_valueset(valueset), valueset)
+        for valueset in (uri, uri[:-1], 'http://x.org/vs', 'http://x.org/vs|'):
+            self.assertFalse(CollectionReference.is_explicit_valueset(valueset), valueset)
+
+        self.assertFalse(CollectionReference.is_explicit_valueset(f'{uri}|r2', all_forms=False))
+        self.assertTrue(CollectionReference.is_explicit_valueset(f'{uri}r2/', all_forms=False))
+
+    def test_persist_claims_default_only_when_asked_and_unset(self):
+        collection = OrganizationCollectionFactory()
+        Collection.objects.filter(id=collection.id).update(expansion_uri=None)
+        manual = Expansion.persist(index=False, collection_version=collection, mnemonic='manual')
+        self.assertFalse(manual.is_default)
+
+        custom = Expansion.persist(index=False, collection_version=collection, mnemonic='custom', claim_default=True)
+        self.assertTrue(Expansion.objects.get(id=custom.id).is_default)
+
+        other = Expansion.persist(index=False, collection_version=collection, mnemonic='other', claim_default=True)
+        self.assertFalse(Expansion.objects.get(id=other.id).is_default)
+        self.assertTrue(Expansion.objects.get(id=custom.id).is_default)
+
+    def test_rebuild_clears_references_resolved_resources_when_named_version_is_gone(self):
+        _, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection = self.locked_auto_expansion(v1)
+        collection.add_expressions({'expressions': [f'{v1.uri}concepts/{old.mnemonic}/']}, collection.created_by)
+        reference = collection.references.first()
+
+        collection.expansion.seed_children(index=False, force_reevaluate=True)
+        reference.refresh_from_db()
+        self.assertEqual(list(reference.concepts.all()), [old])
+        self.assertIsNotNone(reference.last_resolved_at)
+
+        Source.objects.filter(id=v1.id).delete()
+        collection.expansion.seed_children(index=False, force_reevaluate=True)
+        reference.refresh_from_db()
+        self.assertFalse(reference.concepts.exists())
+        self.assertIsNone(reference.last_resolved_at)
 
     @patch('core.collections.models.seed_children_to_expansion')
     def test_persist_with_mnemonic(self, seed_children_to_expansion_mock):
@@ -2363,6 +3128,7 @@ class ExpansionTest(OCLTestCase):
     @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
     @patch('core.collections.models.batch_index_resources')
     def test_delete_references_not_test_mode_queues_readd_task(self, batch_index_mock, readd_task_mock):
+        readd_task_mock.__name__ = 'readd_references_to_expansion_on_references_removal'
         batch_index_mock.apply_async = Mock()
         collection = OrganizationCollectionFactory()
         concept1 = ConceptFactory()
@@ -2372,7 +3138,31 @@ class ExpansionTest(OCLTestCase):
         reference.save()
         reference.concepts.set([concept1])
 
-        expansion.delete_references(reference)
+        with self.captureOnCommitCallbacks(execute=True):
+            expansion.delete_references(reference)
+
+        task = Task.objects.get(name='readd_references_to_expansion_on_references_removal', args__0=expansion.id)
+        readd_task_mock.apply_async.assert_called_once_with(
+            (expansion.id, [reference.id]), queue='default', task_id=task.id, persist_args=True)
+        self.assertTrue(expansion.has_pending_readd)
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
+    @patch('core.collections.models.batch_index_resources')
+    def test_delete_references_not_test_mode_queues_readd_task_with_toggle_off(
+            self, batch_index_mock, readd_task_mock):
+        batch_index_mock.apply_async = Mock()
+        collection = OrganizationCollectionFactory()
+        concept1 = ConceptFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        expansion.concepts.set([concept1])
+        reference = CollectionReference(expression=concept1.uri, collection=collection)
+        reference.save()
+        reference.concepts.set([concept1])
+
+        with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False), \
+                self.captureOnCommitCallbacks(execute=True):
+            expansion.delete_references(reference)
 
         readd_task_mock.apply_async.assert_called_once_with(
             (expansion.id, [reference.id]), queue='default', permanent=False)
@@ -2387,7 +3177,8 @@ class ExpansionTest(OCLTestCase):
         expansion.concepts.set([concept])
         expansion.mappings.set([mapping])
 
-        expansion.delete_expressions([concept.url, mapping.url])
+        with self.captureOnCommitCallbacks(execute=True):
+            expansion.delete_expressions([concept.url, mapping.url])
 
         self.assertEqual(batch_index_mock.apply_async.call_count, 2)
         batch_index_mock.apply_async.assert_any_call(
@@ -2587,6 +3378,254 @@ class ExpansionTest(OCLTestCase):
         full_index_mock.assert_called_once_with([concept.id], [])
 
 
+    @staticmethod
+    def _expansion_with_resource_version_reference(source, concept_version):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        reference = CollectionReference(
+            expression=concept_version.uri, collection=collection, system=source.uri,
+            code=concept_version.mnemonic, resource_version=concept_version.version)
+        reference.evaluate()
+        reference.save()
+        return collection, expansion, reference
+
+    @staticmethod
+    def _rebuild(collection, expansion):
+        with patch.object(Expansion, 'index_resources'), patch.object(Expansion, 'full_index_resources'):
+            expansion.add_references(
+                collection.references.all(), index=True, is_adding_all=True, force_reevaluate=True)
+
+    def test_rebuild_keeps_resource_version_held_by_older_release(self):
+        source, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection, expansion, _ = self._expansion_with_resource_version_reference(source, old)
+
+        self._rebuild(collection, expansion)
+
+        self.assertEqual(list(expansion.concepts.all()), [old])
+        self.assertEqual(list(expansion.explicit_source_versions.all()), [v1])
+        self.assertEqual(expansion.unresolved_repo_versions, [])
+
+    def test_rebuild_drops_resource_version_held_by_older_release_with_toggle_off(self):
+        source, old, _, v2 = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection, expansion, _ = self._expansion_with_resource_version_reference(source, old)
+
+        with patch.object(CollectionReference, 'is_resource_version_repo_resolution_on', return_value=False):
+            self._rebuild(collection, expansion)
+
+        self.assertEqual(expansion.concepts.count(), 0)
+        self.assertEqual(list(expansion.explicit_source_versions.all()), [v2])
+
+    def test_rebuild_keeps_resource_version_no_version_holds_as_unresolved(self):
+        source, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection, expansion, reference = self._expansion_with_resource_version_reference(source, old)
+        old.sources.remove(v1)
+
+        self._rebuild(collection, expansion)
+
+        self.assertEqual(list(expansion.concepts.all()), [old])
+        self.assertEqual(expansion.explicit_source_versions.count(), 0)
+        self.assertEqual(expansion.unresolved_repo_versions, [{
+            'url': reference.expression, 'namespace': None, 'version': old.version,
+            'type': 'reference.resource_version'
+        }])
+
+    def test_rebuild_with_filter_reference_under_release_adds_its_resource_versions(self):
+        source, release, _, concept_version = CollectionReferenceTest.released_source_with_concepts()
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        reference = CollectionReference(
+            expression=source.uri, collection=collection, system=source.uri, created_by=source.created_by,
+            filter=[{'property': 'concept_class', 'value': 'Diagnosis', 'op': '='}])
+        reference.save()
+
+        self._rebuild(collection, expansion)
+
+        self.assertEqual(list(expansion.concepts.all()), [concept_version])
+        self.assertEqual(list(expansion.evaluated_source_versions.all()), [release])
+
+    def test_add_references_reuses_locked_version_holding_resource_version(self):
+        source, old, v1, v2 = CollectionReferenceTest.source_with_replaced_concept_version()
+        old.sources.add(v2)
+        collection, expansion, _ = self._expansion_with_resource_version_reference(source, old)
+        expansion.evaluated_source_versions.add(v1)
+
+        with patch.object(Expansion, 'index_resources'):
+            expansion.add_references(collection.references.all())
+
+        self.assertEqual(list(expansion.concepts.all()), [old])
+        self.assertEqual(list(expansion.explicit_source_versions.all()), [v1])
+
+    def test_add_references_looks_up_holding_versions_once_per_repository(self):
+        source, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection, expansion, _ = self._expansion_with_resource_version_reference(source, old)
+        other = ConceptFactory(parent=source, mnemonic='c2').get_latest_version()
+        other.sources.add(v1)
+        reference = CollectionReference(
+            expression=other.uri, collection=collection, system=source.uri, code=other.mnemonic,
+            resource_version=other.version)
+        reference.evaluate()
+        reference.save()
+
+        with patch.object(
+                CollectionReference, 'get_repo_versions_holding_resource_versions',
+                wraps=CollectionReference.get_repo_versions_holding_resource_versions) as lookup:
+            self._rebuild(collection, expansion)
+
+        self.assertEqual(lookup.call_count, 1)
+        self.assertEqual(sorted(expansion.concepts.values_list('id', flat=True)), sorted([old.id, other.id]))
+        self.assertEqual(list(expansion.explicit_source_versions.all()), [v1])
+
+    def test_dry_run_rebuild_reports_changes_per_reference_without_saving(self):
+        source, old, v1, v2 = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection, expansion, reference = self._expansion_with_resource_version_reference(source, old)
+        self._rebuild(collection, expansion)
+
+        with override_settings(ENV='production'):
+            report = expansion.dry_run_rebuild()
+
+        removed = {'type': 'concepts', 'status': 'removed', 'before': old.uri, 'after': None}
+        self.assertEqual(report['expansion'], expansion.uri)
+        self.assertEqual(report['concepts'], {'added': 0, 'removed': 1, 'changed': 0})
+        self.assertEqual(report['references'], {reference.expression: [removed]})
+        self.assertEqual(report['unattributed'], [])
+        self.assertEqual(report['explicit_source_versions'], {'before': [v1.uri], 'after': [v2.uri]})
+        self.assertEqual(list(expansion.concepts.all()), [old])
+        self.assertEqual(list(expansion.explicit_source_versions.all()), [v1])
+
+    def test_dry_run_rebuild_without_changes(self):
+        source, old, _, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection, expansion, _ = self._expansion_with_resource_version_reference(source, old)
+        self._rebuild(collection, expansion)
+
+        report = expansion.dry_run_rebuild()
+
+        self.assertEqual(report['concepts'], {'added': 0, 'removed': 0, 'changed': 0})
+        self.assertEqual(report['references'], {})
+        self.assertNotIn('explicit_source_versions', report)
+
+    def test_diff_members(self):
+        self.assertEqual(
+            Expansion.diff_members(
+                {1: '/c/1/v1/', 2: '/c/2/v1/', 3: '/c/3/v1/'}, {1: '/c/1/v1/', 2: '/c/2/v2/', 4: '/c/4/'}),
+            {
+                2: {'status': 'changed', 'before': '/c/2/v1/', 'after': '/c/2/v2/'},
+                3: {'status': 'removed', 'before': '/c/3/v1/', 'after': None},
+                4: {'status': 'added', 'before': None, 'after': '/c/4/'},
+            }
+        )
+
+    def test_dry_run_expansions_command(self):
+        source, old, _, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection, expansion, reference = self._expansion_with_resource_version_reference(source, old)
+        self._rebuild(collection, expansion)
+        out = StringIO()
+
+        call_command(
+            'dry_run_expansions', collection.uri, '--env', 'production', stdout=out)
+
+        output = out.getvalue()
+        self.assertIn(expansion.uri, output)
+        self.assertIn('concepts: 0 added, 1 removed, 0 changed', output)
+        self.assertIn(f'{reference.expression}: 1 member(s) would change', output)
+        self.assertEqual(list(expansion.concepts.all()), [old])
+
+        with self.assertRaises(CommandError):
+            call_command('dry_run_expansions', stdout=out)
+        with self.assertRaises(CommandError):
+            call_command('dry_run_expansions', collection.uri, '--env', 'nowhere', stdout=out)
+
+    def _source_with_pins_in_releases(self):
+        """c1's pinned version is held by v1 and v3, c2's only by v1"""
+        source = OrganizationSourceFactory()
+        c1 = ConceptFactory(parent=source, mnemonic='c1').get_latest_version()
+        c2 = ConceptFactory(parent=source, mnemonic='c2').get_latest_version()
+        kwargs = {'mnemonic': source.mnemonic, 'organization': source.organization, 'released': True}
+        v1 = OrganizationSourceFactory(version='v1', **kwargs)
+        v3 = OrganizationSourceFactory(version='v3', **kwargs)
+        c1.sources.add(v1, v3)
+        c2.sources.add(v1)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        return source, collection, expansion, c1, c2, v1, v3
+
+    @staticmethod
+    def _pin(collection, source, concept_version):
+        reference = CollectionReference(
+            expression=concept_version.uri, collection=collection, system=source.uri,
+            code=concept_version.mnemonic, resource_version=concept_version.version)
+        reference.evaluate()
+        reference.save()
+        return reference
+
+    def test_resolved_repo_versions_of_pinned_reference_match_rebuild(self):
+        source, collection, expansion, c1, c2, v1, v3 = self._source_with_pins_in_releases()
+        reference = self._pin(collection, source, c1)
+        self._pin(collection, source, c2)
+
+        self._rebuild(collection, expansion)
+
+        self.assertEqual(
+            sorted(expansion.explicit_source_versions.values_list('id', flat=True)), sorted([v1.id, v3.id]))
+        reference = CollectionReference.objects.get(id=reference.id)
+        self.assertEqual(reference.resolve_system_version, v3)
+        self.assertEqual(
+            [version['version'] for version in reference.get_resolved_repo_versions_serialized()], ['v3'])
+
+    def test_resolved_repo_versions_of_unresolved_pinned_reference_are_empty(self):
+        source, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection, expansion, reference = self._expansion_with_resource_version_reference(source, old)
+        old.sources.remove(v1)
+        other = ConceptFactory(parent=source, mnemonic='c2').get_latest_version()
+        other.sources.add(v1)
+        self._pin(collection, source, other)
+
+        self._rebuild(collection, expansion)
+
+        self.assertTrue(expansion.is_unresolved_resource_version(reference))
+        self.assertEqual(list(expansion.explicit_source_versions.all()), [v1])
+        reference = CollectionReference.objects.get(id=reference.id)
+        self.assertEqual(reference.get_resolved_repo_versions_serialized(), [])
+
+    def test_load_collection_source_versions_prefers_locked_holder(self):
+        source, collection, expansion, c1, _, v1, v3 = self._source_with_pins_in_releases()
+        expansion.evaluated_source_versions.add(v1)
+        c3 = ConceptFactory(parent=source, mnemonic='c3').get_latest_version()
+        c3.sources.add(v3)
+        self._pin(collection, source, c1)
+        self._pin(collection, source, c3)
+
+        with patch.object(Expansion, 'index_resources'):
+            expansion.add_references(collection.references.all())
+
+        self.assertEqual(
+            sorted(expansion.explicit_source_versions.values_list('id', flat=True)), sorted([v1.id, v3.id]))
+        member = Concept.objects.get(id=c1.id)
+        Concept.load_collection_source_versions([member], collection)
+        self.assertEqual(member._collection_source_version, v1)  # pylint: disable=protected-access
+
+    def test_load_collection_source_versions_from_expansion(self):
+        source, old, v1, v2 = CollectionReferenceTest.source_with_replaced_concept_version()
+        new = Concept.objects.get(versioned_object_id=old.versioned_object_id, version='new')
+        collection, expansion, _ = self._expansion_with_resource_version_reference(source, old)
+        expansion.concepts.add(old, new)
+        expansion.explicit_source_versions.add(v1)
+
+        old.sources.add(v2)
+        Concept.load_collection_source_versions([old, new], collection)
+
+        self.assertEqual(old._collection_source_version, v1)  # pylint: disable=protected-access
+        self.assertEqual(new._collection_source_version, v2)  # pylint: disable=protected-access
+
+        new.sources.remove(v2)
+        Concept.load_collection_source_versions([new], collection)
+        self.assertIsNone(new._collection_source_version)  # pylint: disable=protected-access
+
+
+@tag('es')
 class ExpansionParametersTest(OCLTestCase):
     def test_apply_active_only(self):
         ConceptFactory(id=1, retired=False, mnemonic='active')

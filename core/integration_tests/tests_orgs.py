@@ -2,6 +2,7 @@ import threading
 import time
 
 from django.db import connection
+from django.test import override_settings, tag
 from mock import patch
 from mock.mock import Mock, ANY
 from rest_framework.exceptions import ErrorDetail
@@ -826,6 +827,7 @@ class OrganizationOverviewViewTest(OCLAPITestCase):
         self.assertFalse(self.org.is_member(staff))
 
 
+@tag('es')
 class OrganizationSourceListViewTest(OCLAPITestCase):
     def test_get(self):
         user = UserProfileFactory(username='batman')
@@ -890,6 +892,7 @@ class OrganizationSourceListViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 0)
 
 
+@tag('es')
 class OrganizationCollectionListViewTest(OCLAPITestCase):
     def test_get(self):
         user = UserProfileFactory(username='batman')
@@ -982,6 +985,16 @@ class CompressHeaderLimitTest(OCLAPITestCase):
     def test_without_header_unaffected(self):
         response = self.client.get('/orgs/', HTTP_AUTHORIZATION='Token ' + UserProfileFactory().get_token())
         self.assertEqual(response.status_code, 200)
+
+    @override_settings(LIST_MAX_LIMIT=1)
+    def test_uncapped_list_ignores_max_page_size(self):
+        token = 'Token ' + UserProfileFactory().get_token()
+        response = self.client.get('/orgs/', HTTP_COMPRESS='true', HTTP_AUTHORIZATION=token)
+        self.assertEqual(response.status_code, 200)
+
+        response = self.client.get('/orgs/?limit=1000', HTTP_AUTHORIZATION=token)
+        self.assertEqual(response.status_code, 200)
+        self.assertGreater(len(response.data), 1)
 
 
 class PaginationParamsValidationTest(OCLAPITestCase):

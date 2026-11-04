@@ -43,6 +43,11 @@ class MatchCoreDayThrottle(UserRateThrottle):
     scope = 'match_core_day'
 
 
+class FhirMinuteThrottle(UserRateThrottle):
+    """The FHIR API's rate, the same for every caller: it protects the server."""
+    scope = 'fhir_minute'
+
+
 class ThrottleUtil:
     """Return the throttling rules that correspond to the current auth group."""
 

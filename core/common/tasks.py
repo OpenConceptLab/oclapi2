@@ -15,6 +15,7 @@ from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage
 from django.core.management import call_command
 from django.core.paginator import Paginator
+from django.db import DatabaseError
 from django.db.models import Exists, OuterRef, F
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -417,7 +418,10 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                     instance.snapshot = CollectionDetailSerializer(head).data
                 instance.save(update_fields=['snapshot'])
             instance.get_checksums(recalculate=True)
-            instance.seed_references()
+            seed_from_head = is_collection and autoexpand and instance.can_seed_from_head_expansion() and \
+                instance.seed_from_head_expansion()
+            if not seed_from_head:
+                instance.seed_references()
             if is_source:
                 instance.seed_concepts(index=False)
                 instance.seed_mappings(index=False)
@@ -436,7 +440,8 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                 else:
                     instance.index_children(sync=False, user=instance.created_by)
             elif autoexpand:
-                instance.cascade_children_to_expansion(index=True, sync=sync)
+                if not seed_from_head:
+                    instance.cascade_children_to_expansion(index=True, sync=sync)
                 instance.update_children_counts(sync)
 
             if export:
@@ -1040,9 +1045,9 @@ def update_collection_active_mappings_count(collection_id):
 
 
 @app.task
-def delete_s3_objects(path):
+def delete_s3_objects(path, key_pattern=None):
     if path:
-        get_export_service().delete_objects(path)
+        get_export_service().delete_objects(path, key_pattern=key_pattern)
 
 
 @app.task(ignore_result=True)
@@ -1096,22 +1101,22 @@ def post_import_update_resource_counts():
     uncounted_concepts = Concept.objects.filter(_counted__isnull=True)
     sources = Source.objects.filter(id__in=uncounted_concepts.values_list('parent_id', flat=True))
     for source in sources:
-        source.update_concepts_count(sync=True)
         try:
+            source.update_concepts_count(sync=True)
             uncounted_concepts.filter(parent_id=source.id).update(_counted=True)
-        except:  # pylint: disable=bare-except
-            pass
+        except DatabaseError as ex:  # source may have been deleted since the query
+            logger.warning('Skipping concepts count for source %s: %s', source.id, ex)
 
     uncounted_mappings = Mapping.objects.filter(_counted__isnull=True)
     sources = Source.objects.filter(
         id__in=uncounted_mappings.values_list('parent_id', flat=True))
 
     for source in sources:
-        source.update_mappings_count(sync=True)
         try:
+            source.update_mappings_count(sync=True)
             uncounted_mappings.filter(parent_id=source.id).update(_counted=True)
-        except:  # pylint: disable=bare-except
-            pass
+        except DatabaseError as ex:  # source may have been deleted since the query
+            logger.warning('Skipping mappings count for source %s: %s', source.id, ex)
 
 
 @app.task(ignore_result=True)
@@ -1181,15 +1186,21 @@ def readd_references_to_expansion_on_references_removal(expansion_id, removed_re
 @app.task(ignore_result=True)
 def resolve_url_registry_entries(repo_id, repo_type):
     repo_klass = get_resource_class_from_resource_name(repo_type)
-    if repo_klass:
-        repo = repo_klass.objects.filter(id=repo_id).first()
-        for entry in repo.active_url_registry_entries:
+    repo = repo_klass.objects.filter(id=repo_id).first() if repo_klass else None
+    if repo:
+        for entry in repo.url_registry_entries_to_resolve():
             entry.lookup_entry()
 
 
 @app.task(ignore_result=True)
 def expire_old_celery_tasks():
     Task.objects.filter(updated_at__lt=timezone.now() - timezone.timedelta(days=7)).delete()
+
+
+@app.task(ignore_result=True)
+def expire_stale_auto_match_runs():
+    from core.map_projects.models import AutomatchRun
+    AutomatchRun.expire_stale()
 
 
 def get_live_indexing_task_ids():

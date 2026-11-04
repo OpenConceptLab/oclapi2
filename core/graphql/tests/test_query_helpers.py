@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 from asgiref.sync import async_to_sync
 from django.contrib.auth.models import AnonymousUser
 from django.http import HttpResponse
-from django.test import RequestFactory
+from django.test import RequestFactory, tag
 from rest_framework.exceptions import AuthenticationFailed
 from strawberry.django.views import AsyncGraphQLView
 from strawberry.exceptions import GraphQLError
@@ -158,6 +158,7 @@ class AuthenticatedGraphQLViewTests(OCLTestCase):
             self.assertEqual(context.auth_status, 'invalid')
 
 
+@tag('es')
 class QueryHelperTests(OCLTestCase):
     maxDiff = None
 

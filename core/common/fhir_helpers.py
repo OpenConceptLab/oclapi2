@@ -1,52 +1,8 @@
-import json
+import re
 
-from core.common.exceptions import Http400
-
-
-def translate_fhir_query(fhir_query_fields, query_params, queryset):
-    remaining_query_params = query_params.copy()
-    query_fields = fhir_query_fields.copy()
-    url = remaining_query_params.get('url')
-    if url and 'url' in query_fields:
-        queryset = queryset.filter(canonical_url=url)
-        remaining_query_params.pop('url')
-        query_fields.remove('url')
-    language = remaining_query_params.get('language')
-    if language and 'language' in query_fields:
-        queryset = queryset.filter(default_locale=language)
-        remaining_query_params.pop('language')
-        query_fields.remove('language')
-    status = remaining_query_params.get('status')
-    if status and 'status' in query_fields:
-        query_fields.remove('status')
-        remaining_query_params.pop('status')
-        if status == 'retired':
-            queryset = queryset.filter(retired=True)
-        elif status == 'active':
-            queryset = queryset.filter(released=True)
-        elif status == 'draft':
-            queryset = queryset.filter(released=False)
-    title = remaining_query_params.get('title')
-    if title and 'title' in query_fields:
-        remaining_query_params.pop('title')
-        query_fields.remove('title')
-        queryset = queryset.filter(full_name=title)
-    code = remaining_query_params.get('code')
-    if code and 'code' in query_fields:
-        remaining_query_params.pop('code')
-        query_fields.remove('code')
-        queryset = queryset.filter(concepts__mnemonic=code)
-    for query_field in query_fields:
-        query_value = remaining_query_params.get(query_field)
-        if query_value:
-            remaining_query_params.pop(query_field, None)
-            kwargs = {query_field: query_value}
-            queryset = queryset.filter(**kwargs)
-
-    if remaining_query_params:
-        raise Http400('The following query params are not supported: ' + json.dumps(remaining_query_params))
-
-    return queryset
+# the OCL repository kind a FHIR resource type names
+REPOSITORY_KINDS = {'CodeSystem': 'sources', 'ConceptMap': 'sources', 'ValueSet': 'collections'}
+REPOSITORY_PATH = re.compile(r'/(orgs|users)/([^/]+)/([^/]+)/([^/]+)/?')
 
 
 def delete_empty_fields(obj):
@@ -59,3 +15,39 @@ def delete_empty_fields(obj):
     if isinstance(obj, list):
         for item in obj:
             delete_empty_fields(item)
+
+
+def to_ocl_path(url, kind=None):
+    """
+    An OCL FHIR path (/orgs/{org}/CodeSystem/{id}/...) as the OCL path of the repository it names, by its own
+    resource type (so a reference to the other type finds nothing) unless `kind` names one; anything else as it is.
+    """
+    parts = url.split('/')
+    if len(parts) > 3 and not parts[0] and parts[1] in ('orgs', 'users') and parts[3] in REPOSITORY_KINDS:
+        parts[3] = kind or REPOSITORY_KINDS[parts[3]]
+    return '/'.join(parts)
+
+
+def to_fhir_path(uri, resource_type):
+    """
+    An OCL path of a repository, or of anything in it (/orgs/{org}/{sources|collections}/{id}/...), as the repository's
+    FHIR path, /orgs/{org}/{resource_type}/{id}/: only the kind's segment is renamed. None when it names no repository.
+    """
+    parts = uri.strip('/').split('/')
+    if len(parts) < 4:
+        return None
+    if parts[2] in ('sources', 'collections'):
+        parts[2] = resource_type
+    return '/' + '/'.join(parts[:4]) + '/'
+
+
+def repository_prefixes(path, kinds, names=('sources', 'CodeSystem', 'ConceptMap'), trailing_slash=False):
+    """
+    The OCL path prefixes (/orgs/{org}/{kind}/{id}/, one per kind) of the repository a path names as one of `names`
+    (by default a source's: its own path, or as FHIR names it), with no version; None for any other value.
+    `trailing_slash` requires the slash, as a ConceptMap group writes it.
+    """
+    match = REPOSITORY_PATH.fullmatch(path or '')
+    if not match or match[3] not in names or (trailing_slash and not path.endswith('/')):
+        return None
+    return [f'/{match[1]}/{match[2]}/{kind}/{match[4]}/' for kind in kinds]

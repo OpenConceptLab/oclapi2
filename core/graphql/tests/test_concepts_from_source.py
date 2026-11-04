@@ -3,7 +3,7 @@ import os
 import uuid
 from unittest import mock
 
-from django.test import override_settings
+from django.test import override_settings, tag
 from rest_framework.authtoken.models import Token
 
 from core.common.constants import ACCESS_TYPE_NONE, HEAD
@@ -39,6 +39,7 @@ from core.users.tests.factories import UserProfileFactory
         and 'TokenAuthMiddleWare' not in mw  # type: ignore
     ],
 )
+@tag('es')
 class ConceptsFromSourceQueryTests(OCLTestCase):
     maxDiff = None
 

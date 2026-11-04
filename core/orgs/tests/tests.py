@@ -1,6 +1,7 @@
 import importlib
 
 from django.apps import apps
+from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import ValidationError
 from mock import patch, Mock
 
@@ -35,6 +36,21 @@ class OrganizationTest(OCLTestCase):
 
     def test_is_versioned(self):
         self.assertFalse(Organization().is_versioned)
+
+    def test_has_edit_access(self):
+        org = OrganizationFactory()
+        member, outsider = UserProfileFactory(), UserProfileFactory()
+        org.members.add(member)
+
+        self.assertTrue(org.has_edit_access(member))
+        self.assertTrue(org.has_edit_access(UserProfileFactory(is_staff=True)))
+        self.assertFalse(org.has_edit_access(outsider))
+        self.assertFalse(org.has_edit_access(AnonymousUser()))
+        self.assertFalse(org.has_edit_access(None))
+        # what a repository of the org asks its owner
+        source = OrganizationSourceFactory(organization=org)
+        for user in (member, outsider):
+            self.assertEqual(source.has_parent_edit_access(user), org.has_edit_access(user))
 
     def test_members(self):
         org = Organization(id=123)
