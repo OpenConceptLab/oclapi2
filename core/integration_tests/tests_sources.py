@@ -18,7 +18,7 @@ from rest_framework.exceptions import ErrorDetail
 from core.bundles.models import Bundle
 from core.capabilities.constants import CLONE_RESOURCES_PER_CALL_CAPABILITY_ID
 from core.capabilities.models import UserCapabilityOverride
-from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
+from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory, UserCollectionFactory
 from core.common.models import BaseModel
 from core.common.tasks import export_source, index_source_concepts, index_source_mappings
 from core.common.tests import OCLAPITestCase
@@ -429,10 +429,12 @@ class SourceRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertFalse(Source.objects.filter(id=source.id).exists())
         self.assertFalse(Source.objects.filter(mnemonic='source').exists())
-        head_prefix = f'orgs/{self.organization.mnemonic}/{self.organization.mnemonic}_source_vHEAD.'
-        delete_s3_objects_mock.apply_async.assert_called_once_with(
-            (head_prefix, get_export_key_pattern(head_prefix)), queue='default', permanent=False
-        )
+        head_prefix = f'orgs/{self.organization.mnemonic}/sources/source/HEAD.'
+        legacy_head_prefix = f'orgs/{self.organization.mnemonic}/{self.organization.mnemonic}_source_vHEAD.'
+        self.assertEqual(delete_s3_objects_mock.apply_async.call_count, 2)
+        for prefix in (head_prefix, legacy_head_prefix):
+            delete_s3_objects_mock.apply_async.assert_any_call(
+                (prefix, get_export_key_pattern(prefix)), queue='default', permanent=False)
 
 
 class SourceVersionListViewTest(OCLAPITestCase):
@@ -786,10 +788,12 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.source.versions.count(), 1)
         self.assertFalse(self.source.versions.filter(version='v1').exists())
-        v1_prefix = f'orgs/{self.source.parent.mnemonic}/{self.source.parent.mnemonic}_{self.source.mnemonic}_v1.'
-        delete_s3_objects_mock.apply_async.assert_called_once_with(
-            (v1_prefix, get_export_key_pattern(v1_prefix)), queue='default', permanent=False
-        )
+        owner = self.source.parent.mnemonic
+        self.assertEqual(delete_s3_objects_mock.apply_async.call_count, 2)
+        mnemonic = self.source.mnemonic
+        for v1_prefix in (f'orgs/{owner}/sources/{mnemonic}/v1.', f'orgs/{owner}/{owner}_{mnemonic}_v1.'):
+            delete_s3_objects_mock.apply_async.assert_any_call(
+                (v1_prefix, get_export_key_pattern(v1_prefix)), queue='default', permanent=False)
 
     @patch('core.common.models.delete_s3_objects')
     def test_version_delete_204_referenced_in_private_collection(self, delete_s3_objects_mock):
@@ -812,10 +816,12 @@ class SourceVersionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.source.versions.count(), 1)
         self.assertFalse(self.source.versions.filter(version='v1').exists())
-        v1_prefix = f'orgs/{self.source.parent.mnemonic}/{self.source.parent.mnemonic}_{self.source.mnemonic}_v1.'
-        delete_s3_objects_mock.apply_async.assert_called_once_with(
-            (v1_prefix, get_export_key_pattern(v1_prefix)), queue='default', permanent=False
-        )
+        owner = self.source.parent.mnemonic
+        self.assertEqual(delete_s3_objects_mock.apply_async.call_count, 2)
+        mnemonic = self.source.mnemonic
+        for v1_prefix in (f'orgs/{owner}/sources/{mnemonic}/v1.', f'orgs/{owner}/{owner}_{mnemonic}_v1.'):
+            delete_s3_objects_mock.apply_async.assert_any_call(
+                (v1_prefix, get_export_key_pattern(v1_prefix)), queue='default', permanent=False)
 
         source_v2 = OrganizationSourceFactory(
             mnemonic=self.source.mnemonic, organization=self.organization, version='v2',
@@ -1147,7 +1153,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 204)
-        s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.v1_updated_at}.zip")
+        s3_exists_mock.assert_any_call(f"users/username/sources/source1/HEAD.{self.HEAD_updated_at}.zip")
 
     @patch('core.services.storages.cloud.aws.S3.has_path')
     def test_get_204_version(self, s3_has_path_mock):
@@ -1160,8 +1166,8 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 204)
-        s3_has_path_mock.assert_called_once_with(
-            "users/username/username_source1_v1.", key_pattern=SOURCE_EXPORT_KEY_PATTERN)
+        s3_has_path_mock.assert_any_call(
+            "users/username/sources/source1/v1.", key_pattern=SOURCE_EXPORT_KEY_PATTERN)
 
     @patch('core.services.storages.cloud.aws.S3.url_for')
     @patch('core.services.storages.cloud.aws.S3.exists')
@@ -1177,9 +1183,9 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response['Location'], 'https://signed.example/head.zip')
-        s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
+        s3_exists_mock.assert_any_call(f"users/username/sources/source1/HEAD.{self.HEAD_updated_at}.zip")
         s3_url_for_mock.assert_called_once_with(
-            f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip",
+            f"users/username/sources/source1/HEAD.{self.HEAD_updated_at}.zip",
             filename=f"users_username_sources_source1_HEAD_{self.HEAD_updated_at}.zip"
         )
 
@@ -1189,7 +1195,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
     def test_get_302_version(self, s3_has_path_mock, s3_get_last_key_from_path_mock, s3_url_for_mock):
         s3_url_for_mock.return_value = 'https://signed.example/v1.zip'
         s3_has_path_mock.return_value = True
-        s3_get_last_key_from_path_mock.return_value = f'users/username/username_source1_v1.{self.v1_updated_at}.zip'
+        s3_get_last_key_from_path_mock.return_value = f'users/username/sources/source1/v1.{self.v1_updated_at}.zip'
 
         with self.assertLogs('oclapi', level='INFO') as logs:
             response = self.client.get(
@@ -1200,16 +1206,16 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response['Location'], 'https://signed.example/v1.zip')
-        s3_has_path_mock.assert_called_once_with(
-            "users/username/username_source1_v1.", key_pattern=SOURCE_EXPORT_KEY_PATTERN)
+        s3_has_path_mock.assert_any_call(
+            "users/username/sources/source1/v1.", key_pattern=SOURCE_EXPORT_KEY_PATTERN)
         s3_get_last_key_from_path_mock.assert_called_once_with(
-            "users/username/username_source1_v1.", key_pattern=SOURCE_EXPORT_KEY_PATTERN)
+            "users/username/sources/source1/v1.", key_pattern=SOURCE_EXPORT_KEY_PATTERN)
         s3_url_for_mock.assert_called_once_with(
-            f'users/username/username_source1_v1.{self.v1_updated_at}.zip',
+            f'users/username/sources/source1/v1.{self.v1_updated_at}.zip',
             filename=f'users_username_sources_source1_v1_{self.v1_updated_at}.zip'
         )
         self.assertIn(
-            f'INFO:oclapi:Export users/username/username_source1_v1.{self.v1_updated_at}.zip downloads as '
+            f'INFO:oclapi:Export users/username/sources/source1/v1.{self.v1_updated_at}.zip downloads as '
             f'users_username_sources_source1_v1_{self.v1_updated_at}.zip',
             logs.output
         )
@@ -1228,9 +1234,9 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.data, {'detail': 'Export exists but could not generate a download URL.'})
-        s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
+        s3_exists_mock.assert_any_call(f"users/username/sources/source1/HEAD.{self.HEAD_updated_at}.zip")
         s3_url_for_mock.assert_called_once_with(
-            f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip",
+            f"users/username/sources/source1/HEAD.{self.HEAD_updated_at}.zip",
             filename=f"users_username_sources_source1_HEAD_{self.HEAD_updated_at}.zip"
         )
 
@@ -1293,7 +1299,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response['URL'], self.source.uri + 'export/')
-        s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
+        s3_exists_mock.assert_any_call(f"users/username/sources/source1/HEAD.{self.HEAD_updated_at}.zip")
 
     @patch('core.services.storages.cloud.aws.S3.has_path')
     def test_post_303_version(self, s3_has_path_mock):
@@ -1306,8 +1312,8 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response['URL'], self.source_v1.uri + 'export/')
-        s3_has_path_mock.assert_called_once_with(
-            "users/username/username_source1_v1.", key_pattern=SOURCE_EXPORT_KEY_PATTERN)
+        s3_has_path_mock.assert_any_call(
+            "users/username/sources/source1/v1.", key_pattern=SOURCE_EXPORT_KEY_PATTERN)
 
     @patch('core.sources.views.export_source')
     @patch('core.services.storages.cloud.aws.S3.exists')
@@ -1321,7 +1327,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 202)
-        s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
+        s3_exists_mock.assert_any_call(f"users/username/sources/source1/HEAD.{self.HEAD_updated_at}.zip")
         export_source_mock.apply_async.assert_called_once_with((self.source.id,), queue='default', task_id=ANY)
 
     @patch('core.sources.views.export_source')
@@ -1336,8 +1342,8 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 202)
-        s3_has_path_mock.assert_called_once_with(
-            "users/username/username_source1_v1.", key_pattern=SOURCE_EXPORT_KEY_PATTERN)
+        s3_has_path_mock.assert_any_call(
+            "users/username/sources/source1/v1.", key_pattern=SOURCE_EXPORT_KEY_PATTERN)
         export_source_mock.apply_async.assert_called_once_with((self.source_v1.id,), queue='default', task_id=ANY)
 
     @patch('core.sources.views.export_source')
@@ -1367,7 +1373,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 409)
-        s3_exists_mock.assert_called_once_with(f"users/username/username_source1_vHEAD.{self.HEAD_updated_at}.zip")
+        s3_exists_mock.assert_any_call(f"users/username/sources/source1/HEAD.{self.HEAD_updated_at}.zip")
         export_source_mock.apply_async.assert_called_once_with((self.source.id,), queue='default', task_id=ANY)
 
     @patch('core.sources.views.export_source')
@@ -1383,8 +1389,8 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 409)
-        s3_has_path_mock.assert_called_once_with(
-            "users/username/username_source1_v1.", key_pattern=SOURCE_EXPORT_KEY_PATTERN)
+        s3_has_path_mock.assert_any_call(
+            "users/username/sources/source1/v1.", key_pattern=SOURCE_EXPORT_KEY_PATTERN)
         export_source_mock.apply_async.assert_called_once_with((self.source_v1.id,), queue='default', task_id=ANY)
 
     def test_delete_405(self):
@@ -1399,8 +1405,8 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
     @patch('core.sources.models.Source.version_export_path', new_callable=PropertyMock)
     @patch('core.sources.models.Source.has_export')
-    @patch('core.services.storages.cloud.aws.S3.remove')
-    def test_delete_204_head(self, s3_remove_mock, has_export_mock, export_path_mock):
+    @patch('core.services.storages.cloud.aws.S3.delete_objects')
+    def test_delete_204_head(self, s3_delete_objects_mock, has_export_mock, export_path_mock):
         has_export_mock.return_value = True
         export_path_mock.return_value = 'head/export/path'
         response = self.client.delete(
@@ -1410,7 +1416,7 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 204)
-        s3_remove_mock.assert_called_once_with('head/export/path')
+        s3_delete_objects_mock.assert_called()
 
     def test_delete_403(self):
         random_user = UserProfileFactory()
@@ -1435,8 +1441,8 @@ class SourceVersionExportViewTest(OCLAPITestCase):
 
     @patch('core.sources.models.Source.version_export_path', new_callable=PropertyMock)
     @patch('core.sources.models.Source.has_export')
-    @patch('core.services.storages.cloud.aws.S3.remove')
-    def test_delete_204(self, s3_remove_mock, has_export_mock, export_path_mock):
+    @patch('core.services.storages.cloud.aws.S3.delete_objects')
+    def test_delete_204(self, s3_delete_objects_mock, has_export_mock, export_path_mock):
         has_export_mock.return_value = True
         export_path_mock.return_value = 'v1/export/path'
         response = self.client.delete(
@@ -1446,12 +1452,28 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 204)
-        s3_remove_mock.assert_called_once_with('v1/export/path')
+        s3_delete_objects_mock.assert_called()
+
+    @mock_aws
+    def test_delete_204_removes_export_stored_before_last_child_update(self):
+        boto3.resource('s3', region_name='us-east-1').create_bucket(Bucket='oclapi2-dev')
+        key = self.source_v1.get_version_export_path(suffix='2020-01-01_000000.zip')
+        self.assertNotEqual(key, self.source_v1.version_export_path)
+        S3().upload(key, io.BytesIO(b'content'))
+
+        response = self.client.delete(
+            self.source_v1.uri + 'export/',
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(self.source_v1.has_export())
 
     @patch('core.sources.models.Source.version_export_path', new_callable=PropertyMock)
     @patch('core.sources.models.Source.has_export')
-    @patch('core.services.storages.cloud.aws.S3.remove')
-    def test_delete_401_anonymous(self, s3_remove_mock, has_export_mock, export_path_mock):
+    @patch('core.services.storages.cloud.aws.S3.delete_objects')
+    def test_delete_401_anonymous(self, s3_delete_objects_mock, has_export_mock, export_path_mock):
         has_export_mock.return_value = True
         export_path_mock.return_value = 'v1/export/path'
         response = self.client.delete(
@@ -1460,10 +1482,10 @@ class SourceVersionExportViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 401)
-        s3_remove_mock.assert_not_called()
+        s3_delete_objects_mock.assert_not_called()
 
 
-SOURCE_EXPORT_KEY_PATTERN = r'users/username/username_source1_v1\.(\d{4})-?(\d{2})-?(\d{2})_?(\d{6})\.zip'
+SOURCE_EXPORT_KEY_PATTERN = r'users/username/sources/source1/v1\.(\d{4})-?(\d{2})-?(\d{2})_?(\d{6})\.zip'
 
 
 def signed_url_for(_, key, filename=None):  # pylint: disable=unused-argument
@@ -3426,3 +3448,165 @@ class SourceVersionPrivateHeadAccessTest(PrivateHeadVersionAccessMixin, OCLAPITe
         concept = ConceptFactory(parent=head)
         version.concepts.add(concept)
         return concept
+
+
+@mock_aws
+class RepoExportCollidingVersionsViewTest(OCLAPITestCase):
+    """Versions that used to build one export prefix: only the requested version is read, scheduled and deleted."""
+    def setUp(self):
+        super().setUp()
+        boto3.resource('s3', region_name='us-east-1').create_bucket(Bucket='oclapi2-dev')
+        self.owner = UserProfileFactory(username='owner')
+        self.owner_token = self.owner.get_token()
+        self.other_token = UserProfileFactory(username='other').get_token()
+        self.public_source = UserSourceFactory(
+            user=self.owner, mnemonic='repo', version='1.8', public_access='View')
+        self.private_source = UserSourceFactory(
+            user=self.owner, mnemonic='repo', version='v1.8', public_access='None')
+
+    @staticmethod
+    def upload(version, timestamp='2026-10-01_090000'):
+        key = version.get_version_export_path(suffix=f'{timestamp}.zip')
+        S3().upload(key, io.BytesIO(b'content'))
+        return key
+
+    def request(self, method, version, token=None, query=''):
+        headers = {'HTTP_AUTHORIZATION': f'Token {token}'} if token else {}
+        return getattr(self.client, method)(version.uri + 'export/' + query, format='json', **headers)
+
+    @patch('core.services.storages.cloud.aws.S3.url_for', signed_url_for)
+    def test_get_for_versions_1_8_and_v1_8(self):
+        private_key = self.upload(self.private_source)
+
+        self.assertEqual(self.request('get', self.public_source, self.other_token).status_code, 204)
+        self.assertIn(self.request('get', self.private_source, self.other_token).status_code, (403, 404))
+        response = self.request('get', self.private_source, self.owner_token)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], f'https://signed.example/{private_key}')
+
+    @patch('core.services.storages.cloud.aws.S3.url_for', signed_url_for)
+    def test_get_for_same_named_source_and_collection(self):
+        collection = UserCollectionFactory(user=self.owner, mnemonic='repo', version='1.8', public_access='View')
+        collection_key = self.upload(collection)
+
+        self.assertEqual(self.request('get', self.public_source, self.other_token).status_code, 204)
+        response = self.request('get', collection, self.other_token)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], f'https://signed.example/{collection_key}')
+
+    @patch('core.sources.views.export_source')
+    def test_post_schedules_export_for_version_without_one(self, export_source_mock):
+        export_source_mock.__name__ = 'export_source'
+        self.upload(self.private_source)
+
+        response = self.request('post', self.public_source, self.owner_token)
+
+        self.assertEqual(response.status_code, 202)
+        export_source_mock.apply_async.assert_called_once()
+        self.assertEqual(export_source_mock.apply_async.call_args[0][0], (self.public_source.id,))
+
+    @patch('core.sources.views.export_source')
+    def test_post_does_not_schedule_when_own_export_exists(self, export_source_mock):
+        self.upload(self.private_source)
+
+        response = self.request('post', self.private_source, self.owner_token, '?noRedirect=true')
+
+        self.assertEqual(response.status_code, 204)
+        export_source_mock.apply_async.assert_not_called()
+
+    def test_delete_for_versions_1_8_and_v1_8(self):
+        public_key = self.upload(self.public_source)
+        private_key = self.upload(self.private_source)
+
+        self.assertEqual(self.request('delete', self.private_source, self.other_token).status_code, 403)
+        self.assertEqual(self.request('delete', self.private_source, self.owner_token).status_code, 204)
+
+        self.assertFalse(self.private_source.has_export())
+        self.assertTrue(self.public_source.has_export())
+        self.assertEqual(self.public_source.get_export_path(), public_key)
+        self.assertNotEqual(public_key, private_key)
+        self.assertEqual(self.request('delete', self.private_source, self.owner_token).status_code, 404)
+
+    def test_delete_for_same_named_source_and_collection(self):
+        collection = UserCollectionFactory(user=self.owner, mnemonic='repo', version='1.8', public_access='View')
+        source_key = self.upload(self.public_source)
+        self.upload(collection)
+
+        self.assertEqual(self.request('delete', collection, self.owner_token).status_code, 204)
+
+        self.assertFalse(collection.has_export())
+        self.assertEqual(self.public_source.get_export_path(), source_key)
+
+    def test_delete_removes_every_export_of_the_version(self):
+        keys = [self.upload(self.public_source, ts) for ts in ('2026-10-01_090000', '2026-10-02_090000')]
+        sibling_key = self.upload(self.private_source)
+        self.assertEqual(len(set(keys)), 2)
+
+        response = self.request('delete', self.public_source, self.owner_token)
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(self.public_source.has_export())
+        self.assertTrue(self.private_source.has_export())
+        self.assertEqual(self.private_source.get_export_path(), sibling_key)
+
+    def test_version_with_slash_does_not_collide_with_expansion(self):
+        collection = UserCollectionFactory(user=self.owner, mnemonic='coll', version='a/b')
+        other = UserCollectionFactory(user=self.owner, mnemonic='coll', version='a')
+        expansion = ExpansionFactory(collection_version=other, mnemonic='b')
+        other.expansion_uri = expansion.uri
+        other.save()
+
+        self.assertNotEqual(collection.get_version_export_path(), other.get_version_export_path())
+        self.upload(other)
+        self.assertFalse(collection.has_export())
+
+    @patch('core.collections.views.export_collection')
+    @patch('core.sources.views.export_source')
+    def test_post_for_private_collection_and_public_source(self, export_source_mock, export_collection_mock):
+        export_source_mock.__name__ = 'export_source'
+        export_collection_mock.__name__ = 'export_collection'
+        private_collection = UserCollectionFactory(
+            user=self.owner, mnemonic='repo', version='1.8', public_access='None')
+        self.upload(private_collection)
+
+        self.assertEqual(self.request('post', self.public_source, self.other_token).status_code, 202)
+        export_source_mock.apply_async.assert_called_once()
+        export_collection_mock.apply_async.assert_not_called()
+
+        self.assertIn(self.request('post', private_collection, self.other_token).status_code, (403, 404))
+        export_collection_mock.apply_async.assert_not_called()
+        self.assertEqual(
+            self.request('post', private_collection, self.owner_token, '?noRedirect=true').status_code, 204)
+        export_collection_mock.apply_async.assert_not_called()
+
+    @patch('core.services.storages.cloud.aws.S3.url_for', signed_url_for)
+    def test_get_and_delete_for_private_collection_and_public_source(self):
+        private_collection = UserCollectionFactory(
+            user=self.owner, mnemonic='repo', version='1.8', public_access='None')
+        source_key = self.upload(self.public_source)
+        collection_key = self.upload(private_collection)
+
+        self.assertIn(self.request('get', private_collection, self.other_token).status_code, (403, 404))
+        response = self.request('get', self.public_source, self.other_token)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], f'https://signed.example/{source_key}')
+        self.assertEqual(self.request('delete', private_collection, self.other_token).status_code, 403)
+        self.assertTrue(private_collection.has_export())
+        self.assertEqual(self.request('delete', private_collection, self.owner_token).status_code, 204)
+        self.assertEqual(self.public_source.get_export_path(), source_key)
+        self.assertNotEqual(source_key, collection_key)
+
+    def test_legacy_export_of_version_and_expansion_lookalike_is_not_served(self):
+        public = UserCollectionFactory(user=self.owner, mnemonic='coll', version='a_b', public_access='View')
+        private = UserCollectionFactory(user=self.owner, mnemonic='coll', version='a', public_access='None')
+        expansion = ExpansionFactory(collection_version=private, mnemonic='b')
+        private.expansion_uri = expansion.uri
+        private.save()
+        legacy = public.get_legacy_version_export_path(suffix='2026-10-01_090000.zip')
+        self.assertEqual(legacy, private.get_legacy_version_export_path(suffix='2026-10-01_090000.zip'))
+        S3().upload(legacy, io.BytesIO(b'content'))
+
+        self.assertFalse(public.owns_legacy_export_path())
+        self.assertFalse(private.owns_legacy_export_path())
+        self.assertFalse(public.has_export())
+        self.assertFalse(private.has_export())

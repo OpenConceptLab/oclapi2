@@ -354,8 +354,7 @@ def write_export_file(
     s3_key = version.version_export_path
     export_service = get_export_service()
     if version.is_head:
-        export_prefix = version.get_version_export_path(suffix=None)
-        export_service.delete_objects(export_prefix, key_pattern=get_export_key_pattern(export_prefix))
+        version.delete_export_keys()
 
     upload_status_code = export_service.upload_file(
         key=s3_key, file_path=file_path, binary=True, metadata={'ContentType': 'application/zip'},

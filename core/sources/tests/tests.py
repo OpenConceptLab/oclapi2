@@ -557,9 +557,10 @@ class SourceTest(OCLTestCase):
 
         v1.delete(force=True, sync=True)
 
-        self.assertEqual(delete_s3_objects_mock.call_count, 2)
+        self.assertEqual(delete_s3_objects_mock.call_count, 3)
         called_paths = sorted(call.args[0] for call in delete_s3_objects_mock.call_args_list)
-        self.assertEqual(called_paths, sorted([expected_export_path, 'v1/external/report.zip']))
+        self.assertEqual(called_paths, sorted([
+            expected_export_path, v1.get_legacy_version_export_path(suffix=None), 'v1/external/report.zip']))
 
     @patch('core.common.models.delete_s3_objects')
     def test_delete_head_clears_export_and_external_export_s3_objects_for_all_versions(
@@ -576,6 +577,9 @@ class SourceTest(OCLTestCase):
             head.get_version_export_path(suffix=None),
             v1.get_version_export_path(suffix=None),
             v2.get_version_export_path(suffix=None),
+            head.get_legacy_version_export_path(suffix=None),
+            v1.get_legacy_version_export_path(suffix=None),
+            v2.get_legacy_version_export_path(suffix=None),
             'v1/external/report.zip',
             'v2/external/report.zip',
         ])

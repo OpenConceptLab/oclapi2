@@ -1,5 +1,6 @@
 import base64
 import re
+import time
 
 from azure.storage.blob import BlobServiceClient, ContentSettings, BlobPrefix
 from django.conf import settings
@@ -10,6 +11,8 @@ from core.services.storages.cloud.core import CloudStorageServiceInterface
 
 
 class BlobStorage(CloudStorageServiceInterface):
+    COPY_TIMEOUT_SECONDS = 300
+    COPY_POLL_SECONDS = 1
     def __init__(self):
         super().__init__()
         self.account_name = settings.AZURE_STORAGE_ACCOUNT_NAME
@@ -63,6 +66,22 @@ class BlobStorage(CloudStorageServiceInterface):
             return count_deleted
         except:  # pylint: disable=bare-except
             return count_deleted
+
+    def get_keys(self, prefix, key_pattern=None):
+        return [
+            blob.name for blob in self._fetch_blobs(prefix, '')
+            if not isinstance(blob, BlobPrefix) and self._matches(blob.name, key_pattern)]
+
+    def copy(self, source_key, target_key):
+        target = self.__get_blob_client(target_key)
+        target.start_copy_from_url(self.__get_blob_client(source_key).url)
+        deadline = time.monotonic() + self.COPY_TIMEOUT_SECONDS
+        status = target.get_blob_properties().copy.status
+        while status == 'pending' and time.monotonic() < deadline:
+            time.sleep(self.COPY_POLL_SECONDS)
+            status = target.get_blob_properties().copy.status
+        if status != 'success':
+            raise Exception(f'Could not copy {source_key} to {target_key}: {status}')  # pylint: disable=broad-exception-raised
 
     def remove(self, key):
         try:

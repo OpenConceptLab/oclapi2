@@ -433,6 +433,54 @@ class BlobStorageTest(TestCase):
         self.assertEqual(client_mock.delete_blob.call_count, 2)
 
     @patch('core.services.storages.cloud.azure.BlobServiceClient')
+    def test_get_keys_and_copy(self, blob_service_client):
+        own = Mock()
+        own.name = 'foo/v1.8.2026-10-01_090000.zip'
+        other = Mock()
+        other.name = 'foo/v1.8.24.2026-10-01_090000.zip'
+        target = Mock(get_blob_properties=Mock(return_value=Mock(copy=Mock(status='success'))))
+        source = Mock(url='https://source-url')
+        container_client_mock = Mock(
+            walk_blobs=Mock(return_value=[own, other, BlobPrefix(name='foo/v1.8./')]),
+            get_blob_client=Mock(side_effect=[target, source]))
+        container_mock = Mock(get_container_client=Mock(return_value=container_client_mock))
+        blob_service_client.from_connection_string = Mock(return_value=container_mock)
+        storage = BlobStorage()
+
+        keys = storage.get_keys('foo/v1.8.', key_pattern=r'foo/v1\.8\.(\d{4})-(\d{2})-(\d{2})_(\d{6})\.zip')
+        storage.copy('foo/old', 'foo/new')
+
+        self.assertEqual(keys, [own.name])
+        target.start_copy_from_url.assert_called_once_with('https://source-url')
+
+    @patch('core.services.storages.cloud.azure.time.sleep')
+    @patch('core.services.storages.cloud.azure.BlobServiceClient')
+    def test_copy_waits_for_pending_copy(self, blob_service_client, sleep_mock):
+        properties = [Mock(copy=Mock(status=status)) for status in ('pending', 'pending', 'success')]
+        target = Mock(get_blob_properties=Mock(side_effect=properties))
+        container_client_mock = Mock(get_blob_client=Mock(side_effect=[target, Mock(url='https://source-url')]))
+        container_mock = Mock(get_container_client=Mock(return_value=container_client_mock))
+        blob_service_client.from_connection_string = Mock(return_value=container_mock)
+
+        BlobStorage().copy('foo/old', 'foo/new')
+
+        self.assertEqual(sleep_mock.call_count, 2)
+
+    @patch('core.services.storages.cloud.azure.time.sleep')
+    @patch('core.services.storages.cloud.azure.BlobServiceClient')
+    def test_copy_raises_when_copy_fails_or_times_out(self, blob_service_client, sleep_mock):  # pylint: disable=unused-argument
+        for status in ('failed', 'pending'):
+            target = Mock(get_blob_properties=Mock(return_value=Mock(copy=Mock(status=status))))
+            container_client_mock = Mock(get_blob_client=Mock(side_effect=[target, Mock(url='https://source-url')]))
+            container_mock = Mock(get_container_client=Mock(return_value=container_client_mock))
+            blob_service_client.from_connection_string = Mock(return_value=container_mock)
+            storage = BlobStorage()
+            storage.COPY_TIMEOUT_SECONDS = 0
+
+            with self.assertRaises(Exception):
+                storage.copy('foo/old', 'foo/new')
+
+    @patch('core.services.storages.cloud.azure.BlobServiceClient')
     def test_remove(self, blob_service_client):
         blob1 = Mock()
         blob1.name = 'foo/bar/foobar.json'
@@ -670,6 +718,23 @@ class MinIOTest(TestCase):
         # Assert that the file_iterator yields the correct content
         self.assertEqual(content, b"chunk1chunk2")
         mock_file_obj.read.assert_called()
+
+    @patch("core.services.storages.cloud.minio.Minio")
+    def test_get_keys_and_copy(self, mock_minio_client):
+        mock_client = mock_minio_client.return_value
+        own = Mock()
+        own.object_name = 'foo/v1.8.2026-10-01_090000.zip'
+        other = Mock()
+        other.object_name = 'foo/v1.8.24.2026-10-01_090000.zip'
+        mock_client.list_objects = Mock(return_value=[own, other])
+        client = MinIO()
+
+        keys = client.get_keys('foo/v1.8.', key_pattern=r'foo/v1\.8\.(\d{4})-(\d{2})-(\d{2})_(\d{6})\.zip')
+        client.copy('foo/old', 'foo/new')
+
+        self.assertEqual(keys, [own.object_name])
+        mock_client.copy_object.assert_called_once()
+        self.assertEqual(mock_client.copy_object.call_args[0][:2], ('bucket', 'foo/new'))
 
     @patch("core.services.storages.cloud.minio.Minio")
     def test_delete_objects_with_errors(self, mock_minio_client):

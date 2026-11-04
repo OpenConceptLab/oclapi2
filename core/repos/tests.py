@@ -6,6 +6,7 @@ from unittest.mock import patch
 import boto3
 from moto import mock_aws
 
+from django.core.management import call_command
 from django.db import IntegrityError, transaction
 from django.test import override_settings, tag
 from django.utils import timezone
@@ -100,7 +101,7 @@ class RepoExternalExportTest(OCLTestCase):
         path = source_v1.get_external_export_path('openmrs23-sql', 'openmrs23.sql.zip')
 
         self.assertEqual(
-            path, f"users/{owner_mnemonic}/{owner_mnemonic}_source1_v1/external/openmrs23-sql_openmrs23.sql.zip"
+            path, f"users/{owner_mnemonic}/sources/source1/v1/external/openmrs23-sql_openmrs23.sql.zip"
         )
 
     def test_get_external_export_path_sanitizes_filename(self):
@@ -110,7 +111,7 @@ class RepoExternalExportTest(OCLTestCase):
         path = source_v1.get_external_export_path('openmrs23-sql', '../etc/passwd')
 
         self.assertEqual(
-            path, f"users/{owner_mnemonic}/{owner_mnemonic}_source1_v1/external/openmrs23-sql_..etcpasswd"
+            path, f"users/{owner_mnemonic}/sources/source1/v1/external/openmrs23-sql_..etcpasswd"
         )
 
     def test_get_external_export_path_normalizes_invalid_filename_characters(self):
@@ -120,7 +121,7 @@ class RepoExternalExportTest(OCLTestCase):
         path = source_v1.get_external_export_path('openmrs23-sql', 'foo bar:baz*.zip')
 
         self.assertEqual(
-            path, f"users/{owner_mnemonic}/{owner_mnemonic}_source1_v1/external/openmrs23-sql_foo_barbaz.zip"
+            path, f"users/{owner_mnemonic}/sources/source1/v1/external/openmrs23-sql_foo_barbaz.zip"
         )
 
 
@@ -130,7 +131,7 @@ class RepoExportDownloadNameTest(OCLTestCase):
             organization=OrganizationFactory(mnemonic='PIH'), mnemonic='PIH', version='1.8.24')
         export_path = source_v1.get_version_export_path(suffix='2026-09-30_123456.zip')
 
-        self.assertEqual(export_path, 'orgs/PIH/PIH_PIH_v1.8.24.2026-09-30_123456.zip')
+        self.assertEqual(export_path, 'orgs/PIH/sources/PIH/1.8.24.2026-09-30_123456.zip')
         self.assertEqual(
             source_v1.get_export_download_name(export_path), 'orgs_PIH_sources_PIH_1.8.24_2026-09-30_123456.zip')
 
@@ -182,25 +183,25 @@ class RepoExportDownloadNameTest(OCLTestCase):
         source_v1 = OrganizationSourceFactory(
             organization=OrganizationFactory(mnemonic='PIH'), mnemonic='PIH', version='1.8.24')
 
-        self.assertIsNone(source_v1.get_export_download_name('orgs/PIH/PIH_PIH_v1.8.24.zip'))
+        self.assertIsNone(source_v1.get_export_download_name('orgs/PIH/sources/PIH/1.8.24.zip'))
 
     def test_date_like_version(self):
         source_v1 = OrganizationSourceFactory(
             organization=OrganizationFactory(mnemonic='PIH'), mnemonic='PIH', version='1.20260930123456')
 
         self.assertEqual(
-            source_v1.get_export_download_name('orgs/PIH/PIH_PIH_v1.20260930123456.2026-10-01_090000.zip'),
+            source_v1.get_export_download_name('orgs/PIH/sources/PIH/1.20260930123456.2026-10-01_090000.zip'),
             'orgs_PIH_sources_PIH_1.20260930123456_2026-10-01_090000.zip'
         )
-        self.assertIsNone(source_v1.get_export_download_name('orgs/PIH/PIH_PIH_v1.20260930123456.zip'))
-        self.assertIsNone(source_v1.get_export_download_name('orgs/PIH/PIH_PIH_v1.20260930123456.1.zip'))
+        self.assertIsNone(source_v1.get_export_download_name('orgs/PIH/sources/PIH/1.20260930123456.zip'))
+        self.assertIsNone(source_v1.get_export_download_name('orgs/PIH/sources/PIH/1.20260930123456.1.zip'))
 
     def test_key_of_another_version_gets_no_name(self):
         source_v1 = OrganizationSourceFactory(
             organization=OrganizationFactory(mnemonic='PIH'), mnemonic='PIH', version='1.8.24')
 
         # get_export_path() lists keys by prefix, so 1.8.24's lookup can return 1.8.24.1's export
-        self.assertIsNone(source_v1.get_export_download_name('orgs/PIH/PIH_PIH_v1.8.24.1.2026-10-01_090000.zip'))
+        self.assertIsNone(source_v1.get_export_download_name('orgs/PIH/sources/PIH/1.8.24.1.2026-10-01_090000.zip'))
 
     def test_mnemonics_named_expansions(self):
         collection_v1 = OrganizationCollectionFactory(
@@ -266,6 +267,73 @@ class RepoExportSiblingVersionsTest(OCLTestCase):
 
         self.assertTrue(self.v1_8.has_export())
 
+    def test_export_keys_differ_for_versions_1_8_and_v1_8(self):
+        org = self.v1_8.organization
+        v_1_8 = OrganizationSourceFactory(organization=org, mnemonic='PIH', version='v1.8')
+
+        self.assertNotEqual(self.v1_8.get_version_export_path(), v_1_8.get_version_export_path())
+        self.upload(v_1_8, '2026-10-01_090000')
+
+        self.assertFalse(self.v1_8.has_export())
+        self.assertTrue(v_1_8.has_export())
+
+    def test_export_keys_differ_for_source_and_collection(self):
+        org = self.v1_8.organization
+        collection = OrganizationCollectionFactory(organization=org, mnemonic='PIH', version='1.8')
+
+        self.assertNotEqual(self.v1_8.get_version_export_path(), collection.get_version_export_path())
+        key = self.upload(collection, '2026-10-01_090000')
+
+        self.assertFalse(self.v1_8.has_export())
+        self.assertEqual(collection.get_export_path(), key)
+
+        self.v1_8.delete_export_paths(self.v1_8.get_export_paths_to_delete(), sync=True)
+        self.assertEqual(self.remaining_keys(), [key])
+
+    def test_legacy_key_served_when_prefix_is_unshared(self):
+        legacy = self.v1_8.get_legacy_version_export_path(suffix='2026-10-01_090000.zip')
+        self.s3.upload(legacy, io.BytesIO(b'content'))
+
+        self.assertTrue(self.v1_8.has_export())
+        self.assertEqual(self.v1_8.get_export_path(), legacy)
+
+        self.v1_8.delete_export_paths(self.v1_8.get_export_paths_to_delete(), sync=True)
+        self.assertEqual(self.remaining_keys(), [])
+
+    def test_legacy_key_not_served_when_prefix_is_shared(self):
+        org = self.v1_8.organization
+        v_1_8 = OrganizationSourceFactory(organization=org, mnemonic='PIH', version='v1.8')
+        legacy = self.v1_8.get_legacy_version_export_path(suffix='2026-10-01_090000.zip')
+        self.s3.upload(legacy, io.BytesIO(b'content'))
+
+        self.assertFalse(self.v1_8.has_export())
+        self.assertFalse(v_1_8.has_export())
+
+        self.v1_8.delete_export_paths(self.v1_8.get_export_paths_to_delete(), sync=True)
+        self.assertEqual(self.remaining_keys(), [legacy])
+
+    def test_migrate_export_keys_moves_unshared_and_skips_shared_legacy_keys(self):
+        out = io.StringIO()
+        legacy = self.v1_8.get_legacy_version_export_path(suffix='2026-10-01_090000.zip')
+        self.s3.upload(legacy, io.BytesIO(b'content'))
+        shared_owner = OrganizationSourceFactory(organization=self.v1_8.organization, mnemonic='X', version='1.0')
+        OrganizationSourceFactory(organization=self.v1_8.organization, mnemonic='X', version='v1.0')
+        shared = shared_owner.get_legacy_version_export_path(suffix='2026-10-01_090000.zip')
+        self.s3.upload(shared, io.BytesIO(b'content'))
+
+        call_command('migrate_export_keys', stdout=out)
+
+        self.assertEqual(
+            self.remaining_keys(),
+            sorted([self.v1_8.get_version_export_path(suffix='2026-10-01_090000.zip'), shared]))
+        self.assertIn('Shared, skipped', out.getvalue())
+
+        call_command('migrate_export_keys', f'--assign={shared_owner.get_legacy_version_export_path(suffix=None)}='
+                     f'{shared_owner.uri}', stdout=out)
+
+        self.assertIn(shared_owner.get_version_export_path(suffix='2026-10-01_090000.zip'), self.remaining_keys())
+        self.assertNotIn(shared, self.remaining_keys())
+
     def test_delete_s3_objects_without_key_pattern_removes_every_key_under_path(self):
         self.s3.upload('map_projects/1/terms.', io.BytesIO(b'content'))
         self.s3.upload('map_projects/1/terms.csv', io.BytesIO(b'content'))
@@ -280,7 +348,7 @@ class RepoExportSiblingVersionsTest(OCLTestCase):
         for key in ['orgs/PIH/PIH_PIH_v1.8.2026-10-01_090000.zip', 'orgs/PIH/PIH_PIH_v1.8.20261001090000.zip']:
             self.assertTrue(re.fullmatch(pattern, key))
         for key in [
-            'orgs/PIH/PIH_PIH_v1.8.24.2026-10-01_090000.zip', 'orgs/PIH/PIH_PIH_v1.8.24.1.2026-10-01_090000.zip',
+            'orgs/PIH/sources/PIH/1.8.24.2026-10-01_090000.zip', 'orgs/PIH/sources/PIH/1.8.24.1.2026-10-01_090000.zip',
             'orgs/PIH/PIH_PIH_v1x8.2026-10-01_090000.zip', 'orgs/PIH/PIH_PIH_v1.8.2026-10-01_090000.zip.bak',
         ]:
             self.assertIsNone(re.fullmatch(pattern, key))
