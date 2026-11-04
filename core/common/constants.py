@@ -2,6 +2,7 @@ import re
 
 HEAD = 'HEAD'
 TEMP = '--TEMP--'
+SERIALIZATION_RETRY_ATTEMPTS = 5
 TEMP_PREFIX = f"{TEMP}-"
 
 

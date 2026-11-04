@@ -7,6 +7,7 @@ from django.core.exceptions import ValidationError
 from django.core.management import call_command, CommandError
 from django.http import QueryDict
 from django.test import override_settings, tag
+from django.db import OperationalError
 from mock import patch, Mock
 from mock.mock import ANY
 from rest_framework import status
@@ -44,6 +45,12 @@ from core.sources.tests.factories import OrganizationSourceFactory
 from core.tasks.models import Task
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
+
+
+def serialization_cause():
+    cause = Exception('could not serialize access')
+    cause.pgcode = '40001'
+    return cause
 
 
 class CollectionTest(OCLTestCase):
@@ -2523,6 +2530,64 @@ class TasksTest(OCLTestCase):
 
         seed_mock.assert_called_once_with('collection', collection_v1.id, True, True)
         self.assertEqual(callbacks, [])
+
+    @override_settings(TEST_MODE=False)
+    def test_persist_new_version_retries_serialization_failures_for_five_overlapping_versions(self):
+        collection = OrganizationCollectionFactory()
+        collection_v1 = Collection(
+            version='v1', mnemonic=collection.mnemonic, organization=collection.organization)
+        failure = OperationalError('could not serialize access')
+        failure.__cause__ = serialization_cause()
+        calls = []
+
+        def conflict_four_times(*_, **__):
+            calls.append(1)
+            if len(calls) < 5:
+                raise failure
+
+        with patch.object(Collection, 'can_seed_from_head_expansion', return_value=True), \
+                patch('core.common.models.transaction.get_connection', return_value=Mock(in_atomic_block=False)), \
+                patch.object(Collection, 'persist_new_version_in_transaction', side_effect=conflict_four_times):
+            errors = Collection.persist_new_version(collection_v1, collection.created_by, sync=True)
+
+        self.assertEqual(errors, {})
+        self.assertEqual(len(calls), 5)
+
+    @override_settings(TEST_MODE=False)
+    def test_persist_new_version_gives_up_after_five_serialization_failures(self):
+        collection = OrganizationCollectionFactory()
+        collection_v1 = Collection(
+            version='v1', mnemonic=collection.mnemonic, organization=collection.organization)
+        failure = OperationalError('could not serialize access')
+        failure.__cause__ = serialization_cause()
+
+        with patch.object(Collection, 'can_seed_from_head_expansion', return_value=True), \
+                patch('core.common.models.transaction.get_connection', return_value=Mock(in_atomic_block=False)), \
+                patch.object(
+                    Collection, 'persist_new_version_in_transaction', side_effect=failure) as in_transaction:
+            with self.assertRaises(OperationalError):
+                Collection.persist_new_version(collection_v1, collection.created_by, sync=True)
+
+        self.assertEqual(in_transaction.call_count, 5)
+
+    def test_seed_from_head_expansion_retries_serialization_failures_five_times(self):
+        collection_v1 = OrganizationCollectionFactory(version='v1')
+        failure = OperationalError('could not serialize access')
+        failure.__cause__ = serialization_cause()
+        expansion = ExpansionFactory(collection_version=collection_v1)
+        calls = []
+
+        def conflict_four_times(*_, **__):
+            calls.append(1)
+            if len(calls) < 5:
+                raise failure
+            return expansion
+
+        with patch('core.collections.models.transaction.get_connection', return_value=Mock(in_atomic_block=False)), \
+                patch.object(Collection, 'seed_from_head_expansion_in_snapshot', side_effect=conflict_four_times):
+            self.assertTrue(collection_v1.seed_from_head_expansion(index=False))
+
+        self.assertEqual(len(calls), 5)
 
     def test_expansion_created_later_does_not_copy_head_expansion(self):
         collection = OrganizationCollectionFactory()

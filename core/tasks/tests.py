@@ -672,6 +672,53 @@ class TaskAPITest(OCLAPITestCase):
         self.assertEqual(response.status_code, 400)
 
 
+    def test_rerun_failed_task(self):
+        task = Task(id='rerun-task-id', name='x', state=FAILURE, created_by=self.user)
+        task.save()
+
+        with patch.object(Task, 'rerun') as rerun_mock:
+            response = self.client.post(f'/tasks/{task.id}/rerun/', HTTP_AUTHORIZATION='Token ' + self.token)
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data['id'], task.id)
+        rerun_mock.assert_called_once_with()
+
+    def test_rerun_succeeded_task_rejected(self):
+        task = Task(id='rerun-success-task-id', name='x', state=SUCCESS, created_by=self.user)
+        task.save()
+
+        with patch.object(Task, 'rerun') as rerun_mock:
+            response = self.client.post(f'/tasks/{task.id}/rerun/', HTTP_AUTHORIZATION='Token ' + self.token)
+
+        self.assertEqual(response.status_code, 400)
+        rerun_mock.assert_not_called()
+
+    def test_rerun_unfinished_task_rejected(self):
+        task = Task(id='rerun-started-task-id', name='x', state=STARTED, created_by=self.user)
+        task.save()
+
+        response = self.client.post(f'/tasks/{task.id}/rerun/', HTTP_AUTHORIZATION='Token ' + self.token)
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_rerun_unknown_task(self):
+        response = self.client.post('/tasks/missing-task-id/rerun/', HTTP_AUTHORIZATION='Token ' + self.token)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_rerun_requires_staff(self):
+        owner = UserProfileFactory()
+        task = Task(id='rerun-owned-task-id', name='x', state=FAILURE, created_by=owner)
+        task.save()
+
+        with patch.object(Task, 'rerun') as rerun_mock:
+            response = self.client.post(
+                f'/tasks/{task.id}/rerun/', HTTP_AUTHORIZATION='Token ' + owner.get_token())
+
+        self.assertEqual(response.status_code, 403)
+        rerun_mock.assert_not_called()
+
+
 class TaskMixinTest(OCLTestCase):
     class DummyView(TaskMixin):
         def __init__(self, user, is_async=False, is_inline=False):

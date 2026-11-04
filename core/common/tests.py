@@ -2499,6 +2499,21 @@ class TaskTest(OCLTestCase):
 
         self.assertFalse(Task.objects.filter(id=old_task.id).exists())
 
+    def test_expire_old_celery_tasks_keeps_unfinished_readd_tasks(self):
+        from core.tasks.models import Task
+        name = 'core.common.tasks.readd_references_to_expansion_on_references_removal'
+        failed = Task.objects.create(id=str(uuid.uuid4()), name=name, state='FAILURE')
+        succeeded = Task.objects.create(id=str(uuid.uuid4()), name=name, state='SUCCESS')
+        other_failed = Task.objects.create(id=str(uuid.uuid4()), name='other-task', state='FAILURE')
+        Task.objects.filter(id__in=[failed.id, succeeded.id, other_failed.id]).update(
+            updated_at=timezone.now() - datetime.timedelta(days=10))
+
+        expire_old_celery_tasks()
+
+        self.assertTrue(Task.objects.filter(id=failed.id).exists())
+        self.assertFalse(Task.objects.filter(id=succeeded.id).exists())
+        self.assertFalse(Task.objects.filter(id=other_failed.id).exists())
+
     def test_generate_cache_key(self):
         self.assertEqual(
             VersionCompareMixin._generate_cache_key(  # pylint: disable=protected-access

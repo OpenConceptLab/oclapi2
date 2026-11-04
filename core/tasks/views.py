@@ -1,5 +1,6 @@
+from celery.states import SUCCESS
 from django.http import Http404
-from drf_yasg.utils import swagger_auto_schema
+from drf_yasg.utils import swagger_auto_schema, no_body
 from pydash import compact
 from rest_framework import status
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, get_object_or_404
@@ -78,6 +79,22 @@ class TaskView(AbstractTaskView, DestroyAPIView):
             instance.revoke()
         except Exception as ex:
             raise Http400({'errors': ex.args}) from ex
+
+
+class TaskRerunView(BaseAPIView):
+    permission_classes = (IsAdminUser,)
+
+    @swagger_auto_schema(request_body=no_body, responses={202: TaskListSerializer})
+    def post(self, request, task_id):  # pylint: disable=unused-argument
+        task = get_object_or_404(Task.objects.all(), id=task_id)
+        if task.state == SUCCESS:
+            raise Http400('Task already succeeded.')
+        try:
+            task.rerun()
+        except ValueError as ex:
+            raise Http400(str(ex)) from ex
+        task.refresh_from_db()
+        return Response(TaskListSerializer(task).data, status=status.HTTP_202_ACCEPTED)
 
 
 class UserTaskListView(AbstractTaskListView):

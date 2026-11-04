@@ -1,7 +1,6 @@
 import time
 from contextlib import nullcontext
 
-from celery.states import SUCCESS
 from celery_once import AlreadyQueued
 from dirtyfields import DirtyFieldsMixin
 from django.conf import settings
@@ -28,12 +27,12 @@ from core.common.constants import (
     ACCESS_TYPE_VIEW,
     ES_REQUEST_TIMEOUT, ES_REQUEST_TIMEOUT_ASYNC, HEAD, ALL, EXCLUDE_WILDCARD_SEARCH_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM,
     SEARCH_MAP_CODES_PARAM, INCLUDE_SEARCH_META_PARAM, VERBOSE_PARAM, NAMESPACE_INVALID_CHAR_REGEX,
-    CONSECUTIVE_HYPHENS_REGEX)
+    CONSECUTIVE_HYPHENS_REGEX, SERIALIZATION_RETRY_ATTEMPTS)
 from core.common.es import ESScript
 from core.common.models import ConceptContainerModel, BaseResourceModel
 from core.common.search import CustomESSearch
 from core.common.tasks import seed_children_to_expansion, batch_index_resources, index_expansion_concepts, \
-    index_expansion_mappings, readd_references_to_expansion_on_references_removal
+    index_expansion_mappings, readd_references_to_expansion_on_references_removal, unfinished_readd_tasks
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
     get_resource_class_from_resource_name, to_snake_case, \
     es_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
@@ -411,7 +410,7 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     def seed_from_head_expansion(self, index=True):
         """False when HEAD has no expansion to copy, so the version seeds as without one"""
         is_outermost = not transaction.get_connection().in_atomic_block
-        attempts = 3 if is_outermost else 1
+        attempts = SERIALIZATION_RETRY_ATTEMPTS if is_outermost else 1
         for attempt in range(1, attempts + 1):
             try:
                 expansion = self.seed_from_head_expansion_in_snapshot(is_outermost)
@@ -2040,9 +2039,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
     @property
     def has_pending_readd(self):
         """A reference removal leaves this expansion short until its re-add succeeds"""
-        return Task.objects.filter(
-            name__iendswith=readd_references_to_expansion_on_references_removal.__name__, args__0=self.id
-        ).exclude(state=SUCCESS).exists()
+        return unfinished_readd_tasks().filter(args__0=self.id).exists()
 
     def copy_members_from(self, expansion):
         for relation in ('concepts', 'mappings'):
