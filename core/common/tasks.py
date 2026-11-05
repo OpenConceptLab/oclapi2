@@ -878,12 +878,14 @@ def index_in_parts(*parts):
 
 def exclude_source_members(queryset, source_id):
     """
-    Leaves out the queryset's rows that are members of source_id. An explicit id__in: Django's exclude(sources=...)
-    correlates on the join table's own row id rather than the resource id, so it leaves the wrong rows out.
+    Leaves out the queryset's rows that are members of source_id. Correlated explicitly on the resource id:
+    Django's exclude(sources=...) correlates on the join table's own row id, so it leaves the wrong rows out.
+    NOT EXISTS, not NOT IN: Postgres can't turn NOT IN into an anti-join, and once the member list outgrows
+    work_mem it rescans that list for every row (hours on a large release).
     """
     through = queryset.model.sources.through
     member_field = queryset.model._meta.model_name + '_id'  # pylint: disable=protected-access
-    return queryset.exclude(id__in=through.objects.filter(source_id=source_id).values(member_field))
+    return queryset.filter(~Exists(through.objects.filter(source_id=source_id, **{member_field: OuterRef('id')})))
 
 
 def get_concepts_to_index(source, locales=None, exclude_locale=None, exclude_members_of=None):
