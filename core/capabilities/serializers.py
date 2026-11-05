@@ -1,16 +1,22 @@
+from django.utils.functional import cached_property
 from rest_framework import serializers
+
+from core.capabilities.policy import get_capability_policy
 
 
 class CapabilitySerializer(serializers.Serializer):  # pylint: disable=abstract-method
     name = serializers.CharField()
-    limit = serializers.SerializerMethodField()
-    used = serializers.SerializerMethodField()
+    limit = serializers.IntegerField(read_only=True, allow_null=True)
+    used = serializers.IntegerField(read_only=True, allow_null=True)
 
-    def get_limit(self, obj):
-        return self.context['user'].get_capability_limit(obj.id)
+    @cached_property
+    def policy(self):
+        # one for a whole list (many=True serializes every item with one of these), so it's one snapshot
+        return get_capability_policy()
 
-    def get_used(self, obj):
-        return self.context['user'].get_capability_usage(obj.id)
+    def to_representation(self, instance):
+        # every usage field the policy reports, not only `used`
+        return {'name': instance.name, **self.policy.describe(self.context['user'], instance.id)}
 
 
 class UserCapabilityOverrideSerializer(serializers.Serializer):  # pylint: disable=abstract-method
