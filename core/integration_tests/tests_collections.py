@@ -3314,12 +3314,15 @@ class CollectionVersionListViewTest(OCLAPITestCase):
     def test_post_201_expansion_choice(self):
         seed_from_head = Collection.seed_from_head_expansion
         cases = [
-            (True, None, True, True), (True, 'copy', True, True), (True, 'generate', False, True),
-            (True, 'none', False, False), (False, None, False, True), (False, 'copy', False, True),
-            (False, 'generate', False, True), (False, 'none', False, False),
+            (True, None, None, True, True), (True, None, True, True, True), (True, None, False, False, False),
+            (True, 'copy', None, True, True), (True, 'generate', None, False, True),
+            (True, 'none', None, False, False), (False, None, None, False, True),
+            (False, None, True, False, True), (False, None, False, False, False),
+            (False, 'copy', None, False, True), (False, 'generate', None, False, True),
+            (False, 'none', None, False, False),
         ]
-        for index, (is_locked, choice, copies, expands) in enumerate(cases):
-            with self.subTest(is_locked=is_locked, choice=choice), \
+        for index, (is_locked, choice, autoexpand, copies, expands) in enumerate(cases):
+            with self.subTest(is_locked=is_locked, choice=choice, autoexpand=autoexpand), \
                     patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=is_locked), \
                     patch.object(
                         Collection, 'seed_from_head_expansion', autospec=True, side_effect=seed_from_head
@@ -3327,6 +3330,8 @@ class CollectionVersionListViewTest(OCLAPITestCase):
                 payload = {'id': f'v{index}', 'description': 'version'}
                 if choice:
                     payload['expansion'] = choice
+                if autoexpand is not None:
+                    payload['autoexpand'] = autoexpand
                 response = self.client.post(
                     self.collection.uri + 'versions/', payload,
                     HTTP_AUTHORIZATION='Token ' + self.token, format='json')
