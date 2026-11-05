@@ -384,7 +384,7 @@ def send_user_reset_password_email(user_id):
 
 
 @app.task(bind=True)
-def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False):  # pylint: disable=too-many-arguments,too-many-locals,too-many-branches,too-many-statements
+def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False, seed_from_head=True):  # pylint: disable=too-many-arguments,too-many-locals,too-many-branches,too-many-statements
     export_task = None
     changelog_task = None
     autoexpand = True
@@ -418,8 +418,8 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                     instance.snapshot = CollectionDetailSerializer(head).data
                 instance.save(update_fields=['snapshot'])
             instance.get_checksums(recalculate=True)
-            seed_from_head = is_collection and autoexpand and instance.can_seed_from_head_expansion() and \
-                instance.seed_from_head_expansion()
+            seed_from_head = seed_from_head and is_collection and autoexpand and \
+                instance.can_seed_from_head_expansion() and instance.seed_from_head_expansion()
             if not seed_from_head:
                 instance.seed_references()
             if is_source:

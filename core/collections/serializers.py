@@ -4,11 +4,13 @@ from datetime import datetime
 from django.core.validators import RegexValidator
 from pydash import get
 from rest_framework.fields import CharField, ListField, IntegerField, DateTimeField, JSONField, \
-    BooleanField, SerializerMethodField
+    BooleanField, SerializerMethodField, ChoiceField
 from rest_framework.relations import PrimaryKeyRelatedField
 from rest_framework.serializers import ModelSerializer, Serializer, ValidationError
 
 from core.client_configs.serializers import ClientConfigSerializer
+from core.collections.constants import VERSION_EXPANSION_CHOICES, VERSION_EXPANSION_NONE, \
+    VERSION_EXPANSION_GENERATE
 from core.collections.models import Collection, CollectionReference, Expansion
 from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, INCLUDE_SUMMARY, \
     INCLUDE_CLIENT_CONFIGS, INVALID_EXPANSION_URL, INCLUDE_STATES, INCLUDE_TASKS, INCLUDE_RESOLVED_REPO_VERSIONS, \
@@ -264,6 +266,7 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
     locked_date = DateTimeField(required=False, allow_null=True)
     autoexpand_head = BooleanField(required=False, default=True)
     autoexpand = BooleanField(required=False, default=True)
+    expansion = ChoiceField(choices=VERSION_EXPANSION_CHOICES, required=False, write_only=True)
 
     def validate(self, attrs):
         # create/create_version consume the raw payload (not validated_data), so DRF's boolean
@@ -287,7 +290,13 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
     def create_version(self, validated_data):
         collection = self.prepare_object(validated_data)
         user = self.context['request'].user
-        errors = Collection.persist_new_version(collection, user)
+        expansion = validated_data.get('expansion')
+        if expansion == VERSION_EXPANSION_NONE:
+            collection.autoexpand = False
+        elif expansion:
+            collection.autoexpand = True
+        errors = Collection.persist_new_version(
+            collection, user, seed_from_head=expansion != VERSION_EXPANSION_GENERATE)
         self._errors.update(errors)
         return collection
 

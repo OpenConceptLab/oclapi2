@@ -2546,7 +2546,7 @@ class TasksTest(OCLTestCase):
         with self.captureOnCommitCallbacks(execute=False) as callbacks:
             Collection.persist_new_version(collection_v1, collection.created_by, sync=True)
 
-        seed_mock.assert_called_once_with('collection', collection_v1.id, True, True)
+        seed_mock.assert_called_once_with('collection', collection_v1.id, True, True, True)
         self.assertEqual(callbacks, [])
 
     @override_settings(TEST_MODE=False)

@@ -1250,6 +1250,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         obj.is_active = True
         sync = kwargs.pop('sync', False)
+        seed_from_head = kwargs.pop('seed_from_head', True)
         if user:
             obj.created_by = user
             obj.updated_by = user
@@ -1262,11 +1263,12 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         is_test_mode = get(settings, 'TEST_MODE', False)
         # a synchronous seed from HEAD runs in this transaction, so it needs this transaction's snapshot
         is_repeatable_read = sync and not is_test_mode and not transaction.get_connection().in_atomic_block and \
-            obj.can_seed_from_head_expansion()
+            seed_from_head and obj.can_seed_from_head_expansion()
         attempts = SERIALIZATION_RETRY_ATTEMPTS if is_repeatable_read else 1
         for attempt in range(1, attempts + 1):
             try:
-                cls.persist_new_version_in_transaction(obj, head, user, sync, is_repeatable_read, **kwargs)
+                cls.persist_new_version_in_transaction(
+                    obj, head, user, sync, is_repeatable_read, seed_from_head, **kwargs)
                 break
             except OperationalError as ex:
                 if attempt == attempts or not cls.is_serialization_failure(ex):
@@ -1278,7 +1280,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         return errors
 
     @classmethod
-    def persist_new_version_in_transaction(cls, obj, head, user, sync, is_repeatable_read, **kwargs):  # pylint: disable=too-many-arguments
+    def persist_new_version_in_transaction(  # pylint: disable=too-many-arguments
+            cls, obj, head, user, sync, is_repeatable_read, seed_from_head=True, **kwargs):
         is_test_mode = get(settings, 'TEST_MODE', False)
         with transaction.atomic():
             if is_repeatable_read:
@@ -1292,7 +1295,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             if obj.id:
                 obj.sibling_versions.update(is_latest_version=False)
 
-            task_args = (obj.resource_type.lower(), obj.id, not is_test_mode, sync)
+            task_args = (obj.resource_type.lower(), obj.id, not is_test_mode, sync, seed_from_head)
             if is_test_mode or sync:
                 seed_children_to_new_version(*task_args)
             else:
