@@ -7,6 +7,7 @@ from django.core.management import call_command, CommandError
 
 from core.capabilities.constants import (
     AI_ASSISTANT_CALLS_CAPABILITY_ID, AI_ASSISTANT_CHANGE_COMMENTS_CAPABILITY_ID,
+    AI_ASSISTANT_DECISION_CALLS_CAPABILITY_ID,
     CLONE_RESOURCES_PER_CALL_CAPABILITY_ID, IMPORTS_FILE_SIZE_CAPABILITY_ID,
     MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, MAPPER_PROJECTS_CAPABILITY_ID,
 )
@@ -367,6 +368,62 @@ class AIAssistantChangeCommentsCapabilityTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.data['error_code'], 'ai_assistant_change_comments_limit_reached')
+
+
+class AIAssistantDecisionCallsCapabilityTest(OCLAPITestCase):
+    """Decision-model runs have their own allowance; entitlement to it is independent of ai_assistant.calls."""
+
+    def setUp(self):
+        super().setUp()
+        self.user = UserProfileFactory()
+        self.user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
+
+    def consume(self, capability='ai_assistant.decision_calls', user=None):
+        return self.client.post(
+            '/capabilities/consume/', data={'capability': capability}, format='json',
+            HTTP_AUTHORIZATION='Token ' + (user or self.user).get_token())
+
+    def test_has_its_own_allowance(self):
+        response = self.consume()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['limit'], 100)
+        self.assertEqual(response.data['used'], 1)
+        self.assertEqual(self.user.get_capability_usage(AI_ASSISTANT_CALLS_CAPABILITY_ID), 0)
+        self.assertEqual(self.user.get_capability_usage(AI_ASSISTANT_CHANGE_COMMENTS_CAPABILITY_ID), 0)
+
+    def test_limit_reached_reports_its_own_code(self):
+        UserCapabilityOverride.objects.create(
+            user=self.user, capability_id=AI_ASSISTANT_DECISION_CALLS_CAPABILITY_ID, limit=1)
+        self.assertEqual(self.consume().status_code, 200)
+
+        response = self.consume()
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['error_code'], 'ai_assistant_decision_calls_limit_reached')
+
+    def test_a_user_with_only_decision_calls_is_not_entitled_to_calls(self):
+        """A tier can hold decision_calls without calls; each capability is entitled on its own row."""
+        user = UserProfileFactory()
+        UserCapabilityOverride.objects.create(
+            user=user, capability_id=AI_ASSISTANT_DECISION_CALLS_CAPABILITY_ID, limit=5)
+
+        self.assertEqual(self.consume(user=user).status_code, 200)
+        response = self.consume('ai_assistant.calls', user=user)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['error_code'], 'ai_assistant_calls_not_entitled')
+        self.assertIsNone(response.data['limit'])
+
+    def test_a_user_with_only_calls_is_not_entitled_to_decision_calls(self):
+        user = UserProfileFactory()
+        UserCapabilityOverride.objects.create(user=user, capability_id=AI_ASSISTANT_CALLS_CAPABILITY_ID, limit=5)
+
+        response = self.consume(user=user)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['error_code'], 'ai_assistant_decision_calls_not_entitled')
+        self.assertIsNone(response.data['limit'])
 
 
 class SeedGroupCapabilitiesTest(OCLAPITestCase):
