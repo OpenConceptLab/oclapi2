@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import factory
 import fakeredis
+import numpy
 
 from celery.states import PENDING
 from django.contrib.auth.models import Group
@@ -4599,6 +4600,131 @@ class MetadataToConceptsListViewTest(CapacityRedisMockMixin, OCLAPITestCase):
         self.assertEqual(get_repos(owner=self.user.username, owner_type='User'), [user_source])
         self.assertEqual(get_repos(owner=self.user.username), [user_source])
         self.assertEqual(get_repos(owner=org, source_version='v1'), [])
+
+
+@tag('es')
+class SemanticMatchRankingTest(CapacityRedisMockMixin, OCLAPITestCase):
+    """
+    Semantic $match ranks each concept by its best-matching name (OpenConceptLab/ocl_online#592). The language model
+    is a stand-in that gives each text a set vector, so the test decides how similar each name is to the input.
+    """
+    def setUp(self):
+        super().setUp()
+        query, other, unrelated, synonym = numpy.linalg.qr(
+            numpy.random.default_rng(592).standard_normal((384, 4)))[0].T
+        weaker = 0.6 * query + 0.8 * other  # cosine 0.6 with the input
+        self.vectors = {
+            'vacina contra raiva': query,
+            'Rabies vaccine': query,
+            'Rabies immune globulin': weaker,
+            'Rabies immunoglobulin': weaker,
+            'Imunizante antirrábico': weaker,
+            'Soro antirrábico': 0.3 * query + numpy.sqrt(0.91) * other,  # cosine 0.3
+            'vacina antirrábica': synonym,
+            'Rabies vaccine, inactivated': (query + synonym) / numpy.sqrt(2),  # cosine 0.71 with each
+            'Rabies vaccine, live': 0.8 * query + 0.6 * other,  # cosine 0.8 with the name, 0 with the synonym
+        }
+
+        def encode(text):  # a doc saved before its names exist encodes '' too
+            return self.vectors.get(text, unrelated)
+        patch('core.concepts.embeddings.encode_texts', lambda texts: [encode(text) for text in texts]).start()
+        self.get_embeddings = patch('core.concepts.search.get_embeddings', side_effect=encode).start()
+        self.user = UserProfileFactory()
+        self.user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
+        self.source = OrganizationSourceFactory(
+            mnemonic='SemanticSource', organization=OrganizationFactory(mnemonic=f'SemOrg{uuid.uuid4().hex[:8]}'),
+            match_algorithms=['es', 'llm'], default_locale='en', supported_locales=['en', 'pt'])
+
+    def create_concept(self, mnemonic, *names, locale='en'):
+        concept = ConceptFactory(
+            parent=self.source, mnemonic=mnemonic,
+            names=[ConceptNameFactory.build(name=name, locale=locale, locale_preferred=index == 0)
+                   for index, name in enumerate(names)])
+        latest = concept.get_latest_version()
+        self.source.concepts.add(latest)
+        return latest
+
+    def match(self, name, data=None, synonyms=None, params=''):
+        row = {'name': name, **({'synonyms': synonyms} if synonyms else {})}
+        response = self.client.post(
+            f'/concepts/$match/?semantic=true&limit=5{params}',
+            {'rows': [row], 'target_repo_url': self.source.uri, **(data or {})},
+            format='json', HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+        self.assertEqual(response.status_code, 200)
+        # each concept's versioned object and latest version both match
+        return list(dict.fromkeys(result['id'] for result in response.data[0]['results']))
+
+    def test_one_name_that_matches_exactly_outranks_two_names_that_match_less_well(self):
+        one_name = self.create_concept('one-name', 'Rabies vaccine')
+        two_names = self.create_concept('two-names', 'Rabies immune globulin', 'Rabies immunoglobulin')
+        ConceptDocument().update([one_name, two_names], refresh=True, parallel=False)
+
+        self.assertEqual(self.match('vacina contra raiva'), ['one-name', 'two-names'])
+
+    def test_input_synonyms_add_to_the_name(self):
+        both = self.create_concept('both', 'Rabies vaccine, inactivated')
+        name_only = self.create_concept('name-only', 'Rabies vaccine, live')
+        ConceptDocument().update([both, name_only], refresh=True, parallel=False)
+
+        self.assertEqual(self.match('vacina contra raiva'), ['name-only', 'both'])
+        self.assertEqual(self.match('vacina contra raiva', synonyms=['vacina antirrábica']), ['both', 'name-only'])
+
+    def test_encodes_each_input_text_once(self):
+        self.match('vacina contra raiva', synonyms=['vacina antirrábica', 'vacina contra raiva'])
+
+        self.assertEqual(
+            sorted(call.args[0] for call in self.get_embeddings.call_args_list),
+            ['vacina antirrábica', 'vacina contra raiva'])
+
+    def test_scores_with_global_term_statistics(self):
+        # Without a DFS phase each shard scores the lexical clauses with its own term statistics, and on a
+        # multi-shard index that noise outweighs the kNN part. The test index has one shard: check the request.
+        search = ConceptFuzzySearch.search(
+            {'name': 'vacina contra raiva'}, self.source.uri, ConceptFuzzySearch.get_repo_params(self.source),
+            is_semantic=True)
+
+        self.assertEqual(search._params.get('search_type'), 'dfs_query_then_fetch')  # pylint: disable=protected-access
+
+    def test_locale_filter_keeps_concepts_with_a_name_in_that_locale(self):
+        english = self.create_concept('english', 'Rabies vaccine')
+        portuguese = self.create_concept('portuguese', 'Imunizante antirrábico', locale='pt')
+        ConceptDocument().update([english, portuguese], refresh=True, parallel=False)
+
+        self.assertEqual(self.match('vacina contra raiva'), ['english', 'portuguese'])
+        self.assertEqual(self.match('vacina contra raiva', {'filter': {'locale': 'pt'}}), ['portuguese'])
+
+    def test_target_repo_filter_with_a_collection_keeps_the_row_in_the_collection(self):
+        # HEAD holds both rows of a concept, under one mnemonic, and only the latest version is in the collection: the
+        # versioned object, indexed first, mustn't take the kNN slot and then fail the collection filter
+        target = OrganizationSourceFactory(organization=self.source.organization, mnemonic='Target')
+        latest = self.create_concept('rabies', 'Rabies vaccine')
+        target_concept = ConceptFactory(parent=target)
+        MappingFactory(
+            parent=self.source, from_concept=latest, to_concept=target_concept, to_source_url=target.uri,
+            to_concept_code=target_concept.mnemonic)
+        collection = OrganizationCollectionFactory(organization=self.source.organization)
+        ExpansionFactory(collection_version=collection).concepts.add(latest)
+        ConceptDocument().update(
+            [Concept.objects.get(id=latest.versioned_object_id), latest], refresh=True, parallel=False)
+
+        filters = {'collection': collection.mnemonic, 'target_repo': target.uri}
+        self.assertEqual(self.match('vacina contra raiva', {'filter': filters}, params='&kNearest=1'), ['rabies'])
+
+    def test_target_repo_filter_keeps_concepts_mapped_to_it_ranked_by_best_name(self):
+        target = OrganizationSourceFactory(organization=self.source.organization, mnemonic='Target')
+        one_name = self.create_concept('one-name', 'Rabies vaccine')
+        two_names = self.create_concept('two-names', 'Rabies immune globulin', 'Rabies immunoglobulin')
+        unmapped = self.create_concept('unmapped', 'Soro antirrábico')
+        for concept in [one_name, two_names]:
+            target_concept = ConceptFactory(parent=target)
+            MappingFactory(
+                parent=self.source, from_concept=concept, to_concept=target_concept, to_source_url=target.uri,
+                to_concept_code=target_concept.mnemonic)
+        ConceptDocument().update([one_name, two_names, unmapped], refresh=True, parallel=False)
+
+        self.assertEqual(self.match('vacina contra raiva'), ['one-name', 'two-names', 'unmapped'])
+        self.assertEqual(
+            self.match('vacina contra raiva', {'filter': {'target_repo': target.uri}}), ['one-name', 'two-names'])
 
 
 class RerankConceptsListViewTest(CapacityRedisMockMixin, OCLAPITestCase):
