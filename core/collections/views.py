@@ -897,7 +897,7 @@ class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, 
     def get_system_version_errors(parameters, version):
         """As FHIR's $expand, system-version may name only one version of a source."""
         value = get(parameters, ExpansionParameters.INCLUDE_SYSTEM)
-        if not value:
+        if value is None or value == '':
             return []
         if not isinstance(value, str):
             return ['Must be a comma-separated string of canonical URLs (url|version) or repository version URLs.']

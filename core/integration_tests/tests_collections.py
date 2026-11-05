@@ -4400,15 +4400,16 @@ class CollectionVersionExpansionsViewTest(OCLAPITestCase):
             ]}})
         self.assertEqual(self.collection.expansions.count(), 0)
 
-        response = self.client.post(
-            self.collection.url + 'HEAD/expansions/',
-            {'mnemonic': 'e1', 'parameters': {'system-version': [v1.uri]}},
-            HTTP_AUTHORIZATION='Token ' + self.token,
-            format='json'
-        )
+        for value in ([v1.uri], [], {}, 0, False):
+            response = self.client.post(
+                self.collection.url + 'HEAD/expansions/',
+                {'mnemonic': 'e1', 'parameters': {'system-version': value}},
+                HTTP_AUTHORIZATION='Token ' + self.token,
+                format='json'
+            )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(self.collection.expansions.count(), 0)
+            self.assertEqual(response.status_code, 400, value)
+            self.assertEqual(self.collection.expansions.count(), 0)
 
         response = self.client.post(
             self.collection.url + 'HEAD/expansions/',
