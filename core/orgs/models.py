@@ -8,8 +8,30 @@ from core.common.checksums import ChecksumModel
 from core.common.constants import NAMESPACE_REGEX, ACCESS_TYPE_VIEW
 from core.common.mixins import SourceContainerMixin
 from core.common.models import BaseResourceModel
-from core.orgs.constants import ORG_OBJECT_TYPE
+from core.orgs.constants import ORG_OBJECT_TYPE, ROLE_ADMIN_ID, ROLE_ID_BY_NAME, ROLE_MEMBER_ID
 from core.users.models import Follow
+
+
+class Role(models.Model):
+    """What a member may do in an organization. The rows are in core/fixtures/org_roles.yaml."""
+    class Meta:
+        db_table = 'org_roles'
+
+    name = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True, default='')
+
+
+class OrganizationMember(models.Model):
+    """A user's membership of an organization, with their role in it."""
+    class Meta:
+        db_table = 'user_profiles_organizations'
+        unique_together = ('userprofile', 'organization')
+
+    userprofile = models.ForeignKey('users.UserProfile', on_delete=models.CASCADE)
+    organization = models.ForeignKey('orgs.Organization', on_delete=models.CASCADE, related_name='memberships')
+    # A new member is a plain member. Only a row inserted without a role gets the column's default: code older than
+    # this column, as during a rollout or after a rollback, where any member could do everything an admin can.
+    role = models.ForeignKey(Role, on_delete=models.PROTECT, default=ROLE_MEMBER_ID, db_default=ROLE_ADMIN_ID)
 
 
 class Organization(BaseResourceModel, SourceContainerMixin, ChecksumModel):
@@ -70,6 +92,38 @@ class Organization(BaseResourceModel, SourceContainerMixin, ChecksumModel):
             return False
         return user.is_staff or self.is_member(user)
 
+    def is_admin(self, user_profile):
+        return self.memberships.filter(userprofile_id=user_profile.id, role_id=ROLE_ADMIN_ID).exists()
+
+    def has_admin_access(self, user):
+        """Whether `user` may edit or delete the org and manage its members: staff and its admins."""
+        if not (user and user.is_authenticated):
+            return False
+        return user.is_staff or self.is_admin(user)
+
+    def is_last_admin(self, user_profile):
+        """True if no other active admin would remain without `user_profile`. Every org keeps at least one."""
+        return self.is_admin(user_profile) and not self.memberships.filter(
+            role_id=ROLE_ADMIN_ID, userprofile__is_active=True).exclude(userprofile_id=user_profile.id).exists()
+
+    def get_member_role(self, user_profile):
+        """The name of the role `user_profile` has in the org, or None if they aren't a member."""
+        return self.memberships.filter(
+            userprofile_id=get(user_profile, 'id')).values_list('role__name', flat=True).first()
+
+    @property
+    def member_roles(self):
+        return dict(self.memberships.values_list('userprofile_id', 'role__name'))
+
+    def set_member_role(self, user_profile, role=None):
+        """
+        Adds `user_profile` to the org or changes their role, and returns whether they're new to it. With no role,
+        a new member gets the default one and an existing member keeps theirs.
+        """
+        _, created = self.memberships.update_or_create(
+            userprofile=user_profile, defaults={'role_id': ROLE_ID_BY_NAME[role]} if role else {})
+        return created
+
     def is_only_member(self, user_profile):
         """True if `user_profile` is the org's only member. Every org keeps at least one member."""
         return bool(self.is_member(user_profile)) and not self.members.exclude(id=user_profile.id).exists()
@@ -98,14 +152,14 @@ class Organization(BaseResourceModel, SourceContainerMixin, ChecksumModel):
 
     def save(self, *args, force_insert=False, force_update=False, using=None, update_fields=None):
         """
-        The creator becomes a member when the org is created. Later saves leave the members alone, so editing
+        The creator becomes an admin when the org is created. Later saves leave the members alone, so editing
         an org doesn't make the editor a member and removing a member sticks.
         """
         is_new = not self.id
         super().save(*args, force_insert=force_insert, force_update=force_update, using=using,
                      update_fields=update_fields)
         if is_new:
-            self.members.add(self.created_by)
+            self.members.add(self.created_by, through_defaults={'role_id': ROLE_ADMIN_ID})
 
     def delete(self, using=None, keep_parents=False, sync=False):   # pylint: disable=arguments-differ
         with transaction.atomic():

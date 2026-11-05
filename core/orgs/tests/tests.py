@@ -3,6 +3,7 @@ import importlib
 from django.apps import apps
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import ValidationError
+from django.db import connection
 from mock import patch, Mock
 
 from core.collections.models import Collection, CollectionReference, Expansion
@@ -13,7 +14,7 @@ from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
 from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
-from core.orgs.constants import ORG_OBJECT_TYPE
+from core.orgs.constants import ORG_OBJECT_TYPE, ROLE_ADMIN
 from core.orgs.documents import OrganizationDocument
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
@@ -51,6 +52,32 @@ class OrganizationTest(OCLTestCase):
         source = OrganizationSourceFactory(organization=org)
         for user in (member, outsider):
             self.assertEqual(source.has_parent_edit_access(user), org.has_edit_access(user))
+
+    def test_has_admin_access(self):
+        org = OrganizationFactory()
+        member, admin, outsider = UserProfileFactory(), UserProfileFactory(), UserProfileFactory()
+        org.members.add(member)
+        org.set_member_role(admin, ROLE_ADMIN)
+
+        self.assertTrue(org.has_admin_access(admin))
+        self.assertTrue(org.has_admin_access(UserProfileFactory(is_staff=True)))
+        self.assertFalse(org.has_admin_access(member))
+        self.assertFalse(org.has_admin_access(outsider))
+        self.assertFalse(org.has_admin_access(AnonymousUser()))
+        self.assertFalse(org.has_admin_access(None))
+
+    def test_an_insert_that_names_no_role_is_an_admin(self):
+        """Code older than the role column inserts this way, during a rollout or after a rollback."""
+        org = OrganizationFactory()
+        user = UserProfileFactory()
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'INSERT INTO user_profiles_organizations (userprofile_id, organization_id) VALUES (%s, %s)',
+                [user.id, org.id]
+            )
+
+        self.assertTrue(org.is_admin(user))
 
     def test_members(self):
         org = Organization(id=123)

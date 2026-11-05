@@ -39,7 +39,17 @@ class PrivateUserFieldsMixin:
         return data
 
 
-class UserListSerializer(AbstractResourceSerializer):
+class OrganizationRoleMixin:
+    """On an org's member list, each member's role in that org."""
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        member_roles = get(self, 'context.member_roles')
+        if member_roles is not None:
+            data['role'] = member_roles.get(instance.id)
+        return data
+
+
+class UserListSerializer(OrganizationRoleMixin, AbstractResourceSerializer):
     type = serializers.CharField(source='resource_type', read_only=True)
 
     class Meta:
@@ -49,7 +59,7 @@ class UserListSerializer(AbstractResourceSerializer):
         )
 
 
-class UserSummarySerializer(PrivateUserFieldsMixin, serializers.ModelSerializer):
+class UserSummarySerializer(OrganizationRoleMixin, PrivateUserFieldsMixin, serializers.ModelSerializer):
     sources = IntegerField(source='public_sources')
     collections = IntegerField(source='public_collections')
     organizations = IntegerField(source='orgs_count')
@@ -174,7 +184,7 @@ class FollowingSerializer(AbstractFollowerSerializer):
         return following.get_brief_serializer()(following).data
 
 
-class UserDetailSerializer(PrivateUserFieldsMixin, AbstractResourceSerializer):
+class UserDetailSerializer(OrganizationRoleMixin, PrivateUserFieldsMixin, AbstractResourceSerializer):
     type = serializers.CharField(source='resource_type', read_only=True)
     uuid = serializers.CharField(source='id', read_only=True)
     username = serializers.CharField(required=False, validators=[

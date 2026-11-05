@@ -56,7 +56,8 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
     OBJECT_TYPE = USER_OBJECT_TYPE
     first_name = models.CharField(max_length=100, blank=True)
     last_name = models.CharField(max_length=100, blank=True)
-    organizations = models.ManyToManyField('orgs.Organization', related_name='members')
+    organizations = models.ManyToManyField(
+        'orgs.Organization', related_name='members', through='orgs.OrganizationMember')
     company = models.TextField(null=True, blank=True)
     sso_id = models.CharField(max_length=64, null=True, blank=True, unique=True)
     location = models.TextField(null=True, blank=True)
@@ -170,6 +171,7 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
         Token.objects.create(user=self, key=token)
 
     def is_admin_for(self, concept_container):  # pragma: no cover
+        """Whether the user owns a repository or is any member of the org that does. Not an org's admin role."""
         user_id = concept_container.user_id
         if user_id and user_id == self.id:
             return True
@@ -186,6 +188,11 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
     @property
     def orgs_count(self):
         return self.organizations.count()
+
+    @property
+    def orgs_needing_this_admin(self):
+        """The orgs that would be left with no active admin without this user."""
+        return [org for org in self.organizations.all() if org.is_last_admin(self)]
 
     @property
     def owned_orgs_count(self):

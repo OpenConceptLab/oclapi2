@@ -8,6 +8,7 @@ from rest_framework.exceptions import ErrorDetail
 
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT
 from core.common.tests import OCLAPITestCase, PREVIEW_GROUP_NAME
+from core.orgs.constants import ROLE_ADMIN, ROLE_MEMBER
 from core.orgs.documents import OrganizationDocument
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import OrganizationSourceFactory
@@ -979,6 +980,42 @@ class UserDetailViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 204)
         self.assertFalse(UserProfile.objects.filter(username=random_user.username).exists())
+
+
+class UserHardDeleteOrganizationAdminTest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.staff = UserProfileFactory(is_staff=True)
+        self.member = UserProfileFactory()
+        self.org = OrganizationFactory(mnemonic='stark', created_by=self.member, updated_by=self.member)
+        self.org.set_member_role(self.member, ROLE_MEMBER)
+        self.user = UserProfileFactory()
+        self.org.set_member_role(self.user, ROLE_ADMIN)
+
+    def delete(self, params='?hardDelete=true'):
+        return self.client.delete(
+            f'/users/{self.user.username}/{params}', HTTP_AUTHORIZATION='Token ' + self.staff.get_token())
+
+    def test_refuses_the_last_admin_of_an_org(self):
+        response = self.delete()
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data, {
+            'detail': 'Cannot remove or demote the last admin of an organization.', 'orgs': ['stark']
+        })
+        self.assertTrue(UserProfile.objects.filter(id=self.user.id).exists())
+
+    def test_allows_an_admin_when_another_remains(self):
+        self.org.set_member_role(self.member, ROLE_ADMIN)
+
+        self.assertEqual(self.delete().status_code, 204)
+        self.assertFalse(UserProfile.objects.filter(id=self.user.id).exists())
+
+    def test_deactivating_the_last_admin_stays_possible(self):
+        self.assertEqual(self.delete(params='').status_code, 204)
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.is_active)
+        self.assertTrue(self.org.is_admin(self.user))
 
 
 class UserReactivateViewTest(OCLAPITestCase):
