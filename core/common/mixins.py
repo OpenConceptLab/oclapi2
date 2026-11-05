@@ -483,6 +483,12 @@ class ConceptDictionaryCreateMixin(ConceptDictionaryMixin):
 
         self.kwargs['parent_resource'] = self.parent_resource = parent_resource
 
+    def set_owner_from_parent(self, data, key_suffix=''):
+        for key in ('organization', 'user', 'organization_id', 'user_id'):
+            data.pop(key, None)
+        data[self.parent_resource.resource_type.lower() + key_suffix] = self.parent_resource.id
+        return data
+
     def create(self, request, **kwargs):  # pylint: disable=unused-argument
         if not self.parent_resource:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
@@ -497,11 +503,9 @@ class ConceptDictionaryCreateMixin(ConceptDictionaryMixin):
         if isinstance(supported_locales, str):
             supported_locales = compact(supported_locales.split(','))
 
-        data = {
-            'mnemonic': data.get('id'),
-            'supported_locales': supported_locales,
-            'version': HEAD, **data, **{self.parent_resource.resource_type.lower(): self.parent_resource.id}
-        }
+        data = self.set_owner_from_parent({
+            'mnemonic': data.get('id'), 'supported_locales': supported_locales, 'version': HEAD, **data
+        })
 
         serializer = self.get_serializer(data=data)
         if serializer.is_valid():

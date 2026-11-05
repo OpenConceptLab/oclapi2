@@ -5534,6 +5534,26 @@ class CollectionViewsAPITest(OCLAPITestCase):
         response = self.client.post('/collections/', {}, format='json')
         self.assertEqual(response.status_code, 404)
 
+    def test_create_ignores_body_owner_collection(self):
+        user = UserProfileFactory()
+        other_org = OrganizationFactory()
+        other_user = UserProfileFactory()
+        for owner_data in (
+                {'organization_id': other_org.id}, {'organization': other_org.id},
+                {'user_id': other_user.id}, {'user': other_user.id},
+        ):
+            name = f"collection-{next(iter(owner_data))}".replace('_', '-')
+            response = self.client.post(
+                f'/users/{user.username}/collections/',
+                {'id': name, 'name': name, **owner_data},
+                HTTP_AUTHORIZATION=f"Token {user.get_token()}",
+                format='json'
+            )
+            self.assertEqual(response.status_code, 201)
+            repo = Collection.objects.get(mnemonic=name, version='HEAD')
+            self.assertEqual(repo.user_id, user.id)
+            self.assertIsNone(repo.organization_id)
+
     def test_verify_scope_no_owner_scope_raises_404(self):
         response = self.client.get('/collections/some-collection/')
         self.assertEqual(response.status_code, 404)
