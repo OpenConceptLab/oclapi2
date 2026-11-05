@@ -5534,6 +5534,45 @@ class CollectionViewsAPITest(OCLAPITestCase):
         response = self.client.post('/collections/', {}, format='json')
         self.assertEqual(response.status_code, 404)
 
+    def test_create_rejects_conflicting_body_owner_collection(self):
+        user = UserProfileFactory()
+        org = OrganizationFactory()
+        org.members.add(user)
+        other_org = OrganizationFactory()
+        other_user = UserProfileFactory()
+        token = f"Token {user.get_token()}"
+        cases = (
+            (f'/users/{user.username}/collections/', {'organization_id': other_org.id}),
+            (f'/users/{user.username}/collections/', {'organization': org.id}),
+            (f'/users/{user.username}/collections/', {'user_id': other_user.id}),
+            (f'/users/{user.username}/collections/', {'user': other_user.id}),
+            (f'/orgs/{org.mnemonic}/collections/', {'organization_id': other_org.id}),
+            (f'/orgs/{org.mnemonic}/collections/', {'user_id': user.id}),
+        )
+        for index, (url, owner_data) in enumerate(cases):
+            response = self.client.post(
+                url, {'id': f'collection-{index}', 'name': 'n', **owner_data}, HTTP_AUTHORIZATION=token, format='json'
+            )
+            self.assertEqual(response.status_code, 400)
+            self.assertFalse({'Source': Source, 'Collection': Collection}['Collection'].objects.filter(
+                mnemonic=f'collection-{index}').exists())
+
+    def test_create_accepts_omitted_or_matching_body_owner_collection(self):
+        user = UserProfileFactory()
+        org = OrganizationFactory()
+        org.members.add(user)
+        token = f"Token {user.get_token()}"
+        for index, (url, owner_data) in enumerate((
+                (f'/users/{user.username}/collections/', {}),
+                (f'/users/{user.username}/collections/', {'user_id': user.id}),
+                (f'/orgs/{org.mnemonic}/collections/', {'organization': org.id}),
+        )):
+            response = self.client.post(
+                url, {'id': f'collection-ok-{index}', 'name': 'n', **owner_data},
+                HTTP_AUTHORIZATION=token, format='json'
+            )
+            self.assertEqual(response.status_code, 201)
+
     def test_verify_scope_no_owner_scope_raises_404(self):
         response = self.client.get('/collections/some-collection/')
         self.assertEqual(response.status_code, 404)
