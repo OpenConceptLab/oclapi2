@@ -90,7 +90,9 @@ class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListW
         if not self.parent_resource:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
-        data = self.set_owner_from_parent(MapProject.format_request_data(request.data), '_id')
+        data = self.set_owner_from_parent(
+            MapProject.format_request_data(request.data), '_id', reject_conflict=False
+        )
         serializer = self.get_serializer(data=data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

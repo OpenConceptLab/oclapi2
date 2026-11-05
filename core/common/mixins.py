@@ -18,6 +18,7 @@ from ocldev.checksum import Checksum
 from psycopg2.errorcodes import QUERY_CANCELED
 from pydash import compact, get
 from rest_framework import status
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.mixins import ListModelMixin, CreateModelMixin
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -483,10 +484,16 @@ class ConceptDictionaryCreateMixin(ConceptDictionaryMixin):
 
         self.kwargs['parent_resource'] = self.parent_resource = parent_resource
 
-    def set_owner_from_parent(self, data, key_suffix=''):
+    def set_owner_from_parent(self, data, key_suffix='', reject_conflict=True):
+        """The URL parent is the only owner. A body owner naming anyone else raises a 400 (or is dropped
+        if reject_conflict is False); an omitted or matching one is accepted."""
+        parent_type = self.parent_resource.resource_type.lower()
         for key in ('organization', 'user', 'organization_id', 'user_id'):
-            data.pop(key, None)
-        data[self.parent_resource.resource_type.lower() + key_suffix] = self.parent_resource.id
+            value = data.pop(key, None)
+            is_parent = key.split('_')[0] == parent_type and str(value) == str(self.parent_resource.id)
+            if reject_conflict and value not in (None, '') and not is_parent:
+                raise DRFValidationError({key: ['Owner must be the one in the URL.']})
+        data[parent_type + key_suffix] = self.parent_resource.id
         return data
 
     def create(self, request, **kwargs):  # pylint: disable=unused-argument

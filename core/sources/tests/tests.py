@@ -54,25 +54,43 @@ class SourceViewsAPITest(OCLAPITestCase):
         response = self.client.post('/sources/', {}, format='json')
         self.assertEqual(response.status_code, 404)
 
-    def test_create_ignores_body_owner_source(self):
+    def test_create_rejects_conflicting_body_owner_source(self):
         user = UserProfileFactory()
+        org = OrganizationFactory()
+        org.members.add(user)
         other_org = OrganizationFactory()
         other_user = UserProfileFactory()
-        for owner_data in (
-                {'organization_id': other_org.id}, {'organization': other_org.id},
-                {'user_id': other_user.id}, {'user': other_user.id},
-        ):
-            name = f"source-{next(iter(owner_data))}".replace('_', '-')
+        token = f"Token {user.get_token()}"
+        cases = (
+            (f'/users/{user.username}/sources/', {'organization_id': other_org.id}),
+            (f'/users/{user.username}/sources/', {'organization': org.id}),
+            (f'/users/{user.username}/sources/', {'user_id': other_user.id}),
+            (f'/users/{user.username}/sources/', {'user': other_user.id}),
+            (f'/orgs/{org.mnemonic}/sources/', {'organization_id': other_org.id}),
+            (f'/orgs/{org.mnemonic}/sources/', {'user_id': user.id}),
+        )
+        for index, (url, owner_data) in enumerate(cases):
             response = self.client.post(
-                f'/users/{user.username}/sources/',
-                {'id': name, 'name': name, **owner_data},
-                HTTP_AUTHORIZATION=f"Token {user.get_token()}",
-                format='json'
+                url, {'id': f'source-{index}', 'name': 'n', **owner_data}, HTTP_AUTHORIZATION=token, format='json'
+            )
+            self.assertEqual(response.status_code, 400)
+            self.assertFalse({'Source': Source, 'Collection': Collection}['Source'].objects.filter(
+                mnemonic=f'source-{index}').exists())
+
+    def test_create_accepts_omitted_or_matching_body_owner_source(self):
+        user = UserProfileFactory()
+        org = OrganizationFactory()
+        org.members.add(user)
+        token = f"Token {user.get_token()}"
+        for index, (url, owner_data) in enumerate((
+                (f'/users/{user.username}/sources/', {}),
+                (f'/users/{user.username}/sources/', {'user_id': user.id}),
+                (f'/orgs/{org.mnemonic}/sources/', {'organization': org.id}),
+        )):
+            response = self.client.post(
+                url, {'id': f'source-ok-{index}', 'name': 'n', **owner_data}, HTTP_AUTHORIZATION=token, format='json'
             )
             self.assertEqual(response.status_code, 201)
-            repo = Source.objects.get(mnemonic=name, version='HEAD')
-            self.assertEqual(repo.user_id, user.id)
-            self.assertIsNone(repo.organization_id)
 
     def test_verify_scope_no_owner_scope_raises_404(self):
         response = self.client.get('/sources/some-source/')
