@@ -5568,7 +5568,8 @@ class CollectionViewsAPITest(OCLAPITestCase):
                 (f'/orgs/{org.mnemonic}/collections/', {'organization': org.id}),
         )):
             response = self.client.post(
-                url, {'id': f'collection-ok-{index}', 'name': 'n', **owner_data}, HTTP_AUTHORIZATION=token, format='json'
+                url, {'id': f'collection-ok-{index}', 'name': 'n', **owner_data},
+                HTTP_AUTHORIZATION=token, format='json'
             )
             self.assertEqual(response.status_code, 201)
 

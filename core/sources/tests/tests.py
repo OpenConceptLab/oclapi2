@@ -88,7 +88,8 @@ class SourceViewsAPITest(OCLAPITestCase):
                 (f'/orgs/{org.mnemonic}/sources/', {'organization': org.id}),
         )):
             response = self.client.post(
-                url, {'id': f'source-ok-{index}', 'name': 'n', **owner_data}, HTTP_AUTHORIZATION=token, format='json'
+                url, {'id': f'source-ok-{index}', 'name': 'n', **owner_data},
+                HTTP_AUTHORIZATION=token, format='json'
             )
             self.assertEqual(response.status_code, 201)
 

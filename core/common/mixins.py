@@ -490,7 +490,7 @@ class ConceptDictionaryCreateMixin(ConceptDictionaryMixin):
         parent_type = self.parent_resource.resource_type.lower()
         for key in ('organization', 'user', 'organization_id', 'user_id'):
             value = data.pop(key, None)
-            is_parent = key.split('_')[0] == parent_type and str(value) == str(self.parent_resource.id)
+            is_parent = key.split('_', maxsplit=1)[0] == parent_type and str(value) == str(self.parent_resource.id)
             if reject_conflict and value not in (None, '') and not is_parent:
                 raise DRFValidationError({key: ['Owner must be the one in the URL.']})
         data[parent_type + key_suffix] = self.parent_resource.id
