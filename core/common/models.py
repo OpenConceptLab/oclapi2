@@ -505,12 +505,13 @@ class BaseModel(models.Model):
             batch_size = INDEX_BATCH_SIZE
             start = 0
             id_qs = queryset.order_by('-id').values_list('id', flat=True)
-            while True:
-                batch = list(id_qs[start:start + batch_size])
-                if not batch:
-                    break
+            # Keyset paging, so each page costs the same; a union can't be filtered, so it pages by offset
+            keyset = not id_qs.query.combinator
+            batch = list(id_qs[start:start + batch_size])
+            while batch:
                 run.attempt(start, batch, index_batch)
                 start += batch_size
+                batch = list(id_qs.filter(id__lt=batch[-1])[:batch_size] if keyset else id_qs[start:start + batch_size])
 
         if refresh:
             run.refresh(doc)

@@ -1528,7 +1528,9 @@ class BaseModelTest(OCLTestCase):
     @patch('core.common.models.parallel_bulk', return_value=[])
     def test_batch_index_partial_by_ids_refreshes_once_after_the_last_batch(self, parallel_bulk_mock):
         id_queryset = MagicMock()
-        id_queryset.__getitem__.side_effect = lambda batch_slice: [1, 2] if batch_slice.start == 0 else []
+        id_queryset.query.combinator = None
+        id_queryset.__getitem__.return_value = [2, 1]
+        id_queryset.filter.return_value.__getitem__.return_value = []
         queryset = Mock()
         queryset.order_by.return_value.values_list.return_value = id_queryset
         doc_instance = Mock()
@@ -1540,6 +1542,34 @@ class BaseModelTest(OCLTestCase):
 
         self.assertNotIn('refresh', parallel_bulk_mock.call_args[1])
         doc_instance._index.refresh.assert_called_once_with()  # pylint: disable=protected-access
+        id_queryset.filter.assert_called_once_with(id__lt=1)
+
+    def _paged_ids(self, queryset):
+        pages = []
+
+        def get_actions(ids):
+            pages.append(list(ids))
+            return iter([])
+
+        with override_settings(TEST_MODE=False), patch('core.common.models.INDEX_BATCH_SIZE', 2), \
+                patch('core.common.models.BatchIndexRun.bulk'):
+            BaseModel.batch_index_partial_by_ids(queryset, ConceptDocument, get_actions, refresh=False)
+        return pages
+
+    def test_batch_index_partial_by_ids_pages_by_keyset(self):
+        source = OrganizationSourceFactory()
+        concepts = [ConceptFactory(parent=source) for _ in range(5)]
+        ids = sorted((concept.id for concept in concepts), reverse=True)
+
+        self.assertEqual(self._paged_ids(Concept.objects.filter(id__in=ids)), [ids[0:2], ids[2:4], ids[4:]])
+
+    def test_batch_index_partial_by_ids_pages_a_union_by_offset(self):
+        source = OrganizationSourceFactory()
+        concepts = [ConceptFactory(parent=source) for _ in range(5)]
+        ids = sorted((concept.id for concept in concepts), reverse=True)
+        queryset = Concept.objects.filter(id__in=ids[:3]).union(Concept.objects.filter(id__in=ids[3:]))
+
+        self.assertEqual(self._paged_ids(queryset), [ids[0:2], ids[2:4], ids[4:]])
 
     @override_settings(TEST_MODE=False)
     def test_batch_index_full_continues_remaining_batches_after_error(self):
