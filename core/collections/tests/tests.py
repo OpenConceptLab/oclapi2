@@ -44,6 +44,9 @@ from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.tasks.models import Task
+from core.toggles.models import Toggle
+from core.url_registry.constants import URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE
+from core.url_registry.factories import GlobalURLRegistryFactory, OrganizationURLRegistryFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -5989,3 +5992,99 @@ class RetirePublicEditMigrationTest(OCLTestCase):
             self.assertEqual(instance.public_access, ACCESS_TYPE_VIEW)
         private.refresh_from_db()
         self.assertEqual(private.public_access, ACCESS_TYPE_NONE)
+
+
+class ExpansionSystemVersionNamespaceTest(OCLTestCase):
+    URL = 'https://registry-only.org/cs'
+
+    @staticmethod
+    def set_registry_toggle(on):
+        Toggle.objects.filter(name=URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE).update(
+            dev=on, qa=on, demo=on, staging=on, who_staging=on, production=on)
+
+    def setUp(self):
+        super().setUp()
+        self.owner = OrganizationFactory(mnemonic='owner')
+        self.other = OrganizationFactory(mnemonic='other')
+        self.publisher = OrganizationFactory(mnemonic='publisher')
+        # the lowest-id repository with the URL, found without the owner's registry
+        self.other_source = OrganizationSourceFactory(
+            organization=self.other, mnemonic='cs', canonical_url=self.URL)
+        self.other_source_v1 = OrganizationSourceFactory(
+            organization=self.other, mnemonic='cs', version='v1', canonical_url=self.URL)
+        self.source = OrganizationSourceFactory(organization=self.publisher, mnemonic='cs', canonical_url=self.URL)
+        self.source_v1 = OrganizationSourceFactory(
+            organization=self.publisher, mnemonic='cs', version='v1', canonical_url=self.URL)
+        self.source_v2 = OrganizationSourceFactory(
+            organization=self.publisher, mnemonic='cs', version='v2', canonical_url=self.URL)
+        self.collection = OrganizationCollectionFactory(organization=self.owner, mnemonic='vs')
+        self.expansion = ExpansionFactory(mnemonic='e1', collection_version=self.collection)
+
+    def tearDown(self):
+        self.set_registry_toggle(False)
+        super().tearDown()
+
+    def add_owner_registry_entry(self):
+        OrganizationURLRegistryFactory(organization=self.owner, url=self.URL, namespace=self.publisher.uri)
+
+    def evaluate(self, system_version, namespace=None):
+        self.expansion.parameters = {'system-version': system_version}
+        self.expansion.add_references(CollectionReference(system=self.URL, code='c1', namespace=namespace))
+
+    def unresolved_system_versions(self):
+        return [
+            entry['url'] for entry in self.expansion.unresolved_repo_versions or []
+            if entry['type'] == 'expansion.parameters.system-version'
+        ]
+
+    def test_resolves_in_owner_registry_with_toggle_on(self):
+        self.set_registry_toggle(True)
+        self.add_owner_registry_entry()
+
+        self.evaluate(f'{self.URL}|v1', self.owner.uri)
+
+        self.assertEqual(self.unresolved_system_versions(), [])
+        self.assertEqual(list(self.expansion.evaluated_source_versions.all()), [self.source_v1])
+
+    def test_owner_registry_ignored_with_toggle_off(self):
+        self.set_registry_toggle(False)
+        self.add_owner_registry_entry()
+
+        self.evaluate(f'{self.URL}|v1')
+
+        self.assertEqual(self.unresolved_system_versions(), [])
+        self.assertEqual(list(self.expansion.evaluated_source_versions.all()), [self.other_source_v1])
+
+    def test_unresolved_without_any_registry_entry_with_toggle_on(self):
+        self.set_registry_toggle(True)
+
+        self.evaluate(f'{self.URL}|v1', self.owner.uri)
+
+        self.assertEqual(self.unresolved_system_versions(), [f'{self.URL}|v1'])
+
+    def test_resolves_in_global_registry_with_toggle_on(self):
+        self.set_registry_toggle(True)
+        GlobalURLRegistryFactory(url=self.URL, namespace=self.publisher.uri)
+
+        self.evaluate(f'{self.URL}|v2', self.owner.uri)
+
+        self.assertEqual(self.unresolved_system_versions(), [])
+        self.assertEqual(list(self.expansion.evaluated_source_versions.all()), [self.source_v2])
+
+    def test_get_system_version_conflicts(self):
+        self.set_registry_toggle(True)
+        self.add_owner_registry_entry()
+        namespace = Expansion.get_system_version_namespace(self.owner.uri)
+        self.assertEqual(namespace, self.owner.uri)
+
+        self.assertEqual(Expansion.get_system_version_conflicts(f'{self.URL}|v1', namespace), {})
+        self.assertEqual(
+            Expansion.get_system_version_conflicts(f'{self.URL}|v1, {self.source_v1.uri}', namespace), {})
+        self.assertEqual(
+            Expansion.get_system_version_conflicts(f'{self.URL}|v1,{self.URL}|v2', namespace),
+            {self.source.uri: [f'{self.URL}|v1', f'{self.URL}|v2']})
+        self.assertEqual(
+            Expansion.get_system_version_conflicts(f'{self.URL}|v1,https://unknown.org|v1', namespace), {})
+
+        self.set_registry_toggle(False)
+        self.assertIsNone(Expansion.get_system_version_namespace(self.owner.uri))

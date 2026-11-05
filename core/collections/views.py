@@ -25,7 +25,7 @@ from core.collections.constants import (
     SOURCE_MAPPINGS,
     UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT, TRANSFORM_TO_RESOURCE_VERSIONS, TRANSFORM_TO_EXTENSIONAL)
 from core.collections.documents import CollectionDocument
-from core.collections.models import Collection, CollectionReference, Expansion
+from core.collections.models import Collection, CollectionReference, Expansion, ExpansionParameters
 from core.collections.search import CollectionFacetedSearch
 from core.collections.serializers import (
     CollectionDetailSerializer, CollectionListSerializer,
@@ -879,6 +879,10 @@ class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, 
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         version = self.get_object()
+        errors = self.get_system_version_errors(serializer.validated_data.get('parameters'), version)
+        if errors:
+            return Response({'parameters': {ExpansionParameters.INCLUDE_SYSTEM: errors}},
+                            status=status.HTTP_400_BAD_REQUEST)
         user = request.user
         expansion = version.cascade_children_to_expansion(
             expansion_data={**serializer.validated_data, 'created_by_id': user.id, 'updated_by_id': user.id},
@@ -888,6 +892,22 @@ class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, 
         headers = self.get_success_headers(serializer.validated_data)
         return Response(self.get_response_serializer_class()(expansion).data, status=status.HTTP_201_CREATED,
                         headers=headers)
+
+    @staticmethod
+    def get_system_version_errors(parameters, version):
+        """As FHIR's $expand, system-version may name only one version of a source."""
+        value = get(parameters, ExpansionParameters.INCLUDE_SYSTEM)
+        if not value:
+            return []
+        if not isinstance(value, str):
+            return ['Must be a comma-separated string of canonical URLs (url|version) or repository version URLs.']
+        conflicts = Expansion.get_system_version_conflicts(
+            value, Expansion.get_system_version_namespace(version.parent_url))
+        return [
+            f"Names more than one version of {repo_url}: {', '.join(entries)}. "
+            "Use only one version of a source in system-version."
+            for repo_url, entries in conflicts.items()
+        ]
 
 
 class CollectionExpansionsView(CollectionBaseView, ListWithHeadersMixin):

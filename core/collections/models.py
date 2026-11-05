@@ -43,6 +43,7 @@ from core.concepts.models import Concept
 from core.mappings.models import Mapping
 from core.tasks.models import Task
 from core.toggles.models import Toggle
+from core.url_registry.constants import URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE
 
 TRUTHY = get_truthy_values()
 FALSEY = get_falsy_values()
@@ -1772,6 +1773,31 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 CollectionReference.on_commit_when_locked(lambda: batch_index_resources.apply_async(
                     ('mapping', mappings_filters), queue='indexing', permanent=False))
 
+    @staticmethod
+    def get_system_version_namespace(owner_url):
+        # without the URL registries a namespace would limit canonical URLs to the owner's repositories
+        return owner_url if Toggle.get(URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE) else None
+
+    @staticmethod
+    def resolve_system_version_entries(value, namespace=None):
+        """Each system-version entry with the repo version it resolves to (one without an id when unresolved)."""
+        from core.sources.models import Source
+        return [
+            (entry, Source.resolve_reference_expression(entry, namespace)[0])
+            for entry in compact([entry.strip() for entry in (value or '').split(',')])
+        ]
+
+    @classmethod
+    def get_system_version_conflicts(cls, value, namespace=None):
+        """The system-version entries naming different versions of one repository, by the repository's URL."""
+        entries_by_repo = {}
+        for entry, version in cls.resolve_system_version_entries(value, namespace):
+            if version.id:
+                entries_by_repo.setdefault(drop_version(version.uri), {}).setdefault(version.id, entry)
+        return {
+            repo_url: list(entries.values()) for repo_url, entries in entries_by_repo.items() if len(entries) > 1
+        }
+
     def add_references(  # pylint: disable=too-many-locals,too-many-statements,too-many-branches,too-many-arguments
             self, references, index=True, is_adding_all=False, attempt_reevaluate=True, force_reevaluate=False):
         include_refs, exclude_refs = self.to_ref_list_separated(references)
@@ -1828,11 +1854,9 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         include_system_versions = []
         system_versions = self.parameters.get(ExpansionParameters.INCLUDE_SYSTEM)
         if should_reevaluate and system_versions:
-            for system_version in compact(system_versions.split(',')):
-                _system = system_version.strip()
-                _cache_key = f"NONE-{_system}-NONE"
-                version, _ = ConceptContainerModel.resolve_reference_expression(_system)
-                _system_version_cache[_cache_key] = version
+            namespace = self.get_system_version_namespace(self.collection_version.parent_url)
+            for _system, version in self.resolve_system_version_entries(system_versions, namespace):
+                _system_version_cache[f"{namespace or 'NONE'}-{_system}-NONE"] = version
                 if version.id:
                     include_system_versions.append(version)
                 else:
