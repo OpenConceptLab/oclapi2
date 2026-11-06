@@ -3,7 +3,7 @@
 # on arm64 they run under Rosetta/QEMU emulation, and once Celery indexing
 # kicks in the emulated cores saturate hard enough to block the API for
 # tens of seconds at a time. Building from the local Dockerfile (which uses
-# python:3.12-slim, a multi-arch base) gives a native image and ~200x faster
+# python:3.13-slim, a multi-arch base) gives a native image and ~200x faster
 # requests in practice.
 #
 # Usage:
