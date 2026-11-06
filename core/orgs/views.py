@@ -11,7 +11,8 @@ from rest_framework.views import APIView
 
 from core.client_configs.views import ResourceClientConfigsView
 from core.collections.views import CollectionListView
-from core.common.constants import NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, HEAD, UPDATED_BY_USERNAME_PARAM
+from core.common.constants import NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, HEAD, UPDATED_BY_USERNAME_PARAM, \
+    ROLES, ROLE_MEMBER
 from core.common.mixins import ListWithHeadersMixin
 from core.common.permissions import CanAdministerOrganization, CanViewConceptDictionary, HasPrivateAccess
 from core.common.swagger_parameters import org_no_members_param
@@ -20,8 +21,7 @@ from core.common.throttling import ThrottleUtil
 from core.common.utils import parse_updated_since_param, get_truthy_values
 from core.common.views import BaseAPIView, BaseLogoView
 from core.map_projects.views import MapProjectListView
-from core.orgs.constants import NO_MEMBERS, CANNOT_REMOVE_ONLY_MEMBER, CANNOT_REMOVE_LAST_ADMIN, INVALID_ROLE, \
-    ROLES, ROLE_MEMBER
+from core.orgs.constants import NO_MEMBERS, CANNOT_REMOVE_ONLY_MEMBER, CANNOT_REMOVE_LAST_ADMIN, INVALID_ROLE
 from core.orgs.documents import OrganizationDocument
 from core.orgs.models import Organization
 from core.orgs.serializers import OrganizationDetailSerializer, OrganizationListSerializer, \

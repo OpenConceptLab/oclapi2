@@ -3,32 +3,15 @@ from django.conf import settings
 from django.db import migrations, models
 
 
-def seed_roles(apps, _):
-    """Only what the new column needs. load_fixtures fills in the rest from core/fixtures/org_roles.yaml."""
-    role = apps.get_model('orgs', 'Role')
-    role.objects.bulk_create([role(id=1, name='admin'), role(id=2, name='member')])
-
-
 class Migration(migrations.Migration):
 
     dependencies = [
+        ('common', '0005_role'),
         ('users', '0037_userprofile_sso_id'),
         ('orgs', '0022_retire_public_edit_access'),
     ]
 
     operations = [
-        migrations.CreateModel(
-            name='Role',
-            fields=[
-                ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('name', models.CharField(max_length=100, unique=True)),
-                ('description', models.TextField(blank=True, default='')),
-            ],
-            options={
-                'db_table': 'org_roles',
-            },
-        ),
-        migrations.RunPython(seed_roles, migrations.RunPython.noop),
         # The table exists already, as the automatic many-to-many table of UserProfile.organizations.
         migrations.SeparateDatabaseAndState(
             state_operations=[
@@ -55,6 +38,6 @@ class Migration(migrations.Migration):
             model_name='organizationmember',
             name='role',
             field=models.ForeignKey(
-                db_default=1, default=2, on_delete=django.db.models.deletion.PROTECT, to='orgs.role'),
+                db_default=1, default=2, on_delete=django.db.models.deletion.PROTECT, to='common.role'),
         ),
     ]

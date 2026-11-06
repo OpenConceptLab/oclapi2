@@ -10,10 +10,10 @@ from rest_framework.test import APIClient
 
 from core.collections.documents import CollectionDocument
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory
-from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT
+from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT, ROLE_ADMIN, \
+    ROLE_MEMBER
 from core.common.tests import OCLAPITestCase, OCLAPITransactionTestCase
 from core.events.models import Event
-from core.orgs.constants import ROLE_ADMIN, ROLE_MEMBER
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.documents import SourceDocument

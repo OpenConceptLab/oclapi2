@@ -4,7 +4,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('orgs', '0023_role_organizationmember'),
+        ('orgs', '0023_organizationmember'),
         ('users', '0037_userprofile_sso_id'),
     ]
 

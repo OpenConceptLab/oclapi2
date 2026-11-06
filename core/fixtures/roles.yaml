@@ -1,9 +1,9 @@
-- model: "orgs.role"
+- model: "common.role"
   pk: 1
   fields:
     name: admin
     description: Can edit or delete the organization, manage its members and change their roles
-- model: "orgs.role"
+- model: "common.role"
   pk: 2
   fields:
     name: member

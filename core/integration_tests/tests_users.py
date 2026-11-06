@@ -6,9 +6,9 @@ from mock import patch
 from rest_framework.authtoken.models import Token
 from rest_framework.exceptions import ErrorDetail
 
-from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT
+from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT, ROLE_ADMIN, \
+    ROLE_MEMBER
 from core.common.tests import OCLAPITestCase, PREVIEW_GROUP_NAME
-from core.orgs.constants import ROLE_ADMIN, ROLE_MEMBER
 from core.orgs.documents import OrganizationDocument
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import OrganizationSourceFactory

@@ -5,20 +5,11 @@ from pydash import get
 
 from core.client_configs.models import ClientConfig
 from core.common.checksums import ChecksumModel
-from core.common.constants import NAMESPACE_REGEX, ACCESS_TYPE_VIEW
+from core.common.constants import NAMESPACE_REGEX, ACCESS_TYPE_VIEW, ROLE_ADMIN_ID, ROLE_ID_BY_NAME, ROLE_MEMBER_ID
 from core.common.mixins import SourceContainerMixin
-from core.common.models import BaseResourceModel
-from core.orgs.constants import ORG_OBJECT_TYPE, ROLE_ADMIN_ID, ROLE_ID_BY_NAME, ROLE_MEMBER_ID
+from core.common.models import BaseResourceModel, Role
+from core.orgs.constants import ORG_OBJECT_TYPE
 from core.users.models import Follow
-
-
-class Role(models.Model):
-    """What a member may do in an organization. The rows are in core/fixtures/org_roles.yaml."""
-    class Meta:
-        db_table = 'org_roles'
-
-    name = models.CharField(max_length=100, unique=True)
-    description = models.TextField(blank=True, default='')
 
 
 class OrganizationMember(models.Model):

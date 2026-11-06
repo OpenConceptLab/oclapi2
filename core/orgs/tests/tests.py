@@ -7,14 +7,16 @@ from django.db import connection
 from mock import patch, Mock
 
 from core.collections.models import Collection, CollectionReference, Expansion
-from core.common.constants import ACCESS_TYPE_NONE, HEAD, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT
+from core.common.constants import ACCESS_TYPE_NONE, HEAD, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT, ROLE_ADMIN, \
+    ROLE_ID_BY_NAME
+from core.common.models import Role
 from core.common.tasks import delete_organization
 from core.common.tests import OCLTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
 from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
-from core.orgs.constants import ORG_OBJECT_TYPE, ROLE_ADMIN
+from core.orgs.constants import ORG_OBJECT_TYPE
 from core.orgs.documents import OrganizationDocument
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
@@ -22,6 +24,19 @@ from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.users.tests.factories import UserProfileFactory
+
+
+class RoleTest(OCLTestCase):
+    def test_roles(self):
+        self.assertEqual(Role._meta.db_table, 'roles')  # pylint: disable=protected-access
+        self.assertEqual(dict(Role.objects.values_list('name', 'id')), ROLE_ID_BY_NAME)
+
+    def test_name_is_one_of_the_roles(self):
+        Role(name=ROLE_ADMIN).clean_fields()
+
+        with self.assertRaises(ValidationError) as error:
+            Role(name='owner').clean_fields()
+        self.assertEqual(list(error.exception.message_dict), ['name'])
 
 
 class OrganizationTest(OCLTestCase):
