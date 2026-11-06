@@ -2462,21 +2462,26 @@ class TasksTest(OCLTestCase):
             CollectionReference.atomic_when_locked()
         atomic_mock.assert_not_called()
 
+    @staticmethod
+    def context_when_generating(concept, is_locked):
+        collection = OrganizationCollectionFactory()
+        seen = {}
+
+        def generate(reference):
+            seen.update(collection_id=reference.collection_id, is_async=bool(getattr(reference, '_async', False)))
+            return [reference]
+
+        with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=is_locked), \
+                patch.object(CollectionReference, 'generate_references', autospec=True, side_effect=generate):
+            collection.add_references(
+                [CollectionReference(expression=concept.uri, created_by=collection.created_by)],
+                collection.created_by, True)
+        return collection, seen
+
     def test_add_references_sets_the_collection_before_generating_and_async_only_with_toggle_on(self):
         concept = ConceptFactory()
         for is_locked in (True, False):
-            collection = OrganizationCollectionFactory()
-            seen = {}
-
-            def generate(reference, _collection=collection, _seen=seen):
-                _seen.update(collection_id=reference.collection_id, is_async=bool(getattr(reference, '_async', False)))
-                return [reference]
-
-            with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=is_locked), \
-                    patch.object(CollectionReference, 'generate_references', autospec=True, side_effect=generate):
-                collection.add_references(
-                    [CollectionReference(expression=concept.uri, created_by=collection.created_by)],
-                    collection.created_by, True)
+            collection, seen = self.context_when_generating(concept, is_locked)
             self.assertEqual(seen, {'collection_id': collection.id, 'is_async': is_locked})
 
     def test_cascade_children_to_expansion_claims_default_only_with_toggle_on(self):
