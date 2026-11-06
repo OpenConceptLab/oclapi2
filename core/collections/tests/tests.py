@@ -2136,9 +2136,11 @@ class TasksTest(OCLTestCase):
             expansion.unresolved_repo_versions,
             [
                 {'url': 'http://foo-system.com', 'type': 'reference.system', 'version': None, 'namespace': 'barbar'},
-                {'url': 'http://foo-valueset.com', 'type': 'reference.valueset', 'namespace': None},
-                {'url': '/orgs/Org/collections/Collection/123/', 'type': 'reference.valueset', 'namespace': None},
-                {'url': 'http://foo-system2.com|v1', 'type': 'reference.system', 'version': None, 'namespace': None}
+                {'url': 'http://foo-valueset.com', 'type': 'reference.valueset', 'namespace': collection.parent_url},
+                {'url': '/orgs/Org/collections/Collection/123/', 'type': 'reference.valueset',
+                 'namespace': collection.parent_url},
+                {'url': 'http://foo-system2.com|v1', 'type': 'reference.system', 'version': None,
+                 'namespace': collection.parent_url}
             ]
         )
         self.assertEqual(expansion.explicit_collection_versions.count(), 0)
@@ -6070,6 +6072,34 @@ class ExpansionSystemVersionNamespaceTest(OCLTestCase):
 
         self.assertEqual(self.unresolved_system_versions(), [])
         self.assertEqual(list(self.expansion.evaluated_source_versions.all()), [self.source_v2])
+
+    def test_entry_applies_whether_or_not_the_reference_names_the_owner_namespace(self):
+        self.set_registry_toggle(True)
+        self.add_owner_registry_entry()
+        GlobalURLRegistryFactory(url=self.URL, namespace=self.other.uri)
+
+        for namespace in (self.owner.uri, None):
+            with self.subTest(namespace=namespace):
+                self.expansion.evaluated_source_versions.clear()
+                self.expansion.parameters = {'system-version': f'{self.URL}|v1'}
+                self.expansion.add_references(CollectionReference(
+                    system=self.URL, code='c1', namespace=namespace, collection=self.collection))
+
+                self.assertEqual(self.unresolved_system_versions(), [])
+                self.assertEqual(list(self.expansion.evaluated_source_versions.all()), [self.source_v1])
+
+    def test_reference_resolution_namespace(self):
+        reference = CollectionReference(system=self.URL, code='c1', collection=self.collection)
+        own = CollectionReference(system=self.URL, code='c1', namespace=self.other.uri, collection=self.collection)
+
+        self.set_registry_toggle(False)
+        self.assertIsNone(reference.resolution_namespace)
+        self.assertEqual(own.resolution_namespace, self.other.uri)
+
+        reference.clear_resolution_cache()
+        self.set_registry_toggle(True)
+        self.assertEqual(reference.resolution_namespace, self.owner.uri)
+        self.assertEqual(CollectionReference(system=self.URL, code='c1').resolution_namespace, None)
 
     def test_get_system_version_conflicts(self):
         self.set_registry_toggle(True)

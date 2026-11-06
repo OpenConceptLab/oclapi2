@@ -1140,10 +1140,17 @@ class CollectionReference(models.Model):
         ]
 
     @cached_property
+    def resolution_namespace(self):
+        """Its own namespace, else its collection owner's, as the URL registries resolve within an owner"""
+        if self.namespace or not self.collection_id:
+            return self.namespace
+        return Expansion.get_system_version_namespace(self.collection.parent_url)
+
+    @cached_property
     def resolve_expression_system_version(self):
         if self.system:
             from core.sources.models import Source
-            version, _ = Source.resolve_reference_expression(self.system, self.namespace, self.version)
+            version, _ = Source.resolve_reference_expression(self.system, self.resolution_namespace, self.version)
             if version.id:
                 return version
         return None
@@ -1274,7 +1281,7 @@ class CollectionReference(models.Model):
 
     def resolve_valueset_version(self, valueset):
         """A value set named without a version resolves to the collection's locked version of it, if any"""
-        version, _ = Collection.resolve_reference_expression(valueset, self.namespace)
+        version, _ = Collection.resolve_reference_expression(valueset, self.resolution_namespace)
         if version.id and self.collection_id and not self.is_explicit_valueset(valueset):
             return next((
                 locked for locked in self.collection.locked_collection_versions
@@ -1283,8 +1290,8 @@ class CollectionReference(models.Model):
         return version
 
     def clear_resolution_cache(self):
-        for attr in ('resolve_system_version', 'resolve_expression_system_version', 'resolve_valueset_versions',
-                     'resolve_valueset_versions_with_unresolved'):
+        for attr in ('resolution_namespace', 'resolve_system_version', 'resolve_expression_system_version',
+                     'resolve_valueset_versions', 'resolve_valueset_versions_with_unresolved'):
             self.__dict__.pop(attr, None)
 
     @cached_property
@@ -1302,7 +1309,8 @@ class CollectionReference(models.Model):
                     if version.id:
                         to_add.append(version)
                     else:
-                        unresolved.append({'url': valueset, 'namespace': self.namespace, 'type': 'reference.valueset'})
+                        unresolved.append(
+                            {'url': valueset, 'namespace': self.resolution_namespace, 'type': 'reference.valueset'})
         return explicit, evaluated, unresolved
 
     def clean(self):
@@ -1415,10 +1423,10 @@ class CollectionReference(models.Model):
         if system_version_cache is None:
             return self.resolve_expression_system_version
 
-        cache_key = (self.namespace, self.system, self.version)
+        cache_key = (self.resolution_namespace, self.system, self.version)
         if cache_key not in system_version_cache:
             from core.sources.models import Source
-            version, _ = Source.resolve_reference_expression(self.system, self.namespace, self.version)
+            version, _ = Source.resolve_reference_expression(self.system, self.resolution_namespace, self.version)
             system_version_cache[cache_key] = version if version.id else None
         return system_version_cache[cache_key]
 
@@ -1457,9 +1465,9 @@ class CollectionReference(models.Model):
         if isinstance(self.valueset, list):
             for valueset in self.valueset:  # pylint: disable=not-an-iterable
                 if valueset:
-                    cache_key = (self.namespace, valueset, None)
+                    cache_key = (self.resolution_namespace, valueset, None)
                     if cache_key not in valueset_version_cache:
-                        version, _ = Collection.resolve_reference_expression(valueset, self.namespace)
+                        version, _ = Collection.resolve_reference_expression(valueset, self.resolution_namespace)
                         valueset_version_cache[cache_key] = version if version.id else None
                     if valueset_version_cache[cache_key]:
                         versions.append(valueset_version_cache[cache_key])
@@ -1864,7 +1872,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
 
         def get_ref_system_version(ref):
             if ref.system:
-                __cache_key = f"{ref.namespace or 'NONE'}-{ref.system}-{ref.version or 'NONE'}"
+                __cache_key = f"{ref.resolution_namespace or 'NONE'}-{ref.system}-{ref.version or 'NONE'}"
                 if __cache_key not in _system_version_cache:
                     _system_version_cache[__cache_key] = ref.resolve_expression_system_version
                 _version = _system_version_cache[__cache_key]
@@ -1918,7 +1926,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                     unresolved_repo_versions.append(
                         {
                             'url': ref.system,
-                            'namespace': ref.namespace,
+                            'namespace': ref.resolution_namespace,
                             'version': ref.version,
                             'type': 'reference.system'
                         }
