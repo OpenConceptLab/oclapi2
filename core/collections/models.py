@@ -1799,24 +1799,21 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
     @classmethod
     def get_system_version_conflicts(cls, value, namespace=None):
         """The system-version entries naming different versions of one repository, by the repository's URL.
-        An entry that doesn't resolve still counts, under its URL without the version."""
-        resolved = cls.resolve_system_version_entries(value, namespace)
-
-        def to_url(entry):
-            url, _ = canonical_url_to_url_and_version(entry)
-            return url if is_canonical_uri(url) else drop_version(url if url.endswith('/') else url + '/')
-
-        repo_by_url = {}
-        for entry, version in resolved:
-            if version.id:
-                repo_url = drop_version(version.uri)
-                for url in compact([to_url(entry), version.canonical_url, repo_url]):
-                    repo_by_url.setdefault(url, repo_url)
+        An entry that doesn't resolve still counts, under the repository its URL names and the version it asks for."""
+        from core.sources.models import Source
         entries_by_repo = {}
-        for entry, version in resolved:
-            url = to_url(entry)
-            repo_url = drop_version(version.uri) if version.id else repo_by_url.get(url, url)
-            entries_by_repo.setdefault(repo_url, {}).setdefault(version.id or entry, entry)
+        for entry, version in cls.resolve_system_version_entries(value, namespace):
+            url, requested = canonical_url_to_url_and_version(entry)
+            if version.id:
+                repo_url, requested = drop_version(version.uri), version.version
+            elif is_canonical_uri(url):
+                repo, _ = Source.resolve_reference_expression(url, namespace)
+                repo_url = drop_version(repo.uri) if repo.id else url
+            else:
+                path = url if url.endswith('/') else url + '/'
+                repo_url = drop_version(path)
+                requested = requested or path[len(repo_url):].strip('/') or None
+            entries_by_repo.setdefault(repo_url, {}).setdefault(requested, entry)
         return {
             repo_url: list(entries.values()) for repo_url, entries in entries_by_repo.items() if len(entries) > 1
         }

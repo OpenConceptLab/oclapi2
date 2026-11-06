@@ -6142,6 +6142,19 @@ class ExpansionSystemVersionNamespaceTest(OCLTestCase):
         self.assertEqual(
             Expansion.get_system_version_conflicts('https://none.org/cs|v8,https://none.org/cs|v8', namespace), {})
 
+    def test_get_system_version_conflicts_matches_missing_versions_across_url_forms(self):
+        self.set_registry_toggle(True)
+        self.add_owner_registry_entry()
+        namespace = Expansion.get_system_version_namespace(self.owner.uri)
+
+        self.assertEqual(
+            Expansion.get_system_version_conflicts(f'{self.URL}|v8,{self.source.uri}v9/', namespace),
+            {self.source.uri: [f'{self.URL}|v8', f'{self.source.uri}v9/']})
+        self.assertEqual(
+            Expansion.get_system_version_conflicts(f'{self.URL}|v8,{self.source.uri}v8/', namespace), {})
+        self.assertEqual(
+            Expansion.get_system_version_conflicts(f'{self.URL}|v1,{self.source.uri}v1/', namespace), {})
+
     def add_cascade_reference(self, **kwargs):
         ConceptFactory(parent=self.source, mnemonic='c1')
         ConceptFactory(parent=self.other_source, mnemonic='c1')
