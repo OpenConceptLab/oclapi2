@@ -274,11 +274,11 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         is_locked = CollectionReference.is_expansion_locked_repo_version_on()
         for reference in references:
             reference.expression = reference.build_expression()
+            # before generating, so cascade-and-transform resolves in this collection's namespace and locks
+            reference.collection = self
             if is_locked:
-                # before generating, so cascade-and-transform resolves against this collection's locks
-                reference.collection = self
                 reference._async = _async  # pylint: disable=protected-access
-                reference.clear_resolution_cache()
+            reference.clear_resolution_cache()
             total_references += reference.generate_references()
         total_references = CollectionReference.dedupe_by_expression(total_references)
         for reference in total_references:
@@ -943,6 +943,7 @@ class CollectionReference(models.Model):
                 created_by=self.created_by,
                 resource_version=resource_version,
                 system=self.system,
+                namespace=self.namespace,
                 version=repo_version
             ))
         return references
@@ -1797,11 +1798,25 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
 
     @classmethod
     def get_system_version_conflicts(cls, value, namespace=None):
-        """The system-version entries naming different versions of one repository, by the repository's URL."""
-        entries_by_repo = {}
-        for entry, version in cls.resolve_system_version_entries(value, namespace):
+        """The system-version entries naming different versions of one repository, by the repository's URL.
+        An entry that doesn't resolve still counts, under its URL without the version."""
+        resolved = cls.resolve_system_version_entries(value, namespace)
+
+        def to_url(entry):
+            url, _ = canonical_url_to_url_and_version(entry)
+            return url if is_canonical_uri(url) else drop_version(url if url.endswith('/') else url + '/')
+
+        repo_by_url = {}
+        for entry, version in resolved:
             if version.id:
-                entries_by_repo.setdefault(drop_version(version.uri), {}).setdefault(version.id, entry)
+                repo_url = drop_version(version.uri)
+                for url in compact([to_url(entry), version.canonical_url, repo_url]):
+                    repo_by_url.setdefault(url, repo_url)
+        entries_by_repo = {}
+        for entry, version in resolved:
+            url = to_url(entry)
+            repo_url = drop_version(version.uri) if version.id else repo_by_url.get(url, url)
+            entries_by_repo.setdefault(repo_url, {}).setdefault(version.id or entry, entry)
         return {
             repo_url: list(entries.values()) for repo_url, entries in entries_by_repo.items() if len(entries) > 1
         }
@@ -1864,7 +1879,8 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         if should_reevaluate and system_versions:
             namespace = self.get_system_version_namespace(self.collection_version.parent_url)
             for _system, version in self.resolve_system_version_entries(system_versions, namespace):
-                _system_version_cache[f"{namespace or 'NONE'}-{_system}-NONE"] = version
+                # unresolved is None here too, as a reference resolving the same URL itself would get
+                _system_version_cache[f"{namespace or 'NONE'}-{_system}-NONE"] = version if version.id else None
                 if version.id:
                     include_system_versions.append(version)
                 else:

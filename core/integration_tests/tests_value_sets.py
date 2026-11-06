@@ -118,6 +118,7 @@ class ValueSetsTest(OCLAPITestCase):
             url = f"/orgs/{self.organization.mnemonic}/CodeSystem/"
             json_file = self.load_json('code_systems/code_systems_who_core.json')
             self.remove_duplicate_codes(json_file)
+            source_version = json_file.get('version')
             json_response = self.post(url, json_file)
             source_url = json_response.get('url')
 
@@ -125,6 +126,9 @@ class ValueSetsTest(OCLAPITestCase):
             json_file = self.load_json(test_file)
             response = self.post(url, json_file)
             json_response = response.json()
+            # the code system resolves in the value set owner's namespace, so each include names its version
+            for include in json_file['compose']['include']:
+                include['version'] = source_version
 
             self.ignore_paths(json_file, json_response, ['jurisdiction', 'date', 'copyright', 'purpose',
                                                          'identifier', 'meta', 'text', 'revisionDate', 'count',

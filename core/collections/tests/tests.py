@@ -2462,16 +2462,22 @@ class TasksTest(OCLTestCase):
             CollectionReference.atomic_when_locked()
         atomic_mock.assert_not_called()
 
-    def test_add_references_sets_lock_context_before_generating_only_with_toggle_on(self):
+    def test_add_references_sets_the_collection_before_generating_and_async_only_with_toggle_on(self):
         concept = ConceptFactory()
         for is_locked in (True, False):
             collection = OrganizationCollectionFactory()
+            seen = {}
+
+            def generate(reference, _collection=collection, _seen=seen):
+                _seen.update(collection_id=reference.collection_id, is_async=bool(getattr(reference, '_async', False)))
+                return [reference]
+
             with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=is_locked), \
-                    patch.object(CollectionReference, 'clear_resolution_cache') as clear_mock:
+                    patch.object(CollectionReference, 'generate_references', autospec=True, side_effect=generate):
                 collection.add_references(
                     [CollectionReference(expression=concept.uri, created_by=collection.created_by)],
                     collection.created_by, True)
-            self.assertEqual(clear_mock.called, is_locked)
+            self.assertEqual(seen, {'collection_id': collection.id, 'is_async': is_locked})
 
     def test_cascade_children_to_expansion_claims_default_only_with_toggle_on(self):
         for is_locked in (True, False):
@@ -6100,6 +6106,70 @@ class ExpansionSystemVersionNamespaceTest(OCLTestCase):
         self.set_registry_toggle(True)
         self.assertEqual(reference.resolution_namespace, self.owner.uri)
         self.assertEqual(CollectionReference(system=self.URL, code='c1').resolution_namespace, None)
+
+    def test_unresolved_entry_matching_a_references_system_leaves_it_unresolved(self):
+        self.set_registry_toggle(True)
+        for namespace in (self.owner.uri, None):
+            with self.subTest(namespace=namespace):
+                expansion = ExpansionFactory(collection_version=self.collection)
+                expansion.parameters = {'system-version': 'https://example.org/cs|v1'}
+
+                expansion.add_references(CollectionReference(
+                    system='https://example.org/cs|v1', code='c1', namespace=namespace, collection=self.collection))
+
+                self.assertEqual(
+                    sorted(entry['type'] for entry in expansion.unresolved_repo_versions),
+                    ['expansion.parameters.system-version', 'reference.system'])
+                self.assertFalse(expansion.evaluated_source_versions.exists())
+
+    def test_get_system_version_conflicts_counts_versions_that_dont_resolve(self):
+        self.set_registry_toggle(True)
+        self.add_owner_registry_entry()
+        namespace = Expansion.get_system_version_namespace(self.owner.uri)
+
+        self.assertEqual(
+            Expansion.get_system_version_conflicts(f'{self.URL}|v1,{self.URL}|v9', namespace),
+            {self.source.uri: [f'{self.URL}|v1', f'{self.URL}|v9']})
+        self.assertEqual(
+            Expansion.get_system_version_conflicts(f'{self.source_v1.uri},{self.URL}|v9', namespace),
+            {self.source.uri: [self.source_v1.uri, f'{self.URL}|v9']})
+        self.assertEqual(
+            Expansion.get_system_version_conflicts(f'{self.source.uri}v8/,{self.source_v1.uri}', namespace),
+            {self.source.uri: [f'{self.source.uri}v8/', self.source_v1.uri]})
+        self.assertEqual(
+            Expansion.get_system_version_conflicts('https://none.org/cs|v8,https://none.org/cs|v9', namespace),
+            {'https://none.org/cs': ['https://none.org/cs|v8', 'https://none.org/cs|v9']})
+        self.assertEqual(
+            Expansion.get_system_version_conflicts('https://none.org/cs|v8,https://none.org/cs|v8', namespace), {})
+
+    def add_cascade_reference(self, **kwargs):
+        ConceptFactory(parent=self.source, mnemonic='c1')
+        ConceptFactory(parent=self.other_source, mnemonic='c1')
+        GlobalURLRegistryFactory(url=self.URL, namespace=self.other.uri)
+        self.add_owner_registry_entry()
+        self.collection.add_references([CollectionReference(
+            system=self.URL, code='c1', reference_type='concepts', created_by=self.collection.created_by,
+            cascade={'method': SOURCE_TO_CONCEPTS}, transform=TRANSFORM_TO_RESOURCE_VERSIONS, **kwargs)],
+            self.collection.created_by)
+        return list(self.collection.references.values_list('expression', flat=True))
+
+    def test_cascade_generates_from_the_owners_repository_with_the_lock_toggle_off(self):
+        self.set_registry_toggle(True)
+
+        with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False):
+            expressions = self.add_cascade_reference()
+
+        self.assertTrue(expressions)
+        self.assertTrue(all(expression.startswith(self.source.uri) for expression in expressions), expressions)
+
+    def test_cascade_keeps_an_explicit_global_namespace_on_generated_references(self):
+        self.set_registry_toggle(True)
+
+        expressions = self.add_cascade_reference(namespace='/')
+
+        self.assertTrue(expressions)
+        self.assertTrue(all(expression.startswith(self.other_source.uri) for expression in expressions), expressions)
+        self.assertEqual(set(self.collection.references.values_list('namespace', flat=True)), {'/'})
 
     def test_get_system_version_conflicts(self):
         self.set_registry_toggle(True)
