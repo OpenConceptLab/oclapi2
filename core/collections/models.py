@@ -2074,12 +2074,26 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         rows.model.objects.filter(id__in=head_rows.values('id')).update(**{f'{field}_id': Subquery(latest)})
 
     def seed_children(self, index=True, force_reevaluate=False):
+        version = self.collection_version
+        # a version's default expansion holds resource versions, so a rebuild swaps HEAD rows as its creation did
+        swap_head = force_reevaluate and not version.is_head and self.is_default and \
+            CollectionReference.is_expansion_locked_repo_version_on()
+        previous_concept_ids = set(self.concepts.values_list('id', flat=True)) if swap_head and index else set()
+        previous_mapping_ids = set(self.mappings.values_list('id', flat=True)) if swap_head and index else set()
         self.add_references(
-            references=self.collection_version.references,
-            index=index,
+            references=version.references,
+            index=index and not swap_head,
             is_adding_all=True,
             force_reevaluate=force_reevaluate
         )
+        if swap_head:
+            version.replace_head_resources(self)
+            if index:
+                concept_ids = set(self.concepts.values_list('id', flat=True))
+                mapping_ids = set(self.mappings.values_list('id', flat=True))
+                self.index_resources(list(concept_ids), list(mapping_ids))
+                self.full_index_resources(
+                    list(previous_concept_ids - concept_ids), list(previous_mapping_ids - mapping_ids))
 
     def wait_until_processed(self):  # pragma: no cover
         processing = self.is_processing

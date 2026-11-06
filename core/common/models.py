@@ -1291,6 +1291,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             head = cls.objects.select_for_update().get(id=head.id)
             obj.update_version_data(head)
             obj.save(**kwargs)
+            # the default is settled while HEAD is locked, so a queued task can't see another HEAD
+            expansion = obj.get_expansion_choice(expansion) or expansion
 
             if obj.id:
                 obj.sibling_versions.update(is_latest_version=False)

@@ -2287,6 +2287,26 @@ class TasksTest(OCLTestCase):
             ('concept', {'id__in': [latest.id]}), queue='indexing', permanent=False)
 
     @patch('core.common.tasks.export_collection')
+    def test_rebuild_keeps_the_resource_versions_a_head_resolved_version_was_created_with(self, _):
+        for choice in ('lock', 'latest'):
+            with self.subTest(choice=choice):
+                _, concept, collection_v1 = self.head_with_head_concept_member()
+                seed_children_to_new_version('collection', collection_v1.id, False, expansion=choice)  # pylint: disable=no-value-for-parameter
+                collection_v1.refresh_from_db()
+                latest = concept.get_latest_version()
+                expansion = collection_v1.expansion
+                self.assertEqual(list(expansion.concepts.all()), [latest])
+
+                expansion.seed_children(index=False, force_reevaluate=True)
+
+                self.assertEqual(list(expansion.concepts.all()), [latest])
+                self.assertEqual(list(collection_v1.references.first().concepts.all()), [latest])
+
+                with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False):
+                    expansion.seed_children(index=False, force_reevaluate=True)
+                self.assertEqual(list(expansion.concepts.all()), [concept])
+
+    @patch('core.common.tasks.export_collection')
     def test_seed_children_task_evaluates_references_while_head_expansion_is_processing(self, _):
         expansion, concept, collection_v1 = self.head_with_head_concept_member()
         Expansion.objects.filter(id=expansion.id).update(is_processing=True, parameters={'activeOnly': True})
@@ -2595,7 +2615,7 @@ class TasksTest(OCLTestCase):
         with self.captureOnCommitCallbacks(execute=False) as callbacks:
             Collection.persist_new_version(collection_v1, collection.created_by, sync=True)
 
-        seed_mock.assert_called_once_with('collection', collection_v1.id, True, True, expansion=None)
+        seed_mock.assert_called_once_with('collection', collection_v1.id, True, True, expansion='latest')
         self.assertEqual(callbacks, [])
 
     @override_settings(TEST_MODE=False)
@@ -2612,6 +2632,29 @@ class TasksTest(OCLTestCase):
         self.assertEqual(task.kwargs, {'expansion': 'latest'})
         apply_async.assert_called_once_with(
             ('collection', collection_v1.id, True, False), task_id=task.id, queue='default', persist_args=True)
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.common.models.seed_children_to_new_version.apply_async')
+    def test_persist_new_version_settles_the_default_before_the_task_runs(self, _):
+        _, _, _, _, head, _ = self.head_locked_to_v1()
+        collection_v2 = Collection(version='v2', mnemonic=head.mnemonic, organization=head.organization)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            Collection.persist_new_version(collection_v2, head.created_by)
+
+        task = Task.objects.get(name='seed_children_to_new_version', args__1=collection_v2.id)
+        self.assertEqual(task.kwargs, {'expansion': 'lock'})
+
+        Collection.objects.filter(id=head.id).update(expansion_uri=None)
+        with patch.object(Collection, 'seed_from_head_expansion', autospec=True, return_value=True) as seed_mock, \
+                patch('core.common.tasks.export_collection'):
+            seed_children_to_new_version.push_request(id=task.id)
+            try:
+                seed_children_to_new_version.run('collection', collection_v2.id, False)
+            finally:
+                seed_children_to_new_version.pop_request()
+
+        seed_mock.assert_called_once_with(ANY, lock=True)
 
     @patch('core.common.tasks.export_collection')
     def test_seed_children_task_reads_the_choice_from_its_task(self, _):
