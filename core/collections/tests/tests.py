@@ -2619,6 +2619,8 @@ class TasksTest(OCLTestCase):
         self.assertEqual(callbacks, [])
 
     @override_settings(TEST_MODE=False)
+    @patch('core.common.models.handle_m2m_changed', Mock())
+    @patch('core.common.models.handle_save', Mock())
     @patch('core.common.models.seed_children_to_new_version.apply_async')
     def test_persist_new_version_records_the_choice_with_the_task_not_in_its_message(self, apply_async):
         collection = OrganizationCollectionFactory()
@@ -2633,13 +2635,15 @@ class TasksTest(OCLTestCase):
         apply_async.assert_called_once_with(
             ('collection', collection_v1.id, True, False), task_id=task.id, queue='default', persist_args=True)
 
-    @override_settings(TEST_MODE=False)
+    @patch('core.common.models.handle_m2m_changed', Mock())
+    @patch('core.common.models.handle_save', Mock())
     @patch('core.common.models.seed_children_to_new_version.apply_async')
     def test_persist_new_version_settles_the_default_before_the_task_runs(self, _):
         _, _, _, _, head, _ = self.head_locked_to_v1()
         collection_v2 = Collection(version='v2', mnemonic=head.mnemonic, organization=head.organization)
 
-        with self.captureOnCommitCallbacks(execute=True):
+        # only the queuing runs as outside tests, and its index tasks are mocked, so nothing reaches Redis
+        with override_settings(TEST_MODE=False), self.captureOnCommitCallbacks(execute=True):
             Collection.persist_new_version(collection_v2, head.created_by)
 
         task = Task.objects.get(name='seed_children_to_new_version', args__1=collection_v2.id)
