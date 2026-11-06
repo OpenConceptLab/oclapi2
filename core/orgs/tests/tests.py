@@ -81,6 +81,35 @@ class OrganizationTest(OCLTestCase):
         self.assertFalse(org.has_admin_access(AnonymousUser()))
         self.assertFalse(org.has_admin_access(None))
 
+    def test_is_last_admin(self):
+        org = OrganizationFactory()
+        admin, member = UserProfileFactory(), UserProfileFactory()
+        org.set_member_role(admin, ROLE_ADMIN)
+        org.members.add(member)
+        org.members.remove(org.created_by)
+
+        self.assertTrue(org.is_last_admin(admin))
+        self.assertFalse(org.is_last_admin(member))
+        org.set_member_role(UserProfileFactory(is_active=False), ROLE_ADMIN)
+        self.assertTrue(org.is_last_admin(admin))
+        org.set_member_role(UserProfileFactory(), ROLE_ADMIN)
+        self.assertFalse(org.is_last_admin(admin))
+
+    def test_is_last_admin_counts_the_user_even_when_deactivated(self):
+        """So a deactivated last admin can't be removed, or hard deleted, leaving the org with no admin."""
+        org = OrganizationFactory()
+        admin = UserProfileFactory(is_active=False)
+        org.set_member_role(admin, ROLE_ADMIN)
+        org.members.remove(org.created_by)
+
+        self.assertTrue(org.is_last_admin(admin))
+
+    def test_is_last_admin_makes_one_query(self):
+        org = OrganizationFactory()
+
+        with self.assertNumQueries(1):
+            org.is_last_admin(org.created_by)
+
     def test_an_insert_that_names_no_role_is_an_admin(self):
         """Code older than the role column inserts this way, during a rollout or after a rollback."""
         org = OrganizationFactory()

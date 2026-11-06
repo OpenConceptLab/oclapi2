@@ -114,6 +114,9 @@ class OrganizationDetailSerializer(AbstractResourceSerializer):
         if not self.include_overview:
             self.fields.pop('overview')
 
+        if not get(kwargs, 'context.request.user.is_authenticated'):
+            self.fields.pop('user_role')
+
         super().__init__(*args, **kwargs)
 
     def get_client_configs(self, obj):

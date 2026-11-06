@@ -93,9 +93,14 @@ class Organization(BaseResourceModel, SourceContainerMixin, ChecksumModel):
         return user.is_staff or self.is_admin(user)
 
     def is_last_admin(self, user_profile):
-        """True if no other active admin would remain without `user_profile`. Every org keeps at least one."""
-        return self.is_admin(user_profile) and not self.memberships.filter(
-            role_id=ROLE_ADMIN_ID, userprofile__is_active=True).exclude(userprofile_id=user_profile.id).exists()
+        """
+        True if `user_profile` is an admin and no other active admin would remain without them. Every org keeps
+        at least one. They count even when deactivated, so a deactivated last admin can't be removed either.
+        """
+        admins = self.memberships.filter(
+            models.Q(userprofile__is_active=True) | models.Q(userprofile_id=user_profile.id), role_id=ROLE_ADMIN_ID
+        ).values_list('userprofile_id', flat=True)
+        return list(admins) == [user_profile.id]
 
     def get_member_role(self, user_profile):
         """The name of the role `user_profile` has in the org, or None if they aren't a member."""

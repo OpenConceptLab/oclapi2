@@ -871,7 +871,7 @@ class OrganizationMemberRoleReadTest(OCLAPITestCase):
         response = self.client.get('/orgs/stark/')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIsNone(response.data['user_role'])
+        self.assertNotIn('user_role', response.data)
 
     def test_creating_an_org_makes_the_creator_its_admin(self):
         user = UserProfileFactory()

@@ -1011,6 +1011,12 @@ class UserHardDeleteOrganizationAdminTest(OCLAPITestCase):
         self.assertEqual(self.delete().status_code, 204)
         self.assertFalse(UserProfile.objects.filter(id=self.user.id).exists())
 
+    def test_refuses_the_last_admin_once_deactivated(self):
+        self.assertEqual(self.delete(params='').status_code, 204)
+
+        self.assertEqual(self.delete().status_code, 409)
+        self.assertTrue(UserProfile.objects.filter(id=self.user.id).exists())
+
     def test_deactivating_the_last_admin_stays_possible(self):
         self.assertEqual(self.delete(params='').status_code, 204)
         self.user.refresh_from_db()
