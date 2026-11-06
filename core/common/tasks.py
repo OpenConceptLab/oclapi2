@@ -24,6 +24,7 @@ from pydash import get, compact
 
 from core.celery import app
 from core.common import ERRBIT_LOGGER
+from core.collections.constants import VERSION_EXPANSION_LOCK
 from core.common.constants import CONFIRM_EMAIL_ADDRESS_MAIL_SUBJECT, PASSWORD_RESET_MAIL_SUBJECT
 from core.common.exceptions import BatchIndexingError
 from core.common.utils import write_export_file, web_url, get_resource_class_from_resource_name, get_export_service, \
@@ -384,7 +385,7 @@ def send_user_reset_password_email(user_id):
 
 
 @app.task(bind=True)
-def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False):  # pylint: disable=too-many-arguments,too-many-locals,too-many-branches,too-many-statements
+def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False, expansion=None):  # pylint: disable=too-many-arguments,too-many-locals,too-many-branches,too-many-statements
     export_task = None
     changelog_task = None
     autoexpand = True
@@ -418,8 +419,10 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                     instance.snapshot = CollectionDetailSerializer(head).data
                 instance.save(update_fields=['snapshot'])
             instance.get_checksums(recalculate=True)
-            seed_from_head = is_collection and autoexpand and instance.can_seed_from_head_expansion() and \
-                instance.seed_from_head_expansion()
+            if is_collection and not expansion and task_id:
+                expansion = get(Task.objects.filter(id=task_id).values_list('kwargs', flat=True).first(), 'expansion')
+            choice = instance.get_expansion_choice(expansion) if is_collection else None
+            seed_from_head = bool(choice) and instance.seed_from_head_expansion(lock=choice == VERSION_EXPANSION_LOCK)
             if not seed_from_head:
                 instance.seed_references()
             if is_source:
