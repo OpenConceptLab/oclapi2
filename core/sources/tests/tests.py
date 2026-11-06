@@ -942,9 +942,9 @@ class SourceTest(OCLTestCase):
             Source.persist_new_version(source_version, source.created_by)
 
         task = Task.objects.get(name='seed_children_to_new_version')
-        self.assertEqual(task.args, ['source', source_version.id, True, False, True])
+        self.assertEqual(task.args, ['source', source_version.id, True, False])
         apply_async.assert_called_once_with(
-            ('source', source_version.id, True, False, True),
+            ('source', source_version.id, True, False),
             task_id=task.id,
             queue='default',
             persist_args=True,

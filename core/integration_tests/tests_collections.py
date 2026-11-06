@@ -3311,34 +3311,38 @@ class CollectionVersionListViewTest(OCLAPITestCase):
         self.assertEqual(expansion.concepts.count(), 1)
         self.assertEqual(expansion.mappings.count(), 0)
 
+    def post_version(self, version, **payload):
+        return self.client.post(
+            self.collection.uri + 'versions/', {'id': version, 'description': 'version', **payload},
+            HTTP_AUTHORIZATION='Token ' + self.token, format='json')
+
     def test_post_201_expansion_choice(self):
         seed_from_head = Collection.seed_from_head_expansion
         cases = [
-            (True, None, None, True, True), (True, None, True, True, True), (True, None, False, False, False),
-            (True, 'copy', None, True, True), (True, 'generate', None, False, True),
-            (True, 'none', None, False, False), (False, None, None, False, True),
-            (False, None, True, False, True), (False, None, False, False, False),
-            (False, 'copy', None, False, True), (False, 'generate', None, False, True),
-            (False, 'none', None, False, False),
+            (True, None, None, 'lock', True), (True, None, True, 'lock', True), (True, None, False, None, False),
+            (True, 'lock', None, 'lock', True), (True, 'latest', None, 'latest', True),
+            (True, 'none', None, None, False), (False, None, None, None, True),
+            (False, None, True, None, True), (False, None, False, None, False),
+            (False, 'lock', None, None, True), (False, 'latest', None, None, True),
+            (False, 'none', None, None, False),
         ]
-        for index, (is_locked, choice, autoexpand, copies, expands) in enumerate(cases):
+        for index, (is_locked, choice, autoexpand, built, expands) in enumerate(cases):
             with self.subTest(is_locked=is_locked, choice=choice, autoexpand=autoexpand), \
                     patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=is_locked), \
                     patch.object(
                         Collection, 'seed_from_head_expansion', autospec=True, side_effect=seed_from_head
                     ) as seed_mock:
-                payload = {'id': f'v{index}', 'description': 'version'}
-                if choice:
-                    payload['expansion'] = choice
+                payload = {'expansion': choice} if choice else {}
                 if autoexpand is not None:
                     payload['autoexpand'] = autoexpand
-                response = self.client.post(
-                    self.collection.uri + 'versions/', payload,
-                    HTTP_AUTHORIZATION='Token ' + self.token, format='json')
+                response = self.post_version(f'v{index}', **payload)
 
                 self.assertEqual(response.status_code, 201)
                 version = self.collection.versions.get(version=f'v{index}')
-                self.assertEqual(seed_mock.called, copies)
+                if built:
+                    seed_mock.assert_called_once_with(version, lock=built == 'lock')
+                else:
+                    seed_mock.assert_not_called()
                 self.assertEqual(version.autoexpand, expands)
                 self.assertEqual(version.references.count(), 1)
                 if expands:
@@ -3347,6 +3351,15 @@ class CollectionVersionListViewTest(OCLAPITestCase):
                 else:
                     self.assertEqual(version.expansions.count(), 0)
                     self.assertIsNone(version.expansion_uri)
+
+    def test_post_201_defaults_to_latest_without_head_expansion(self):
+        Collection.objects.filter(id=self.collection.id).update(expansion_uri=None)
+
+        with patch.object(Collection, 'seed_from_head_expansion', autospec=True, return_value=True) as seed_mock:
+            response = self.post_version('v1')
+
+        self.assertEqual(response.status_code, 201)
+        seed_mock.assert_called_once_with(self.collection.versions.get(version='v1'), lock=False)
 
     def test_post_400_expansion_choice_invalid(self):
         response = self.client.post(

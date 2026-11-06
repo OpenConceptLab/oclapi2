@@ -9,8 +9,7 @@ from rest_framework.relations import PrimaryKeyRelatedField
 from rest_framework.serializers import ModelSerializer, Serializer, ValidationError
 
 from core.client_configs.serializers import ClientConfigSerializer
-from core.collections.constants import VERSION_EXPANSION_CHOICES, VERSION_EXPANSION_NONE, \
-    VERSION_EXPANSION_GENERATE
+from core.collections.constants import VERSION_EXPANSION_CHOICES, VERSION_EXPANSION_NONE
 from core.collections.models import Collection, CollectionReference, Expansion
 from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, INCLUDE_SUMMARY, \
     INCLUDE_CLIENT_CONFIGS, INVALID_EXPANSION_URL, INCLUDE_STATES, INCLUDE_TASKS, INCLUDE_RESOLVED_REPO_VERSIONS, \
@@ -295,8 +294,7 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
             collection.autoexpand = False
         elif expansion:
             collection.autoexpand = True
-        errors = Collection.persist_new_version(
-            collection, user, seed_from_head=expansion != VERSION_EXPANSION_GENERATE)
+        errors = Collection.persist_new_version(collection, user, expansion=expansion)
         self._errors.update(errors)
         return collection
 

@@ -1250,7 +1250,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         obj.is_active = True
         sync = kwargs.pop('sync', False)
-        seed_from_head = kwargs.pop('seed_from_head', True)
+        expansion = kwargs.pop('expansion', None)
         if user:
             obj.created_by = user
             obj.updated_by = user
@@ -1263,12 +1263,12 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         is_test_mode = get(settings, 'TEST_MODE', False)
         # a synchronous seed from HEAD runs in this transaction, so it needs this transaction's snapshot
         is_repeatable_read = sync and not is_test_mode and not transaction.get_connection().in_atomic_block and \
-            seed_from_head and obj.can_seed_from_head_expansion()
+            bool(obj.get_expansion_choice(expansion))
         attempts = SERIALIZATION_RETRY_ATTEMPTS if is_repeatable_read else 1
         for attempt in range(1, attempts + 1):
             try:
                 cls.persist_new_version_in_transaction(
-                    obj, head, user, sync, is_repeatable_read, seed_from_head, **kwargs)
+                    obj, head, user, sync, is_repeatable_read, expansion, **kwargs)
                 break
             except OperationalError as ex:
                 if attempt == attempts or not cls.is_serialization_failure(ex):
@@ -1281,7 +1281,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     @classmethod
     def persist_new_version_in_transaction(  # pylint: disable=too-many-arguments
-            cls, obj, head, user, sync, is_repeatable_read, seed_from_head=True, **kwargs):
+            cls, obj, head, user, sync, is_repeatable_read, expansion=None, **kwargs):
         is_test_mode = get(settings, 'TEST_MODE', False)
         with transaction.atomic():
             if is_repeatable_read:
@@ -1295,16 +1295,18 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             if obj.id:
                 obj.sibling_versions.update(is_latest_version=False)
 
-            task_args = (obj.resource_type.lower(), obj.id, not is_test_mode, sync, seed_from_head)
+            task_args = (obj.resource_type.lower(), obj.id, not is_test_mode, sync)
             if is_test_mode or sync:
-                seed_children_to_new_version(*task_args)
+                seed_children_to_new_version(*task_args, expansion=expansion)
             else:
                 from core.tasks.models import Task
+                # the choice rides on the task record, so a worker on older code still takes the message
                 task = Task.new(
                     queue='default',
                     user=user,
                     name=seed_children_to_new_version.__name__,
                     args=task_args,
+                    kwargs={'expansion': expansion} if expansion else None,
                 )
 
                 # Mark the version as processing before the response goes out
@@ -1328,8 +1330,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     def index_resources_for_self_as_latest_released(self, only_update=False):  # pylint: disable=unused-argument
         pass
 
-    def can_seed_from_head_expansion(self):
-        return False
+    def get_expansion_choice(self, expansion=None):  # pylint: disable=unused-argument
+        return None
 
     @classmethod
     def persist_changes(cls, obj, updated_by, original_schema, **kwargs):  # pylint: disable=too-many-locals,too-many-branches
