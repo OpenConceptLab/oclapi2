@@ -6270,7 +6270,6 @@ class IsolatedVersionImportTest(OCLTestCase):
         self.assertEqual(self.members('v2'), {'B'})
         self.assertEqual(self.head_concepts(), {'B'})
 
-    @override_settings(TEST_MODE=False)
     @patch('core.sources.models.index_dropped_source_children.apply_async')
     def test_dropped_codes_are_repaired_by_a_queued_task(self, apply_async_mock):
         self.run_import([self.concept('A'), self.concept('B'), self.version('v1')])
@@ -6278,7 +6277,7 @@ class IsolatedVersionImportTest(OCLTestCase):
         dropped = Concept.objects.get(mnemonic='A', id=F('versioned_object_id'))
         kept = Concept.objects.get(mnemonic='B', id=F('versioned_object_id'))
 
-        with self.captureOnCommitCallbacks(execute=True):
+        with override_settings(TEST_MODE=False), self.captureOnCommitCallbacks(execute=True):
             head.drop_unseen_children([kept.id], [])
 
         task = Task.objects.get(name='index_dropped_source_children')
