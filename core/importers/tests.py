@@ -49,6 +49,7 @@ from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.constants import AUTO_ID_SEQUENTIAL, AUTO_ID_UUID, ISOLATED_VERSION_CONTENT_FAILED, \
+    ISOLATED_VERSION_EXISTS, ISOLATED_VERSION_LINE_INVALID, ISOLATED_VERSION_NO_EDIT_ACCESS, \
     VERSIONING_MODE_NEEDS_ISOLATED_VERSION, INVALID_VERSIONING_MODE
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
@@ -6246,10 +6247,36 @@ class IsolatedVersionImportTest(OCLTestCase):
     def test_existing_version_changes_nothing(self):
         self.run_import([self.concept('A'), self.concept('B'), self.version('v1')])
 
-        importer = self.run_import([self.concept('B'), self.version('v1')])
+        with self.assertRaises(DjangoValidationError) as context:
+            self.run_import([self.concept('B'), self.concept('NEW'), self.version('v1')])
 
-        self.assertEqual([item['type'] for item in importer.exists], ['Source', 'Source Version'])
+        self.assertEqual(context.exception.message_dict, {'__all__': [ISOLATED_VERSION_EXISTS]})
+        self.assertFalse(Concept.objects.filter(mnemonic='NEW').exists())
         self.assertEqual(self.head_concepts(), {'A', 'B'})
+
+    def test_preflight_rejects_a_version_before_content_imports(self):
+        self.run_import([self.concept('A'), self.version('v1')])
+        user = UserProfileFactory()
+        for line, message in (
+                ({'source': 'LOINC', 'owner': 'Regen', 'owner_type': 'Organization'}, ISOLATED_VERSION_LINE_INVALID),
+                (self.version('v2'), ISOLATED_VERSION_NO_EDIT_ACCESS),
+        ):
+            with self.assertRaises(DjangoValidationError) as context:
+                IsolatedVersionCommit(line, user).preflight()
+            self.assertEqual(context.exception.message_dict, {'__all__': [message]})
+        self.assertIsNone(IsolatedVersionCommit(
+            {**self.version('v2'), 'source': 'NEW'}, UserProfile.objects.get(username='ocladmin')).preflight())
+
+    @patch('core.sources.models.Source.batch_index', side_effect=Exception('ES down'))
+    def test_failed_search_update_does_not_undo_a_committed_version(self, batch_index_mock):
+        self.run_import([self.concept('A'), self.concept('B'), self.version('v1')])
+
+        importer = self.run_import([self.concept('B'), self.version('v2')])
+
+        self.assertTrue(batch_index_mock.called)
+        self.assertEqual(len(importer.created), 1)
+        self.assertEqual(self.members('v2'), {'B'})
+        self.assertEqual(self.head_concepts(), {'B'})
 
     def test_hierarchy_root_drop_rolls_back_the_hierarchy(self):
         self.run_import([
@@ -6486,15 +6513,39 @@ class IsolatedVersionZipImportTest(OCLTestCase):
         self.assertEqual(
             Concept.objects.get(mnemonic='N3', id=F('versioned_object_id')).extras, {'rank': 1.5, 'order': 2})
 
-    def test_categorize_resources_collects_versioning_modes(self):
-        importer = Importer('task-id', '/tmp/loinc.zip', 'ocladmin', 'Organization', 'Regen')
+    def test_categorize_resources_keeps_only_source_version_lines(self):
+        importer = Importer('task-id', '/tmp/loinc.zip', 'ocladmin', 'Organization', 'Regen', isolated_version=True)
         resources = {}
+        lines = [
+            {'type': 'Source', 'id': 'LOINC', 'versioning_mode': 'carry_forward', 'extras': {'type': 'x'}},
+            {**IsolatedVersionImportTest.version('v1'), 'versioning_mode': 'isolated', 'extras': {'a': [1]}},
+        ]
         importer.categorize_resources(
-            io.BytesIO(json.dumps({**IsolatedVersionImportTest.version('v1'), 'versioning_mode': 'isolated'}).encode()),
-            '/tmp/loinc.zip', 'version.json', ['Source Version'], resources)
+            io.BytesIO('\n'.join(json.dumps(line) for line in lines).encode()),
+            '/tmp/loinc.zip', 'lines.json', ['Source', 'Source Version'], resources)
 
-        self.assertEqual(importer.requested_versioning_modes, {'isolated'})
-        self.assertEqual(resources, {'Source Version': {'/tmp/loinc.zip/version.json': 1}})
+        self.assertEqual(importer.version_lines, [{
+            **IsolatedVersionImportTest.version('v1'), 'versioning_mode': 'isolated', 'extras': {}}])
+        self.assertEqual(
+            importer.validate_versioning(resources, ['Source', 'Source Version', 'Concept', 'Mapping']),
+            ['Source', 'Concept', 'Mapping', 'Source Version'])
+
+    def test_validate_versioning_rejects_before_content_imports(self):
+        self.import_zip([('A',)], [], 'v1')
+        resources = {'Source Version': {'/tmp/loinc.zip/version.json': 1}}
+        for line, isolated_version, errors in (
+                ({**IsolatedVersionImportTest.version('v2'), 'versioning_mode': 1}, True,
+                 {'versioning_mode': [INVALID_VERSIONING_MODE]}),
+                ({**IsolatedVersionImportTest.version('v2'), 'versioning_mode': {}}, False,
+                 {'versioning_mode': [INVALID_VERSIONING_MODE]}),
+                (IsolatedVersionImportTest.version('v1'), True, {'__all__': [ISOLATED_VERSION_EXISTS]}),
+        ):
+            importer = Importer(
+                'task-id', '/tmp/loinc.zip', 'ocladmin', 'Organization', 'Regen', isolated_version=isolated_version)
+            importer.version_lines = [line]
+            with self.assertRaises(ValidationError) as context:
+                importer.validate_versioning(resources, ['Source Version', 'Concept', 'Mapping'])
+            self.assertEqual(context.exception.detail, errors)
 
     def test_isolated_version_resource_types(self):
         self.assertEqual(

@@ -236,18 +236,20 @@ class Importer:
         self.import_type = import_type
         self.index = index
         self.isolated_version = isolated_version
-        self.requested_versioning_modes = set()
+        self.version_lines = []
 
     def validate_versioning(self, resources, resource_types):
-        for mode in self.requested_versioning_modes:
-            try:
-                Source.resolve_versioning_mode(self.isolated_version, mode)
-            except DjangoValidationError as ex:
-                raise ValidationError(ex.message_dict) from ex
-        if not self.isolated_version:
-            return resource_types
-        if sum(get(resources, 'Source Version', {}).values()) != 1:
-            raise ValidationError(ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION)
+        try:
+            for line in self.version_lines:
+                Source.resolve_versioning_mode(self.isolated_version, line.get('versioning_mode'))
+            if not self.isolated_version:
+                return resource_types
+            if sum(get(resources, 'Source Version', {}).values()) != 1:
+                raise ValidationError(ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION)
+            IsolatedVersionCommit(
+                self.version_lines[0], UserProfile.objects.filter(username=self.username).first(), True).preflight()
+        except DjangoValidationError as ex:
+            raise ValidationError(ex.message_dict) from ex
         return self.get_isolated_version_resource_types(resource_types)
 
     @staticmethod
@@ -511,10 +513,10 @@ class Importer:
 
         try:
             parser = ijson.parse(json_file, multiple_values=True, allow_comments=True)
+            line = None  # top-level scalar fields of the current resource, to keep its Source Version lines
             for prefix, event, value in parser:
+                line = self.collect_version_line(line, prefix, event, value)
                 # Expect {"resourceType": ""}{"resourceType": ""} or {"type": ""}{"type": ""}
-                if event == 'string' and prefix == 'versioning_mode':
-                    self.requested_versioning_modes.add(value)
                 if event == 'string' and (prefix in {'resourceType', 'type'}):
                     # Categorize files based on resourceType
                     if value in resource_types:
@@ -530,6 +532,20 @@ class Importer:
                         break
         except JSONError as json_error:
             raise JSONError(f'Failed to process {path}/{file_path}') from json_error
+
+    def collect_version_line(self, line, prefix, event, value):
+        if not prefix:
+            if event == 'start_map':
+                return {}
+            if event == 'end_map' and get(line, 'type') == 'Source Version':
+                self.version_lines.append(line)
+            return line if event == 'map_key' else None
+        if line is not None and '.' not in prefix:
+            if event in ('string', 'number', 'boolean', 'null'):
+                line[prefix] = value
+            elif event in ('start_map', 'start_array'):
+                line[prefix] = {} if event == 'start_map' else []
+        return line
 
 
 class ImportRequest:

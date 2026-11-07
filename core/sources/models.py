@@ -287,16 +287,18 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             if concept_ids or mapping_ids:
                 self.update_children_counts(sync=True)
 
-        # inside a caller's transaction, a rollback must leave search and counts as they were
-        transaction.on_commit(after_commit)
+        # after a rollback search and counts stay as they were; robust, so a failure here can't stop version seeding
+        transaction.on_commit(after_commit, robust=True)
         return {'concepts': len(concept_ids), 'mappings': len(mapping_ids)}
 
     @staticmethod
     def resolve_versioning_mode(isolated_version, requested_mode=None):
         mode = VERSIONING_MODE_ISOLATED if isolated_version else VERSIONING_MODE_CARRY_FORWARD
-        if requested_mode and requested_mode not in dict(VERSIONING_MODES):
+        if requested_mode in (None, ''):
+            return mode
+        if not isinstance(requested_mode, str) or requested_mode not in dict(VERSIONING_MODES):
             raise ValidationError({'versioning_mode': [INVALID_VERSIONING_MODE]})
-        if requested_mode and requested_mode != mode:
+        if requested_mode != mode:
             raise ValidationError({'versioning_mode': [VERSIONING_MODE_NEEDS_ISOLATED_VERSION]})
         return mode
 

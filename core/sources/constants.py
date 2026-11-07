@@ -14,6 +14,9 @@ VERSIONING_MODES = (
 ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION = \
     'An isolated_version import needs exactly one Source Version line, after its concepts and mappings.'
 ISOLATED_VERSION_CONTENT_FAILED = 'Not created: some of the version content failed to import.'
+ISOLATED_VERSION_LINE_INVALID = 'The Source Version line needs an id.'
+ISOLATED_VERSION_EXISTS = 'This Source Version already exists.'
+ISOLATED_VERSION_NO_EDIT_ACCESS = 'You need edit access to the source to import a version into it.'
 HIERARCHY_ROOT_CANNOT_BE_DROPPED = 'Hierarchy Root must be present in an isolated version.'
 INVALID_VERSIONING_MODE = 'versioning_mode must be carry_forward or isolated.'
 VERSIONING_MODE_NEEDS_ISOLATED_VERSION = \

@@ -276,7 +276,7 @@ def bulk_import_parallel_inline(  # pylint: disable=too-many-arguments
     except JSONDecodeError as ex:
         return {'error': f"Invalid JSON ({ex.msg})"}
     except ValidationError as ex:
-        return {'error': f"Invalid Input ({ex.message})"}
+        return {'error': f"Invalid Input ({'; '.join(ex.messages)})"}
     return importer.run()
 
 
