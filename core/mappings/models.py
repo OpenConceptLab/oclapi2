@@ -421,16 +421,13 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         return self.parent.mappings_set.filter(mnemonic__exact=self.mnemonic).exists()
 
     @classmethod
-    def create_new_version_for(cls, instance, data, user, cache=None):
+    def create_new_version_for(cls, instance, data, user, cache=None, isolated=False):  # pylint: disable=too-many-arguments
         instance.populate_fields_from_relations(data, cache=cache, user=user)
-        instance.extras = data.get('extras', instance.extras)
-        instance.external_id = data.get('external_id', instance.external_id)
         instance.mnemonic = data.get('mnemonic', instance.mnemonic)
         instance.map_type = data.get('map_type', instance.map_type)
-        instance.sort_weight = data.get('sort_weight', instance.sort_weight)
         instance.comment = data.get('update_comment') or data.get('comment')
-        instance.retire_reason = data.get('retire_reason', instance.retire_reason)
-        instance.retired = data.get('retired', instance.retired)
+        instance.set_version_fields(
+            data, ('extras', 'external_id', 'sort_weight', 'retire_reason', 'retired'), isolated)
 
         return instance.save_as_new_version(user)
 

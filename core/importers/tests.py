@@ -33,21 +33,24 @@ from core.common.tasks import post_import_update_resource_counts, bulk_import_pa
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.common.utils import decode_string, startswith_temp_version, get_bulk_import_celery_once_lock_key
 from core.concepts.documents import ConceptDocument
-from core.concepts.models import Concept
+from core.concepts.models import Concept, HierarchicalConcepts
 from core.concepts.tests.factories import ConceptFactory
 from core.importers.importer import ImporterSubtask, ImportTask, ImportTaskSummary, Importer, ResourceImporter
 from core.importers.input_parsers import ImportContentParser
 from core.importers.models import BulkImport, BulkImportInline, BulkImportParallelRunner, \
     CREATED, UPDATED, DELETED, PERMISSION_DENIED, UNCHANGED, FAILED, NOT_FOUND, \
     BaseImporter, BaseResourceImporter, OrganizationImporter, SourceImporter, SourceVersionImporter, \
-    CollectionImporter, CollectionVersionImporter, ConceptImporter, MappingImporter, ReferenceImporter, ImportIndexer
+    CollectionImporter, CollectionVersionImporter, ConceptImporter, MappingImporter, ReferenceImporter, ImportIndexer, \
+    IsolatedVersionCommit
 from core.importers.views import csv_file_data_to_input_list, ImportRetrieveDestroyMixin
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
-from core.sources.constants import AUTO_ID_SEQUENTIAL, AUTO_ID_UUID
+from core.sources.constants import AUTO_ID_SEQUENTIAL, AUTO_ID_UUID, ISOLATED_VERSION_CONTENT_FAILED, \
+    ISOLATED_VERSION_EXISTS, ISOLATED_VERSION_LINE_INVALID, ISOLATED_VERSION_NO_EDIT_ACCESS, \
+    VERSIONING_MODE_NEEDS_ISOLATED_VERSION, INVALID_VERSIONING_MODE
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.tasks.models import Task
@@ -2892,7 +2895,7 @@ class BulkImportParallelRunnerTest(OCLTestCase):
             bulk_import_parts_inline_mock.reset_mock()
             importer = BulkImportParallelRunner(json.dumps(concept), 'ocladmin', True, None, 'runner-task-id', index)
             importer.queue_tasks([concept], True)
-            bulk_import_parts_inline_mock.s.assert_called_once_with([concept], 'ocladmin', True, index)
+            bulk_import_parts_inline_mock.s.assert_called_once_with([concept], 'ocladmin', True, index, False)
 
     def test_celery_once_lock_key_matches_the_task_key(self):
         """Revoking an import clears its celery_once lock under the key get_bulk_import_celery_once_lock_key rebuilds
@@ -3186,7 +3189,7 @@ class BulkImportParallelRunnerTest(OCLTestCase):
     @patch('core.importers.models.post_import_update_resource_counts.apply_async', Mock())
     @patch('core.importers.models.BulkImportParallelRunner.wait_till_tasks_alive', Mock())
     @patch('core.importers.models.BulkImportParallelRunner.queue_tasks', Mock())
-    @patch('core.importers.models.make_hierarchy')
+    @patch('core.concepts.models.make_hierarchy')
     def test_run_calls_make_hierarchy_with_inverted_map(self, make_hierarchy_mock):
         """After all chunks complete, make_hierarchy receives the inverted {parent_uri: [child_uris]} map."""
         org = OrganizationFactory(mnemonic='TestOrg')
@@ -3219,7 +3222,7 @@ class BulkImportParallelRunnerTest(OCLTestCase):
     @patch('core.importers.models.post_import_update_resource_counts.apply_async', Mock())
     @patch('core.importers.models.BulkImportParallelRunner.wait_till_tasks_alive', Mock())
     @patch('core.importers.models.BulkImportParallelRunner.queue_tasks', Mock())
-    @patch('core.importers.models.make_hierarchy')
+    @patch('core.concepts.models.make_hierarchy')
     def test_run_skips_make_hierarchy_when_no_hierarchy(self, make_hierarchy_mock):
         """make_hierarchy is not called when no concept in the import has parent_concept_urls."""
         content = '\n'.join([
@@ -3301,7 +3304,7 @@ class BulkImportParallelRunnerTest(OCLTestCase):
     @patch('core.importers.models.post_import_update_resource_counts.apply_async', Mock())
     @patch('core.importers.models.BulkImportParallelRunner.wait_till_tasks_alive', Mock())
     @patch('core.importers.models.BulkImportParallelRunner.queue_tasks', Mock())
-    @patch('core.importers.models.make_hierarchy')
+    @patch('core.concepts.models.make_hierarchy')
     def test_run_excludes_inaccessible_concepts(self, make_hierarchy_mock):
         """
         Concepts from sources the importing user cannot edit must be excluded from make_hierarchy,
@@ -4178,7 +4181,7 @@ class TasksTest(OCLTestCase):
         bulk_import_parts_inline([1, 2], 'username', True)  # pylint: disable=no-value-for-parameter
         bulk_import_inline_mock.assert_called_once_with(
             content=None, username='username', update_if_exists=True, input_list=[1, 2],
-            self_task_id=ANY, skip_hierarchy_tasks=True, index=True
+            self_task_id=ANY, skip_hierarchy_tasks=True, index=True, isolated=False
         )
         bulk_import_inline_mock().run.assert_called_once()
 
@@ -4186,7 +4189,7 @@ class TasksTest(OCLTestCase):
         bulk_import_parts_inline([1, 2], 'username', True, False)  # pylint: disable=no-value-for-parameter
         bulk_import_inline_mock.assert_called_once_with(
             content=None, username='username', update_if_exists=True, input_list=[1, 2],
-            self_task_id=ANY, skip_hierarchy_tasks=True, index=False
+            self_task_id=ANY, skip_hierarchy_tasks=True, index=False, isolated=False
         )
 
     @patch('core.importers.models.BulkImportInline')
@@ -4195,14 +4198,14 @@ class TasksTest(OCLTestCase):
 
         bulk_import_inline([1, 2], 'username', True)
         bulk_import_inline_mock.assert_called_once_with(  # the import's size decides
-            content=[1, 2], username='username', update_if_exists=True, index=None
+            content=[1, 2], username='username', update_if_exists=True, index=None, isolated_version=False
         )
         bulk_import_inline_mock().run.assert_called_once()
 
         bulk_import_inline_mock.reset_mock()
         bulk_import_inline([1, 2], 'username', True, False)
         bulk_import_inline_mock.assert_called_once_with(
-            content=[1, 2], username='username', update_if_exists=True, index=False
+            content=[1, 2], username='username', update_if_exists=True, index=False, isolated_version=False
         )
 
     @patch('core.importers.models.BulkImportParallelRunner')
@@ -4210,7 +4213,7 @@ class TasksTest(OCLTestCase):
         bulk_import_parallel_inline('content', 'username', True, 2, False)  # pylint: disable=no-value-for-parameter
         runner_mock.assert_called_once_with(
             content='content', username='username', update_if_exists=True, parallel=2, self_task_id=ANY,
-            index=False
+            index=False, isolated_version=False
         )
         runner_mock().run.assert_called_once()
 
@@ -6050,3 +6053,502 @@ class BulkImportLimitsTest(OCLAPITestCase):
         response = self.post(self.preview_user, {'file': self.json_file(600)}, url='/importers/bulk-import-inline/')
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.data['error_code'], 'imports_file_size_limit_reached')
+
+
+@patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+@patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+@patch('core.importers.models.index_concepts_mapped_codes', Mock())
+@patch('core.importers.models.batch_index_resources', Mock(__name__='batch_index_resources'))
+class IsolatedVersionImportTest(OCLTestCase):
+    def setUp(self):
+        super().setUp()
+        self.org = OrganizationFactory(mnemonic='Regen')
+        self.source_line = {
+            'type': 'Source', 'id': 'LOINC', 'name': 'LOINC', 'owner_type': 'Organization', 'owner': 'Regen',
+            'default_locale': 'en', 'supported_locales': 'en'
+        }
+
+    @staticmethod
+    def concept(mnemonic, parents=None, **kwargs):
+        return {
+            'type': 'Concept', 'id': mnemonic, 'concept_class': 'LOINC', 'datatype': 'N/A', 'owner': 'Regen',
+            'owner_type': 'Organization', 'source': 'LOINC',
+            'names': [{'name': f'{mnemonic} name', 'locale': 'en', 'locale_preferred': True}],
+            'parent_concept_urls': [f'/orgs/Regen/sources/LOINC/concepts/{parent}/' for parent in parents or []],
+            **kwargs
+        }
+
+    @staticmethod
+    def mapping(mnemonic, from_concept, to_concept):
+        return {
+            'type': 'Mapping', 'id': mnemonic, 'map_type': 'SAME-AS', 'owner': 'Regen', 'owner_type': 'Organization',
+            'source': 'LOINC', 'from_concept_url': f'/orgs/Regen/sources/LOINC/concepts/{from_concept}/',
+            'to_concept_url': f'/orgs/Regen/sources/LOINC/concepts/{to_concept}/'
+        }
+
+    @staticmethod
+    def version(version, **kwargs):
+        return {
+            'type': 'Source Version', 'id': version, 'source': 'LOINC', 'owner': 'Regen', 'owner_type': 'Organization',
+            'description': f'LOINC {version}', 'released': True, **kwargs
+        }
+
+    def run_import(self, lines, isolated_version=True):
+        importer = BulkImportInline(
+            '\n'.join(json.dumps(line) for line in [self.source_line, *lines]), 'ocladmin', True,
+            isolated_version=isolated_version)
+        with self.captureOnCommitCallbacks(execute=True):
+            importer.run()
+        return importer
+
+    @staticmethod
+    def members(version):
+        return set(Source.objects.get(mnemonic='LOINC', version=version).concepts.values_list('mnemonic', flat=True))
+
+    def test_isolated_import_drops_unseen_concepts(self):
+        self.run_import([self.concept('A'), self.concept('B', extras={'x': 1}), self.version('v1')])
+        importer = self.run_import([self.concept('B'), self.concept('C'), self.version('v2')])
+
+        self.assertEqual(len(importer.failed), 0)
+        self.assertEqual(self.members('v1'), {'A', 'B'})
+        self.assertEqual(self.members('v2'), {'B', 'C'})
+        self.assertEqual(Source.objects.get(mnemonic='LOINC', version='v2').versioning_mode, 'isolated')
+        head = Source.objects.get(mnemonic='LOINC', version='HEAD')
+        self.assertEqual(head.versioning_mode, 'carry_forward')
+        self.assertEqual(set(head.concepts.filter(
+            id=F('versioned_object_id'), is_active=True).values_list('mnemonic', flat=True)), {'B', 'C'})
+        concept_a = Concept.objects.get(mnemonic='A', id=F('versioned_object_id'))
+        self.assertFalse(concept_a.is_active)
+        self.assertTrue(concept_a.get_latest_version().is_latest_version)
+        self.assertTrue(concept_a.get_latest_version().sources.filter(version='v1').exists())
+        self.assertEqual(Concept.objects.get(mnemonic='B', is_latest_version=True).extras, {})
+        self.assertEqual(head.active_concepts, 2)
+
+    def test_isolated_import_drops_and_revives_mappings(self):
+        concepts = [self.concept('A'), self.concept('B')]
+        self.run_import([*concepts, self.mapping('M1', 'A', 'B'), self.mapping('M2', 'B', 'A'), self.version('v1')])
+        self.run_import([*concepts, self.mapping('M1', 'A', 'B'), self.version('v2')])
+        self.run_import([*concepts, self.mapping('M1', 'A', 'B'), self.mapping('M2', 'B', 'A'), self.version('v3')])
+
+        def mapping_members(version):
+            return set(Source.objects.get(mnemonic='LOINC', version=version).mappings.values_list(
+                'mnemonic', flat=True))
+
+        self.assertEqual(mapping_members('v1'), {'M1', 'M2'})
+        self.assertEqual(mapping_members('v2'), {'M1'})
+        self.assertEqual(mapping_members('v3'), {'M1', 'M2'})
+        self.assertTrue(Mapping.objects.get(mnemonic='M2', id=F('versioned_object_id')).is_active)
+
+    def test_isolated_import_revives_dropped_concept(self):
+        self.run_import([self.concept('A'), self.concept('B'), self.version('v1')])
+        concept_a_v1 = Concept.objects.get(mnemonic='A', is_latest_version=True)
+        self.run_import([self.concept('B'), self.version('v2')])
+        self.run_import([self.concept('A'), self.concept('B'), self.version('v3')])
+
+        self.assertEqual(self.members('v3'), {'A', 'B'})
+        self.assertEqual(self.members('v2'), {'B'})
+        concept_a = Concept.objects.get(mnemonic='A', id=F('versioned_object_id'))
+        self.assertTrue(concept_a.is_active)
+        self.assertEqual(concept_a.id, concept_a_v1.versioned_object_id)
+        self.assertTrue(Source.objects.get(mnemonic='LOINC', version='v1').concepts.filter(
+            id=concept_a_v1.id).exists())
+
+    def test_isolated_import_moves_child_without_leaking_old_parent(self):
+        self.run_import([
+            self.concept('P1'), self.concept('P2'), self.concept('C', parents=['P1']), self.version('v1')])
+        self.run_import([
+            self.concept('P1'), self.concept('P2'), self.concept('C', parents=['P2']), self.version('v2')])
+
+        concept = Concept.objects.get(mnemonic='C', id=F('versioned_object_id'))
+        v1 = Source.objects.get(mnemonic='LOINC', version='v1')
+        v2 = Source.objects.get(mnemonic='LOINC', version='v2')
+        self.assertEqual(
+            set(concept.get_version_hierarchy_queryset('parent_concepts', v1).values_list('mnemonic', flat=True)),
+            {'P1'})
+        self.assertEqual(
+            set(concept.get_version_hierarchy_queryset('parent_concepts', v2).values_list('mnemonic', flat=True)),
+            {'P2'})
+        parent_one = Concept.objects.get(mnemonic='P1', id=F('versioned_object_id'))
+        self.assertFalse(parent_one.get_version_hierarchy_queryset('child_concepts', v2).exists())
+        self.assertEqual(
+            set(parent_one.get_version_hierarchy_queryset('child_concepts', v1).values_list('mnemonic', flat=True)),
+            {'C'})
+        self.assertEqual(concept.parent_concept_urls, ['/orgs/Regen/sources/LOINC/concepts/P2/'])
+
+    def test_isolated_import_fails_when_hierarchy_root_is_dropped(self):
+        self.run_import([self.concept('ROOT'), self.concept('A', parents=['ROOT']), self.version('v1')])
+        head = Source.objects.get(mnemonic='LOINC', version='HEAD')
+        head.hierarchy_root = Concept.objects.get(mnemonic='ROOT', id=F('versioned_object_id'))
+        head.save()
+
+        importer = self.run_import([self.concept('A'), self.version('v2')])
+
+        self.assertEqual(len(importer.failed), 1)
+        self.assertIn('hierarchy_root', importer.failed[0]['errors'])
+        self.assertFalse(Source.objects.filter(mnemonic='LOINC', version='v2').exists())
+        self.assertTrue(Concept.objects.get(mnemonic='ROOT', id=F('versioned_object_id')).is_active)
+
+    def test_isolated_import_skips_version_when_content_fails(self):
+        self.run_import([self.concept('A'), self.concept('B'), self.version('v1')])
+        invalid = self.concept('C')
+        invalid.pop('concept_class')
+
+        importer = self.run_import([self.concept('A'), invalid, self.version('v2')])
+
+        self.assertEqual(len(importer.invalid), 1)
+        self.assertEqual(importer.failed[0]['errors'], {'__all__': [ISOLATED_VERSION_CONTENT_FAILED]})
+        self.assertFalse(Source.objects.filter(mnemonic='LOINC', version='v2').exists())
+        self.assertTrue(Concept.objects.get(mnemonic='B', id=F('versioned_object_id')).is_active)
+
+    def test_isolated_import_needs_one_source_version_after_content(self):
+        for lines in (
+                [self.concept('A')],
+                [self.concept('A'), self.version('v1'), self.version('v2')],
+                [self.version('v1'), self.concept('A')],
+        ):
+            with self.assertRaises(DjangoValidationError):
+                self.run_import(lines)
+
+    def test_carry_forward_import_keeps_unseen_concepts(self):
+        self.run_import([self.concept('A'), self.concept('B', extras={'x': 1}), self.version('v1')], False)
+        self.run_import([self.concept('B'), self.version('v2')], False)
+
+        self.assertEqual(self.members('v2'), {'A', 'B'})
+        self.assertEqual(Concept.objects.get(mnemonic='B', is_latest_version=True).extras, {'x': 1})
+        self.assertEqual(Source.objects.get(mnemonic='LOINC', version='v2').versioning_mode, 'carry_forward')
+
+    @staticmethod
+    def head_concepts():
+        return set(Source.objects.get(mnemonic='LOINC', version='HEAD').concepts.filter(
+            id=F('versioned_object_id'), is_active=True).values_list('mnemonic', flat=True))
+
+    @staticmethod
+    def head_parents(mnemonic):
+        return set(HierarchicalConcepts.objects.filter(
+            child__mnemonic=mnemonic, child_id=F('child__versioned_object_id')).values_list(
+                'parent__mnemonic', flat=True))
+
+    @patch('core.sources.models.Source.batch_index')
+    def test_rejected_version_leaves_head_unchanged(self, batch_index_mock):
+        self.run_import([
+            self.concept('P1'), self.concept('P2'), self.concept('C', parents=['P1']), self.concept('A'),
+            self.version('v1')])
+        batch_index_mock.reset_mock()
+
+        with patch('core.sources.models.Source.persist_new_version', return_value={'version': ['Not saved']}):
+            importer = self.run_import([
+                self.concept('P1'), self.concept('P2'), self.concept('C', parents=['P2']), self.version('v2')])
+
+        self.assertEqual(importer.failed[0]['errors'], {'version': ['Not saved']})
+        self.assertFalse(Source.objects.filter(mnemonic='LOINC', version='v2').exists())
+        self.assertEqual(self.head_concepts(), {'P1', 'P2', 'C', 'A'})
+        batch_index_mock.assert_not_called()
+
+    def test_existing_version_changes_nothing(self):
+        self.run_import([self.concept('A'), self.concept('B'), self.version('v1')])
+
+        with self.assertRaises(DjangoValidationError) as context:
+            self.run_import([self.concept('B'), self.concept('NEW'), self.version('v1')])
+
+        self.assertEqual(context.exception.message_dict, {'__all__': [ISOLATED_VERSION_EXISTS]})
+        self.assertFalse(Concept.objects.filter(mnemonic='NEW').exists())
+        self.assertEqual(self.head_concepts(), {'A', 'B'})
+
+    def test_preflight_rejects_a_version_before_content_imports(self):
+        self.run_import([self.concept('A'), self.version('v1')])
+        user = UserProfileFactory()
+        for line, message in (
+                ({'source': 'LOINC', 'owner': 'Regen', 'owner_type': 'Organization'}, ISOLATED_VERSION_LINE_INVALID),
+                (self.version('v2'), ISOLATED_VERSION_NO_EDIT_ACCESS),
+        ):
+            with self.assertRaises(DjangoValidationError) as context:
+                IsolatedVersionCommit(line, user).preflight()
+            self.assertEqual(context.exception.message_dict, {'__all__': [message]})
+        self.assertIsNone(IsolatedVersionCommit(
+            {**self.version('v2'), 'source': 'NEW'}, UserProfile.objects.get(username='ocladmin')).preflight())
+
+    @patch('core.sources.models.Source.batch_index', side_effect=Exception('ES down'))
+    def test_failed_search_update_does_not_undo_a_committed_version(self, batch_index_mock):
+        self.run_import([self.concept('A'), self.concept('B'), self.version('v1')])
+
+        importer = self.run_import([self.concept('B'), self.version('v2')])
+
+        self.assertTrue(batch_index_mock.called)
+        self.assertEqual(len(importer.created), 1)
+        self.assertEqual(self.members('v2'), {'B'})
+        self.assertEqual(self.head_concepts(), {'B'})
+
+    def test_hierarchy_root_drop_rolls_back_the_hierarchy(self):
+        self.run_import([
+            self.concept('ROOT'), self.concept('P1'), self.concept('C', parents=['P1']), self.version('v1')])
+        head = Source.objects.get(mnemonic='LOINC', version='HEAD')
+        head.hierarchy_root = Concept.objects.get(mnemonic='ROOT', id=F('versioned_object_id'))
+        head.save()
+
+        importer = self.run_import([self.concept('P1'), self.concept('C'), self.version('v2')])
+
+        self.assertIn('hierarchy_root', importer.failed[0]['errors'])
+        self.assertEqual(self.head_concepts(), {'ROOT', 'P1', 'C'})
+
+    def test_commit_rolls_back_the_hierarchy_with_the_version(self):
+        self.run_import([
+            self.concept('P1'), self.concept('P2'), self.concept('C', parents=['P1']), self.version('v1')])
+        version_line = self.version('v2')
+        version_line.pop('type')
+        prefix = '/orgs/Regen/sources/LOINC/concepts/'
+
+        def commit():
+            with self.captureOnCommitCallbacks(execute=True):
+                return IsolatedVersionCommit(
+                    version_line, UserProfile.objects.get(username='ocladmin'),
+                    hierarchy_map={f'{prefix}C/': [f'{prefix}P2/'], f'{prefix}P1/': [], f'{prefix}P2/': []},
+                    seen_concept_ids=Concept.objects.filter(
+                        mnemonic__in=['P1', 'P2', 'C'], id=F('versioned_object_id')).values_list('id', flat=True)
+                ).run()
+
+        with patch('core.sources.models.Source.persist_new_version', return_value={'version': ['Not saved']}):
+            self.assertEqual(commit(), {'version': ['Not saved']})
+        self.assertEqual(self.head_parents('C'), {'P1'})
+
+        self.assertEqual(commit(), CREATED)
+        self.assertEqual(self.head_parents('C'), {'P2'})
+
+    def test_versioning_mode_is_resolved_before_anything_imports(self):
+        for lines, isolated_version, message in (
+                ([self.concept('A'), self.version('v1', versioning_mode='carry_forward')], True,
+                 VERSIONING_MODE_NEEDS_ISOLATED_VERSION),
+                ([self.concept('A'), self.version('v1', versioning_mode='isolated')], False,
+                 VERSIONING_MODE_NEEDS_ISOLATED_VERSION),
+                ([self.concept('A'), self.version('v1', versioning_mode='other')], False, INVALID_VERSIONING_MODE),
+        ):
+            with self.assertRaises(DjangoValidationError) as context:
+                self.run_import(lines, isolated_version)
+            self.assertEqual(context.exception.message_dict, {'versioning_mode': [message]})
+        self.assertFalse(Concept.objects.filter(mnemonic='A').exists())
+
+    def test_version_line_mode_matching_the_import_is_accepted(self):
+        self.run_import([self.concept('A'), self.version('v1', versioning_mode='isolated')])
+        self.run_import([self.concept('B'), self.version('v2', versioning_mode='carry_forward')], False)
+
+        self.assertEqual(Source.objects.get(mnemonic='LOINC', version='v1').versioning_mode, 'isolated')
+        self.assertEqual(Source.objects.get(mnemonic='LOINC', version='v2').versioning_mode, 'carry_forward')
+        self.assertEqual(self.members('v2'), {'A', 'B'})
+
+    def test_plain_version_importer_rejects_isolated_mode(self):
+        self.run_import([self.concept('A'), self.version('v1')])
+        version_line = self.version('v2', versioning_mode='isolated')
+        version_line.pop('type')
+
+        result = SourceVersionImporter(version_line, UserProfile.objects.get(username='ocladmin')).run()
+
+        self.assertEqual(result, {'versioning_mode': [VERSIONING_MODE_NEEDS_ISOLATED_VERSION]})
+        self.assertFalse(Source.objects.filter(mnemonic='LOINC', version='v2').exists())
+
+    def test_commit_needs_edit_access_to_head(self):
+        self.run_import([self.concept('A'), self.concept('B'), self.version('v1')])
+        version_line = self.version('v2')
+        version_line.pop('type')
+
+        result = IsolatedVersionCommit(
+            version_line, UserProfileFactory(), seen_concept_ids=[
+                Concept.objects.get(mnemonic='B', id=F('versioned_object_id')).id]).run()
+
+        self.assertEqual(result, PERMISSION_DENIED)
+        self.assertEqual(self.head_concepts(), {'A', 'B'})
+
+    def test_isolated_version_merges_metadata_into_head(self):
+        self.run_import([self.concept('A'), self.version('v1')])
+        head = Source.objects.get(mnemonic='LOINC', version='HEAD')
+        head.website = 'https://loinc.org'
+        head.publisher = 'Old'
+        head.save()
+
+        self.run_import([self.concept('A'), self.version('v2', publisher='Regenstrief', description='2.82')])
+
+        head.refresh_from_db()
+        version = Source.objects.get(mnemonic='LOINC', version='v2')
+        self.assertEqual(head.publisher, 'Regenstrief')
+        self.assertEqual(head.description, '2.82')
+        self.assertEqual(head.website, 'https://loinc.org')
+        self.assertEqual(version.publisher, 'Regenstrief')
+        self.assertEqual(version.website, 'https://loinc.org')
+        self.assertEqual(head.name, 'LOINC')
+
+
+@patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+@patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+@patch('core.importers.models.index_concepts_mapped_codes', Mock())
+@patch('core.importers.models.batch_index_resources', Mock(__name__='batch_index_resources'))
+class IsolatedVersionAPITest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.token = UserProfile.objects.get(username='ocladmin').get_token()
+        OrganizationFactory(mnemonic='Regen')
+
+    def run_import(self, lines):
+        with self.captureOnCommitCallbacks(execute=True):
+            BulkImportInline(
+                '\n'.join(json.dumps(line) for line in [
+                    {'type': 'Source', 'id': 'LOINC', 'name': 'LOINC', 'owner_type': 'Organization', 'owner': 'Regen',
+                     'default_locale': 'en', 'supported_locales': 'en'}, *lines]),
+                'ocladmin', True, isolated_version=True).run()
+
+    def test_version_hierarchy_endpoints(self):
+        concept = IsolatedVersionImportTest.concept
+        version = IsolatedVersionImportTest.version
+        self.run_import([concept('P1'), concept('P2'), concept('C', parents=['P1']), version('v1')])
+        self.run_import([concept('P1'), concept('P2'), concept('C', parents=['P2']), version('v2')])
+
+        for repo_version, parent in (('v1', 'P1'), ('v2', 'P2')):
+            response = self.client.get(
+                f'/orgs/Regen/sources/LOINC/{repo_version}/concepts/C/parents/',
+                HTTP_AUTHORIZATION='Token ' + self.token)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual([item['id'] for item in response.data], [parent])
+        response = self.client.get(
+            '/orgs/Regen/sources/LOINC/v2/concepts/P1/children/', HTTP_AUTHORIZATION='Token ' + self.token)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, [])
+        response = self.client.get(
+            '/orgs/Regen/sources/LOINC/concepts/C/parents/', HTTP_AUTHORIZATION='Token ' + self.token)
+        self.assertEqual([item['id'] for item in response.data], ['P2'])
+
+    def test_version_create_cannot_set_versioning_mode(self):
+        self.run_import([IsolatedVersionImportTest.concept('A'), IsolatedVersionImportTest.version('v1')])
+        response = self.client.post(
+            '/orgs/Regen/sources/LOINC/versions/',
+            {'id': 'v2', 'description': 'v2', 'versioning_mode': 'isolated'},
+            HTTP_AUTHORIZATION='Token ' + self.token, format='json')
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['versioning_mode'], 'carry_forward')
+
+    @patch('core.importers.views.queue_bulk_import')
+    def test_import_passes_isolated_version(self, queue_bulk_import_mock):
+        queue_bulk_import_mock.return_value = Task.new(queue='default', username='ocladmin', name='bulk_import')
+        response = self.client.post(
+            '/importers/bulk-import/?update_if_exists=true&isolated_version=true', {'data': '{"type": "Concept"}'},
+            HTTP_AUTHORIZATION='Token ' + self.token, format='json')
+        self.assertEqual(response.status_code, 202)
+        self.assertTrue(queue_bulk_import_mock.call_args.kwargs['isolated_version'])
+
+        response = self.client.post(
+            '/importers/bulk-import/?isolated_version=maybe', {'data': '{"type": "Concept"}'},
+            HTTP_AUTHORIZATION='Token ' + self.token, format='json')
+        self.assertEqual(response.status_code, 400)
+
+        response = self.client.post(
+            '/importers/bulk-import/?isolated_version=true', {'data': '{}', 'import_type': 'npm'},
+            HTTP_AUTHORIZATION='Token ' + self.token, format='json')
+        self.assertEqual(response.status_code, 400)
+
+
+@patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+@patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+@patch('core.importers.models.index_concepts_mapped_codes', Mock())
+@patch('core.importers.models.batch_index_resources', Mock(__name__='batch_index_resources'))
+class IsolatedVersionZipImportTest(OCLTestCase):
+    def setUp(self):
+        super().setUp()
+        OrganizationFactory(mnemonic='Regen')
+        BulkImportInline(json.dumps({
+            'type': 'Source', 'id': 'LOINC', 'name': 'LOINC', 'owner_type': 'Organization', 'owner': 'Regen',
+            'default_locale': 'en', 'supported_locales': 'en'}), 'ocladmin', True).run()
+
+    def import_zip(self, concepts, mappings, version):
+        concept = IsolatedVersionImportTest.concept
+        directory = tempfile.mkdtemp()
+        path = os.path.join(directory, 'loinc.zip')
+        with ZipFile(path, 'w') as package:
+            package.writestr('concepts.json', '\n'.join(json.dumps(concept(*args)) for args in concepts))
+            package.writestr('mappings.json', '\n'.join(
+                json.dumps(IsolatedVersionImportTest.mapping(*args)) for args in mappings))
+            package.writestr('version.json', json.dumps(IsolatedVersionImportTest.version(version)))
+        results = []
+        for resource_type, filepath, count in (
+                ('Concept', 'concepts.json', len(concepts)), ('Mapping', 'mappings.json', len(mappings))):
+            if count:
+                results += ImporterSubtask(
+                    path, 'ocladmin', 'Organization', 'Regen', resource_type,
+                    [{'filepath': filepath, 'start_index': 0, 'end_index': count}], False, True).run()
+        with patch.object(ImporterSubtask, 'get_previous_results', return_value=results), \
+                self.captureOnCommitCallbacks(execute=True):
+            return ImporterSubtask(
+                path, 'ocladmin', 'Organization', 'Regen', 'Source Version',
+                [{'filepath': 'version.json', 'start_index': 0, 'end_index': 1}], False, True, True).run()
+
+    def test_isolated_version_zip_import(self):
+        self.assertEqual(self.import_zip([('A',), ('B',)], [('M1', 'A', 'B')], 'v1'), [CREATED])
+        self.assertEqual(self.import_zip([('B',), ('C', ['B'])], [], 'v2'), [CREATED])
+
+        self.assertEqual(IsolatedVersionImportTest.members('v1'), {'A', 'B'})
+        self.assertEqual(IsolatedVersionImportTest.members('v2'), {'B', 'C'})
+        self.assertEqual(Source.objects.get(mnemonic='LOINC', version='v2').mappings.count(), 0)
+        self.assertEqual(Source.objects.get(mnemonic='LOINC', version='v2').versioning_mode, 'isolated')
+        self.assertEqual(
+            Concept.objects.get(mnemonic='C', id=F('versioned_object_id')).parent_concept_urls,
+            ['/orgs/Regen/sources/LOINC/concepts/B/'])
+
+    def test_isolated_version_zip_import_skips_version_when_content_fails(self):
+        self.import_zip([('A',), ('B',)], [], 'v1')
+        with patch.object(ImporterSubtask, 'get_previous_results', return_value=[CREATED, 'Failed to import']):
+            result = ImporterSubtask(
+                '/dev/null', 'ocladmin', 'Organization', 'Regen', 'Source Version', [], False, True, True
+            ).commit_isolated_version(IsolatedVersionImportTest.version('v2'))
+        self.assertEqual(result, {'__all__': [ISOLATED_VERSION_CONTENT_FAILED]})
+
+    def test_zip_import_with_numeric_extras(self):
+        directory = tempfile.mkdtemp()
+        path = os.path.join(directory, 'loinc.zip')
+        with ZipFile(path, 'w') as package:
+            package.writestr('concepts.json', '\n'.join(
+                json.dumps(IsolatedVersionImportTest.concept(mnemonic, extras={'rank': 1.5, 'order': 2}))
+                for mnemonic in ('N1', 'N2', 'N3')))
+        results = []
+        for start_index, end_index in ((0, 1), (1, 3)):
+            results += ImporterSubtask(
+                path, 'ocladmin', 'Organization', 'Regen', 'Concept',
+                [{'filepath': 'concepts.json', 'start_index': start_index, 'end_index': end_index}], False).run()
+
+        self.assertEqual(results, [CREATED, CREATED, CREATED])
+        self.assertEqual(
+            Concept.objects.get(mnemonic='N3', id=F('versioned_object_id')).extras, {'rank': 1.5, 'order': 2})
+
+    def test_categorize_resources_keeps_only_source_version_lines(self):
+        importer = Importer('task-id', '/tmp/loinc.zip', 'ocladmin', 'Organization', 'Regen', isolated_version=True)
+        resources = {}
+        lines = [
+            {'type': 'Source', 'id': 'LOINC', 'versioning_mode': 'carry_forward', 'extras': {'type': 'x'}},
+            {**IsolatedVersionImportTest.version('v1'), 'versioning_mode': 'isolated', 'extras': {'a': [1]}},
+        ]
+        importer.categorize_resources(
+            io.BytesIO('\n'.join(json.dumps(line) for line in lines).encode()),
+            '/tmp/loinc.zip', 'lines.json', ['Source', 'Source Version'], resources)
+
+        self.assertEqual(importer.version_lines, [{
+            **IsolatedVersionImportTest.version('v1'), 'versioning_mode': 'isolated', 'extras': {}}])
+        self.assertEqual(
+            importer.validate_versioning(resources, ['Source', 'Source Version', 'Concept', 'Mapping']),
+            ['Source', 'Concept', 'Mapping', 'Source Version'])
+
+    def test_validate_versioning_rejects_before_content_imports(self):
+        self.import_zip([('A',)], [], 'v1')
+        resources = {'Source Version': {'/tmp/loinc.zip/version.json': 1}}
+        for line, isolated_version, errors in (
+                ({**IsolatedVersionImportTest.version('v2'), 'versioning_mode': 1}, True,
+                 {'versioning_mode': [INVALID_VERSIONING_MODE]}),
+                ({**IsolatedVersionImportTest.version('v2'), 'versioning_mode': {}}, False,
+                 {'versioning_mode': [INVALID_VERSIONING_MODE]}),
+                (IsolatedVersionImportTest.version('v1'), True, {'__all__': [ISOLATED_VERSION_EXISTS]}),
+        ):
+            importer = Importer(
+                'task-id', '/tmp/loinc.zip', 'ocladmin', 'Organization', 'Regen', isolated_version=isolated_version)
+            importer.version_lines = [line]
+            with self.assertRaises(ValidationError) as context:
+                importer.validate_versioning(resources, ['Source Version', 'Concept', 'Mapping'])
+            self.assertEqual(context.exception.detail, errors)
+
+    def test_isolated_version_resource_types(self):
+        self.assertEqual(
+            Importer.get_isolated_version_resource_types(
+                ['Source', 'Source Version', 'Concept', 'Mapping', 'Reference']),
+            ['Source', 'Concept', 'Mapping', 'Source Version', 'Reference'])

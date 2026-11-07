@@ -24,10 +24,11 @@ from core.common.throttling import ThrottleUtil
 from core.common.views import BaseAPIView
 from core.common.tasks import bulk_import_new
 from core.common.swagger_parameters import update_if_exists_param, task_param, result_param, username_param, \
-    file_upload_param, file_url_param, parallel_threads_param, verbose_param, index_param
+    file_upload_param, file_url_param, parallel_threads_param, verbose_param, index_param, isolated_version_param
 from core.common.utils import queue_bulk_import, is_csv_file, get_truthy_values, get_queue_task_names, \
     get_export_service
-from core.importers.constants import ALREADY_QUEUED, INVALID_UPDATE_IF_EXISTS, NO_CONTENT_TO_IMPORT, INVALID_INDEX
+from core.importers.constants import ALREADY_QUEUED, INVALID_UPDATE_IF_EXISTS, NO_CONTENT_TO_IMPORT, INVALID_INDEX, \
+    INVALID_ISOLATED_VERSION, ISOLATED_VERSION_IMPORT_TYPE
 from core.importers.importer import Importer, ResourceImporter
 from core.importers.input_parsers import ImportContentParser
 from core.importers.limits import (
@@ -58,6 +59,13 @@ def get_index_param(request):
     return index == 'true', None
 
 
+def get_isolated_version_param(request):
+    isolated_version = request.GET.get('isolated_version', 'false')
+    if isolated_version not in ['true', 'false']:
+        return None, Response({'exception': INVALID_ISOLATED_VERSION}, status=status.HTTP_400_BAD_REQUEST)
+    return isolated_version == 'true', None
+
+
 def import_response(request, import_queue, data, threads=None, inline=False, deprecated=False):  # pylint: disable=too-many-arguments
     if not data:
         return Response({'exception': NO_CONTENT_TO_IMPORT}, status=status.HTTP_400_BAD_REQUEST)
@@ -75,11 +83,16 @@ def import_response(request, import_queue, data, threads=None, inline=False, dep
     index, error_response = get_index_param(request)
     if error_response:
         return error_response
+    isolated_version, error_response = get_isolated_version_param(request)
+    if error_response:
+        return error_response
 
     data = data.decode('utf-8') if isinstance(data, bytes) else data
     task = None
     try:
-        task = queue_bulk_import(data, import_queue, username, update_if_exists, threads, inline, index=index)
+        task = queue_bulk_import(
+            data, import_queue, username, update_if_exists, threads, inline, index=index,
+            isolated_version=isolated_version)
         task.refresh_from_db()
     except AlreadyQueued:
         if task:
@@ -180,7 +193,8 @@ class BulkImportParallelInlineView(APIView):
 
     @swagger_auto_schema(
         manual_parameters=[
-            update_if_exists_param, index_param, file_url_param, file_upload_param, parallel_threads_param
+            update_if_exists_param, index_param, isolated_version_param, file_url_param, file_upload_param,
+            parallel_threads_param
         ],
         deprecated=True
     )
@@ -259,15 +273,21 @@ class ImportView(BulkImportParallelInlineView, ImportRetrieveDestroyMixin):
 
     @swagger_auto_schema(
         manual_parameters=[
-            update_if_exists_param, index_param, file_url_param, file_upload_param, parallel_threads_param
+            update_if_exists_param, index_param, isolated_version_param, file_url_param, file_upload_param,
+            parallel_threads_param
         ],
     )
-    def post(self, request, import_queue=None):  # pylint: disable=too-many-locals
+    def post(self, request, import_queue=None):  # pylint: disable=too-many-locals,too-many-return-statements,too-many-branches
         check_request_body_size(request)
         if 'import_type' in request.data:
             index, error_response = get_index_param(request)
             if error_response:
                 return error_response
+            isolated_version, error_response = get_isolated_version_param(request)
+            if error_response:
+                return error_response
+            if isolated_version and request.data.get('import_type', 'npm') == 'npm':
+                return Response({'exception': ISOLATED_VERSION_IMPORT_TYPE}, status=status.HTTP_400_BAD_REQUEST)
             check_import_payload(request)
             owner_type = request.data.get('owner_type', 'user')
             owner = request.data.get('owner', self.request.user.username)
@@ -299,7 +319,8 @@ class ImportView(BulkImportParallelInlineView, ImportRetrieveDestroyMixin):
             task = get_queue_task_names(sanitize_import_queue(request.user, import_queue), self.request.user.username)
             new_task = bulk_import_new.apply_async(
                 (file_url, self.request.user.username, owner_type, owner,
-                 request.data.get('import_type', 'npm'), index), task_id=task.id, queue=task.queue)
+                 request.data.get('import_type', 'npm'), index, *([True] if isolated_version else [])),
+                task_id=task.id, queue=task.queue)
             return Response({
                 'task': new_task.id,
                 'state': new_task.state

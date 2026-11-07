@@ -198,7 +198,8 @@ class SourceListViewTest(OCLAPITestCase):
                 'canonical_url', 'identifier', 'publisher', 'contact', 'meta',
                 'jurisdiction', 'purpose', 'copyright', 'content_type', 'revision_date', 'logo_url', 'text',
                 'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
-                'version_needed', 'hierarchy_root_url', 'autoid_concept_mnemonic', 'autoid_mapping_mnemonic',
+                'version_needed', 'versioning_mode', 'hierarchy_root_url', 'autoid_concept_mnemonic',
+                'autoid_mapping_mnemonic',
                 'autoid_concept_external_id', 'autoid_mapping_external_id',
                 'autoid_concept_name_external_id', 'autoid_concept_description_external_id',
                 'autoid_concept_mnemonic_start_from', 'autoid_concept_external_id_start_from',
@@ -320,7 +321,8 @@ class SourceRetrieveUpdateDestroyViewTest(OCLAPITestCase):
                 'canonical_url', 'identifier', 'publisher', 'contact', 'meta',
                 'jurisdiction', 'purpose', 'copyright', 'content_type', 'revision_date', 'logo_url', 'text',
                 'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
-                'version_needed', 'hierarchy_root_url', 'autoid_concept_mnemonic', 'autoid_mapping_mnemonic',
+                'version_needed', 'versioning_mode', 'hierarchy_root_url', 'autoid_concept_mnemonic',
+                'autoid_mapping_mnemonic',
                 'autoid_concept_external_id', 'autoid_mapping_external_id',
                 'autoid_concept_name_external_id', 'autoid_concept_description_external_id',
                 'autoid_concept_mnemonic_start_from', 'autoid_concept_external_id_start_from',
@@ -2918,6 +2920,29 @@ class SourceVersionsChangelogOutputViewTest(OCLAPITestCase):
                 self.assertIn('mapping-target-v1', markdown_output)
                 self.assertIn('mapping-target-v2', markdown_output)
 
+    @override_settings(CHANGELOG_ENRICHMENT_MAX_RESOURCES=1)
+    def test_large_diff_skips_enrichment(self):
+        data = self._build_changelog_output_fixture()
+        token = data['source'].created_by.get_token()
+
+        response = self._post_changelog(data['source_v1'], data['source_v2'], token, 4, output='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data['meta']['enrichment_skipped'])
+        changed_concept = response.data['concepts']['changed_major']['concept-detailed']
+        self.assertEqual(changed_concept['id'], 'concept-detailed')
+        self.assertIn('display_name', changed_concept)
+        self.assertNotIn('names', changed_concept)
+        self.assertNotIn('prev_names', changed_concept)
+        changed_mapping = response.data['mappings']['changed_major']['mapping-detailed']
+        self.assertEqual(changed_mapping['to_concept'], 'mapping-target-v2')
+        self.assertNotIn('prev_to_concept', changed_mapping)
+
+        response = self._post_changelog(data['source_v1'], data['source_v2'], token, 4, output='markdown')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('without enrichment', response.data['markdown'])
+
 
 class SourceVersionsComparisonViewTest(OCLAPITestCase):
     def test_post_200(self):  # pylint: disable=too-many-locals,too-many-statements
@@ -3325,6 +3350,10 @@ class SourceVersionsChangelogViewTest(OCLAPITestCase):
                 }
             }
         )
+
+    @patch('core.common.checksums.ChecksumChangelog.CONCEPTS_BATCH_SIZE', 1)
+    def test_post_200_in_concept_batches_of_one(self):
+        self.test_post_200()
 
 
 class SourceReleaseFlagsTest(OCLAPITestCase):

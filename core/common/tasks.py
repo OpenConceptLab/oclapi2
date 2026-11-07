@@ -265,40 +265,47 @@ def bulk_import(to_import, username, update_if_exists):
 
 
 @app.task(base=QueueOnceCustomTask, bind=True, retry_kwargs={'max_retries': 0})
-def bulk_import_parallel_inline(self, to_import, username, update_if_exists, threads=5, index=None):  # pylint: disable=too-many-arguments
+def bulk_import_parallel_inline(  # pylint: disable=too-many-arguments
+        self, to_import, username, update_if_exists, threads=5, index=None, isolated_version=False):
     from core.importers.models import BulkImportParallelRunner
     try:
         importer = BulkImportParallelRunner(
             content=to_import, username=username, update_if_exists=update_if_exists,
-            parallel=threads, self_task_id=self.request.id, index=index
+            parallel=threads, self_task_id=self.request.id, index=index, isolated_version=isolated_version
         )
     except JSONDecodeError as ex:
         return {'error': f"Invalid JSON ({ex.msg})"}
     except ValidationError as ex:
-        return {'error': f"Invalid Input ({ex.message})"}
+        return {'error': f"Invalid Input ({'; '.join(ex.messages)})"}
     return importer.run()
 
 
 @app.task(base=QueueOnceCustomTask, retry_kwargs={'max_retries': 0})
-def bulk_import_inline(to_import, username, update_if_exists, index=None):
+def bulk_import_inline(to_import, username, update_if_exists, index=None, isolated_version=False):
     from core.importers.models import BulkImportInline
     return BulkImportInline(
-        content=to_import, username=username, update_if_exists=update_if_exists, index=index).run()
+        content=to_import, username=username, update_if_exists=update_if_exists, index=index,
+        isolated_version=isolated_version).run()
 
 
 # pylint: disable=too-many-arguments
 @app.task(bind=True, base=QueueOnceCustomTask, retry_kwargs={'max_retries': 0})
-def bulk_import_new(self, path, username, owner_type, owner, import_type='default', index=None):
+def bulk_import_new(  # pylint: disable=too-many-arguments
+        self, path, username, owner_type, owner, import_type='default', index=None, isolated_version=False):
     from core.importers.importer import Importer
     task_id = self.request.id
-    return Importer(task_id, path, username, owner_type, owner, import_type, index).run()
+    return Importer(task_id, path, username, owner_type, owner, import_type, index, isolated_version).run()
 
 
 # pylint: disable=too-many-arguments
 @app.task(retry_kwargs={'max_retries': 0}, compression='gzip')
-def bulk_import_subtask(path, username, owner_type, owner, resource_type, files, index=True):
+def bulk_import_subtask(  # pylint: disable=too-many-arguments
+        path, username, owner_type, owner, resource_type, files, index=True, isolated=False, isolated_version=False,
+        previous_subtask_ids=None):
     from core.importers.importer import ImporterSubtask
-    return ImporterSubtask(path, username, owner_type, owner, resource_type, files, index).run()
+    return ImporterSubtask(
+        path, username, owner_type, owner, resource_type, files, index, isolated, isolated_version,
+        previous_subtask_ids).run()
 
 
 @app.task(retry_kwargs={'max_retries': 0}, compression='gzip')
@@ -334,11 +341,11 @@ def import_finisher(task_id):
 
 
 @app.task(bind=True, retry_kwargs={'max_retries': 0})
-def bulk_import_parts_inline(self, input_list, username, update_if_exists, index=True):
+def bulk_import_parts_inline(self, input_list, username, update_if_exists, index=True, isolated=False):  # pylint: disable=too-many-arguments
     from core.importers.models import BulkImportInline
     return BulkImportInline(
         content=None, username=username, update_if_exists=update_if_exists, input_list=input_list,
-        self_task_id=self.request.id, skip_hierarchy_tasks=True, index=index
+        self_task_id=self.request.id, skip_hierarchy_tasks=True, index=index, isolated=isolated
     ).run()
 
 
@@ -524,7 +531,8 @@ def process_hierarchy_for_new_concept(concept_id, initial_version_id, parent_con
     acks_late=True, reject_on_worker_lost=True
 )
 def process_hierarchy_for_concept_version(
-        latest_version_id, prev_version_id, parent_concept_uris, create_parent_version):
+        latest_version_id, prev_version_id, parent_concept_uris, create_parent_version,
+        create_removed_parent_versions=True):
     """
       Executed when a new concept version is created with new, updated or existing hierarchy
       1. Associates parent concepts to the latest concept version.
@@ -546,7 +554,7 @@ def process_hierarchy_for_concept_version(
     latest_version.set_parent_concepts_from_uris(create_parent_version)
     latest_version.versioned_object.parent_concepts.set(latest_version.parent_concepts.all())
 
-    if prev_version:
+    if prev_version and create_removed_parent_versions:
         removed_parent_urls = [
             url for url in old_parents if url not in list(latest_version.parent_concept_urls)
         ]
