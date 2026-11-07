@@ -13,7 +13,7 @@ from core.common.db_functions import ImmutableUnaccent
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel, ConceptContainerModel
 from core.common.tasks import process_hierarchy_for_new_concept, process_hierarchy_for_concept_version, \
-    process_hierarchy_for_new_parent_concept_version, update_mappings_concept, make_hierarchy
+    process_hierarchy_for_new_parent_concept_version, update_mappings_concept
 from core.common.utils import generate_temp_version, drop_version, \
     startswith_temp_version, is_versioned_uri, decode_string, chunks, is_url_encoded_string, encode_string
 from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
@@ -1430,26 +1430,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     @classmethod
     def reconcile_import_hierarchy(cls, hierarchy_map, user, replace_head=False):
-        from core.sources.models import Source
-        children = cls.get_versioned_objects_by_uri(hierarchy_map.keys())
-        parents = cls.get_versioned_objects_by_uri({uri for uris in hierarchy_map.values() for uri in uris})
-        sources = Source.objects.filter(
-            id__in={source_id for _, source_id in [*children.values(), *parents.values()]})
-        editable = {source.id for source in sources if source.has_edit_access(user)}
-        viewable = {source.id for source in sources if source.has_view_access(user)}
-        inverted = {}
-        accessible_map = {}
-        for child_uri, parent_uris in hierarchy_map.items():
-            if children.get(child_uri, (None, None))[1] not in editable:
-                continue
-            accessible_map[child_uri] = [
-                uri for uri in parent_uris if parents.get(uri, (None, None))[1] in viewable]
-            for parent_uri in accessible_map[child_uri]:
-                inverted.setdefault(parent_uri, []).append(child_uri)
-        if inverted:
-            make_hierarchy(inverted)
-        if replace_head and accessible_map:
-            cls.replace_versioned_object_hierarchy(accessible_map)
+        ImportHierarchy.from_uri_map(hierarchy_map, user).apply(replace_head)
 
     @classmethod
     def get_versioned_objects_by_uri(cls, uris):
@@ -1469,36 +1450,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             ).exclude(id=F('versioned_object_id')).order_by('created_at').values_list('versioned_object_id', 'id'):
                 latest[versioned_object_id] = concept_id
         return latest
-
-    @classmethod
-    def replace_versioned_object_hierarchy(cls, hierarchy_map):
-        children = {uri: ids[0] for uri, ids in cls.get_versioned_objects_by_uri(hierarchy_map.keys()).items()}
-        parents = {
-            uri: ids[0] for uri, ids in cls.get_versioned_objects_by_uri(
-                {uri for uris in hierarchy_map.values() for uri in uris}).items()}
-        parent_latest = cls.get_latest_version_ids_by_versioned_object_id(set(parents.values()))
-        desired = {
-            children[child_uri]: {
-                parent_latest[parents[uri]] for uri in parent_uris
-                if uri in parents and parents[uri] in parent_latest
-            }
-            for child_uri, parent_uris in hierarchy_map.items() if child_uri in children
-        }
-        existing = {}
-        for batch in chunks(sorted(desired.keys()), 5000):
-            for child_id, parent_id in HierarchicalConcepts.objects.filter(
-                    child_id__in=batch).values_list('child_id', 'parent_id'):
-                existing.setdefault(child_id, set()).add(parent_id)
-        changed = sorted(
-            child_id for child_id, parent_ids in desired.items() if existing.get(child_id, set()) != parent_ids)
-        for batch in chunks(changed, 5000):
-            HierarchicalConcepts.objects.filter(child_id__in=batch).delete()
-            HierarchicalConcepts.objects.bulk_create(
-                [HierarchicalConcepts(child_id=child_id, parent_id=parent_id)
-                 for child_id in batch for parent_id in desired[child_id]],
-                batch_size=5000
-            )
-        return changed
 
     def get_version_hierarchy_queryset(self, relation, repo_version):
         if relation == 'parent_concepts':
@@ -2042,3 +1993,79 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     @staticmethod
     def get_brief_serializer():
         return Concept.get_serializer_class(brief=True)
+
+
+class ImportHierarchy:
+    """
+    An import's parent links, resolved once into versioned object ids. apply() links each child's versioned object
+    and latest version to its parents' latest versions, add-only, or replaces the versioned objects' links.
+    """
+    CHUNK_SIZE = 5000
+
+    def __init__(self, links):
+        self.links = links  # child versioned object id -> parent versioned object ids
+        self.latest = Concept.get_latest_version_ids_by_versioned_object_id(
+            {*links, *(parent_id for parent_ids in links.values() for parent_id in parent_ids)})
+
+    @classmethod
+    def from_uri_map(cls, hierarchy_map, user=None):
+        """hierarchy_map: child uri -> parent uris. With a user, only children it can edit and parents it can view."""
+        from core.sources.models import Source
+        resolved = Concept.get_versioned_objects_by_uri(
+            {*hierarchy_map, *(uri for uris in hierarchy_map.values() for uri in uris)})
+        editable = viewable = None
+        if user:
+            sources = Source.objects.filter(id__in={source_id for _, source_id in resolved.values()})
+            editable = {source.id for source in sources if source.has_edit_access(user)}
+            viewable = {source.id for source in sources if source.has_view_access(user)}
+        links = {}
+        for child_uri, parent_uris in hierarchy_map.items():
+            child_id, child_source_id = resolved.get(child_uri, (None, None))
+            if not child_id or (editable is not None and child_source_id not in editable):
+                continue
+            links.setdefault(child_id, set()).update(
+                resolved[uri][0] for uri in parent_uris
+                if uri in resolved and (viewable is None or resolved[uri][1] in viewable))
+        return cls(links)
+
+    def apply(self, replace_head=False):
+        for batch in chunks(sorted(self.links), self.CHUNK_SIZE):
+            parents = {
+                child_id: {self.latest[parent_id] for parent_id in self.links[child_id] if parent_id in self.latest}
+                for child_id in batch
+            }
+            pairs = {
+                (self.latest[child_id], parent_id) for child_id, parent_ids in parents.items()
+                if child_id in self.latest for parent_id in parent_ids}
+            if replace_head:
+                self.replace_links(parents)
+            else:
+                pairs.update(
+                    (child_id, parent_id) for child_id, parent_ids in parents.items() for parent_id in parent_ids)
+            self.add_links(pairs)
+
+    @staticmethod
+    def add_links(pairs):
+        if not pairs:
+            return
+        existing = set(HierarchicalConcepts.objects.filter(
+            child_id__in={child_id for child_id, _ in pairs}, parent_id__in={parent_id for _, parent_id in pairs}
+        ).values_list('child_id', 'parent_id'))
+        HierarchicalConcepts.objects.bulk_create(
+            [HierarchicalConcepts(child_id=child_id, parent_id=parent_id) for child_id, parent_id in pairs - existing],
+            batch_size=5000)
+
+    @staticmethod
+    def replace_links(parents):
+        """parents: child versioned object id -> the parent ids it should have, and no others."""
+        existing = {}
+        for child_id, parent_id in HierarchicalConcepts.objects.filter(
+                child_id__in=parents).values_list('child_id', 'parent_id'):
+            existing.setdefault(child_id, set()).add(parent_id)
+        changed = [child_id for child_id, parent_ids in parents.items() if existing.get(child_id, set()) != parent_ids]
+        if changed:
+            HierarchicalConcepts.objects.filter(child_id__in=changed).delete()
+            HierarchicalConcepts.objects.bulk_create(
+                [HierarchicalConcepts(child_id=child_id, parent_id=parent_id)
+                 for child_id in changed for parent_id in parents[child_id]],
+                batch_size=5000)

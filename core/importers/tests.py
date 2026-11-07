@@ -29,7 +29,8 @@ from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.constants import OPENMRS_VALIDATION_SCHEMA, DEPRECATED_API_HEADER, ACCESS_TYPE_NONE
 from core.common.tasks import post_import_update_resource_counts, bulk_import_parts_inline, bulk_import_inline, \
-    bulk_import, batch_index_resources, bulk_import_parallel_inline, bulk_import_new, index_concepts_mapped_codes
+    bulk_import, batch_index_resources, bulk_import_parallel_inline, bulk_import_new, index_concepts_mapped_codes, \
+    index_dropped_source_children
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.common.utils import decode_string, startswith_temp_version, get_bulk_import_celery_once_lock_key
 from core.concepts.documents import ConceptDocument
@@ -3189,9 +3190,9 @@ class BulkImportParallelRunnerTest(OCLTestCase):
     @patch('core.importers.models.post_import_update_resource_counts.apply_async', Mock())
     @patch('core.importers.models.BulkImportParallelRunner.wait_till_tasks_alive', Mock())
     @patch('core.importers.models.BulkImportParallelRunner.queue_tasks', Mock())
-    @patch('core.concepts.models.make_hierarchy')
-    def test_run_calls_make_hierarchy_with_inverted_map(self, make_hierarchy_mock):
-        """After all chunks complete, make_hierarchy receives the inverted {parent_uri: [child_uris]} map."""
+    @patch('core.concepts.models.ImportHierarchy.apply')
+    def test_run_reconciles_the_hierarchy_once(self, apply_mock):
+        """After all chunks complete, the hierarchy is applied once, with the child linked to its parent."""
         org = OrganizationFactory(mnemonic='TestOrg')
         source = OrganizationSourceFactory(organization=org, mnemonic='TestSource', version='HEAD')
         parent = ConceptFactory(parent=source, mnemonic='ParentConcept')
@@ -3210,21 +3211,21 @@ class BulkImportParallelRunnerTest(OCLTestCase):
             }),
         ])
 
-        importer = BulkImportParallelRunner(content, 'ocladmin', True)
-        importer.run()
+        with patch('core.concepts.models.Concept.get_versioned_objects_by_uri',
+                   wraps=Concept.get_versioned_objects_by_uri) as resolve_mock:
+            importer = BulkImportParallelRunner(content, 'ocladmin', True)
+            importer.run()
 
-        make_hierarchy_mock.assert_called_once()
+        apply_mock.assert_called_once_with(False)
+        resolve_mock.assert_called_once()
         self.assertTrue(importer.hierarchy_reconciliation_done)
-        inverted = make_hierarchy_mock.call_args[0][0]
-        self.assertIn(parent.uri, inverted)
-        self.assertIn(child.uri, inverted[parent.uri])
 
     @patch('core.importers.models.post_import_update_resource_counts.apply_async', Mock())
     @patch('core.importers.models.BulkImportParallelRunner.wait_till_tasks_alive', Mock())
     @patch('core.importers.models.BulkImportParallelRunner.queue_tasks', Mock())
-    @patch('core.concepts.models.make_hierarchy')
-    def test_run_skips_make_hierarchy_when_no_hierarchy(self, make_hierarchy_mock):
-        """make_hierarchy is not called when no concept in the import has parent_concept_urls."""
+    @patch('core.concepts.models.ImportHierarchy.apply')
+    def test_run_skips_hierarchy_when_no_hierarchy(self, apply_mock):
+        """The hierarchy isn't applied when no concept in the import has parent_concept_urls."""
         content = '\n'.join([
             json.dumps({
                 "type": "Concept", "id": "StandaloneConcept",
@@ -3234,7 +3235,7 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         importer = BulkImportParallelRunner(content, 'ocladmin', True)
         importer.run()
 
-        make_hierarchy_mock.assert_not_called()
+        apply_mock.assert_not_called()
 
     @patch('core.importers.models.post_import_update_resource_counts.apply_async', Mock())
     @patch('core.importers.models.BulkImportParallelRunner.wait_till_tasks_alive', Mock())
@@ -3304,10 +3305,9 @@ class BulkImportParallelRunnerTest(OCLTestCase):
     @patch('core.importers.models.post_import_update_resource_counts.apply_async', Mock())
     @patch('core.importers.models.BulkImportParallelRunner.wait_till_tasks_alive', Mock())
     @patch('core.importers.models.BulkImportParallelRunner.queue_tasks', Mock())
-    @patch('core.concepts.models.make_hierarchy')
-    def test_run_excludes_inaccessible_concepts(self, make_hierarchy_mock):
+    def test_run_excludes_inaccessible_concepts(self):
         """
-        Concepts from sources the importing user cannot edit must be excluded from make_hierarchy,
+        Concepts from sources the importing user cannot edit must be excluded from the hierarchy,
         even when they exist in the database. This prevents hierarchy changes on foreign sources
         that were denied during import (P1 security fix).
         """
@@ -3346,17 +3346,9 @@ class BulkImportParallelRunnerTest(OCLTestCase):
         importer = BulkImportParallelRunner(content, importing_user.username, True)
         importer.run()
 
-        make_hierarchy_mock.assert_called_once()
-        inverted = make_hierarchy_mock.call_args[0][0]
-
-        # OrgA child must be linked to its parent
-        self.assertIn(parent_a.uri, inverted)
-        self.assertIn(child_a.uri, inverted[parent_a.uri])
-
-        # OrgB child must NOT appear — user has no access to SourceB
-        self.assertNotIn(parent_b.uri, inverted)
-        all_children = [uri for uris in inverted.values() for uri in uris]
-        self.assertNotIn(child_b.uri, all_children)
+        self.assertEqual(
+            set(child_a.parent_concepts.values_list('id', flat=True)), {parent_a.get_latest_version().id})
+        self.assertFalse(child_b.parent_concepts.exists())
 
 
 class BulkImportViewTest(OCLAPITestCase):
@@ -6278,6 +6270,33 @@ class IsolatedVersionImportTest(OCLTestCase):
         self.assertEqual(self.members('v2'), {'B'})
         self.assertEqual(self.head_concepts(), {'B'})
 
+    @override_settings(TEST_MODE=False)
+    @patch('core.sources.models.index_dropped_source_children.apply_async')
+    def test_dropped_codes_are_repaired_by_a_queued_task(self, apply_async_mock):
+        self.run_import([self.concept('A'), self.concept('B'), self.version('v1')])
+        head = Source.objects.get(mnemonic='LOINC', version='HEAD')
+        dropped = Concept.objects.get(mnemonic='A', id=F('versioned_object_id'))
+        kept = Concept.objects.get(mnemonic='B', id=F('versioned_object_id'))
+
+        with self.captureOnCommitCallbacks(execute=True):
+            head.drop_unseen_children([kept.id], [])
+
+        task = Task.objects.get(name='index_dropped_source_children')
+        apply_async_mock.assert_called_once_with(
+            (head.id, [dropped.id, dropped.get_latest_version().id], []), task_id=task.id, queue='indexing')
+
+    def test_dropped_codes_repair_task_retries_and_reindexes(self):
+        self.assertEqual(index_dropped_source_children.max_retries, 5)
+        self.assertIn(Exception, index_dropped_source_children.autoretry_for)
+        self.run_import([self.concept('A'), self.version('v1')])
+        head = Source.objects.get(mnemonic='LOINC', version='HEAD')
+
+        with patch('core.sources.models.Source.index_dropped_children') as index_mock:
+            index_dropped_source_children(head.id, [1], [2])
+            index_dropped_source_children(0, [1], [2])
+
+        index_mock.assert_called_once_with([1], [2])
+
     def test_hierarchy_root_drop_rolls_back_the_hierarchy(self):
         self.run_import([
             self.concept('ROOT'), self.concept('P1'), self.concept('C', parents=['P1']), self.version('v1')])
@@ -6470,7 +6489,7 @@ class IsolatedVersionZipImportTest(OCLTestCase):
                 results += ImporterSubtask(
                     path, 'ocladmin', 'Organization', 'Regen', resource_type,
                     [{'filepath': filepath, 'start_index': 0, 'end_index': count}], False, True).run()
-        with patch.object(ImporterSubtask, 'get_previous_results', return_value=results), \
+        with patch.object(ImporterSubtask, 'iter_previous_results', return_value=[results]), \
                 self.captureOnCommitCallbacks(execute=True):
             return ImporterSubtask(
                 path, 'ocladmin', 'Organization', 'Regen', 'Source Version',
@@ -6490,7 +6509,7 @@ class IsolatedVersionZipImportTest(OCLTestCase):
 
     def test_isolated_version_zip_import_skips_version_when_content_fails(self):
         self.import_zip([('A',), ('B',)], [], 'v1')
-        with patch.object(ImporterSubtask, 'get_previous_results', return_value=[CREATED, 'Failed to import']):
+        with patch.object(ImporterSubtask, 'iter_previous_results', return_value=[[CREATED], ['Failed to import']]):
             result = ImporterSubtask(
                 '/dev/null', 'ocladmin', 'Organization', 'Regen', 'Source Version', [], False, True, True
             ).commit_isolated_version(IsolatedVersionImportTest.version('v2'))

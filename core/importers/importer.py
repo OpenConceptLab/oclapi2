@@ -802,27 +802,18 @@ class ImporterSubtask:
             collect(temp)
         temp.seek(0)
 
-    def get_previous_results(self):
-        results = []
+    def commit_isolated_version(self, version_line):
+        commit = IsolatedVersionCommit(
+            version_line, UserProfile.objects.get(username=self.username), True, hierarchy_map=self.hierarchy_map)
+        for results in self.iter_previous_results():
+            commit.add_subtask_results(results)
+        return commit.run()
+
+    def iter_previous_results(self):
+        """Each earlier subtask's results in turn, so only one is held at a time."""
         for task_id in self.previous_subtask_ids:
             result = AsyncResult(task_id).result
-            results.extend(result if isinstance(result, list) else [result])
-        return results
-
-    def commit_isolated_version(self, version_line):
-        results = self.get_previous_results()
-        seen = {'concepts': set(), 'mappings': set()}
-        for result in results:
-            if isinstance(result, dict):
-                for key, ids in seen.items():
-                    ids.update(get(result, f'seen.{key}') or [])
-        return IsolatedVersionCommit(
-            version_line, UserProfile.objects.get(username=self.username), True, hierarchy_map=self.hierarchy_map,
-            seen_concept_ids=seen['concepts'], seen_mapping_ids=seen['mappings'],
-            content_failures=sum(
-                1 for result in results
-                if not isinstance(result, dict) and result not in (CREATED, UPDATED, UNCHANGED, DELETED))
-        ).run()
+            yield result if isinstance(result, list) else [result]
 
     def import_zip(self, temp, results):
         with ZipFile(temp) as package:

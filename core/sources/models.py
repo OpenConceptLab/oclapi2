@@ -15,7 +15,7 @@ from core.common.checksums import VersionCompareMixin
 from core.common.constants import HEAD, VERSION_UNCOPYABLE_EXTRAS
 from core.common.models import ConceptContainerModel
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings, \
-    sync_source_concept_vectors, index_source_public_access
+    sync_source_concept_vectors, index_source_public_access, index_dropped_source_children
 from core.common.utils import to_camel_case, chunks
 from core.common.validators import validate_non_negative
 from core.concepts.models import ConceptName, Concept, HierarchicalConcepts
@@ -255,9 +255,24 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             }
         head.save()
 
-    def drop_unseen_children(self, seen_concept_ids, seen_mapping_ids):
+    def queue_index_dropped_children(self, concept_ids, mapping_ids):
+        if get(settings, 'TEST_MODE'):
+            self.index_dropped_children(concept_ids, mapping_ids)
+            return
+        task = Task.new(queue='indexing', user=self.updated_by, name=index_dropped_source_children.__name__)
+        index_dropped_source_children.apply_async(
+            (self.id, concept_ids, mapping_ids), task_id=task.id, queue='indexing')
+
+    def index_dropped_children(self, concept_ids, mapping_ids):
         from core.concepts.documents import ConceptDocument
         from core.mappings.documents import MappingDocument
+        from core.mappings.models import Mapping
+        for model, document, ids in ((Concept, ConceptDocument, concept_ids), (Mapping, MappingDocument, mapping_ids)):
+            for chunk in chunks(ids, 5000):
+                self.batch_index(model.objects.filter(id__in=chunk), document)
+        self.update_children_counts(sync=True)
+
+    def drop_unseen_children(self, seen_concept_ids, seen_mapping_ids):
         from core.mappings.models import Mapping
         to_index = {Concept: [], Mapping: []}
         with transaction.atomic():
@@ -280,15 +295,10 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                         HierarchicalConcepts.objects.filter(child_id__in=chunk).delete()
                     to_index[model] += [*chunk, *latest_ids]
 
-        def after_commit():
-            for model, document in ((Concept, ConceptDocument), (Mapping, MappingDocument)):
-                for chunk in chunks(to_index[model], 5000):
-                    self.batch_index(model.objects.filter(id__in=chunk), document)
-            if concept_ids or mapping_ids:
-                self.update_children_counts(sync=True)
-
-        # after a rollback search and counts stay as they were; robust, so a failure here can't stop version seeding
-        transaction.on_commit(after_commit, robust=True)
+        if to_index[Concept] or to_index[Mapping]:
+            # registered robustly so a failure to queue can't stop the version's seeding
+            transaction.on_commit(
+                lambda: self.queue_index_dropped_children(to_index[Concept], to_index[Mapping]), robust=True)
         return {'concepts': len(concept_ids), 'mappings': len(mapping_ids)}
 
     @staticmethod

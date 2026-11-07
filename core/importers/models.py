@@ -404,6 +404,23 @@ class IsolatedVersionCommit:
         self.seen_mapping_ids = set(seen_mapping_ids or [])
         self.content_failures = content_failures
 
+    def add_seen(self, seen):
+        self.seen_concept_ids.update(get(seen, 'concepts') or [])
+        self.seen_mapping_ids.update(get(seen, 'mappings') or [])
+
+    def add_runner_result(self, result):
+        """Folds in one BulkImportInline part's result, so the parts are read once and not kept."""
+        self.add_seen(get(result, 'seen'))
+        self.content_failures += sum(len(get(result, f'json.{key}') or []) for key in BulkImportInline.FAILURE_KEYS)
+
+    def add_subtask_results(self, results):
+        """Folds in one archive subtask's results: a status per resource, and a dict of the ids it saw."""
+        for result in results:
+            if isinstance(result, dict):
+                self.add_seen(get(result, 'seen'))
+            elif result not in (CREATED, UPDATED, UNCHANGED, DELETED):
+                self.content_failures += 1
+
     def get_head(self):
         owner_type = (self.version_line.get('owner_type', '') or '').lower()
         owner_filter = 'user__username' if owner_type in ['user', 'users'] else 'organization__mnemonic'
@@ -1023,10 +1040,11 @@ class BulkImportInline(BaseImporter):
     def set_task(self):
         self.task = Task.objects.filter(id=self.self_task_id).first()
 
+    FAILURE_KEYS = ('failed', 'exception', 'permission_denied', 'invalid', 'unknown', 'others')
+
     @property
     def content_failures_count(self):
-        return sum(len(results) for results in (
-            self.failed, self.exception, self.permission_denied, self.invalid, self.unknown, self.others))
+        return sum(len(getattr(self, key)) for key in self.FAILURE_KEYS)
 
     def import_source_version(self, item):
         if not self.isolated_version:
@@ -1401,29 +1419,18 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self.hierarchy_reconciliation_done = True
         self.notify_progress()
 
-    def get_task_results(self):
-        results = []
+    def commit_isolated_version(self, version_line):
+        commit = IsolatedVersionCommit(
+            version_line, UserProfile.objects.filter(username=self.username).first(), self.update_if_exists,
+            hierarchy_map=self.concept_hierarchy_map)
         for task in self.tasks:
             try:
-                if isinstance(task.result, dict):
-                    results.append(task.result)
+                task_result = task.result
             except:  # pylint: disable=bare-except
-                pass
-        return results
-
-    def get_content_failures_count(self):
-        keys = ('failed', 'exception', 'permission_denied', 'invalid', 'unknown', 'others')
-        return sum(len(get(result, f'json.{key}') or []) for result in self.get_task_results() for key in keys)
-
-    def get_seen_ids(self, resource):
-        return {_id for result in self.get_task_results() for _id in get(result, f'seen.{resource}') or []}
-
-    def commit_isolated_version(self, version_line):
-        result = IsolatedVersionCommit(
-            version_line, UserProfile.objects.filter(username=self.username).first(), self.update_if_exists,
-            hierarchy_map=self.concept_hierarchy_map, seen_concept_ids=self.get_seen_ids('concepts'),
-            seen_mapping_ids=self.get_seen_ids('mappings'), content_failures=self.get_content_failures_count()
-        ).run()
+                continue
+            if isinstance(task_result, dict):
+                commit.add_runner_result(task_result)
+        result = commit.run()
         # the commit owns the hierarchy, so a rejected version leaves it untouched
         self.hierarchy_reconciliation_done = True
         self.isolated_version_results.setdefault(self.get_result_key(result), []).append(
