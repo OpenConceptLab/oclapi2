@@ -1287,6 +1287,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                     cursor.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
             # Serialize version creation with destructive child operations on the HEAD repository.
             head = cls.objects.select_for_update().get(id=head.id)
+            obj.apply_version_metadata_to_head(head)
             obj.update_version_data(head)
             obj.save(**kwargs)
 
@@ -1328,6 +1329,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     def can_seed_from_head_expansion(self):
         return False
+
+    def apply_version_metadata_to_head(self, head):
+        pass
 
     @classmethod
     def persist_changes(cls, obj, updated_by, original_schema, **kwargs):  # pylint: disable=too-many-locals,too-many-branches

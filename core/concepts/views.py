@@ -602,7 +602,13 @@ class ConceptCloneView(ConceptCascadeView):
         return source
 
 
-class ConceptChildrenView(ConceptBaseView, ListWithHeadersMixin):
+class ConceptHierarchyMixin:
+    def is_source_version(self):
+        parent = get(self, 'parent_resource')
+        return bool(parent) and parent.__class__.__name__ == 'Source' and not parent.is_head
+
+
+class ConceptChildrenView(ConceptHierarchyMixin, ConceptBaseView, ListWithHeadersMixin):
     is_page_size_capped = True
     is_searchable = False  # a search would list the repo's concepts, not this concept's hierarchy
     serializer_class = ConceptChildrenSerializer
@@ -617,13 +623,16 @@ class ConceptChildrenView(ConceptBaseView, ListWithHeadersMixin):
             raise Http404()
 
         self.check_object_permissions(self.request, instance)
+        if self.is_source_version():
+            return get_viewable_concepts(
+                instance.get_version_hierarchy_queryset('child_concepts', self.parent_resource), self.request)
         return get_viewable_concepts(instance.child_concept_queryset(), self.request)
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
 
 
-class ConceptParentsView(ConceptBaseView, ListWithHeadersMixin):
+class ConceptParentsView(ConceptHierarchyMixin, ConceptBaseView, ListWithHeadersMixin):
     is_page_size_capped = True
     is_searchable = False  # a search would list the repo's concepts, not this concept's hierarchy
     serializer_class = ConceptParentsSerializer
@@ -637,6 +646,9 @@ class ConceptParentsView(ConceptBaseView, ListWithHeadersMixin):
             raise Http404()
 
         self.check_object_permissions(self.request, instance)
+        if self.is_source_version():
+            return get_viewable_concepts(
+                instance.get_version_hierarchy_queryset('parent_concepts', self.parent_resource), self.request)
         return get_viewable_concepts(instance.parent_concept_queryset(), self.request)
 
     def get(self, request, *args, **kwargs):

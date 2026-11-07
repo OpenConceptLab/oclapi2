@@ -16,11 +16,13 @@ from core.collections.models import Collection
 from core.common import ERRBIT_LOGGER
 from core.common.constants import HEAD, ALL
 from core.common.tasks import bulk_import_parts_inline, delete_organization, batch_index_resources, \
-    post_import_update_resource_counts, make_hierarchy, index_concepts_mapped_codes
+    post_import_update_resource_counts, index_concepts_mapped_codes
 from core.common.utils import drop_version, is_url_encoded_string, encode_string, to_parent_uri, chunks
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
+from core.sources.constants import ISOLATED_METADATA_FIELDS, VERSIONING_MODE_ISOLATED, \
+    ISOLATED_VERSION_CONTENT_FAILED
 from core.sources.models import Source
 from core.tasks.models import Task
 from core.users.models import UserProfile
@@ -109,13 +111,14 @@ class BaseResourceImporter:
     mandatory_fields = set()
     allowed_fields = []
 
-    def __init__(self, data, user, update_if_exists=False, cache=None):
+    def __init__(self, data, user, update_if_exists=False, cache=None, isolated=False):  # pylint: disable=too-many-arguments
         self.user = user
         self.data = data
         self.update_if_exists = update_if_exists
         self.queryset = None
         self.index_resources = False
         self.cache = cache if cache is not None else {}
+        self.isolated = isolated
 
     @classmethod
     def can_handle(cls, obj):
@@ -191,6 +194,17 @@ class BaseResourceImporter:
 
     def process(self):
         raise NotImplementedError()
+
+    def track_isolated_result(self, result):
+        if self.isolated and result in (UPDATED, UNCHANGED) and get(self, 'instance.versioned_object_id'):
+            if not self.instance.versioned_object.is_active:
+                self.instance.restore_to_head()
+        return result
+
+    def get_seen_versioned_object_id(self, result):
+        if self.isolated and result in (CREATED, UPDATED, UNCHANGED, DELETED):
+            return get(self, 'instance.versioned_object_id')
+        return None
 
     def retire_resource(self, resource):
         """
@@ -310,7 +324,10 @@ class SourceImporter(BaseResourceImporter):
 
 class SourceVersionImporter(BaseResourceImporter):
     mandatory_fields = {"id"}
-    allowed_fields = ["id", "external_id", "description", "released"]
+    allowed_fields = [
+        "id", "released", "versioning_mode", "name", "default_locale", "supported_locales", "extras",
+        *ISOLATED_METADATA_FIELDS
+    ]
 
     @staticmethod
     def get_resource_type():
@@ -332,9 +349,14 @@ class SourceVersionImporter(BaseResourceImporter):
         self.data['version'] = self.data.pop('id')
         self.data['mnemonic'] = source
         self.data[owner_type] = owner
+        self.data['versioning_mode'] = self.data.get('versioning_mode') or None
+        supported_locales = self.data.get('supported_locales')
+        if isinstance(supported_locales, str):
+            self.data['supported_locales'] = supported_locales.split(',')
 
     def process(self):
         source = Source(**self.data)
+        source._metadata_fields = list(self.data.keys())  # pylint: disable=protected-access
         if source.has_parent_edit_access(self.user):
             errors = Source.persist_new_version(source, self.user)
             return errors or CREATED
@@ -443,8 +465,9 @@ class ConceptImporter(BaseResourceImporter):
     def get_resource_type():
         return 'Concept'
 
-    def __init__(self, data, user, update_if_exists, skip_hierarchy_tasks=False, cache=None):  # pylint: disable=too-many-arguments
-        super().__init__(data, user, update_if_exists, cache=cache)
+    def __init__(  # pylint: disable=too-many-arguments
+            self, data, user, update_if_exists, skip_hierarchy_tasks=False, cache=None, isolated=False):
+        super().__init__(data, user, update_if_exists, cache=cache, isolated=isolated)
         self.skip_hierarchy_tasks = skip_hierarchy_tasks
         self.version = False
         self.instance = None
@@ -498,11 +521,11 @@ class ConceptImporter(BaseResourceImporter):
                 self.instance._index = False  # pylint: disable=protected-access
                 errors = Concept.create_new_version_for(
                     instance=self.instance, data=self.data, user=self.user, create_parent_version=False,
-                    add_prev_version_children=False
+                    add_prev_version_children=False, isolated=self.isolated
                 )
                 if errors and Concept.is_standard_checksum_error(errors):
-                    return UNCHANGED
-                return errors or UPDATED
+                    return self.track_isolated_result(UNCHANGED)
+                return errors or self.track_isolated_result(UPDATED)
 
             if 'update_comment' in self.data:
                 self.data['comment'] = self.data['update_comment']
@@ -514,7 +537,7 @@ class ConceptImporter(BaseResourceImporter):
                 data=persist_data,
                 user=self.user, create_parent_version=False)
             if self.instance.id:
-                return CREATED
+                return self.track_isolated_result(CREATED)
             return self.instance.errors or errors or FAILED
 
         return PERMISSION_DENIED
@@ -528,7 +551,7 @@ class ConceptImporter(BaseResourceImporter):
             try:
                 if parent.has_edit_access(self.user):
                     self.retire_resource(self.get_queryset().first())
-                    return DELETED
+                    return self.track_isolated_result(DELETED)
                 return PERMISSION_DENIED
             except Exception as ex:
                 return {'errors': ex.args}
@@ -548,8 +571,8 @@ class MappingImporter(BaseResourceImporter):
     def get_resource_type():
         return 'Mapping'
 
-    def __init__(self, data, user, update_if_exists, cache=None):
-        super().__init__(data, user, update_if_exists, cache=cache)
+    def __init__(self, data, user, update_if_exists, cache=None, isolated=False):  # pylint: disable=too-many-arguments
+        super().__init__(data, user, update_if_exists, cache=cache, isolated=isolated)
         self.version = False
         self.instance = None
 
@@ -665,17 +688,18 @@ class MappingImporter(BaseResourceImporter):
                 self.instance = queryset.first().clone()
                 self.instance._counted = None  # pylint: disable=protected-access
                 self.instance._index = False  # pylint: disable=protected-access
-                errors = Mapping.create_new_version_for(self.instance, self.data, self.user, cache=self.cache)
+                errors = Mapping.create_new_version_for(
+                    self.instance, self.data, self.user, cache=self.cache, isolated=self.isolated)
                 if errors and Mapping.is_standard_checksum_error(errors):
-                    return UNCHANGED
-                return errors or UPDATED
+                    return self.track_isolated_result(UNCHANGED)
+                return errors or self.track_isolated_result(UPDATED)
             if 'update_comment' in self.data:
                 self.data['comment'] = self.data['update_comment']
                 self.data.pop('update_comment')
             self.instance = Mapping.persist_new(
                 {**self.data, '_counted': None, '_index': False}, self.user, cache=self.cache)
             if self.instance.id:
-                return CREATED
+                return self.track_isolated_result(CREATED)
             return self.instance.errors or errors or FAILED
 
         return PERMISSION_DENIED
@@ -689,7 +713,7 @@ class MappingImporter(BaseResourceImporter):
             try:
                 if parent.has_edit_access(self.user):
                     self.retire_resource(self.get_queryset().first())
-                    return DELETED
+                    return self.track_isolated_result(DELETED)
                 return PERMISSION_DENIED
             except Exception as ex:
                 return {'errors': ex.args}
@@ -858,11 +882,15 @@ class BulkImportInline(BaseImporter):
 
     def __init__(  # pylint: disable=too-many-arguments
             self, content, username, update_if_exists=False, input_list=None, user=None, set_user=True,
-            self_task_id=None, skip_hierarchy_tasks=False, index=None
+            self_task_id=None, skip_hierarchy_tasks=False, index=None, isolated_version=False, isolated=False
     ):
         super().__init__(content, username, update_if_exists, user, not bool(input_list), set_user)
         self.self_task_id = self_task_id
         self.skip_hierarchy_tasks = skip_hierarchy_tasks
+        self.isolated_version = isolated_version
+        self.isolated = isolated or isolated_version
+        self.seen_concept_ids = set()
+        self.seen_mapping_ids = set()
         # Lookup cache shared across this run's items (see ConceptImporter/MappingImporter).
         # It caches misses too (None/False), so it's only safe because a chunk is single-resource-type
         # in the production parallel path (BulkImportParallelRunner.make_parts splits concepts and
@@ -893,9 +921,31 @@ class BulkImportInline(BaseImporter):
         self.last_progress_notified_at = 0
         self.elapsed_seconds = 0
         self.index = should_index_import(index, self.total)
+        if self.isolated_version:
+            Source.get_isolated_version_line(self.input_list)
 
     def set_task(self):
         self.task = Task.objects.filter(id=self.self_task_id).first()
+
+    @property
+    def content_failures_count(self):
+        return sum(len(results) for results in (
+            self.failed, self.exception, self.permission_denied, self.invalid, self.unknown, self.others))
+
+    def import_source_version(self, item):
+        if self.isolated:
+            item['versioning_mode'] = VERSIONING_MODE_ISOLATED
+        if self.isolated_version:
+            if self.content_failures_count:
+                return {'__all__': [ISOLATED_VERSION_CONTENT_FAILED]}
+            Concept.reconcile_import_hierarchy(
+                Concept.get_import_hierarchy_map(self.input_list, include_parentless=True), self.user,
+                replace_head=True)
+            errors = Source.drop_unseen_for_isolated_version(
+                item, self.seen_concept_ids, self.seen_mapping_ids, self.user)
+            if errors:
+                return errors
+        return SourceVersionImporter(item, self.user, self.update_if_exists).run()
 
     def handle_item_import_result(self, result, item):  # pylint: disable=too-many-return-statements
         if result is None:
@@ -983,9 +1033,7 @@ class BulkImportInline(BaseImporter):
                     )
                     continue
                 if item_type == 'source version':
-                    self.handle_item_import_result(
-                        SourceVersionImporter(item, self.user, self.update_if_exists).run(), original_item
-                    )
+                    self.handle_item_import_result(self.import_source_version(item), original_item)
                     continue
                 if item_type == 'collection':
                     collection_importer = CollectionImporter(item, self.user, self.update_if_exists)
@@ -1003,10 +1051,11 @@ class BulkImportInline(BaseImporter):
                         concept_importer = ConceptImporter(
                             item, self.user, self.update_if_exists,
                             skip_hierarchy_tasks=self.skip_hierarchy_tasks and bool(item.get('id')),
-                            cache=self.cache
+                            cache=self.cache, isolated=self.isolated
                         )
                         _result = concept_importer.delete() if action == 'delete' else concept_importer.run()
                         indexer.add(concept_importer.instance)
+                        self.seen_concept_ids.update(compact([concept_importer.get_seen_versioned_object_id(_result)]))
                     except Exception as ex:
                         ERRBIT_LOGGER.log(ex)
                         _result = {'__all__': str(ex)}
@@ -1014,9 +1063,11 @@ class BulkImportInline(BaseImporter):
                     continue
                 if item_type == 'mapping':
                     try:
-                        mapping_importer = MappingImporter(item, self.user, self.update_if_exists, cache=self.cache)
+                        mapping_importer = MappingImporter(
+                            item, self.user, self.update_if_exists, cache=self.cache, isolated=self.isolated)
                         _result = mapping_importer.delete() if action == 'delete' else mapping_importer.run()
                         indexer.add(mapping_importer.instance)
+                        self.seen_mapping_ids.update(compact([mapping_importer.get_seen_versioned_object_id(_result)]))
                     except Exception as ex:
                         ERRBIT_LOGGER.log(ex)
                         _result = {'__all__': str(ex)}
@@ -1078,13 +1129,18 @@ class BulkImportInline(BaseImporter):
             'detailed_summary': self.detailed_summary,
             'report': self.report
         }
+        if self.isolated and not self.isolated_version:
+            self.result['seen'] = {'concepts': sorted(self.seen_concept_ids), 'mappings': sorted(self.seen_mapping_ids)}
 
 
 class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
     def __init__(
-            self, content, username, update_if_exists, parallel=None, self_task_id=None, index=None
+            self, content, username, update_if_exists, parallel=None, self_task_id=None, index=None,
+            isolated_version=False
     ):  # pylint: disable=too-many-arguments
         super().__init__(content, username, update_if_exists, None, False)
+        self.isolated_version = isolated_version
+        self.isolated_failures = []
         self.start_time = time.time()
         self.self_task_id = self_task_id
         self.set_task()
@@ -1106,6 +1162,8 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             self.populate_input_list()
             self.total = len(self.input_list)
         self.index = should_index_import(index, self.total)
+        if self.isolated_version:
+            Source.get_isolated_version_line(self.input_list)
         self.make_resource_distribution()
         self.make_parts()
         self.collect_concept_hierarchy_map()
@@ -1157,22 +1215,8 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                 prev_line = line
 
     def collect_concept_hierarchy_map(self):
-        for line in self.input_list:
-            if line.get('type', '').lower() != 'concept':
-                continue
-            parent_urls = line.get('parent_concept_urls') or []
-            concept_id = line.get('id')
-            owner = line.get('owner')
-            source = line.get('source')
-            if parent_urls and concept_id and owner and source:
-                owner_type = line.get('owner_type', '').lower()
-                owner_prefix = 'users' if owner_type in ['user', 'users'] else 'orgs'
-                # P2: normalize concept_id the same way ConceptImporter.parse() does,
-                # so the URI matches what was actually persisted in the database.
-                if not is_url_encoded_string(concept_id):
-                    concept_id = encode_string(concept_id, safe='')
-                child_uri = f'/{owner_prefix}/{owner}/sources/{source}/concepts/{concept_id}/'
-                self.concept_hierarchy_map[child_uri] = parent_urls
+        self.concept_hierarchy_map = Concept.get_import_hierarchy_map(
+            self.input_list, include_parentless=self.isolated_version)
 
     @staticmethod
     def get_resource_id(resource):
@@ -1256,6 +1300,44 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
     def has_hierarchy_reconciliation_step(self):
         return bool(self.concept_hierarchy_map)
 
+    def reconcile_hierarchy(self):
+        if self.hierarchy_reconciliation_done or not self.concept_hierarchy_map:
+            return
+        user = UserProfile.objects.filter(username=self.username).first()
+        Concept.reconcile_import_hierarchy(self.concept_hierarchy_map, user, replace_head=self.isolated_version)
+        self.hierarchy_reconciliation_done = True
+        self.notify_progress()
+
+    def get_task_results(self):
+        results = []
+        for task in self.tasks:
+            try:
+                if isinstance(task.result, dict):
+                    results.append(task.result)
+            except:  # pylint: disable=bare-except
+                pass
+        return results
+
+    def get_content_failures_count(self):
+        keys = ('failed', 'exception', 'permission_denied', 'invalid', 'unknown', 'others')
+        return sum(len(get(result, f'json.{key}') or []) for result in self.get_task_results() for key in keys)
+
+    def get_seen_ids(self, resource):
+        return {_id for result in self.get_task_results() for _id in get(result, f'seen.{resource}') or []}
+
+    def prepare_isolated_version(self, part_list):
+        version_line = Source.get_isolated_version_line(part_list)
+        errors = {'__all__': [ISOLATED_VERSION_CONTENT_FAILED]} if self.get_content_failures_count() else None
+        if not errors:
+            self.reconcile_hierarchy()
+            errors = Source.drop_unseen_for_isolated_version(
+                version_line, self.get_seen_ids('concepts'), self.get_seen_ids('mappings'),
+                UserProfile.objects.filter(username=self.username).first())
+        if errors:
+            self.isolated_failures.append({**version_line, 'errors': errors})
+            return []
+        return part_list
+
     def get_total_progress_target(self):
         return self.total + int(self.has_hierarchy_reconciliation_step())
 
@@ -1289,6 +1371,8 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             print("***************")
         while len(self.parts) > 0:
             part_list = self.parts.popleft()
+            if part_list and self.isolated_version and get(part_list, '0.type', '').lower() == 'source version':
+                part_list = self.prepare_isolated_version(part_list)
             if part_list:
                 part_type = get(part_list, '0.type', '').lower()
                 if part_type:
@@ -1302,33 +1386,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                         self.resource_wise_time[part_type] += round(time.time() - start_time, 4)
 
         self.notify_progress()
-        if self.concept_hierarchy_map:
-            # P1: restrict reconciliation to concepts the importing user can actually edit,
-            # mirroring the has_edit_access guard in ConceptImporter.process(). This excludes
-            # PERMISSION_DENIED rows and prevents hierarchy changes on sources the user does
-            # not own, even when those concepts already exist in the database.
-            user = UserProfile.objects.filter(username=self.username).first()
-            accessible_uris = set(
-                concept.uri
-                for concept in Concept.objects.filter(
-                    uri__in=self.concept_hierarchy_map.keys(), id=F('versioned_object_id')
-                ).select_related('parent')
-                if concept.parent.has_edit_access(user)
-            )
-            viewable_parent_uris = set(Concept.get_viewable_parent_uris(
-                list({uri for uris in self.concept_hierarchy_map.values() for uri in uris}), user))
-            inverted = {}
-            for child_uri, parent_uris in self.concept_hierarchy_map.items():
-                if child_uri not in accessible_uris:
-                    continue
-                for parent_uri in [uri for uri in parent_uris if uri in viewable_parent_uris]:
-                    if parent_uri not in inverted:
-                        inverted[parent_uri] = []
-                    inverted[parent_uri].append(child_uri)
-            if inverted:
-                make_hierarchy(inverted)
-            self.hierarchy_reconciliation_done = True
-            self.notify_progress()
+        self.reconcile_hierarchy()
 
         post_import_update_resource_counts.apply_async(queue='default', permanent=False)
 
@@ -1396,6 +1454,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                 except:  # pylint: disable=bare-except
                     pass
 
+        total_result['failed'] += self.isolated_failures
         total_result['start_time'] = self.start_time_formatted
         total_result['elapsed_seconds'] = self.elapsed_seconds
         total_result['child_resource_time_distribution'] = self.resource_wise_time
@@ -1424,7 +1483,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         chunked_lists = [part_list] if has_delete_action else compact(
             self.chunker_list(part_list, self.parallel, is_child))
         jobs = group(
-            bulk_import_parts_inline.s(_list, self.username, self.update_if_exists, self.index)
+            bulk_import_parts_inline.s(_list, self.username, self.update_if_exists, self.index, self.isolated_version)
             for _list in chunked_lists
         )
         group_result = jobs.apply_async(queue='concurrent')

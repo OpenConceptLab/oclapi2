@@ -12,16 +12,18 @@ from django.db.models.functions import Cast
 from pydash import get, compact
 
 from core.common.checksums import VersionCompareMixin
-from core.common.constants import HEAD
+from core.common.constants import HEAD, VERSION_UNCOPYABLE_EXTRAS
 from core.common.models import ConceptContainerModel
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings, \
     sync_source_concept_vectors, index_source_public_access
-from core.common.utils import to_camel_case
+from core.common.utils import to_camel_case, chunks
 from core.common.validators import validate_non_negative
-from core.concepts.models import ConceptName, Concept
+from core.concepts.models import ConceptName, Concept, HierarchicalConcepts
 from core.services.storages.postgres import PostgresQL
 from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE, \
-    HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID, LOCALE_EXTERNAL_AUTO_ID_CHOICES
+    HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID, LOCALE_EXTERNAL_AUTO_ID_CHOICES, \
+    VERSIONING_MODES, VERSIONING_MODE_CARRY_FORWARD, VERSIONING_MODE_ISOLATED, ISOLATED_METADATA_FIELDS, \
+    ISOLATED_REQUIRED_METADATA_FIELDS, HIERARCHY_ROOT_CANNOT_BE_DROPPED, ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION
 from core.tasks.models import Task
 
 
@@ -107,6 +109,8 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     compositional = models.BooleanField(null=True, blank=True, default=None)
     version_needed = models.BooleanField(null=True, blank=True, default=None)
     hierarchy_root = models.ForeignKey('concepts.Concept', null=True, blank=True, on_delete=models.SET_NULL)
+    versioning_mode = models.CharField(
+        null=True, blank=True, max_length=20, choices=VERSIONING_MODES, default=VERSIONING_MODE_CARRY_FORWARD)
     # auto-id
     autoid_concept_mnemonic = models.CharField(null=True, blank=True, choices=AUTO_ID_CHOICES, max_length=10)
     autoid_concept_external_id = models.CharField(null=True, blank=True, choices=AUTO_ID_CHOICES, max_length=10)
@@ -228,6 +232,81 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         self.case_sensitive = head.case_sensitive
         self.compositional = head.compositional
         self.version_needed = head.version_needed
+
+    @property
+    def is_isolated(self):
+        return self.versioning_mode == VERSIONING_MODE_ISOLATED
+
+    def apply_version_metadata_to_head(self, head):
+        self.versioning_mode = self.versioning_mode or VERSIONING_MODE_CARRY_FORWARD
+        if not self.is_isolated:
+            return
+        fields = [field for field in get(self, '_metadata_fields') or [] if field in ISOLATED_METADATA_FIELDS]
+        for field in fields:
+            setattr(head, field, getattr(self, field))
+        for field in ISOLATED_REQUIRED_METADATA_FIELDS:
+            if field in (get(self, '_metadata_fields') or []) and getattr(self, field):
+                setattr(head, field, getattr(self, field))
+        if 'extras' in (get(self, '_metadata_fields') or []):
+            head.extras = {
+                **{key: value for key, value in (head.extras or {}).items() if key in VERSION_UNCOPYABLE_EXTRAS},
+                **(self.extras or {})
+            }
+        head.save()
+
+    def drop_unseen_children(self, seen_concept_ids, seen_mapping_ids):
+        from core.concepts.documents import ConceptDocument
+        from core.mappings.documents import MappingDocument
+        from core.mappings.models import Mapping
+        to_index = {Concept: [], Mapping: []}
+        with transaction.atomic():
+            Source.objects.select_for_update().get(id=self.id)
+            concept_ids = set(self.concepts_set.filter(
+                id=F('versioned_object_id'), is_active=True).values_list('id', flat=True)) - set(seen_concept_ids)
+            mapping_ids = set(self.mappings_set.filter(
+                id=F('versioned_object_id'), is_active=True).values_list('id', flat=True)) - set(seen_mapping_ids)
+            if self.hierarchy_root_id and Concept.objects.filter(
+                    id=self.hierarchy_root_id, versioned_object_id__in=concept_ids).exists():
+                raise ValidationError({'hierarchy_root': [HIERARCHY_ROOT_CANNOT_BE_DROPPED]})
+            for model, ids in ((Concept, concept_ids), (Mapping, mapping_ids)):
+                for chunk in chunks(sorted(ids), 5000):
+                    latest_ids = list(model.objects.filter(
+                        versioned_object_id__in=chunk, is_latest_version=True).values_list('id', flat=True))
+                    model.objects.filter(id__in=chunk).update(is_active=False)
+                    model.sources.through.objects.filter(
+                        source_id=self.id, **{f'{model.__name__.lower()}_id__in': [*chunk, *latest_ids]}).delete()
+                    if model is Concept:
+                        HierarchicalConcepts.objects.filter(child_id__in=chunk).delete()
+                    to_index[model] += [*chunk, *latest_ids]
+        for model, document in ((Concept, ConceptDocument), (Mapping, MappingDocument)):
+            for chunk in chunks(to_index[model], 5000):
+                self.batch_index(model.objects.filter(id__in=chunk), document)
+        if concept_ids or mapping_ids:
+            self.update_children_counts(sync=True)
+        return {'concepts': len(concept_ids), 'mappings': len(mapping_ids)}
+
+    @staticmethod
+    def get_isolated_version_line(input_list):
+        types = [(line.get('type', '') or '').lower() for line in input_list]
+        version_indexes = [index for index, _type in enumerate(types) if _type == 'source version']
+        content_indexes = [index for index, _type in enumerate(types) if _type in ('concept', 'mapping')]
+        if len(version_indexes) != 1 or (content_indexes and content_indexes[-1] > version_indexes[0]):
+            raise ValidationError(ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION)
+        return input_list[version_indexes[0]]
+
+    @classmethod
+    def drop_unseen_for_isolated_version(cls, version_line, seen_concept_ids, seen_mapping_ids, user):
+        owner_type = (version_line.get('owner_type', '') or '').lower()
+        owner_filter = 'user__username' if owner_type in ['user', 'users'] else 'organization__mnemonic'
+        head = cls.objects.filter(
+            **{owner_filter: version_line.get('owner')}, mnemonic=version_line.get('source'), version=HEAD).first()
+        if not head or not head.has_edit_access(user):
+            return None
+        try:
+            head.drop_unseen_children(seen_concept_ids, seen_mapping_ids)
+        except ValidationError as ex:
+            return get(ex, 'message_dict') or {'__all__': ex.messages}
+        return None
 
     def get_concept_name_locales(self):
         return ConceptName.objects.filter(concept__in=self.get_active_concepts())
