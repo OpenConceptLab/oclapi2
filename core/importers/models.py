@@ -7,6 +7,7 @@ from celery import group
 from celery.utils.log import get_task_logger
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import F
 from ocldev.oclfleximporter import OclFlexImporter
 from pydash import compact, get
@@ -21,8 +22,7 @@ from core.common.utils import drop_version, is_url_encoded_string, encode_string
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
-from core.sources.constants import ISOLATED_METADATA_FIELDS, VERSIONING_MODE_ISOLATED, \
-    ISOLATED_VERSION_CONTENT_FAILED
+from core.sources.constants import ISOLATED_METADATA_FIELDS, ISOLATED_VERSION_CONTENT_FAILED
 from core.sources.models import Source
 from core.tasks.models import Task
 from core.users.models import UserProfile
@@ -349,18 +349,92 @@ class SourceVersionImporter(BaseResourceImporter):
         self.data['version'] = self.data.pop('id')
         self.data['mnemonic'] = source
         self.data[owner_type] = owner
-        self.data['versioning_mode'] = self.data.get('versioning_mode') or None
+        self.requested_versioning_mode = self.data.pop('versioning_mode', None) or None
         supported_locales = self.data.get('supported_locales')
         if isinstance(supported_locales, str):
             self.data['supported_locales'] = supported_locales.split(',')
 
+    def __init__(self, data, user, update_if_exists=False, cache=None, isolated_version=False):  # pylint: disable=too-many-arguments
+        super().__init__(data, user, update_if_exists, cache=cache)
+        self.isolated_version = isolated_version
+        self.requested_versioning_mode = None
+
+    def get_versioning_mode_errors(self):
+        try:
+            self.data['versioning_mode'] = Source.resolve_versioning_mode(
+                self.isolated_version, self.requested_versioning_mode)
+        except ValidationError as ex:
+            return ex.message_dict
+        return None
+
     def process(self):
+        errors = self.get_versioning_mode_errors()
+        if errors:
+            return errors
         source = Source(**self.data)
         source._metadata_fields = list(self.data.keys())  # pylint: disable=protected-access
         if source.has_parent_edit_access(self.user):
             errors = Source.persist_new_version(source, self.user)
             return errors or CREATED
         return PERMISSION_DENIED
+
+
+class IsolatedVersionRollback(Exception):
+    def __init__(self, result):
+        super().__init__(result)
+        self.result = result
+
+
+class IsolatedVersionCommit:
+    """
+    The last step of an isolated version import, shared by every import path. HEAD's hierarchy replacement, the drop
+    of what the import didn't contain and the version share one transaction, so a rejected version changes nothing.
+    """
+
+    def __init__(  # pylint: disable=too-many-arguments
+            self, version_line, user, update_if_exists=False, hierarchy_map=None, seen_concept_ids=None,
+            seen_mapping_ids=None, content_failures=0):
+        self.version_line = version_line
+        self.user = user
+        self.update_if_exists = update_if_exists
+        self.hierarchy_map = hierarchy_map or {}
+        self.seen_concept_ids = set(seen_concept_ids or [])
+        self.seen_mapping_ids = set(seen_mapping_ids or [])
+        self.content_failures = content_failures
+
+    def get_head(self):
+        owner_type = (self.version_line.get('owner_type', '') or '').lower()
+        owner_filter = 'user__username' if owner_type in ['user', 'users'] else 'organization__mnemonic'
+        return Source.objects.filter(
+            **{owner_filter: self.version_line.get('owner')}, mnemonic=self.version_line.get('source'),
+            version=HEAD).first()
+
+    def run(self):  # pylint: disable=too-many-return-statements
+        if self.content_failures:
+            return {'__all__': [ISOLATED_VERSION_CONTENT_FAILED]}
+        importer = SourceVersionImporter(
+            {**self.version_line}, self.user, self.update_if_exists, isolated_version=True)
+        is_clean = importer.clean()
+        if not is_clean:
+            return is_clean
+        errors = importer.get_versioning_mode_errors()
+        if errors:
+            return errors
+        head = self.get_head()
+        if not head or not head.has_edit_access(self.user):
+            return PERMISSION_DENIED
+        try:
+            with transaction.atomic():
+                Concept.reconcile_import_hierarchy(self.hierarchy_map, self.user, replace_head=True)
+                head.drop_unseen_children(self.seen_concept_ids, self.seen_mapping_ids)
+                result = importer.process()
+                if result != CREATED:
+                    raise IsolatedVersionRollback(result)
+        except IsolatedVersionRollback as ex:
+            return ex.result
+        except ValidationError as ex:
+            return get(ex, 'message_dict') or {'__all__': ex.messages}
+        return CREATED
 
 
 class CollectionImporter(BaseResourceImporter):
@@ -921,8 +995,7 @@ class BulkImportInline(BaseImporter):
         self.last_progress_notified_at = 0
         self.elapsed_seconds = 0
         self.index = should_index_import(index, self.total)
-        if self.isolated_version:
-            Source.get_isolated_version_line(self.input_list)
+        Source.validate_import_versioning_modes(self.input_list, self.isolated_version)
 
     def set_task(self):
         self.task = Task.objects.filter(id=self.self_task_id).first()
@@ -933,19 +1006,14 @@ class BulkImportInline(BaseImporter):
             self.failed, self.exception, self.permission_denied, self.invalid, self.unknown, self.others))
 
     def import_source_version(self, item):
-        if self.isolated:
-            item['versioning_mode'] = VERSIONING_MODE_ISOLATED
-        if self.isolated_version:
-            if self.content_failures_count:
-                return {'__all__': [ISOLATED_VERSION_CONTENT_FAILED]}
-            Concept.reconcile_import_hierarchy(
-                Concept.get_import_hierarchy_map(self.input_list, include_parentless=True), self.user,
-                replace_head=True)
-            errors = Source.drop_unseen_for_isolated_version(
-                item, self.seen_concept_ids, self.seen_mapping_ids, self.user)
-            if errors:
-                return errors
-        return SourceVersionImporter(item, self.user, self.update_if_exists).run()
+        if not self.isolated_version:
+            return SourceVersionImporter(item, self.user, self.update_if_exists).run()
+        return IsolatedVersionCommit(
+            item, self.user, self.update_if_exists,
+            hierarchy_map=Concept.get_import_hierarchy_map(self.input_list, include_parentless=True),
+            seen_concept_ids=self.seen_concept_ids, seen_mapping_ids=self.seen_mapping_ids,
+            content_failures=self.content_failures_count
+        ).run()
 
     def handle_item_import_result(self, result, item):  # pylint: disable=too-many-return-statements
         if result is None:
@@ -1140,7 +1208,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
     ):  # pylint: disable=too-many-arguments
         super().__init__(content, username, update_if_exists, None, False)
         self.isolated_version = isolated_version
-        self.isolated_failures = []
+        self.isolated_version_results = {}
         self.start_time = time.time()
         self.self_task_id = self_task_id
         self.set_task()
@@ -1162,8 +1230,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             self.populate_input_list()
             self.total = len(self.input_list)
         self.index = should_index_import(index, self.total)
-        if self.isolated_version:
-            Source.get_isolated_version_line(self.input_list)
+        Source.validate_import_versioning_modes(self.input_list, self.isolated_version)
         self.make_resource_distribution()
         self.make_parts()
         self.collect_concept_hierarchy_map()
@@ -1301,10 +1368,11 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         return bool(self.concept_hierarchy_map)
 
     def reconcile_hierarchy(self):
-        if self.hierarchy_reconciliation_done or not self.concept_hierarchy_map:
+        # an isolated version's hierarchy is rebuilt only by its commit, inside the version's transaction
+        if self.isolated_version or self.hierarchy_reconciliation_done or not self.concept_hierarchy_map:
             return
         user = UserProfile.objects.filter(username=self.username).first()
-        Concept.reconcile_import_hierarchy(self.concept_hierarchy_map, user, replace_head=self.isolated_version)
+        Concept.reconcile_import_hierarchy(self.concept_hierarchy_map, user)
         self.hierarchy_reconciliation_done = True
         self.notify_progress()
 
@@ -1325,18 +1393,24 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
     def get_seen_ids(self, resource):
         return {_id for result in self.get_task_results() for _id in get(result, f'seen.{resource}') or []}
 
-    def prepare_isolated_version(self, part_list):
-        version_line = Source.get_isolated_version_line(part_list)
-        errors = {'__all__': [ISOLATED_VERSION_CONTENT_FAILED]} if self.get_content_failures_count() else None
-        if not errors:
-            self.reconcile_hierarchy()
-            errors = Source.drop_unseen_for_isolated_version(
-                version_line, self.get_seen_ids('concepts'), self.get_seen_ids('mappings'),
-                UserProfile.objects.filter(username=self.username).first())
-        if errors:
-            self.isolated_failures.append({**version_line, 'errors': errors})
-            return []
-        return part_list
+    def commit_isolated_version(self, version_line):
+        result = IsolatedVersionCommit(
+            version_line, UserProfile.objects.filter(username=self.username).first(), self.update_if_exists,
+            hierarchy_map=self.concept_hierarchy_map, seen_concept_ids=self.get_seen_ids('concepts'),
+            seen_mapping_ids=self.get_seen_ids('mappings'), content_failures=self.get_content_failures_count()
+        ).run()
+        # the commit owns the hierarchy, so a rejected version leaves it untouched
+        self.hierarchy_reconciliation_done = True
+        self.isolated_version_results.setdefault(self.get_result_key(result), []).append(
+            {**version_line, 'errors': result} if isinstance(result, dict) else version_line)
+        self.notify_progress()
+
+    @staticmethod
+    def get_result_key(result):
+        if isinstance(result, dict):
+            return 'failed'
+        return {None: 'exists', False: 'invalid', CREATED: 'created', PERMISSION_DENIED: 'permission_denied'}.get(
+            result, 'others')
 
     def get_total_progress_target(self):
         return self.total + int(self.has_hierarchy_reconciliation_step())
@@ -1372,7 +1446,8 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         while len(self.parts) > 0:
             part_list = self.parts.popleft()
             if part_list and self.isolated_version and get(part_list, '0.type', '').lower() == 'source version':
-                part_list = self.prepare_isolated_version(part_list)
+                self.commit_isolated_version(part_list[0])
+                part_list = part_list[1:]
             if part_list:
                 part_type = get(part_list, '0.type', '').lower()
                 if part_type:
@@ -1454,7 +1529,9 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                 except:  # pylint: disable=bare-except
                     pass
 
-        total_result['failed'] += self.isolated_failures
+        for key, items in self.isolated_version_results.items():
+            total_result[key] += items
+            total_result['processed'] += len(items)
         total_result['start_time'] = self.start_time_formatted
         total_result['elapsed_seconds'] = self.elapsed_seconds
         total_result['child_resource_time_distribution'] = self.resource_wise_time

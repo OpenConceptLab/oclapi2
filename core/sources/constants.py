@@ -15,6 +15,9 @@ ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION = \
     'An isolated_version import needs exactly one Source Version line, after its concepts and mappings.'
 ISOLATED_VERSION_CONTENT_FAILED = 'Not created: some of the version content failed to import.'
 HIERARCHY_ROOT_CANNOT_BE_DROPPED = 'Hierarchy Root must be present in an isolated version.'
+INVALID_VERSIONING_MODE = 'versioning_mode must be carry_forward or isolated.'
+VERSIONING_MODE_NEEDS_ISOLATED_VERSION = \
+    'versioning_mode isolated needs isolated_version=true, and isolated_version=true makes an isolated version.'
 ISOLATED_METADATA_FIELDS = (
     'description', 'full_name', 'website', 'external_id', 'canonical_url', 'identifier', 'contact', 'jurisdiction',
     'publisher', 'purpose', 'copyright', 'revision_date', 'text', 'experimental', 'source_type', 'content_type',

@@ -23,7 +23,8 @@ from core.services.storages.postgres import PostgresQL
 from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE, \
     HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID, LOCALE_EXTERNAL_AUTO_ID_CHOICES, \
     VERSIONING_MODES, VERSIONING_MODE_CARRY_FORWARD, VERSIONING_MODE_ISOLATED, ISOLATED_METADATA_FIELDS, \
-    ISOLATED_REQUIRED_METADATA_FIELDS, HIERARCHY_ROOT_CANNOT_BE_DROPPED, ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION
+    ISOLATED_REQUIRED_METADATA_FIELDS, HIERARCHY_ROOT_CANNOT_BE_DROPPED, ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION, \
+    INVALID_VERSIONING_MODE, VERSIONING_MODE_NEEDS_ISOLATED_VERSION
 from core.tasks.models import Task
 
 
@@ -278,35 +279,40 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                     if model is Concept:
                         HierarchicalConcepts.objects.filter(child_id__in=chunk).delete()
                     to_index[model] += [*chunk, *latest_ids]
-        for model, document in ((Concept, ConceptDocument), (Mapping, MappingDocument)):
-            for chunk in chunks(to_index[model], 5000):
-                self.batch_index(model.objects.filter(id__in=chunk), document)
-        if concept_ids or mapping_ids:
-            self.update_children_counts(sync=True)
+
+        def after_commit():
+            for model, document in ((Concept, ConceptDocument), (Mapping, MappingDocument)):
+                for chunk in chunks(to_index[model], 5000):
+                    self.batch_index(model.objects.filter(id__in=chunk), document)
+            if concept_ids or mapping_ids:
+                self.update_children_counts(sync=True)
+
+        # inside a caller's transaction, a rollback must leave search and counts as they were
+        transaction.on_commit(after_commit)
         return {'concepts': len(concept_ids), 'mappings': len(mapping_ids)}
 
     @staticmethod
-    def get_isolated_version_line(input_list):
+    def resolve_versioning_mode(isolated_version, requested_mode=None):
+        mode = VERSIONING_MODE_ISOLATED if isolated_version else VERSIONING_MODE_CARRY_FORWARD
+        if requested_mode and requested_mode not in dict(VERSIONING_MODES):
+            raise ValidationError({'versioning_mode': [INVALID_VERSIONING_MODE]})
+        if requested_mode and requested_mode != mode:
+            raise ValidationError({'versioning_mode': [VERSIONING_MODE_NEEDS_ISOLATED_VERSION]})
+        return mode
+
+    @classmethod
+    def validate_import_versioning_modes(cls, input_list, isolated_version):
+        """Checks the whole import before anything runs. An isolated_version import gets its one version line back."""
         types = [(line.get('type', '') or '').lower() for line in input_list]
         version_indexes = [index for index, _type in enumerate(types) if _type == 'source version']
+        for index in version_indexes:
+            cls.resolve_versioning_mode(isolated_version, input_list[index].get('versioning_mode'))
+        if not isolated_version:
+            return None
         content_indexes = [index for index, _type in enumerate(types) if _type in ('concept', 'mapping')]
         if len(version_indexes) != 1 or (content_indexes and content_indexes[-1] > version_indexes[0]):
             raise ValidationError(ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION)
         return input_list[version_indexes[0]]
-
-    @classmethod
-    def drop_unseen_for_isolated_version(cls, version_line, seen_concept_ids, seen_mapping_ids, user):
-        owner_type = (version_line.get('owner_type', '') or '').lower()
-        owner_filter = 'user__username' if owner_type in ['user', 'users'] else 'organization__mnemonic'
-        head = cls.objects.filter(
-            **{owner_filter: version_line.get('owner')}, mnemonic=version_line.get('source'), version=HEAD).first()
-        if not head or not head.has_edit_access(user):
-            return None
-        try:
-            head.drop_unseen_children(seen_concept_ids, seen_mapping_ids)
-        except ValidationError as ex:
-            return get(ex, 'message_dict') or {'__all__': ex.messages}
-        return None
 
     def get_concept_name_locales(self):
         return ConceptName.objects.filter(concept__in=self.get_active_concepts())

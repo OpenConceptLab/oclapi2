@@ -19,6 +19,7 @@ from kombu import uuid
 from packaging.version import Version
 from pydantic import BaseModel, computed_field, PrivateAttr
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from pydash import get
 from rest_framework.exceptions import ValidationError
@@ -27,14 +28,13 @@ from core import settings
 from core.common.serializers import IdentifierSerializer
 from core.common.tasks import bulk_import_subtask, bulk_import_subtask_empty, bulk_import_queue
 from core.concepts.models import Concept
-from core.sources.constants import ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION, ISOLATED_VERSION_CONTENT_FAILED, \
-    VERSIONING_MODE_ISOLATED
+from core.sources.constants import ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION
 from core.common.tasks import import_finisher
 from core.code_systems.converter import CodeSystemConverter
 from core.common.utils import get_export_service
 from core.importers.models import SourceImporter, SourceVersionImporter, ConceptImporter, OrganizationImporter, \
     CollectionImporter, CollectionVersionImporter, MappingImporter, ReferenceImporter, ImportIndexer, CREATED, \
-    UPDATED, FAILED, DELETED, NOT_FOUND, PERMISSION_DENIED, UNCHANGED, should_index_import
+    UPDATED, FAILED, DELETED, NOT_FOUND, PERMISSION_DENIED, UNCHANGED, should_index_import, IsolatedVersionCommit
 from core.orgs.models import Organization
 from core.sources.models import Source
 from core.users.models import UserProfile
@@ -236,6 +236,19 @@ class Importer:
         self.import_type = import_type
         self.index = index
         self.isolated_version = isolated_version
+        self.requested_versioning_modes = set()
+
+    def validate_versioning(self, resources, resource_types):
+        for mode in self.requested_versioning_modes:
+            try:
+                Source.resolve_versioning_mode(self.isolated_version, mode)
+            except DjangoValidationError as ex:
+                raise ValidationError(ex.message_dict) from ex
+        if not self.isolated_version:
+            return resource_types
+        if sum(get(resources, 'Source Version', {}).values()) != 1:
+            raise ValidationError(ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION)
+        return self.get_isolated_version_resource_types(resource_types)
 
     @staticmethod
     def get_isolated_version_resource_types(resource_types):
@@ -246,7 +259,7 @@ class Importer:
     def is_npm_import(self) -> bool:
         return self.import_type == 'npm'
 
-    def run(self):  # pylint: disable=too-many-locals,too-many-branches
+    def run(self):  # pylint: disable=too-many-locals
         time_started = timezone.now()
         resource_types = ['CodeSystem', 'ValueSet', 'ConceptMap']
         resource_types.extend(ResourceImporter.get_resource_types())
@@ -286,10 +299,7 @@ class Importer:
         dependencies = []
 
         self.prepare_resources(self.path, resource_types, dependencies, [], resources)
-        if self.isolated_version:
-            if sum(get(resources, 'Source Version', {}).values()) != 1:
-                raise ValidationError(ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION)
-            resource_types = self.get_isolated_version_resource_types(resource_types)
+        resource_types = self.validate_versioning(resources, resource_types)
         self.index = should_index_import(self.index, sum(sum(files.values()) for files in resources.values()))
         tasks = self.prepare_tasks(resource_types, dependencies, resources)
         if tasks:
@@ -503,6 +513,8 @@ class Importer:
             parser = ijson.parse(json_file, multiple_values=True, allow_comments=True)
             for prefix, event, value in parser:
                 # Expect {"resourceType": ""}{"resourceType": ""} or {"type": ""}{"type": ""}
+                if event == 'string' and prefix == 'versioning_mode':
+                    self.requested_versioning_modes.add(value)
                 if event == 'string' and (prefix in {'resourceType', 'type'}):
                     # Categorize files based on resourceType
                     if value in resource_types:
@@ -781,19 +793,20 @@ class ImporterSubtask:
             results.extend(result if isinstance(result, list) else [result])
         return results
 
-    def prepare_isolated_version(self, version_line):
+    def commit_isolated_version(self, version_line):
         results = self.get_previous_results()
-        if any(not isinstance(result, dict) and result not in (CREATED, UPDATED, UNCHANGED, DELETED)
-               for result in results):
-            return {'__all__': [ISOLATED_VERSION_CONTENT_FAILED]}
         seen = {'concepts': set(), 'mappings': set()}
         for result in results:
             if isinstance(result, dict):
                 for key, ids in seen.items():
                     ids.update(get(result, f'seen.{key}') or [])
-        user = UserProfile.objects.get(username=self.username)
-        Concept.reconcile_import_hierarchy(self.hierarchy_map, user, replace_head=True)
-        return Source.drop_unseen_for_isolated_version(version_line, seen['concepts'], seen['mappings'], user)
+        return IsolatedVersionCommit(
+            version_line, UserProfile.objects.get(username=self.username), True, hierarchy_map=self.hierarchy_map,
+            seen_concept_ids=seen['concepts'], seen_mapping_ids=seen['mappings'],
+            content_failures=sum(
+                1 for result in results
+                if not isinstance(result, dict) and result not in (CREATED, UPDATED, UNCHANGED, DELETED))
+        ).run()
 
     def import_zip(self, temp, results):
         with ZipFile(temp) as package:
@@ -886,16 +899,15 @@ class ImporterSubtask:
                         if 'owner' not in resource:
                             resource['owner'] = self.owner
                     if self.isolated_version and self.resource_type == 'Source Version':
-                        resource['versioning_mode'] = VERSIONING_MODE_ISOLATED
-                        prepare_errors = self.prepare_isolated_version(resource)
-                        if prepare_errors:
-                            results.append(f'{error} due to: {prepare_errors}')
-                            continue
-                    resource_importer = ResourceImporter(self.indexer, self.isolated)
-                    result = resource_importer.import_resource(resource, self.username, self.owner_type, self.owner)
+                        resource_importer = None
+                        result = self.commit_isolated_version(resource)
+                    else:
+                        resource_importer = ResourceImporter(self.indexer, self.isolated)
+                        result = resource_importer.import_resource(
+                            resource, self.username, self.owner_type, self.owner)
                     if isinstance(result, int):
                         results.append(result)
-                        self.add_seen(resource_importer.importer, result)
+                        self.add_seen(get(resource_importer, 'importer'), result)
                     else:
                         results.append(f'{error} due to: {result}')
                 except Exception as e:
