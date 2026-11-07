@@ -6055,6 +6055,7 @@ class BulkImportLimitsTest(OCLAPITestCase):
 @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
 @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
 @patch('core.importers.models.index_concepts_mapped_codes', Mock())
+@patch('core.importers.models.batch_index_resources', Mock(__name__='batch_index_resources'))
 class IsolatedVersionImportTest(OCLTestCase):
     def setUp(self):
         super().setUp()
@@ -6234,6 +6235,7 @@ class IsolatedVersionImportTest(OCLTestCase):
 @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
 @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
 @patch('core.importers.models.index_concepts_mapped_codes', Mock())
+@patch('core.importers.models.batch_index_resources', Mock(__name__='batch_index_resources'))
 class IsolatedVersionAPITest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
@@ -6300,6 +6302,7 @@ class IsolatedVersionAPITest(OCLAPITestCase):
 @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
 @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
 @patch('core.importers.models.index_concepts_mapped_codes', Mock())
+@patch('core.importers.models.batch_index_resources', Mock(__name__='batch_index_resources'))
 class IsolatedVersionZipImportTest(OCLTestCase):
     def setUp(self):
         super().setUp()
