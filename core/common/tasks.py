@@ -927,15 +927,15 @@ def index_source_mappings(
     autoretry_for=(Exception, WorkerLostError, ), retry_backoff=True, retry_backoff_max=600, max_retries=5,
     acks_late=True, reject_on_worker_lost=True
 )
-def index_dropped_source_children(source_id, concept_ids, mapping_ids):
+def index_dropped_source_children(source_id, concept_ids, mapping_ids, recount=True):
     """
-    Reindexes the concepts and mappings an isolated version dropped from HEAD and recounts HEAD, after the commit.
-    Retried with backoff; its Task records a final failure.
+    Reindexes one chunk of the concepts and mappings an isolated version dropped from HEAD, after the commit, and
+    recounts HEAD when asked. Retried with backoff; its Task records a final failure.
     """
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
     if source:
-        source.index_dropped_children(concept_ids, mapping_ids)
+        source.index_dropped_children(concept_ids, mapping_ids, recount)
 
 
 @app.task(

@@ -1,6 +1,7 @@
 import uuid
 from collections import OrderedDict
 
+from celery.states import FAILURE
 from celery_once import AlreadyQueued
 from dirtyfields import DirtyFieldsMixin
 from django.conf import settings
@@ -9,6 +10,7 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.db.models import UniqueConstraint, F, Max, Count
 from django.db.models.functions import Cast
+from django.utils import timezone
 from pydash import get, compact
 
 from core.common.checksums import VersionCompareMixin
@@ -24,7 +26,7 @@ from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_R
     HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID, LOCALE_EXTERNAL_AUTO_ID_CHOICES, \
     VERSIONING_MODES, VERSIONING_MODE_CARRY_FORWARD, VERSIONING_MODE_ISOLATED, ISOLATED_METADATA_FIELDS, \
     ISOLATED_REQUIRED_METADATA_FIELDS, HIERARCHY_ROOT_CANNOT_BE_DROPPED, ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION, \
-    INVALID_VERSIONING_MODE, VERSIONING_MODE_NEEDS_ISOLATED_VERSION
+    INVALID_VERSIONING_MODE, VERSIONING_MODE_NEEDS_ISOLATED_VERSION, DROPPED_CHILDREN_CHUNK_SIZE
 from core.tasks.models import Task
 
 
@@ -256,21 +258,41 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         head.save()
 
     def queue_index_dropped_children(self, concept_ids, mapping_ids):
+        """
+        Queues the repair of dropped codes in chunks, each a retried Task with its arguments saved so it can be rerun.
+        The first chunk also recounts HEAD. A chunk that can't be queued is left as a failed Task.
+        """
         if get(settings, 'TEST_MODE'):
             self.index_dropped_children(concept_ids, mapping_ids)
-            return
-        task = Task.new(queue='indexing', user=self.updated_by, name=index_dropped_source_children.__name__)
-        index_dropped_source_children.apply_async(
-            (self.id, concept_ids, mapping_ids), task_id=task.id, queue='indexing')
+            return []
+        concept_chunks = list(chunks(concept_ids, DROPPED_CHILDREN_CHUNK_SIZE))
+        mapping_chunks = list(chunks(mapping_ids, DROPPED_CHILDREN_CHUNK_SIZE))
+        tasks = []
+        for index in range(max(len(concept_chunks), len(mapping_chunks), 1)):
+            args = [
+                self.id, concept_chunks[index] if index < len(concept_chunks) else [],
+                mapping_chunks[index] if index < len(mapping_chunks) else [], index == 0
+            ]
+            task = Task.new(queue='indexing', user=self.updated_by, name=index_dropped_source_children.name,
+                            args=args)
+            try:
+                index_dropped_source_children.apply_async(args, task_id=task.id, queue='indexing', persist_args=True)
+            except Exception as ex:  # pylint: disable=broad-except
+                task.state = FAILURE
+                task.finished_at = timezone.now()
+                task.record_exception(ex)
+            tasks.append(task)
+        return tasks
 
-    def index_dropped_children(self, concept_ids, mapping_ids):
+    def index_dropped_children(self, concept_ids, mapping_ids, recount=True):
         from core.concepts.documents import ConceptDocument
         from core.mappings.documents import MappingDocument
         from core.mappings.models import Mapping
         for model, document, ids in ((Concept, ConceptDocument, concept_ids), (Mapping, MappingDocument, mapping_ids)):
-            for chunk in chunks(ids, 5000):
+            for chunk in chunks(ids, DROPPED_CHILDREN_CHUNK_SIZE):
                 self.batch_index(model.objects.filter(id__in=chunk), document)
-        self.update_children_counts(sync=True)
+        if recount:
+            self.update_children_counts(sync=True)
 
     def drop_unseen_children(self, seen_concept_ids, seen_mapping_ids):
         from core.mappings.models import Mapping

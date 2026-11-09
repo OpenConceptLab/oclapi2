@@ -6280,9 +6280,40 @@ class IsolatedVersionImportTest(OCLTestCase):
         with override_settings(TEST_MODE=False), self.captureOnCommitCallbacks(execute=True):
             head.drop_unseen_children([kept.id], [])
 
-        task = Task.objects.get(name='index_dropped_source_children')
-        apply_async_mock.assert_called_once_with(
-            (head.id, [dropped.id, dropped.get_latest_version().id], []), task_id=task.id, queue='indexing')
+        task = Task.objects.get(name=index_dropped_source_children.name)
+        args = [head.id, [dropped.id, dropped.get_latest_version().id], [], True]
+        self.assertEqual(task.args, args)
+        apply_async_mock.assert_called_once_with(args, task_id=task.id, queue='indexing', persist_args=True)
+
+    @patch('core.sources.models.DROPPED_CHILDREN_CHUNK_SIZE', 2)
+    @patch('core.sources.models.index_dropped_source_children.apply_async')
+    def test_dropped_codes_repair_is_queued_in_chunks(self, apply_async_mock):
+        self.run_import([self.concept('A'), self.version('v1')])
+        head = Source.objects.get(mnemonic='LOINC', version='HEAD')
+
+        with override_settings(TEST_MODE=False):
+            tasks = head.queue_index_dropped_children([1, 2, 3, 4, 5], [6])
+
+        self.assertEqual([task.args for task in tasks], [
+            [head.id, [1, 2], [6], True], [head.id, [3, 4], [], False], [head.id, [5], [], False]])
+        self.assertEqual(apply_async_mock.call_count, 3)
+
+    @patch('core.sources.models.index_dropped_source_children.apply_async', side_effect=Exception('broker down'))
+    def test_dropped_codes_repair_that_cannot_be_queued_is_a_failed_task_that_reruns(self, _):
+        self.run_import([self.concept('A'), self.version('v1')])
+        head = Source.objects.get(mnemonic='LOINC', version='HEAD')
+
+        with override_settings(TEST_MODE=False):
+            task, = head.queue_index_dropped_children([1], [2])
+
+        task.refresh_from_db()
+        self.assertEqual(task.state, 'FAILURE')
+        self.assertEqual(task.error_message, 'broker down')
+        with patch('core.common.tasks.index_dropped_source_children.apply_async') as rerun_mock, \
+                patch.object(Task, 'clear_celery_once_lock'):
+            task.rerun()
+        rerun_mock.assert_called_once_with(
+            args=[head.id, [1], [2], True], kwargs={}, queue='indexing', task_id=task.id, persist_args=True)
 
     def test_dropped_codes_repair_task_retries_and_reindexes(self):
         self.assertEqual(index_dropped_source_children.max_retries, 5)
@@ -6292,9 +6323,25 @@ class IsolatedVersionImportTest(OCLTestCase):
 
         with patch('core.sources.models.Source.index_dropped_children') as index_mock:
             index_dropped_source_children(head.id, [1], [2])
+            index_dropped_source_children(head.id, [3], [], False)
             index_dropped_source_children(0, [1], [2])
 
-        index_mock.assert_called_once_with([1], [2])
+        self.assertEqual(index_mock.call_args_list, [call([1], [2], True), call([3], [], False)])
+
+    def test_failed_or_missing_parallel_part_blocks_the_version(self):
+        self.run_import([self.concept('A'), self.concept('B'), self.version('v1')])
+        content = '\n'.join(json.dumps(line) for line in [self.source_line, self.concept('B'), self.version('v2')])
+        runner = BulkImportParallelRunner(content, 'ocladmin', True, None, 'task-id', isolated_version=True)
+        done = Mock(result={'seen': {'concepts': [Concept.objects.get(mnemonic='B', id=F('versioned_object_id')).id]},
+                            'json': {}})
+        for failed_part in (Mock(result=Exception('worker lost'), successful=Mock(return_value=False)),
+                            Mock(result=None)):
+            runner.tasks = [done, failed_part]
+            runner.commit_isolated_version(self.version('v2'))
+
+        self.assertEqual(len(runner.isolated_version_results['failed']), 2)
+        self.assertFalse(Source.objects.filter(mnemonic='LOINC', version='v2').exists())
+        self.assertEqual(self.head_concepts(), {'A', 'B'})
 
     def test_hierarchy_root_drop_rolls_back_the_hierarchy(self):
         self.run_import([

@@ -413,6 +413,9 @@ class IsolatedVersionCommit:
         self.add_seen(get(result, 'seen'))
         self.content_failures += sum(len(get(result, f'json.{key}') or []) for key in BulkImportInline.FAILURE_KEYS)
 
+    def add_failed_part(self):
+        self.content_failures += 1
+
     def add_subtask_results(self, results):
         """Folds in one archive subtask's results: a status per resource, and a dict of the ids it saw."""
         for result in results:
@@ -1425,11 +1428,14 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             hierarchy_map=self.concept_hierarchy_map)
         for task in self.tasks:
             try:
-                task_result = task.result
+                task_result = task.result if task.successful() else None
             except:  # pylint: disable=bare-except
-                continue
+                task_result = None
+            # a failed, lost or expired part saw nothing, so committing would drop its codes
             if isinstance(task_result, dict):
                 commit.add_runner_result(task_result)
+            else:
+                commit.add_failed_part()
         result = commit.run()
         # the commit owns the hierarchy, so a rejected version leaves it untouched
         self.hierarchy_reconciliation_done = True
