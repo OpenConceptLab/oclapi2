@@ -1868,7 +1868,8 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         should_reevaluate = force_reevaluate or (attempt_reevaluate and not self.is_auto_generated)
 
         resolve_by_resource_version = CollectionReference.is_resource_version_repo_resolution_on()
-        use_any_lock = CollectionReference.is_expansion_locked_repo_version_on()
+        # one built with lock or latest keeps evaluating as it was built, whatever the toggle is now
+        use_any_lock = CollectionReference.is_expansion_locked_repo_version_on() or bool(self.built_with)
         lock_filters = {} if use_any_lock else {'released': True, 'retired': False}
         should_write_back = use_any_lock and self.is_default
         resolved_ref_ids = []
