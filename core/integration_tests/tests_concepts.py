@@ -4137,6 +4137,30 @@ class ConceptChildrenViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
 
+    def test_get_200_paged_with_has_children(self):
+        source = OrganizationSourceFactory()
+        parent_concept = ConceptFactory(parent=source)
+        children = [ConceptFactory(parent=source, mnemonic=f'c{i}') for i in range(3)]
+        for child in children:
+            child.parent_concepts.set([parent_concept])
+        ConceptFactory(parent=source).parent_concepts.set([children[0]])
+
+        response = self.client.get(parent_concept.url + 'children/?limit=2')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['num_found'], '3')
+        self.assertEqual(response['num_returned'], '2')
+        self.assertIn('page=2', response['next'])
+        self.assertEqual([data['id'] for data in response.data], ['c0', 'c1'])
+        self.assertEqual([data['has_children'] for data in response.data], [True, False])
+
+        response = self.client.get(parent_concept.url + 'children/?limit=2&page=2')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['num_returned'], '1')
+        self.assertEqual([data['id'] for data in response.data], ['c2'])
+        self.assertEqual([data['has_children'] for data in response.data], [False])
+
 
 class ConceptCollectionMembershipViewTest(OCLAPITestCase):
     def test_get_200(self):

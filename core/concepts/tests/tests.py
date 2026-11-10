@@ -2954,6 +2954,56 @@ class ConceptTest(OCLTestCase):
 
         self.assertTrue(latest_parent.versioned_object.has_children)
 
+    def test_hierarchy_querysets_via_versions_match_urls(self):
+        source = OrganizationSourceFactory()
+        parent_concept = ConceptFactory(parent=source)
+        child_concept = ConceptFactory(parent=source)
+        latest_parent = parent_concept.get_latest_version()
+        child_concept.get_latest_version().parent_concepts.add(latest_parent)
+
+        for concept in (parent_concept, latest_parent):
+            self.assertEqual(
+                list(concept.child_concept_queryset().values_list('uri', flat=True)), concept.child_concept_urls)
+            self.assertEqual(concept.child_concept_urls, [child_concept.uri])
+        for concept in (child_concept, child_concept.get_latest_version()):
+            self.assertEqual(
+                list(concept.parent_concept_queryset().values_list('uri', flat=True)), [parent_concept.uri])
+
+    def test_get_hierarchy_queryset_versioned_matches_urls(self):
+        source = OrganizationSourceFactory()
+        parent_concept = ConceptFactory(parent=source)
+        child_concept = ConceptFactory(parent=source)
+        latest_child = child_concept.get_latest_version()
+        latest_child.parent_concepts.add(parent_concept.get_latest_version())
+        child_concept.parent_concepts.add(parent_concept)
+        version = OrganizationSourceFactory(
+            version='v1', mnemonic=source.mnemonic, organization=source.organization)
+
+        self.assertEqual(
+            list(parent_concept.get_hierarchy_queryset('child_concepts', version).values_list('uri', flat=True)),
+            [latest_child.uri])
+        self.assertEqual(
+            list(parent_concept.get_hierarchy_queryset('child_concepts', source).values_list('uri', flat=True)),
+            [child_concept.uri])
+        self.assertEqual(
+            parent_concept.get_hierarchy_concept_urls('child_concepts', versioned=True), [latest_child.uri])
+
+    def test_annotate_has_children_matches_property(self):
+        source = OrganizationSourceFactory()
+        own_parent = ConceptFactory(parent=source)
+        ConceptFactory(parent=source).parent_concepts.add(own_parent)
+        version_parent = ConceptFactory(parent=source)
+        ConceptFactory(parent=source).get_latest_version().parent_concepts.add(version_parent.get_latest_version())
+        leaf = ConceptFactory(parent=source)
+
+        concepts = Concept.annotate_has_children(Concept.objects.filter(parent=source))
+
+        self.assertTrue(concepts.filter(has_children_annotated=True).exists())
+        for concept in concepts:
+            self.assertEqual(concept.has_children, Concept.objects.get(id=concept.id).has_children, concept.uri)
+        self.assertFalse(concepts.get(id=leaf.id).has_children)
+        self.assertTrue(concepts.get(id=version_parent.id).has_children)
+
     def test_cascade_returns_self_without_repo_version(self):
         concept = ConceptFactory()
         result = concept.cascade(repo_version=None)

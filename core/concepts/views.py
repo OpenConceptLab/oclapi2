@@ -617,7 +617,7 @@ class ConceptChildrenView(ConceptBaseView, ListWithHeadersMixin):
             raise Http404()
 
         self.check_object_permissions(self.request, instance)
-        return get_viewable_concepts(instance.child_concept_queryset(), self.request)
+        return Concept.annotate_has_children(get_viewable_concepts(instance.child_concept_queryset(), self.request))
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
