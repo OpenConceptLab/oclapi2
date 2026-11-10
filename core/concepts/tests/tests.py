@@ -3118,7 +3118,7 @@ class ConceptConcurrentNewVersionTest(OCLAPITransactionTestCase):
             post_version_create(instance, *args)
             time.sleep(0.5)  # widens the gap between reading the latest version and demoting it
 
-        barrier = threading.Barrier(2)
+        barrier = threading.Barrier(2, timeout=30)
         results = []
 
         def save(clone):
@@ -3129,11 +3129,12 @@ class ConceptConcurrentNewVersionTest(OCLAPITransactionTestCase):
                 connection.close()
 
         with patch.object(Concept, 'post_version_create', slow_post_version_create):
-            threads = [threading.Thread(target=save, args=(clone,)) for clone in clones]
+            threads = [threading.Thread(target=save, args=(clone,), daemon=True) for clone in clones]
             for thread in threads:
                 thread.start()
             for thread in threads:
-                thread.join()
+                thread.join(timeout=30)
+            self.assertFalse(any(thread.is_alive() for thread in threads))
 
         self.assertEqual(results, [{}, {}])
         self.assertEqual(concept.versions.count(), 3)
