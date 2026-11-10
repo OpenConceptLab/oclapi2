@@ -450,6 +450,7 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 parameters[ExpansionParameters.INCLUDE_SYSTEM] = system_versions
             expansion = Expansion(
                 mnemonic=mnemonic, collection_version=self, parameters=parameters,
+                built_with=VERSION_EXPANSION_LOCK if lock else VERSION_EXPANSION_LATEST,
                 created_by_id=self.created_by_id, updated_by_id=self.created_by_id)
             expansion.clean()
             expansion.full_clean()
@@ -1540,6 +1541,10 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
     evaluated_source_versions = models.ManyToManyField(
         'sources.Source', related_name='expansions_evaluated_source_versions_set')
     unresolved_repo_versions = ArrayField(models.JSONField(), default=list, null=True, blank=True)
+    # lock or latest when version create built it with that choice, so a rebuild repeats how it was built
+    built_with = models.CharField(
+        max_length=10, null=True, blank=True,
+        choices=[(choice, choice) for choice in (VERSION_EXPANSION_LOCK, VERSION_EXPANSION_LATEST)])
 
     @property
     def is_head(self):
@@ -1863,7 +1868,8 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         should_reevaluate = force_reevaluate or (attempt_reevaluate and not self.is_auto_generated)
 
         resolve_by_resource_version = CollectionReference.is_resource_version_repo_resolution_on()
-        use_any_lock = CollectionReference.is_expansion_locked_repo_version_on()
+        # one built with lock or latest keeps evaluating as it was built, whatever the toggle is now
+        use_any_lock = CollectionReference.is_expansion_locked_repo_version_on() or bool(self.built_with)
         lock_filters = {} if use_any_lock else {'released': True, 'retired': False}
         should_write_back = use_any_lock and self.is_default
         resolved_ref_ids = []
@@ -2128,10 +2134,9 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
 
     def seed_children(self, index=True, force_reevaluate=False):
         version = self.collection_version
-        # the expansion version create built is rebuilt as it was built, whichever expansion is now the default:
+        # one built with lock or latest is rebuilt as it was built, whatever the toggle or default expansion is now:
         # HEAD rows swapped for resource versions and cascades without a cap
-        swap_head = force_reevaluate and not version.is_head and self.is_auto_generated and \
-            CollectionReference.is_expansion_locked_repo_version_on()
+        swap_head = force_reevaluate and not version.is_head and bool(self.built_with)
         previous_concept_ids = set(self.concepts.values_list('id', flat=True)) if swap_head and index else set()
         previous_mapping_ids = set(self.mappings.values_list('id', flat=True)) if swap_head and index else set()
         references = version.references
