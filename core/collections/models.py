@@ -468,12 +468,13 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             self.replace_head_resources(expansion)
         return expansion
 
-    def replace_head_resources(self, expansion):
+    def replace_head_resources(self, expansion, references=True):
         """In this version's references and expansion, each HEAD resource becomes its latest resource version"""
         for field, klass in (('concept', Concept), ('mapping', Mapping)):
-            through = getattr(CollectionReference, f'{field}s').through
-            Expansion.replace_head_rows(
-                through.objects.filter(reference__collection_id=self.id), 'reference', field, klass)
+            if references:
+                through = getattr(CollectionReference, f'{field}s').through
+                Expansion.replace_head_rows(
+                    through.objects.filter(reference__collection_id=self.id), 'reference', field, klass)
             through = getattr(Expansion, f'{field}s').through
             Expansion.replace_head_rows(through.objects.filter(expansion_id=expansion.id), 'expansion', field, klass)
 
@@ -2127,14 +2128,14 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
 
     def seed_children(self, index=True, force_reevaluate=False):
         version = self.collection_version
-        # a version's default expansion holds resource versions, so a rebuild swaps HEAD rows as its creation did
-        swap_head = force_reevaluate and not version.is_head and self.is_default and \
+        # the expansion version create built is rebuilt as it was built, whichever expansion is now the default:
+        # HEAD rows swapped for resource versions and cascades without a cap
+        swap_head = force_reevaluate and not version.is_head and self.is_auto_generated and \
             CollectionReference.is_expansion_locked_repo_version_on()
         previous_concept_ids = set(self.concepts.values_list('id', flat=True)) if swap_head and index else set()
         previous_mapping_ids = set(self.mappings.values_list('id', flat=True)) if swap_head and index else set()
         references = version.references
         if swap_head:
-            # cascades run without a result cap, as when the version was created
             references = list(references.all())
             for reference in references:
                 reference._async = True  # pylint: disable=protected-access
@@ -2145,7 +2146,8 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             force_reevaluate=force_reevaluate
         )
         if swap_head:
-            version.replace_head_resources(self)
+            # the version's references follow its default expansion
+            version.replace_head_resources(self, references=self.is_default)
             if index:
                 concept_ids = set(self.concepts.values_list('id', flat=True))
                 mapping_ids = set(self.mappings.values_list('id', flat=True))
