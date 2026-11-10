@@ -8,7 +8,6 @@ from django.core.management import call_command, CommandError
 from django.http import QueryDict
 from django.test import override_settings, tag
 from django.db import OperationalError
-from django.db.models import F
 from mock import patch, Mock
 from mock.mock import ANY
 from rest_framework import status
@@ -16,7 +15,7 @@ from rest_framework.response import Response
 
 from core.collections.constants import SOURCE_TO_CONCEPTS, TRANSFORM_TO_RESOURCE_VERSIONS
 from core.collections.documents import CollectionDocument
-from core.common.constants import SERIALIZATION_RETRY_ATTEMPTS, HEAD
+from core.common.constants import SERIALIZATION_RETRY_ATTEMPTS
 from core.collections.models import CollectionReference, Collection, Expansion
 from core.collections.models import ExpansionParameters, ExpansionSystemParameter
 from core.collections.parsers import CollectionReferenceExpressionStringParser, \
@@ -2319,19 +2318,10 @@ class TasksTest(OCLTestCase):
 
     @staticmethod
     def head_cascading_past_the_cap():
-        """HEAD references a root with 1,000 children, one with a child: a capped cascade stops before it"""
+        """HEAD references a root with 3 children, one with a child, capped at 3: a capped cascade stops before it"""
         source = OrganizationSourceFactory()
         root = ConceptFactory(parent=source, mnemonic='root')
-        user = root.created_by
-        children = Concept.objects.bulk_create([
-            Concept(
-                mnemonic=f'child{index}', version=HEAD, parent=source, concept_class='Diagnosis', datatype='None',
-                uri=f'{source.uri}concepts/child{index}/', created_by=user, updated_by=user, is_latest_version=True)
-            for index in range(1000)
-        ])
-        Concept.objects.filter(id__in=[child.id for child in children]).update(versioned_object_id=F('id'))
-        Concept.sources.through.objects.bulk_create(
-            [Concept.sources.through(concept_id=child.id, source_id=source.id) for child in children])
+        children = [ConceptFactory(parent=source, mnemonic=f'child{index}') for index in range(3)]
         HierarchicalConcepts.objects.bulk_create(
             [HierarchicalConcepts(child_id=child.id, parent_id=root.id) for child in children])
         grandchild = ConceptFactory(parent=source, mnemonic='grandchild')
@@ -2342,7 +2332,7 @@ class TasksTest(OCLTestCase):
         head.save()
         head.add_references([CollectionReference(
             system=source.uri, code=root.mnemonic, reference_type='concepts', created_by=head.created_by,
-            cascade={'method': SOURCE_TO_CONCEPTS})], head.created_by)
+            cascade={'method': SOURCE_TO_CONCEPTS, 'max_results': 3})], head.created_by)
         version = OrganizationCollectionFactory(organization=head.organization, version='v1', mnemonic=head.mnemonic)
         return grandchild, version
 
@@ -2353,13 +2343,68 @@ class TasksTest(OCLTestCase):
         seed_children_to_new_version('collection', version.id, False, expansion='lock')  # pylint: disable=no-value-for-parameter
         version.refresh_from_db()
         expansion = version.expansion
-        self.assertGreater(expansion.concepts.count(), 1000)
+        self.assertEqual(expansion.concepts.count(), 5)
         self.assertTrue(expansion.concepts.filter(versioned_object_id=grandchild.versioned_object_id).exists())
 
         expansion.seed_children(index=False, force_reevaluate=True)
 
-        self.assertGreater(expansion.concepts.count(), 1000)
+        self.assertEqual(expansion.concepts.count(), 5)
         self.assertTrue(expansion.concepts.filter(versioned_object_id=grandchild.versioned_object_id).exists())
+
+    @patch('core.common.tasks.export_collection')
+    def test_rebuild_keeps_valueset_only_members_after_the_toggle_is_turned_off(self, _):
+        valueset = OrganizationCollectionFactory()
+        _, concept = self.valueset_release(valueset, 'v1')
+        head = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=head, mnemonic='autoexpand-HEAD')
+        head.expansion_uri = expansion.uri
+        head.save()
+        reference = CollectionReference(
+            expression=valueset.uri, collection=head, valueset=[valueset.uri], reference_type='concepts')
+        reference.clean()
+        reference.save()
+        version = OrganizationCollectionFactory(organization=head.organization, version='v1', mnemonic=head.mnemonic)
+        seed_children_to_new_version('collection', version.id, False, expansion='lock')  # pylint: disable=no-value-for-parameter
+        version.refresh_from_db()
+        expansion = version.expansion
+        self.assertEqual(list(expansion.concepts.all()), [concept])
+
+        with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False):
+            expansion.seed_children(index=False, force_reevaluate=True)
+
+        self.assertEqual(list(expansion.concepts.all()), [concept])
+
+    @patch('core.common.tasks.export_collection')
+    def test_rebuild_keeps_members_past_the_cascade_cap_after_the_toggle_is_turned_off(self, _):
+        grandchild, version = self.head_cascading_past_the_cap()
+        seed_children_to_new_version('collection', version.id, False, expansion='lock')  # pylint: disable=no-value-for-parameter
+        version.refresh_from_db()
+        expansion = version.expansion
+        member_ids = set(expansion.concepts.values_list('id', flat=True))
+
+        with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False):
+            expansion.seed_children(index=False, force_reevaluate=True)
+
+        self.assertEqual(set(expansion.concepts.values_list('id', flat=True)), member_ids)
+        self.assertTrue(expansion.concepts.filter(versioned_object_id=grandchild.versioned_object_id).exists())
+
+    @patch('core.common.tasks.export_collection')
+    def test_rebuild_of_an_expansion_built_with_the_toggle_off_stays_capped_once_it_is_on(self, _):
+        grandchild, version = self.head_cascading_past_the_cap()
+        with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False):
+            seed_children_to_new_version('collection', version.id, False)  # pylint: disable=no-value-for-parameter
+        version.refresh_from_db()
+        expansion = version.expansion
+        self.assertIsNone(expansion.built_with)
+        member_ids = set(expansion.concepts.values_list('id', flat=True))
+        self.assertFalse(expansion.concepts.filter(versioned_object_id=grandchild.versioned_object_id).exists())
+        other = ExpansionFactory(collection_version=version, mnemonic='other')
+        Collection.objects.filter(id=version.id).update(expansion_uri=other.uri)
+        expansion = Expansion.objects.get(id=expansion.id)
+
+        expansion.seed_children(index=False, force_reevaluate=True)
+
+        self.assertEqual(set(expansion.concepts.values_list('id', flat=True)), member_ids)
 
     @patch('core.common.tasks.export_collection')
     def test_rebuild_keeps_members_past_the_cascade_cap_when_another_expansion_is_the_default(self, _):
@@ -2417,12 +2462,13 @@ class TasksTest(OCLTestCase):
 
                 expansion.seed_children(index=False, force_reevaluate=True)
 
+                self.assertEqual(expansion.built_with, choice)
                 self.assertEqual(list(expansion.concepts.all()), [latest])
                 self.assertEqual(list(collection_v1.references.first().concepts.all()), [latest])
 
                 with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False):
                     expansion.seed_children(index=False, force_reevaluate=True)
-                self.assertEqual(list(expansion.concepts.all()), [concept])
+                self.assertEqual(list(expansion.concepts.all()), [latest])
 
     @patch('core.common.tasks.export_collection')
     def test_seed_children_task_evaluates_references_while_head_expansion_is_processing(self, _):
