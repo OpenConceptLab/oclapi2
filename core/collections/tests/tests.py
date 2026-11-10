@@ -6180,6 +6180,21 @@ class ExpansionSystemVersionNamespaceTest(OCLTestCase):
         self.assertTrue(expressions)
         self.assertTrue(all(expression.startswith(self.source.uri) for expression in expressions), expressions)
 
+    def test_cascade_while_parsing_resolves_in_the_owner_namespace(self):
+        self.set_registry_toggle(True)
+        ConceptFactory(parent=self.source, mnemonic='c1')
+        ConceptFactory(parent=self.other_source, mnemonic='c1')
+        GlobalURLRegistryFactory(url=self.URL, namespace=self.other.uri)
+        self.add_owner_registry_entry()
+
+        self.collection.add_expressions(
+            {'system': self.URL, 'code': 'c1'}, self.collection.created_by, cascade=SOURCE_TO_CONCEPTS,
+            transform='extensional')
+
+        expressions = list(self.collection.references.values_list('expression', flat=True))
+        self.assertTrue(expressions)
+        self.assertFalse([expression for expression in expressions if expression.startswith(self.other_source.uri)])
+
     def test_cascade_keeps_an_explicit_global_namespace_on_generated_references(self):
         self.set_registry_toggle(True)
 

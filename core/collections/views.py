@@ -639,7 +639,8 @@ class CollectionReferencesPreview(CollectionBaseView):
         collection = self.get_object()
         data, cascade, transform = self.get_data()
         results = []
-        for reference in collection.parse_expressions(data, self.request.user, cascade, transform):
+        for reference in collection.parse_expressions(
+                data, self.request.user, cascade, transform, collection=collection):
             reference.expression = reference.build_expression()
             for ref in CollectionReference.dedupe_by_expression(reference.generate_references()):
                 ref.collection = collection

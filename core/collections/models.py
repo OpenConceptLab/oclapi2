@@ -256,12 +256,12 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     @transaction.atomic
     def add_expressions(
             self, data, user, cascade=False, transform=False, _async=False):
-        references = self.parse_expressions(data, user, cascade, transform)
+        references = self.parse_expressions(data, user, cascade, transform, collection=self)
         return self.add_references(references, user, _async)
 
     @staticmethod
-    def parse_expressions(data, user, cascade=False, transform=False):
-        parser = CollectionReferenceParser(data, transform, cascade, user)
+    def parse_expressions(data, user, cascade=False, transform=False, collection=None):  # pylint: disable=too-many-arguments
+        parser = CollectionReferenceParser(data, transform, cascade, user, collection)
         parser.parse()
         parser.to_reference_structure()
         references = parser.to_objects()
