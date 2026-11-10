@@ -42,7 +42,7 @@ from .constants import (
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
     CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, OPENMRS_VALIDATION_SCHEMA, VALIDATION_SCHEMAS,
     DEFAULT_VALIDATION_SCHEMA, ES_REQUEST_TIMEOUT, UPDATED_BY_USERNAME_PARAM, ES_RETRYABLE_ERROR_TYPES,
-    INDEX_BATCH_SIZE, RETIRED_ACCESS_TYPE_EDIT)
+    INDEX_BATCH_SIZE, RETIRED_ACCESS_TYPE_EDIT, ROLE_CHOICES)
 from .es import ESScript
 from .exceptions import Http400, BatchIndexingError
 from .fields import URIField
@@ -200,6 +200,15 @@ class BatchIndexRun:
                 message += f', {self.rejected_batches} batch(es) still rejected by Elasticsearch after retries'
             raise BatchIndexingError(message, self.summary, bool(self.rejected_batches))
         return self.summary
+
+
+class Role(models.Model):
+    """A role a user can have, such as in an organization. The rows are in core/fixtures/roles.yaml."""
+    class Meta:
+        db_table = 'roles'
+
+    name = models.CharField(max_length=100, unique=True, choices=ROLE_CHOICES)
+    description = models.TextField(blank=True, default='')
 
 
 class BaseModel(models.Model):

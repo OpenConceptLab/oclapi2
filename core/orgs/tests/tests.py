@@ -3,10 +3,13 @@ import importlib
 from django.apps import apps
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import ValidationError
+from django.db import connection
 from mock import patch, Mock
 
 from core.collections.models import Collection, CollectionReference, Expansion
-from core.common.constants import ACCESS_TYPE_NONE, HEAD, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT
+from core.common.constants import ACCESS_TYPE_NONE, HEAD, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT, ROLE_ADMIN, \
+    ROLE_ID_BY_NAME
+from core.common.models import Role
 from core.common.tasks import delete_organization
 from core.common.tests import OCLTestCase
 from core.concepts.models import Concept
@@ -21,6 +24,19 @@ from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.users.tests.factories import UserProfileFactory
+
+
+class RoleTest(OCLTestCase):
+    def test_roles(self):
+        self.assertEqual(Role._meta.db_table, 'roles')  # pylint: disable=protected-access
+        self.assertEqual(dict(Role.objects.values_list('name', 'id')), ROLE_ID_BY_NAME)
+
+    def test_name_is_one_of_the_roles(self):
+        Role(name=ROLE_ADMIN).clean_fields()
+
+        with self.assertRaises(ValidationError) as error:
+            Role(name='owner').clean_fields()
+        self.assertEqual(list(error.exception.message_dict), ['name'])
 
 
 class OrganizationTest(OCLTestCase):
@@ -51,6 +67,61 @@ class OrganizationTest(OCLTestCase):
         source = OrganizationSourceFactory(organization=org)
         for user in (member, outsider):
             self.assertEqual(source.has_parent_edit_access(user), org.has_edit_access(user))
+
+    def test_has_admin_access(self):
+        org = OrganizationFactory()
+        member, admin, outsider = UserProfileFactory(), UserProfileFactory(), UserProfileFactory()
+        org.members.add(member)
+        org.set_member_role(admin, ROLE_ADMIN)
+
+        self.assertTrue(org.has_admin_access(admin))
+        self.assertTrue(org.has_admin_access(UserProfileFactory(is_staff=True)))
+        self.assertFalse(org.has_admin_access(member))
+        self.assertFalse(org.has_admin_access(outsider))
+        self.assertFalse(org.has_admin_access(AnonymousUser()))
+        self.assertFalse(org.has_admin_access(None))
+
+    def test_is_last_admin(self):
+        org = OrganizationFactory()
+        admin, member = UserProfileFactory(), UserProfileFactory()
+        org.set_member_role(admin, ROLE_ADMIN)
+        org.members.add(member)
+        org.members.remove(org.created_by)
+
+        self.assertTrue(org.is_last_admin(admin))
+        self.assertFalse(org.is_last_admin(member))
+        org.set_member_role(UserProfileFactory(is_active=False), ROLE_ADMIN)
+        self.assertTrue(org.is_last_admin(admin))
+        org.set_member_role(UserProfileFactory(), ROLE_ADMIN)
+        self.assertFalse(org.is_last_admin(admin))
+
+    def test_is_last_admin_counts_the_user_even_when_deactivated(self):
+        """So a deactivated last admin can't be removed, or hard deleted, leaving the org with no admin."""
+        org = OrganizationFactory()
+        admin = UserProfileFactory(is_active=False)
+        org.set_member_role(admin, ROLE_ADMIN)
+        org.members.remove(org.created_by)
+
+        self.assertTrue(org.is_last_admin(admin))
+
+    def test_is_last_admin_makes_one_query(self):
+        org = OrganizationFactory()
+
+        with self.assertNumQueries(1):
+            org.is_last_admin(org.created_by)
+
+    def test_an_insert_that_names_no_role_is_an_admin(self):
+        """Code older than the role column inserts this way, during a rollout or after a rollback."""
+        org = OrganizationFactory()
+        user = UserProfileFactory()
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'INSERT INTO user_profiles_organizations (userprofile_id, organization_id) VALUES (%s, %s)',
+                [user.id, org.id]
+            )
+
+        self.assertTrue(org.is_admin(user))
 
     def test_members(self):
         org = Organization(id=123)
