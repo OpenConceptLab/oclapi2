@@ -44,6 +44,7 @@ from core.concepts.models import Concept
 from core.mappings.models import Mapping
 from core.tasks.models import Task
 from core.toggles.models import Toggle
+from core.url_registry.constants import URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE
 
 TRUTHY = get_truthy_values()
 FALSEY = get_falsy_values()
@@ -256,12 +257,12 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     @transaction.atomic
     def add_expressions(
             self, data, user, cascade=False, transform=False, _async=False):
-        references = self.parse_expressions(data, user, cascade, transform)
+        references = self.parse_expressions(data, user, cascade, transform, collection=self)
         return self.add_references(references, user, _async)
 
     @staticmethod
-    def parse_expressions(data, user, cascade=False, transform=False):
-        parser = CollectionReferenceParser(data, transform, cascade, user)
+    def parse_expressions(data, user, cascade=False, transform=False, collection=None):  # pylint: disable=too-many-arguments
+        parser = CollectionReferenceParser(data, transform, cascade, user, collection)
         parser.parse()
         parser.to_reference_structure()
         references = parser.to_objects()
@@ -274,11 +275,11 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         is_locked = CollectionReference.is_expansion_locked_repo_version_on()
         for reference in references:
             reference.expression = reference.build_expression()
+            # before generating, so cascade-and-transform resolves in this collection's namespace and locks
+            reference.collection = self
             if is_locked:
-                # before generating, so cascade-and-transform resolves against this collection's locks
-                reference.collection = self
                 reference._async = _async  # pylint: disable=protected-access
-                reference.clear_resolution_cache()
+            reference.clear_resolution_cache()
             total_references += reference.generate_references()
         total_references = CollectionReference.dedupe_by_expression(total_references)
         for reference in total_references:
@@ -941,6 +942,7 @@ class CollectionReference(models.Model):
                 created_by=self.created_by,
                 resource_version=resource_version,
                 system=self.system,
+                namespace=self.namespace,
                 version=repo_version
             ))
         return references
@@ -1138,10 +1140,17 @@ class CollectionReference(models.Model):
         ]
 
     @cached_property
+    def resolution_namespace(self):
+        """Its own namespace, else its collection owner's, as the URL registries resolve within an owner"""
+        if self.namespace or not self.collection_id:
+            return self.namespace
+        return Expansion.get_system_version_namespace(self.collection.parent_url)
+
+    @cached_property
     def resolve_expression_system_version(self):
         if self.system:
             from core.sources.models import Source
-            version, _ = Source.resolve_reference_expression(self.system, self.namespace, self.version)
+            version, _ = Source.resolve_reference_expression(self.system, self.resolution_namespace, self.version)
             if version.id:
                 return version
         return None
@@ -1272,7 +1281,7 @@ class CollectionReference(models.Model):
 
     def resolve_valueset_version(self, valueset):
         """A value set named without a version resolves to the collection's locked version of it, if any"""
-        version, _ = Collection.resolve_reference_expression(valueset, self.namespace)
+        version, _ = Collection.resolve_reference_expression(valueset, self.resolution_namespace)
         if version.id and self.collection_id and not self.is_explicit_valueset(valueset):
             return next((
                 locked for locked in self.collection.locked_collection_versions
@@ -1281,8 +1290,8 @@ class CollectionReference(models.Model):
         return version
 
     def clear_resolution_cache(self):
-        for attr in ('resolve_system_version', 'resolve_expression_system_version', 'resolve_valueset_versions',
-                     'resolve_valueset_versions_with_unresolved'):
+        for attr in ('resolution_namespace', 'resolve_system_version', 'resolve_expression_system_version',
+                     'resolve_valueset_versions', 'resolve_valueset_versions_with_unresolved'):
             self.__dict__.pop(attr, None)
 
     @cached_property
@@ -1300,7 +1309,8 @@ class CollectionReference(models.Model):
                     if version.id:
                         to_add.append(version)
                     else:
-                        unresolved.append({'url': valueset, 'namespace': self.namespace, 'type': 'reference.valueset'})
+                        unresolved.append(
+                            {'url': valueset, 'namespace': self.resolution_namespace, 'type': 'reference.valueset'})
         return explicit, evaluated, unresolved
 
     def clean(self):
@@ -1413,10 +1423,10 @@ class CollectionReference(models.Model):
         if system_version_cache is None:
             return self.resolve_expression_system_version
 
-        cache_key = (self.namespace, self.system, self.version)
+        cache_key = (self.resolution_namespace, self.system, self.version)
         if cache_key not in system_version_cache:
             from core.sources.models import Source
-            version, _ = Source.resolve_reference_expression(self.system, self.namespace, self.version)
+            version, _ = Source.resolve_reference_expression(self.system, self.resolution_namespace, self.version)
             system_version_cache[cache_key] = version if version.id else None
         return system_version_cache[cache_key]
 
@@ -1455,9 +1465,9 @@ class CollectionReference(models.Model):
         if isinstance(self.valueset, list):
             for valueset in self.valueset:  # pylint: disable=not-an-iterable
                 if valueset:
-                    cache_key = (self.namespace, valueset, None)
+                    cache_key = (self.resolution_namespace, valueset, None)
                     if cache_key not in valueset_version_cache:
-                        version, _ = Collection.resolve_reference_expression(valueset, self.namespace)
+                        version, _ = Collection.resolve_reference_expression(valueset, self.resolution_namespace)
                         valueset_version_cache[cache_key] = version if version.id else None
                     if valueset_version_cache[cache_key]:
                         versions.append(valueset_version_cache[cache_key])
@@ -1771,6 +1781,42 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 CollectionReference.on_commit_when_locked(lambda: batch_index_resources.apply_async(
                     ('mapping', mappings_filters), queue='indexing', permanent=False))
 
+    @staticmethod
+    def get_system_version_namespace(owner_url):
+        # without the URL registries a namespace would limit canonical URLs to the owner's repositories
+        return owner_url if Toggle.get(URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE) else None
+
+    @staticmethod
+    def resolve_system_version_entries(value, namespace=None):
+        """Each system-version entry with the repo version it resolves to (one without an id when unresolved)."""
+        from core.sources.models import Source
+        return [
+            (entry, Source.resolve_reference_expression(entry, namespace)[0])
+            for entry in compact([entry.strip() for entry in (value or '').split(',')])
+        ]
+
+    @classmethod
+    def get_system_version_conflicts(cls, value, namespace=None):
+        """The system-version entries naming different versions of one repository, by the repository's URL.
+        An entry that doesn't resolve still counts, under the repository its URL names and the version it asks for."""
+        from core.sources.models import Source
+        entries_by_repo = {}
+        for entry, version in cls.resolve_system_version_entries(value, namespace):
+            url, requested = canonical_url_to_url_and_version(entry)
+            if version.id:
+                repo_url, requested = drop_version(version.uri), version.version
+            elif is_canonical_uri(url):
+                repo, _ = Source.resolve_reference_expression(url, namespace)
+                repo_url = drop_version(repo.uri) if repo.id else url
+            else:
+                path = url if url.endswith('/') else url + '/'
+                repo_url = drop_version(path)
+                requested = requested or path[len(repo_url):].strip('/') or None
+            entries_by_repo.setdefault(repo_url, {}).setdefault(requested, entry)
+        return {
+            repo_url: list(entries.values()) for repo_url, entries in entries_by_repo.items() if len(entries) > 1
+        }
+
     def add_references(  # pylint: disable=too-many-locals,too-many-statements,too-many-branches,too-many-arguments
             self, references, index=True, is_adding_all=False, attempt_reevaluate=True, force_reevaluate=False):
         include_refs, exclude_refs = self.to_ref_list_separated(references)
@@ -1827,11 +1873,10 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         include_system_versions = []
         system_versions = self.parameters.get(ExpansionParameters.INCLUDE_SYSTEM)
         if should_reevaluate and system_versions:
-            for system_version in compact(system_versions.split(',')):
-                _system = system_version.strip()
-                _cache_key = f"NONE-{_system}-NONE"
-                version = self.resolve_system_version_entry(_system)
-                _system_version_cache[_cache_key] = version
+            namespace = self.get_system_version_namespace(self.collection_version.parent_url)
+            for _system, version in self.resolve_system_version_entries(system_versions, namespace):
+                # unresolved is None here too, as a reference resolving the same URL itself would get
+                _system_version_cache[f"{namespace or 'NONE'}-{_system}-NONE"] = version if version.id else None
                 if version.id:
                     include_system_versions.append(version)
                 else:
@@ -1839,7 +1884,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
 
         def get_ref_system_version(ref):
             if ref.system:
-                __cache_key = f"{ref.namespace or 'NONE'}-{ref.system}-{ref.version or 'NONE'}"
+                __cache_key = f"{ref.resolution_namespace or 'NONE'}-{ref.system}-{ref.version or 'NONE'}"
                 if __cache_key not in _system_version_cache:
                     _system_version_cache[__cache_key] = ref.resolve_expression_system_version
                 _version = _system_version_cache[__cache_key]
@@ -1893,7 +1938,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                     unresolved_repo_versions.append(
                         {
                             'url': ref.system,
-                            'namespace': ref.namespace,
+                            'namespace': ref.resolution_namespace,
                             'version': ref.version,
                             'type': 'reference.system'
                         }

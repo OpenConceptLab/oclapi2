@@ -1,4 +1,5 @@
 import datetime
+import importlib
 import json
 import os
 import sys
@@ -19,6 +20,7 @@ from django.core.management import call_command, CommandError
 from django.http import HttpResponse
 from django.test import TestCase, override_settings, RequestFactory, tag
 from django.test.runner import DiscoverRunner
+from django.urls import clear_url_caches, resolve
 from django.utils import timezone
 from elastic_transport import Transport
 from mock.mock import call
@@ -1528,7 +1530,9 @@ class BaseModelTest(OCLTestCase):
     @patch('core.common.models.parallel_bulk', return_value=[])
     def test_batch_index_partial_by_ids_refreshes_once_after_the_last_batch(self, parallel_bulk_mock):
         id_queryset = MagicMock()
-        id_queryset.__getitem__.side_effect = lambda batch_slice: [1, 2] if batch_slice.start == 0 else []
+        id_queryset.query.combinator = None
+        id_queryset.__getitem__.return_value = [2, 1]
+        id_queryset.filter.return_value.__getitem__.return_value = []
         queryset = Mock()
         queryset.order_by.return_value.values_list.return_value = id_queryset
         doc_instance = Mock()
@@ -1540,6 +1544,34 @@ class BaseModelTest(OCLTestCase):
 
         self.assertNotIn('refresh', parallel_bulk_mock.call_args[1])
         doc_instance._index.refresh.assert_called_once_with()  # pylint: disable=protected-access
+        id_queryset.filter.assert_called_once_with(id__lt=1)
+
+    def _paged_ids(self, queryset):
+        pages = []
+
+        def get_actions(ids):
+            pages.append(list(ids))
+            return iter([])
+
+        with override_settings(TEST_MODE=False), patch('core.common.models.INDEX_BATCH_SIZE', 2), \
+                patch('core.common.models.BatchIndexRun.bulk'):
+            BaseModel.batch_index_partial_by_ids(queryset, ConceptDocument, get_actions, refresh=False)
+        return pages
+
+    def test_batch_index_partial_by_ids_pages_by_keyset(self):
+        source = OrganizationSourceFactory()
+        concepts = [ConceptFactory(parent=source) for _ in range(5)]
+        ids = sorted((concept.id for concept in concepts), reverse=True)
+
+        self.assertEqual(self._paged_ids(Concept.objects.filter(id__in=ids)), [ids[0:2], ids[2:4], ids[4:]])
+
+    def test_batch_index_partial_by_ids_pages_a_union_by_offset(self):
+        source = OrganizationSourceFactory()
+        concepts = [ConceptFactory(parent=source) for _ in range(5)]
+        ids = sorted((concept.id for concept in concepts), reverse=True)
+        queryset = Concept.objects.filter(id__in=ids[:3]).union(Concept.objects.filter(id__in=ids[3:]))
+
+        self.assertEqual(self._paged_ids(queryset), [ids[0:2], ids[2:4], ids[4:]])
 
     @override_settings(TEST_MODE=False)
     def test_batch_index_full_continues_remaining_batches_after_error(self):
@@ -3662,3 +3694,22 @@ class ESSplitIndexCommandTest(OCLTestCase):
         target = client.indices.split.call_args[1]['target']
         client.indices.delete.assert_called_once_with(index=target, ignore_unavailable=True)
         client.indices.put_settings.assert_called_once_with(index='concepts', settings={'index.blocks.write': None})
+
+
+class ExtraURLConfsTest(OCLTestCase):
+    def tearDown(self):
+        from core import urls
+        importlib.reload(urls)
+        clear_url_caches()
+        super().tearDown()
+
+    def test_extra_urlconfs_are_included_after_the_core_routes(self):
+        from core import urls
+        from core.capabilities.views import CapabilityConsumeView
+        with patch('core.settings.OCL_EXTRA_URLCONFS', ['core.capabilities.urls']):
+            importlib.reload(urls)
+        clear_url_caches()
+
+        self.assertEqual(resolve('/consume/').func.view_class, CapabilityConsumeView)
+        self.assertEqual(resolve('/capabilities/consume/').func.view_class, CapabilityConsumeView)
+        self.assertEqual(urls.urlpatterns[-1].urlconf_name.__name__, 'core.capabilities.urls')

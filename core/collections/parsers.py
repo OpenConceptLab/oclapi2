@@ -11,11 +11,12 @@ from core.common.utils import to_parent_uri, drop_version
 
 
 class CollectionReferenceAbstractParser:
-    def __init__(self, expression, transform=None, cascade=None, user=None):
+    def __init__(self, expression, transform=None, cascade=None, user=None, collection=None):  # pylint: disable=too-many-arguments
         self.expression = expression
         self.transform = transform
         self.cascade = cascade
         self.user = user
+        self.collection = collection
         self.references = []
         self.parsers = []
         self.instances = []
@@ -87,6 +88,9 @@ class CollectionReferenceParser(CollectionReferenceAbstractParser):
         for reference in self.references:
             reference['valueset'] = self.get_formatted_valueset(reference.get('valueset'))
             collection_reference = CollectionReference(**reference)
+            if self.collection:
+                # so a cascade run while parsing resolves in the collection's namespace
+                collection_reference.collection = self.collection
             if should_cascade_now and collection_reference.code:
                 uris = collection_reference.get_related_uris()
                 for uri in uris:
@@ -96,6 +100,7 @@ class CollectionReferenceParser(CollectionReferenceAbstractParser):
                         parser.parse()
                         _reference = parser.to_reference_structure()[0]
                         _reference['valueset'] = self.get_formatted_valueset(_reference.get('valueset'))
+                        _reference['namespace'] = _reference.get('namespace') or collection_reference.namespace
                         self.instances.append(CollectionReference(**_reference))
             self.instances.append(collection_reference)
         return self.instances

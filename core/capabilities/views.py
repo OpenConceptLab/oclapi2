@@ -5,11 +5,10 @@ from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from core.capabilities.constants import (
-    CAPABILITY_EXCEEDED_ERROR_CODE, CAPABILITY_ID_BY_NAME, CAPABILITY_NOT_ENTITLED_ERROR_CODE,
-)
-from core.capabilities.exceptions import CapabilityExceeded
-from core.capabilities.models import UsageCounter, UserCapabilityOverride
+from core.capabilities.constants import CAPABILITY_ID_BY_NAME
+from core.capabilities.exceptions import UsageRefused
+from core.capabilities.models import UserCapabilityOverride
+from core.capabilities.policy import get_capability_policy
 from core.capabilities.serializers import UserCapabilityOverrideSerializer
 from core.common.mixins import ListWithHeadersMixin
 from core.common.utils import parse_id
@@ -93,22 +92,20 @@ class CapabilityConsumeView(CapabilityBaseView):
             return error_response
         map_project, run = self.get_owned_map_project_and_run()
 
+        # one policy for the whole response, so what it reports is what it counted
+        policy = get_capability_policy()
         try:
-            event, already_consumed = request.user.check_and_consume_capability(
-                capability_id, units=units,
+            event, already_consumed = policy.consume(
+                request.user, capability_id, units=units, idempotency_key=idempotency_key,
                 action=request.data.get('action', ''), algorithm=request.data.get('algorithm'),
-                map_project=map_project, run=run, idempotency_key=idempotency_key,
+                map_project=map_project, run=run,
             )
-        except CapabilityExceeded as ex:
-            not_entitled = ex.not_entitled
+        except UsageRefused as ex:
             return Response(
                 {
-                    'detail': f'You do not have access to {capability_name}.' if not_entitled else
+                    'detail': f'You do not have access to {capability_name}.' if ex.no_access else
                     f'{capability_name} limit reached.',
-                    'error_code': CAPABILITY_NOT_ENTITLED_ERROR_CODE.get(capability_name, 'capability_not_entitled')
-                    if not_entitled else
-                    CAPABILITY_EXCEEDED_ERROR_CODE.get(capability_name, 'capability_limit_reached'),
-                    'limit': None if not_entitled else ex.limit, 'used': ex.used,
+                    **ex.detail,
                 },
                 status=status.HTTP_403_FORBIDDEN
             )
@@ -116,8 +113,7 @@ class CapabilityConsumeView(CapabilityBaseView):
         return Response(
             {
                 'capability': capability_name,
-                'limit': request.user.get_capability_limit(capability_id),
-                'used': request.user.get_capability_usage(capability_id),
+                **policy.describe(request.user, capability_id),
                 'usage_event_id': event.id,
                 'units': event.units,
                 'already_consumed': already_consumed,
@@ -140,7 +136,7 @@ class CapabilityConsumeView(CapabilityBaseView):
 
 class CapabilityRefundView(CapabilityBaseView):
     """
-    Manual ledger correction (see UsageCounter.refund) - e.g. staff fixing an
+    Manual ledger correction (see CapabilityPolicy.refund) - e.g. staff fixing an
     over-count after a bug. Staff-only, and operates on a user given explicitly
     in the request body: this is an admin tool for correcting ANY user's
     ledger, not a per-request refund a service would issue against its own
@@ -168,14 +164,14 @@ class CapabilityRefundView(CapabilityBaseView):
         if error_response:
             return error_response
 
-        UsageCounter.refund(user, capability_id, units=units)
+        policy = get_capability_policy()
+        policy.refund(user, capability_id, units=units)
 
         return Response(
             {
                 'user': username,
                 'capability': capability_name,
-                'limit': user.get_capability_limit(capability_id),
-                'used': user.get_capability_usage(capability_id),
+                **policy.describe(user, capability_id),
             },
             status=status.HTTP_200_OK
         )
