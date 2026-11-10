@@ -18,7 +18,8 @@ from core.collections.constants import (
     REFERENCE_TYPE_CHOICES, CONCEPT_REFERENCE_TYPE, MAPPING_REFERENCE_TYPE, SOURCE_MAPPINGS, SOURCE_TO_CONCEPTS,
     TRANSFORM_TO_RESOURCE_VERSIONS, COLLECTION_REFERENCE_TYPE, TRANSFORM_TO_EXTENSIONAL,
     RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE, UNRESOLVED_RESOURCE_VERSION_TYPE,
-    INTENSIONAL_REFERENCE_RESOURCE_VERSIONS_TOGGLE, EXPANSION_LOCKED_REPO_VERSION_TOGGLE)
+    INTENSIONAL_REFERENCE_RESOURCE_VERSIONS_TOGGLE, EXPANSION_LOCKED_REPO_VERSION_TOGGLE, VERSION_EXPANSION_LOCK,
+    VERSION_EXPANSION_LATEST)
 from core.collections.parsers import CollectionReferenceParser
 from core.collections.translators import CollectionReferenceTranslator
 from core.collections.utils import is_concept, is_mapping
@@ -402,19 +403,21 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         expansion = self.expansion if CollectionReference.is_expansion_locked_repo_version_on() else None
         return list(getattr(expansion, relation).filter(is_active=True).order_by('-id')) if expansion else []
 
-    def can_seed_from_head_expansion(self):
-        return bool(
-            not self.is_head and self.should_auto_expand and CollectionReference.is_expansion_locked_repo_version_on()
-            and get(self.head, 'expansion')
-        )
+    def get_expansion_choice(self, expansion=None):
+        """How a new version's expansion is built with the lock toggle on: lock or latest, else None (as before)"""
+        if self.is_head or not self.should_auto_expand or not CollectionReference.is_expansion_locked_repo_version_on():
+            return None
+        if expansion in (VERSION_EXPANSION_LOCK, VERSION_EXPANSION_LATEST):
+            return expansion
+        return VERSION_EXPANSION_LOCK if get(self.head, 'expansion') else VERSION_EXPANSION_LATEST
 
-    def seed_from_head_expansion(self, index=True):
-        """False when HEAD has no expansion to copy, so the version seeds as without one"""
+    def seed_from_head_expansion(self, lock=True, index=True):
+        """References from HEAD, evaluated again with HEAD's expansion parameters (and its locks, with lock)"""
         is_outermost = not transaction.get_connection().in_atomic_block
         attempts = SERIALIZATION_RETRY_ATTEMPTS if is_outermost else 1
         for attempt in range(1, attempts + 1):
             try:
-                expansion = self.seed_from_head_expansion_in_snapshot(is_outermost)
+                expansion = self.seed_from_head_expansion_in_snapshot(is_outermost, lock)
                 break
             except OperationalError as ex:
                 if attempt == attempts or not self.is_serialization_failure(ex):
@@ -422,16 +425,14 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 self.refresh_from_db()
                 self.__dict__.pop('locked_source_versions', None)
                 self.__dict__.pop('locked_collection_versions', None)
-        if not expansion:
-            return False
         if index:
             expansion.index_resources(
                 list(expansion.concepts.values_list('id', flat=True)),
                 list(expansion.mappings.values_list('id', flat=True)))
         return True
 
-    def seed_from_head_expansion_in_snapshot(self, is_outermost):
-        """References and expansion copied from HEAD in one transaction, so both come from the same HEAD state"""
+    def seed_from_head_expansion_in_snapshot(self, is_outermost, lock=True):
+        """References, parameters and locks read from HEAD in one transaction, so all come from the same HEAD state"""
         with transaction.atomic():
             if is_outermost:
                 with transaction.get_connection().cursor() as cursor:
@@ -442,30 +443,28 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 return expansion
             head = self.head
             head_expansion = Expansion.objects.filter(uri=head.expansion_uri).first() if head.expansion_uri else None
-            if not head_expansion:
-                return None
             self.seed_references()
+            parameters = dict(get(head_expansion, 'parameters') or {})
+            system_versions = head_expansion.get_locked_system_version_parameter() if lock and head_expansion else None
+            if system_versions:
+                parameters[ExpansionParameters.INCLUDE_SYSTEM] = system_versions
             expansion = Expansion(
-                mnemonic=mnemonic, collection_version=self, parameters=head_expansion.parameters,
+                mnemonic=mnemonic, collection_version=self, parameters=parameters,
                 created_by_id=self.created_by_id, updated_by_id=self.created_by_id)
             expansion.clean()
             expansion.full_clean()
             expansion.save()
-            for relation in Expansion.REPO_VERSION_RELATIONS:
-                getattr(expansion, relation).set(getattr(head_expansion, relation).all())
+            if lock and head_expansion:
+                # system-version doesn't reach value sets, so they start from HEAD's value set lock
+                expansion.evaluated_collection_versions.set(
+                    head_expansion.evaluated_collection_versions.filter(is_active=True))
             if not self.expansion_uri:
                 self.expansion_uri = expansion.uri
                 self.save()
-            if head_expansion.is_processing or head_expansion.has_pending_readd:
-                # HEAD's expansion is mid-build, so evaluate this version's references against HEAD's locks
-                references = list(self.references.all())
-                for reference in references:
-                    reference._async = True  # pylint: disable=protected-access
-                expansion.add_references(references, index=False, force_reevaluate=True)
-            else:
-                expansion.copy_members_from(head_expansion)
-                expansion.unresolved_repo_versions = head_expansion.unresolved_repo_versions
-                expansion.save(update_fields=['unresolved_repo_versions'])
+            references = list(self.references.all())
+            for reference in references:
+                reference._async = True  # pylint: disable=protected-access
+            expansion.add_references(references, index=False, force_reevaluate=True)
             self.replace_head_resources(expansion)
         return expansion
 
@@ -1797,11 +1796,11 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         ]
 
     @classmethod
-    def get_system_version_conflicts(cls, value, namespace=None):
-        """The system-version entries naming different versions of one repository, by the repository's URL.
-        An entry that doesn't resolve still counts, under the repository its URL names and the version it asks for."""
+    def get_system_version_entry_repos(cls, value, namespace=None):
+        """Each system-version entry with the repository it names and the version it asks for.
+        An entry that doesn't resolve still names a repository, by its URL without the version."""
         from core.sources.models import Source
-        entries_by_repo = {}
+        repos = []
         for entry, version in cls.resolve_system_version_entries(value, namespace):
             url, requested = canonical_url_to_url_and_version(entry)
             if version.id:
@@ -1813,6 +1812,14 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 path = url if url.endswith('/') else url + '/'
                 repo_url = drop_version(path)
                 requested = requested or path[len(repo_url):].strip('/') or None
+            repos.append((entry, repo_url, requested))
+        return repos
+
+    @classmethod
+    def get_system_version_conflicts(cls, value, namespace=None):
+        """The system-version entries naming different versions of one repository, by the repository's URL."""
+        entries_by_repo = {}
+        for entry, repo_url, requested in cls.get_system_version_entry_repos(value, namespace):
             entries_by_repo.setdefault(repo_url, {}).setdefault(requested, entry)
         return {
             repo_url: list(entries.values()) for repo_url, entries in entries_by_repo.items() if len(entries) > 1
@@ -2081,20 +2088,28 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         if mappings:
             self.index_mappings(mappings)
 
-    @property
-    def has_pending_readd(self):
-        """A reference removal leaves this expansion short until its re-add succeeds"""
-        return Task.unfinished_readd_references_tasks().filter(args__0=self.id).exists()
-
-    def copy_members_from(self, expansion):
-        for relation in ('concepts', 'mappings'):
-            through = getattr(Expansion, relation).through
-            field = f'{relation[:-1]}_id'
-            with transaction.get_connection().cursor() as cursor:
-                cursor.execute(
-                    f'INSERT INTO {through._meta.db_table} (expansion_id, {field}) '  # pylint: disable=protected-access
-                    f'SELECT %s, {field} FROM {through._meta.db_table} WHERE expansion_id = %s',  # pylint: disable=protected-access
-                    [self.id, expansion.id])
+    def get_locked_system_version_parameter(self):
+        """This expansion's system-version, plus each source it locked that the parameter doesn't name yet.
+        Entries resolve in the owner's namespace, as the expansion built from them will."""
+        namespace = self.get_system_version_namespace(self.collection_version.parent_url)
+        value = str(get(self.parameters, ExpansionParameters.INCLUDE_SYSTEM) or '')
+        repos = self.get_system_version_entry_repos(value, namespace)
+        entries = [entry for entry, _, _ in repos]
+        named = {repo_url for _, repo_url, _ in repos}
+        for version in self.evaluated_source_versions.filter(is_active=True).order_by('-id'):
+            if version.versioned_object_url in named:
+                continue
+            named.add(version.versioned_object_url)
+            entry = f"{version.canonical_url}|{version.version}" if version.canonical_url else None
+            if not entry or self.resolve_system_version_entries(entry, namespace)[0][1].id != version.id:
+                entry = f"{version.versioned_object_url}|{version.version}"
+            entries.append(entry)
+        locked = ','.join(entries)
+        # as on expansion create, one version per source: never add a conflict HEAD's own parameter doesn't have
+        if set(self.get_system_version_conflicts(locked, namespace)) - set(
+                self.get_system_version_conflicts(value, namespace)):
+            return value
+        return locked
 
     @staticmethod
     def replace_head_rows(rows, owner, field, klass):
@@ -2111,12 +2126,32 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         rows.model.objects.filter(id__in=head_rows.values('id')).update(**{f'{field}_id': Subquery(latest)})
 
     def seed_children(self, index=True, force_reevaluate=False):
+        version = self.collection_version
+        # a version's default expansion holds resource versions, so a rebuild swaps HEAD rows as its creation did
+        swap_head = force_reevaluate and not version.is_head and self.is_default and \
+            CollectionReference.is_expansion_locked_repo_version_on()
+        previous_concept_ids = set(self.concepts.values_list('id', flat=True)) if swap_head and index else set()
+        previous_mapping_ids = set(self.mappings.values_list('id', flat=True)) if swap_head and index else set()
+        references = version.references
+        if swap_head:
+            # cascades run without a result cap, as when the version was created
+            references = list(references.all())
+            for reference in references:
+                reference._async = True  # pylint: disable=protected-access
         self.add_references(
-            references=self.collection_version.references,
-            index=index,
+            references=references,
+            index=index and not swap_head,
             is_adding_all=True,
             force_reevaluate=force_reevaluate
         )
+        if swap_head:
+            version.replace_head_resources(self)
+            if index:
+                concept_ids = set(self.concepts.values_list('id', flat=True))
+                mapping_ids = set(self.mappings.values_list('id', flat=True))
+                self.index_resources(list(concept_ids), list(mapping_ids))
+                self.full_index_resources(
+                    list(previous_concept_ids - concept_ids), list(previous_mapping_ids - mapping_ids))
 
     def wait_until_processed(self):  # pragma: no cover
         processing = self.is_processing
