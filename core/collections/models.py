@@ -2040,15 +2040,23 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         version, _ = ConceptContainerModel.resolve_reference_expression(entry.strip())
         return version
 
+    @classmethod
+    def get_system_version_entry_repo_url(cls, entry):
+        """The repository a system-version entry names, also when the version it asks for doesn't resolve"""
+        version = cls.resolve_system_version_entry(entry)
+        if version.id:
+            return version.versioned_object_url
+        url, _ = canonical_url_to_url_and_version(entry.strip())
+        if is_canonical_uri(url):
+            repo = cls.resolve_system_version_entry(url)
+            return repo.versioned_object_url if repo.id else None
+        return drop_version(url if url.endswith('/') else url + '/')
+
     def get_locked_system_version_parameter(self):
         """This expansion's system-version, plus each source it locked that the parameter doesn't name yet"""
         entries = [entry.strip() for entry in compact(
             str(get(self.parameters, ExpansionParameters.INCLUDE_SYSTEM) or '').split(','))]
-        named = set()
-        for entry in entries:
-            resolved = self.resolve_system_version_entry(entry)
-            if resolved.id:
-                named.add(resolved.versioned_object_url)
+        named = set(compact(self.get_system_version_entry_repo_url(entry) for entry in entries))
         for version in self.evaluated_source_versions.filter(is_active=True).order_by('-id'):
             if version.versioned_object_url in named:
                 continue
@@ -2080,8 +2088,14 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             CollectionReference.is_expansion_locked_repo_version_on()
         previous_concept_ids = set(self.concepts.values_list('id', flat=True)) if swap_head and index else set()
         previous_mapping_ids = set(self.mappings.values_list('id', flat=True)) if swap_head and index else set()
+        references = version.references
+        if swap_head:
+            # cascades run without a result cap, as when the version was created
+            references = list(references.all())
+            for reference in references:
+                reference._async = True  # pylint: disable=protected-access
         self.add_references(
-            references=version.references,
+            references=references,
             index=index and not swap_head,
             is_adding_all=True,
             force_reevaluate=force_reevaluate

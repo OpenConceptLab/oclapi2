@@ -2246,6 +2246,16 @@ class TasksTest(OCLTestCase):
 
         self.assertEqual(expansion.get_locked_system_version_parameter(), f'{source.uri}|v2,{other.uri}|HEAD')
 
+    def test_locked_system_version_parameter_keeps_a_source_named_with_a_version_that_doesnt_resolve(self):
+        source, _, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        for entry in (f'{source.uri}|v9', f'{source.uri}v9/'):
+            with self.subTest(entry=entry):
+                expansion = ExpansionFactory(
+                    collection_version=OrganizationCollectionFactory(), parameters={'system-version': entry})
+                expansion.evaluated_source_versions.add(v1)
+
+                self.assertEqual(expansion.get_locked_system_version_parameter(), entry)
+
     def test_locked_system_version_parameter_names_the_ocl_url_when_the_canonical_url_resolves_elsewhere(self):
         source = OrganizationSourceFactory(canonical_url='https://example.com/cs')
         expansion = ExpansionFactory(collection_version=OrganizationCollectionFactory())
@@ -2285,6 +2295,32 @@ class TasksTest(OCLTestCase):
         self.assertFalse(collection_v1.expansion.concepts.exists())
         batch_index_resources_mock.apply_async.assert_called_once_with(
             ('concept', {'id__in': [latest.id]}), queue='indexing', permanent=False)
+
+    @patch('core.common.tasks.export_collection')
+    def test_rebuild_cascades_without_a_result_cap_as_creation_does(self, _):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source, mnemonic='root')
+        head = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=head, mnemonic='autoexpand-HEAD')
+        head.expansion_uri = expansion.uri
+        head.save()
+        head.add_references([CollectionReference(
+            system=source.uri, code=concept.mnemonic, reference_type='concepts', created_by=head.created_by,
+            cascade={'method': SOURCE_TO_CONCEPTS})], head.created_by)
+        version = OrganizationCollectionFactory(organization=head.organization, version='v1', mnemonic=head.mnemonic)
+        cascade = Concept.cascade
+
+        with patch.object(Concept, 'cascade', autospec=True, side_effect=cascade) as cascade_mock:
+            seed_children_to_new_version('collection', version.id, False, expansion='lock')  # pylint: disable=no-value-for-parameter
+            version.refresh_from_db()
+            created = [call.kwargs.get('max_results', 1000) for call in cascade_mock.call_args_list]
+            cascade_mock.reset_mock()
+            version.expansion.seed_children(index=False, force_reevaluate=True)
+            rebuilt = [call.kwargs.get('max_results', 1000) for call in cascade_mock.call_args_list]
+
+        self.assertTrue(created)
+        self.assertEqual(set(created), {None})
+        self.assertEqual(set(rebuilt), {None})
 
     @patch('core.common.tasks.export_collection')
     def test_rebuild_keeps_the_resource_versions_a_head_resolved_version_was_created_with(self, _):
