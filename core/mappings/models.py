@@ -583,9 +583,9 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             self.update_versioned_object()
             self.sources.set([parent])
 
-    def _index_on_new_version_creation(self, prev_latest):
+    def _index_on_new_version_creation(self, prev_latest, stale_latest_versions=None):
         if self._index:
-            super()._index_on_new_version_creation(prev_latest)
+            super()._index_on_new_version_creation(prev_latest, stale_latest_versions)
             self.index_from_concept()
 
     @classmethod

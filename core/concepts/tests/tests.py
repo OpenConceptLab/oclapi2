@@ -1,10 +1,13 @@
 import json
 import threading
+import time
+from io import StringIO
 from unittest.mock import ANY, Mock, patch
 
 import factory
 from elasticsearch_dsl.utils import AttrDict
 from django.contrib.auth.models import Group
+from django.core.management import call_command
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection
 from django.test.utils import CaptureQueriesContext
@@ -16,7 +19,7 @@ from core.collections.models import CollectionReference
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import OPENMRS_VALIDATION_SCHEMA, HEAD, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, LATEST
 from core.common.search import Reranker
-from core.common.tests import OCLTestCase, OCLAPITestCase, PREVIEW_GROUP_NAME
+from core.common.tests import OCLTestCase, OCLAPITestCase, OCLAPITransactionTestCase, PREVIEW_GROUP_NAME
 from core.concepts.constants import (
     OPENMRS_MUST_HAVE_EXACTLY_ONE_PREFERRED_NAME,
     OPENMRS_FULLY_SPECIFIED_NAME_UNIQUE_PER_SOURCE_LOCALE, OPENMRS_AT_LEAST_ONE_FULLY_SPECIFIED_NAME,
@@ -1692,6 +1695,53 @@ class ConceptTest(OCLTestCase):
             {'__all__': CONCEPT_IS_ALREADY_NOT_RETIRED}
         )
 
+    def _concept_with_two_latest_versions(self):
+        """A concept whose last two versions are both flagged latest, as two concurrent writers used to leave it."""
+        source = OrganizationSourceFactory(version=HEAD)
+        concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
+        })
+        first_version = concept.get_latest_version()
+        new_version = first_version.clone()
+        new_version.datatype = 'foo'
+        self.assertEqual(new_version.save_as_new_version(concept.created_by), {})
+        Concept.objects.filter(id=first_version.id).update(is_latest_version=True)
+        self.assertEqual(concept.versions.filter(is_latest_version=True).count(), 2)
+        return concept, first_version, concept.versions.order_by('-id').first()
+
+    def test_save_as_new_version_demotes_every_version_flagged_latest(self):
+        concept, _, second_version = self._concept_with_two_latest_versions()
+
+        new_version = second_version.clone()
+        new_version.datatype = 'bar'
+        self.assertEqual(new_version.save_as_new_version(concept.created_by), {})
+
+        self.assertEqual(
+            list(concept.versions.filter(is_latest_version=True).values_list('id', flat=True)), [new_version.id])
+
+    def test_repair_duplicate_latest_versions_keeps_the_newest(self):
+        concept, first_version, second_version = self._concept_with_two_latest_versions()
+
+        out = StringIO()
+        call_command('repair_duplicate_latest_versions', '--dry-run', stdout=out)
+        self.assertIn(
+            f'would be repaired: {concept.uri} keeps {second_version.version}, demotes {first_version.version}',
+            out.getvalue())
+        self.assertEqual(concept.versions.filter(is_latest_version=True).count(), 2)
+
+        out = StringIO()
+        call_command('repair_duplicate_latest_versions', stdout=out)
+        self.assertIn(f'repaired: {concept.uri} keeps {second_version.version}', out.getvalue())
+        self.assertEqual(
+            list(concept.versions.filter(is_latest_version=True).values_list('id', flat=True)), [second_version.id])
+        first_version.refresh_from_db()
+        self.assertFalse(first_version.sources.filter(id=concept.parent_id).exists())
+
+        out = StringIO()
+        call_command('repair_duplicate_latest_versions', stdout=out)
+        self.assertIn('0 concept(s) repaired', out.getvalue())
+
     @patch.object(Concept, 'index', autospec=True)
     def test_edit_and_retire_index_versions_cloned_from_deferred_rows(  # pylint: disable=protected-access
             self, index_mock):
@@ -3046,6 +3096,51 @@ class ConceptTest(OCLTestCase):
 
         process_hierarchy_mock.apply_async.assert_called_once_with(
             (concept.id, None, None, True), queue='concurrent', permanent=False)
+
+
+class ConceptConcurrentNewVersionTest(OCLAPITransactionTestCase):
+    """Saves two new versions of one concept at once, on separate connections."""
+
+    def test_two_new_versions_at_once_leave_one_latest_version(self):
+        source = OrganizationSourceFactory(version=HEAD)
+        concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
+        })
+        clones = []
+        for datatype in ('foo', 'bar'):
+            clone = concept.get_latest_version().clone()
+            clone.datatype = datatype
+            clones.append(clone)
+        post_version_create = Concept.post_version_create
+
+        def slow_post_version_create(instance, *args):
+            post_version_create(instance, *args)
+            time.sleep(0.5)  # widens the gap between reading the latest version and demoting it
+
+        barrier = threading.Barrier(2)
+        results = []
+
+        def save(clone):
+            try:
+                barrier.wait()
+                results.append(clone.save_as_new_version(concept.created_by))
+            finally:
+                connection.close()
+
+        with patch.object(Concept, 'post_version_create', slow_post_version_create):
+            threads = [threading.Thread(target=save, args=(clone,)) for clone in clones]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+        self.assertEqual(results, [{}, {}])
+        self.assertEqual(concept.versions.count(), 3)
+        self.assertEqual(
+            list(concept.versions.filter(is_latest_version=True).values_list('id', flat=True)),
+            [concept.versions.order_by('-id').first().id]
+        )
 
 
 class ConceptSerializersTest(OCLTestCase):
