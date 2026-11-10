@@ -8,7 +8,6 @@ from django.core.management import call_command, CommandError
 from django.http import QueryDict
 from django.test import override_settings, tag
 from django.db import OperationalError
-from django.db.models import F
 from mock import patch, Mock
 from mock.mock import ANY
 from rest_framework import status
@@ -16,7 +15,7 @@ from rest_framework.response import Response
 
 from core.collections.constants import SOURCE_TO_CONCEPTS, TRANSFORM_TO_RESOURCE_VERSIONS
 from core.collections.documents import CollectionDocument
-from core.common.constants import SERIALIZATION_RETRY_ATTEMPTS, HEAD
+from core.common.constants import SERIALIZATION_RETRY_ATTEMPTS
 from core.collections.models import CollectionReference, Collection, Expansion
 from core.collections.models import ExpansionParameters, ExpansionSystemParameter
 from core.collections.parsers import CollectionReferenceExpressionStringParser, \
@@ -2319,19 +2318,10 @@ class TasksTest(OCLTestCase):
 
     @staticmethod
     def head_cascading_past_the_cap():
-        """HEAD references a root with 1,000 children, one with a child: a capped cascade stops before it"""
+        """HEAD references a root with 3 children, one with a child, capped at 3: a capped cascade stops before it"""
         source = OrganizationSourceFactory()
         root = ConceptFactory(parent=source, mnemonic='root')
-        user = root.created_by
-        children = Concept.objects.bulk_create([
-            Concept(
-                mnemonic=f'child{index}', version=HEAD, parent=source, concept_class='Diagnosis', datatype='None',
-                uri=f'{source.uri}concepts/child{index}/', created_by=user, updated_by=user, is_latest_version=True)
-            for index in range(1000)
-        ])
-        Concept.objects.filter(id__in=[child.id for child in children]).update(versioned_object_id=F('id'))
-        Concept.sources.through.objects.bulk_create(
-            [Concept.sources.through(concept_id=child.id, source_id=source.id) for child in children])
+        children = [ConceptFactory(parent=source, mnemonic=f'child{index}') for index in range(3)]
         HierarchicalConcepts.objects.bulk_create(
             [HierarchicalConcepts(child_id=child.id, parent_id=root.id) for child in children])
         grandchild = ConceptFactory(parent=source, mnemonic='grandchild')
@@ -2342,7 +2332,7 @@ class TasksTest(OCLTestCase):
         head.save()
         head.add_references([CollectionReference(
             system=source.uri, code=root.mnemonic, reference_type='concepts', created_by=head.created_by,
-            cascade={'method': SOURCE_TO_CONCEPTS})], head.created_by)
+            cascade={'method': SOURCE_TO_CONCEPTS, 'max_results': 3})], head.created_by)
         version = OrganizationCollectionFactory(organization=head.organization, version='v1', mnemonic=head.mnemonic)
         return grandchild, version
 
@@ -2353,12 +2343,12 @@ class TasksTest(OCLTestCase):
         seed_children_to_new_version('collection', version.id, False, expansion='lock')  # pylint: disable=no-value-for-parameter
         version.refresh_from_db()
         expansion = version.expansion
-        self.assertGreater(expansion.concepts.count(), 1000)
+        self.assertEqual(expansion.concepts.count(), 5)
         self.assertTrue(expansion.concepts.filter(versioned_object_id=grandchild.versioned_object_id).exists())
 
         expansion.seed_children(index=False, force_reevaluate=True)
 
-        self.assertGreater(expansion.concepts.count(), 1000)
+        self.assertEqual(expansion.concepts.count(), 5)
         self.assertTrue(expansion.concepts.filter(versioned_object_id=grandchild.versioned_object_id).exists())
 
     @patch('core.common.tasks.export_collection')
