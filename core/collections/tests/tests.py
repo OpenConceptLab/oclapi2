@@ -2362,6 +2362,38 @@ class TasksTest(OCLTestCase):
         self.assertTrue(expansion.concepts.filter(versioned_object_id=grandchild.versioned_object_id).exists())
 
     @patch('core.common.tasks.export_collection')
+    def test_rebuild_keeps_members_past_the_cascade_cap_after_the_toggle_is_turned_off(self, _):
+        grandchild, version = self.head_cascading_past_the_cap()
+        seed_children_to_new_version('collection', version.id, False, expansion='lock')  # pylint: disable=no-value-for-parameter
+        version.refresh_from_db()
+        expansion = version.expansion
+        member_ids = set(expansion.concepts.values_list('id', flat=True))
+
+        with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False):
+            expansion.seed_children(index=False, force_reevaluate=True)
+
+        self.assertEqual(set(expansion.concepts.values_list('id', flat=True)), member_ids)
+        self.assertTrue(expansion.concepts.filter(versioned_object_id=grandchild.versioned_object_id).exists())
+
+    @patch('core.common.tasks.export_collection')
+    def test_rebuild_of_an_expansion_built_with_the_toggle_off_stays_capped_once_it_is_on(self, _):
+        grandchild, version = self.head_cascading_past_the_cap()
+        with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False):
+            seed_children_to_new_version('collection', version.id, False)  # pylint: disable=no-value-for-parameter
+        version.refresh_from_db()
+        expansion = version.expansion
+        self.assertIsNone(expansion.built_with)
+        member_ids = set(expansion.concepts.values_list('id', flat=True))
+        self.assertFalse(expansion.concepts.filter(versioned_object_id=grandchild.versioned_object_id).exists())
+        other = ExpansionFactory(collection_version=version, mnemonic='other')
+        Collection.objects.filter(id=version.id).update(expansion_uri=other.uri)
+        expansion = Expansion.objects.get(id=expansion.id)
+
+        expansion.seed_children(index=False, force_reevaluate=True)
+
+        self.assertEqual(set(expansion.concepts.values_list('id', flat=True)), member_ids)
+
+    @patch('core.common.tasks.export_collection')
     def test_rebuild_keeps_members_past_the_cascade_cap_when_another_expansion_is_the_default(self, _):
         grandchild, version = self.head_cascading_past_the_cap()
         seed_children_to_new_version('collection', version.id, False, expansion='latest')  # pylint: disable=no-value-for-parameter
@@ -2417,12 +2449,13 @@ class TasksTest(OCLTestCase):
 
                 expansion.seed_children(index=False, force_reevaluate=True)
 
+                self.assertEqual(expansion.built_with, choice)
                 self.assertEqual(list(expansion.concepts.all()), [latest])
                 self.assertEqual(list(collection_v1.references.first().concepts.all()), [latest])
 
                 with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False):
                     expansion.seed_children(index=False, force_reevaluate=True)
-                self.assertEqual(list(expansion.concepts.all()), [concept])
+                self.assertEqual(list(expansion.concepts.all()), [latest])
 
     @patch('core.common.tasks.export_collection')
     def test_seed_children_task_evaluates_references_while_head_expansion_is_processing(self, _):
