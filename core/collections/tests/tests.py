@@ -8,6 +8,7 @@ from django.core.management import call_command, CommandError
 from django.http import QueryDict
 from django.test import override_settings, tag
 from django.db import OperationalError
+from django.db.models import F
 from mock import patch, Mock
 from mock.mock import ANY
 from rest_framework import status
@@ -15,7 +16,7 @@ from rest_framework.response import Response
 
 from core.collections.constants import SOURCE_TO_CONCEPTS, TRANSFORM_TO_RESOURCE_VERSIONS
 from core.collections.documents import CollectionDocument
-from core.common.constants import SERIALIZATION_RETRY_ATTEMPTS
+from core.common.constants import SERIALIZATION_RETRY_ATTEMPTS, HEAD
 from core.collections.models import CollectionReference, Collection, Expansion
 from core.collections.models import ExpansionParameters, ExpansionSystemParameter
 from core.collections.parsers import CollectionReferenceExpressionStringParser, \
@@ -35,7 +36,7 @@ from core.common.tasks import update_collection_active_mappings_count
 from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.common.utils import to_owner_uri, get_falsy_values
 from core.concepts.documents import ConceptDocument
-from core.concepts.models import Concept
+from core.concepts.models import Concept, HierarchicalConcepts
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
@@ -2261,12 +2262,27 @@ class TasksTest(OCLTestCase):
 
                 self.assertEqual(expansion.get_locked_system_version_parameter(), entry)
 
+    def test_locked_system_version_parameter_never_adds_a_conflict(self):
+        source, _, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        expansion = ExpansionFactory(
+            collection_version=OrganizationCollectionFactory(), parameters={'system-version': 'https://a.org|v1'})
+        expansion.evaluated_source_versions.add(v1)
+
+        def conflicts(value, namespace=None):  # pylint: disable=unused-argument
+            return {source.uri: []} if source.uri in value else {}
+
+        with patch.object(Expansion, 'get_system_version_conflicts', side_effect=conflicts):
+            self.assertEqual(expansion.get_locked_system_version_parameter(), 'https://a.org|v1')
+
     def test_locked_system_version_parameter_names_the_ocl_url_when_the_canonical_url_resolves_elsewhere(self):
         source = OrganizationSourceFactory(canonical_url='https://example.com/cs')
         expansion = ExpansionFactory(collection_version=OrganizationCollectionFactory())
         expansion.evaluated_source_versions.add(source)
 
-        with patch.object(Expansion, 'resolve_system_version_entry', return_value=Mock(id=None)):
+        def unresolved(value, namespace=None):  # pylint: disable=unused-argument
+            return [(entry.strip(), Mock(id=None)) for entry in value.split(',') if entry]
+
+        with patch.object(Expansion, 'resolve_system_version_entries', side_effect=unresolved):
             self.assertEqual(expansion.get_locked_system_version_parameter(), f'{source.uri}|HEAD')
 
     @staticmethod
@@ -2300,6 +2316,50 @@ class TasksTest(OCLTestCase):
         self.assertFalse(collection_v1.expansion.concepts.exists())
         batch_index_resources_mock.apply_async.assert_called_once_with(
             ('concept', {'id__in': [latest.id]}), queue='indexing', permanent=False)
+
+    @staticmethod
+    def head_cascading_past_the_cap():
+        """HEAD references a root with 1,000 children, one with a child: a capped cascade stops before it"""
+        source = OrganizationSourceFactory()
+        root = ConceptFactory(parent=source, mnemonic='root')
+        user = root.created_by
+        children = Concept.objects.bulk_create([
+            Concept(
+                mnemonic=f'child{index}', version=HEAD, parent=source, concept_class='Diagnosis', datatype='None',
+                uri=f'{source.uri}concepts/child{index}/', created_by=user, updated_by=user, is_latest_version=True)
+            for index in range(1000)
+        ])
+        Concept.objects.filter(id__in=[child.id for child in children]).update(versioned_object_id=F('id'))
+        Concept.sources.through.objects.bulk_create(
+            [Concept.sources.through(concept_id=child.id, source_id=source.id) for child in children])
+        HierarchicalConcepts.objects.bulk_create(
+            [HierarchicalConcepts(child_id=child.id, parent_id=root.id) for child in children])
+        grandchild = ConceptFactory(parent=source, mnemonic='grandchild')
+        HierarchicalConcepts.objects.create(child_id=grandchild.id, parent_id=children[0].id)
+        head = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=head, mnemonic='autoexpand-HEAD')
+        head.expansion_uri = expansion.uri
+        head.save()
+        head.add_references([CollectionReference(
+            system=source.uri, code=root.mnemonic, reference_type='concepts', created_by=head.created_by,
+            cascade={'method': SOURCE_TO_CONCEPTS})], head.created_by)
+        version = OrganizationCollectionFactory(organization=head.organization, version='v1', mnemonic=head.mnemonic)
+        return grandchild, version
+
+    @patch('core.common.tasks.export_collection')
+    def test_rebuild_keeps_members_past_the_cascade_cap_as_creation_does(self, _):
+        grandchild, version = self.head_cascading_past_the_cap()
+
+        seed_children_to_new_version('collection', version.id, False, expansion='lock')  # pylint: disable=no-value-for-parameter
+        version.refresh_from_db()
+        expansion = version.expansion
+        self.assertGreater(expansion.concepts.count(), 1000)
+        self.assertTrue(expansion.concepts.filter(versioned_object_id=grandchild.versioned_object_id).exists())
+
+        expansion.seed_children(index=False, force_reevaluate=True)
+
+        self.assertGreater(expansion.concepts.count(), 1000)
+        self.assertTrue(expansion.concepts.filter(versioned_object_id=grandchild.versioned_object_id).exists())
 
     @patch('core.common.tasks.export_collection')
     def test_rebuild_cascades_without_a_result_cap_as_creation_does(self, _):
@@ -6367,6 +6427,34 @@ class ExpansionSystemVersionNamespaceTest(OCLTestCase):
         self.assertTrue(expressions)
         self.assertTrue(all(expression.startswith(self.other_source.uri) for expression in expressions), expressions)
         self.assertEqual(set(self.collection.references.values_list('namespace', flat=True)), {'/'})
+
+    @patch('core.common.tasks.export_collection')
+    def test_lock_keeps_heads_version_when_the_owner_registry_maps_its_canonical_url_elsewhere(self, _):
+        self.set_registry_toggle(True)
+        self.add_owner_registry_entry()
+        GlobalURLRegistryFactory(url=self.URL, namespace=self.other.uri)
+        concept = ConceptFactory(parent=self.other_source, mnemonic='c1')
+        old = concept.get_latest_version()
+        new = ConceptFactory(parent=self.other_source, mnemonic='c1', versioned_object=concept, version='new')
+        old.sources.remove(self.other_source)
+        old.sources.add(self.other_source_v1)
+        other_v2 = OrganizationSourceFactory(
+            organization=self.other, mnemonic='cs', version='v2', canonical_url=self.URL, released=True)
+        new.sources.add(other_v2)
+        Source.objects.filter(id=self.other_source_v1.id).update(released=True)
+        self.collection.expansion_uri = self.expansion.uri
+        self.collection.save()
+        self.expansion.evaluated_source_versions.add(self.other_source_v1)
+        self.collection.add_expressions({'expressions': [concept.uri]}, self.collection.created_by)
+        self.assertEqual(list(self.collection.expansion.concepts.all()), [old])
+        version = OrganizationCollectionFactory(organization=self.owner, mnemonic='vs', version='v1')
+
+        seed_children_to_new_version('collection', version.id, False, expansion='lock')  # pylint: disable=no-value-for-parameter
+
+        version.refresh_from_db()
+        self.assertEqual(version.expansion.parameters['system-version'], f'{self.other_source.uri}|v1')
+        self.assertEqual(list(version.expansion.concepts.all()), [old])
+        self.assertEqual(list(version.expansion.evaluated_source_versions.all()), [self.other_source_v1])
 
     def test_get_system_version_conflicts(self):
         self.set_registry_toggle(True)

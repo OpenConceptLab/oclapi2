@@ -1796,11 +1796,11 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         ]
 
     @classmethod
-    def get_system_version_conflicts(cls, value, namespace=None):
-        """The system-version entries naming different versions of one repository, by the repository's URL.
-        An entry that doesn't resolve still counts, under the repository its URL names and the version it asks for."""
+    def get_system_version_entry_repos(cls, value, namespace=None):
+        """Each system-version entry with the repository it names and the version it asks for.
+        An entry that doesn't resolve still names a repository, by its URL without the version."""
         from core.sources.models import Source
-        entries_by_repo = {}
+        repos = []
         for entry, version in cls.resolve_system_version_entries(value, namespace):
             url, requested = canonical_url_to_url_and_version(entry)
             if version.id:
@@ -1812,6 +1812,14 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 path = url if url.endswith('/') else url + '/'
                 repo_url = drop_version(path)
                 requested = requested or path[len(repo_url):].strip('/') or None
+            repos.append((entry, repo_url, requested))
+        return repos
+
+    @classmethod
+    def get_system_version_conflicts(cls, value, namespace=None):
+        """The system-version entries naming different versions of one repository, by the repository's URL."""
+        entries_by_repo = {}
+        for entry, repo_url, requested in cls.get_system_version_entry_repos(value, namespace):
             entries_by_repo.setdefault(repo_url, {}).setdefault(requested, entry)
         return {
             repo_url: list(entries.values()) for repo_url, entries in entries_by_repo.items() if len(entries) > 1
@@ -2080,37 +2088,28 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         if mappings:
             self.index_mappings(mappings)
 
-    @staticmethod
-    def resolve_system_version_entry(entry):
-        version, _ = ConceptContainerModel.resolve_reference_expression(entry.strip())
-        return version
-
-    @classmethod
-    def get_system_version_entry_repo_url(cls, entry):
-        """The repository a system-version entry names, also when the version it asks for doesn't resolve"""
-        version = cls.resolve_system_version_entry(entry)
-        if version.id:
-            return version.versioned_object_url
-        url, _ = canonical_url_to_url_and_version(entry.strip())
-        if is_canonical_uri(url):
-            repo = cls.resolve_system_version_entry(url)
-            return repo.versioned_object_url if repo.id else None
-        return drop_version(url if url.endswith('/') else url + '/')
-
     def get_locked_system_version_parameter(self):
-        """This expansion's system-version, plus each source it locked that the parameter doesn't name yet"""
-        entries = [entry.strip() for entry in compact(
-            str(get(self.parameters, ExpansionParameters.INCLUDE_SYSTEM) or '').split(','))]
-        named = set(compact(self.get_system_version_entry_repo_url(entry) for entry in entries))
+        """This expansion's system-version, plus each source it locked that the parameter doesn't name yet.
+        Entries resolve in the owner's namespace, as the expansion built from them will."""
+        namespace = self.get_system_version_namespace(self.collection_version.parent_url)
+        value = str(get(self.parameters, ExpansionParameters.INCLUDE_SYSTEM) or '')
+        repos = self.get_system_version_entry_repos(value, namespace)
+        entries = [entry for entry, _, _ in repos]
+        named = {repo_url for _, repo_url, _ in repos}
         for version in self.evaluated_source_versions.filter(is_active=True).order_by('-id'):
             if version.versioned_object_url in named:
                 continue
             named.add(version.versioned_object_url)
             entry = f"{version.canonical_url}|{version.version}" if version.canonical_url else None
-            if not entry or get(self.resolve_system_version_entry(entry), 'id') != version.id:
+            if not entry or self.resolve_system_version_entries(entry, namespace)[0][1].id != version.id:
                 entry = f"{version.versioned_object_url}|{version.version}"
             entries.append(entry)
-        return ','.join(entries)
+        locked = ','.join(entries)
+        # as on expansion create, one version per source: never add a conflict HEAD's own parameter doesn't have
+        if set(self.get_system_version_conflicts(locked, namespace)) - set(
+                self.get_system_version_conflicts(value, namespace)):
+            return value
+        return locked
 
     @staticmethod
     def replace_head_rows(rows, owner, field, klass):
