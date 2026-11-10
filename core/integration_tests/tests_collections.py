@@ -4379,6 +4379,48 @@ class CollectionVersionExpansionsViewTest(OCLAPITestCase):
         self.assertEqual(self.collection.expansions.count(), 1)
         self.assertIsNotNone(self.collection.expansion_uri)
 
+    def test_post_system_version_with_two_versions_of_one_source_400(self):
+        source = OrganizationSourceFactory()
+        v1 = OrganizationSourceFactory(organization=source.organization, mnemonic=source.mnemonic, version='v1')
+        v2 = OrganizationSourceFactory(organization=source.organization, mnemonic=source.mnemonic, version='v2')
+
+        response = self.client.post(
+            self.collection.url + 'HEAD/expansions/',
+            {'mnemonic': 'e1', 'parameters': {'system-version': f'{v1.uri},{v2.uri}'}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data,
+            {'parameters': {'system-version': [
+                f'Names more than one version of {source.uri}: {v1.uri}, {v2.uri}. '
+                'Use only one version of a source in system-version.'
+            ]}})
+        self.assertEqual(self.collection.expansions.count(), 0)
+
+        for value in ([v1.uri], [], {}, 0, False):
+            response = self.client.post(
+                self.collection.url + 'HEAD/expansions/',
+                {'mnemonic': 'e1', 'parameters': {'system-version': value}},
+                HTTP_AUTHORIZATION='Token ' + self.token,
+                format='json'
+            )
+
+            self.assertEqual(response.status_code, 400, value)
+            self.assertEqual(self.collection.expansions.count(), 0)
+
+        response = self.client.post(
+            self.collection.url + 'HEAD/expansions/',
+            {'mnemonic': 'e1', 'parameters': {'system-version': f'{v1.uri},{v1.uri}'}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(self.collection.expansions.count(), 1)
+
     def test_get(self):
         response = self.client.get(
             self.collection.url + 'HEAD/expansions/',
