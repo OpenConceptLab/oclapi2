@@ -7,9 +7,9 @@ from core.mappings.models import Mapping
 
 
 class Command(BaseCommand):
-    help = ('Finds concepts and mappings with more than one version flagged latest, keeps the one with the highest id '
-            'as latest and demotes the others, as a new version would have. Every repaired concept and mapping is '
-            'listed.')
+    help = ('Finds concepts and mappings with more than one version flagged latest, keeps the active one with the '
+            'highest id as latest and demotes the others, as a new version would have. Every repaired concept and '
+            'mapping is listed.')
 
     def add_arguments(self, parser):
         parser.add_argument('--dry-run', action='store_true')
@@ -53,7 +53,7 @@ class Command(BaseCommand):
             if not head:
                 return None
             latest, *stale = list(
-                head.versions.filter(is_latest_version=True).order_by('-id')) or [None]
+                head.versions.filter(is_latest_version=True).order_by('-is_active', '-id')) or [None]
             if not stale:
                 return None
             line = f"{head.uri} keeps {latest.version}, demotes {', '.join(version.version for version in stale)}"

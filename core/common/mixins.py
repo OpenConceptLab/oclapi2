@@ -1159,13 +1159,17 @@ class SourceChildMixin(ChecksumModel):
                     version.index()
             self.index()
 
+    def lock_versioned_object(self):
+        """Holds the versioned object's row until the transaction ends, so new versions of it run one at a time."""
+        if self.versioned_object_id:
+            list(self.__class__.objects.select_for_update().filter(id=self.versioned_object_id).only('id'))
+
     def _lock_and_get_latest_versions(self):
         """
         Locks the versioned object so concurrent new versions of it run one at a time, then returns its versions flagged
         latest, highest id first (only one unless an earlier race left more), or [None] when there are none.
         """
-        if self.versioned_object_id:
-            list(self.__class__.objects.select_for_update().filter(id=self.versioned_object_id).only('id'))
+        self.lock_versioned_object()
         return list(
             self.versions.exclude(id=self.id).filter(is_latest_version=True).order_by('-id')
         ) or [None]
@@ -1224,6 +1228,7 @@ class SourceChildMixin(ChecksumModel):
                                 raise ValidationError(self.get_standard_checksum_error())
                         if not self._index:
                             self.prev_latest_version_id = prev_latest.id
+                            self.stale_latest_version_ids = [version.id for version in stale_latest_versions]
                         prev_latest.unmark_latest_version(self._index, parent)
                         for stale_version in stale_latest_versions:
                             stale_version.unmark_latest_version(self._index, parent)

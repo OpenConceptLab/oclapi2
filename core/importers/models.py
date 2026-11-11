@@ -199,6 +199,8 @@ class BaseResourceImporter:
         was.
         """
         prev_latest = resource.get_latest_version()
+        stale_latest_version_ids = list(resource.versions.filter(
+            is_latest_version=True).exclude(id=get(prev_latest, 'id')).values_list('id', flat=True))
         resource.retire(
             self.user, self.data.get('update_comment') or self.data.get('comment'), self.data.get('retire_reason'),
             index=get(prev_latest, '_index', True)
@@ -206,6 +208,7 @@ class BaseResourceImporter:
         self.instance = resource.get_latest_version()
         if self.instance:
             self.instance.prev_latest_version_id = get(prev_latest, 'id')
+            self.instance.stale_latest_version_ids = stale_latest_version_ids
 
 
 class OrganizationImporter(BaseResourceImporter):
@@ -817,6 +820,7 @@ class ImportIndexer:
         self.ids[resource].update(compact([
             instance.versioned_object_id,
             get(instance, 'prev_latest_version_id'),
+            *(get(instance, 'stale_latest_version_ids') or []),
             get(instance, 'latest_version_id'),
             instance.id,
         ]))
