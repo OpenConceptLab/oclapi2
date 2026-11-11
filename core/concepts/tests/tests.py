@@ -3112,11 +3112,6 @@ class ConceptTest(OCLTestCase):
 class ConceptConcurrentNewVersionTest(OCLAPITransactionTestCase):
     """Saves two new versions of one concept at once, on separate connections."""
 
-    def setUp(self):
-        super().setUp()
-        call_command('loaddata', 'core/fixtures/base_entities.yaml', 'core/fixtures/ocl_org.yaml', verbosity=0)
-        self.token = UserProfile.objects.get(username='ocladmin').get_token()  # committed before any test takes a lock
-
     def test_two_new_versions_at_once_leave_one_latest_version(self):
         source = OrganizationSourceFactory(version=HEAD)
         concept = Concept.persist_new({
@@ -3159,6 +3154,14 @@ class ConceptConcurrentNewVersionTest(OCLAPITransactionTestCase):
             [concept.versions.order_by('-id').first().id]
         )
 
+
+class ConceptLocaleEditLockMixin:
+    """Locale edits on another connection. One test per class, as a transaction test's flush removes the fixtures."""
+
+    def setUp(self):
+        super().setUp()
+        self.token = UserProfile.objects.get(username='ocladmin').get_token()  # committed before any test takes a lock
+
     @staticmethod
     def _concept_for_locale_edit():
         source = OrganizationSourceFactory(version=HEAD)
@@ -3190,6 +3193,8 @@ class ConceptConcurrentNewVersionTest(OCLAPITransactionTestCase):
                 time.sleep(0.1)
         self.fail('The locale edit never waited for the HEAD lock')
 
+
+class ConceptLocaleEditLockOrderTest(ConceptLocaleEditLockMixin, OCLAPITransactionTestCase):
     def test_locale_edit_waits_for_the_head_lock_before_touching_the_locale(self):
         concept = self._concept_for_locale_edit()
         name = concept.names.first()
@@ -3207,6 +3212,8 @@ class ConceptConcurrentNewVersionTest(OCLAPITransactionTestCase):
         self.assertEqual(responses[0].status_code, 200)
         self.assertTrue(concept.get_latest_version().names.filter(name='Edited').exists())
 
+
+class ConceptLocaleEditReplacedLocaleTest(ConceptLocaleEditLockMixin, OCLAPITransactionTestCase):
     def test_locale_edit_is_not_found_once_a_new_version_replaced_the_locale(self):
         concept = self._concept_for_locale_edit()
         name = concept.names.first()
