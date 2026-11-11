@@ -1,23 +1,27 @@
 import json
 from datetime import timedelta
 import threading
+import time
+from io import StringIO
 from unittest.mock import ANY, Mock, patch
 
 import factory
 from elasticsearch_dsl.utils import AttrDict
 from django.contrib.auth.models import Group
+from django.core.management import call_command
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, connection
+from django.db import IntegrityError, connection, transaction
 from django.test.utils import CaptureQueriesContext
 from django.http import Http404, QueryDict
 from django.test import override_settings, tag
 from pydash import omit
+from rest_framework.test import APIClient
 
 from core.collections.models import CollectionReference
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import OPENMRS_VALIDATION_SCHEMA, HEAD, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, LATEST
 from core.common.search import Reranker
-from core.common.tests import OCLTestCase, OCLAPITestCase, PREVIEW_GROUP_NAME
+from core.common.tests import OCLTestCase, OCLAPITestCase, OCLAPITransactionTestCase, PREVIEW_GROUP_NAME
 from core.concepts.constants import (
     OPENMRS_MUST_HAVE_EXACTLY_ONE_PREFERRED_NAME,
     OPENMRS_FULLY_SPECIFIED_NAME_UNIQUE_PER_SOURCE_LOCALE, OPENMRS_AT_LEAST_ONE_FULLY_SPECIFIED_NAME,
@@ -26,7 +30,7 @@ from core.concepts.constants import (
     OPENMRS_NO_MORE_THAN_ONE_SHORT_NAME_PER_LOCALE, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED,
     OPENMRS_CONCEPT_CLASS, OPENMRS_DATATYPE, OPENMRS_DESCRIPTION_TYPE, OPENMRS_NAME_LOCALE)
 from core.concepts.documents import ConceptDocument
-from core.concepts.models import AbstractLocalizedText, Concept
+from core.concepts.models import AbstractLocalizedText, Concept, ConceptName
 from core.concepts.serializers import ConceptListSerializer, ConceptVersionListSerializer, ConceptDetailSerializer, \
     ConceptVersionDetailSerializer, ConceptMinimalSerializer, ConceptCascadeMinimalSerializer, \
     ConceptLocaleSerializer, ConceptDescriptionSerializer, ConceptLookupListSerializer, \
@@ -1693,6 +1697,63 @@ class ConceptTest(OCLTestCase):
             {'__all__': CONCEPT_IS_ALREADY_NOT_RETIRED}
         )
 
+    def _concept_with_two_latest_versions(self):
+        """A concept whose last two versions are both flagged latest, as two concurrent writers used to leave it."""
+        source = OrganizationSourceFactory(version=HEAD)
+        concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
+        })
+        first_version = concept.get_latest_version()
+        new_version = first_version.clone()
+        new_version.datatype = 'foo'
+        self.assertEqual(new_version.save_as_new_version(concept.created_by), {})
+        Concept.objects.filter(id=first_version.id).update(is_latest_version=True)
+        self.assertEqual(concept.versions.filter(is_latest_version=True).count(), 2)
+        return concept, first_version, concept.versions.order_by('-id').first()
+
+    def test_save_as_new_version_demotes_every_version_flagged_latest(self):
+        concept, _, second_version = self._concept_with_two_latest_versions()
+
+        new_version = second_version.clone()
+        new_version.datatype = 'bar'
+        self.assertEqual(new_version.save_as_new_version(concept.created_by), {})
+
+        self.assertEqual(
+            list(concept.versions.filter(is_latest_version=True).values_list('id', flat=True)), [new_version.id])
+
+    def test_repair_duplicate_latest_versions_keeps_the_active_one(self):
+        concept, first_version, second_version = self._concept_with_two_latest_versions()
+        second_version.soft_delete()
+
+        call_command('repair_duplicate_latest_versions', stdout=StringIO())
+
+        self.assertEqual(concept.get_latest_version().id, first_version.id)
+        second_version.refresh_from_db()
+        self.assertFalse(second_version.is_latest_version)
+
+    def test_repair_duplicate_latest_versions_keeps_the_newest(self):
+        concept, first_version, second_version = self._concept_with_two_latest_versions()
+
+        out = StringIO()
+        call_command('repair_duplicate_latest_versions', '--dry-run', stdout=out)
+        self.assertIn(
+            f'would be repaired: {concept.uri} keeps {second_version.version}, demotes {first_version.version}',
+            out.getvalue())
+        self.assertEqual(concept.versions.filter(is_latest_version=True).count(), 2)
+
+        out = StringIO()
+        call_command('repair_duplicate_latest_versions', stdout=out)
+        self.assertIn(f'repaired: {concept.uri} keeps {second_version.version}', out.getvalue())
+        self.assertEqual(
+            list(concept.versions.filter(is_latest_version=True).values_list('id', flat=True)), [second_version.id])
+        first_version.refresh_from_db()
+        self.assertFalse(first_version.sources.filter(id=concept.parent_id).exists())
+
+        out = StringIO()
+        call_command('repair_duplicate_latest_versions', stdout=out)
+        self.assertIn('0 concept(s) repaired', out.getvalue())
+
     @patch.object(Concept, 'index', autospec=True)
     def test_edit_and_retire_index_versions_cloned_from_deferred_rows(  # pylint: disable=protected-access
             self, index_mock):
@@ -3151,6 +3212,131 @@ class ConceptTest(OCLTestCase):
 
         process_hierarchy_mock.apply_async.assert_called_once_with(
             (concept.id, None, None, True), queue='concurrent', permanent=False)
+
+
+class ConceptConcurrentNewVersionTest(OCLAPITransactionTestCase):
+    """Saves two new versions of one concept at once, on separate connections."""
+
+    def test_two_new_versions_at_once_leave_one_latest_version(self):
+        source = OrganizationSourceFactory(version=HEAD)
+        concept = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
+        })
+        clones = []
+        for datatype in ('foo', 'bar'):
+            clone = concept.get_latest_version().clone()
+            clone.datatype = datatype
+            clones.append(clone)
+        post_version_create = Concept.post_version_create
+
+        def slow_post_version_create(instance, *args):
+            post_version_create(instance, *args)
+            time.sleep(0.5)  # widens the gap between reading the latest version and demoting it
+
+        barrier = threading.Barrier(2, timeout=30)
+        results = []
+
+        def save(clone):
+            try:
+                barrier.wait()
+                results.append(clone.save_as_new_version(concept.created_by))
+            finally:
+                connection.close()
+
+        with patch.object(Concept, 'post_version_create', slow_post_version_create):
+            threads = [threading.Thread(target=save, args=(clone,), daemon=True) for clone in clones]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=30)
+            self.assertFalse(any(thread.is_alive() for thread in threads))
+
+        self.assertEqual(results, [{}, {}])
+        self.assertEqual(concept.versions.count(), 3)
+        self.assertEqual(
+            list(concept.versions.filter(is_latest_version=True).values_list('id', flat=True)),
+            [concept.versions.order_by('-id').first().id]
+        )
+
+
+class ConceptLocaleEditLockMixin:
+    """Locale edits on another connection. One test per class, as a transaction test's flush removes the fixtures."""
+
+    def setUp(self):
+        super().setUp()
+        self.token = UserProfile.objects.get(username='ocladmin').get_token()  # committed before any test takes a lock
+
+    @staticmethod
+    def _concept_for_locale_edit():
+        source = OrganizationSourceFactory(version=HEAD)
+        return Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'c1', 'parent': source,
+            'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)]
+        })
+
+    def _start_locale_edit(self, concept, name, responses):
+        """PATCHes the locale from another connection, while the caller holds the concept's HEAD lock."""
+        def patch_name():
+            try:
+                responses.append(APIClient().patch(
+                    f'{concept.uri}names/{name.id}/', {'name': 'Edited'},
+                    HTTP_AUTHORIZATION=f'Token {self.token}', format='json'))
+            finally:
+                connection.close()
+
+        thread = threading.Thread(target=patch_name, daemon=True)
+        thread.start()
+        return thread
+
+    def _wait_until_blocked_by_this_connection(self):
+        with connection.cursor() as cursor:
+            for _ in range(300):
+                cursor.execute('SELECT count(*) FROM pg_locks WHERE pg_backend_pid() = ANY(pg_blocking_pids(pid))')
+                if cursor.fetchone()[0]:
+                    return
+                time.sleep(0.1)
+        self.fail('The locale edit never waited for the HEAD lock')
+
+
+class ConceptLocaleEditLockOrderTest(ConceptLocaleEditLockMixin, OCLAPITransactionTestCase):
+    def test_locale_edit_waits_for_the_head_lock_before_touching_the_locale(self):
+        concept = self._concept_for_locale_edit()
+        name = concept.names.first()
+        responses = []
+
+        with transaction.atomic():
+            concept.lock_versioned_object()
+            thread = self._start_locale_edit(concept, name, responses)
+            self._wait_until_blocked_by_this_connection()
+            # nowait raises if the waiting edit already holds the locale: the deadlock a concurrent edit would hit
+            list(ConceptName.objects.select_for_update(nowait=True).filter(id=name.id))
+
+        thread.join(timeout=30)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(responses[0].status_code, 200)
+        self.assertTrue(concept.get_latest_version().names.filter(name='Edited').exists())
+
+
+class ConceptLocaleEditReplacedLocaleTest(ConceptLocaleEditLockMixin, OCLAPITransactionTestCase):
+    def test_locale_edit_is_not_found_once_a_new_version_replaced_the_locale(self):
+        concept = self._concept_for_locale_edit()
+        name = concept.names.first()
+        responses = []
+
+        with transaction.atomic():
+            concept.lock_versioned_object()
+            thread = self._start_locale_edit(concept, name, responses)
+            self._wait_until_blocked_by_this_connection()
+            new_version = concept.get_latest_version().clone()
+            new_version.datatype = 'foo'
+            self.assertEqual(new_version.save_as_new_version(concept.created_by), {})
+
+        thread.join(timeout=30)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(responses[0].status_code, 404)
+        self.assertEqual(concept.versions.count(), 2)
+        self.assertFalse(ConceptName.objects.filter(name='Edited').exists())
 
 
 class ConceptSerializersTest(OCLTestCase):

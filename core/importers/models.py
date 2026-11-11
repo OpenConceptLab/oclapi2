@@ -194,18 +194,16 @@ class BaseResourceImporter:
 
     def retire_resource(self, resource):
         """
-        Retires a concept or mapping and keeps the version the retire saved as the instance, marked with the one it
-        superseded, as process() keeps what it saves. Both are left deferred (_index=False) when the latest version
-        was.
+        Retires a concept or mapping and keeps the version the retire saved as the instance, marked by that save with
+        the versions it demoted, as process() keeps what it saves. All are left deferred (_index=False) when the latest
+        version was.
         """
         prev_latest = resource.get_latest_version()
         resource.retire(
             self.user, self.data.get('update_comment') or self.data.get('comment'), self.data.get('retire_reason'),
             index=get(prev_latest, '_index', True)
         )
-        self.instance = resource.get_latest_version()
-        if self.instance:
-            self.instance.prev_latest_version_id = get(prev_latest, 'id')
+        self.instance = get(resource, 'last_retire_version') or resource.get_latest_version()
 
 
 class OrganizationImporter(BaseResourceImporter):
@@ -817,6 +815,7 @@ class ImportIndexer:
         self.ids[resource].update(compact([
             instance.versioned_object_id,
             get(instance, 'prev_latest_version_id'),
+            *(get(instance, 'stale_latest_version_ids') or []),
             get(instance, 'latest_version_id'),
             instance.id,
         ]))

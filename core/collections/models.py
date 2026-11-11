@@ -311,7 +311,7 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     def seed_references(self):
         head = self.head
         if head:
-            for reference in head.references.all():
+            for reference in head.references.order_by('id'):
                 new_reference = reference.clone(last_resolved_at=timezone.now(), collection=self)
                 new_reference.save()
                 new_reference.concepts.set(reference.concepts.all())

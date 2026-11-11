@@ -1022,7 +1022,10 @@ class SourceChildMixin(ChecksumModel):
         new_version.comment = comment
         if reason is not None:
             new_version.retire_reason = reason
-        return new_version.save_as_new_version(user)
+        errors = new_version.save_as_new_version(user)
+        if not errors:
+            self.last_retire_version = new_version
+        return errors
 
     @classmethod
     def from_uri_queryset(cls, uri):  # soon to be deleted
@@ -1153,11 +1156,27 @@ class SourceChildMixin(ChecksumModel):
     def _process_latest_version_hierarchy(self, prev_latest, parent_concept_uris=None, create_parent_version=True):
         pass
 
-    def _index_on_new_version_creation(self, prev_latest):
+    def _index_on_new_version_creation(self, prev_latest, stale_latest_versions=None):
         if self._index:
-            if prev_latest:
-                prev_latest.index()
+            for version in [prev_latest, *(stale_latest_versions or [])]:
+                if version:
+                    version.index()
             self.index()
+
+    def lock_versioned_object(self):
+        """Holds the versioned object's row until the transaction ends, so new versions of it run one at a time."""
+        if self.versioned_object_id:
+            list(self.__class__.objects.select_for_update().filter(id=self.versioned_object_id).only('id'))
+
+    def _lock_and_get_latest_versions(self):
+        """
+        Locks the versioned object so concurrent new versions of it run one at a time, then returns its versions flagged
+        latest, highest id first (only one unless an earlier race left more), or [None] when there are none.
+        """
+        self.lock_versioned_object()
+        return list(
+            self.versions.exclude(id=self.id).filter(is_latest_version=True).order_by('-id')
+        ) or [None]
 
     def remove_locales(self):
         pass
@@ -1182,10 +1201,12 @@ class SourceChildMixin(ChecksumModel):
         self.version = self.version or generate_temp_version()
         parent = self.parent
         persisted = False
-        prev_latest = self.versions.exclude(id=self.id).filter(is_latest_version=True).first()
+        prev_latest = None
+        stale_latest_versions = []
         is_concept = self.__class__.__name__ == 'Concept'
         try:
             with transaction.atomic():
+                prev_latest, *stale_latest_versions = self._lock_and_get_latest_versions()
                 self.validate_locales_limit(get(self, 'cloned_names'), get(self, 'cloned_descriptions'))
                 cls.pause_indexing()
                 self.is_latest_version = True
@@ -1211,7 +1232,10 @@ class SourceChildMixin(ChecksumModel):
                                 raise ValidationError(self.get_standard_checksum_error())
                         if not self._index:
                             self.prev_latest_version_id = prev_latest.id
+                            self.stale_latest_version_ids = [version.id for version in stale_latest_versions]
                         prev_latest.unmark_latest_version(self._index, parent)
+                        for stale_version in stale_latest_versions:
+                            stale_version.unmark_latest_version(self._index, parent)
                         should_process_hierarchy = should_process_hierarchy or bool(
                             is_concept and prev_latest.parent_concept_urls)
                         if should_process_hierarchy:
@@ -1221,14 +1245,13 @@ class SourceChildMixin(ChecksumModel):
                     persisted = True
                     cls.resume_indexing()
 
-                transaction.on_commit(lambda: self._index_on_new_version_creation(prev_latest))
+                transaction.on_commit(lambda: self._index_on_new_version_creation(prev_latest, stale_latest_versions))
         except ValidationError as err:
             errors.update(get(err, 'message_dict') or get(err, 'error_dict') or {})
         finally:
             cls.resume_indexing()
             if not persisted:
-                if prev_latest:
-                    prev_latest.mark_latest_version(True, parent)
+                # The rollback has already restored prev_latest; re-marking it here could undo a newer writer's demote.
                 if self.id:
                     self.remove_locales()
                     self.delete()

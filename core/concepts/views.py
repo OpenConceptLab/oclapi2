@@ -846,6 +846,10 @@ class ConceptLocaleRetrieveUpdateDestroyView(ConceptBaseView, RetrieveUpdateDest
             new_version = resource_instance.clone()
             try:
                 with transaction.atomic():
+                    # New versions lock HEAD before rewriting locales, so lock it first here too or the two deadlock
+                    resource_instance.lock_versioned_object()
+                    if not get(resource_instance, self.parent_list_attribute).filter(id=self.kwargs['uuid']).exists():
+                        raise Http404()  # a new version replaced this locale while the lock was awaited
                     saved_instance = serializer.save()
                     setattr(
                         new_version, subject_label_attr, [*[locale.clone() for locale in locales.all()], saved_instance]

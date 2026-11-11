@@ -1896,6 +1896,79 @@ class BulkImportInlineTest(OCLTestCase):
             {concept.id, first_version.id, concept.get_latest_version().id}
         )
 
+    def _concept_with_two_versions_flagged_latest(self, mnemonic_org):
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic=mnemonic_org))
+        for line in [self.concept_line(source, 'C1'), self.concept_line(source, 'C1', datatype='Text')]:
+            BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[line]).run()
+        concept = Concept.objects.get(parent=source, mnemonic='C1', id=F('versioned_object_id'))
+        first_version = concept.versions.order_by('id').first()
+        Concept.objects.filter(id=first_version.id).update(is_latest_version=True)
+        return source, first_version
+
+    @patch('core.importers.models.batch_index_resources')
+    def test_update_import_reindexes_every_version_it_demotes(self, batch_index_resources_mock):
+        source, first_version = self._concept_with_two_versions_flagged_latest('DemoteUpdateOrg')
+        batch_index_resources_mock.reset_mock()
+
+        BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[
+            self.concept_line(source, 'C1', datatype='Numeric')]).run()
+
+        first_version.refresh_from_db()
+        self.assertFalse(first_version.is_latest_version)
+        self.assertTrue(first_version._index)  # pylint: disable=protected-access
+        self.assertIn(first_version.id, {
+            _id for call_args in batch_index_resources_mock.apply_async.call_args_list
+            for _id in call_args[0][0][1]['id__in']
+        })
+
+    @patch('core.importers.models.batch_index_resources')
+    def test_retire_import_reindexes_every_version_it_demotes(self, batch_index_resources_mock):
+        source, first_version = self._concept_with_two_versions_flagged_latest('DemoteRetireOrg')
+        Concept.objects.filter(parent=source).update(_index=False)
+        batch_index_resources_mock.reset_mock()
+
+        BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[
+            self.concept_line(source, 'C1', __action='DELETE')]).run()
+
+        self.assertTrue(Concept.objects.get(parent=source, mnemonic='C1', id=F('versioned_object_id')).retired)
+        first_version.refresh_from_db()
+        self.assertFalse(first_version.is_latest_version)
+        self.assertTrue(first_version._index)  # pylint: disable=protected-access
+        self.assertIn(first_version.id, {
+            _id for call_args in batch_index_resources_mock.apply_async.call_args_list
+            for _id in call_args[0][0][1]['id__in']
+        })
+
+    @patch('core.importers.models.batch_index_resources')
+    def test_retire_import_reindexes_a_version_written_while_it_waited_for_the_lock(self, batch_index_resources_mock):
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='DemoteWriterOrg'))
+        BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[
+            self.concept_line(source, 'C1')]).run()
+        Concept.objects.filter(parent=source).update(_index=False)
+        batch_index_resources_mock.reset_mock()
+        retire = Concept.retire
+        written = []
+
+        def retire_after_another_write(instance, *args, **kwargs):
+            version = instance.get_latest_version().clone()
+            version._index = False  # pylint: disable=protected-access
+            version.datatype = 'Text'
+            self.assertEqual(version.save_as_new_version(instance.created_by), {})
+            written.append(version)
+            return retire(instance, *args, **kwargs)
+
+        with patch.object(Concept, 'retire', retire_after_another_write):
+            BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[
+                self.concept_line(source, 'C1', __action='DELETE')]).run()
+
+        written[0].refresh_from_db()
+        self.assertFalse(written[0].is_latest_version)
+        self.assertTrue(written[0]._index)  # pylint: disable=protected-access
+        self.assertIn(written[0].id, {
+            _id for call_args in batch_index_resources_mock.apply_async.call_args_list
+            for _id in call_args[0][0][1]['id__in']
+        })
+
     @patch('core.importers.models.batch_index_resources')
     def test_mapped_concept_lookup_queries_plain_id_lists(self, _):
         source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='MappedLookupOrg'))

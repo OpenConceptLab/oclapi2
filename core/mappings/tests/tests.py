@@ -1,8 +1,10 @@
+from io import StringIO
 from unittest.mock import patch
 from uuid import UUID
 
 import factory
 from django.core.exceptions import ValidationError
+from django.core.management import call_command
 
 from core.common.constants import HEAD, OPENMRS_VALIDATION_SCHEMA
 from core.common.tests import OCLTestCase
@@ -321,6 +323,28 @@ class MappingTest(OCLTestCase):
         self.assertEqual(
             persisted_mapping.version_url, persisted_mapping.uri
         )
+
+    def test_save_as_new_version_and_repair_demote_every_version_flagged_latest(self):
+        source = OrganizationSourceFactory(version=HEAD)
+        mapping = MappingFactory(parent=source)
+        first_version = mapping.get_latest_version()
+        new_version = mapping.clone(mapping.created_by)
+        new_version.extras = {'foo': 'bar'}
+        self.assertEqual(new_version.save_as_new_version(mapping.created_by), {})
+        Mapping.objects.filter(id=first_version.id).update(is_latest_version=True)
+
+        out = StringIO()
+        call_command('repair_duplicate_latest_versions', stdout=out)
+        self.assertIn(f'repaired: {mapping.uri} keeps {new_version.version}', out.getvalue())
+        self.assertEqual(
+            list(mapping.versions.filter(is_latest_version=True).values_list('id', flat=True)), [new_version.id])
+
+        Mapping.objects.filter(id=first_version.id).update(is_latest_version=True)
+        newest_version = mapping.clone(mapping.created_by)
+        newest_version.extras = {'foo': 'baz'}
+        self.assertEqual(newest_version.save_as_new_version(mapping.created_by), {})
+        self.assertEqual(
+            list(mapping.versions.filter(is_latest_version=True).values_list('id', flat=True)), [newest_version.id])
 
     @patch.object(Mapping, 'index_from_concept')
     @patch.object(Mapping, 'index', autospec=True)
