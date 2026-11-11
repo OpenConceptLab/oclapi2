@@ -820,7 +820,7 @@ class UserDetailViewTest(OCLAPITestCase):
             self.assertEqual(tuple(data.get(field) for field in fields), counts, requester.username)
             summary = get_user(requester, '?summary=true')
             self.assertEqual(summary['organizations'], organizations, requester.username)
-            self.assertEqual((summary['sources'], summary['collections']), (1, 0), requester.username)
+            self.assertEqual((summary['sources'], summary['collections']), counts[2:4], requester.username)
             self.assertEqual(summary.get('bookmarks'), counts[-1], requester.username)
 
     def test_get_200_with_subscribed_orgs(self):

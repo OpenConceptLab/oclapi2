@@ -3412,7 +3412,8 @@ class ConceptListCacheTest(OCLAPITestCase):
     def test_repo_version_concepts_with_hierarchy_includes_are_not_cached(self):
         body_key, _ = self.source_v1.get_concepts_cache_keys()
 
-        for param in ['includeParentConcepts', 'includeChildConcepts']:
+        for param in ['includeParentConcepts', 'includeChildConcepts', 'includeParentConceptURLs',
+                      'includeChildConceptURLs', 'includeHierarchyPath', 'includeSummary']:
             key = f'{body_key}?{param}=true'
             url = f'/orgs/{self.org}/sources/MySource/v1/concepts/?{param}=true'
 
@@ -3422,7 +3423,7 @@ class ConceptListCacheTest(OCLAPITestCase):
             self.assertEqual(response.data[0]['id'], 'MyConcept1')
             self.assertIsNone(cache.get(key))
 
-            # the included concepts are filtered per requester, so a cached response is never served
+            # hierarchy fields are filtered per requester, so a cached response is never served
             cache.set(key, [{'id': 'FromCache'}])
             response = self.client.get(url)
 

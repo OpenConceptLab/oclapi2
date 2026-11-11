@@ -91,8 +91,8 @@ class UserListSerializer(OrganizationRoleMixin, AbstractResourceSerializer):
 
 class UserSummarySerializer(
         OrganizationRoleMixin, PrivateUserFieldsMixin, ViewableCountsMixin, serializers.ModelSerializer):
-    sources = IntegerField(source='public_sources')
-    collections = IntegerField(source='public_collections')
+    sources = serializers.SerializerMethodField()
+    collections = serializers.SerializerMethodField()
     organizations = serializers.SerializerMethodField()
     bookmarks = IntegerField(source='bookmarks_count')
 

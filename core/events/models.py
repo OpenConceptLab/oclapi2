@@ -1,5 +1,18 @@
 from django.db import models
+from django.db.models.functions import Coalesce
 from pydash import has, compact
+
+from core.common.constants import ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT, HEAD
+
+
+def get_repo_head_url(field):
+    """The URL of the repo HEAD an event URL is in, read by position, or '' when it names no repo."""
+    return Coalesce(
+        models.Func(
+            models.F(field), function='SUBSTRING',
+            template="%(function)s(%(expressions)s FROM '^(/(?:orgs|users)/[^/]+/(?:sources|collections)/[^/]+/)')",
+            output_field=models.TextField()),
+        models.Value(''), output_field=models.TextField())
 
 
 class Event(models.Model):
@@ -92,49 +105,68 @@ class Event(models.Model):
 
     @staticmethod
     def get_model_for_url(url):  # pylint: disable=too-many-return-statements
-        """The model of the object an event's URL names."""
-        if not url:
+        """
+        The model of the object an event's URL names, read by position:
+        /<orgs|users>/<owner>/[<sources|collections>/<repo>/[<version>/]][<concepts|mappings>/<id>/...]
+        """
+        parts = [part for part in (url or '').split('/') if part]
+        if len(parts) < 2 or parts[0] not in ('orgs', 'users'):
             return None
-        if '/mappings/' in url:
-            from core.mappings.models import Mapping
-            return Mapping
-        if '/concepts/' in url:
-            from core.concepts.models import Concept
-            return Concept
-        if '/sources/' in url:
-            from core.sources.models import Source
-            return Source
-        if '/collections/' in url:
-            from core.collections.models import Collection
-            return Collection
-        if '/orgs/' in url:
-            from core.orgs.models import Organization
-            return Organization
-        if '/users/' in url:
+        if len(parts) == 2:
+            if parts[0] == 'orgs':
+                from core.orgs.models import Organization
+                return Organization
             from core.users.models import UserProfile
             return UserProfile
-        return None
+        if len(parts) < 4 or parts[2] not in ('sources', 'collections'):
+            return None
+        content_type = parts[4] if len(parts) >= 6 else None
+        if content_type not in ('concepts', 'mappings') and len(parts) >= 7:
+            content_type = parts[5]
+        if content_type == 'concepts':
+            from core.concepts.models import Concept
+            return Concept
+        if content_type == 'mappings':
+            from core.mappings.models import Mapping
+            return Mapping
+        if len(parts) > 5:
+            return None
+        if parts[2] == 'sources':
+            from core.sources.models import Source
+            return Source
+        from core.collections.models import Collection
+        return Collection
 
     @property
     def referenced_object(self):
         model = self.get_model_for_url(self.referenced_object_url)
         return model.objects.filter(uri=self.referenced_object_url).first() if model else None
 
-    @classmethod
-    def get_hidden_urls(cls, urls, user):
-        """The URLs among `urls` of objects that exist and `user` can't view now. A user can always be viewed."""
-        from core.users.models import UserProfile
-        urls_by_model = {}
-        for url in urls:
-            model = cls.get_model_for_url(url)
-            if model and model is not UserProfile:
-                urls_by_model.setdefault(model, set()).add(url)
-        hidden = set()
-        for model, model_urls in urls_by_model.items():
-            for obj in model.objects.filter(uri__in=model_urls):
-                if not UserProfile.can_user_view(user, obj):
-                    hidden.add(obj.uri)
-        return hidden
+    @staticmethod
+    def get_hidden_criteria(field, user):
+        """
+        A query on an event URL field for the orgs, repos, repo versions and repo content `user` can't view now, as
+        UserProfile.can_user_view decides; built from subqueries so the database applies it with the page.
+        """
+        from core.collections.models import Collection
+        from core.orgs.models import Organization
+        from core.sources.models import Source
+        is_authenticated = bool(user and user.is_authenticated)
+
+        orgs = Organization.objects.exclude(id__in=Organization.get_public().values('id'))
+        if is_authenticated:
+            orgs = orgs.exclude(members__id=user.id)
+        criteria = models.Q(**{f'{field}__in': orgs.filter(uri__isnull=False).values('uri')})
+
+        for model in (Source, Collection):
+            repos = model.objects.exclude(public_access__in=[ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT])
+            if is_authenticated:
+                repos = repos.exclude(user_id=user.id).exclude(organization__members__id=user.id)
+            repos = repos.filter(uri__isnull=False)
+            # a private HEAD hides its versions and content too; a private version only itself
+            criteria |= models.Q(**{f'{field}_repo__in': repos.filter(version=HEAD).values('uri')})
+            criteria |= models.Q(**{f'{field}__in': repos.exclude(version=HEAD).values('uri')})
+        return criteria
 
     @classmethod
     def get_visible_to(cls, queryset, user):
@@ -144,16 +176,13 @@ class Event(models.Model):
         """
         if getattr(user, 'is_staff', False):
             return queryset
-        is_combined = bool(queryset.query.combinator)
-        pairs = queryset.order_by().values_list('object_url', 'referenced_object_url')
-        if not is_combined:  # a union's rows are distinct already
-            pairs = pairs.distinct()
-        hidden = cls.get_hidden_urls({url for pair in pairs for url in pair}, user)
-        if not hidden:
-            return queryset
-        if is_combined:  # a union can't be filtered
+        if queryset.query.combinator:  # a union can't be filtered
             queryset = cls.objects.filter(id__in=queryset.order_by().values('id'))
-        return queryset.exclude(object_url__in=hidden).exclude(referenced_object_url__in=hidden)
+        return queryset.annotate(
+            object_url_repo=get_repo_head_url('object_url'),
+            referenced_object_url_repo=get_repo_head_url('referenced_object_url')
+        ).exclude(
+            cls.get_hidden_criteria('object_url', user) | cls.get_hidden_criteria('referenced_object_url', user))
 
     @property
     def referenced_object_repr(self):

@@ -1,4 +1,7 @@
+from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.tests import OCLAPITestCase
+from core.concepts.tests.factories import ConceptFactory
+from core.events.models import Event
 from core.events.tests.factories import EventFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import OrganizationSourceFactory
@@ -304,6 +307,41 @@ class UserEventsViewTest(OCLAPITestCase):
         for user in [member, staff]:
             self.assertEqual(get_followed_urls(user), sorted([org.url, source.url]), user)
         self.assertEqual(self.client.get('/orgs/turned-private-org/events/').data, [])
+
+    def test_get_events_hide_private_repo_versions_and_content_by_url_position(self):
+        org = OrganizationFactory(mnemonic='by-position')
+        member = UserProfileFactory(username='by-position-member')
+        org.members.add(member)
+        source = OrganizationSourceFactory(organization=org, mnemonic='mappings')
+        version = OrganizationSourceFactory(organization=org, mnemonic='mappings', version='v1')
+        collection = OrganizationCollectionFactory(organization=org, mnemonic='concepts')
+        concept = ConceptFactory(parent=source)
+        follower = UserProfileFactory(username='by-position-follower')
+        follower.follow(collection)
+        follower.follow(concept)
+        released = EventFactory(object_url=follower.url, referenced_object_url=version.uri, event_type='Released')
+        public_event = EventFactory(object_url=follower.url, referenced_object_url=org.url)
+        for repo in [source, collection]:
+            repo.public_access = 'None'
+            repo.save()
+
+        def get_event_ids(user=None):
+            headers = {'HTTP_AUTHORIZATION': f'Token {user.get_token()}'} if user else {}
+            response = self.client.get('/users/by-position-follower/events/?scopes=self', **headers)
+            self.assertEqual(response.status_code, 200)
+            return sorted(event['id'] for event in response.data)
+
+        all_ids = sorted(follower.events.values_list('id', flat=True))
+        hidden_ids = [released.id, *follower.events.filter(event_type=Event.FOLLOWED).values_list('id', flat=True)]
+        self.assertEqual(len(hidden_ids), 3)
+        self.assertIn(public_event.id, all_ids)
+        for user in [None, follower]:
+            self.assertEqual(get_event_ids(user), sorted(set(all_ids) - set(hidden_ids)), user)
+        self.assertEqual(get_event_ids(member), all_ids)
+
+        # the check is part of the events query, so building it reads nothing
+        with self.assertNumQueries(0):
+            Event.get_visible_to(follower.events, follower)
 
     def test_get_orgs_events(self):  # pylint:disable=too-many-statements,too-many-locals
         alfred = UserProfileFactory(username='alfred', first_name='Alfred', last_name='Pennyworth')

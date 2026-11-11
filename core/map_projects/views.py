@@ -82,10 +82,12 @@ class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListW
                 Q(name__icontains=search_query) | Q(id_text__icontains=search_query))
         return super().filter_queryset_by_public_access(queryset)
 
-    @staticmethod
-    def get_csv_rows(queryset):
-        """A row per listed project, read again by id as the list may be a union; content columns are left out."""
-        return MapProject.objects.filter(id__in=[project.id for project in queryset]).order_by('id').values(
+    def get_csv_rows(self, queryset):
+        """A row per listed project, read again by id as the list may be a union; verbose keeps every column."""
+        rows = MapProject.objects.filter(id__in=[project.id for project in queryset]).order_by('id')
+        if self.is_verbose():
+            return rows.values()
+        return rows.values(
             'id', 'name', 'public_access', 'is_active', 'created_at', 'updated_at', 'created_by__username',
             'updated_by__username', 'organization__mnemonic', 'user__username')
 

@@ -13,6 +13,7 @@ from core.mappings.serializers import MappingListSerializer, MappingDetailSerial
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.tests.factories import UserSourceFactory, OrganizationSourceFactory
+from core.url_registry.factories import GlobalURLRegistryFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -498,6 +499,7 @@ class MappingListViewTest(OCLAPITestCase):
         self.assertIsNone(mapping.to_source_id)
 
         to_source = OrganizationSourceFactory(canonical_url="http://who.int/ICPC-2")
+        GlobalURLRegistryFactory(url=to_source.canonical_url, namespace=to_source.organization.uri)
         to_source.update_mappings()
         mapping.refresh_from_db()
 
@@ -517,6 +519,7 @@ class MappingListViewTest(OCLAPITestCase):
         self.assertEqual(mapping.from_source, None)
 
         from_source = OrganizationSourceFactory(canonical_url="http://loinc.org")
+        GlobalURLRegistryFactory(url=from_source.canonical_url, namespace=from_source.organization.uri)
         from_source.update_mappings()
         mapping.refresh_from_db()
 

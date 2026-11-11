@@ -732,6 +732,8 @@ class CsvExportAccessTest(AccessTestMixin, OCLAPITestCase):
         for url in [self.owner.uri + 'map-projects/?csv=true&verbose=true', self.owner.uri + 'map-projects/?csv=true']:
             self.assertEqual(self.export(url, None, 'name'), ['csv-public-project'], url)
         self.assertNotIn('matches', self.export_columns(self.owner.uri + 'map-projects/?csv=true', self.owner))
+        verbose_url = self.owner.uri + 'map-projects/?csv=true&verbose=true'
+        self.assertIn('matches', self.export_columns(verbose_url, self.owner))
 
     def test_search_without_type(self):
         private_org = OrganizationFactory(public_access=ACCESS_TYPE_NONE)
