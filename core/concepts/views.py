@@ -612,7 +612,7 @@ class ConceptChildrenView(ConceptHierarchyMixin, ConceptBaseView, ListWithHeader
     is_page_size_capped = True
     is_searchable = False  # a search would list the repo's concepts, not this concept's hierarchy
     serializer_class = ConceptChildrenSerializer
-    default_qs_sort_attr = 'mnemonic'
+    default_qs_sort_attr = ['mnemonic', 'id']  # id breaks ties, so pages never repeat or skip a child
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -628,6 +628,9 @@ class ConceptChildrenView(ConceptHierarchyMixin, ConceptBaseView, ListWithHeader
                 instance.get_version_hierarchy_queryset('child_concepts', self.parent_resource), self.request)
         return get_viewable_concepts(instance.child_concept_queryset(), self.request)
 
+    def filter_queryset(self, queryset=None):  # annotated here, not in get_queryset, to keep it out of CSV exports
+        return Concept.annotate_has_children(super().filter_queryset(queryset))
+
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
 
@@ -636,6 +639,7 @@ class ConceptParentsView(ConceptHierarchyMixin, ConceptBaseView, ListWithHeaders
     is_page_size_capped = True
     is_searchable = False  # a search would list the repo's concepts, not this concept's hierarchy
     serializer_class = ConceptParentsSerializer
+    default_qs_sort_attr = ['-updated_at', 'id']  # id breaks ties, so pages never repeat or skip a parent
 
     def get_queryset(self):
         queryset = super().get_queryset()

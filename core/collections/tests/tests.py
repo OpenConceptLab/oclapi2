@@ -35,7 +35,7 @@ from core.common.tasks import update_collection_active_mappings_count
 from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.common.utils import to_owner_uri, get_falsy_values
 from core.concepts.documents import ConceptDocument
-from core.concepts.models import Concept
+from core.concepts.models import Concept, HierarchicalConcepts
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
@@ -44,6 +44,9 @@ from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.tasks.models import Task
+from core.toggles.models import Toggle
+from core.url_registry.constants import URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE
+from core.url_registry.factories import GlobalURLRegistryFactory, OrganizationURLRegistryFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -2133,9 +2136,11 @@ class TasksTest(OCLTestCase):
             expansion.unresolved_repo_versions,
             [
                 {'url': 'http://foo-system.com', 'type': 'reference.system', 'version': None, 'namespace': 'barbar'},
-                {'url': 'http://foo-valueset.com', 'type': 'reference.valueset', 'namespace': None},
-                {'url': '/orgs/Org/collections/Collection/123/', 'type': 'reference.valueset', 'namespace': None},
-                {'url': 'http://foo-system2.com|v1', 'type': 'reference.system', 'version': None, 'namespace': None}
+                {'url': 'http://foo-valueset.com', 'type': 'reference.valueset', 'namespace': collection.parent_url},
+                {'url': '/orgs/Org/collections/Collection/123/', 'type': 'reference.valueset',
+                 'namespace': collection.parent_url},
+                {'url': 'http://foo-system2.com|v1', 'type': 'reference.system', 'version': None,
+                 'namespace': collection.parent_url}
             ]
         )
         self.assertEqual(expansion.explicit_collection_versions.count(), 0)
@@ -2182,28 +2187,102 @@ class TasksTest(OCLTestCase):
         self.assertEqual(expansion.mappings.count(), 1)
         export_collection_task.apply_async.assert_not_called()
 
+    @staticmethod
+    def head_locked_to_v1():
+        """HEAD's expansion locks v1, whose concept version a later release v2 replaced"""
+        source, old, v1, v2 = CollectionReferenceTest.source_with_replaced_concept_version()
+        head = ExpansionTest.locked_auto_expansion(v1)
+        Expansion.objects.filter(uri=head.expansion_uri).update(parameters={'activeOnly': True})
+        head.add_expressions({'expressions': [old.versioned_object.uri]}, head.created_by)
+        version = OrganizationCollectionFactory(
+            organization=head.organization, version='v1', mnemonic=head.mnemonic)
+        return source, old, v1, v2, head, version
+
     @patch('core.common.tasks.export_collection')
-    def test_seed_children_task_copies_head_expansion(self, _):
-        collection = OrganizationCollectionFactory()
-        expansion = ExpansionFactory(collection_version=collection, parameters={'activeOnly': True})
-        collection.expansion_uri = expansion.uri
-        collection.save()
-        concept = ConceptFactory()
-        mapping_version = MappingFactory().get_latest_version()
-        expansion.concepts.add(concept)
-        expansion.mappings.add(mapping_version)
-        expansion.evaluated_source_versions.add(concept.parent)
-        collection_v1 = OrganizationCollectionFactory(
-            organization=collection.organization, version='v1', mnemonic=collection.mnemonic)
+    def test_seed_children_task_lock_keeps_heads_versions_through_a_rebuild(self, _):
+        source, old, v1, _, head, version = self.head_locked_to_v1()
+        self.assertEqual(list(head.expansion.concepts.all()), [old])
 
-        seed_children_to_new_version('collection', collection_v1.id, False)  # pylint: disable=no-value-for-parameter
+        seed_children_to_new_version('collection', version.id, False, expansion='lock')  # pylint: disable=no-value-for-parameter
 
-        collection_v1.refresh_from_db()
-        copy = collection_v1.expansion
-        self.assertEqual(list(copy.concepts.all()), [concept.get_latest_version()])
-        self.assertEqual(list(copy.mappings.all()), [mapping_version])
-        self.assertEqual(list(copy.evaluated_source_versions.all()), [concept.parent])
-        self.assertEqual(copy.parameters, expansion.parameters)
+        version.refresh_from_db()
+        expansion = version.expansion
+        self.assertEqual(list(expansion.concepts.all()), [old])
+        self.assertEqual(list(expansion.evaluated_source_versions.all()), [v1])
+        self.assertEqual(expansion.parameters, {'activeOnly': True, 'system-version': f'{source.uri}|v1'})
+        self.assertEqual(list(version.references.first().concepts.all()), [old])
+
+        expansion.seed_children(index=False, force_reevaluate=True)
+
+        self.assertEqual(list(expansion.concepts.all()), [old])
+        self.assertEqual(list(expansion.evaluated_source_versions.all()), [v1])
+
+    @patch('core.common.tasks.export_collection')
+    def test_seed_children_task_latest_evaluates_against_the_latest_release(self, _):
+        _, old, _, v2, _, version = self.head_locked_to_v1()
+        new = old.versioned_object.get_latest_version()
+
+        seed_children_to_new_version('collection', version.id, False, expansion='latest')  # pylint: disable=no-value-for-parameter
+
+        version.refresh_from_db()
+        expansion = version.expansion
+        self.assertEqual(list(expansion.concepts.all()), [new])
+        self.assertEqual(list(expansion.evaluated_source_versions.all()), [v2])
+        self.assertEqual(expansion.parameters, {'activeOnly': True})
+        self.assertEqual(list(version.references.first().concepts.all()), [new])
+
+    @patch('core.common.tasks.export_collection')
+    def test_seed_children_task_defaults_to_lock_with_a_head_expansion(self, _):
+        _, old, v1, _, _, version = self.head_locked_to_v1()
+
+        seed_children_to_new_version('collection', version.id, False)  # pylint: disable=no-value-for-parameter
+
+        version.refresh_from_db()
+        self.assertEqual(list(version.expansion.concepts.all()), [old])
+        self.assertEqual(list(version.expansion.evaluated_source_versions.all()), [v1])
+
+    def test_locked_system_version_parameter_keeps_sources_the_parameters_name(self):
+        source, _, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        other = OrganizationSourceFactory()
+        expansion = ExpansionFactory(
+            collection_version=OrganizationCollectionFactory(),
+            parameters={'system-version': f'{source.uri}|v2'})
+        expansion.evaluated_source_versions.add(v1, other)
+
+        self.assertEqual(expansion.get_locked_system_version_parameter(), f'{source.uri}|v2,{other.uri}|HEAD')
+
+    def test_locked_system_version_parameter_keeps_a_source_named_with_a_version_that_doesnt_resolve(self):
+        source, _, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        for entry in (f'{source.uri}|v9', f'{source.uri}v9/'):
+            with self.subTest(entry=entry):
+                expansion = ExpansionFactory(
+                    collection_version=OrganizationCollectionFactory(), parameters={'system-version': entry})
+                expansion.evaluated_source_versions.add(v1)
+
+                self.assertEqual(expansion.get_locked_system_version_parameter(), entry)
+
+    def test_locked_system_version_parameter_never_adds_a_conflict(self):
+        source, _, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        expansion = ExpansionFactory(
+            collection_version=OrganizationCollectionFactory(), parameters={'system-version': 'https://a.org|v1'})
+        expansion.evaluated_source_versions.add(v1)
+
+        def conflicts(value, namespace=None):  # pylint: disable=unused-argument
+            return {source.uri: []} if source.uri in value else {}
+
+        with patch.object(Expansion, 'get_system_version_conflicts', side_effect=conflicts):
+            self.assertEqual(expansion.get_locked_system_version_parameter(), 'https://a.org|v1')
+
+    def test_locked_system_version_parameter_names_the_ocl_url_when_the_canonical_url_resolves_elsewhere(self):
+        source = OrganizationSourceFactory(canonical_url='https://example.com/cs')
+        expansion = ExpansionFactory(collection_version=OrganizationCollectionFactory())
+        expansion.evaluated_source_versions.add(source)
+
+        def unresolved(value, namespace=None):  # pylint: disable=unused-argument
+            return [(entry.strip(), Mock(id=None)) for entry in value.split(',') if entry]
+
+        with patch.object(Expansion, 'resolve_system_version_entries', side_effect=unresolved):
+            self.assertEqual(expansion.get_locked_system_version_parameter(), f'{source.uri}|HEAD')
 
     @staticmethod
     def head_with_head_concept_member():
@@ -2237,6 +2316,160 @@ class TasksTest(OCLTestCase):
         batch_index_resources_mock.apply_async.assert_called_once_with(
             ('concept', {'id__in': [latest.id]}), queue='indexing', permanent=False)
 
+    @staticmethod
+    def head_cascading_past_the_cap():
+        """HEAD references a root with 3 children, one with a child, capped at 3: a capped cascade stops before it"""
+        source = OrganizationSourceFactory()
+        root = ConceptFactory(parent=source, mnemonic='root')
+        children = [ConceptFactory(parent=source, mnemonic=f'child{index}') for index in range(3)]
+        HierarchicalConcepts.objects.bulk_create(
+            [HierarchicalConcepts(child_id=child.id, parent_id=root.id) for child in children])
+        grandchild = ConceptFactory(parent=source, mnemonic='grandchild')
+        HierarchicalConcepts.objects.create(child_id=grandchild.id, parent_id=children[0].id)
+        head = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=head, mnemonic='autoexpand-HEAD')
+        head.expansion_uri = expansion.uri
+        head.save()
+        head.add_references([CollectionReference(
+            system=source.uri, code=root.mnemonic, reference_type='concepts', created_by=head.created_by,
+            cascade={'method': SOURCE_TO_CONCEPTS, 'max_results': 3})], head.created_by)
+        version = OrganizationCollectionFactory(organization=head.organization, version='v1', mnemonic=head.mnemonic)
+        return grandchild, version
+
+    @patch('core.common.tasks.export_collection')
+    def test_rebuild_keeps_members_past_the_cascade_cap_as_creation_does(self, _):
+        grandchild, version = self.head_cascading_past_the_cap()
+
+        seed_children_to_new_version('collection', version.id, False, expansion='lock')  # pylint: disable=no-value-for-parameter
+        version.refresh_from_db()
+        expansion = version.expansion
+        self.assertEqual(expansion.concepts.count(), 5)
+        self.assertTrue(expansion.concepts.filter(versioned_object_id=grandchild.versioned_object_id).exists())
+
+        expansion.seed_children(index=False, force_reevaluate=True)
+
+        self.assertEqual(expansion.concepts.count(), 5)
+        self.assertTrue(expansion.concepts.filter(versioned_object_id=grandchild.versioned_object_id).exists())
+
+    @patch('core.common.tasks.export_collection')
+    def test_rebuild_keeps_valueset_only_members_after_the_toggle_is_turned_off(self, _):
+        valueset = OrganizationCollectionFactory()
+        _, concept = self.valueset_release(valueset, 'v1')
+        head = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=head, mnemonic='autoexpand-HEAD')
+        head.expansion_uri = expansion.uri
+        head.save()
+        reference = CollectionReference(
+            expression=valueset.uri, collection=head, valueset=[valueset.uri], reference_type='concepts')
+        reference.clean()
+        reference.save()
+        version = OrganizationCollectionFactory(organization=head.organization, version='v1', mnemonic=head.mnemonic)
+        seed_children_to_new_version('collection', version.id, False, expansion='lock')  # pylint: disable=no-value-for-parameter
+        version.refresh_from_db()
+        expansion = version.expansion
+        self.assertEqual(list(expansion.concepts.all()), [concept])
+
+        with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False):
+            expansion.seed_children(index=False, force_reevaluate=True)
+
+        self.assertEqual(list(expansion.concepts.all()), [concept])
+
+    @patch('core.common.tasks.export_collection')
+    def test_rebuild_keeps_members_past_the_cascade_cap_after_the_toggle_is_turned_off(self, _):
+        grandchild, version = self.head_cascading_past_the_cap()
+        seed_children_to_new_version('collection', version.id, False, expansion='lock')  # pylint: disable=no-value-for-parameter
+        version.refresh_from_db()
+        expansion = version.expansion
+        member_ids = set(expansion.concepts.values_list('id', flat=True))
+
+        with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False):
+            expansion.seed_children(index=False, force_reevaluate=True)
+
+        self.assertEqual(set(expansion.concepts.values_list('id', flat=True)), member_ids)
+        self.assertTrue(expansion.concepts.filter(versioned_object_id=grandchild.versioned_object_id).exists())
+
+    @patch('core.common.tasks.export_collection')
+    def test_rebuild_of_an_expansion_built_with_the_toggle_off_stays_capped_once_it_is_on(self, _):
+        grandchild, version = self.head_cascading_past_the_cap()
+        with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False):
+            seed_children_to_new_version('collection', version.id, False)  # pylint: disable=no-value-for-parameter
+        version.refresh_from_db()
+        expansion = version.expansion
+        self.assertIsNone(expansion.built_with)
+        member_ids = set(expansion.concepts.values_list('id', flat=True))
+        self.assertFalse(expansion.concepts.filter(versioned_object_id=grandchild.versioned_object_id).exists())
+        other = ExpansionFactory(collection_version=version, mnemonic='other')
+        Collection.objects.filter(id=version.id).update(expansion_uri=other.uri)
+        expansion = Expansion.objects.get(id=expansion.id)
+
+        expansion.seed_children(index=False, force_reevaluate=True)
+
+        self.assertEqual(set(expansion.concepts.values_list('id', flat=True)), member_ids)
+
+    @patch('core.common.tasks.export_collection')
+    def test_rebuild_keeps_members_past_the_cascade_cap_when_another_expansion_is_the_default(self, _):
+        grandchild, version = self.head_cascading_past_the_cap()
+        seed_children_to_new_version('collection', version.id, False, expansion='latest')  # pylint: disable=no-value-for-parameter
+        version.refresh_from_db()
+        expansion = version.expansion
+        member_ids = set(expansion.concepts.values_list('id', flat=True))
+        other = ExpansionFactory(collection_version=version, mnemonic='other')
+        Collection.objects.filter(id=version.id).update(expansion_uri=other.uri)
+        expansion = Expansion.objects.get(id=expansion.id)
+        self.assertFalse(expansion.is_default)
+
+        expansion.seed_children(index=False, force_reevaluate=True)
+
+        self.assertEqual(set(expansion.concepts.values_list('id', flat=True)), member_ids)
+        self.assertTrue(expansion.concepts.filter(versioned_object_id=grandchild.versioned_object_id).exists())
+
+    @patch('core.common.tasks.export_collection')
+    def test_rebuild_cascades_without_a_result_cap_as_creation_does(self, _):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source, mnemonic='root')
+        head = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=head, mnemonic='autoexpand-HEAD')
+        head.expansion_uri = expansion.uri
+        head.save()
+        head.add_references([CollectionReference(
+            system=source.uri, code=concept.mnemonic, reference_type='concepts', created_by=head.created_by,
+            cascade={'method': SOURCE_TO_CONCEPTS})], head.created_by)
+        version = OrganizationCollectionFactory(organization=head.organization, version='v1', mnemonic=head.mnemonic)
+        cascade = Concept.cascade
+
+        with patch.object(Concept, 'cascade', autospec=True, side_effect=cascade) as cascade_mock:
+            seed_children_to_new_version('collection', version.id, False, expansion='lock')  # pylint: disable=no-value-for-parameter
+            version.refresh_from_db()
+            created = [call.kwargs.get('max_results', 1000) for call in cascade_mock.call_args_list]
+            cascade_mock.reset_mock()
+            version.expansion.seed_children(index=False, force_reevaluate=True)
+            rebuilt = [call.kwargs.get('max_results', 1000) for call in cascade_mock.call_args_list]
+
+        self.assertTrue(created)
+        self.assertEqual(set(created), {None})
+        self.assertEqual(set(rebuilt), {None})
+
+    @patch('core.common.tasks.export_collection')
+    def test_rebuild_keeps_the_resource_versions_a_head_resolved_version_was_created_with(self, _):
+        for choice in ('lock', 'latest'):
+            with self.subTest(choice=choice):
+                _, concept, collection_v1 = self.head_with_head_concept_member()
+                seed_children_to_new_version('collection', collection_v1.id, False, expansion=choice)  # pylint: disable=no-value-for-parameter
+                collection_v1.refresh_from_db()
+                latest = concept.get_latest_version()
+                expansion = collection_v1.expansion
+                self.assertEqual(list(expansion.concepts.all()), [latest])
+
+                expansion.seed_children(index=False, force_reevaluate=True)
+
+                self.assertEqual(expansion.built_with, choice)
+                self.assertEqual(list(expansion.concepts.all()), [latest])
+                self.assertEqual(list(collection_v1.references.first().concepts.all()), [latest])
+
+                with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False):
+                    expansion.seed_children(index=False, force_reevaluate=True)
+                self.assertEqual(list(expansion.concepts.all()), [latest])
+
     @patch('core.common.tasks.export_collection')
     def test_seed_children_task_evaluates_references_while_head_expansion_is_processing(self, _):
         expansion, concept, collection_v1 = self.head_with_head_concept_member()
@@ -2248,7 +2481,7 @@ class TasksTest(OCLTestCase):
         latest = concept.get_latest_version()
         copy = collection_v1.expansion
         self.assertFalse(copy.is_processing)
-        self.assertEqual(copy.parameters, {'activeOnly': True})
+        self.assertEqual(copy.parameters, {'activeOnly': True, 'system-version': f'{concept.parent.uri}|HEAD'})
         self.assertEqual(list(copy.concepts.all()), [latest])
         self.assertEqual(list(collection_v1.references.first().concepts.all()), [latest])
 
@@ -2270,7 +2503,7 @@ class TasksTest(OCLTestCase):
         with override_settings(TEST_MODE=False), self.captureOnCommitCallbacks(execute=True):
             head.delete_references([shared.uri])
         self.assertTrue(readd_mock.apply_async.called)
-        self.assertTrue(expansion.has_pending_readd)
+        self.assertTrue(Task.unfinished_readd_references_tasks().filter(args__0=expansion.id).exists())
         self.assertEqual(list(expansion.concepts.values_list('mnemonic', flat=True)), ['other'])
 
         collection_v1 = OrganizationCollectionFactory(
@@ -2282,18 +2515,18 @@ class TasksTest(OCLTestCase):
             sorted(collection_v1.expansion.concepts.values_list('id', flat=True)),
             sorted([shared.get_latest_version().id, other.get_latest_version().id]))
 
-    def test_has_pending_readd_until_the_readd_succeeds(self):
+    def test_readd_stays_unfinished_until_it_succeeds(self):
         expansion = ExpansionFactory(collection_version=OrganizationCollectionFactory())
         task = Task.new(
             user=expansion.collection_version.created_by,
             name='readd_references_to_expansion_on_references_removal', args=[expansion.id, [1]])
-        self.assertTrue(expansion.has_pending_readd)
+        self.assertTrue(Task.unfinished_readd_references_tasks().filter(args__0=expansion.id).exists())
 
         Task.objects.filter(id=task.id).update(state='FAILURE')
-        self.assertTrue(expansion.has_pending_readd)
+        self.assertTrue(Task.unfinished_readd_references_tasks().filter(args__0=expansion.id).exists())
 
         Task.objects.filter(id=task.id).update(state='SUCCESS')
-        self.assertFalse(expansion.has_pending_readd)
+        self.assertFalse(Task.unfinished_readd_references_tasks().filter(args__0=expansion.id).exists())
 
     def test_successful_readd_clears_only_older_unfinished_readds_of_that_expansion(self):
         expansion = ExpansionFactory(collection_version=OrganizationCollectionFactory())
@@ -2457,16 +2690,27 @@ class TasksTest(OCLTestCase):
             CollectionReference.atomic_when_locked()
         atomic_mock.assert_not_called()
 
-    def test_add_references_sets_lock_context_before_generating_only_with_toggle_on(self):
+    @staticmethod
+    def context_when_generating(concept, is_locked):
+        collection = OrganizationCollectionFactory()
+        seen = {}
+
+        def generate(reference):
+            seen.update(collection_id=reference.collection_id, is_async=bool(getattr(reference, '_async', False)))
+            return [reference]
+
+        with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=is_locked), \
+                patch.object(CollectionReference, 'generate_references', autospec=True, side_effect=generate):
+            collection.add_references(
+                [CollectionReference(expression=concept.uri, created_by=collection.created_by)],
+                collection.created_by, True)
+        return collection, seen
+
+    def test_add_references_sets_the_collection_before_generating_and_async_only_with_toggle_on(self):
         concept = ConceptFactory()
         for is_locked in (True, False):
-            collection = OrganizationCollectionFactory()
-            with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=is_locked), \
-                    patch.object(CollectionReference, 'clear_resolution_cache') as clear_mock:
-                collection.add_references(
-                    [CollectionReference(expression=concept.uri, created_by=collection.created_by)],
-                    collection.created_by, True)
-            self.assertEqual(clear_mock.called, is_locked)
+            collection, seen = self.context_when_generating(concept, is_locked)
+            self.assertEqual(seen, {'collection_id': collection.id, 'is_async': is_locked})
 
     def test_cascade_children_to_expansion_claims_default_only_with_toggle_on(self):
         for is_locked in (True, False):
@@ -2546,8 +2790,67 @@ class TasksTest(OCLTestCase):
         with self.captureOnCommitCallbacks(execute=False) as callbacks:
             Collection.persist_new_version(collection_v1, collection.created_by, sync=True)
 
-        seed_mock.assert_called_once_with('collection', collection_v1.id, True, True)
+        seed_mock.assert_called_once_with('collection', collection_v1.id, True, True, expansion='latest')
         self.assertEqual(callbacks, [])
+
+    @override_settings(TEST_MODE=False)
+    @patch('core.common.models.handle_m2m_changed', Mock())
+    @patch('core.common.models.handle_save', Mock())
+    @patch('core.common.models.seed_children_to_new_version.apply_async')
+    def test_persist_new_version_records_the_choice_with_the_task_not_in_its_message(self, apply_async):
+        collection = OrganizationCollectionFactory()
+        collection_v1 = Collection(version='v1', mnemonic=collection.mnemonic, organization=collection.organization)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            Collection.persist_new_version(collection_v1, collection.created_by, expansion='latest')
+
+        task = Task.objects.get(name='seed_children_to_new_version')
+        self.assertEqual(task.args, ['collection', collection_v1.id, True, False])
+        self.assertEqual(task.kwargs, {'expansion': 'latest'})
+        apply_async.assert_called_once_with(
+            ('collection', collection_v1.id, True, False), task_id=task.id, queue='default', persist_args=True)
+
+    @patch('core.common.models.handle_m2m_changed', Mock())
+    @patch('core.common.models.handle_save', Mock())
+    @patch('core.common.models.seed_children_to_new_version.apply_async')
+    def test_persist_new_version_settles_the_default_before_the_task_runs(self, _):
+        _, _, _, _, head, _ = self.head_locked_to_v1()
+        collection_v2 = Collection(version='v2', mnemonic=head.mnemonic, organization=head.organization)
+
+        # only the queuing runs as outside tests, and its index tasks are mocked, so nothing reaches Redis
+        with override_settings(TEST_MODE=False), self.captureOnCommitCallbacks(execute=True):
+            Collection.persist_new_version(collection_v2, head.created_by)
+
+        task = Task.objects.get(name='seed_children_to_new_version', args__1=collection_v2.id)
+        self.assertEqual(task.kwargs, {'expansion': 'lock'})
+
+        Collection.objects.filter(id=head.id).update(expansion_uri=None)
+        with patch.object(Collection, 'seed_from_head_expansion', autospec=True, return_value=True) as seed_mock, \
+                patch('core.common.tasks.export_collection'):
+            seed_children_to_new_version.push_request(id=task.id)
+            try:
+                seed_children_to_new_version.run('collection', collection_v2.id, False)
+            finally:
+                seed_children_to_new_version.pop_request()
+
+        seed_mock.assert_called_once_with(ANY, lock=True)
+
+    @patch('core.common.tasks.export_collection')
+    def test_seed_children_task_reads_the_choice_from_its_task(self, _):
+        _, _, _, v2, _, version = self.head_locked_to_v1()
+        task = Task.new(user=version.created_by, name='seed_children_to_new_version', kwargs={'expansion': 'latest'})
+        Task.before_start(task.id, ['collection', version.id, False], {}, name='seed_children_to_new_version')
+
+        seed_children_to_new_version.push_request(id=task.id)
+        try:
+            seed_children_to_new_version.run('collection', version.id, False)
+        finally:
+            seed_children_to_new_version.pop_request()
+
+        version.refresh_from_db()
+        self.assertEqual(list(version.expansion.evaluated_source_versions.all()), [v2])
+        task.refresh_from_db()
+        self.assertEqual(task.kwargs, {'expansion': 'latest'})
 
     @override_settings(TEST_MODE=False)
     def test_persist_new_version_retries_serialization_failures_for_overlapping_versions(self):
@@ -2563,7 +2866,7 @@ class TasksTest(OCLTestCase):
             if len(calls) < SERIALIZATION_RETRY_ATTEMPTS:
                 raise failure
 
-        with patch.object(Collection, 'can_seed_from_head_expansion', return_value=True), \
+        with patch.object(Collection, 'get_expansion_choice', return_value='lock'), \
                 patch('core.common.models.transaction.get_connection', return_value=Mock(in_atomic_block=False)), \
                 patch.object(Collection, 'persist_new_version_in_transaction', side_effect=conflict_until_last_attempt):
             errors = Collection.persist_new_version(collection_v1, collection.created_by, sync=True)
@@ -2579,7 +2882,7 @@ class TasksTest(OCLTestCase):
         failure = OperationalError('could not serialize access')
         failure.__cause__ = serialization_cause()
 
-        with patch.object(Collection, 'can_seed_from_head_expansion', return_value=True), \
+        with patch.object(Collection, 'get_expansion_choice', return_value='lock'), \
                 patch('core.common.models.transaction.get_connection', return_value=Mock(in_atomic_block=False)), \
                 patch.object(
                     Collection, 'persist_new_version_in_transaction', side_effect=failure) as in_transaction:
@@ -3229,7 +3532,7 @@ class ExpansionTest(OCLTestCase):
             name='core.common.tasks.readd_references_to_expansion_on_references_removal', args__0=expansion.id)
         readd_task_mock.apply_async.assert_called_once_with(
             (expansion.id, [reference.id]), queue='default', task_id=task.id, persist_args=True)
-        self.assertTrue(expansion.has_pending_readd)
+        self.assertTrue(Task.unfinished_readd_references_tasks().filter(args__0=expansion.id).exists())
 
     @override_settings(TEST_MODE=False)
     @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
@@ -5989,3 +6292,247 @@ class RetirePublicEditMigrationTest(OCLTestCase):
             self.assertEqual(instance.public_access, ACCESS_TYPE_VIEW)
         private.refresh_from_db()
         self.assertEqual(private.public_access, ACCESS_TYPE_NONE)
+
+
+class ExpansionSystemVersionNamespaceTest(OCLTestCase):
+    URL = 'https://registry-only.org/cs'
+
+    @staticmethod
+    def set_registry_toggle(on):
+        Toggle.objects.filter(name=URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE).update(
+            dev=on, qa=on, demo=on, staging=on, who_staging=on, production=on)
+
+    def setUp(self):
+        super().setUp()
+        self.owner = OrganizationFactory(mnemonic='owner')
+        self.other = OrganizationFactory(mnemonic='other')
+        self.publisher = OrganizationFactory(mnemonic='publisher')
+        # the lowest-id repository with the URL, found without the owner's registry
+        self.other_source = OrganizationSourceFactory(
+            organization=self.other, mnemonic='cs', canonical_url=self.URL)
+        self.other_source_v1 = OrganizationSourceFactory(
+            organization=self.other, mnemonic='cs', version='v1', canonical_url=self.URL)
+        self.source = OrganizationSourceFactory(organization=self.publisher, mnemonic='cs', canonical_url=self.URL)
+        self.source_v1 = OrganizationSourceFactory(
+            organization=self.publisher, mnemonic='cs', version='v1', canonical_url=self.URL)
+        self.source_v2 = OrganizationSourceFactory(
+            organization=self.publisher, mnemonic='cs', version='v2', canonical_url=self.URL)
+        self.collection = OrganizationCollectionFactory(organization=self.owner, mnemonic='vs')
+        self.expansion = ExpansionFactory(mnemonic='e1', collection_version=self.collection)
+
+    def tearDown(self):
+        self.set_registry_toggle(False)
+        super().tearDown()
+
+    def add_owner_registry_entry(self):
+        OrganizationURLRegistryFactory(organization=self.owner, url=self.URL, namespace=self.publisher.uri)
+
+    def evaluate(self, system_version, namespace=None):
+        self.expansion.parameters = {'system-version': system_version}
+        self.expansion.add_references(CollectionReference(system=self.URL, code='c1', namespace=namespace))
+
+    def unresolved_system_versions(self):
+        return [
+            entry['url'] for entry in self.expansion.unresolved_repo_versions or []
+            if entry['type'] == 'expansion.parameters.system-version'
+        ]
+
+    def test_resolves_in_owner_registry_with_toggle_on(self):
+        self.set_registry_toggle(True)
+        self.add_owner_registry_entry()
+
+        self.evaluate(f'{self.URL}|v1', self.owner.uri)
+
+        self.assertEqual(self.unresolved_system_versions(), [])
+        self.assertEqual(list(self.expansion.evaluated_source_versions.all()), [self.source_v1])
+
+    def test_owner_registry_ignored_with_toggle_off(self):
+        self.set_registry_toggle(False)
+        self.add_owner_registry_entry()
+
+        self.evaluate(f'{self.URL}|v1')
+
+        self.assertEqual(self.unresolved_system_versions(), [])
+        self.assertEqual(list(self.expansion.evaluated_source_versions.all()), [self.other_source_v1])
+
+    def test_unresolved_without_any_registry_entry_with_toggle_on(self):
+        self.set_registry_toggle(True)
+
+        self.evaluate(f'{self.URL}|v1', self.owner.uri)
+
+        self.assertEqual(self.unresolved_system_versions(), [f'{self.URL}|v1'])
+
+    def test_resolves_in_global_registry_with_toggle_on(self):
+        self.set_registry_toggle(True)
+        GlobalURLRegistryFactory(url=self.URL, namespace=self.publisher.uri)
+
+        self.evaluate(f'{self.URL}|v2', self.owner.uri)
+
+        self.assertEqual(self.unresolved_system_versions(), [])
+        self.assertEqual(list(self.expansion.evaluated_source_versions.all()), [self.source_v2])
+
+    def test_entry_applies_whether_or_not_the_reference_names_the_owner_namespace(self):
+        self.set_registry_toggle(True)
+        self.add_owner_registry_entry()
+        GlobalURLRegistryFactory(url=self.URL, namespace=self.other.uri)
+
+        for namespace in (self.owner.uri, None):
+            with self.subTest(namespace=namespace):
+                self.expansion.evaluated_source_versions.clear()
+                self.expansion.parameters = {'system-version': f'{self.URL}|v1'}
+                self.expansion.add_references(CollectionReference(
+                    system=self.URL, code='c1', namespace=namespace, collection=self.collection))
+
+                self.assertEqual(self.unresolved_system_versions(), [])
+                self.assertEqual(list(self.expansion.evaluated_source_versions.all()), [self.source_v1])
+
+    def test_reference_resolution_namespace(self):
+        reference = CollectionReference(system=self.URL, code='c1', collection=self.collection)
+        own = CollectionReference(system=self.URL, code='c1', namespace=self.other.uri, collection=self.collection)
+
+        self.set_registry_toggle(False)
+        self.assertIsNone(reference.resolution_namespace)
+        self.assertEqual(own.resolution_namespace, self.other.uri)
+
+        reference.clear_resolution_cache()
+        self.set_registry_toggle(True)
+        self.assertEqual(reference.resolution_namespace, self.owner.uri)
+        self.assertEqual(CollectionReference(system=self.URL, code='c1').resolution_namespace, None)
+
+    def test_unresolved_entry_matching_a_references_system_leaves_it_unresolved(self):
+        self.set_registry_toggle(True)
+        for namespace in (self.owner.uri, None):
+            with self.subTest(namespace=namespace):
+                expansion = ExpansionFactory(collection_version=self.collection)
+                expansion.parameters = {'system-version': 'https://example.org/cs|v1'}
+
+                expansion.add_references(CollectionReference(
+                    system='https://example.org/cs|v1', code='c1', namespace=namespace, collection=self.collection))
+
+                self.assertEqual(
+                    sorted(entry['type'] for entry in expansion.unresolved_repo_versions),
+                    ['expansion.parameters.system-version', 'reference.system'])
+                self.assertFalse(expansion.evaluated_source_versions.exists())
+
+    def test_get_system_version_conflicts_counts_versions_that_dont_resolve(self):
+        self.set_registry_toggle(True)
+        self.add_owner_registry_entry()
+        namespace = Expansion.get_system_version_namespace(self.owner.uri)
+
+        self.assertEqual(
+            Expansion.get_system_version_conflicts(f'{self.URL}|v1,{self.URL}|v9', namespace),
+            {self.source.uri: [f'{self.URL}|v1', f'{self.URL}|v9']})
+        self.assertEqual(
+            Expansion.get_system_version_conflicts(f'{self.source_v1.uri},{self.URL}|v9', namespace),
+            {self.source.uri: [self.source_v1.uri, f'{self.URL}|v9']})
+        self.assertEqual(
+            Expansion.get_system_version_conflicts(f'{self.source.uri}v8/,{self.source_v1.uri}', namespace),
+            {self.source.uri: [f'{self.source.uri}v8/', self.source_v1.uri]})
+        self.assertEqual(
+            Expansion.get_system_version_conflicts('https://none.org/cs|v8,https://none.org/cs|v9', namespace),
+            {'https://none.org/cs': ['https://none.org/cs|v8', 'https://none.org/cs|v9']})
+        self.assertEqual(
+            Expansion.get_system_version_conflicts('https://none.org/cs|v8,https://none.org/cs|v8', namespace), {})
+
+    def test_get_system_version_conflicts_matches_missing_versions_across_url_forms(self):
+        self.set_registry_toggle(True)
+        self.add_owner_registry_entry()
+        namespace = Expansion.get_system_version_namespace(self.owner.uri)
+
+        self.assertEqual(
+            Expansion.get_system_version_conflicts(f'{self.URL}|v8,{self.source.uri}v9/', namespace),
+            {self.source.uri: [f'{self.URL}|v8', f'{self.source.uri}v9/']})
+        self.assertEqual(
+            Expansion.get_system_version_conflicts(f'{self.URL}|v8,{self.source.uri}v8/', namespace), {})
+        self.assertEqual(
+            Expansion.get_system_version_conflicts(f'{self.URL}|v1,{self.source.uri}v1/', namespace), {})
+
+    def add_cascade_reference(self, **kwargs):
+        ConceptFactory(parent=self.source, mnemonic='c1')
+        ConceptFactory(parent=self.other_source, mnemonic='c1')
+        GlobalURLRegistryFactory(url=self.URL, namespace=self.other.uri)
+        self.add_owner_registry_entry()
+        self.collection.add_references([CollectionReference(
+            system=self.URL, code='c1', reference_type='concepts', created_by=self.collection.created_by,
+            cascade={'method': SOURCE_TO_CONCEPTS}, transform=TRANSFORM_TO_RESOURCE_VERSIONS, **kwargs)],
+            self.collection.created_by)
+        return list(self.collection.references.values_list('expression', flat=True))
+
+    def test_cascade_generates_from_the_owners_repository_with_the_lock_toggle_off(self):
+        self.set_registry_toggle(True)
+
+        with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False):
+            expressions = self.add_cascade_reference()
+
+        self.assertTrue(expressions)
+        self.assertTrue(all(expression.startswith(self.source.uri) for expression in expressions), expressions)
+
+    def test_cascade_while_parsing_resolves_in_the_owner_namespace(self):
+        self.set_registry_toggle(True)
+        ConceptFactory(parent=self.source, mnemonic='c1')
+        ConceptFactory(parent=self.other_source, mnemonic='c1')
+        GlobalURLRegistryFactory(url=self.URL, namespace=self.other.uri)
+        self.add_owner_registry_entry()
+
+        self.collection.add_expressions(
+            {'system': self.URL, 'code': 'c1'}, self.collection.created_by, cascade=SOURCE_TO_CONCEPTS,
+            transform='extensional')
+
+        expressions = list(self.collection.references.values_list('expression', flat=True))
+        self.assertTrue(expressions)
+        self.assertFalse([expression for expression in expressions if expression.startswith(self.other_source.uri)])
+
+    def test_cascade_keeps_an_explicit_global_namespace_on_generated_references(self):
+        self.set_registry_toggle(True)
+
+        expressions = self.add_cascade_reference(namespace='/')
+
+        self.assertTrue(expressions)
+        self.assertTrue(all(expression.startswith(self.other_source.uri) for expression in expressions), expressions)
+        self.assertEqual(set(self.collection.references.values_list('namespace', flat=True)), {'/'})
+
+    @patch('core.common.tasks.export_collection')
+    def test_lock_keeps_heads_version_when_the_owner_registry_maps_its_canonical_url_elsewhere(self, _):
+        self.set_registry_toggle(True)
+        self.add_owner_registry_entry()
+        GlobalURLRegistryFactory(url=self.URL, namespace=self.other.uri)
+        concept = ConceptFactory(parent=self.other_source, mnemonic='c1')
+        old = concept.get_latest_version()
+        new = ConceptFactory(parent=self.other_source, mnemonic='c1', versioned_object=concept, version='new')
+        old.sources.remove(self.other_source)
+        old.sources.add(self.other_source_v1)
+        other_v2 = OrganizationSourceFactory(
+            organization=self.other, mnemonic='cs', version='v2', canonical_url=self.URL, released=True)
+        new.sources.add(other_v2)
+        Source.objects.filter(id=self.other_source_v1.id).update(released=True)
+        self.collection.expansion_uri = self.expansion.uri
+        self.collection.save()
+        self.expansion.evaluated_source_versions.add(self.other_source_v1)
+        self.collection.add_expressions({'expressions': [concept.uri]}, self.collection.created_by)
+        self.assertEqual(list(self.collection.expansion.concepts.all()), [old])
+        version = OrganizationCollectionFactory(organization=self.owner, mnemonic='vs', version='v1')
+
+        seed_children_to_new_version('collection', version.id, False, expansion='lock')  # pylint: disable=no-value-for-parameter
+
+        version.refresh_from_db()
+        self.assertEqual(version.expansion.parameters['system-version'], f'{self.other_source.uri}|v1')
+        self.assertEqual(list(version.expansion.concepts.all()), [old])
+        self.assertEqual(list(version.expansion.evaluated_source_versions.all()), [self.other_source_v1])
+
+    def test_get_system_version_conflicts(self):
+        self.set_registry_toggle(True)
+        self.add_owner_registry_entry()
+        namespace = Expansion.get_system_version_namespace(self.owner.uri)
+        self.assertEqual(namespace, self.owner.uri)
+
+        self.assertEqual(Expansion.get_system_version_conflicts(f'{self.URL}|v1', namespace), {})
+        self.assertEqual(
+            Expansion.get_system_version_conflicts(f'{self.URL}|v1, {self.source_v1.uri}', namespace), {})
+        self.assertEqual(
+            Expansion.get_system_version_conflicts(f'{self.URL}|v1,{self.URL}|v2', namespace),
+            {self.source.uri: [f'{self.URL}|v1', f'{self.URL}|v2']})
+        self.assertEqual(
+            Expansion.get_system_version_conflicts(f'{self.URL}|v1,https://unknown.org|v1', namespace), {})
+
+        self.set_registry_toggle(False)
+        self.assertIsNone(Expansion.get_system_version_namespace(self.owner.uri))

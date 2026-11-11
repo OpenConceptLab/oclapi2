@@ -42,7 +42,7 @@ from .constants import (
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
     CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, OPENMRS_VALIDATION_SCHEMA, VALIDATION_SCHEMAS,
     DEFAULT_VALIDATION_SCHEMA, ES_REQUEST_TIMEOUT, UPDATED_BY_USERNAME_PARAM, ES_RETRYABLE_ERROR_TYPES,
-    INDEX_BATCH_SIZE, RETIRED_ACCESS_TYPE_EDIT)
+    INDEX_BATCH_SIZE, RETIRED_ACCESS_TYPE_EDIT, ROLE_CHOICES)
 from .es import ESScript
 from .exceptions import Http400, BatchIndexingError
 from .fields import URIField
@@ -200,6 +200,15 @@ class BatchIndexRun:
                 message += f', {self.rejected_batches} batch(es) still rejected by Elasticsearch after retries'
             raise BatchIndexingError(message, self.summary, bool(self.rejected_batches))
         return self.summary
+
+
+class Role(models.Model):
+    """A role a user can have, such as in an organization. The rows are in core/fixtures/roles.yaml."""
+    class Meta:
+        db_table = 'roles'
+
+    name = models.CharField(max_length=100, unique=True, choices=ROLE_CHOICES)
+    description = models.TextField(blank=True, default='')
 
 
 class BaseModel(models.Model):
@@ -1251,6 +1260,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         obj.is_active = True
         sync = kwargs.pop('sync', False)
+        expansion = kwargs.pop('expansion', None)
         if user:
             obj.created_by = user
             obj.updated_by = user
@@ -1263,11 +1273,12 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         is_test_mode = get(settings, 'TEST_MODE', False)
         # a synchronous seed from HEAD runs in this transaction, so it needs this transaction's snapshot
         is_repeatable_read = sync and not is_test_mode and not transaction.get_connection().in_atomic_block and \
-            obj.can_seed_from_head_expansion()
+            bool(obj.get_expansion_choice(expansion))
         attempts = SERIALIZATION_RETRY_ATTEMPTS if is_repeatable_read else 1
         for attempt in range(1, attempts + 1):
             try:
-                cls.persist_new_version_in_transaction(obj, head, user, sync, is_repeatable_read, **kwargs)
+                cls.persist_new_version_in_transaction(
+                    obj, head, user, sync, is_repeatable_read, expansion, **kwargs)
                 break
             except OperationalError as ex:
                 if attempt == attempts or not cls.is_serialization_failure(ex):
@@ -1279,7 +1290,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         return errors
 
     @classmethod
-    def persist_new_version_in_transaction(cls, obj, head, user, sync, is_repeatable_read, **kwargs):  # pylint: disable=too-many-arguments
+    def persist_new_version_in_transaction(  # pylint: disable=too-many-arguments
+            cls, obj, head, user, sync, is_repeatable_read, expansion=None, **kwargs):
         is_test_mode = get(settings, 'TEST_MODE', False)
         with transaction.atomic():
             if is_repeatable_read:
@@ -1290,20 +1302,24 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             obj.apply_version_metadata_to_head(head)
             obj.update_version_data(head)
             obj.save(**kwargs)
+            # the default is settled while HEAD is locked, so a queued task can't see another HEAD
+            expansion = obj.get_expansion_choice(expansion) or expansion
 
             if obj.id:
                 obj.sibling_versions.update(is_latest_version=False)
 
             task_args = (obj.resource_type.lower(), obj.id, not is_test_mode, sync)
             if is_test_mode or sync:
-                seed_children_to_new_version(*task_args)
+                seed_children_to_new_version(*task_args, expansion=expansion)
             else:
                 from core.tasks.models import Task
+                # the choice rides on the task record, so a worker on older code still takes the message
                 task = Task.new(
                     queue='default',
                     user=user,
                     name=seed_children_to_new_version.__name__,
                     args=task_args,
+                    kwargs={'expansion': expansion} if expansion else None,
                 )
 
                 # Mark the version as processing before the response goes out
@@ -1327,8 +1343,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     def index_resources_for_self_as_latest_released(self, only_update=False):  # pylint: disable=unused-argument
         pass
 
-    def can_seed_from_head_expansion(self):
-        return False
+    def get_expansion_choice(self, expansion=None):  # pylint: disable=unused-argument
+        return None
 
     def apply_version_metadata_to_head(self, head):
         pass

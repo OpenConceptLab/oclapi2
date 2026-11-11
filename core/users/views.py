@@ -28,6 +28,7 @@ from core.common.swagger_parameters import last_login_before_param, last_login_s
 from core.common.utils import parse_updated_since_param, from_string_to_date, get_truthy_values, \
     get_resource_class_from_resource_uri
 from core.common.views import BaseAPIView, BaseLogoView
+from core.orgs.constants import CANNOT_REMOVE_LAST_ADMIN
 from core.orgs.models import Organization
 from core.services.auth.core import AuthService
 from core.services.auth.openid import OpenIDAuthService
@@ -249,6 +250,7 @@ class UserListView(UserBaseView,
                    ListWithHeadersMixin,
                    mixins.CreateModelMixin):
     allow_csv_export = False  # user rows carry private account fields
+    organization = None
 
     def get_serializer_class(self):
         if self.request.query_params.get('summary') in TRUTHY and self.request.method == 'GET':
@@ -264,6 +266,12 @@ class UserListView(UserBaseView,
         if self.request.method in ['POST', 'DELETE']:
             return [IsAdminUser()]
         return []
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        if self.organization:
+            context['member_roles'] = self.organization.member_roles
+        return context
 
     def can_view(self, organization):
         user = self.request.user
@@ -284,6 +292,7 @@ class UserListView(UserBaseView,
 
             if not self.can_view(organization):
                 return Response(status=status.HTTP_403_FORBIDDEN)
+            self.organization = organization
             queryset = organization.members
             if not self.should_include_inactive():
                 queryset = queryset.filter(is_active=True)
@@ -477,6 +486,12 @@ class UserDetailView(UserBaseView, RetrieveAPIView, DestroyAPIView, mixins.Updat
         if self.user_is_self:
             return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
         if self.is_hard_delete_requested():
+            orgs = obj.orgs_needing_this_admin
+            if orgs:
+                return Response(
+                    {'detail': CANNOT_REMOVE_LAST_ADMIN, 'orgs': [org.mnemonic for org in orgs]},
+                    status=status.HTTP_409_CONFLICT
+                )
             try:
                 obj.delete()
             except Exception as ex:

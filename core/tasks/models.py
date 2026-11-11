@@ -121,7 +121,7 @@ class Task(models.Model):
         return self
 
     def save_common(self, args, kwargs, einfo=None):  # pylint: disable=unused-argument
-        self.kwargs = kwargs
+        self.kwargs = kwargs or self.kwargs
 
         if einfo:
             self.record_exception(einfo)
@@ -159,7 +159,8 @@ class Task(models.Model):
         task.name = name or task.name
         task.state = STARTED
         task.queue = kwargs.get('queue', None) or task.queue or 'default'
-        task.kwargs = kwargs
+        # a message without kwargs keeps the ones recorded with the task
+        task.kwargs = kwargs or task.kwargs
         task.started_at = timezone.now()
         task.save()
         return task

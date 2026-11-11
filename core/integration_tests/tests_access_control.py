@@ -9,7 +9,7 @@ from core.client_configs.models import ClientConfig
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection, CollectionReference
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory, ExpansionFactory
-from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT
+from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT, ROLE_ADMIN
 from core.common.permissions import HasOwnership
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.concepts.models import Concept
@@ -30,14 +30,16 @@ from core.users.tests.factories import UserProfileFactory
 
 class AccessTestMixin:
     """
-    Staff, an org with one member, the owner of user-owned resources, and an outsider: a logged-in user who belongs
-    to no org and owns nothing under test.
+    Staff, an org with one member and one admin, the owner of user-owned resources, and an outsider: a logged-in user
+    who belongs to no org and owns nothing under test.
     """
     def setUp(self):
         super().setUp()
         self.staff = UserProfile.objects.get(username='ocladmin')
         self.org = OrganizationFactory(public_access=ACCESS_TYPE_VIEW)
         self.member = UserProfileFactory(organizations=[self.org])
+        self.admin = UserProfileFactory()
+        self.org.set_member_role(self.admin, ROLE_ADMIN)
         self.owner = UserProfileFactory()
         self.outsider = UserProfileFactory()
 
@@ -68,8 +70,16 @@ class OrganizationDetailAccessTest(AccessTestMixin, OCLAPITestCase):
     def test_anonymous_cannot_edit(self):
         self.assert_not_renamed(self.rename(None), 401)
 
-    def test_member_can_edit(self):
-        self.assert_renamed(self.rename(self.member))
+    def test_member_cannot_edit(self):
+        self.assert_not_renamed(self.rename(self.member), 403)
+        self.assert_not_renamed(self.request('patch', self.org.uri, self.member, {'name': 'Renamed'}), 403)
+
+    def test_member_cannot_delete(self):
+        self.assertEqual(self.request('delete', self.org.uri + '?inline=true', self.member).status_code, 403)
+        self.assertTrue(Organization.objects.filter(id=self.org.id).exists())
+
+    def test_admin_can_edit(self):
+        self.assert_renamed(self.rename(self.admin))
 
     def test_staff_can_edit(self):
         self.assert_renamed(self.rename(self.staff))
@@ -118,8 +128,11 @@ class OrganizationOverviewAccessTest(AccessTestMixin, OCLAPITestCase):
     def test_anonymous_cannot_edit(self):
         self.assert_not_edited(self.edit(None), 401)
 
-    def test_member_can_edit(self):
-        self.assert_edited(self.edit(self.member))
+    def test_member_cannot_edit(self):
+        self.assert_not_edited(self.edit(self.member), 403)
+
+    def test_admin_can_edit(self):
+        self.assert_edited(self.edit(self.admin))
 
     def test_staff_can_edit(self):
         self.assert_edited(self.edit(self.staff))
@@ -130,8 +143,16 @@ class OrganizationOverviewAccessTest(AccessTestMixin, OCLAPITestCase):
     def test_anonymous_cannot_delete(self):
         self.assert_not_deleted(self.request('delete', self.get_url()), 401)
 
-    def test_member_and_staff_delete_clears_overview_only(self):
-        for user in [self.member, self.staff]:
+    def test_member_cannot_delete(self):
+        self.org.overview = {'text': 'Existing'}
+        self.org.save()
+
+        self.assertEqual(self.request('delete', self.get_url(), self.member).status_code, 403)
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.overview, {'text': 'Existing'})
+
+    def test_admin_and_staff_delete_clears_overview_only(self):
+        for user in [self.admin, self.staff]:
             self.org.overview = {'text': 'Existing'}
             self.org.save()
 
@@ -179,14 +200,17 @@ class OrganizationLogoAccessTest(AccessTestMixin, OCLAPITestCase):
     def test_anonymous_cannot_upload(self):
         self.assert_not_uploaded(self.upload(None), 401)
 
-    def test_member_can_upload(self):
-        self.assert_uploaded(self.upload(self.member))
+    def test_member_cannot_upload(self):
+        self.assert_not_uploaded(self.upload(self.member), 403)
+
+    def test_admin_can_upload(self):
+        self.assert_uploaded(self.upload(self.admin))
 
     def test_staff_can_upload(self):
         self.assert_uploaded(self.upload(self.staff))
 
     def test_delete_clears_logo_only(self):
-        for user, status_code in [(None, 401), (self.outsider, 403)]:
+        for user, status_code in [(None, 401), (self.outsider, 403), (self.member, 403)]:
             self.org.logo_path = f'orgs/{self.org.mnemonic}/logo.png'
             self.org.save()
 
@@ -194,7 +218,7 @@ class OrganizationLogoAccessTest(AccessTestMixin, OCLAPITestCase):
             self.org.refresh_from_db()
             self.assertEqual(self.org.logo_path, f'orgs/{self.org.mnemonic}/logo.png')
 
-        for user in [self.member, self.staff]:
+        for user in [self.admin, self.staff]:
             self.org.logo_path = f'orgs/{self.org.mnemonic}/logo.png'
             self.org.save()
 
@@ -747,10 +771,15 @@ class OrganizationExtrasAccessTest(AccessTestMixin, OCLAPITestCase):
         self.assertEqual(self.delete(None).status_code, 401)
         self.assert_extras({'foo': 'bar'})
 
-    def test_member_can_edit_and_delete(self):
-        self.assertEqual(self.edit(self.member).status_code, 200)
+    def test_member_cannot_edit_or_delete(self):
+        self.assertEqual(self.edit(self.member).status_code, 403)
+        self.assertEqual(self.delete(self.member).status_code, 403)
+        self.assert_extras({'foo': 'bar'})
+
+    def test_admin_can_edit_and_delete(self):
+        self.assertEqual(self.edit(self.admin).status_code, 200)
         self.assert_extras({'foo': 'changed'})
-        self.assertEqual(self.delete(self.member).status_code, 204)
+        self.assertEqual(self.delete(self.admin).status_code, 204)
         self.assert_extras({})
 
     def test_staff_can_edit(self):
@@ -825,8 +854,8 @@ class UserLogoAccessTest(AccessTestMixin, OCLAPITestCase):
 
 class ClientConfigAccessTest(AccessTestMixin, OCLAPITestCase):
     """
-    Adding a config to an org needs staff or membership, and to a repo staff or edit access. Changing a config needs
-    staff or its creator.
+    Adding a config to an org needs staff or an admin of it, and to a repo staff or edit access. Changing a config
+    needs staff or its creator.
     """
     payload = {'name': 'Home', 'type': 'home', 'config': {'tabs': [{'type': 'concepts', 'default': True}]}}
 
@@ -850,7 +879,9 @@ class ClientConfigAccessTest(AccessTestMixin, OCLAPITestCase):
 
     def test_create_on_org(self):
         self.assert_cannot_create(self.org)
-        self.assert_can_create(self.org, self.member)
+        self.assertEqual(self.create(self.org, self.member).status_code, 403)
+        self.assertFalse(self.org.client_configs.exists())
+        self.assert_can_create(self.org, self.admin)
         self.assert_can_create(self.org, self.staff)
 
     def test_create_on_source(self):
@@ -862,16 +893,16 @@ class ClientConfigAccessTest(AccessTestMixin, OCLAPITestCase):
         self.assert_can_create(self.collection, self.member)
 
     def test_edit(self):
-        config_id = self.assert_can_create(self.org, self.member)
+        config_id = self.assert_can_create(self.org, self.admin)
         url = f'/client-configs/{config_id}/'
 
-        for user in [self.outsider, self.owner]:
+        for user in [self.outsider, self.owner, self.member]:
             self.assertEqual(self.request('put', url, user, {'name': 'Renamed'}).status_code, 403)
             self.assertEqual(self.request('patch', url, user, {'name': 'Renamed'}).status_code, 403)
         self.assertEqual(self.request('put', url, None, {'name': 'Renamed'}).status_code, 401)
         self.assertEqual(ClientConfig.objects.get(id=config_id).name, 'Home')
 
-        self.assertEqual(self.request('put', url, self.member, {'name': 'Renamed'}).status_code, 200)
+        self.assertEqual(self.request('put', url, self.admin, {'name': 'Renamed'}).status_code, 200)
         self.assertEqual(ClientConfig.objects.get(id=config_id).name, 'Renamed')
         self.assertEqual(self.request('put', url, self.staff, {'name': 'Renamed again'}).status_code, 200)
         self.assertEqual(ClientConfig.objects.get(id=config_id).name, 'Renamed again')
