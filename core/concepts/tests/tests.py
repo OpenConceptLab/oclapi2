@@ -1,4 +1,5 @@
 import json
+from datetime import timedelta
 import threading
 from unittest.mock import ANY, Mock, patch
 
@@ -2987,6 +2988,60 @@ class ConceptTest(OCLTestCase):
             [child_concept.uri])
         self.assertEqual(
             parent_concept.get_hierarchy_concept_urls('child_concepts', versioned=True), [latest_child.uri])
+
+    def test_get_hierarchy_queryset_for_a_collection_version(self):
+        source = OrganizationSourceFactory()
+        parent_concept = ConceptFactory(parent=source)
+        latest_child = ConceptFactory(parent=source).get_latest_version()
+        latest_child.parent_concepts.add(parent_concept.get_latest_version())
+        collection_version = OrganizationCollectionFactory(version='v1')
+        expansion = ExpansionFactory(collection_version=collection_version)
+        filters = {'expansion_set__collection_version': collection_version}
+
+        self.assertEqual(
+            parent_concept.get_hierarchy_queryset('child_concepts', collection_version, filters).count(), 0)
+
+        expansion.concepts.add(latest_child)
+
+        self.assertEqual(
+            list(parent_concept.get_hierarchy_queryset(
+                'child_concepts', collection_version, filters).values_list('uri', flat=True)),
+            [latest_child.uri])
+
+    def test_get_hierarchy_related_queryset_rejects_an_unknown_relation(self):
+        with self.assertRaises(KeyError):
+            ConceptFactory().get_hierarchy_related_queryset('children_concepts')
+
+    def test_hierarchy_counts_match_urls(self):
+        parent_concept = ConceptFactory()
+        child_concept = ConceptFactory()
+        child_concept.parent_concepts.add(parent_concept)
+
+        self.assertEqual(parent_concept.children_concepts_count, len(parent_concept.child_concept_urls))
+        self.assertEqual(child_concept.parent_concepts_count, len(child_concept.parent_concept_urls))
+        self.assertEqual(parent_concept.children_concepts_count, 1)
+
+    def test_annotate_has_children_uses_the_newest_latest_version(self):
+        source = OrganizationSourceFactory()
+        parent_concept = ConceptFactory(parent=source)
+        older_latest = parent_concept.get_latest_version()
+        newer_latest = ConceptFactory(
+            parent=source, mnemonic=parent_concept.mnemonic, version='newer',
+            versioned_object=parent_concept, is_latest_version=True)
+        Concept.objects.filter(id=older_latest.id).update(created_at=newer_latest.created_at - timedelta(days=1))
+        child_concept = ConceptFactory(parent=source)
+        child_concept.parent_concepts.add(older_latest)
+
+        def annotated():
+            return Concept.annotate_has_children(Concept.objects.filter(id=parent_concept.id)).get()
+
+        self.assertFalse(Concept.objects.get(id=parent_concept.id).has_children)
+        self.assertFalse(annotated().has_children)
+
+        child_concept.parent_concepts.add(newer_latest)
+
+        self.assertTrue(Concept.objects.get(id=parent_concept.id).has_children)
+        self.assertTrue(annotated().has_children)
 
     def test_annotate_has_children_matches_property(self):
         source = OrganizationSourceFactory()

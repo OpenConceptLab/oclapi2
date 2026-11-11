@@ -4114,6 +4114,23 @@ class ConceptParentsViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
 
+    def test_get_200_paged(self):
+        child_concept = ConceptFactory()
+        parents = [ConceptFactory() for _ in range(3)]
+        child_concept.parent_concepts.set(parents)
+
+        first_page = self.client.get(child_concept.url + 'parents/?limit=2')
+        second_page = self.client.get(child_concept.url + 'parents/?limit=2&page=2')
+
+        self.assertEqual(first_page.status_code, 200)
+        self.assertEqual(first_page['num_found'], '3')
+        self.assertEqual(len(first_page.data), 2)
+        self.assertEqual(len(second_page.data), 1)
+        self.assertEqual(
+            sorted(data['url'] for data in [*first_page.data, *second_page.data]),
+            sorted(parent.uri for parent in parents)
+        )
+
 
 class ConceptChildrenViewTest(OCLAPITestCase):
     def test_get_200(self):
@@ -4160,6 +4177,43 @@ class ConceptChildrenViewTest(OCLAPITestCase):
         self.assertEqual(response['num_returned'], '1')
         self.assertEqual([data['id'] for data in response.data], ['c2'])
         self.assertEqual([data['has_children'] for data in response.data], [False])
+
+    def test_get_200_pages_are_stable_for_the_same_mnemonic(self):
+        parent_concept = ConceptFactory()
+        children = [ConceptFactory(mnemonic='same') for _ in range(3)]  # each in its own source
+        for child in children:
+            child.parent_concepts.set([parent_concept])
+
+        with CaptureQueriesContext(connection) as queries:
+            pages = [self.client.get(f'{parent_concept.url}children/?limit=1&page={page}') for page in (1, 2, 3)]
+
+        self.assertTrue(
+            any('ORDER BY "concepts"."mnemonic" ASC, "concepts"."id" ASC' in query['sql'] for query in queries))
+        self.assertEqual(
+            [page.data[0]['uuid'] for page in pages], [str(child.id) for child in sorted(children, key=lambda c: c.id)])
+
+    @patch('core.common.mixins.write_csv_to_s3', return_value='https://csv-url')
+    def test_csv_has_no_has_children_column(self, write_csv_mock):
+        parent_concept = ConceptFactory()
+        ConceptFactory().parent_concepts.set([parent_concept])
+
+        self.client.get(parent_concept.url + 'children/?csv=true')
+
+        write_csv_mock.assert_called_once()
+        rows = list(write_csv_mock.call_args.args[0])
+        self.assertEqual(len(rows), 1)
+        self.assertNotIn('has_children_annotated', rows[0])
+
+    def test_get_200_includes_retired_children(self):
+        parent_concept = ConceptFactory()
+        retired_child = ConceptFactory(retired=True)
+        retired_child.parent_concepts.set([parent_concept])
+
+        response = self.client.get(parent_concept.url + 'children/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([data['url'] for data in response.data], [retired_child.uri])
+        self.assertTrue(response.data[0]['retired'])
 
 
 class ConceptCollectionMembershipViewTest(OCLAPITestCase):

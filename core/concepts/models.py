@@ -3,7 +3,7 @@ from django.contrib.postgres.indexes import HashIndex
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError
-from django.db.models import F, Q, Exists, OuterRef
+from django.db.models import F, Q, Exists, OuterRef, Subquery
 from django.db.models.functions import MD5, Upper
 from pydash import get, compact, has
 
@@ -15,7 +15,7 @@ from core.common.models import VersionedModel, ConceptContainerModel
 from core.common.tasks import process_hierarchy_for_new_concept, process_hierarchy_for_concept_version, \
     process_hierarchy_for_new_parent_concept_version, update_mappings_concept
 from core.common.utils import generate_temp_version, drop_version, \
-    startswith_temp_version, is_versioned_uri, decode_string
+    startswith_temp_version, decode_string
 from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCALES_SHORT, LOCALES_SEARCH_INDEX_TERM, \
     CONCEPT_WAS_RETIRED, CONCEPT_IS_ALREADY_RETIRED, CONCEPT_IS_ALREADY_NOT_RETIRED, CONCEPT_WAS_UNRETIRED, \
     ALREADY_EXISTS, CONCEPT_REGEX, MAX_LOCALES_LIMIT, \
@@ -1391,17 +1391,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return self.get_hierarchy_concept_urls('child_concepts')
 
     def get_hierarchy_concept_urls(self, relation, versioned=False):
-        queryset = get(self, relation).all()
-        if self.is_latest_version:
-            queryset |= get(self.versioned_object, relation).all()
-        if self.is_versioned_object:
-            latest_version = self.get_latest_version()
-            if latest_version:
-                queryset |= get(latest_version, relation).all()
-        uris = queryset.values_list('uri', flat=True)
-        if versioned:
-            return self.__format_hierarchy_versioned_uris(uris)
-        return self.__format_hierarchy_uris(uris)
+        return list(self.get_hierarchy_related_queryset(relation, versioned).values_list('uri', flat=True))
 
     def get_hierarchy_queryset(self, relation, repo_version, filters=None):
         filters = filters or {}
@@ -1419,11 +1409,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return ids
 
     def get_hierarchy_related_queryset(self, relation, versioned=False):
-        """
-        The concepts get_hierarchy_concept_urls lists, in one query: their HEADs, or with versioned the linked
-        versions themselves (HEADs left out).
-        """
-        own, other = ('parent', 'child') if relation == 'child_concepts' else ('child', 'parent')
+        """The concepts linked through relation, in one query: their HEADs, or with versioned the linked versions."""
+        own, other = {'child_concepts': ('parent', 'child'), 'parent_concepts': ('child', 'parent')}[relation]
         links = HierarchicalConcepts.objects.filter(**{f'{own}_id__in': self.get_hierarchy_ids()})
         if versioned:
             return Concept.objects.filter(id__in=links.values(f'{other}_id')).exclude(id=F('versioned_object_id'))
@@ -1434,8 +1421,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         """has_children for each row as part of the list query, by the same rules as the has_children property."""
         own = HierarchicalConcepts.objects.filter(parent_id=OuterRef('id'))
         of_head = HierarchicalConcepts.objects.filter(parent_id=OuterRef('versioned_object_id'))
-        of_latest = HierarchicalConcepts.objects.filter(
-            parent__versioned_object_id=OuterRef('id'), parent__is_latest_version=True, parent__is_active=True)
+        newest_latest_version = Concept.objects.filter(
+            versioned_object_id=OuterRef(OuterRef('id')), is_latest_version=True, is_active=True
+        ).order_by('-created_at').values('id')[:1]
+        of_latest = HierarchicalConcepts.objects.filter(parent_id=Subquery(newest_latest_version))
         return queryset.annotate(
             has_children_annotated=Exists(own) | (Q(is_latest_version=True) & Exists(of_head)) |
             (Q(id=F('versioned_object_id')) & Exists(of_latest)))
@@ -1445,7 +1434,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     @property
     def children_concepts_count(self):
-        return len(self.child_concept_urls)
+        return self.child_concept_queryset().count()
 
     @property
     def has_children(self):
@@ -1462,18 +1451,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     @property
     def parent_concepts_count(self):
-        return len(self.parent_concept_urls)
+        return self.parent_concept_queryset().count()
 
     def parent_concept_queryset(self):
         return self.get_hierarchy_related_queryset('parent_concepts')
-
-    @staticmethod
-    def __format_hierarchy_uris(uris):
-        return list({drop_version(uri) for uri in uris})
-
-    @staticmethod
-    def __format_hierarchy_versioned_uris(uris):
-        return list({uri for uri in uris if is_versioned_uri(uri)})
 
     def get_hierarchy_path(self):
         result = []
