@@ -1021,7 +1021,10 @@ class SourceChildMixin(ChecksumModel):
         new_version.comment = comment
         if reason is not None:
             new_version.retire_reason = reason
-        return new_version.save_as_new_version(user)
+        errors = new_version.save_as_new_version(user)
+        if not errors:
+            self.last_retire_version = new_version
+        return errors
 
     @classmethod
     def from_uri_queryset(cls, uri):  # soon to be deleted
