@@ -580,9 +580,6 @@ class MappingImporter(BaseResourceImporter):
         to_source_url = self.get('to_source_url')
         parent_uri = f'/{"users" if self.is_user_owner() else "orgs"}/{self.get("owner")}/sources/{self.get("source")}/'
         if self.get('id'):
-            # An explicit ID identifies the mapping within its source. Matching on its relationship fields too would
-            # hide the mapping whenever the import changes them (e.g. the target), and the import would then try to
-            # create a duplicate ID instead of versioning the existing mapping.
             self.queryset = Mapping.objects.filter(
                 parent__uri=parent_uri, id=F('versioned_object_id'), mnemonic=self.get('id'))
             return self.queryset
