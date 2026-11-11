@@ -668,6 +668,9 @@ class MappingImporter(BaseResourceImporter):
                 self.instance = queryset.first().clone()
                 self.instance._counted = None  # pylint: disable=protected-access
                 self.instance._index = False  # pylint: disable=protected-access
+                if self.instance.from_concept_id and self.instance.from_source_id == self.instance.parent_id:
+                    # the update can move the mapping to another from concept, whose mapped codes then need a refresh
+                    self.instance.replaced_from_concept_id = self.instance.from_concept_id
                 errors = Mapping.create_new_version_for(self.instance, self.data, self.user, cache=self.cache)
                 if errors and Mapping.is_standard_checksum_error(errors):
                     return UNCHANGED
@@ -826,6 +829,8 @@ class ImportIndexer:
         ]))
         if resource == 'mapping' and instance.from_concept_id and instance.from_source_id == instance.parent_id:
             self.mapped_concept_ids.add(instance.from_concept_id)
+        if resource == 'mapping' and get(instance, 'replaced_from_concept_id'):
+            self.mapped_concept_ids.add(instance.replaced_from_concept_id)  # the mapping no longer starts there
 
     def finish(self):
         # every row first, so that a failure to queue can't leave any deferred

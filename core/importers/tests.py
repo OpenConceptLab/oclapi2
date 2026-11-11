@@ -1341,6 +1341,75 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(importer.failed[0]['errors'], {'__all__': ['Mapping ID must be unique within a source.']})
 
     @patch('core.importers.models.batch_index_resources')
+    def test_mapping_import_with_id_relinks_the_target_when_only_its_code_changes(self, batch_index_resources_mock):
+        """Same to_source_url, new to_concept_code: the mapping follows the new code, not the previously linked one."""
+        batch_index_resources_mock.__name__ = 'batch_index_resources'
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='CodeChangeOrg'))
+        ConceptFactory(parent=source, mnemonic='From')
+        ConceptFactory(parent=source, mnemonic='CodeA')
+        code_b = ConceptFactory(parent=source, mnemonic='CodeB')
+        line = {
+            'type': 'Mapping', 'id': 'code-map', 'map_type': 'Same As', 'owner_type': 'Organization',
+            'owner': source.organization.mnemonic, 'source': source.mnemonic,
+            'from_concept_url': source.uri + 'concepts/From/', 'to_source_url': source.uri, 'to_concept_code': 'CodeA'
+        }
+        BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[line]).run()
+
+        importer = BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[
+            {**line, 'to_concept_code': 'CodeB'}])
+        importer.run()
+
+        self.assertEqual((len(importer.created), len(importer.updated), len(importer.failed)), (0, 1, 0))
+        mapping = Mapping.objects.get(parent=source, mnemonic='code-map', id=F('versioned_object_id'))
+        self.assertEqual(mapping.to_concept_code, 'CodeB')
+        self.assertEqual(mapping.to_concept_id, code_b.versioned_object_id)
+
+    @patch('core.importers.models.batch_index_resources')
+    def test_mapping_import_with_id_replaces_the_source_version_of_the_previous_target(
+            self, batch_index_resources_mock):
+        """A source version recorded for the previous target repo is not carried over to the new one."""
+        batch_index_resources_mock.__name__ = 'batch_index_resources'
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='VersionChangeOrg'))
+        ConceptFactory(parent=source, mnemonic='From')
+        BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[
+            self.external_target_mapping_line(source, to_source_url='/orgs/External/sources/Old/v1/')]).run()
+        mapping = Mapping.objects.get(parent=source, mnemonic='fixture-map', id=F('versioned_object_id'))
+        self.assertEqual((mapping.to_source_url, mapping.to_source_version), ('/orgs/External/sources/Old/', 'v1'))
+
+        importer = BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[
+            self.external_target_mapping_line(source, to_source_url='/orgs/External/sources/New/v2/')])
+        importer.run()
+
+        self.assertEqual((len(importer.created), len(importer.updated), len(importer.failed)), (0, 1, 0))
+        mapping.refresh_from_db()
+        self.assertEqual((mapping.to_source_url, mapping.to_source_version), ('/orgs/External/sources/New/', 'v2'))
+
+    @patch('core.importers.models.index_concepts_mapped_codes')
+    @patch('core.importers.models.batch_index_resources')
+    def test_mapping_import_with_id_moved_to_another_from_concept_refreshes_the_previous_one(
+            self, _, index_concepts_mapped_codes_mock):
+        """The concept a mapping moved away from stops advertising it, so its mapped codes are refreshed too."""
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='MovedFromOrg'))
+        old_from = ConceptFactory(parent=source, mnemonic='OldFrom')
+        new_from = ConceptFactory(parent=source, mnemonic='NewFrom')
+        ConceptFactory(parent=source, mnemonic='To')
+        BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[
+            self.mapping_line(source, 'OldFrom', 'To', id='moved-map')]).run()
+        index_concepts_mapped_codes_mock.reset_mock()
+
+        importer = BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[
+            self.mapping_line(source, 'NewFrom', 'To', id='moved-map')])
+        importer.run()
+
+        self.assertEqual((len(importer.created), len(importer.updated), len(importer.failed)), (0, 1, 0))
+        mapping = Mapping.objects.get(parent=source, mnemonic='moved-map', id=F('versioned_object_id'))
+        self.assertEqual(mapping.from_concept_id, new_from.versioned_object_id)
+        self.assertEqual(
+            self.queued_mapped_code_ids(index_concepts_mapped_codes_mock) & {
+                old_from.versioned_object_id, new_from.versioned_object_id},
+            {old_from.versioned_object_id, new_from.versioned_object_id})
+
+    @patch('core.importers.models.batch_index_resources')
     def test_mapping_import_with_autoid_assignment(self, batch_index_resources_mock):
         self.assertEqual(Mapping.objects.count(), 0)
 
