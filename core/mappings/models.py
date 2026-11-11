@@ -378,23 +378,35 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         self.from_source, self.from_source_url = get_source(from_source_url)
         self.to_source, self.to_source_url = get_source(to_source_url)
 
+        def keep_linked_concept(concept, requested_source_url, resolved_source_url):
+            """Already linked concept, dropped when the data points that end of the mapping to another repo."""
+            if concept and requested_source_url and get(concept, 'parent.uri') != separate_version(
+                    resolved_source_url)[1]:
+                return None
+            return concept
+
+        linked_from_concept = keep_linked_concept(
+            get(self, 'from_concept'), data.get('from_source_url'), self.from_source_url)
+        linked_to_concept = keep_linked_concept(
+            get(self, 'to_concept'), data.get('to_source_url'), self.to_source_url)
+
         if to_concept_code and not is_url_encoded_string(to_concept_code):
             to_concept_code = encode_string(to_concept_code)
         if from_concept_code and not is_url_encoded_string(from_concept_code):
             from_concept_code = encode_string(from_concept_code)
 
-        if not to_concept_url and not get(self, 'to_concept') and self.to_source_url and (
+        if not to_concept_url and not linked_to_concept and self.to_source_url and (
                 to_concept_code or self.to_concept_code):
             to_concept_code = to_concept_code or self.to_concept_code
             to_concept_url = self.to_source_url + 'concepts/' + to_concept_code + '/'
 
-        if not from_concept_url and not get(self, 'from_concept') and self.from_source_url and (
+        if not from_concept_url and not linked_from_concept and self.from_source_url and (
                 from_concept_code or self.from_concept_code):
             from_concept_code = from_concept_code or self.from_concept_code
             from_concept_url = self.from_source_url + 'concepts/' + from_concept_code + '/'
 
-        from_concept = get_concept(from_concept_url) if from_concept_url else get(self, 'from_concept')
-        to_concept = get_concept(to_concept_url) if to_concept_url else get(self, 'to_concept')
+        from_concept = get_concept(from_concept_url) if from_concept_url else linked_from_concept
+        to_concept = get_concept(to_concept_url) if to_concept_url else linked_to_concept
 
         self.from_concept_id = get(from_concept, 'id')
         self.to_concept_id = get(to_concept, 'id')

@@ -579,6 +579,14 @@ class MappingImporter(BaseResourceImporter):
         from_concept_code = self.get('from_concept_code')
         to_source_url = self.get('to_source_url')
         parent_uri = f'/{"users" if self.is_user_owner() else "orgs"}/{self.get("owner")}/sources/{self.get("source")}/'
+        if self.get('id'):
+            # An explicit ID identifies the mapping within its source. Matching on its relationship fields too would
+            # hide the mapping whenever the import changes them (e.g. the target), and the import would then try to
+            # create a duplicate ID instead of versioning the existing mapping.
+            self.queryset = Mapping.objects.filter(
+                parent__uri=parent_uri, id=F('versioned_object_id'), mnemonic=self.get('id'))
+            return self.queryset
+
         filters = {
             'parent__uri': parent_uri,
             'id': F('versioned_object_id'),
@@ -606,9 +614,6 @@ class MappingImporter(BaseResourceImporter):
                     to_source_uri = to_parent_uri(versionless_to_concept_url)
                     if self.get_cached_source_exists_by_uri(drop_version(to_source_uri)):
                         filters['to_source__uri'] = to_source_uri
-
-        if self.get('id'):
-            filters['mnemonic'] = self.get('id')
 
         if to_source_url:
             to_source_uri = drop_version(to_source_url)
