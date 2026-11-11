@@ -8,7 +8,7 @@ from django.db.models.functions import MD5, Upper
 from pydash import get, compact, has
 
 from core.common.checksums import ChecksumModel
-from core.common.constants import ISO_639_1, LATEST, HEAD, ALL
+from core.common.constants import ISO_639_1, LATEST, HEAD, ALL, ACCESS_TYPE_NONE
 from core.common.db_functions import ImmutableUnaccent
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel, ConceptContainerModel
@@ -1348,7 +1348,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         # Updates mappings where mapping.to_concept or mapping.from_concepts matches concept's mnemonic and parent
         # only mappings whose last saver can view this concept's repo; others keep the external code, as on save
         from core.mappings.models import Mapping
-        parent_uris = self.parent.identity_uris
+        parent_uris = self.parent.get_mapping_link_uris()
         can_view = self.parent.get_view_access_criteria('updated_by')
 
         Mapping.objects.filter(
@@ -1381,6 +1381,20 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         """
         from core.concepts.documents import ConceptDocument
         return cls.batch_index_partial_by_ids(queryset, ConceptDocument, cls.get_mapped_codes_actions, refresh=False)
+
+    @staticmethod
+    def get_viewable(queryset, user):
+        """The concepts of `queryset` in repos `user` (None or anonymous for the public) can view."""
+        if get(user, 'is_staff'):
+            return queryset
+        if not get(user, 'is_authenticated'):
+            return queryset.exclude(public_access=ACCESS_TYPE_NONE)
+        return Concept.apply_user_criteria(queryset, user)
+
+    def get_viewable_hierarchy_concept_urls(self, relation, user):
+        """parent_concept_urls or child_concept_urls (`relation`), of concepts in repos `user` can view."""
+        return list(self.get_viewable(
+            self.get_hierarchy_related_queryset(relation), user).values_list('uri', flat=True))
 
     @property
     def parent_concept_urls(self):
@@ -1456,12 +1470,14 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def parent_concept_queryset(self):
         return self.get_hierarchy_related_queryset('parent_concepts')
 
-    def get_hierarchy_path(self):
+    def get_hierarchy_path(self, user=None):
+        """The URLs from the top of the hierarchy down to this concept's parent, through parents in repos `user`
+        (None for the public) can view."""
         result = []
-        parent_concept = self.parent_concepts.first()
+        parent_concept = self.get_viewable(self.parent_concepts.all(), user).first()
         while parent_concept is not None:
             result.append(drop_version(parent_concept.uri))
-            parent_concept = parent_concept.parent_concepts.first()
+            parent_concept = self.get_viewable(parent_concept.parent_concepts.all(), user).first()
 
         result.reverse()
         return result

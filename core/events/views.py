@@ -35,6 +35,9 @@ class EventsView(BaseAPIView, ListWithHeadersMixin):
         return self.owner
 
     def get_queryset(self):
+        return Event.get_visible_to(self.get_events(), self.request.user)
+
+    def get_events(self):
         owner = self.get_owner()
         return self.apply_permissions(owner, owner.events)
 
@@ -52,12 +55,12 @@ class EventsView(BaseAPIView, ListWithHeadersMixin):
 
 class UserEventsView(EventsView):
     """Events of a User"""
-    def get_queryset(self):
+    def get_events(self):
         user = self.get_owner()
         scopes = compact(self.request.query_params.get('scopes', '').split(','))
         queryset = Event.objects.none()
         if 'self' in scopes or not scopes:
-            queryset = super().get_queryset()
+            queryset = super().get_events()
         include_private = self.should_include_private_events(user)
         if 'all' in scopes:
             queryset = queryset.union(Event.get_user_all_events(user, include_private))
@@ -77,7 +80,7 @@ class GuestEventsView(EventsView):
             return response
         return super().get(request, *args, **kwargs)
 
-    def get_queryset(self):
+    def get_events(self):
         from core.users.models import UserProfile
         user = UserProfile.objects.filter(username=settings.HIGHLIGHTED_EVENTS_FROM_USERNAME).first()
         events = Event.objects.none()

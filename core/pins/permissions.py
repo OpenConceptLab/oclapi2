@@ -5,7 +5,8 @@ from core.common.permissions import HasOwnership
 
 class CanEditPins(BasePermission):
     """
-    Anyone can read the pins they can view (Pin.get_visible_to). A user's pins can be changed by that user, an
+    An org's pins can be read by anyone who can view them (Pin.get_visible_to), a user's by that user and staff
+    (PinBaseView). A user's pins can be changed by that user, an
     org's pins by its members, and any pin by staff. Checked against the user or org the pins belong to.
     """
     def has_object_permission(self, request, view, obj):

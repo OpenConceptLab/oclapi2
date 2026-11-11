@@ -90,29 +90,70 @@ class Event(models.Model):
             return UserProfile.objects.filter(uri=self.object_url).first()
         return None
 
-    @property
-    def referenced_object(self):  # pylint: disable=too-many-return-statements
-        if not self.referenced_object_url:
+    @staticmethod
+    def get_model_for_url(url):  # pylint: disable=too-many-return-statements
+        """The model of the object an event's URL names."""
+        if not url:
             return None
-        if '/mappings/' in self.referenced_object_url:
+        if '/mappings/' in url:
             from core.mappings.models import Mapping
-            return Mapping.objects.filter(uri=self.referenced_object_url).first()
-        if '/concepts/' in self.referenced_object_url:
+            return Mapping
+        if '/concepts/' in url:
             from core.concepts.models import Concept
-            return Concept.objects.filter(uri=self.referenced_object_url).first()
-        if '/sources/' in self.referenced_object_url:
+            return Concept
+        if '/sources/' in url:
             from core.sources.models import Source
-            return Source.objects.filter(uri=self.referenced_object_url).first()
-        if '/collections/' in self.referenced_object_url:
+            return Source
+        if '/collections/' in url:
             from core.collections.models import Collection
-            return Collection.objects.filter(uri=self.referenced_object_url).first()
-        if '/orgs/' in self.referenced_object_url:
+            return Collection
+        if '/orgs/' in url:
             from core.orgs.models import Organization
-            return Organization.objects.filter(uri=self.referenced_object_url).first()
-        if '/users/' in self.referenced_object_url:
+            return Organization
+        if '/users/' in url:
             from core.users.models import UserProfile
-            return UserProfile.objects.filter(uri=self.referenced_object_url).first()
+            return UserProfile
         return None
+
+    @property
+    def referenced_object(self):
+        model = self.get_model_for_url(self.referenced_object_url)
+        return model.objects.filter(uri=self.referenced_object_url).first() if model else None
+
+    @classmethod
+    def get_hidden_urls(cls, urls, user):
+        """The URLs among `urls` of objects that exist and `user` can't view now. A user can always be viewed."""
+        from core.users.models import UserProfile
+        urls_by_model = {}
+        for url in urls:
+            model = cls.get_model_for_url(url)
+            if model and model is not UserProfile:
+                urls_by_model.setdefault(model, set()).add(url)
+        hidden = set()
+        for model, model_urls in urls_by_model.items():
+            for obj in model.objects.filter(uri__in=model_urls):
+                if not UserProfile.can_user_view(user, obj):
+                    hidden.add(obj.uri)
+        return hidden
+
+    @classmethod
+    def get_visible_to(cls, queryset, user):
+        """
+        The events of `queryset` without those of an org or repo `user` can't view now, such as one made private after
+        the event: its stored URLs would still name it. Staff get them all.
+        """
+        if getattr(user, 'is_staff', False):
+            return queryset
+        is_combined = bool(queryset.query.combinator)
+        pairs = queryset.order_by().values_list('object_url', 'referenced_object_url')
+        if not is_combined:  # a union's rows are distinct already
+            pairs = pairs.distinct()
+        hidden = cls.get_hidden_urls({url for pair in pairs for url in pair}, user)
+        if not hidden:
+            return queryset
+        if is_combined:  # a union can't be filtered
+            queryset = cls.objects.filter(id__in=queryset.order_by().values('id'))
+        return queryset.exclude(object_url__in=hidden).exclude(referenced_object_url__in=hidden)
 
     @property
     def referenced_object_repr(self):

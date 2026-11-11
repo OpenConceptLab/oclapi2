@@ -8,11 +8,13 @@ from core.collections.tests.factories import OrganizationCollectionFactory, Expa
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLAPITestCase
 from core.concepts.models import Concept
+from core.concepts.serializers import ConceptVersionExportSerializer
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
+from core.url_registry.factories import GlobalURLRegistryFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -222,6 +224,63 @@ class ParentConceptAccessTest(CrossRepoAccessBaseTest):
                 self.assertEqual(sorted(concept['id'] for concept in response.data), expected, (user, url))
 
 
+    def test_hierarchy_urls_paths_and_counts_hide_private_concepts(self):
+        child = self.persist_child('urlchild', [self.private_concept.uri, self.public_concept.uri])
+        for mnemonic, parent_uri in [('privchild', self.public_concept.uri), ('privgrandchild', child.uri)]:
+            concept = Concept.persist_new({
+                **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': mnemonic,
+                'parent': self.private_source, 'public_access': ACCESS_TYPE_NONE,
+                'names': [ConceptNameFactory.build(locale='en', locale_preferred=True)],
+                'parent_concept_urls': [parent_uri]
+            }, self.member)
+            self.assertEqual(concept.errors, {})
+        private_child_uri = self.private_source.uri + 'concepts/privchild/'
+        private_grandchild_uri = self.private_source.uri + 'concepts/privgrandchild/'
+
+        def get(url, headers):
+            response = self.client.get(url, **headers)
+            self.assertEqual(response.status_code, 200, url)
+            return response.data
+
+        for user, viewable in [(None, False), (self.outsider, False), (self.member, True), (self.admin, True)]:
+            headers = {'HTTP_AUTHORIZATION': 'Token ' + user.get_token()} if user else {}
+            children = sorted([child.uri, *([private_child_uri] if viewable else [])])
+            parents = sorted([self.public_concept.uri, *([self.private_concept.uri] if viewable else [])])
+
+            data = get(self.public_concept.uri + '?includeChildConceptURLs=true&includeSummary=true', headers)
+            self.assertEqual(sorted(data['child_concept_urls']), children, user)
+            self.assertEqual(data['summary']['children'], len(children), user)
+            self.assertEqual(get(self.public_concept.uri + 'summary/', headers)['children'], len(children), user)
+            data = get(child.uri + '?includeParentConceptURLs=true&includeHierarchyPath=true&includeSummary=true',
+                       headers)
+            self.assertEqual(sorted(data['parent_concept_urls']), parents, user)
+            self.assertEqual(data['summary']['parents'], len(parents), user)
+            # the path goes up through a parent the requester can view
+            self.assertIn(data['hierarchy_path'], [[uri] for uri in parents], user)
+            data = get(self.public_concept.uri + 'children/?includeChildConcepts=true', headers)
+            self.assertEqual(
+                next(concept for concept in data if concept['id'] == 'urlchild')['children'],
+                [private_grandchild_uri] if viewable else [], user)
+            data = get(self.public_source.uri + 'hierarchy/', headers)
+            self.assertEqual(
+                sorted(next(concept for concept in data['children'] if concept['id'] == 'public')['children']),
+                children, user)
+
+
+    def test_exports_link_only_concepts_every_viewer_of_the_export_can_view(self):
+        sibling = ConceptFactory(parent=self.public_source, mnemonic='sibling', public_access=ACCESS_TYPE_NONE)
+        child = self.persist_child('exportchild', [self.private_concept.uri, self.public_concept.uri])
+        child.parent_concepts.add(sibling)  # a concept of the same source, as private as its source may be
+
+        def linked(concept, field):  # the concepts named, as the export names the linked rows (HEAD or versions)
+            urls = ConceptVersionExportSerializer(concept).data[field]
+            return {Concept.objects.get(uri=uri).mnemonic for uri in urls}
+
+        for concept in [child, child.get_latest_version()]:
+            self.assertEqual(linked(concept, 'parent_concept_urls'), {'public', 'sibling'})
+        self.assertEqual(linked(self.public_concept.get_latest_version(), 'child_concept_urls'), {'exportchild'})
+
+
 class MappingTargetAccessTest(CrossRepoAccessBaseTest):
     def test_outsider_mapping_to_private_concept_is_external(self):
         from_concept = ConceptFactory(parent=self.outsider_source, mnemonic='from')
@@ -328,6 +387,34 @@ class MappingTargetAccessTest(CrossRepoAccessBaseTest):
         self.assertIsNone(outsider_mapping.to_source_id)
         member_mapping.refresh_from_db()
         self.assertEqual(member_mapping.to_source_id, new_source.id)
+
+    def test_new_source_does_not_take_over_mappings_to_a_canonical_url_another_source_answers_for(self):
+        canonical_url = 'http://example.org/CodeSystem/claimed'
+        self.public_source.canonical_url = canonical_url
+        self.public_source.save()
+        GlobalURLRegistryFactory(url=canonical_url, namespace=self.public_source.organization.uri)
+        mapping = MappingFactory(
+            parent=self.outsider_source, from_concept=ConceptFactory(parent=self.outsider_source), to_concept=None,
+            to_source_url=canonical_url, to_concept_code='claimed', updated_by=self.outsider)
+        self.assertIsNone(mapping.to_source_id)
+
+        errors = Source.persist_new(
+            UserSourceFactory.build(user=self.outsider, mnemonic='Claimer', canonical_url=canonical_url),
+            self.outsider, parent_resource=self.outsider)
+        self.assertEqual(errors, {})
+        claimer = Source.objects.get(mnemonic='Claimer', version='HEAD')
+        ConceptFactory(parent=claimer, mnemonic='claimed').update_mappings()
+
+        mapping.refresh_from_db()
+        self.assertIsNone(mapping.to_source_id)
+        self.assertIsNone(mapping.to_concept_id)
+
+        self.public_source.update_mappings()
+        concept = ConceptFactory(parent=self.public_source, mnemonic='claimed')
+        concept.update_mappings()
+        mapping.refresh_from_db()
+        self.assertEqual(mapping.to_source_id, self.public_source.id)
+        self.assertEqual(mapping.to_concept_id, concept.id)
 
     def test_edit_by_user_who_cannot_view_target_keeps_link(self):
         from_concept = ConceptFactory(parent=self.outsider_source, mnemonic='from')

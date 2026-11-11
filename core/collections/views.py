@@ -346,7 +346,7 @@ class CollectionReferenceResolveView(CollectionReferenceAbstractResourcesView): 
 
     def get(self, request, *args, **kwargs):
         reference = self.get_queryset()
-        data = reference.get_resolved_repo_versions_serialized()
+        data = reference.get_resolved_repo_versions_serialized(user=request.user)
         return Response(data)
 
 

@@ -722,10 +722,30 @@ class CsvExportAccessTest(AccessTestMixin, OCLAPITestCase):
 
     def test_map_project_list(self):
         MapProjectFactory(user=self.owner, organization=None, public_access=ACCESS_TYPE_NONE, name='csv-project')
-        url = self.owner.uri + 'map-projects/?csv=true&verbose=true'
+        MapProjectFactory(user=self.owner, organization=None, public_access=ACCESS_TYPE_VIEW, name='csv-public-project')
+        MapProjectFactory(
+            user=self.outsider, organization=None, public_access=ACCESS_TYPE_VIEW, name='csv-other-project')
 
-        self.assertEqual(self.export(url, self.owner, 'name'), ['csv-project'])
-        self.assertEqual(self.export(url, None, 'name'), [])
+        for url in [self.owner.uri + 'map-projects/?csv=true&verbose=true', self.owner.uri + 'map-projects/?csv=true',
+                    '/user/map-projects/?csv=true']:
+            self.assertEqual(self.export(url, self.owner, 'name'), ['csv-project', 'csv-public-project'], url)
+        for url in [self.owner.uri + 'map-projects/?csv=true&verbose=true', self.owner.uri + 'map-projects/?csv=true']:
+            self.assertEqual(self.export(url, None, 'name'), ['csv-public-project'], url)
+        self.assertNotIn('matches', self.export_columns(self.owner.uri + 'map-projects/?csv=true', self.owner))
+
+    def test_search_without_type(self):
+        private_org = OrganizationFactory(public_access=ACCESS_TYPE_NONE)
+
+        mnemonics = self.export(f'/orgs/?csv=true&q={self.org.mnemonic}', None, 'mnemonic')
+
+        self.assertIn(self.org.mnemonic, mnemonics)
+        self.assertNotIn(private_org.mnemonic, mnemonics)
+
+    def export_columns(self, url, user):
+        response = self.request('get', url, user)
+        with zipfile.ZipFile(io.BytesIO(self.exports[response.data['url'].removeprefix('https://exports.test/')])) \
+                as zip_file, zip_file.open(zip_file.namelist()[0]) as csv_file:
+            return csv.DictReader(io.TextIOWrapper(csv_file, 'utf-8-sig')).fieldnames
 
     def test_repo_concepts(self):
         source = UserSourceFactory(user=self.owner, public_access=ACCESS_TYPE_NONE)
@@ -1150,6 +1170,27 @@ class CollectionReferenceAccessTest(AccessTestMixin, OCLAPITestCase):
         self.assertEqual(self.request('get', url, self.outsider).status_code, 403)
         self.assertEqual(self.request('get', url, self.member).status_code, 200)
 
+    def test_resolved_repo_versions_are_those_the_requester_can_view(self):
+        private_source = UserSourceFactory(user=self.owner, public_access=ACCESS_TYPE_NONE)
+        public_source = OrganizationSourceFactory(organization=self.org, public_access=ACCESS_TYPE_VIEW)
+        for source in [private_source, public_source]:
+            CollectionReference(
+                expression=f'{source.uri}concepts/foo/', collection=self.collection, system=source.uri, code='foo'
+            ).save()
+        url = self.collection.uri + 'HEAD/references/?includeResolvedRepoVersions=true'
+
+        def get_resolved_urls(user):
+            response = self.request('get', url, user)
+            self.assertEqual(response.status_code, 200)
+            return sorted(
+                version['version_url']
+                for reference in response.data for version in reference['resolved_repo_versions'])
+
+        for user in [None, self.outsider, self.member]:
+            self.assertEqual(get_resolved_urls(user), [public_source.uri], user)
+        for user in [self.owner, self.staff]:
+            self.assertEqual(get_resolved_urls(user), sorted([private_source.uri, public_source.uri]), user)
+
 
 class SourceContentAccessTest(AccessTestMixin, OCLAPITestCase):
     """
@@ -1236,6 +1277,31 @@ class SourceContentAccessTest(AccessTestMixin, OCLAPITestCase):
             self.assertEqual(self.request('get', url, self.outsider).status_code, 403, url)
             self.assertEqual(self.request('get', url).status_code, 401, url)
             self.assertEqual(self.request('get', url, self.member).status_code, 200, url)
+
+
+class CanViewAllContentTest(OCLTestCase):
+    """A collection reference reads all of a repo's content only for those who can view it."""
+    def setUp(self):
+        super().setUp()
+        self.staff = UserProfile.objects.get(username='ocladmin')
+        self.org = OrganizationFactory()
+        self.member = UserProfileFactory(organizations=[self.org])
+        self.owner = UserProfileFactory()
+        self.outsider = UserProfileFactory()
+
+    def test_private_repos(self):
+        user_source = UserSourceFactory(user=self.owner, public_access=ACCESS_TYPE_NONE)
+        org_source = OrganizationSourceFactory(organization=self.org, public_access=ACCESS_TYPE_NONE)
+
+        for source, viewers in [(user_source, [self.owner, self.staff]), (org_source, [self.member, self.staff])]:
+            for user in [self.owner, self.member, self.outsider, self.staff]:
+                self.assertEqual(source.can_view_all_content(user), user in viewers, (source.uri, user.username))
+            self.assertFalse(source.can_view_all_content(None))  # no user: public content only
+
+    def test_public_repo(self):
+        source = UserSourceFactory(user=self.owner, public_access=ACCESS_TYPE_VIEW)
+
+        self.assertTrue(source.can_view_all_content(self.outsider))
 
 
 class HasOwnershipTest(OCLTestCase):

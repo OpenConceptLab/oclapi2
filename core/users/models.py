@@ -343,10 +343,10 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
         return bool(repo and hasattr(repo, 'has_view_access') and repo.has_view_access(user))
 
     def get_following_visible_to(self, viewer):
-        """This user's follows, without those of objects `viewer` can't view (the user too, once they lose access).
-        Staff get them all."""
+        """This user's follows, without those of objects `viewer` can't view. The user and staff get them all, so the
+        user can unfollow what they lost access to (FollowingSerializer then shows no object)."""
         follows = self.following.prefetch_related('following')
-        if getattr(viewer, 'is_staff', False):
+        if getattr(viewer, 'is_staff', False) or getattr(viewer, 'id', None) == self.id:
             return follows
         hidden_ids = [follow.id for follow in follows if not self.can_user_view(viewer, follow.following)]
         return follows.exclude(id__in=hidden_ids) if hidden_ids else follows

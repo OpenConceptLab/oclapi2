@@ -3,7 +3,7 @@ from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.generics import ListAPIView, \
     RetrieveUpdateDestroyAPIView
-from rest_framework.permissions import IsAuthenticatedOrReadOnly
+from rest_framework.permissions import IsAuthenticatedOrReadOnly, SAFE_METHODS
 from rest_framework.response import Response
 
 from core.common.constants import MAX_PINS_ALLOWED, INCLUDE_CREATOR_PINS
@@ -55,7 +55,15 @@ class PinBaseView(BaseAPIView):
             return {'organization__mnemonic': self.kwargs['org']}
         return None
 
+    def can_read_user_pins(self):
+        """A user's pins are read by that user and staff only."""
+        user = self.request.user
+        return self.kwargs.get('user_is_self') or user.is_staff or (
+            user.is_authenticated and user.username == self.kwargs.get('user'))
+
     def get_queryset(self):
+        if self.get_parent_type() == 'user' and self.request.method in SAFE_METHODS and not self.can_read_user_pins():
+            self.permission_denied(self.request)
         filters = self.get_parent_filter()
         criteria = Q(**filters)
         if self.should_include_creator_pins() and 'org' not in self.kwargs:

@@ -609,7 +609,8 @@ class CollectionReferenceSerializer(ModelSerializer):
         if not self.include_resolved_repo_versions:
             return None
         return obj.get_resolved_repo_versions_serialized(
-            self.resolved_system_version_cache, self.resolved_valueset_version_cache, self.expansion_cache
+            self.resolved_system_version_cache, self.resolved_valueset_version_cache, self.expansion_cache,
+            get(self, 'context.request.user')
         )
 
 

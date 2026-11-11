@@ -240,13 +240,23 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
         return self.custom_validation_schema is not None and self.active_concepts
 
+    def get_mapping_link_uris(self):
+        """The URLs a stored mapping names this source by to be linked to it: its own, and its canonical URL only while
+        that resolves to this source, as on a mapping's save, so a new source can't take over another's mappings."""
+        uris = [self.uri]
+        if self.canonical_url:
+            resolved, _ = Source.resolve_reference_expression(self.canonical_url, None, HEAD)
+            if resolved.id and resolved.versioned_object_url == self.versioned_object_url:
+                uris.append(self.canonical_url)
+        return uris
+
     def update_mappings(self):
         # Updates mappings where mapping.to_source_url or mapping.from_source_url matches source url or canonical url
         from core.mappings.models import Mapping
         from core.mappings.documents import MappingDocument
 
         # only mappings whose last saver can view this repo; others keep the external URL, as on save
-        uris = self.identity_uris
+        uris = self.get_mapping_link_uris()
         can_view = self.get_view_access_criteria('updated_by')
 
         to_queryset = Mapping.objects.filter(to_source_url__in=uris)
@@ -401,12 +411,14 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     def get_parentless_concepts(self):
         return self.concepts.filter(parent_concepts__isnull=True, id=F('versioned_object_id'))
 
-    def hierarchy(self, offset=0, limit=100):
+    def hierarchy(self, offset=0, limit=100, user=None):
+        """The parentless concepts, each with its children's URLs in repos `user` (None for the public) can view."""
         from core.concepts.serializers import ConceptHierarchySerializer
         hierarchy_root = None
         if offset == 0:
             hierarchy_root = self.hierarchy_root
 
+        context = {'user': user}
         parent_less_children = self.get_parentless_concepts()
         if hierarchy_root:
             parent_less_children = parent_less_children.exclude(mnemonic=hierarchy_root.mnemonic)
@@ -419,10 +431,10 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
         children = []
         if parent_less_children.exists():
-            children = ConceptHierarchySerializer(parent_less_children, many=True).data
+            children = ConceptHierarchySerializer(parent_less_children, many=True, context=context).data
 
         if hierarchy_root:
-            children.append({**ConceptHierarchySerializer(hierarchy_root).data, 'root': True})
+            children.append({**ConceptHierarchySerializer(hierarchy_root, context=context).data, 'root': True})
 
         return {
             'id': self.mnemonic,

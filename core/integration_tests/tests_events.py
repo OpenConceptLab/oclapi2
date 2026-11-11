@@ -278,32 +278,32 @@ class UserEventsViewTest(OCLAPITestCase):
         for user in [member, staff]:
             self.assertEqual(get_followed_urls(user), sorted([private_org.url, private_source.url, public_org.url]))
 
-    def test_get_events_show_objects_only_to_requesters_who_can_view_them_now(self):
+    def test_get_events_of_objects_made_private_only_to_requesters_who_can_view_them_now(self):
         org = OrganizationFactory(mnemonic='turned-private-org')
         source = OrganizationSourceFactory(organization=org, mnemonic='turned-private')
         member = UserProfileFactory(username='turned-member')
         org.members.add(member)
+        staff = UserProfileFactory(username='turned-staff', is_staff=True)
         follower = UserProfileFactory(username='turned-follower')
         follower.follow(source)
-        source.public_access = 'None'
-        source.save()
+        follower.follow(org)
+        for repo in [source, org]:
+            repo.public_access = 'None'
+            repo.save()
 
-        def get_events(user=None, params=''):
+        def get_followed_urls(user=None, params=''):
             headers = {'HTTP_AUTHORIZATION': f'Token {user.get_token()}'} if user else {}
             response = self.client.get(f'/users/turned-follower/events/{params}', **headers)
             self.assertEqual(response.status_code, 200)
-            return response.data
+            return sorted(event['referenced_object']['url'] for event in response.data)
 
-        # the event was public when recorded; the source it shows is live, so it's shown only to those who can view it
+        # the events were public when recorded; their stored URLs would still name the org and source
         for user in [None, follower]:
-            events = get_events(user)
-            self.assertEqual([event['referenced_object'] for event in events], [None], user)
-            self.assertEqual([event['description'] for event in events], ['Followed'], user)
-            # no CSV export, which would skip these checks
-            self.assertEqual(get_events(user, '?csv=true'), events, user)
-        events = get_events(member)
-        self.assertEqual([event['referenced_object']['url'] for event in events], [source.url])
-        self.assertNotEqual(events[0]['description'], 'Followed')
+            for params in ['', '?scopes=self,following', '?scopes=all', '?csv=true']:
+                self.assertEqual(get_followed_urls(user, params), [], (user, params))
+        for user in [member, staff]:
+            self.assertEqual(get_followed_urls(user), sorted([org.url, source.url]), user)
+        self.assertEqual(self.client.get('/orgs/turned-private-org/events/').data, [])
 
     def test_get_orgs_events(self):  # pylint:disable=too-many-statements,too-many-locals
         alfred = UserProfileFactory(username='alfred', first_name='Alfred', last_name='Pennyworth')

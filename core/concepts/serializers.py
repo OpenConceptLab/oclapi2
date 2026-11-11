@@ -30,12 +30,21 @@ def get_collection_uri_from_view(view, request):
 
 def get_viewable_concepts(queryset, request):
     """Concepts from repos the requester can view."""
-    user = get(request, 'user')
-    if get(user, 'is_staff'):
-        return queryset
-    if not get(user, 'is_authenticated'):
-        return queryset.exclude(public_access=ACCESS_TYPE_NONE)
-    return Concept.apply_user_criteria(queryset, user)
+    return Concept.get_viewable(queryset, get(request, 'user'))
+
+
+class ViewableHierarchyUrlsField(ListField):
+    """
+    A concept's parent or child concept URLs (`relation`), of concepts in repos the requester can view: the context's
+    `user`, else its request's user.
+    """
+    def __init__(self, relation, **kwargs):
+        self.relation = relation
+        super().__init__(**kwargs)
+
+    def get_attribute(self, instance):
+        user = self.context['user'] if 'user' in self.context else get(self.context, 'request.user')
+        return instance.get_viewable_hierarchy_concept_urls(self.relation, user)
 
 
 class LocalizedNameSerializer(ModelSerializer):
@@ -153,8 +162,9 @@ class ConceptAbstractSerializer(SourceVersionFieldMixin, AbstractResourceSeriali
     parent_concepts = SerializerMethodField()
     child_concepts = SerializerMethodField()
     hierarchy_path = SerializerMethodField()
-    parent_concept_urls = ListField(allow_null=True, required=False, allow_empty=True)
-    child_concept_urls = ListField(read_only=True)
+    parent_concept_urls = ViewableHierarchyUrlsField(
+        'parent_concepts', allow_null=True, required=False, allow_empty=True)
+    child_concept_urls = ViewableHierarchyUrlsField('child_concepts', read_only=True)
     summary = SerializerMethodField()
     references = SerializerMethodField()
     checksums = SerializerMethodField()
@@ -325,12 +335,12 @@ class ConceptAbstractSerializer(SourceVersionFieldMixin, AbstractResourceSeriali
 
     def get_hierarchy_path(self, obj):
         if self.include_hierarchy_path:
-            return obj.get_hierarchy_path()
+            return obj.get_hierarchy_path(get(self, 'context.request.user'))
         return None
 
     def get_summary(self, obj):
         if self.include_summary:
-            return ConceptSummarySerializer(obj).data
+            return ConceptSummarySerializer(obj, context=self.context).data
         return None
 
 
@@ -430,12 +440,19 @@ class ConceptSummarySerializer(ModelSerializer):
     names = SerializerMethodField()
     descriptions = SerializerMethodField()
     versions = SerializerMethodField()
-    parents = IntegerField(source='parent_concepts_count', read_only=True)
-    children = IntegerField(source='children_concepts_count', read_only=True)
+    parents = SerializerMethodField()
+    children = SerializerMethodField()
 
     class Meta:
         model = Concept
         fields = ('children', 'parents', 'names', 'descriptions', 'versions', 'id', 'uuid', 'versioned_object_id')
+
+    def get_parents(self, obj):
+        """Only parents in repos the requester can view, as the lists show."""
+        return Concept.get_viewable(obj.parent_concept_queryset(), get(self, 'context.request.user')).count()
+
+    def get_children(self, obj):
+        return Concept.get_viewable(obj.child_concept_queryset(), get(self, 'context.request.user')).count()
 
     @staticmethod
     def get_names(obj):
@@ -613,20 +630,22 @@ class ConceptVersionExportSerializer(ModelSerializer):
         return obj.prev_version_uri
 
     @staticmethod
-    def get_parent_concept_urls(obj):
-        uris = set(c.uri for c in obj.parent_concepts.all())
+    def get_shared_hierarchy_urls(obj, relation):
+        """An export is served to anyone who can view its repo version, so it links only concepts of the same source
+        and public ones. Reads the export's prefetched relations."""
+        concepts = list(getattr(obj, relation).all())
         versioned = getattr(obj, 'versioned_object', None)
         if versioned:
-            uris.update(c.uri for c in versioned.parent_concepts.all())
-        return list(uris)
+            concepts += getattr(versioned, relation).all()
+        return list({
+            concept.uri for concept in concepts
+            if concept.parent_id == obj.parent_id or concept.public_access != ACCESS_TYPE_NONE})
 
-    @staticmethod
-    def get_child_concept_urls(obj):
-        uris = set(c.uri for c in obj.child_concepts.all())
-        versioned = getattr(obj, 'versioned_object', None)
-        if versioned:
-            uris.update(c.uri for c in versioned.child_concepts.all())
-        return list(uris)
+    def get_parent_concept_urls(self, obj):
+        return self.get_shared_hierarchy_urls(obj, 'parent_concepts')
+
+    def get_child_concept_urls(self, obj):
+        return self.get_shared_hierarchy_urls(obj, 'child_concepts')
 
 
 class ConceptVersionDetailSerializer(CollectionVersionsMixin, SourceVersionFieldMixin, ModelSerializer):
@@ -651,8 +670,8 @@ class ConceptVersionDetailSerializer(CollectionVersionsMixin, SourceVersionField
     update_comment = CharField(source='comment', required=False, allow_null=True, allow_blank=True)
     parent_concepts = SerializerMethodField()
     child_concepts = SerializerMethodField()
-    parent_concept_urls = ListField(read_only=True)
-    child_concept_urls = ListField(read_only=True)
+    parent_concept_urls = ViewableHierarchyUrlsField('parent_concepts', read_only=True)
+    child_concept_urls = ViewableHierarchyUrlsField('child_concepts', read_only=True)
     source_versions = ListField(read_only=True)
     collection_versions = SerializerMethodField()
     references = SerializerMethodField()
@@ -751,7 +770,7 @@ class ConceptHierarchySerializer(ModelSerializer):
     uuid = CharField(source='id')
     id = EncodedDecodedCharField(source='mnemonic')
     url = CharField(source='uri')
-    children = ListField(source='child_concept_urls')
+    children = ViewableHierarchyUrlsField('child_concepts')
     name = CharField(source='display_name')
 
     class Meta:
@@ -785,7 +804,7 @@ class ConceptChildrenSerializer(ConceptListSerializer):
 
     def get_children(self, obj):
         if self.include_child_concepts:
-            return obj.child_concept_urls
+            return obj.get_viewable_hierarchy_concept_urls('child_concepts', get(self, 'context.request.user'))
         return None
 
 
@@ -816,5 +835,5 @@ class ConceptParentsSerializer(ModelSerializer):
 
     def get_parents(self, obj):
         if self.include_parent_concepts:
-            return obj.parent_concept_urls
+            return obj.get_viewable_hierarchy_concept_urls('parent_concepts', get(self, 'context.request.user'))
         return None

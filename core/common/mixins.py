@@ -232,12 +232,6 @@ class ListWithHeadersMixin(ListModelMixin):
         if not data:
             search_string = query_params.get('type', None)
             search_term = query_params.get('q', None)
-            if is_csv:
-                pattern = search_term
-                if pattern:
-                    query_params._mutable = True  # pylint: disable=protected-access
-                    query_params['q'] = "*" + search_term + "*"
-
             if is_csv and not search_string:
                 return self.get_csv(request)
 
