@@ -11,7 +11,7 @@ from pydash import get
 
 from core.common.constants import PERSIST_NEW_ERROR_MESSAGE, ACCESS_TYPE_CHOICES, ACCESS_TYPE_NONE
 from core.common.models import BaseModel
-from core.common.utils import get_export_service, generate_temp_version
+from core.common.utils import get_export_service, generate_temp_version, drop_key_deep, get_url_origin
 
 
 def default_score_configuration():
@@ -54,6 +54,8 @@ class MapProject(BaseModel):
     # No further migration needed at that point.
     input_locales = ArrayField(models.CharField(max_length=10), null=True, blank=True, default=list)
     use_lexical_variants = models.BooleanField(default=False)
+    # Endpoint tokens split out of algorithms and lookup_config; never serialized.
+    credentials = models.JSONField(default=dict, null=True, blank=True)
 
     # Fields that define how a project matches —
     # excluding identity, results, logs, and audit metadata.
@@ -63,6 +65,11 @@ class MapProject(BaseModel):
         'lookup_config', 'score_configuration', 'target_repo_url', 'prompt_template_key',
         'prompt_output_locale', 'input_locales', 'use_lexical_variants'
     ]
+
+    TOKEN_KEY = 'token'
+    HAS_TOKEN_KEY = 'has_token'
+    ALGORITHMS_CREDENTIALS_KEY = 'algorithms'
+    LOOKUP_CREDENTIALS_KEY = 'lookup'
 
     class Meta:
         db_table = 'map_projects'
@@ -243,6 +250,95 @@ class MapProject(BaseModel):
         self.clean_include_retired()
         self.clean_encoder_model()
         self.clean_matches()
+        self.clean_tokens()
+
+    def clean_tokens(self):
+        self.algorithms, self.lookup_config, self.credentials = self.split_tokens(
+            self.algorithms, self.lookup_config, self.credentials)
+
+    @staticmethod
+    def is_ocl_api_url(url):
+        """A lookup URL the Mapper sends to this API: none (the target repo), a path, or a URL on its origin."""
+        if not url:
+            return True
+        if not isinstance(url, str):
+            return False
+        if not url.startswith('http'):
+            return True
+        origin = get_url_origin(url)
+        return bool(origin) and origin == get_url_origin(settings.API_BASE_URL)
+
+    @staticmethod
+    def get_endpoint_url(entry):
+        url = entry.get('url')
+        return url if isinstance(url, str) else ''
+
+    @classmethod
+    def take_token(cls, entry, stored, kept, accept_new=True):
+        """
+        Moves the entry's token into kept by its URL. A missing token keeps the stored one for the
+        same URL, so changing the URL drops it; an empty one clears it. Returns the entry without it.
+        """
+        url = cls.get_endpoint_url(entry)
+        token = entry.get(cls.TOKEN_KEY)
+        is_usable = isinstance(token, str) and bool(token.strip())
+        if cls.TOKEN_KEY in entry and (not is_usable or accept_new):
+            if is_usable:
+                kept[url] = token
+        elif stored.get(url):
+            kept[url] = stored[url]
+        return {key: val for key, val in entry.items() if key not in (cls.TOKEN_KEY, cls.HAS_TOKEN_KEY)}
+
+    @classmethod
+    def split_tokens(cls, algorithms, lookup_config, credentials):
+        """
+        Returns (algorithms, lookup_config, credentials) with tokens moved into credentials. No token is kept
+        for an algorithm without a URL, nor a new one for an OCL API lookup, which gets the user's own.
+        """
+        credentials = credentials if isinstance(credentials, dict) else {}
+        stored_algorithm_tokens = credentials.get(cls.ALGORITHMS_CREDENTIALS_KEY) or {}
+        algorithm_tokens = {}
+        if isinstance(algorithms, list):
+            algorithms = [
+                (
+                    cls.take_token(entry, stored_algorithm_tokens, algorithm_tokens)
+                    if cls.get_endpoint_url(entry) else drop_key_deep(entry, cls.TOKEN_KEY)
+                ) if isinstance(entry, dict) else entry for entry in algorithms
+            ]
+        lookup_tokens = {}
+        if isinstance(lookup_config, dict):
+            lookup_config = cls.take_token(
+                lookup_config, credentials.get(cls.LOOKUP_CREDENTIALS_KEY) or {}, lookup_tokens,
+                accept_new=not cls.is_ocl_api_url(cls.get_endpoint_url(lookup_config))
+            )
+        return algorithms, lookup_config, {
+            key: tokens for key, tokens in (
+                (cls.ALGORITHMS_CREDENTIALS_KEY, algorithm_tokens), (cls.LOOKUP_CREDENTIALS_KEY, lookup_tokens)
+            ) if tokens
+        }
+
+    def flag_token(self, entry, credentials_key):
+        entry = drop_key_deep(entry, self.TOKEN_KEY)
+        entry.pop(self.HAS_TOKEN_KEY, None)
+        url = self.get_endpoint_url(entry)
+        tokens = (self.credentials or {}).get(credentials_key) or {}
+        is_stored = url in tokens and (url or credentials_key == self.LOOKUP_CREDENTIALS_KEY)
+        return {**entry, self.HAS_TOKEN_KEY: True} if is_stored else entry
+
+    def get_algorithms_without_tokens(self, algorithms):
+        """The API's view of algorithms: no tokens, and has_token where one is stored."""
+        if not isinstance(algorithms, list):
+            return algorithms
+        return [
+            self.flag_token(entry, self.ALGORITHMS_CREDENTIALS_KEY) if isinstance(entry, dict) else entry
+            for entry in algorithms
+        ]
+
+    def get_lookup_config_without_token(self, lookup_config):
+        """The API's view of lookup_config: no token, and has_token where one is stored."""
+        if not isinstance(lookup_config, dict):
+            return lookup_config
+        return self.flag_token(lookup_config, self.LOOKUP_CREDENTIALS_KEY)
 
     def clean_matches(self):
         if self.matches:

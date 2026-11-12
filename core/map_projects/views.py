@@ -71,7 +71,7 @@ class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListW
         if self.request.method == 'GET' and not self.is_verbose():
             queryset = queryset.defer(
                 'matches', 'columns', 'candidates', 'analysis', 'logs', 'extras', 'algorithms', 'filters',
-                'lookup_config', 'input_locales'
+                'lookup_config', 'input_locales', 'credentials'
             )
         return self.filter_queryset_by_public_access(self.filter_queryset_by_owner(queryset))
 
