@@ -75,6 +75,8 @@ class MapProject(BaseModel):
     HAS_TOKEN_KEY = 'has_token'
     ALGORITHMS_CREDENTIALS_KEY = 'algorithms'
     LOOKUP_CREDENTIALS_KEY = 'lookup'
+    # Tokens 0041 found only in logs, kept so they can be revoked; never used or flagged.
+    LOGGED_CREDENTIALS_KEY = 'logs'
 
     class Meta:
         db_table = 'map_projects'
@@ -153,6 +155,12 @@ class MapProject(BaseModel):
             if result == 204:
                 self.input_file_name = file_name
                 self.save()
+
+    def save(self, *args, **kwargs):
+        # Tokens never stay in logs, whichever path saves them.
+        if self.logs:
+            self.logs = drop_key_deep(self.logs, self.TOKEN_KEY)
+        super().save(*args, **kwargs)
 
     @classmethod
     def persist_new(cls, instance, user, **kwargs):
@@ -337,7 +345,8 @@ class MapProject(BaseModel):
             lookup_config = cls.without_token(lookup_config)
         return algorithms, lookup_config, {
             key: tokens for key, tokens in (
-                (cls.ALGORITHMS_CREDENTIALS_KEY, algorithm_tokens), (cls.LOOKUP_CREDENTIALS_KEY, lookup_tokens)
+                (cls.ALGORITHMS_CREDENTIALS_KEY, algorithm_tokens), (cls.LOOKUP_CREDENTIALS_KEY, lookup_tokens),
+                (cls.LOGGED_CREDENTIALS_KEY, credentials.get(cls.LOGGED_CREDENTIALS_KEY)),
             ) if tokens
         }
 

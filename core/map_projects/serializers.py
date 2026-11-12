@@ -18,6 +18,8 @@ class TokenFlagsMixin:
             data['algorithms'] = instance.get_algorithms_without_tokens(data['algorithms'])
         if 'lookup_config' in data:
             data['lookup_config'] = instance.get_lookup_config_without_token(data['lookup_config'])
+        if 'logs' in data:
+            data['logs'] = drop_key_deep(data['logs'], MapProject.TOKEN_KEY)
         return data
 
 
@@ -184,8 +186,15 @@ class MapProjectDetailSerializer(MapProjectSerializer):
         model = MapProject
         fields = MapProjectSerializer.Meta.fields + ['file_url', 'matches', 'columns']
 
+    def update(self, instance, validated_data):
+        """A PATCH saves as a PUT does, so tokens are split out and model validation runs."""
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        self._errors.update(MapProject.persist_changes(instance, self.context['request'].user))
+        return instance
 
-class MapProjectLogsSerializer(serializers.ModelSerializer):
+
+class MapProjectLogsSerializer(TokenFlagsMixin, serializers.ModelSerializer):
     class Meta:
         model = MapProject
         fields = ['id', 'logs', 'url']

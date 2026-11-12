@@ -215,6 +215,51 @@ class MapProjectTokensTest(MapProjectAbstractViewTest):
         self.assertEqual(
             MapProject.persist_changes(stale, self.user), {'__all__': ['This map project no longer exists.']})
 
+    @patch('core.common.mixins.write_csv_to_s3', return_value='https://csv-url')
+    def test_patch_splits_tokens(self, write_csv_mock):
+        response = self.client.patch(self.url, {
+            'algorithms': [{'id': 'custom-1', 'type': 'custom', 'url': CUSTOM_URL, 'token': 'algo-key'}],
+            'lookup_config': {'url': LOOKUP_URL, 'token': 'lookup-key'},
+        }, format='json', **self.auth)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('algo-key', str(response.data))
+        self.project.refresh_from_db()
+        self.assertEqual(find_token_keys(self.project.algorithms), [])
+        self.assertEqual(find_token_keys(self.project.lookup_config), [])
+        self.assertEqual(
+            self.project.credentials, {'algorithms': {CUSTOM_URL: 'algo-key'}, 'lookup': {LOOKUP_URL: 'lookup-key'}})
+        self.client.get('/orgs/CIEL/map-projects/?csv=true&verbose=true', **self.auth)
+        rows = str(list(write_csv_mock.call_args.args[0]))
+        self.assertNotIn('algo-key', rows)
+        self.assertNotIn('lookup-key', rows)
+
+    def test_logs_never_hold_tokens(self):
+        logs = {'project_logs': [{'action': 'Created', 'extras': {'project': {
+            'algorithms': [{'url': CUSTOM_URL, 'token': 'algo-key'}], 'lookup_config': {'token': 'lookup-key'}}}}]}
+
+        self.client.post(f'{self.url}logs/', {'logs': logs}, format='json', **self.auth)
+
+        self.project.refresh_from_db()
+        self.assertEqual(find_token_keys(self.project.logs), [])
+        self.assertEqual(self.project.logs['project_logs'][0]['extras']['project']['algorithms'], [{'url': CUSTOM_URL}])
+
+        MapProject.objects.filter(id=self.project.id).update(logs=logs)
+        for url in [f'{self.url}logs/', f'{self.url}?includeSummary=true']:
+            response = self.client.get(url, **self.auth)
+            self.assertEqual(response.status_code, 200, url)
+            self.assertIn('logs', response.data, url)
+            self.assertEqual(find_token_keys(response.data), [], url)
+
+    def test_logged_tokens_are_kept_on_save(self):
+        MapProject.objects.filter(id=self.project.id).update(credentials={'logs': ['old-key']})
+
+        self.put_tokens()
+
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.credentials['logs'], ['old-key'])
+        self.assertNotIn('old-key', str(self.client.get(f'{self.url}?includeSummary=true', **self.auth).data))
+
     def test_credentials_cannot_be_written_directly(self):
         self.put({'credentials': {'algorithms': {CUSTOM_URL: 'injected'}}})
 
@@ -272,6 +317,8 @@ class MapProjectTokensMigrationTest(MapProjectAbstractViewTest):
                 {'type': 'ocl-semantic', 'token': 'stray'},
             ],
             lookup_config={'url': '/orgs/CIEL/', 'token': 'ocl-token'},
+            logs={'project_logs': [{'extras': {'project': {'algorithms': [
+                {'url': CUSTOM_URL, 'token': 'algo-key'}, {'url': CUSTOM_URL, 'token': 'logged-only'}]}}}]},
         )
         run = AutomatchRunFactory(map_project=project, config_snapshot={'a': [{'token': 'algo-key', 'x': 1}]})
 
@@ -282,8 +329,9 @@ class MapProjectTokensMigrationTest(MapProjectAbstractViewTest):
         self.assertEqual(
             project.algorithms, [{'type': 'custom', 'url': CUSTOM_URL, 'auth': {}}, {'type': 'ocl-semantic'}])
         self.assertEqual(project.lookup_config, {'url': '/orgs/CIEL/'})
-        self.assertEqual(
-            project.credentials, {'algorithms': {CUSTOM_URL: 'algo-key'}, 'lookup': {'/orgs/CIEL/': 'ocl-token'}})
+        self.assertEqual(project.credentials, {
+            'algorithms': {CUSTOM_URL: 'algo-key'}, 'lookup': {'/orgs/CIEL/': 'ocl-token'}, 'logs': ['logged-only']})
+        self.assertEqual(find_token_keys(project.logs), [])
         self.assertEqual(run.config_snapshot, {'a': [{'x': 1}]})
 
         self.migration.move_tokens_back(apps, None)

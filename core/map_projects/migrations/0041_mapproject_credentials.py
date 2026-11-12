@@ -11,6 +11,14 @@ def drop_key_deep(value, key):
     return value
 
 
+def find_values(value, key):
+    if isinstance(value, dict):
+        return [val for name, val in value.items() if name == key] + find_values(list(value.values()), key)
+    if isinstance(value, list):
+        return [hit for item in value for hit in find_values(item, key)]
+    return []
+
+
 def _move_token(entry, tokens):
     if not isinstance(entry, dict):
         return entry
@@ -35,7 +43,8 @@ def find_token_conflicts(project_model):
     return conflicts
 
 
-# Every stored token moves to credentials, OCL API lookup tokens too, so they can still be found to revoke.
+# Every stored token moves to credentials, OCL API lookup tokens and ones found only in logs too, so they can
+# still be found to revoke. Logs and run snapshots lose their tokens.
 def move_tokens_to_credentials(apps, schema_editor):  # pylint: disable=unused-argument
     MapProject = apps.get_model('map_projects', 'MapProject')
     conflicts = find_token_conflicts(MapProject)
@@ -45,18 +54,26 @@ def move_tokens_to_credentials(apps, schema_editor):  # pylint: disable=unused-a
             ', '.join(f'project {project_id} ({url})' for project_id, url in conflicts) +
             '. Leave one token per URL (or remove the extra algorithm) on these projects, then migrate again.'
         )
-    for project in MapProject.objects.only('id', 'algorithms', 'lookup_config').iterator(chunk_size=500):
+    for project in MapProject.objects.only('id', 'algorithms', 'lookup_config', 'logs').iterator(chunk_size=500):
         algorithm_tokens, lookup_tokens = {}, {}
         algorithms = [_move_token(entry, algorithm_tokens) for entry in project.algorithms or []]
         lookup_config = _move_token(project.lookup_config, lookup_tokens)
         algorithm_tokens.pop('', None)
-        if algorithm_tokens or lookup_tokens or algorithms != (project.algorithms or []) or \
-                lookup_config != project.lookup_config:
+        kept = set(algorithm_tokens.values()) | set(lookup_tokens.values())
+        logged_tokens = sorted({
+            token for token in find_values(project.logs, 'token')
+            if isinstance(token, str) and token.strip() and token not in kept
+        })
+        logs = drop_key_deep(project.logs, 'token')
+        if algorithm_tokens or lookup_tokens or logged_tokens or algorithms != (project.algorithms or []) or \
+                lookup_config != project.lookup_config or logs != project.logs:
             credentials = {
-                key: tokens for key, tokens in (('algorithms', algorithm_tokens), ('lookup', lookup_tokens)) if tokens
+                key: tokens for key, tokens in (
+                    ('algorithms', algorithm_tokens), ('lookup', lookup_tokens), ('logs', logged_tokens)
+                ) if tokens
             }
             MapProject.objects.filter(id=project.id).update(
-                algorithms=algorithms, lookup_config=lookup_config, credentials=credentials)
+                algorithms=algorithms, lookup_config=lookup_config, logs=logs, credentials=credentials)
 
     AutomatchRun = apps.get_model('map_projects', 'AutomatchRun')
     for run in AutomatchRun.objects.only('id', 'config_snapshot').iterator(chunk_size=500):
@@ -65,7 +82,7 @@ def move_tokens_to_credentials(apps, schema_editor):  # pylint: disable=unused-a
             AutomatchRun.objects.filter(id=run.id).update(config_snapshot=snapshot)
 
 
-# Tokens go back on their entries; tokens removed from run snapshots are not restored.
+# Tokens go back on their entries; tokens removed from logs and run snapshots are not restored.
 def move_tokens_back(apps, schema_editor):  # pylint: disable=unused-argument
     MapProject = apps.get_model('map_projects', 'MapProject')
     for project in MapProject.objects.exclude(credentials={}).exclude(credentials__isnull=True).only(
