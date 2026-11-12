@@ -208,6 +208,13 @@ class MapProjectTokensTest(MapProjectAbstractViewTest):
         self.assertEqual(self.project.name, 'Renamed')
         self.assertEqual(self.project.credentials['algorithms'], {CUSTOM_URL: 'newer'})
 
+    def test_save_of_deleted_project_is_an_error(self):
+        stale = MapProject.objects.get(id=self.project.id)
+        MapProject.objects.filter(id=self.project.id).delete()
+
+        self.assertEqual(
+            MapProject.persist_changes(stale, self.user), {'__all__': ['This map project no longer exists.']})
+
     def test_credentials_cannot_be_written_directly(self):
         self.put({'credentials': {'algorithms': {CUSTOM_URL: 'injected'}}})
 
@@ -318,8 +325,9 @@ class GetUrlOriginTest(SimpleTestCase):
 @override_settings(API_BASE_URL='https://api.example.org')
 class IsOCLAPIURLTest(SimpleTestCase):
     def test_is_ocl_api_url(self):
-        for url in ['', None, '/orgs/CIEL/', 'https://api.example.org/orgs/', 'HTTPS://api.example.org:443/orgs/']:
+        for url in ['', None, '/orgs/CIEL/', '//terms.example.org/', 'https://api.example.org/orgs/',
+                    'HTTPS://api.example.org:443/orgs/']:
             self.assertTrue(MapProject.is_ocl_api_url(url), url)
-        for url in [LOOKUP_URL, 'HTTPS://terms.example.org/', '//terms.example.org/', '//api.example.org/',
-                    'http://api.example.org/', 'https://api.example.org:8443/']:
+        for url in [
+                LOOKUP_URL, 'HTTPS://terms.example.org/', 'http://api.example.org/', 'https://api.example.org:8443/']:
             self.assertFalse(MapProject.is_ocl_api_url(url), url)

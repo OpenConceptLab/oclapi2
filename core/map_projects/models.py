@@ -1,4 +1,5 @@
 import json
+import re
 from collections import Counter
 
 from django.conf import settings
@@ -197,6 +198,8 @@ class MapProject(BaseModel):
             errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
         except IntegrityError as ex:
             errors.update({'__all__': ex.args})
+        except cls.DoesNotExist:
+            errors.update({'__all__': ['This map project no longer exists.']})
 
         return errors
 
@@ -270,13 +273,17 @@ class MapProject(BaseModel):
 
     @staticmethod
     def is_ocl_api_url(url):
-        """A lookup URL the Mapper sends to this API: none (the target repo), a path, or a URL on its origin."""
+        """
+        A lookup URL the Mapper sends to this API: none (the target repo), a path, or a URL on its origin.
+        As in the Mapper, only an http(s):// URL, in any case, is absolute; anything else is a path on this API.
+        """
         if not url:
             return True
         if not isinstance(url, str):
             return False
-        origin = get_url_origin(url)
-        return origin is None or origin == get_url_origin(get_api_base_url())
+        if not re.match(r'https?://', url, re.IGNORECASE):
+            return True
+        return get_url_origin(url) == get_url_origin(get_api_base_url())
 
     @staticmethod
     def get_endpoint_url(entry):
