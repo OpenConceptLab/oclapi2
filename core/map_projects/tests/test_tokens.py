@@ -1,5 +1,7 @@
 import importlib
 
+from mock import patch
+
 from django.apps import apps
 from django.test import override_settings, SimpleTestCase
 
@@ -157,6 +159,26 @@ class MapProjectTokensTest(MapProjectAbstractViewTest):
 
         self.project.refresh_from_db()
         self.assertEqual(self.project.credentials, {})
+
+    @patch('core.common.mixins.write_csv_to_s3', return_value='https://csv-url')
+    def test_csv_exports_no_tokens(self, write_csv_mock):
+        self.put_tokens()
+
+        for url in [
+            '/orgs/CIEL/map-projects/?csv=true',
+            '/orgs/CIEL/map-projects/?csv=true&verbose=true',
+            f'/users/{self.user.username}/orgs/map-projects/?csv=true&verbose=true',
+        ]:
+            write_csv_mock.reset_mock()
+            response = self.client.get(url, **self.auth)
+
+            self.assertEqual(response.status_code, 200, url)
+            write_csv_mock.assert_called_once()
+            rows = list(write_csv_mock.call_args.args[0])
+            self.assertEqual([row['id'] for row in rows], [self.project.id], url)
+            self.assertNotIn('credentials', rows[0], url)
+            self.assertNotIn('algo-key', str(rows), url)
+            self.assertNotIn('lookup-key', str(rows), url)
 
     def test_run_snapshot_drops_tokens(self):
         response = self.client.post(

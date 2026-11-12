@@ -66,6 +66,9 @@ class MapProject(BaseModel):
         'prompt_output_locale', 'input_locales', 'use_lexical_variants'
     ]
 
+    # Never returned by the API, in any response or export.
+    WRITE_ONLY_FIELDS = ['credentials']
+
     TOKEN_KEY = 'token'
     HAS_TOKEN_KEY = 'has_token'
     ALGORITHMS_CREDENTIALS_KEY = 'algorithms'
@@ -73,6 +76,10 @@ class MapProject(BaseModel):
 
     class Meta:
         db_table = 'map_projects'
+
+    @classmethod
+    def get_readable_field_names(cls):
+        return [field.attname for field in cls._meta.concrete_fields if field.name not in cls.WRITE_ONLY_FIELDS]
 
     @property
     def mnemonic(self):
