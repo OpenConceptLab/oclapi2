@@ -207,6 +207,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return _queryset
 
     def filter_queryset_by_owner(self, queryset):
+        if self.user_is_self:
+            return queryset.filter(user=self.request.user)
         if 'user' in self.kwargs:
             return queryset.filter(user__username=self.kwargs['user'])
         if 'org' in self.kwargs:
@@ -816,8 +818,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if ((self.is_concept_container_document_model() or self.is_repo_document_model()) and
                 self.request.query_params.get('allVersions', None) in TRUTHY):
             default_filters.pop('version', None)
-        if self.is_user_document() and self.should_include_inactive():
-            default_filters.pop('is_active', None)
+        if self.is_user_document() and not self.should_include_inactive():
+            # excludes rather than requires, so a profile indexed without the field yet still shows
+            results = results.exclude('term', is_active=False)
 
         updated_by = self.request.query_params.get(UPDATED_BY_USERNAME_PARAM, None)
         if updated_by:

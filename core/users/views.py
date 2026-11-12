@@ -209,6 +209,10 @@ class UserBaseView(BaseAPIView):
     serializer_class = UserDetailSerializer
     staff_only_filters = ('is_superuser', 'is_staff', 'is_admin')
 
+    def should_include_inactive(self):
+        """Deactivated accounts are listed for staff only."""
+        return self.request.user.is_staff and super().should_include_inactive()
+
     def get_faceted_filters(self, split=False, params=None, additional_fields=None, repo_default_filters=None):
         filters = super().get_faceted_filters(split, params, additional_fields, repo_default_filters)
         if not self.request.user.is_staff:
@@ -601,6 +605,7 @@ class UserExtraRetrieveUpdateDestroyView(UserExtrasBaseView, RetrieveUpdateDestr
 class AbstractFollowerFollowedView(UserBaseView):
     permission_classes = (AllowAny, )
     default_qs_sort_attr = '-follow_date'
+    is_searchable = False  # a search would list users, not this user's follows
 
     def get_object(self, queryset=None):
         if self.user_is_self:

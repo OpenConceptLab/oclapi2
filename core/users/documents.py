@@ -30,6 +30,7 @@ class UserProfileDocument(Document):
         fields = [
             'is_superuser',
             'is_staff',
+            'is_active',
         ]
 
     @staticmethod

@@ -6,12 +6,13 @@ from mock import patch
 from rest_framework.authtoken.models import Token
 from rest_framework.exceptions import ErrorDetail
 
+from core.collections.tests.factories import UserCollectionFactory
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT, ROLE_ADMIN, \
     ROLE_MEMBER
 from core.common.tests import OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.orgs.documents import OrganizationDocument
 from core.orgs.tests.factories import OrganizationFactory
-from core.sources.tests.factories import OrganizationSourceFactory
+from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.users.constants import VERIFY_EMAIL_MESSAGE, VERIFICATION_TOKEN_MISMATCH, MAPPER_USE_PERMISSION
 from core.users.documents import UserProfileDocument
 from core.users.models import UserProfile
@@ -600,6 +601,23 @@ class UserListViewTest(OCLAPITestCase):
         self.assertEqual(users['planfieldsother']['auth_groups'], [PREVIEW_GROUP_NAME])
         self.assertIn(MAPPER_USE_PERMISSION, users['planfieldsother']['permissions'])
 
+    def test_get_verbose_extras_need_sign_in(self):
+        UserProfileFactory(username='verboseextras', extras={'xdept': 'xcardiology'})
+        url = '/users/?verbose=true'
+
+        response = self.client.get(url, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(sorted(user['username'] for user in response.data), ['ocladmin', 'verboseextras'])
+        for user in response.data:
+            self.assertNotIn('extras', user)
+
+        response = self.client.get(url, HTTP_AUTHORIZATION='Token ' + UserProfileFactory().get_token(), format='json')
+
+        self.assertEqual(response.status_code, 200)
+        users = {user['username']: user for user in response.data}
+        self.assertEqual(users['verboseextras']['extras'], {'xdept': 'xcardiology'})
+
     @patch('core.common.mixins.ListWithHeadersMixin.get_csv')
     def test_get_csv_is_not_exported(self, get_csv_mock):
         for query in ['csv=true', 'csv=1&q=ocl']:
@@ -626,9 +644,20 @@ class UserListViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['username'], 'ocladmin')
 
+        # deactivated accounts are listed for staff only
+        for user in [None, UserProfileFactory(username='inactive-list-outsider')]:
+            headers = {'HTTP_AUTHORIZATION': 'Token ' + user.get_token()} if user else {}
+            for url in ['/users/?includeInactive=true', '/users/?includeInactive=true&q=inactive',
+                        '/users/?q=inactive']:
+                response = self.client.get(url, format='json', **headers)
+                self.assertEqual(response.status_code, 200)
+                self.assertNotIn('inactive', [user['username'] for user in response.data], url)
+        UserProfile.objects.filter(username='inactive-list-outsider').delete()
+        staff = {'HTTP_AUTHORIZATION': 'Token ' + self.superuser.get_token()}
+
         response = self.client.get(
             '/users/?includeInactive=true',
-            format='json'
+            format='json', **staff
         )
 
         self.assertEqual(response.status_code, 200)
@@ -637,7 +666,7 @@ class UserListViewTest(OCLAPITestCase):
 
         response = self.client.get(
             '/users/?includeInactive=true&q=',
-            format='json'
+            format='json', **staff
         )
 
         self.assertEqual(response.status_code, 200)
@@ -646,7 +675,7 @@ class UserListViewTest(OCLAPITestCase):
 
         response = self.client.get(
             '/users/?includeInactive=true&q=inactive',
-            format='json'
+            format='json', **staff
         )
 
         self.assertEqual(response.status_code, 200)
@@ -766,6 +795,33 @@ class UserDetailViewTest(OCLAPITestCase):
         self.assertEqual(response.data['username'], self.user.username)
         self.assertEqual(response.data['name'], self.user.name)
         self.assertEqual(response.data['url'], self.user.uri)
+
+    def test_get_counts_only_what_the_requester_can_view(self):
+        private_org = OrganizationFactory(public_access=ACCESS_TYPE_NONE, created_by=self.user)
+        public_org = OrganizationFactory(created_by=self.user)
+        self.user.organizations.add(private_org, public_org)
+        org_member = UserProfileFactory(organizations=[private_org])
+        UserSourceFactory(user=self.user, public_access=ACCESS_TYPE_VIEW)
+        UserSourceFactory(user=self.user, public_access=ACCESS_TYPE_NONE)
+        UserCollectionFactory(user=self.user, public_access=ACCESS_TYPE_NONE)
+        self.user.pins.create(resource=public_org)
+        fields = ('orgs', 'owned_orgs', 'sources', 'collections', 'bookmarks')
+
+        def get_user(requester, query=''):
+            response = self.client.get(
+                f'/users/{self.user.username}/{query}', HTTP_AUTHORIZATION='Token ' + requester.get_token())
+            self.assertEqual(response.status_code, 200)
+            return response.data
+
+        for requester, counts, organizations in [
+                (self.user, (2, 2, 2, 1, 1), 2), (self.superuser, (2, 2, 2, 1, 1), 2),
+                (org_member, (2, 2, 1, 0, None), 2), (UserProfileFactory(), (1, 1, 1, 0, None), 1)]:
+            data = get_user(requester)
+            self.assertEqual(tuple(data.get(field) for field in fields), counts, requester.username)
+            summary = get_user(requester, '?summary=true')
+            self.assertEqual(summary['organizations'], organizations, requester.username)
+            self.assertEqual((summary['sources'], summary['collections']), counts[2:4], requester.username)
+            self.assertEqual(summary.get('bookmarks'), counts[-1], requester.username)
 
     def test_get_200_with_subscribed_orgs(self):
         response = self.client.get(
@@ -1394,7 +1450,7 @@ class UserFollowingListViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
 
-    def test_get_only_follows_the_requester_can_view(self):
+    def test_get_only_follows_the_requester_can_view(self):  # pylint: disable=too-many-locals
         private_org = OrganizationFactory(mnemonic='private-followed', public_access=ACCESS_TYPE_NONE)
         private_source = OrganizationSourceFactory(organization=private_org, public_access=ACCESS_TYPE_NONE)
         public_org = OrganizationFactory(mnemonic='public-followed')
@@ -1415,7 +1471,7 @@ class UserFollowingListViewTest(OCLAPITestCase):
                 follows = next(user for user in follows if user['username'] == member.username)['following']
             elif 'includeFollowing' in url:
                 follows = follows['following']
-            return sorted(follow['object']['url'] for follow in follows)
+            return sorted(follow['object']['url'] if follow['object'] else '' for follow in follows)
 
         following_url = f'/users/{member.username}/following/'
         detail_url = f'/users/{member.username}/?includeFollowing=true'
@@ -1427,11 +1483,27 @@ class UserFollowingListViewTest(OCLAPITestCase):
             self.assertEqual(get_followed_urls(url, member), all_urls)
             self.assertEqual(get_followed_urls(url, staff), all_urls)
 
-        # the user themselves too, once they lose access
+        # the user keeps their follows of what they lost access to, without the object, so they can unfollow it
         private_org.members.remove(member)
         for url in [following_url, detail_url, list_url]:
-            self.assertEqual(get_followed_urls(url, member), [public_org.url])
+            self.assertEqual(get_followed_urls(url, member), ['', '', public_org.url])
+            self.assertEqual(get_followed_urls(url, outsider), [public_org.url])
             self.assertEqual(get_followed_urls(url, staff), all_urls)
+        lost_follow = member.following.get(following_id=private_source.id)
+        response = self.client.delete(
+            f'{following_url}{lost_follow.id}/', HTTP_AUTHORIZATION='Token ' + member.get_token())
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(member.following.filter(id=lost_follow.id).exists())
+
+    def test_get_search_lists_follows_not_users(self):
+        follower = UserProfileFactory(username='search-follower')
+        followed = UserProfileFactory(username='search-followed')
+        follower.follow(followed)
+
+        response = self.client.get(f'/users/{follower.username}/following/?q=search')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([follow['object']['url'] for follow in response.data], [followed.url])
 
     def test_post(self):
         follower = UserProfileFactory(username='follower')

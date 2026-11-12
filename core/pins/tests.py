@@ -249,14 +249,13 @@ class PinListViewTest(OCLAPITestCase):
             self.assertEqual(response.status_code, 200)
             return sorted(pin['resource_uri'] for pin in response.data)
 
-        for token in [None, UserProfileFactory().get_token()]:
-            self.assertEqual(get_pin_uris(owner.uri + 'pins/', token), [public_source.uri])
+        for token, status_code in [(None, 401), (UserProfileFactory().get_token(), 403)]:
             self.assertEqual(get_pin_uris(public_org.uri + 'pins/', token), [public_source.uri])
             self.assertEqual(get_pin_uris(private_org.uri + 'pins/', token), [])
+            # a user's pins are for that user and staff only
             headers = {'HTTP_AUTHORIZATION': 'Token ' + token} if token else {}
-            response = self.client.get(
-                owner.uri + f'pins/{private_user_pin.id}/', format='json', **headers)
-            self.assertEqual(response.status_code, 404)
+            for url in [owner.uri + 'pins/', owner.uri + f'pins/{private_user_pin.id}/']:
+                self.assertEqual(self.client.get(url, format='json', **headers).status_code, status_code)
 
         for token in [owner.get_token(), admin.get_token()]:
             self.assertEqual(

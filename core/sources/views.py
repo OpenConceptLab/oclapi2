@@ -649,7 +649,7 @@ class SourceHierarchyView(SourceBaseView, RetrieveAPIView):
             limit = int(params.get('limit'))
         if 'offset' in params:
             offset = int(params.get('offset'))
-        return Response(instance.hierarchy(offset=offset, limit=limit))
+        return Response(instance.hierarchy(offset=offset, limit=limit, user=request.user))
 
 
 class SourceSummaryView(SummaryMixin, SourceBaseView, RetrieveAPIView):

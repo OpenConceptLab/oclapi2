@@ -27,7 +27,8 @@ from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     LIST_DEFAULT_LIMIT, HTTP_COMPRESS_HEADER, CSV_DEFAULT_LIMIT, FACETS_ONLY, INCLUDE_RETIRED_PARAM, \
     SEARCH_STATS_ONLY, INCLUDE_SEARCH_STATS, UPDATED_BY_USERNAME_PARAM, CHECKSUM_STANDARD_HEADER, \
     CHECKSUM_SMART_HEADER, SEARCH_LATEST_REPO_VERSION, SAME_STANDARD_CHECKSUM_ERROR, ACCESS_TYPE_VIEW, \
-    INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS
+    INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS, INCLUDE_PARENT_CONCEPT_URLS, INCLUDE_CHILD_CONCEPT_URLS, \
+    INCLUDE_HIERARCHY_PATH, INCLUDE_SUMMARY
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion, CanEditConceptDictionary
 from .checksums import ChecksumModel
@@ -40,6 +41,9 @@ from ..toggles.models import Toggle
 
 logger = logging.getLogger('oclapi')
 TRUTHY = get_truthy_values()
+PER_REQUESTER_LIST_PARAMS = (
+    INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS, INCLUDE_PARENT_CONCEPT_URLS, INCLUDE_CHILD_CONCEPT_URLS,
+    INCLUDE_HIERARCHY_PATH, INCLUDE_SUMMARY)
 MAX_UNPAGINATED_RESULTS = 1000  # `Compress` lists; above this, users.list_unpaginated (ocl_online#230)
 
 
@@ -185,12 +189,11 @@ class ListWithHeadersMixin(ListModelMixin):
 
     def __can_cache(self):
         # facets/search-stats are header driven and change the response shape, but are not part of the cache key;
-        # included parent/child concepts are filtered per requester, so they can't be shared
+        # hierarchy concepts, URLs, paths and summary counts are filtered per requester, so they can't be shared
         params = self.request.query_params
         return (self.is_repo_version_children_request_without_any_search() and
                 not self.should_include_facets() and not self.should_include_search_stats() and
-                params.get(INCLUDE_PARENT_CONCEPTS) not in TRUTHY and
-                params.get(INCLUDE_CHILD_CONCEPTS) not in TRUTHY and
+                all(params.get(param) not in TRUTHY for param in PER_REQUESTER_LIST_PARAMS) and
                 get(self, 'parent_resource.is_latest_version', False))
 
     def list(self, request, *args, **kwargs):
@@ -232,13 +235,9 @@ class ListWithHeadersMixin(ListModelMixin):
         if not data:
             search_string = query_params.get('type', None)
             search_term = query_params.get('q', None)
-            if is_csv:
-                pattern = search_term
-                if pattern:
-                    query_params._mutable = True  # pylint: disable=protected-access
-                    query_params['q'] = "*" + search_term + "*"
-
-            if is_csv and not search_string:
+            # q alone takes the search path only where it's an Elasticsearch search; other lists apply it themselves
+            is_csv_search = is_csv and bool(search_string or (search_term and get(self, 'is_searchable', False)))
+            if is_csv and not is_csv_search:
                 return self.get_csv(request)
 
             if self.only_facets():
@@ -256,10 +255,11 @@ class ListWithHeadersMixin(ListModelMixin):
             if self.object_list is None:
                 self.object_list = self.filter_queryset()
 
-            if is_csv and search_string:
-                klass = type(self.object_list[0])
-                queryset = klass.objects.filter(id__in=self.get_object_ids())
-                return self.get_csv(request, queryset)
+            if is_csv_search:  # the search's hits; none gives an empty export where the document's model is known
+                ids = list(self.get_object_ids())
+                klass = get(self, 'document_model.Django.model') if not ids else None
+                klass = klass or type(self.object_list[0])
+                return self.get_csv(request, klass.objects.filter(id__in=ids))
 
             # Skip pagination if compressed results are requested
             compress = self.should_compress()

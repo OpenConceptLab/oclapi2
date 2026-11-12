@@ -3,6 +3,7 @@ import os
 import uuid
 from unittest import mock
 
+import factory
 from django.test import override_settings, tag
 from rest_framework.authtoken.models import Token
 
@@ -474,6 +475,10 @@ class ConceptsFromSourceQueryTests(OCLTestCase):
           }
         }
         """
+        # global search reads latest versions, which the API gives the concept's names too
+        ConceptNameFactory(
+            concept=self.concept1.get_latest_version(), name='Hypertension', locale='en', locale_preferred=True)
+        ConceptDocument().update(Concept.objects.filter(versioned_object_id=self.concept1.id), refresh=True)
         status, data = self._execute(query, {'query': 'hyper'})
         self.assertEqual(status, 200)
         payload = data['concepts']
@@ -661,3 +666,39 @@ class ConceptsFromSourceQueryTests(OCLTestCase):
         _, data = self._execute(
             query, {'org': self.organization.mnemonic, 'source': self.source.mnemonic, 'text': token})
         self.assertEqual(data['concepts']['totalCount'], 1)
+
+    @mock.patch('core.graphql.queries.fallback_db_search', side_effect=AssertionError('expected an ES search'))
+    def test_query_search_lists_each_concept_once_and_only_from_the_named_source(self, _fallback_mock):
+        self.patch_concept_es_mapping_for_ci()
+        token = f'zyq{uuid.uuid4().hex[:10]}'
+        # the same source name in another org, and concepts with their versions, as the API creates them
+        other_source = OrganizationSourceFactory(
+            organization=OrganizationFactory(mnemonic='GQLOTHER'), mnemonic=self.source.mnemonic, version=HEAD)
+        concepts = []
+        for source, mnemonic in [(self.source, 'gql-versioned'), (other_source, 'gql-other')]:
+            concept = Concept.persist_new({
+                **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': mnemonic, 'parent': source,
+                'names': [ConceptNameFactory.build(name=f'{token} name', locale='en', locale_preferred=True)]
+            }, self.audit_user)
+            self.assertEqual(concept.errors, {})
+            self.assertNotEqual(concept.get_latest_version().id, concept.id)
+            concepts.append(concept)
+        ConceptDocument().update(
+            Concept.objects.filter(versioned_object_id__in=[concept.id for concept in concepts]), refresh=True)
+        query = """
+        query ($org: String, $source: String, $text: String!) {
+          concepts(org: $org, source: $source, query: $text) {
+            totalCount
+            results { conceptId }
+          }
+        }
+        """
+
+        for variables, concept_ids in [
+                ({'text': token}, ['gql-other', 'gql-versioned']),
+                ({'org': self.organization.mnemonic, 'source': self.source.mnemonic, 'text': token},
+                 ['gql-versioned'])]:
+            _, data = self._execute(query, variables)
+            results = data['concepts']['results']
+            self.assertEqual(sorted(result['conceptId'] for result in results), concept_ids, variables)
+            self.assertEqual(data['concepts']['totalCount'], len(concept_ids), variables)

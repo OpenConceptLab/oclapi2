@@ -6,7 +6,7 @@ from typing import Iterable, List, Optional, Sequence
 
 import strawberry
 from asgiref.sync import sync_to_async
-from django.db.models import Case, IntegerField, Prefetch, Q, When
+from django.db.models import Case, F, IntegerField, Prefetch, Q, When
 from django.utils import timezone
 from elasticsearch import ConnectionError as ESConnectionError, TransportError
 from elasticsearch_dsl import Q as ES_Q
@@ -369,12 +369,14 @@ def concept_ids_from_es(
 
     try:
         search = ConceptDocument.search()
-        if source_version:
-            search = search.filter('term', source=source_version.mnemonic.lower())
-            if source_version.is_head:
-                search = search.filter('term', is_latest_version=True)
-            else:
-                search = search.filter('term', source_version=source_version.version)
+        if source_version:  # this owner's source by its exact names, as a same-named one of another owner may exist
+            search = search.filter('term', **{'owner_text.keyword': source_version.parent_resource})
+            search = search.filter('term', owner_type='Organization' if source_version.organization_id else 'User')
+            search = search.filter('term', **{'source_text.keyword': source_version.mnemonic})
+        if source_version and not source_version.is_head:
+            search = search.filter('term', source_version=source_version.version)
+        else:  # one hit per concept, its latest version (versioned_object_ids maps it to the concept)
+            search = search.filter('term', is_latest_version=True)
         search = search.filter('term', retired=False)
         visible_repo_criteria = get_visible_repo_criteria(user)
         if visible_repo_criteria:
@@ -403,6 +405,12 @@ def concept_ids_from_es(
     except Exception as exc:  # pragma: no cover - unexpected ES error should not break API
         logger.warning('Unexpected Elasticsearch error, falling back to DB search: %s', exc)
     return None
+
+
+def versioned_object_ids(concept_ids: Sequence[int]) -> list[int]:
+    """The concepts (HEAD rows) of these concept versions, in the same order."""
+    heads = dict(Concept.objects.filter(id__in=concept_ids).values_list('id', 'versioned_object_id'))
+    return list(dict.fromkeys(heads.get(concept_id) or concept_id for concept_id in concept_ids))
 
 
 def fallback_db_search(base_qs, query: str):
@@ -458,6 +466,8 @@ async def concepts_for_query(  # pylint: disable=too-many-arguments
             else:
                 return [], total
         else:
+            if not source_version or source_version.is_head:  # the hits are latest versions; HEAD rows are listed
+                concept_ids = await sync_to_async(versioned_object_ids)(concept_ids)
             ordering = Case(
                 *[When(id=pk, then=pos) for pos, pk in enumerate(concept_ids)],
                 output_field=IntegerField()
@@ -507,9 +517,10 @@ class Query:
             base_qs = build_base_queryset(source_version)
             mapping_prefetch = build_mapping_prefetch(source_version)
         else:
-            # Global search across all repositories the user can view
+            # Global search across the HEAD of every repository the user can view, a row per concept
             source_version = None
-            base_qs = get_viewable_concepts(Concept.objects.filter(is_active=True, retired=False), info.context)
+            base_qs = get_viewable_concepts(
+                Concept.objects.filter(is_active=True, retired=False, id=F('versioned_object_id')), info.context)
             mapping_prefetch = build_global_mapping_prefetch(user)
 
         if concept_ids_param:

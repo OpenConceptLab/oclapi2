@@ -18,7 +18,8 @@ from ..common.utils import get_truthy_values
 
 TRUTHY = get_truthy_values()
 PRIVATE_USER_FIELDS = (
-    'email', 'last_login', 'is_staff', 'is_superuser', 'auth_groups', 'permissions', 'capabilities', 'pins')
+    'email', 'last_login', 'is_staff', 'is_superuser', 'auth_groups', 'permissions', 'capabilities', 'pins',
+    'bookmarks')
 
 
 def can_view_private_user_fields(request, user):
@@ -30,13 +31,42 @@ def can_view_private_user_fields(request, user):
 
 
 class PrivateUserFieldsMixin:
-    """Email, account flags, plan fields and pins are only for the user themselves and staff."""
+    """Email, account flags, plan fields, pins and bookmarks are only for the user themselves and staff.
+    Extras need sign-in, as on /users/<user>/extras/."""
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        if not can_view_private_user_fields(get(self, 'context.request'), instance):
+        request = get(self, 'context.request')
+        if not can_view_private_user_fields(request, instance):
             for field in PRIVATE_USER_FIELDS:
                 data.pop(field, None)
+        if not get(request, 'user.is_authenticated'):
+            data.pop('extras', None)
         return data
+
+
+class ViewableCountsMixin:
+    """A user's org and repo counts: all of them for the user and staff, else those the requester can view."""
+    def shows_all_counts(self, obj):
+        return can_view_private_user_fields(get(self, 'context.request'), obj)
+
+    def get_viewable_orgs(self, obj):
+        orgs = obj.organizations.all()
+        if self.shows_all_counts(obj):
+            return orgs
+        from core.orgs.models import Organization
+        return Organization.get_visible_to(get(self, 'context.request.user'), orgs)
+
+    def get_orgs(self, obj):
+        return self.get_viewable_orgs(obj).count()
+
+    def get_owned_orgs(self, obj):
+        return self.get_viewable_orgs(obj).filter(created_by=obj).count()
+
+    def get_sources(self, obj):
+        return obj.all_sources_count if self.shows_all_counts(obj) else obj.public_sources
+
+    def get_collections(self, obj):
+        return obj.all_collections_count if self.shows_all_counts(obj) else obj.public_collections
 
 
 class OrganizationRoleMixin:
@@ -59,10 +89,11 @@ class UserListSerializer(OrganizationRoleMixin, AbstractResourceSerializer):
         )
 
 
-class UserSummarySerializer(OrganizationRoleMixin, PrivateUserFieldsMixin, serializers.ModelSerializer):
-    sources = IntegerField(source='public_sources')
-    collections = IntegerField(source='public_collections')
-    organizations = IntegerField(source='orgs_count')
+class UserSummarySerializer(
+        OrganizationRoleMixin, PrivateUserFieldsMixin, ViewableCountsMixin, serializers.ModelSerializer):
+    sources = serializers.SerializerMethodField()
+    collections = serializers.SerializerMethodField()
+    organizations = serializers.SerializerMethodField()
     bookmarks = IntegerField(source='bookmarks_count')
 
     class Meta:
@@ -71,6 +102,9 @@ class UserSummarySerializer(OrganizationRoleMixin, PrivateUserFieldsMixin, seria
             'username', 'name', 'url', 'logo_url', 'sources', 'collections', 'organizations',
             'is_superuser', 'is_staff', 'first_name', 'last_name', 'status', 'bookmarks'
         )
+
+    def get_organizations(self, obj):
+        return self.get_orgs(obj)
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
@@ -178,13 +212,16 @@ class FollowerSerializer(AbstractFollowerSerializer):
 
 
 class FollowingSerializer(AbstractFollowerSerializer):
-    @staticmethod
-    def get_object(obj):
+    def get_object(self, obj):
+        """The followed object, or None when the requester can't view it now (the follower's own list keeps it)."""
         following = obj.following
+        if not following or not UserProfile.can_user_view(get(self, 'context.request.user'), following):
+            return None
         return following.get_brief_serializer()(following).data
 
 
-class UserDetailSerializer(OrganizationRoleMixin, PrivateUserFieldsMixin, AbstractResourceSerializer):
+class UserDetailSerializer(
+        OrganizationRoleMixin, PrivateUserFieldsMixin, ViewableCountsMixin, AbstractResourceSerializer):
     type = serializers.CharField(source='resource_type', read_only=True)
     uuid = serializers.CharField(source='id', read_only=True)
     username = serializers.CharField(required=False, validators=[
@@ -200,11 +237,11 @@ class UserDetailSerializer(OrganizationRoleMixin, PrivateUserFieldsMixin, Abstra
     location = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     bio = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     preferred_locale = serializers.CharField(required=False)
-    orgs = serializers.IntegerField(read_only=True, source='orgs_count')
-    owned_orgs = serializers.IntegerField(read_only=True, source='owned_orgs_count')
-    sources = serializers.IntegerField(read_only=True, source='all_sources_count')
+    orgs = serializers.SerializerMethodField()
+    owned_orgs = serializers.SerializerMethodField()
+    sources = serializers.SerializerMethodField()
     bookmarks = serializers.IntegerField(read_only=True, source='bookmarks_count')
-    collections = serializers.IntegerField(read_only=True, source='all_collections_count')
+    collections = serializers.SerializerMethodField()
     created_on = serializers.DateTimeField(source='created_at', read_only=True)
     updated_on = serializers.DateTimeField(source='updated_at', read_only=True)
     created_by = serializers.CharField(read_only=True)
@@ -293,8 +330,9 @@ class UserDetailSerializer(OrganizationRoleMixin, PrivateUserFieldsMixin, Abstra
         return None
 
     def get_following(self, obj):
-        """Only follows of objects the requester can view."""
-        return FollowingSerializer(obj.get_following_visible_to(get(self, 'context.request.user')), many=True).data
+        """Follows of objects the requester can view; all of them for the user and staff."""
+        return FollowingSerializer(
+            obj.get_following_visible_to(get(self, 'context.request.user')), many=True, context=self.context).data
 
     def validate_username(self, value):
         from core.services.auth.core import AuthService

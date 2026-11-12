@@ -22,7 +22,7 @@ from django_elasticsearch_dsl.registries import registry
 from django_elasticsearch_dsl.signals import RealTimeSignalProcessor
 from elasticsearch import ApiError, TransportError
 from elasticsearch.helpers import BulkIndexError, parallel_bulk, streaming_bulk
-from pydash import get, compact
+from pydash import get
 
 from core.celery import app as celery_app
 from core.common.tasks import update_collection_active_concepts_count, update_collection_active_mappings_count, \
@@ -1212,10 +1212,6 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     def should_auto_expand(self):
         return True
 
-    @property
-    def identity_uris(self):
-        return compact([self.uri, self.canonical_url])
-
     @classmethod
     def persist_new(cls, obj, created_by, **kwargs):
         errors = {}
@@ -1717,9 +1713,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     def can_view_all_content(self, user):
         if get(user, 'is_anonymous'):
             return False
-        return get(
-            user, 'is_staff'
-        ) or self.public_can_view or self.user_id == user.id or self.organization.members.filter(id=user.id).exists()
+        return bool(get(user, 'is_staff') or self.is_publicly_viewable or (user and (self.user_id == user.id or (
+            self.organization_id and self.organization.members.filter(id=user.id).exists()))))
 
     @classmethod
     def resolve_expression_to_version(cls, expression, namespace=None):

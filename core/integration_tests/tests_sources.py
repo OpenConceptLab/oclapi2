@@ -2215,7 +2215,8 @@ class SourceHierarchyViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, 'hierarchy-response')
-        hierarchy_mock.assert_called_once_with(offset=100, limit=1000)
+        hierarchy_mock.assert_called_once_with(offset=100, limit=1000, user=ANY)
+        self.assertTrue(hierarchy_mock.call_args.kwargs['user'].is_anonymous)
 
 
 class SourceMappingsIndexViewTest(OCLAPITestCase):

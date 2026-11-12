@@ -1475,11 +1475,15 @@ class CollectionReference(models.Model):
                         versions.append(valueset_version_cache[cache_key])
         return versions
 
-    def get_resolved_repo_versions_serialized(
-            self, system_version_cache=None, valueset_version_cache=None, expansion_cache=None):
-        """Serialize repository versions resolved from this reference's system and valuesets."""
-        system_versions = self._get_resolved_system_versions(system_version_cache, expansion_cache)
-        valueset_versions = self._get_resolved_valueset_versions(valueset_version_cache)
+    def get_resolved_repo_versions_serialized(  # pylint: disable=too-many-arguments
+            self, system_version_cache=None, valueset_version_cache=None, expansion_cache=None, user=None):
+        """Serialize repository versions resolved from this reference's system and valuesets that `user` can view."""
+        system_versions = [
+            version for version in self._get_resolved_system_versions(system_version_cache, expansion_cache)
+            if version.has_view_access(user)]
+        valueset_versions = [
+            version for version in self._get_resolved_valueset_versions(valueset_version_cache)
+            if version.has_view_access(user)]
         data = []
         if system_versions:
             from core.sources.serializers import SourceVersionListSerializer
