@@ -292,6 +292,32 @@ class MapProjectTokensMigrationTest(MapProjectAbstractViewTest):
         self.assertEqual(project.algorithms[0]['token'], 'algo-key')
         self.assertEqual(project.lookup_config['token'], 'ocl-token')
 
+    def test_stops_on_different_tokens_for_one_url(self):
+        project = MapProjectFactory(organization=self.org)
+        algorithms = [
+            {'id': 'a', 'url': CUSTOM_URL, 'token': 'k1'},
+            {'id': 'b', 'url': CUSTOM_URL, 'token': 'k2'},
+            {'id': 'c', 'url': CUSTOM_URL, 'token': 'k2'},
+        ]
+        MapProject.objects.filter(id=project.id).update(algorithms=algorithms)
+
+        with self.assertRaisesMessage(RuntimeError, f'project {project.id} ({CUSTOM_URL}).'):
+            self.migration.move_tokens_to_credentials(apps, None)
+
+        project.refresh_from_db()
+        self.assertEqual(project.algorithms, algorithms)
+        self.assertEqual(project.credentials, {})
+
+    def test_same_token_on_one_url_migrates(self):
+        project = MapProjectFactory(organization=self.org)
+        MapProject.objects.filter(id=project.id).update(algorithms=[
+            {'id': 'a', 'url': CUSTOM_URL, 'token': 'k1'}, {'id': 'b', 'url': CUSTOM_URL, 'token': 'k1'}])
+
+        self.migration.move_tokens_to_credentials(apps, None)
+
+        project.refresh_from_db()
+        self.assertEqual(project.credentials, {'algorithms': {CUSTOM_URL: 'k1'}})
+
     def test_leaves_projects_without_tokens_alone(self):
         project = MapProjectFactory(organization=self.org, algorithms=[{'type': 'ocl-semantic'}])
         updated_at = MapProject.objects.get(id=project.id).updated_at

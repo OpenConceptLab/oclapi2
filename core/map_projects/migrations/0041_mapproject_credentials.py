@@ -21,9 +21,30 @@ def _move_token(entry, tokens):
     return drop_key_deep(entry, 'token')
 
 
+def find_token_conflicts(project_model):
+    """(project id, URL) pairs where algorithms on one URL hold different tokens; only one could be kept."""
+    conflicts = []
+    for project in project_model.objects.only('id', 'algorithms').iterator(chunk_size=500):
+        tokens, urls = {}, []
+        for entry in project.algorithms or []:
+            url, token = (entry.get('url'), entry.get('token')) if isinstance(entry, dict) else (None, None)
+            if isinstance(url, str) and url and isinstance(token, str) and token.strip() and \
+                    tokens.setdefault(url, token) != token and url not in urls:
+                urls.append(url)
+        conflicts += [(project.id, url) for url in urls]
+    return conflicts
+
+
 # Every stored token moves to credentials, OCL API lookup tokens too, so they can still be found to revoke.
 def move_tokens_to_credentials(apps, schema_editor):  # pylint: disable=unused-argument
     MapProject = apps.get_model('map_projects', 'MapProject')
+    conflicts = find_token_conflicts(MapProject)
+    if conflicts:
+        raise RuntimeError(
+            'Map project algorithms on the same URL have different tokens, so only one could be kept: ' +
+            ', '.join(f'project {project_id} ({url})' for project_id, url in conflicts) +
+            '. Leave one token per URL (or remove the extra algorithm) on these projects, then migrate again.'
+        )
     for project in MapProject.objects.only('id', 'algorithms', 'lookup_config').iterator(chunk_size=500):
         algorithm_tokens, lookup_tokens = {}, {}
         algorithms = [_move_token(entry, algorithm_tokens) for entry in project.algorithms or []]
