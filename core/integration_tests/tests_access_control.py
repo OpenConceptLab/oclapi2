@@ -720,6 +720,17 @@ class CsvExportAccessTest(AccessTestMixin, OCLAPITestCase):
         self.assertEqual(self.export(url, self.owner, 'name'), ['csv-owner-task'])
         self.assertEqual(self.export(url, self.outsider, 'name'), [])
 
+    def test_task_list_search_without_type(self):
+        # a list that applies q itself exports all its matches, not a search's first 100
+        for index in range(101):
+            Task.objects.create(name=f'csv-import-{index}', created_by=self.owner)
+        Task.objects.create(name='csv-other', created_by=self.owner)
+
+        names = self.export(self.owner.uri + 'tasks/?csv=true&q=csv-import', self.owner, 'name')
+
+        self.assertEqual(len(names), 101)
+        self.assertNotIn('csv-other', names)
+
     def test_map_project_list(self):
         MapProjectFactory(user=self.owner, organization=None, public_access=ACCESS_TYPE_NONE, name='csv-project')
         MapProjectFactory(user=self.owner, organization=None, public_access=ACCESS_TYPE_VIEW, name='csv-public-project')
@@ -735,6 +746,7 @@ class CsvExportAccessTest(AccessTestMixin, OCLAPITestCase):
         verbose_url = self.owner.uri + 'map-projects/?csv=true&verbose=true'
         self.assertIn('matches', self.export_columns(verbose_url, self.owner))
 
+    @tag('es')
     def test_search_without_type(self):
         private_org = OrganizationFactory(public_access=ACCESS_TYPE_NONE, mnemonic=self.org.mnemonic + '-private')
         unmatched_org = OrganizationFactory(public_access=ACCESS_TYPE_VIEW, mnemonic='csv-unmatched')

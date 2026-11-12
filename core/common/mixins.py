@@ -235,7 +235,8 @@ class ListWithHeadersMixin(ListModelMixin):
         if not data:
             search_string = query_params.get('type', None)
             search_term = query_params.get('q', None)
-            is_csv_search = is_csv and bool(search_string or search_term)
+            # q alone takes the search path only where it's an Elasticsearch search; other lists apply it themselves
+            is_csv_search = is_csv and bool(search_string or (search_term and get(self, 'is_searchable', False)))
             if is_csv and not is_csv_search:
                 return self.get_csv(request)
 
@@ -254,11 +255,11 @@ class ListWithHeadersMixin(ListModelMixin):
             if self.object_list is None:
                 self.object_list = self.filter_queryset()
 
-            if is_csv_search:  # the search's hits, read again within the view's queryset so its access checks apply
-                listed = self.get_queryset()
-                queryset = listed.model.objects.filter(
-                    id__in=list(self.get_object_ids())).filter(id__in=listed.order_by().values('id'))
-                return self.get_csv(request, queryset)
+            if is_csv_search:  # the search's hits; none gives an empty export where the document's model is known
+                ids = list(self.get_object_ids())
+                klass = get(self, 'document_model.Django.model') if not ids else None
+                klass = klass or type(self.object_list[0])
+                return self.get_csv(request, klass.objects.filter(id__in=ids))
 
             # Skip pagination if compressed results are requested
             compress = self.should_compress()
