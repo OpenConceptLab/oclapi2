@@ -15,6 +15,7 @@ from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory, ConceptDescriptionFactory
 from core.map_projects.tests.factories import MapProjectFactory, AutomatchRunFactory
+from core.orgs.documents import OrganizationDocument
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
 from core.pins.models import Pin
@@ -750,6 +751,7 @@ class CsvExportAccessTest(AccessTestMixin, OCLAPITestCase):
     def test_search_without_type(self):
         private_org = OrganizationFactory(public_access=ACCESS_TYPE_NONE, mnemonic=self.org.mnemonic + '-private')
         unmatched_org = OrganizationFactory(public_access=ACCESS_TYPE_VIEW, mnemonic='csv-unmatched')
+        OrganizationDocument().update([self.org, private_org, unmatched_org], refresh=True)
 
         mnemonics = self.export(f'/orgs/?csv=true&q={self.org.mnemonic}', None, 'mnemonic')
 
