@@ -220,6 +220,7 @@ class AutomatchRunDetailSerializer(AutomatchRunListSerializer):
         ]
 
     def to_representation(self, instance):
+        # Snapshots are stripped on save; this also covers any written outside the API.
         data = super().to_representation(instance)
         if 'config_snapshot' in data:
             data['config_snapshot'] = drop_key_deep(data['config_snapshot'], MapProject.TOKEN_KEY)

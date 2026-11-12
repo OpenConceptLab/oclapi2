@@ -1051,9 +1051,13 @@ def drop_key_deep(value, key):
 
 
 def get_url_origin(url):
-    """(scheme, host[:port]) of an absolute URL, lowercased; None for a relative or unparsable one."""
+    """(scheme, host[:port]) of a URL with a host, lowercased, default port left out; None for a path or bad URL."""
     try:
         parsed = parse.urlparse(url)
+        host, port = parsed.hostname, parsed.port
     except (ValueError, TypeError, AttributeError):
         return None
-    return (parsed.scheme.lower(), parsed.netloc.lower()) if parsed.scheme and parsed.netloc else None
+    if not host:
+        return None
+    scheme = parsed.scheme.lower()
+    return scheme, host if port in (None, {'http': 80, 'https': 443}.get(scheme)) else f'{host}:{port}'

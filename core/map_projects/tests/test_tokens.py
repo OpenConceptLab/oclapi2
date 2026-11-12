@@ -5,7 +5,7 @@ from mock import patch
 from django.apps import apps
 from django.test import override_settings, SimpleTestCase
 
-from core.common.utils import drop_key_deep
+from core.common.utils import drop_key_deep, get_url_origin
 from core.map_projects.models import MapProject, AutomatchRun
 from core.map_projects.tests.factories import MapProjectFactory, AutomatchRunFactory
 from core.map_projects.tests.tests import MapProjectAbstractViewTest
@@ -154,6 +154,60 @@ class MapProjectTokensTest(MapProjectAbstractViewTest):
         self.assertEqual(self.project.algorithms, [{'id': 'ocl-semantic'}])
         self.assertEqual(self.project.credentials, {})
 
+    def test_nested_tokens_are_not_stored(self):
+        self.put({
+            'algorithms': [{'id': 'custom-1', 'type': 'custom', 'url': CUSTOM_URL, 'auth': {'token': 'nested'}}],
+            'lookup_config': {'url': LOOKUP_URL, 'headers': [{'token': 'nested'}]},
+        })
+
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.algorithms, [{'id': 'custom-1', 'type': 'custom', 'url': CUSTOM_URL, 'auth': {}}])
+        self.assertEqual(self.project.lookup_config, {'url': LOOKUP_URL, 'headers': [{}]})
+        self.assertEqual(self.project.credentials, {})
+
+    def test_migrated_ocl_lookup_token_is_kept_but_not_shown(self):
+        MapProject.objects.filter(id=self.project.id).update(
+            lookup_config={'url': '/orgs/CIEL/'}, credentials={'lookup': {'/orgs/CIEL/': 'old-ocl-token'}})
+
+        self.assertNotIn('has_token', self.client.get(self.url, **self.auth).data['lookup_config'])
+        response = self.put({'lookup_config': {'url': '/orgs/CIEL/', 'token': 'new-ocl-token'}})
+
+        self.assertNotIn('has_token', response.data['lookup_config'])
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.credentials, {'lookup': {'/orgs/CIEL/': 'old-ocl-token'}})
+
+    def test_algorithms_sharing_a_url_share_one_token(self):
+        self.put_tokens()
+
+        response = self.put({'algorithms': [
+            {'id': 'custom-1', 'url': CUSTOM_URL, 'token': 'k1'},
+            {'id': 'custom-2', 'url': CUSTOM_URL, 'token': 'k2'},
+        ]})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('algorithms', response.data)
+
+        response = self.put({'algorithms': [
+            {'id': 'custom-1', 'url': CUSTOM_URL, 'has_token': True},
+            {'id': 'custom-2', 'url': CUSTOM_URL, 'token': 'k2'},
+        ]})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([algo.get('has_token') for algo in response.data['algorithms']], [True, True])
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.credentials['algorithms'], {CUSTOM_URL: 'k2'})
+
+    def test_stale_save_keeps_newer_token(self):
+        self.put_tokens()
+        stale = MapProject.objects.get(id=self.project.id)
+        MapProject.objects.filter(id=self.project.id).update(
+            credentials={'algorithms': {CUSTOM_URL: 'newer'}, 'lookup': {LOOKUP_URL: 'lookup-key'}})
+        stale.name = 'Renamed'
+
+        self.assertEqual(MapProject.persist_changes(stale, self.user), {})
+
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.name, 'Renamed')
+        self.assertEqual(self.project.credentials['algorithms'], {CUSTOM_URL: 'newer'})
+
     def test_credentials_cannot_be_written_directly(self):
         self.put({'credentials': {'algorithms': {CUSTOM_URL: 'injected'}}})
 
@@ -207,7 +261,7 @@ class MapProjectTokensMigrationTest(MapProjectAbstractViewTest):
         project = MapProjectFactory(organization=self.org)
         MapProject.objects.filter(id=project.id).update(
             algorithms=[
-                {'type': 'custom', 'url': CUSTOM_URL, 'token': 'algo-key'},
+                {'type': 'custom', 'url': CUSTOM_URL, 'token': 'algo-key', 'auth': {'token': 'nested'}},
                 {'type': 'ocl-semantic', 'token': 'stray'},
             ],
             lookup_config={'url': '/orgs/CIEL/', 'token': 'ocl-token'},
@@ -218,7 +272,8 @@ class MapProjectTokensMigrationTest(MapProjectAbstractViewTest):
 
         project.refresh_from_db()
         run.refresh_from_db()
-        self.assertEqual(project.algorithms, [{'type': 'custom', 'url': CUSTOM_URL}, {'type': 'ocl-semantic'}])
+        self.assertEqual(
+            project.algorithms, [{'type': 'custom', 'url': CUSTOM_URL, 'auth': {}}, {'type': 'ocl-semantic'}])
         self.assertEqual(project.lookup_config, {'url': '/orgs/CIEL/'})
         self.assertEqual(
             project.credentials, {'algorithms': {CUSTOM_URL: 'algo-key'}, 'lookup': {'/orgs/CIEL/': 'ocl-token'}})
@@ -248,3 +303,23 @@ class DropKeyDeepTest(SimpleTestCase):
             {'a': [{'b': {'c': 4}}]}
         )
         self.assertEqual(drop_key_deep('token', 'token'), 'token')
+
+
+class GetUrlOriginTest(SimpleTestCase):
+    def test_origin(self):
+        self.assertEqual(get_url_origin('HTTPS://API.Example.org:443/orgs/'), ('https', 'api.example.org'))
+        self.assertEqual(get_url_origin('http://api.example.org:8000/'), ('http', 'api.example.org:8000'))
+        self.assertEqual(get_url_origin('//api.example.org/orgs/'), ('', 'api.example.org'))
+        self.assertIsNone(get_url_origin('/orgs/CIEL/'))
+        self.assertIsNone(get_url_origin('http://[bad'))
+        self.assertIsNone(get_url_origin(None))
+
+
+@override_settings(API_BASE_URL='https://api.example.org')
+class IsOCLAPIURLTest(SimpleTestCase):
+    def test_is_ocl_api_url(self):
+        for url in ['', None, '/orgs/CIEL/', 'https://api.example.org/orgs/', 'HTTPS://api.example.org:443/orgs/']:
+            self.assertTrue(MapProject.is_ocl_api_url(url), url)
+        for url in [LOOKUP_URL, 'HTTPS://terms.example.org/', '//terms.example.org/', '//api.example.org/',
+                    'http://api.example.org/', 'https://api.example.org:8443/']:
+            self.assertFalse(MapProject.is_ocl_api_url(url), url)

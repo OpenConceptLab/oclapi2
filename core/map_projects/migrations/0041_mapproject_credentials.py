@@ -2,18 +2,23 @@
 
 from django.db import migrations, models
 
-from core.common.utils import drop_key_deep
+
+def drop_key_deep(value, key):
+    if isinstance(value, dict):
+        return {name: drop_key_deep(val, key) for name, val in value.items() if name != key}
+    if isinstance(value, list):
+        return [drop_key_deep(item, key) for item in value]
+    return value
 
 
 def _move_token(entry, tokens):
-    if not isinstance(entry, dict) or 'token' not in entry:
+    if not isinstance(entry, dict):
         return entry
-    entry = dict(entry)
-    token = entry.pop('token')
+    token = entry.get('token')
     if isinstance(token, str) and token.strip():
         url = entry.get('url') if isinstance(entry.get('url'), str) else ''
         tokens[url] = token
-    return entry
+    return drop_key_deep(entry, 'token')
 
 
 # Every stored token moves to credentials, OCL API lookup tokens too, so they can still be found to revoke.
