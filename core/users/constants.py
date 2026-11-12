@@ -10,7 +10,6 @@ OCL_FHIR_SERVERS_GROUP = 'ocl_fhir_servers'
 HAPI_FHIR_SERVERS_GROUP = 'hapi_fhir_servers'
 OPERATIONS_PANEL_GROUP = 'operations_panel'
 MAPPER_AI_ASSISTANT_GROUP = 'mapper_ai_assistant'
-MAPPER_WAITLIST_GROUP = 'mapper-waitlist'  # obsolete no effect
 MAPPER_APPROVED_GROUP = 'mapper-approved'  # obsolete no effect
 EARLY_ACCESS_NGO_GROUP = 'early_access_ngo'
 GUEST_GROUP = 'guest_user'
