@@ -153,13 +153,16 @@ class Event(models.Model):
         from core.sources.models import Source
         is_authenticated = bool(user and user.is_authenticated)
 
-        orgs = Organization.objects.exclude(id__in=Organization.get_public().values('id'))
+        # not public as BaseModel.is_public_access reads it: View, or the retired Edit, in any case
+        is_private = ~models.Q(public_access__iexact=ACCESS_TYPE_VIEW) & ~models.Q(
+            public_access__iexact=RETIRED_ACCESS_TYPE_EDIT)
+        orgs = Organization.objects.filter(is_private)
         if is_authenticated:
             orgs = orgs.exclude(members__id=user.id)
         criteria = models.Q(**{f'{field}__in': orgs.filter(uri__isnull=False).values('uri')})
 
         for model in (Source, Collection):
-            repos = model.objects.exclude(public_access__in=[ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT])
+            repos = model.objects.filter(is_private)
             if is_authenticated:
                 repos = repos.exclude(user_id=user.id).exclude(organization__members__id=user.id)
             repos = repos.filter(uri__isnull=False)

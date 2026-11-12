@@ -1713,7 +1713,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     def can_view_all_content(self, user):
         if get(user, 'is_anonymous'):
             return False
-        return bool(get(user, 'is_staff') or self.public_can_view or (user and (self.user_id == user.id or (
+        return bool(get(user, 'is_staff') or self.is_publicly_viewable or (user and (self.user_id == user.id or (
             self.organization_id and self.organization.members.filter(id=user.id).exists()))))
 
     @classmethod

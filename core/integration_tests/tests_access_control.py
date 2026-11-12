@@ -736,12 +736,15 @@ class CsvExportAccessTest(AccessTestMixin, OCLAPITestCase):
         self.assertIn('matches', self.export_columns(verbose_url, self.owner))
 
     def test_search_without_type(self):
-        private_org = OrganizationFactory(public_access=ACCESS_TYPE_NONE)
+        private_org = OrganizationFactory(public_access=ACCESS_TYPE_NONE, mnemonic=self.org.mnemonic + '-private')
+        unmatched_org = OrganizationFactory(public_access=ACCESS_TYPE_VIEW, mnemonic='csv-unmatched')
 
         mnemonics = self.export(f'/orgs/?csv=true&q={self.org.mnemonic}', None, 'mnemonic')
 
         self.assertIn(self.org.mnemonic, mnemonics)
         self.assertNotIn(private_org.mnemonic, mnemonics)
+        # the export is the search's, not the whole list
+        self.assertNotIn(unmatched_org.mnemonic, mnemonics)
 
     def export_columns(self, url, user):
         response = self.request('get', url, user)
@@ -1304,6 +1307,16 @@ class CanViewAllContentTest(OCLTestCase):
         source = UserSourceFactory(user=self.owner, public_access=ACCESS_TYPE_VIEW)
 
         self.assertTrue(source.can_view_all_content(self.outsider))
+
+    def test_public_version_of_a_private_head(self):
+        head = OrganizationSourceFactory(organization=self.org, public_access=ACCESS_TYPE_NONE)
+        version = OrganizationSourceFactory(
+            organization=self.org, mnemonic=head.mnemonic, version='v1', public_access=ACCESS_TYPE_VIEW)
+
+        for user in [self.member, self.outsider, self.staff]:
+            self.assertEqual(
+                version.can_view_all_content(user), version.has_view_access(user), user.username)
+        self.assertFalse(version.can_view_all_content(self.outsider))
 
 
 class HasOwnershipTest(OCLTestCase):

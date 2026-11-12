@@ -235,7 +235,8 @@ class ListWithHeadersMixin(ListModelMixin):
         if not data:
             search_string = query_params.get('type', None)
             search_term = query_params.get('q', None)
-            if is_csv and not search_string:
+            is_csv_search = is_csv and bool(search_string or search_term)
+            if is_csv and not is_csv_search:
                 return self.get_csv(request)
 
             if self.only_facets():
@@ -253,9 +254,10 @@ class ListWithHeadersMixin(ListModelMixin):
             if self.object_list is None:
                 self.object_list = self.filter_queryset()
 
-            if is_csv and search_string:
-                klass = type(self.object_list[0])
-                queryset = klass.objects.filter(id__in=self.get_object_ids())
+            if is_csv_search:  # the search's hits, read again within the view's queryset so its access checks apply
+                listed = self.get_queryset()
+                queryset = listed.model.objects.filter(
+                    id__in=list(self.get_object_ids())).filter(id__in=listed.order_by().values('id'))
                 return self.get_csv(request, queryset)
 
             # Skip pagination if compressed results are requested
