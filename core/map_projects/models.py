@@ -16,6 +16,9 @@ from core.common.utils import get_export_service, generate_temp_version, drop_ke
     get_api_base_url
 
 
+PERSIST_ERROR_MESSAGE = 'The map project could not be saved.'
+
+
 def default_score_configuration():
     return {'recommended': 100, 'available': 70}
 
@@ -154,7 +157,7 @@ class MapProject(BaseModel):
             result = service.upload(key=key, file_content=input_file)
             if result == 204:
                 self.input_file_name = file_name
-                self.save()
+                self.save(update_fields=['input_file_name'])
 
     def save(self, *args, **kwargs):
         # Tokens never stay in logs, whichever path saves them.
@@ -177,8 +180,9 @@ class MapProject(BaseModel):
                 instance.save()
                 persisted = True
                 instance.update_input_file(input_file)
-        except IntegrityError as ex:
-            errors.update({'__all__': ex.args})
+        except IntegrityError:
+            # The database's message can quote the failing row, credentials included.
+            errors.update({'__all__': [PERSIST_ERROR_MESSAGE]})
         except ValidationError as ex:
             errors = get(ex, 'message_dict', {}) or get(ex, 'error_dict', {})
         finally:
@@ -204,8 +208,9 @@ class MapProject(BaseModel):
                 instance.update_input_file(input_file)
         except ValidationError as ex:
             errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
-        except IntegrityError as ex:
-            errors.update({'__all__': ex.args})
+        except IntegrityError:
+            # The database's message can quote the failing row, credentials included.
+            errors.update({'__all__': [PERSIST_ERROR_MESSAGE]})
         except cls.DoesNotExist:
             errors.update({'__all__': ['This map project no longer exists.']})
 
@@ -276,6 +281,10 @@ class MapProject(BaseModel):
         self.clean_tokens()
 
     def clean_tokens(self):
+        if self.lookup_config and not isinstance(self.lookup_config, dict):
+            raise ValidationError({'lookup_config': ['Must be an object.']})
+        if any(not isinstance(entry, dict) for entry in self.algorithms or []):
+            raise ValidationError({'algorithms': ['Each algorithm must be an object.']})
         self.algorithms, self.lookup_config, self.credentials = self.split_tokens(
             self.algorithms, self.lookup_config, self.credentials)
 
@@ -361,16 +370,16 @@ class MapProject(BaseModel):
     def get_algorithms_without_tokens(self, algorithms):
         """The API's view of algorithms: no tokens, and has_token where one is stored."""
         if not isinstance(algorithms, list):
-            return algorithms
+            return drop_key_deep(algorithms, self.TOKEN_KEY)
         return [
-            self.flag_token(entry, self.ALGORITHMS_CREDENTIALS_KEY) if isinstance(entry, dict) else entry
-            for entry in algorithms
+            self.flag_token(entry, self.ALGORITHMS_CREDENTIALS_KEY) if isinstance(entry, dict) else
+            drop_key_deep(entry, self.TOKEN_KEY) for entry in algorithms
         ]
 
     def get_lookup_config_without_token(self, lookup_config):
         """The API's view of lookup_config: no token, and has_token where one is stored."""
         if not isinstance(lookup_config, dict):
-            return lookup_config
+            return drop_key_deep(lookup_config, self.TOKEN_KEY)
         return self.flag_token(lookup_config, self.LOOKUP_CREDENTIALS_KEY)
 
     def clean_matches(self):

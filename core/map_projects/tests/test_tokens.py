@@ -1,8 +1,10 @@
 import importlib
 
-from mock import patch
+from mock import patch, Mock
 
 from django.apps import apps
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import IntegrityError
 from django.test import override_settings, SimpleTestCase
 
 from core.common.utils import drop_key_deep, get_url_origin
@@ -259,6 +261,61 @@ class MapProjectTokensTest(MapProjectAbstractViewTest):
         self.project.refresh_from_db()
         self.assertEqual(self.project.credentials['logs'], ['old-key'])
         self.assertNotIn('old-key', str(self.client.get(f'{self.url}?includeSummary=true', **self.auth).data))
+
+    def test_logs_save_writes_only_log_fields(self):
+        original_save = MapProject.save
+        with patch.object(MapProject, 'save', autospec=True, side_effect=original_save) as save_mock:
+            self.client.post(f'{self.url}logs/', {'logs': {'project_logs': [{'action': 'Opened'}]}}, format='json',
+                             **self.auth)
+
+        self.assertEqual(save_mock.call_args.kwargs, {'update_fields': ['logs', 'updated_by', 'updated_at']})
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.logs, {'project_logs': [{'action': 'Opened'}]})
+
+    @patch('core.map_projects.models.get_export_service')
+    def test_input_file_save_keeps_newer_tokens(self, get_export_service_mock):
+        get_export_service_mock.return_value.upload.return_value = 204
+        self.put_tokens()
+        stale = MapProject.objects.get(id=self.project.id)
+        MapProject.objects.filter(id=self.project.id).update(credentials={'algorithms': {CUSTOM_URL: 'newer'}})
+
+        stale.update_input_file(SimpleUploadedFile('new.csv', b'a', 'text/csv'))
+
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.input_file_name, 'new.csv')
+        self.assertEqual(self.project.credentials, {'algorithms': {CUSTOM_URL: 'newer'}})
+
+    def test_settings_must_be_objects(self):
+        response = self.put({'lookup_config': [{'url': LOOKUP_URL, 'token': 'lookup-key'}]})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('lookup_config', response.data)
+
+        response = self.put({'algorithms': [[{'url': CUSTOM_URL, 'token': 'algo-key'}]]})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('algorithms', response.data)
+
+        self.project.refresh_from_db()
+        self.assertNotIn('lookup-key', str(self.project.lookup_config))
+        self.assertNotIn('algo-key', str(self.project.algorithms))
+
+    def test_stored_non_object_settings_are_stripped_on_read(self):
+        MapProject.objects.filter(id=self.project.id).update(
+            lookup_config=[{'url': LOOKUP_URL, 'token': 'lookup-key'}],
+            algorithms=[[{'url': CUSTOM_URL, 'token': 'algo-key'}]],
+        )
+
+        for url in [self.url, f'{self.url}configurations/', '/orgs/CIEL/map-projects/?verbose=true']:
+            response = self.client.get(url, **self.auth)
+            self.assertEqual(response.status_code, 200, url)
+            self.assertEqual(find_token_keys(response.data), [], url)
+
+    def test_integrity_error_is_generic(self):
+        project = MapProject.objects.get(id=self.project.id)
+        project.full_clean = Mock()
+        project.save = Mock(side_effect=IntegrityError('DETAIL: Failing row contains (..., {"algorithms": "k"})'))
+
+        self.assertEqual(
+            MapProject.persist_changes(project, self.user), {'__all__': ['The map project could not be saved.']})
 
     def test_credentials_cannot_be_written_directly(self):
         self.put({'credentials': {'algorithms': {CUSTOM_URL: 'injected'}}})

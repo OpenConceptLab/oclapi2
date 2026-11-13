@@ -193,7 +193,8 @@ class MapProjectLogsView(MapProjectBaseView, RetrieveAPIView, CreateAPIView):
         if new_logs:
             map_project.logs = new_logs
             map_project.updated_by = request.user
-            map_project.save()
+            # Only the log fields, so an older copy of the project's settings and tokens isn't written back.
+            map_project.save(update_fields=['logs', 'updated_by', 'updated_at'])
         return Response(status.HTTP_204_NO_CONTENT)
 
 
