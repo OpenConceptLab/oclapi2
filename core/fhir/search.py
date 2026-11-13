@@ -246,11 +246,6 @@ def concepts_over_limit():
     return Exists(Concept.sources.through.objects.filter(source_id=OuterRef('id'))[limit:limit + 1])
 
 
-def with_concepts_over_limit(queryset):
-    """Each Source row annotated with concepts_over_limit."""
-    return queryset.annotate(concepts_over_limit=concepts_over_limit())
-
-
 def defines_concept(**filters):
     """
     A CodeSystem version with a concept (matching `filters`), as its read lists them: linked to the version and not
@@ -618,7 +613,7 @@ def search_bundle(view):
         rows = with_repository_canonical(REPO_TYPES[resource_type].objects.filter(
             id__in=ids[(page - 1) * count:page * count])).order_by('-id')
         if resource_type == 'CodeSystem':
-            rows = with_concepts_over_limit(rows)
+            rows = rows.annotate(concepts_over_limit=concepts_over_limit())
         paginator = CustomPaginator(
             request=request, total_count=len(ids), queryset=list(rows), page_size=count, is_sliced=True)
         resources = view.get_serializer(paginator.current_page_results, many=True).data
