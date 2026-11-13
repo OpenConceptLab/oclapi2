@@ -82,10 +82,6 @@
   fields:
     name: mapper_ai_assistant
 - model: "auth.group"
-  pk: 6
-  fields:
-    name: mapper-waitlist
-- model: "auth.group"
   pk: 7
   fields:
     name: mapper-approved
