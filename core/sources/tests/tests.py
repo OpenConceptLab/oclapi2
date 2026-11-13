@@ -3217,3 +3217,73 @@ class RetirePublicEditMigrationTest(OCLTestCase):
         self.assertTrue(Mapping.objects.filter(id=mapping.id).exists())
         self.assertEqual(private_source.public_access, ACCESS_TYPE_NONE)
         self.assertEqual(private_concept.public_access, ACCESS_TYPE_NONE)
+
+
+class SourceSupplementsTest(OCLAPITestCase):
+    """A supplement names the code system it supplements (OpenConceptLab/ocl_issues#3030)."""
+    ICD10 = 'http://hl7.org/fhir/sid/icd-10'
+    ICD10_2019 = 'http://hl7.org/fhir/sid/icd-10|2019-covid-expanded'
+
+    def setUp(self):
+        super().setUp()
+        self.org = OrganizationFactory()
+        self.user = UserProfileFactory()
+        self.org.members.add(self.user)
+        self.token = f'Token {self.user.get_token()}'
+
+    def post(self, **data):
+        return self.client.post(
+            f'/orgs/{self.org.mnemonic}/sources/', {'name': 'n', **data}, HTTP_AUTHORIZATION=self.token,
+            format='json')
+
+    def put(self, path, **data):
+        return self.client.put(path, data, HTTP_AUTHORIZATION=self.token, format='json')
+
+    def supplement_fields(self, path):
+        data = self.client.get(path).data
+        return [data['supplements'], data['supplement_type'], data['supplement_global']]
+
+    def test_a_supplement_must_name_what_it_supplements(self):
+        response = self.post(id='fr', content_type='supplement')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('supplements', response.data)
+        self.assertFalse(Source.objects.filter(mnemonic='fr').exists())
+
+    def test_supplements_is_a_canonical_url_with_an_optional_version(self):
+        for index, value in enumerate(['not a url', f'{self.ICD10}|', f'{self.ICD10}|1|2', '|2019']):
+            response = self.post(id=f'fr-{index}', content_type='supplement', supplements=value)
+            self.assertEqual(response.status_code, 400, value)
+            self.assertIn('supplements', response.data, value)
+
+    @patch('core.sources.models.Source.index_children', Mock())
+    def test_create_update_read_and_versions_carry_supplements(self):
+        response = self.post(
+            id='fr', content_type='supplement', supplements=self.ICD10_2019, supplement_type='lang-pack',
+            supplement_global=False)
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(
+            [response.data['supplements'], response.data['supplement_type'], response.data['supplement_global']],
+            [self.ICD10_2019, 'lang-pack', False])
+        url = response.data['url']
+
+        response = self.put(url, supplements=self.ICD10, supplement_global=True)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(self.supplement_fields(url), [self.ICD10, 'lang-pack', True])
+
+        response = self.client.post(
+            f'{url}versions/', {'id': 'v1', 'description': 'v1'}, HTTP_AUTHORIZATION=self.token, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(self.supplement_fields(f'{url}v1/'), [self.ICD10, 'lang-pack', True])
+
+        response = self.put(url, supplements='')  # a supplement can't drop what it supplements
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('supplements', response.data)
+        self.assertEqual(Source.objects.get(uri=url).supplements, self.ICD10)
+
+    def test_supplements_is_optional_for_other_content(self):
+        """FHIR (csd-4) requires supplements only of a supplement."""
+        response = self.post(id='plain', supplements=self.ICD10)
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data['supplements'], self.ICD10)

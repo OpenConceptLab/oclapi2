@@ -27,6 +27,8 @@ SEARCH_DESCRIPTIONS = {
     'system': 'Canonical URL of the code system (an alias of url).',
     'code': 'A code defined by the code system; code or system|code.',
     'language': 'Language token for the code system (urn:ietf:bcp:47).',
+    'supplements': 'Canonical URL of the code system a supplement supplements: any version of it, or url|version.',
+    'content-mode': 'Content token: not-present, example, fragment, complete or supplement, as the read shows it.',
     'reference': 'Canonical code system URL referenced by the value set\'s stored default expansion.',
     'source-system': 'Canonical URL of a source system in a ConceptMap group.',
     'source-uri': 'Alias of source-system.',

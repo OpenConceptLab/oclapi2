@@ -2209,6 +2209,24 @@ class ResourceImporterModelsTest(OCLTestCase):
         self.assertEqual(Organization.objects.get(mnemonic='EditOrg').public_access, 'View')
         self.assertEqual(Source.objects.get(mnemonic='edit-src').public_access, 'View')
 
+    def test_source_importer_creates_a_supplement(self):
+        admin = UserProfile.objects.get(username='ocladmin')
+        OrganizationFactory(mnemonic='SuppOrg')
+        supplement = {
+            'id': 'icd10-fr', 'name': 'ICD-10 fr', 'owner_type': 'Organization', 'owner': 'SuppOrg',
+            'content_type': 'supplement', 'supplements': 'http://hl7.org/fhir/sid/icd-10|2019',
+            'supplement_type': 'lang-pack', 'supplement_global': False}
+
+        self.assertEqual(SourceImporter(supplement, admin).run(), CREATED)
+        source = Source.objects.get(mnemonic='icd10-fr')
+        self.assertEqual(
+            [source.supplements, source.supplement_type, source.supplement_global],
+            ['http://hl7.org/fhir/sid/icd-10|2019', 'lang-pack', False])
+
+        result = SourceImporter({**supplement, 'id': 'icd10-pt', 'supplements': None}, admin).run()
+        self.assertIn('supplements', result)
+        self.assertFalse(Source.objects.filter(mnemonic='icd10-pt').exists())
+
     def test_source_importer_delete_not_found(self):
         importer = SourceImporter(
             {'id': 'no-such-source', 'owner_type': 'Organization', 'owner': 'NoSuchOrg'}, UserProfileFactory()

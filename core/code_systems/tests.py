@@ -1,5 +1,6 @@
 import json
 
+from django.test import override_settings
 from fhir.resources.R4B.codesystem import CodeSystem
 from mock.mock import patch, Mock
 from rest_framework.test import APIClient
@@ -10,6 +11,7 @@ from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLTestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
+from core.fhir.serializers import SUBSETTED
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
@@ -764,3 +766,125 @@ class CodeSystemTest(OCLTestCase):
         self.assertTrue(can_convert)
         code_system = CodeSystemConverter.to_fhir(source)
         self.assertEqual(code_system['id'], 'test')
+
+
+SUPPLEMENTED = 'http://hl7.org/fhir/sid/icd-10|2019-covid-expanded'
+LANG_PACK = [
+    {'url': 'http://hl7.org/fhir/StructureDefinition/codesystem-supplement-type', 'valueCode': 'lang-pack'},
+    {'url': 'http://hl7.org/fhir/StructureDefinition/codesystem-supplement-global', 'valueBoolean': True}]
+
+
+@patch('core.common.tasks.__handle_save', Mock(__name__='__handle_save'))
+@patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+@patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+class CodeSystemSupplementTest(OCLTestCase):
+    """
+    A supplement written and read as FHIR shows one, like HL7 Denmark's ICD-10 supplement on tx.fhir.org: content
+    supplement, supplements, and concepts that are a code and their designations (OpenConceptLab/ocl_issues#3030).
+    """
+    def setUp(self):
+        super().setUp()
+        self.user = UserProfileFactory()
+        self.client = APIClient(HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+        self.path = f'/users/{self.user.mnemonic}/CodeSystem/'
+
+    def write(self, method='post', **resource):
+        body = {
+            'resourceType': 'CodeSystem', 'id': 'icd10-fr', 'url': 'http://example.org/CodeSystem/icd10-fr',
+            'version': '1', 'name': 'icd10-fr', 'title': 'ICD-10 fr', 'status': 'active', 'language': 'fr',
+            'content': 'supplement', 'supplements': SUPPLEMENTED, **resource}
+        path = self.path + ('icd10-fr/' if method == 'put' else '')
+        return getattr(self.client, method)(
+            path, {key: value for key, value in body.items() if value is not None}, format='json')
+
+    def read(self):
+        response = self.client.get(self.path + 'icd10-fr/')
+        self.assertEqual(response.status_code, 200, response.data)
+        return response.data
+
+    def head(self):
+        return Source.objects.get(mnemonic='icd10-fr', version='HEAD', user=self.user)
+
+    def names(self, code):
+        concept = self.head().get_concepts_queryset().get(mnemonic=code)
+        return sorted((name.locale, name.name, name.locale_preferred) for name in concept.names.all())
+
+    def test_a_supplement_is_written_and_read_without_anything_added(self):
+        response = self.write(extension=LANG_PACK, concept=[
+            {'code': 'A00', 'designation': [{'language': 'fr', 'value': 'Choléra'}]},
+            {'code': 'A01', 'designation': [{'language': 'fr', 'value': 'Fièvres typhoïde et paratyphoïde'}]}])
+        self.assertEqual(response.status_code, 201, response.data)
+
+        head = self.head()
+        self.assertEqual(
+            [head.content_type, head.supplements, head.supplement_type, head.supplement_global],
+            ['supplement', SUPPLEMENTED, 'lang-pack', True])
+        self.assertEqual(self.names('A00'), [('fr', 'Choléra', False)])  # no name made up from the code
+
+        resource = self.read()
+        self.assertEqual(
+            [resource['content'], resource['supplements'], resource['extension']],
+            ['supplement', SUPPLEMENTED, LANG_PACK])
+        self.assertEqual(
+            resource['concept'][0], {'code': 'A00', 'designation': [{'language': 'fr', 'value': 'Choléra'}]})
+        self.assertEqual([prop['code'] for prop in resource['property']], ['inactive'])
+
+    def test_a_supplements_display_is_its_name_in_the_code_systems_language(self):
+        """FHIR: the display is a designation in the resource's language with the use 'primary'."""
+        response = self.write(concept=[{'code': 'A00', 'display': 'Choléra', 'designation': [
+            {'language': 'fr', 'value': 'Choléra, sans précision'}, {'language': 'en', 'value': 'Cholera'}]}])
+        self.assertEqual(response.status_code, 201, response.data)
+
+        self.assertEqual(
+            self.names('A00'),
+            [('en', 'Cholera', False), ('fr', 'Choléra', True), ('fr', 'Choléra, sans précision', False)])
+        self.assertEqual(self.read()['concept'][0], {
+            'code': 'A00', 'display': 'Choléra', 'designation': [
+                {'language': 'fr', 'value': 'Choléra, sans précision'}, {'language': 'en', 'value': 'Cholera'}]})
+
+    def test_a_supplement_must_name_what_it_supplements(self):
+        response = self.write(supplements=None)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('supplements', str(response.data))
+        self.assertFalse(Source.objects.filter(mnemonic='icd10-fr').exists())
+
+    def test_an_update_carries_supplements_and_its_extensions(self):
+        self.assertEqual(self.write(extension=LANG_PACK).status_code, 201)
+
+        response = self.write(
+            'put', version='2', supplements='http://hl7.org/fhir/sid/icd-10', extension=LANG_PACK[:1],
+            concept=[{'code': 'A00', 'designation': [{'language': 'fr', 'value': 'Choléra'}]}])
+        self.assertEqual(response.status_code, 200, response.data)
+
+        for version in ('HEAD', '2'):
+            source = Source.objects.get(mnemonic='icd10-fr', version=version, user=self.user)
+            self.assertEqual(
+                [source.supplements, source.supplement_type, source.supplement_global],
+                ['http://hl7.org/fhir/sid/icd-10', 'lang-pack', None], version)
+        self.assertEqual(self.names('A00'), [('fr', 'Choléra', False)])
+        resource = self.read()
+        self.assertEqual(
+            [resource['supplements'], resource['extension']], ['http://hl7.org/fhir/sid/icd-10', LANG_PACK[:1]])
+
+    @override_settings(FHIR_CODE_SYSTEM_CONCEPT_LIMIT=1)
+    def test_a_supplement_over_the_concept_limit_is_still_a_supplement(self):
+        """Its concepts are left out (SUBSETTED), but it can't be not-present: it would no longer be a supplement."""
+        response = self.write(concept=[
+            {'code': 'A00', 'designation': [{'language': 'fr', 'value': 'Choléra'}]},
+            {'code': 'A01', 'designation': [{'language': 'fr', 'value': 'Fièvres typhoïde et paratyphoïde'}]}])
+        self.assertEqual(response.status_code, 201, response.data)
+
+        resource = self.read()
+        self.assertEqual([resource['content'], resource['count']], ['supplement', 2])
+        self.assertNotIn('concept', resource)
+        self.assertIn(SUBSETTED, resource['meta']['tag'])
+
+    def test_a_concept_with_designations_but_no_display_loads(self):
+        response = self.write(content='complete', supplements=None, concept=[
+            {'code': 'A00', 'designation': [{'language': 'fr', 'value': 'Choléra'}]}])
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(self.names('A00'), [('fr', 'Choléra', False)])
+        concept = self.read()['concept'][0]
+        self.assertEqual([prop['code'] for prop in concept['property']], ['conceptclass', 'datatype'])

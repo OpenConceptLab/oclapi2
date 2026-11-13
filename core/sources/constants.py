@@ -5,6 +5,9 @@ DELETE_FAILURE = 'Could not delete Source.'
 DELETE_SUCCESS = 'Successfully deleted Source.'
 VERSION_ALREADY_EXISTS = "Source version '{}' already exist."
 HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE = 'Hierarchy Root must belong to the same Source.'
+CONTENT_TYPE_SUPPLEMENT = 'supplement'
+SUPPLEMENTS_REQUIRED = 'A supplement must name the code system it supplements.'
+SUPPLEMENTS_FORMAT = 'Enter the canonical URL of the code system, optionally followed by |version.'
 HIERARCHY_MEANINGS = (
     ('grouped-by', 'grouped-by'),
     ('is-a', 'is-a'),

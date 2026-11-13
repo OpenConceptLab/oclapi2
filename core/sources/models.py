@@ -13,6 +13,7 @@ from pydash import get, compact
 
 from core.common.checksums import VersionCompareMixin
 from core.common.constants import HEAD
+from core.common.fields import URIField
 from core.common.models import ConceptContainerModel
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings, \
     sync_source_concept_vectors, index_source_public_access
@@ -21,7 +22,8 @@ from core.common.validators import validate_non_negative
 from core.concepts.models import ConceptName, Concept
 from core.services.storages.postgres import PostgresQL
 from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE, \
-    HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID, LOCALE_EXTERNAL_AUTO_ID_CHOICES
+    HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID, LOCALE_EXTERNAL_AUTO_ID_CHOICES, \
+    CONTENT_TYPE_SUPPLEMENT, SUPPLEMENTS_REQUIRED, SUPPLEMENTS_FORMAT
 from core.tasks.models import Task
 
 
@@ -101,6 +103,11 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                                                                     ('example', 'example'), ('fragment', 'fragment'),
                                                                     ('complete', 'complete'),
                                                                     ('supplement', 'supplement')])
+    # A supplement's code system: its canonical URL, optionally |version. The type and global flag are the publisher's
+    # FHIR codesystem-supplement-type and codesystem-supplement-global extensions, kept as they're given.
+    supplements = URIField(null=True, blank=True, max_length=300)
+    supplement_type = models.CharField(null=True, blank=True, max_length=50)
+    supplement_global = models.BooleanField(null=True, blank=True, default=None)
     collection_reference = models.CharField(null=True, blank=True, max_length=100)
     hierarchy_meaning = models.CharField(null=True, blank=True, max_length=50, choices=HIERARCHY_MEANINGS)
     case_sensitive = models.BooleanField(null=True, blank=True, default=None)
@@ -222,6 +229,9 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         super().update_version_data(head)
         self.source_type = head.source_type
         self.content_type = head.content_type
+        self.supplements = head.supplements
+        self.supplement_type = head.supplement_type
+        self.supplement_global = head.supplement_global
         self.collection_reference = head.collection_reference
         self.hierarchy_meaning = head.hierarchy_meaning
         self.hierarchy_root_id = head.hierarchy_root_id
@@ -274,9 +284,14 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             return hierarchy_root.parent_id == self.id
         return hierarchy_root.parent_id == self.head.id
 
+    @property
+    def is_supplement(self):
+        return self.content_type == CONTENT_TYPE_SUPPLEMENT
+
     def clean(self):
         self.hierarchy_meaning = self.hierarchy_meaning or None
 
+        self.clean_supplements()
         self.clean_properties()
         self.clean_filters()
         self.clean_match_algorithms()
@@ -284,6 +299,20 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         super().clean()
         if self.hierarchy_root_id and not self.is_hierarchy_root_belonging_to_self():
             raise ValidationError({'hierarchy_root': [HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE]})
+
+    def clean_supplements(self):
+        """
+        A supplement must name what it supplements (FHIR csd-4); any source may. The URL itself is checked as a URI
+        (clean_fields); here, at most one |version, which isn't empty.
+        """
+        self.supplements = self.supplements or None
+        if not self.supplements:
+            if self.is_supplement:
+                raise ValidationError({'supplements': [SUPPLEMENTS_REQUIRED]})
+            return
+        version = self.supplements.split('|')[1:]
+        if len(version) > 1 or version == ['']:
+            raise ValidationError({'supplements': [SUPPLEMENTS_FORMAT]})
 
     def clean_match_algorithms(self):
         self.match_algorithms = self.match_algorithms or []
