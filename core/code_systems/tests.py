@@ -842,6 +842,24 @@ class CodeSystemSupplementTest(OCLTestCase):
             'code': 'A00', 'display': 'Choléra', 'designation': [
                 {'language': 'fr', 'value': 'Choléra, sans précision'}, {'language': 'en', 'value': 'Cholera'}]})
 
+    def test_a_designation_with_a_use_is_kept_when_it_is_also_the_display(self):
+        designation = {'language': 'fr', 'value': 'Choléra', 'use': {'code': 'synonym'}}
+        response = self.write(concept=[{'code': 'A00', 'display': 'Choléra', 'designation': [designation]}])
+        self.assertEqual(response.status_code, 201, response.data)
+
+        self.assertEqual(
+            self.read()['concept'][0], {'code': 'A00', 'display': 'Choléra', 'designation': [designation]})
+
+    def test_a_supplement_concept_without_a_name_is_refused_not_dropped(self):
+        """OCL keeps a concept only with a name, and a supplement's write makes none up: the whole write is a 400."""
+        response = self.write(concept=[
+            {'code': 'A00', 'designation': [{'language': 'fr', 'value': 'Choléra'}]},
+            {'code': 'A01', 'property': [{'code': 'inactive', 'valueBoolean': False}]}])
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('designation', str(response.data))
+        self.assertFalse(Source.objects.filter(mnemonic='icd10-fr').exists())
+
     def test_a_supplement_must_name_what_it_supplements(self):
         response = self.write(supplements=None)
 

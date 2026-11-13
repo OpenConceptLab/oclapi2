@@ -8,7 +8,8 @@ from rest_framework.fields import CharField, BooleanField, SerializerMethodField
     DateTimeField
 
 from core import settings
-from core.code_systems.constants import RESOURCE_TYPE, SUPPLEMENT_TYPE_EXTENSION, SUPPLEMENT_GLOBAL_EXTENSION
+from core.code_systems.constants import RESOURCE_TYPE, SUPPLEMENT_TYPE_EXTENSION, SUPPLEMENT_GLOBAL_EXTENSION, \
+    SUPPLEMENT_CONCEPT_NEEDS_A_NAME
 from core.common.constants import HEAD
 from core.common.fhir_helpers import delete_empty_fields
 from core.common.serializers import ReadSerializerMixin, StatusField, IdentifierSerializer
@@ -116,6 +117,8 @@ class CodeSystemConceptSerializer(ReadSerializerMixin, serializers.Serializer):
         display = data.get('display')
         if self.context.get('supplement'):  # nothing made up: a display is the name in the code system's language
             self.add_preferred_name(ret['names'], display, self.context['language'])
+            if not ret['names']:  # refused here, before anything is saved: the concept wouldn't be
+                raise serializers.ValidationError({'designation': [SUPPLEMENT_CONCEPT_NEEDS_A_NAME]})
         elif display or not ret['names']:  # a concept needs a name: the code, when it has no other
             self.add_preferred_name(ret['names'], display or ret['mnemonic'], settings.DEFAULT_LOCALE)
 
@@ -137,7 +140,8 @@ class CodeSystemSupplementConceptSerializer(CodeSystemConceptSerializer):
     """
     A supplement's concept has only what the supplement adds to the code: its names, and inactive when retired (no
     concept class or datatype, which are the supplemented code system's). Its preferred name in the code system's
-    language (context language) is its display, FHIR's primary designation, and isn't repeated as a designation.
+    language (context language) is its display, FHIR's primary designation, and is repeated as a designation only
+    when it has a use of its own.
     """
     def to_representation(self, instance):
         names = list(instance.names.all())
@@ -148,7 +152,7 @@ class CodeSystemSupplementConceptSerializer(CodeSystemConceptSerializer):
             ('display', display.name if display else None),
             ('definition', self.fields['definition'].to_representation(instance)),
             ('designation', CodeSystemConceptDesignationSerializer(
-                [name for name in names if name is not display], many=True).data),
+                [name for name in names if name is not display or name.type], many=True).data),
             ('property', [{'code': 'inactive', 'valueBoolean': True}] if instance.retired else []),
         ])
 
