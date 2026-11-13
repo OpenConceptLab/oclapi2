@@ -544,14 +544,32 @@ class AuthoringCapabilityDefaultTest(OCLAPITestCase):
         self.assertIsNone(user.get_capability_usage(CLONE_RESOURCES_PER_CALL_CAPABILITY_ID))
 
 
+class ListedCapabilitiesDefaultTest(OCLAPITestCase):
+    def test_a_user_lists_every_capability(self):
+        user = UserProfileFactory()
+
+        response = self.client.get('/user/?includeCapabilities=true', HTTP_AUTHORIZATION='Token ' + user.get_token())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            sorted(capability['name'] for capability in response.data['capabilities']),
+            sorted(Capability.objects.values_list('name', flat=True)))
+
+
 class FakePolicy(CapabilityPolicy):
     """Records every call, and answers with values GroupLimitPolicy never gives."""
     calls = []
     refusal = None
+    listed = None  # the names listed_capabilities() keeps; None keeps them all
     made = 0
 
     def __init__(self):
         type(self).made += 1
+
+    def listed_capabilities(self, user):
+        self.calls.append(('listed_capabilities', user))
+        capabilities = super().listed_capabilities(user)
+        return capabilities if self.listed is None else capabilities.filter(name__in=self.listed)
 
     def get_limit(self, user, capability_id, owner=None):
         self.calls.append(('get_limit', user, capability_id, owner))
@@ -585,6 +603,7 @@ class CapabilityPolicyContractTest(OCLAPITestCase):
         super().setUp()
         FakePolicy.calls = []
         FakePolicy.refusal = None
+        FakePolicy.listed = None
         FakePolicy.made = 0
         self.user = UserProfileFactory()
         self.user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))  # mapper.use, for $match
@@ -649,6 +668,26 @@ class CapabilityPolicyContractTest(OCLAPITestCase):
         self.assertEqual(
             capabilities_by_name['ai_assistant.calls'],
             {'name': 'ai_assistant.calls', 'limit': 7, 'used': 3, 'window': 'fake'})
+
+    def test_the_policy_chooses_which_capabilities_a_user_lists(self):
+        FakePolicy.listed = ['ai_assistant.calls', 'mapper.match_operations']
+
+        response = self.client.get(
+            '/user/?includeCapabilities=true', HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            sorted(capability['name'] for capability in response.data['capabilities']),
+            ['ai_assistant.calls', 'mapper.match_operations'])
+        self.assertEqual(self.calls('listed_capabilities'), [('listed_capabilities', self.user)])
+
+    def test_the_policy_lists_the_capabilities_of_the_user_shown(self):
+        response = self.client.get(
+            f'/users/{self.user.username}/?includeCapabilities=true',
+            HTTP_AUTHORIZATION='Token ' + UserProfileFactory(is_staff=True).get_token())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.calls('listed_capabilities'), [('listed_capabilities', self.user)])
 
     def test_consume_reports_every_usage_field(self):
         response = self.consume(units=2, action='act', idempotency_key='key')
@@ -1007,6 +1046,13 @@ class NoOwnerPolicy(GroupLimitPolicy):
         return 0
 
 
+class NoUserListPolicy(GroupLimitPolicy):
+    """listed_capabilities() can't take `user`."""
+
+    def listed_capabilities(self):  # pylint: disable=arguments-differ
+        return Capability.objects.all()
+
+
 class RequiredInitPolicy(GroupLimitPolicy):
     def __init__(self, setting):
         self.setting = setting
@@ -1110,6 +1156,7 @@ class CapabilityPolicyCheckTest(SimpleTestCase):
         for path, misfits in (
                 ('core.capabilities.tests.tests.NarrowRefundPolicy', 'refund'),
                 ('core.capabilities.tests.tests.NoOwnerPolicy', 'get_limit'),
+                ('core.capabilities.tests.tests.NoUserListPolicy', 'listed_capabilities'),
                 ('core.capabilities.tests.tests.RequiredInitPolicy', '__init__'),
         ):
             with self.subTest(path):
