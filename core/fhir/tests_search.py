@@ -590,6 +590,56 @@ class CodeSystemSearchTest(SearchCorpusMixin, OCLTestCase):  # pylint: disable=t
 
 
 @tag('es')
+class CodeSystemSupplementSearchTest(SearchCorpusMixin, OCLTestCase):
+    """The supplements and content-mode parameters (OpenConceptLab/ocl_issues#3030)."""
+    FR = 'https://who.example/CodeSystem/icd10-fr'
+    PT = 'https://who.example/CodeSystem/icd10-pt'
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        fr = {'canonical_url': cls.FR, 'supplements': f'{ICD10}|2019'}
+        pt = {'canonical_url': cls.PT, 'supplements': ICD10}
+        cls.fr = source(cls.who, 'icd10-fr', content_type='supplement', **fr)
+        cls.fr_v1 = source(cls.who, 'icd10-fr', 'v1', released=True, content_type='supplement', **fr)
+        cls.pt = source(cls.who, 'icd10-pt', content_type='supplement', **pt)
+        cls.pt_v1 = source(cls.who, 'icd10-pt', 'v1', released=True, content_type='supplement', **pt)
+
+    def test_supplements_matches_any_version_unless_one_is_named(self):
+        self.assertEqual(self.keys(self.search('CodeSystem', supplements=ICD10)), [f'{self.FR}|v1', f'{self.PT}|v1'])
+        self.assertEqual(self.keys(self.search('CodeSystem', supplements=f'{ICD10}|2019')), [f'{self.FR}|v1'])
+        self.assertEqual(self.search('CodeSystem', supplements=f'{ICD10}|2020')['total'], 0)
+        self.assertEqual(self.search('CodeSystem', supplements='http://hl7.org/fhir/sid/icd')['total'], 0)
+        self.assertEqual(self.search('CodeSystem', base='/orgs/CIEL', supplements=ICD10)['total'], 0)
+
+    def test_content_mode_is_the_content_a_read_shows(self):
+        """A supplement stays one past the concept limit; any other code system is then not-present."""
+        mode = 'content-mode'
+        supplements = [f'{self.FR}|v1', f'{self.PT}|v1']
+        ConceptFactory(parent=self.ciel_source, sources=[self.ciel_v2])
+        ConceptFactory(parent=self.fr, sources=[self.fr_v1])
+
+        self.assertEqual(self.keys(self.search('CodeSystem', **{mode: 'supplement'})), supplements)
+        self.assertEqual(
+            self.keys(self.search('CodeSystem', **{mode: 'complete'})), CodeSystemSearchTest.PUBLIC_RELEASES)
+        self.assertEqual(self.search('CodeSystem', **{mode: 'not-present'})['total'], 0)
+        self.assertEqual(
+            self.keys(self.search('CodeSystem', **{mode: 'http://hl7.org/fhir/codesystem-content-mode|supplement'})),
+            supplements)
+        self.assertEqual(self.search('CodeSystem', **{mode: 'urn:x|supplement'})['total'], 0)
+        Source.objects.filter(id=self.jdoe_codes_v1.id).update(content_type='example')
+        self.assertEqual(self.keys(self.search('CodeSystem', **{mode: 'example'})), ['https://example.org/my-codes|v1'])
+
+        with override_settings(FHIR_CODE_SYSTEM_CONCEPT_LIMIT=0):
+            self.assertEqual(self.keys(self.search('CodeSystem', **{mode: 'not-present'})), [f'{CIEL}|v2'])
+            self.assertEqual(self.keys(self.search('CodeSystem', **{mode: 'supplement'})), supplements)
+            self.assertNotIn(f'{CIEL}|v2', self.keys(self.search('CodeSystem', **{mode: 'complete'})))
+            self.assertEqual(
+                {entry['resource']['version']: entry['resource']['content']
+                 for entry in self.search('CodeSystem', url=self.FR)['entry']}, {'v1': 'supplement'})
+
+
+@tag('es')
 class ValueSetSearchTest(SearchCorpusMixin, OCLTestCase):
     def test_global_search_and_the_repository_canonical(self):
         bundle = self.search('ValueSet')

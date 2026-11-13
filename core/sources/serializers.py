@@ -149,6 +149,7 @@ class SourceVersionListSerializer(ModelSerializer):
 
 class SourceCreateOrUpdateSerializer(ModelSerializer):
     canonical_url = CharField(allow_blank=True, allow_null=True, required=False)
+    supplements = CharField(allow_blank=True, allow_null=True, required=False)
     public_access = PublicAccessField(required=False)
 
     class Meta:
@@ -179,8 +180,8 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
                 'retired', 'released', 'organization', 'user', 'organization_id', 'user_id', 'external_id', 'extras',
                 'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
                 'version_needed', 'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose',
-                'copyright', 'content_type', 'revision_date', 'text', 'meta',
-                'autoid_concept_mnemonic', 'autoid_concept_external_id',
+                'copyright', 'content_type', 'supplements', 'supplement_type', 'supplement_global', 'revision_date',
+                'text', 'meta', 'autoid_concept_mnemonic', 'autoid_concept_external_id',
                 'autoid_mapping_mnemonic', 'autoid_mapping_external_id',
                 'autoid_concept_mnemonic_start_from', 'autoid_concept_external_id_start_from',
                 'autoid_mapping_mnemonic_start_from', 'autoid_mapping_external_id_start_from',
@@ -425,7 +426,8 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourc
             'url', 'owner', 'owner_type', 'owner_url', 'created_on', 'updated_on', 'created_by', 'updated_by',
             'extras', 'external_id', 'versions_url', 'version', 'concepts_url', 'mappings_url',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
-            'content_type', 'revision_date', 'logo_url', 'summary', 'text', 'client_configs',
+            'content_type', 'supplements', 'supplement_type', 'supplement_global', 'revision_date', 'logo_url',
+            'summary', 'text', 'client_configs',
             'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
             'version_needed', 'hierarchy_root_url', 'hierarchy_root', 'meta',
             'autoid_concept_mnemonic', 'autoid_concept_external_id',
@@ -520,8 +522,8 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id',
             'version', 'concepts_url', 'mappings_url', 'is_processing', 'released',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
-            'content_type', 'revision_date', 'summary', 'text', 'meta',
-            'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
+            'content_type', 'supplements', 'supplement_type', 'supplement_global', 'revision_date', 'summary', 'text',
+            'meta', 'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
             'version_needed', 'hierarchy_root_url', 'checksums', 'states', 'tasks', 'properties', 'filters',
             'match_algorithms', 'external_exports'
         ) + AbstractRepoResourcesSerializer.Meta.fields

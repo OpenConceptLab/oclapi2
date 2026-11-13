@@ -21,7 +21,8 @@ FHIR search and read of CodeSystem, ValueSet and ConceptMap: SVCM's Query transa
   parameter within the same time.
 - A search entry is the resource's summary, marked SUBSETTED: no concept, compose or group, which only a read returns.
   A CodeSystem is `complete` (with every concept, retired ones flagged) up to FHIR_CODE_SYSTEM_CONCEPT_LIMIT concepts,
-  else `not-present` (design D9).
+  else `not-present` (design D9). A supplement is `supplement` at any size; past the limit its concepts are left out
+  and the read is marked SUBSETTED.
 - A version released before its repository had a canonical URL has the repository's (HEAD's), in its `url` and for
   the url parameter.
 """
@@ -58,6 +59,7 @@ from core.fhir.resolve import (
 from core.fhir.utils import fhir_base_url
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
+from core.sources.constants import CONTENT_TYPE_SUPPLEMENT
 from core.sources.models import Source
 from core.users.models import UserProfile
 
@@ -82,7 +84,9 @@ COMMON_PARAMETERS = {
     '_id': 'by_id', '_lastUpdated': 'by_last_updated', 'url': 'by_url', 'version': 'by_version',
     'status': 'by_status', 'identifier': 'by_identifier'}
 PARAMETERS = {
-    'CodeSystem': {**COMMON_PARAMETERS, 'system': 'by_url', 'code': 'by_code', 'language': 'by_language'},
+    'CodeSystem': {
+        **COMMON_PARAMETERS, 'system': 'by_url', 'code': 'by_code', 'language': 'by_language',
+        'supplements': 'by_supplements', 'content-mode': 'by_content_mode'},
     'ValueSet': {**COMMON_PARAMETERS, 'reference': 'by_reference'},
     'ConceptMap': {
         **COMMON_PARAMETERS, 'source-system': 'by_source', 'source-uri': 'by_source', 'target-system': 'by_target',
@@ -99,9 +103,12 @@ STORED_ACCESSION = (
 CODE_SYSTEM = 'the code system searched'
 TOKEN_SYSTEMS = {
     '_id': None, 'version': None, 'status': 'http://hl7.org/fhir/publication-status', 'language': 'urn:ietf:bcp:47',
-    'code': CODE_SYSTEM}
+    'code': CODE_SYSTEM, 'content-mode': 'http://hl7.org/fhir/codesystem-content-mode'}
 # what system| (any code of the system) means for a parameter with a system of its own
-ANY_CODE = {'status': EVERYTHING, 'language': Q(default_locale__isnull=False) & ~Q(default_locale='')}
+ANY_CODE = {
+    'status': EVERYTHING, 'language': Q(default_locale__isnull=False) & ~Q(default_locale=''),
+    'content-mode': EVERYTHING}
+STATED_CONTENT = ('example', 'fragment')  # the content modes a CodeSystem shows as stored, up to the concept limit
 STATUSES = {'active': Q(released=True, retired=False), 'retired': Q(retired=True)}  # search shows no draft
 # the parameters whose values are canonical URLs, looked up before the search (Search.look_up), by what they're among
 LOOKUPS = {
@@ -233,11 +240,10 @@ def code_system_concepts(source):
     return count, concepts
 
 
-def with_concepts_over_limit(queryset):
-    """Each Source row annotated with concepts_over_limit, reading at most one link past the limit."""
+def concepts_over_limit():
+    """Whether a Source row has more concepts than a read lists, reading at most one link past the limit."""
     limit = settings.FHIR_CODE_SYSTEM_CONCEPT_LIMIT
-    links = Concept.sources.through.objects.filter(source_id=OuterRef('id'))
-    return queryset.annotate(concepts_over_limit=Exists(links[limit:limit + 1]))
+    return Exists(Concept.sources.through.objects.filter(source_id=OuterRef('id'))[limit:limit + 1])
 
 
 def defines_concept(**filters):
@@ -517,6 +523,28 @@ class Search:
     def by_language(value):
         return Q(default_locale=value)
 
+    @staticmethod
+    def by_supplements(value):
+        """A CodeSystem supplementing the canonical URL named: any version of it, or only the one url|version names."""
+        url, _, version = value.partition('|')
+        if version:
+            return Q(supplements=value)
+        return Q(supplements=url) | Q(supplements__startswith=f'{url}|')
+
+    @staticmethod
+    def by_content_mode(value):
+        """The content a CodeSystem shows (CodeSystemDetailSerializer.get_content): a supplement's at any size."""
+        supplement, over_limit = Q(content_type=CONTENT_TYPE_SUPPLEMENT), concepts_over_limit()
+        if value == CONTENT_TYPE_SUPPLEMENT:
+            return supplement
+        if value == 'not-present':
+            return ~supplement & over_limit
+        if value in STATED_CONTENT:
+            return Q(content_type=value) & ~over_limit
+        if value == 'complete':
+            return ~Q(content_type__in=[CONTENT_TYPE_SUPPLEMENT, *STATED_CONTENT]) & ~over_limit
+        return NOTHING
+
     def by_reference(self, value):
         """
         A ValueSet whose stored default expansion draws on a version of the code system (canonical URL) named, among
@@ -585,7 +613,7 @@ def search_bundle(view):
         rows = with_repository_canonical(REPO_TYPES[resource_type].objects.filter(
             id__in=ids[(page - 1) * count:page * count])).order_by('-id')
         if resource_type == 'CodeSystem':
-            rows = with_concepts_over_limit(rows)
+            rows = rows.annotate(concepts_over_limit=concepts_over_limit())
         paginator = CustomPaginator(
             request=request, total_count=len(ids), queryset=list(rows), page_size=count, is_sliced=True)
         resources = view.get_serializer(paginator.current_page_results, many=True).data
