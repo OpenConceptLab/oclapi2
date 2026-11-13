@@ -2398,7 +2398,7 @@ class TaskTest(OCLTestCase):
         bulk_import_subtask('some/path', 'ocladmin', 'Organization', 'org1', 'Concept', ['f1.json'], False)
 
         subtask_mock.assert_called_once_with(
-            'some/path', 'ocladmin', 'Organization', 'org1', 'Concept', ['f1.json'], False, False, False, None)
+            'some/path', 'ocladmin', 'Organization', 'org1', 'Concept', ['f1.json'], False, False, False, None, None)
 
     @patch('core.common.tasks.chord')
     def test_bulk_import_queue(self, chord_mock):
