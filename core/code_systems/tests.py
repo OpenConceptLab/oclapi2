@@ -171,6 +171,23 @@ class CodeSystemTest(OCLTestCase):
         self.assertEqual(response.data['id'], self.org_source.mnemonic)
         self.assertEqual(response.data['version'], 'v2')
 
+    def test_languages_are_bcp_47_tags_in_fhir_only(self):
+        """
+        OCL's pt_BR is pt-BR in the CodeSystem's language and its designations; OCL's own API still shows the locale as
+        it's stored (OpenConceptLab/ocl_issues#3031).
+        """
+        Source.objects.filter(id=self.org_source_v2.id).update(default_locale='pt_BR')
+        concept = self.org_source_v2.concepts.get(mnemonic=self.concept_1.mnemonic)
+        concept.names.create(name='Cólera', locale='pt_BR', locale_preferred=True)
+
+        resource = self.client.get(f'/orgs/{self.org.mnemonic}/CodeSystem/{self.org_source.mnemonic}/').data
+        self.assertEqual(resource['language'], 'pt-BR')
+        designations = next(item for item in resource['concept'] if item['code'] == concept.mnemonic)['designation']
+        self.assertIn({'language': 'pt-BR', 'value': 'Cólera'}, designations)
+
+        self.assertEqual(self.client.get(self.org_source_v2.uri).data['default_locale'], 'pt_BR')
+        self.assertIn('pt_BR', [name['locale'] for name in self.client.get(concept.uri).data['names']])
+
     def valid(self, concept):
         """$validate-code's answer for a valid code of the org source, at the version resolved (v2)."""
         return {'resourceType': 'Parameters', 'parameter': [

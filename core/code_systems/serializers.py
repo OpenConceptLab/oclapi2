@@ -10,7 +10,7 @@ from core import settings
 from core.code_systems.constants import RESOURCE_TYPE
 from core.common.constants import HEAD
 from core.common.fhir_helpers import delete_empty_fields
-from core.common.serializers import ReadSerializerMixin, StatusField, IdentifierSerializer
+from core.common.serializers import ReadSerializerMixin, StatusField, IdentifierSerializer, LanguageTagField
 from core.concepts.models import Concept, ConceptName
 from core.concepts.serializers import ConceptDetailSerializer
 from core.fhir import search as fhir_search
@@ -34,7 +34,7 @@ class CodeSystemConceptDesignationUseSerializer(serializers.Field):
 
 
 class CodeSystemConceptDesignationSerializer(serializers.ModelSerializer):
-    language = CharField(source='locale')
+    language = LanguageTagField(source='locale')
     value = CharField(source='name')
     use = CodeSystemConceptDesignationUseSerializer(source='*', required=False)
 
@@ -180,7 +180,7 @@ class CodeSystemDetailSerializer(FhirRepositorySerializerMixin, serializers.Mode
     url = CanonicalUrlField(source='canonical_url', required=False)
     title = TitleField(source='full_name', required=False)
     status = StatusField(source='*')
-    language = CharField(source='default_locale', required=False)
+    language = LanguageTagField(source='default_locale', required=False)
     count = SerializerMethodField(method_name='get_total_count')
     content = ChoiceField(
         source='content_type',

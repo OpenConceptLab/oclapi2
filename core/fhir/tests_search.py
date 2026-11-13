@@ -407,6 +407,13 @@ class CodeSystemSearchTest(SearchCorpusMixin, OCLTestCase):  # pylint: disable=t
         Source.objects.filter(id=self.ciel_v1.id).update(identifier={'system': 'urn:x', 'value': 'y'})
         self.assertEqual(self.search('CodeSystem', identifier='urn:x|')['total'], 0)
 
+    def test_language_takes_either_spelling(self):
+        """CodeSystem.language shows OCL's pt_BR as pt-BR: both find it, in any case (ocl_issues#3031)."""
+        Source.objects.filter(id=self.ciel_v2.id).update(default_locale='pt_BR')
+        for language in ('pt-BR', 'pt_BR', 'PT-br', 'urn:ietf:bcp:47|pt-BR'):
+            self.assertEqual(self.keys(self.search('CodeSystem', language=language)), [f'{CIEL}|v2'], language)
+        self.assertEqual(self.search('CodeSystem', language='pt')['total'], 0)
+
     def test_language_system_only_needs_a_language(self):
         Source.objects.filter(id=self.ciel_v2.id).update(default_locale='')
         self.assertEqual(self.keys(self.search('CodeSystem', language='urn:ietf:bcp:47|')), sorted(

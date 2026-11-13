@@ -216,6 +216,18 @@ class LookupCases(OpsCorpusMixin):
         response = self.lookup(system=CIEL, code='117053', displayLanguage='ru')
         self.assertEqual(self.by_name(response)['display']['valueString'], 'Infectious enteritis')
 
+    def test_languages_are_bcp_47_tags_and_display_language_takes_either_spelling(self):
+        """OCL's pt_BR is pt-BR in FHIR; displayLanguage finds it by either spelling, in any case (ocl_issues#3031)."""
+        ConceptNameFactory(concept=self.infectious, name='Enterite infecciosa', locale='pt_BR', locale_preferred=True)
+
+        for language in ('pt-BR', 'pt_BR', 'PT-br'):
+            response = self.lookup(system=CIEL, code='117053', displayLanguage=language)
+            self.assertEqual(self.by_name(response)['display']['valueString'], 'Enterite infecciosa', language)
+        languages = {part['valueCode'] for designation in self.by_name(response)['designations']
+                     for part in designation['part'] if part['name'] == 'language'}
+        self.assertEqual(languages, {'en', 'es', 'fr', 'pt-BR'})
+        self.assertEqual(self.infectious.names.get(name='Enterite infecciosa').locale, 'pt_BR')  # stored as it was
+
     def test_a_concept_without_names_is_displayed_by_its_code(self):
         response = self.lookup(system=REST, code='batch')
 
