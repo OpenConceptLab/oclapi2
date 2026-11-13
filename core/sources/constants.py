@@ -5,22 +5,15 @@ DELETE_FAILURE = 'Could not delete Source.'
 DELETE_SUCCESS = 'Successfully deleted Source.'
 VERSION_ALREADY_EXISTS = "Source version '{}' already exist."
 HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE = 'Hierarchy Root must belong to the same Source.'
-VERSIONING_MODE_CARRY_FORWARD = 'carry_forward'
-VERSIONING_MODE_ISOLATED = 'isolated'
-VERSIONING_MODES = (
-    (VERSIONING_MODE_CARRY_FORWARD, 'Carry Forward'),
-    (VERSIONING_MODE_ISOLATED, 'Isolated'),
-)
+SEEDED_FROM_REPO_VERSION = 'repo_version'
+SEEDED_FROM_IMPORT = 'import'
 ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION = \
-    'An isolated_version import needs exactly one Source Version line, after its concepts and mappings.'
+    'A seed_from_import import needs exactly one Source Version line, after its concepts and mappings.'
 ISOLATED_VERSION_CONTENT_FAILED = 'Not created: some of the version content failed to import.'
 ISOLATED_VERSION_LINE_INVALID = 'The Source Version line needs an id.'
 ISOLATED_VERSION_EXISTS = 'This Source Version already exists.'
 ISOLATED_VERSION_NO_EDIT_ACCESS = 'You need edit access to the source to import a version into it.'
-HIERARCHY_ROOT_CANNOT_BE_DROPPED = 'Hierarchy Root must be present in an isolated version.'
-INVALID_VERSIONING_MODE = 'versioning_mode must be carry_forward or isolated.'
-VERSIONING_MODE_NEEDS_ISOLATED_VERSION = \
-    'versioning_mode isolated needs isolated_version=true, and isolated_version=true makes an isolated version.'
+HIERARCHY_ROOT_CANNOT_BE_DROPPED = 'Hierarchy Root must be present in a version seeded from an import.'
 ISOLATED_METADATA_FIELDS = (
     'description', 'full_name', 'website', 'external_id', 'canonical_url', 'identifier', 'contact', 'jurisdiction',
     'publisher', 'purpose', 'copyright', 'revision_date', 'text', 'experimental', 'source_type', 'content_type',

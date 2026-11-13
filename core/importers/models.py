@@ -23,7 +23,7 @@ from core.concepts.models import Concept
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
 from core.sources.constants import ISOLATED_METADATA_FIELDS, ISOLATED_VERSION_CONTENT_FAILED, \
-    ISOLATED_VERSION_LINE_INVALID, ISOLATED_VERSION_EXISTS, ISOLATED_VERSION_NO_EDIT_ACCESS
+    ISOLATED_VERSION_LINE_INVALID, ISOLATED_VERSION_EXISTS, ISOLATED_VERSION_NO_EDIT_ACCESS, SEEDED_FROM_IMPORT
 from core.sources.models import Source
 from core.tasks.models import Task
 from core.users.models import UserProfile
@@ -326,7 +326,7 @@ class SourceImporter(BaseResourceImporter):
 class SourceVersionImporter(BaseResourceImporter):
     mandatory_fields = {"id"}
     allowed_fields = [
-        "id", "released", "versioning_mode", "name", "default_locale", "supported_locales", "extras",
+        "id", "released", "name", "default_locale", "supported_locales", "extras",
         *ISOLATED_METADATA_FIELDS
     ]
 
@@ -350,29 +350,20 @@ class SourceVersionImporter(BaseResourceImporter):
         self.data['version'] = self.data.pop('id')
         self.data['mnemonic'] = source
         self.data[owner_type] = owner
-        self.requested_versioning_mode = self.data.pop('versioning_mode', None)
         supported_locales = self.data.get('supported_locales')
         if isinstance(supported_locales, str):
             self.data['supported_locales'] = supported_locales.split(',')
 
-    def __init__(self, data, user, update_if_exists=False, cache=None, isolated_version=False):  # pylint: disable=too-many-arguments
+    def __init__(  # pylint: disable=too-many-arguments
+            self, data, user, update_if_exists=False, cache=None, isolated_version=False, import_task_id=None):
         super().__init__(data, user, update_if_exists, cache=cache)
         self.isolated_version = isolated_version
-        self.requested_versioning_mode = None
-
-    def get_versioning_mode_errors(self):
-        try:
-            self.data['versioning_mode'] = Source.resolve_versioning_mode(
-                self.isolated_version, self.requested_versioning_mode)
-        except ValidationError as ex:
-            return ex.message_dict
-        return None
+        self.import_task_id = import_task_id
 
     def process(self):
-        errors = self.get_versioning_mode_errors()
-        if errors:
-            return errors
         source = Source(**self.data)
+        if self.isolated_version:
+            source.seeded_from = {'type': SEEDED_FROM_IMPORT, 'task': self.import_task_id}
         source._metadata_fields = list(self.data.keys())  # pylint: disable=protected-access
         if source.has_parent_edit_access(self.user):
             errors = Source.persist_new_version(source, self.user)
@@ -388,15 +379,16 @@ class IsolatedVersionRollback(Exception):
 
 class IsolatedVersionCommit:
     """
-    The last step of an isolated version import, shared by every import path. HEAD's hierarchy replacement, the drop
+    The last step of an import that seeds a version, shared by every import path. HEAD's hierarchy replacement, the drop
     of what the import didn't contain and the version share one transaction. preflight() runs the same checks before
     any content imports.
     """
 
     def __init__(  # pylint: disable=too-many-arguments
             self, version_line, user, update_if_exists=False, hierarchy_map=None, seen_concept_ids=None,
-            seen_mapping_ids=None, content_failures=0):
+            seen_mapping_ids=None, content_failures=0, import_task_id=None):
         self.version_line = version_line
+        self.import_task_id = import_task_id
         self.user = user
         self.update_if_exists = update_if_exists
         self.hierarchy_map = hierarchy_map or {}
@@ -436,9 +428,6 @@ class IsolatedVersionCommit:
         is_clean = importer.clean()
         if not is_clean:
             return True, is_clean
-        errors = importer.get_versioning_mode_errors()
-        if errors:
-            return True, errors
         head = self.get_head()
         if (needs_head and not head) or (head and not head.has_edit_access(self.user)):
             return True, PERMISSION_DENIED
@@ -457,7 +446,8 @@ class IsolatedVersionCommit:
         if self.content_failures:
             return {'__all__': [ISOLATED_VERSION_CONTENT_FAILED]}
         importer = SourceVersionImporter(
-            {**self.version_line}, self.user, self.update_if_exists, isolated_version=True)
+            {**self.version_line}, self.user, self.update_if_exists, isolated_version=True,
+            import_task_id=self.import_task_id)
         rejected, result = self.get_rejection(importer)
         if rejected:
             return result
@@ -1034,7 +1024,7 @@ class BulkImportInline(BaseImporter):
         self.last_progress_notified_at = 0
         self.elapsed_seconds = 0
         self.index = should_index_import(index, self.total)
-        self.preflight_isolated_version(Source.validate_import_versioning_modes(self.input_list, self.isolated_version))
+        self.preflight_isolated_version(Source.get_import_version_line(self.input_list, self.isolated_version))
 
     def preflight_isolated_version(self, version_line):
         if version_line:
@@ -1056,7 +1046,7 @@ class BulkImportInline(BaseImporter):
             item, self.user, self.update_if_exists,
             hierarchy_map=Concept.get_import_hierarchy_map(self.input_list, include_parentless=True),
             seen_concept_ids=self.seen_concept_ids, seen_mapping_ids=self.seen_mapping_ids,
-            content_failures=self.content_failures_count
+            content_failures=self.content_failures_count, import_task_id=self.self_task_id
         ).run()
 
     def handle_item_import_result(self, result, item):  # pylint: disable=too-many-return-statements
@@ -1274,7 +1264,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             self.populate_input_list()
             self.total = len(self.input_list)
         self.index = should_index_import(index, self.total)
-        version_line = Source.validate_import_versioning_modes(self.input_list, self.isolated_version)
+        version_line = Source.get_import_version_line(self.input_list, self.isolated_version)
         if version_line:
             IsolatedVersionCommit(version_line, self.user, self.update_if_exists).preflight()
         self.make_resource_distribution()
@@ -1414,7 +1404,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         return bool(self.concept_hierarchy_map)
 
     def reconcile_hierarchy(self):
-        # an isolated version's hierarchy is rebuilt only by its commit, inside the version's transaction
+        # an import-seeded version's hierarchy is rebuilt only by its commit, inside the version's transaction
         if self.isolated_version or self.hierarchy_reconciliation_done or not self.concept_hierarchy_map:
             return
         user = UserProfile.objects.filter(username=self.username).first()
@@ -1425,7 +1415,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
     def commit_isolated_version(self, version_line):
         commit = IsolatedVersionCommit(
             version_line, UserProfile.objects.filter(username=self.username).first(), self.update_if_exists,
-            hierarchy_map=self.concept_hierarchy_map)
+            hierarchy_map=self.concept_hierarchy_map, import_task_id=self.self_task_id)
         for task in self.tasks:
             try:
                 task_result = task.result if task.successful() else None

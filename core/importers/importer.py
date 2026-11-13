@@ -239,11 +239,9 @@ class Importer:
         self.version_lines = []
 
     def validate_versioning(self, resources, resource_types):
+        if not self.isolated_version:
+            return resource_types
         try:
-            for line in self.version_lines:
-                Source.resolve_versioning_mode(self.isolated_version, line.get('versioning_mode'))
-            if not self.isolated_version:
-                return resource_types
             if sum(get(resources, 'Source Version', {}).values()) != 1:
                 raise ValidationError(ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION)
             IsolatedVersionCommit(
@@ -483,7 +481,7 @@ class Importer:
                         group_task['resource_type'], group_task['files'], self.index)
                 if self.isolated_version:
                     is_version = group_task['resource_type'] == 'Source Version'
-                    args = (*args, True, is_version, previous_subtask_ids if is_version else None)
+                    args = (*args, True, is_version, *((previous_subtask_ids, self.task_id) if is_version else ()))
                 group_tasks.append(bulk_import_subtask.si(*args).set(task_id=subtask_id))
             if len(group_tasks) == 1:  # Prevent celery from converting group to a single task
                 group_tasks.append(bulk_import_subtask_empty.si())
@@ -719,7 +717,7 @@ class ImporterSubtask:
     # pylint: disable=too-many-arguments
     def __init__(
             self, path, username, owner_type, owner, resource_type, files, index=True, isolated=False,
-            isolated_version=False, previous_subtask_ids=None):
+            isolated_version=False, previous_subtask_ids=None, import_task_id=None):
         super().__init__()
         self.path = path
         self.username = username
@@ -731,6 +729,7 @@ class ImporterSubtask:
         self.isolated = isolated
         self.isolated_version = isolated_version
         self.previous_subtask_ids = previous_subtask_ids or []
+        self.import_task_id = import_task_id
         self.seen = {'concepts': set(), 'mappings': set()}
         self.hierarchy_map = {}
 
@@ -804,7 +803,8 @@ class ImporterSubtask:
 
     def commit_isolated_version(self, version_line):
         commit = IsolatedVersionCommit(
-            version_line, UserProfile.objects.get(username=self.username), True, hierarchy_map=self.hierarchy_map)
+            version_line, UserProfile.objects.get(username=self.username), True, hierarchy_map=self.hierarchy_map,
+            import_task_id=self.import_task_id)
         for results in self.iter_previous_results():
             commit.add_subtask_results(results)
         return commit.run()

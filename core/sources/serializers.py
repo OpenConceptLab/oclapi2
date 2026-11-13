@@ -263,7 +263,7 @@ class SourceCreateSerializer(SourceCreateOrUpdateSerializer):
     hierarchy_meaning = CharField(required=False, allow_null=True, allow_blank=True)
     collection_reference = CharField(required=False, allow_null=True, allow_blank=True)
     hierarchy_root_url = CharField(allow_null=True, allow_blank=True, required=False)
-    versioning_mode = CharField(read_only=True)
+    seeded_from = JSONField(read_only=True)
 
     def validate(self, attrs):
         # create/create_version consume the raw payload (not validated_data), so DRF's boolean
@@ -428,7 +428,7 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourc
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
             'content_type', 'revision_date', 'logo_url', 'summary', 'text', 'client_configs',
             'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
-            'version_needed', 'hierarchy_root_url', 'hierarchy_root', 'meta', 'versioning_mode',
+            'version_needed', 'hierarchy_root_url', 'hierarchy_root', 'meta', 'seeded_from',
             'autoid_concept_mnemonic', 'autoid_concept_external_id',
             'autoid_concept_name_external_id', 'autoid_concept_description_external_id',
             'autoid_mapping_mnemonic', 'autoid_mapping_external_id',
@@ -524,7 +524,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
             'content_type', 'revision_date', 'summary', 'text', 'meta',
             'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
             'version_needed', 'hierarchy_root_url', 'checksums', 'states', 'tasks', 'properties', 'filters',
-            'versioning_mode',
+            'seeded_from',
             'match_algorithms', 'external_exports'
         ) + AbstractRepoResourcesSerializer.Meta.fields
 

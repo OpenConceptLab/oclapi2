@@ -24,9 +24,8 @@ from core.concepts.models import ConceptName, Concept, HierarchicalConcepts
 from core.services.storages.postgres import PostgresQL
 from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE, \
     HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID, LOCALE_EXTERNAL_AUTO_ID_CHOICES, \
-    VERSIONING_MODES, VERSIONING_MODE_CARRY_FORWARD, VERSIONING_MODE_ISOLATED, ISOLATED_METADATA_FIELDS, \
-    ISOLATED_REQUIRED_METADATA_FIELDS, HIERARCHY_ROOT_CANNOT_BE_DROPPED, ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION, \
-    INVALID_VERSIONING_MODE, VERSIONING_MODE_NEEDS_ISOLATED_VERSION, DROPPED_CHILDREN_CHUNK_SIZE
+    SEEDED_FROM_REPO_VERSION, SEEDED_FROM_IMPORT, ISOLATED_METADATA_FIELDS, ISOLATED_REQUIRED_METADATA_FIELDS, \
+    HIERARCHY_ROOT_CANNOT_BE_DROPPED, ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION, DROPPED_CHILDREN_CHUNK_SIZE
 from core.tasks.models import Task
 
 
@@ -112,8 +111,8 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     compositional = models.BooleanField(null=True, blank=True, default=None)
     version_needed = models.BooleanField(null=True, blank=True, default=None)
     hierarchy_root = models.ForeignKey('concepts.Concept', null=True, blank=True, on_delete=models.SET_NULL)
-    versioning_mode = models.CharField(
-        null=True, blank=True, max_length=20, choices=VERSIONING_MODES, default=VERSIONING_MODE_CARRY_FORWARD)
+    # what a version was seeded from, recorded once at creation; on HEAD, what an import last re-seeded it from
+    seeded_from = models.JSONField(null=True, blank=True)
     # auto-id
     autoid_concept_mnemonic = models.CharField(null=True, blank=True, choices=AUTO_ID_CHOICES, max_length=10)
     autoid_concept_external_id = models.CharField(null=True, blank=True, choices=AUTO_ID_CHOICES, max_length=10)
@@ -237,13 +236,17 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         self.version_needed = head.version_needed
 
     @property
-    def is_isolated(self):
-        return self.versioning_mode == VERSIONING_MODE_ISOLATED
+    def is_seeded_from_import(self):
+        return get(self, 'seeded_from.type') == SEEDED_FROM_IMPORT
+
+    def get_version_url(self, version):
+        return f'{self.uri}{version}/'
 
     def apply_version_metadata_to_head(self, head):
-        self.versioning_mode = self.versioning_mode or VERSIONING_MODE_CARRY_FORWARD
-        if not self.is_isolated:
+        if not self.is_seeded_from_import:
+            self.seeded_from = {'type': SEEDED_FROM_REPO_VERSION, 'url': head.get_version_url(HEAD)}
             return
+        head.seeded_from = {'type': SEEDED_FROM_REPO_VERSION, 'url': head.get_version_url(self.version)}
         fields = [field for field in get(self, '_metadata_fields') or [] if field in ISOLATED_METADATA_FIELDS]
         for field in fields:
             setattr(head, field, getattr(self, field))
@@ -324,25 +327,12 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         return {'concepts': len(concept_ids), 'mappings': len(mapping_ids)}
 
     @staticmethod
-    def resolve_versioning_mode(isolated_version, requested_mode=None):
-        mode = VERSIONING_MODE_ISOLATED if isolated_version else VERSIONING_MODE_CARRY_FORWARD
-        if requested_mode in (None, ''):
-            return mode
-        if not isinstance(requested_mode, str) or requested_mode not in dict(VERSIONING_MODES):
-            raise ValidationError({'versioning_mode': [INVALID_VERSIONING_MODE]})
-        if requested_mode != mode:
-            raise ValidationError({'versioning_mode': [VERSIONING_MODE_NEEDS_ISOLATED_VERSION]})
-        return mode
-
-    @classmethod
-    def validate_import_versioning_modes(cls, input_list, isolated_version):
-        """Checks the whole import before anything runs. An isolated_version import gets its one version line back."""
+    def get_import_version_line(input_list, seed_from_import):
+        """Checks the whole import before anything runs. A seed_from_import import gets its one version line back."""
+        if not seed_from_import:
+            return None
         types = [(line.get('type', '') or '').lower() for line in input_list]
         version_indexes = [index for index, _type in enumerate(types) if _type == 'source version']
-        for index in version_indexes:
-            cls.resolve_versioning_mode(isolated_version, input_list[index].get('versioning_mode'))
-        if not isolated_version:
-            return None
         content_indexes = [index for index, _type in enumerate(types) if _type in ('concept', 'mapping')]
         if len(version_indexes) != 1 or (content_indexes and content_indexes[-1] > version_indexes[0]):
             raise ValidationError(ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION)

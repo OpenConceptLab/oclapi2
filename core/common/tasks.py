@@ -302,11 +302,11 @@ def bulk_import_new(  # pylint: disable=too-many-arguments
 @app.task(retry_kwargs={'max_retries': 0}, compression='gzip')
 def bulk_import_subtask(  # pylint: disable=too-many-arguments
         path, username, owner_type, owner, resource_type, files, index=True, isolated=False, isolated_version=False,
-        previous_subtask_ids=None):
+        previous_subtask_ids=None, import_task_id=None):
     from core.importers.importer import ImporterSubtask
     return ImporterSubtask(
         path, username, owner_type, owner, resource_type, files, index, isolated, isolated_version,
-        previous_subtask_ids).run()
+        previous_subtask_ids, import_task_id).run()
 
 
 @app.task(retry_kwargs={'max_retries': 0}, compression='gzip')
@@ -932,8 +932,8 @@ def index_source_mappings(
 )
 def index_dropped_source_children(source_id, concept_ids, mapping_ids, recount=True):
     """
-    Reindexes one chunk of the concepts and mappings an isolated version dropped from HEAD, after the commit, and
-    recounts HEAD when asked. Retried with backoff; its Task records a final failure.
+    Reindexes one chunk of the concepts and mappings an import-seeded version dropped from HEAD, after the commit,
+    and recounts HEAD when asked. Retried with backoff; its Task records a final failure.
     """
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()

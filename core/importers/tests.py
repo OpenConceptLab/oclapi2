@@ -50,8 +50,7 @@ from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.constants import AUTO_ID_SEQUENTIAL, AUTO_ID_UUID, ISOLATED_VERSION_CONTENT_FAILED, \
-    ISOLATED_VERSION_EXISTS, ISOLATED_VERSION_LINE_INVALID, ISOLATED_VERSION_NO_EDIT_ACCESS, \
-    VERSIONING_MODE_NEEDS_ISOLATED_VERSION, INVALID_VERSIONING_MODE
+    ISOLATED_VERSION_EXISTS, ISOLATED_VERSION_LINE_INVALID, ISOLATED_VERSION_NO_EDIT_ACCESS
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.tasks.models import Task
@@ -6061,6 +6060,9 @@ class BulkImportLimitsTest(OCLAPITestCase):
         self.assertEqual(response.data['error_code'], 'imports_file_size_limit_reached')
 
 
+LOINC_HEAD_SEED = {'type': 'repo_version', 'url': '/orgs/Regen/sources/LOINC/HEAD/'}
+
+
 @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
 @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
 @patch('core.importers.models.index_concepts_mapped_codes', Mock())
@@ -6099,10 +6101,10 @@ class IsolatedVersionImportTest(OCLTestCase):
             'description': f'LOINC {version}', 'released': True, **kwargs
         }
 
-    def run_import(self, lines, isolated_version=True):
+    def run_import(self, lines, isolated_version=True, self_task_id=None):
         importer = BulkImportInline(
             '\n'.join(json.dumps(line) for line in [self.source_line, *lines]), 'ocladmin', True,
-            isolated_version=isolated_version)
+            isolated_version=isolated_version, self_task_id=self_task_id)
         with self.captureOnCommitCallbacks(execute=True):
             importer.run()
         return importer
@@ -6118,9 +6120,10 @@ class IsolatedVersionImportTest(OCLTestCase):
         self.assertEqual(len(importer.failed), 0)
         self.assertEqual(self.members('v1'), {'A', 'B'})
         self.assertEqual(self.members('v2'), {'B', 'C'})
-        self.assertEqual(Source.objects.get(mnemonic='LOINC', version='v2').versioning_mode, 'isolated')
+        self.assertEqual(
+            Source.objects.get(mnemonic='LOINC', version='v2').seeded_from, {'type': 'import', 'task': None})
         head = Source.objects.get(mnemonic='LOINC', version='HEAD')
-        self.assertEqual(head.versioning_mode, 'carry_forward')
+        self.assertEqual(head.seeded_from, {'type': 'repo_version', 'url': '/orgs/Regen/sources/LOINC/v2/'})
         self.assertEqual(set(head.concepts.filter(
             id=F('versioned_object_id'), is_active=True).values_list('mnemonic', flat=True)), {'B', 'C'})
         concept_a = Concept.objects.get(mnemonic='A', id=F('versioned_object_id'))
@@ -6221,7 +6224,8 @@ class IsolatedVersionImportTest(OCLTestCase):
 
         self.assertEqual(self.members('v2'), {'A', 'B'})
         self.assertEqual(Concept.objects.get(mnemonic='B', is_latest_version=True).extras, {'x': 1})
-        self.assertEqual(Source.objects.get(mnemonic='LOINC', version='v2').versioning_mode, 'carry_forward')
+        self.assertEqual(Source.objects.get(mnemonic='LOINC', version='v2').seeded_from, LOINC_HEAD_SEED)
+        self.assertIsNone(Source.objects.get(mnemonic='LOINC', version='HEAD').seeded_from)
 
     @staticmethod
     def head_concepts():
@@ -6392,36 +6396,28 @@ class IsolatedVersionImportTest(OCLTestCase):
         self.assertEqual(commit(), CREATED)
         self.assertEqual(self.head_parents('C'), {'P2'})
 
-    def test_versioning_mode_is_resolved_before_anything_imports(self):
-        for lines, isolated_version, message in (
-                ([self.concept('A'), self.version('v1', versioning_mode='carry_forward')], True,
-                 VERSIONING_MODE_NEEDS_ISOLATED_VERSION),
-                ([self.concept('A'), self.version('v1', versioning_mode='isolated')], False,
-                 VERSIONING_MODE_NEEDS_ISOLATED_VERSION),
-                ([self.concept('A'), self.version('v1', versioning_mode='other')], False, INVALID_VERSIONING_MODE),
-        ):
-            with self.assertRaises(DjangoValidationError) as context:
-                self.run_import(lines, isolated_version)
-            self.assertEqual(context.exception.message_dict, {'versioning_mode': [message]})
-        self.assertFalse(Concept.objects.filter(mnemonic='A').exists())
+    def test_seeded_from_records_the_import_task_and_survives_a_later_head_version(self):
+        self.run_import([self.concept('A'), self.version('v1')], self_task_id='import-task-id')
+        self.run_import([self.concept('B'), self.version('v2', versioning_mode='isolated')], False)
 
-    def test_version_line_mode_matching_the_import_is_accepted(self):
-        self.run_import([self.concept('A'), self.version('v1', versioning_mode='isolated')])
-        self.run_import([self.concept('B'), self.version('v2', versioning_mode='carry_forward')], False)
-
-        self.assertEqual(Source.objects.get(mnemonic='LOINC', version='v1').versioning_mode, 'isolated')
-        self.assertEqual(Source.objects.get(mnemonic='LOINC', version='v2').versioning_mode, 'carry_forward')
+        self.assertEqual(
+            Source.objects.get(mnemonic='LOINC', version='v1').seeded_from,
+            {'type': 'import', 'task': 'import-task-id'})
+        self.assertEqual(Source.objects.get(mnemonic='LOINC', version='v2').seeded_from, LOINC_HEAD_SEED)
+        self.assertEqual(
+            Source.objects.get(mnemonic='LOINC', version='HEAD').seeded_from,
+            {'type': 'repo_version', 'url': '/orgs/Regen/sources/LOINC/v1/'})
         self.assertEqual(self.members('v2'), {'A', 'B'})
 
-    def test_plain_version_importer_rejects_isolated_mode(self):
+    def test_plain_version_importer_ignores_versioning_mode(self):
         self.run_import([self.concept('A'), self.version('v1')])
         version_line = self.version('v2', versioning_mode='isolated')
         version_line.pop('type')
 
         result = SourceVersionImporter(version_line, UserProfile.objects.get(username='ocladmin')).run()
 
-        self.assertEqual(result, {'versioning_mode': [VERSIONING_MODE_NEEDS_ISOLATED_VERSION]})
-        self.assertFalse(Source.objects.filter(mnemonic='LOINC', version='v2').exists())
+        self.assertEqual(result, CREATED)
+        self.assertEqual(Source.objects.get(mnemonic='LOINC', version='v2').seeded_from, LOINC_HEAD_SEED)
 
     def test_commit_needs_edit_access_to_head(self):
         self.run_import([self.concept('A'), self.concept('B'), self.version('v1')])
@@ -6492,31 +6488,41 @@ class IsolatedVersionAPITest(OCLAPITestCase):
             '/orgs/Regen/sources/LOINC/concepts/C/parents/', HTTP_AUTHORIZATION='Token ' + self.token)
         self.assertEqual([item['id'] for item in response.data], ['P2'])
 
-    def test_version_create_cannot_set_versioning_mode(self):
+    def test_version_create_records_head_as_its_seed(self):
         self.run_import([IsolatedVersionImportTest.concept('A'), IsolatedVersionImportTest.version('v1')])
         response = self.client.post(
             '/orgs/Regen/sources/LOINC/versions/',
-            {'id': 'v2', 'description': 'v2', 'versioning_mode': 'isolated'},
+            {'id': 'v2', 'description': 'v2', 'seeded_from': {'type': 'import', 'task': 'other'}},
             HTTP_AUTHORIZATION='Token ' + self.token, format='json')
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.data['versioning_mode'], 'carry_forward')
+        self.assertEqual(response.data['seeded_from'], LOINC_HEAD_SEED)
+        self.assertNotIn('versioning_mode', response.data)
+        response = self.client.get('/orgs/Regen/sources/LOINC/', HTTP_AUTHORIZATION='Token ' + self.token)
+        self.assertEqual(
+            response.data['seeded_from'], {'type': 'repo_version', 'url': '/orgs/Regen/sources/LOINC/v1/'})
 
     @patch('core.importers.views.queue_bulk_import')
-    def test_import_passes_isolated_version(self, queue_bulk_import_mock):
+    def test_import_passes_seed_from_import(self, queue_bulk_import_mock):
         queue_bulk_import_mock.return_value = Task.new(queue='default', username='ocladmin', name='bulk_import')
         response = self.client.post(
-            '/importers/bulk-import/?update_if_exists=true&isolated_version=true', {'data': '{"type": "Concept"}'},
+            '/importers/bulk-import/?update_if_exists=true&seed_from_import=true', {'data': '{"type": "Concept"}'},
             HTTP_AUTHORIZATION='Token ' + self.token, format='json')
         self.assertEqual(response.status_code, 202)
         self.assertTrue(queue_bulk_import_mock.call_args.kwargs['isolated_version'])
 
         response = self.client.post(
-            '/importers/bulk-import/?isolated_version=maybe', {'data': '{"type": "Concept"}'},
+            '/importers/bulk-import/?isolated_version=true', {'data': '{"type": "Concept"}'},
+            HTTP_AUTHORIZATION='Token ' + self.token, format='json')
+        self.assertEqual(response.status_code, 202)
+        self.assertFalse(queue_bulk_import_mock.call_args.kwargs['isolated_version'])
+
+        response = self.client.post(
+            '/importers/bulk-import/?seed_from_import=maybe', {'data': '{"type": "Concept"}'},
             HTTP_AUTHORIZATION='Token ' + self.token, format='json')
         self.assertEqual(response.status_code, 400)
 
         response = self.client.post(
-            '/importers/bulk-import/?isolated_version=true', {'data': '{}', 'import_type': 'npm'},
+            '/importers/bulk-import/?seed_from_import=true', {'data': '{}', 'import_type': 'npm'},
             HTTP_AUTHORIZATION='Token ' + self.token, format='json')
         self.assertEqual(response.status_code, 400)
 
@@ -6553,7 +6559,8 @@ class IsolatedVersionZipImportTest(OCLTestCase):
                 self.captureOnCommitCallbacks(execute=True):
             return ImporterSubtask(
                 path, 'ocladmin', 'Organization', 'Regen', 'Source Version',
-                [{'filepath': 'version.json', 'start_index': 0, 'end_index': 1}], False, True, True).run()
+                [{'filepath': 'version.json', 'start_index': 0, 'end_index': 1}], False, True, True,
+                import_task_id='zip-task-id').run()
 
     def test_isolated_version_zip_import(self):
         self.assertEqual(self.import_zip([('A',), ('B',)], [('M1', 'A', 'B')], 'v1'), [CREATED])
@@ -6562,7 +6569,8 @@ class IsolatedVersionZipImportTest(OCLTestCase):
         self.assertEqual(IsolatedVersionImportTest.members('v1'), {'A', 'B'})
         self.assertEqual(IsolatedVersionImportTest.members('v2'), {'B', 'C'})
         self.assertEqual(Source.objects.get(mnemonic='LOINC', version='v2').mappings.count(), 0)
-        self.assertEqual(Source.objects.get(mnemonic='LOINC', version='v2').versioning_mode, 'isolated')
+        self.assertEqual(
+            Source.objects.get(mnemonic='LOINC', version='v2').seeded_from, {'type': 'import', 'task': 'zip-task-id'})
         self.assertEqual(
             Concept.objects.get(mnemonic='C', id=F('versioned_object_id')).parent_concept_urls,
             ['/orgs/Regen/sources/LOINC/concepts/B/'])
@@ -6596,15 +6604,15 @@ class IsolatedVersionZipImportTest(OCLTestCase):
         importer = Importer('task-id', '/tmp/loinc.zip', 'ocladmin', 'Organization', 'Regen', isolated_version=True)
         resources = {}
         lines = [
-            {'type': 'Source', 'id': 'LOINC', 'versioning_mode': 'carry_forward', 'extras': {'type': 'x'}},
-            {**IsolatedVersionImportTest.version('v1'), 'versioning_mode': 'isolated', 'extras': {'a': [1]}},
+            {'type': 'Source', 'id': 'LOINC', 'name': 'LOINC', 'extras': {'type': 'x'}},
+            {**IsolatedVersionImportTest.version('v1'), 'name': 'v1', 'extras': {'a': [1]}},
         ]
         importer.categorize_resources(
             io.BytesIO('\n'.join(json.dumps(line) for line in lines).encode()),
             '/tmp/loinc.zip', 'lines.json', ['Source', 'Source Version'], resources)
 
         self.assertEqual(importer.version_lines, [{
-            **IsolatedVersionImportTest.version('v1'), 'versioning_mode': 'isolated', 'extras': {}}])
+            **IsolatedVersionImportTest.version('v1'), 'name': 'v1', 'extras': {}}])
         self.assertEqual(
             importer.validate_versioning(resources, ['Source', 'Source Version', 'Concept', 'Mapping']),
             ['Source', 'Concept', 'Mapping', 'Source Version'])
@@ -6613,10 +6621,6 @@ class IsolatedVersionZipImportTest(OCLTestCase):
         self.import_zip([('A',)], [], 'v1')
         resources = {'Source Version': {'/tmp/loinc.zip/version.json': 1}}
         for line, isolated_version, errors in (
-                ({**IsolatedVersionImportTest.version('v2'), 'versioning_mode': 1}, True,
-                 {'versioning_mode': [INVALID_VERSIONING_MODE]}),
-                ({**IsolatedVersionImportTest.version('v2'), 'versioning_mode': {}}, False,
-                 {'versioning_mode': [INVALID_VERSIONING_MODE]}),
                 (IsolatedVersionImportTest.version('v1'), True, {'__all__': [ISOLATED_VERSION_EXISTS]}),
         ):
             importer = Importer(
@@ -6625,6 +6629,20 @@ class IsolatedVersionZipImportTest(OCLTestCase):
             with self.assertRaises(ValidationError) as context:
                 importer.validate_versioning(resources, ['Source Version', 'Concept', 'Mapping'])
             self.assertEqual(context.exception.detail, errors)
+
+    @patch('core.importers.importer.bulk_import_queue')
+    @patch('core.importers.importer.bulk_import_subtask')
+    def test_version_subtask_gets_the_import_task_id(self, subtask_mock, _):
+        importer = Importer('zip-task-id', '/tmp/loinc.zip', 'ocladmin', 'Organization', 'Regen', isolated_version=True)
+        task = {'path': '/tmp/loinc.zip', 'username': 'ocladmin', 'owner_type': 'Organization', 'owner': 'Regen',
+                'files': []}
+
+        _, subtask_ids = importer.schedule_tasks([
+            [{**task, 'resource_type': 'Concept'}], [{**task, 'resource_type': 'Source Version'}]])
+
+        concept_args, version_args = [call_.args for call_ in subtask_mock.si.call_args_list]
+        self.assertEqual(concept_args[-2:], (True, False))
+        self.assertEqual(version_args[-4:], (True, True, [subtask_ids[0]], 'zip-task-id'))
 
     def test_isolated_version_resource_types(self):
         self.assertEqual(
