@@ -37,7 +37,7 @@ from dateutil.relativedelta import relativedelta
 from django.conf import settings
 from django.db import connection, transaction, OperationalError
 from django.db.models import BooleanField, Case, F, Exists, Func, OuterRef, Q, Subquery, TextField, Value, When
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, Lower, Replace
 from django.db.models.lookups import Exact, IContains, In, IStartsWith
 from django.utils import timezone
 from psycopg2 import errorcodes
@@ -46,7 +46,7 @@ from core.bundles.serializers import FHIRBundleSerializer
 from core.collections.models import Expansion
 from core.common.constants import HEAD
 from core.common.db_functions import ImmutableUnaccent
-from core.common.fhir_helpers import repository_prefixes
+from core.common.fhir_helpers import language_key, repository_prefixes
 from core.common.mixins import CustomPaginator
 from core.common.utils import to_int
 from core.concepts.models import Concept
@@ -515,7 +515,9 @@ class Search:
 
     @staticmethod
     def by_language(value):
-        return Q(default_locale=value)
+        """The language CodeSystem.language shows, a BCP-47 tag: a default locale in either spelling, any case."""
+        locale = Replace('default_locale', Value('_'), Value('-'), output_field=TextField())
+        return Q(Exact(Lower(locale), language_key(value)))
 
     def by_reference(self, value):
         """

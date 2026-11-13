@@ -22,7 +22,7 @@ from core.collections.tests.factories import ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLTestCase, OCLAPITransactionTestCase
 from core.concepts.models import Concept
-from core.concepts.tests.factories import ConceptFactory
+from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from core.fhir.outcomes import MESSAGE_ID_EXTENSION, TX_ISSUE_TYPE_SYSTEM
 from core.fhir.tests_ops_lookup import CIEL, FEVERS, HIV, NEWEST_PRIVATE, OpsCorpusMixin, REST, name
 from core.fhir.tests_search import collection, source
@@ -196,6 +196,17 @@ class ExpandCases(OpsCorpusMixin):
         self.assertEqual(expansion['parameter'][:2], [
             {'name': 'displayLanguage', 'valueCode': 'fr'}, {'name': 'includeDesignations', 'valueBoolean': True}])
         self.assertNotIn('designation', self.expansion(self.expand(url=FEVERS))['contains'][0])
+
+    def test_languages_are_bcp_47_tags_and_display_language_takes_either_spelling(self):
+        """OCL's pt_BR is pt-BR in FHIR; displayLanguage finds it by either spelling, in any case (ocl_issues#3031)."""
+        ConceptNameFactory(concept=self.infectious, name='Enterite infecciosa', locale='pt_BR', locale_preferred=True)
+
+        for language in ('pt-BR', 'pt_br'):
+            expansion = self.expansion(
+                self.expand(url=FEVERS, displayLanguage=language, includeDesignations='true', count='1'))
+            self.assertEqual(expansion['contains'][0]['display'], 'Enterite infecciosa', language)
+        self.assertEqual(
+            sorted({item['language'] for item in expansion['contains'][0]['designation']}), ['en', 'es', 'fr', 'pt-BR'])
 
     # versions: only releases the caller is shown
 

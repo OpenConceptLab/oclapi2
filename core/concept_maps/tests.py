@@ -160,6 +160,13 @@ class ConceptMapTest(OCLTestCase):
         self.assertEqual(response.data['id'], self.org_source.mnemonic)
         self.assertEqual(response.data['version'], 'v2')
 
+    def test_language_is_a_bcp_47_tag(self):
+        """OCL's pt_BR is pt-BR in FHIR (OpenConceptLab/ocl_issues#3031)."""
+        Source.objects.filter(id=self.org_source_v2.id).update(default_locale='pt_BR')
+
+        response = self.client.get(f'/orgs/{self.org.mnemonic}/ConceptMap/{self.org_source.mnemonic}/')
+        self.assertEqual(response.data['language'], 'pt-BR')
+
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     def test_post_concept_map_without_mappings(self):
