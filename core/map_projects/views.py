@@ -15,6 +15,7 @@ from core.common.swagger_parameters import q_param
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin
 from core.common.permissions import CanEditConceptDictionary, CanCreateOrgMapProjects, \
     CanUseCustomMapperAlgorithms, HasMapProjectParentOwnership, HasMapProjectCapacity
+from core.common.utils import drop_key_deep
 from core.common.views import BaseAPIView
 from core.map_projects.models import MapProject, AutomatchRun
 from core.map_projects.serializers import MapProjectCreateUpdateSerializer, \
@@ -81,6 +82,14 @@ class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListW
             queryset = queryset.annotate(id_text=Cast('id', CharField())).filter(
                 Q(name__icontains=search_query) | Q(id_text__icontains=search_query))
         return super().filter_queryset_by_public_access(queryset)
+
+    @staticmethod
+    def csv_value_without_tokens(value):
+        return str(drop_key_deep(value, MapProject.TOKEN_KEY))
+
+    def get_csv_field_serializers(self):
+        """Verbose rows are raw columns, so settings stored in any shape lose their tokens as they're written."""
+        return {field: self.csv_value_without_tokens for field in ('algorithms', 'lookup_config', 'logs')}
 
     def get_csv_rows(self, queryset):
         """A row per listed project, read again by id as the list may be a union; verbose has every readable column."""

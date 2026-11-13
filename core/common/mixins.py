@@ -373,6 +373,8 @@ class ListWithHeadersMixin(ListModelMixin):
         if queryset is None:
             queryset = self.get_queryset()[0:CSV_DEFAULT_LIMIT]
         data = self.get_csv_rows(queryset) if hasattr(self, 'get_csv_rows') else queryset.values()
+        if hasattr(self, 'get_csv_field_serializers'):
+            kwargs['field_serializer_map'] = self.get_csv_field_serializers()
         requester = request.user.id if request.user.is_authenticated else 'anonymous'
         url = write_csv_to_s3(data, requester, **kwargs)
 

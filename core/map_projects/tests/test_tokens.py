@@ -298,16 +298,26 @@ class MapProjectTokensTest(MapProjectAbstractViewTest):
         self.assertNotIn('lookup-key', str(self.project.lookup_config))
         self.assertNotIn('algo-key', str(self.project.algorithms))
 
-    def test_stored_non_object_settings_are_stripped_on_read(self):
+    @patch('core.common.mixins.write_csv_to_s3', return_value='https://csv-url')
+    def test_stored_non_object_settings_are_stripped_on_read(self, write_csv_mock):
         MapProject.objects.filter(id=self.project.id).update(
             lookup_config=[{'url': LOOKUP_URL, 'token': 'lookup-key'}],
             algorithms=[[{'url': CUSTOM_URL, 'token': 'algo-key'}]],
+            logs={'project_logs': [{'token': 'logged-key'}]},
         )
 
         for url in [self.url, f'{self.url}configurations/', '/orgs/CIEL/map-projects/?verbose=true']:
             response = self.client.get(url, **self.auth)
             self.assertEqual(response.status_code, 200, url)
             self.assertEqual(find_token_keys(response.data), [], url)
+
+        self.client.get('/orgs/CIEL/map-projects/?csv=true&verbose=true', **self.auth)
+        rows = list(write_csv_mock.call_args.args[0])
+        serializers = write_csv_mock.call_args.kwargs['field_serializer_map']
+        written = str([{key: serializers.get(key, str)(val) for key, val in row.items()} for row in rows])
+        self.assertIn(CUSTOM_URL, written)
+        for token in ['algo-key', 'lookup-key', 'logged-key']:
+            self.assertNotIn(token, written)
 
     def test_integrity_error_is_generic(self):
         project = MapProject.objects.get(id=self.project.id)
