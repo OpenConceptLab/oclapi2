@@ -281,12 +281,13 @@ def bulk_import_parallel_inline(  # pylint: disable=too-many-arguments
     return importer.run()
 
 
-@app.task(base=QueueOnceCustomTask, retry_kwargs={'max_retries': 0})
-def bulk_import_inline(to_import, username, update_if_exists, index=None, isolated_version=False):
+@app.task(bind=True, base=QueueOnceCustomTask, retry_kwargs={'max_retries': 0})
+def bulk_import_inline(  # pylint: disable=too-many-arguments
+        self, to_import, username, update_if_exists, index=None, isolated_version=False):
     from core.importers.models import BulkImportInline
     return BulkImportInline(
         content=to_import, username=username, update_if_exists=update_if_exists, index=index,
-        isolated_version=isolated_version).run()
+        isolated_version=isolated_version, self_task_id=self.request.id).run()
 
 
 # pylint: disable=too-many-arguments

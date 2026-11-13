@@ -457,11 +457,7 @@ def queue_bulk_import(  # pylint: disable=too-many-arguments,too-many-locals
             task_func = bulk_import_parallel_inline
             args = (to_import, username, update_if_exists, threads)
         else:
-            # TODO: bulk_import_inline is unreachable from the current view layer —
-            # import_response always passes `parallel_threads = request.data.get('parallel') or 5`
-            # which is always truthy, so the `elif threads` branch above is always taken.
-            # Consider removing bulk_import_inline and this branch once confirmed no external
-            # callers rely on it (check API consumers and the test suite first).
+            # BulkImportInlineView reaches this with threads=None
             task_func = bulk_import_inline
         args = (*args, index, True) if isolated_version else (*args, index)
     else:

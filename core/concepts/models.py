@@ -1411,12 +1411,13 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return ids
 
     def get_hierarchy_related_queryset(self, relation, versioned=False):
-        """The concepts linked through relation, in one query: their HEADs, or with versioned the linked versions."""
+        """The concepts linked through relation, in one query: their active HEADs, or with versioned the linked
+        versions."""
         own, other = {'child_concepts': ('parent', 'child'), 'parent_concepts': ('child', 'parent')}[relation]
         links = HierarchicalConcepts.objects.filter(**{f'{own}_id__in': self.get_hierarchy_ids()})
         if versioned:
             return Concept.objects.filter(id__in=links.values(f'{other}_id')).exclude(id=F('versioned_object_id'))
-        return Concept.objects.filter(id__in=links.values(f'{other}__versioned_object_id'))
+        return Concept.objects.filter(id__in=links.values(f'{other}__versioned_object_id'), is_active=True)
 
     @staticmethod
     def annotate_has_children(queryset):

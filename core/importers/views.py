@@ -28,7 +28,7 @@ from core.common.swagger_parameters import update_if_exists_param, task_param, r
 from core.common.utils import queue_bulk_import, is_csv_file, get_truthy_values, get_queue_task_names, \
     get_export_service
 from core.importers.constants import ALREADY_QUEUED, INVALID_UPDATE_IF_EXISTS, NO_CONTENT_TO_IMPORT, INVALID_INDEX, \
-    INVALID_SEED_FROM_IMPORT, SEED_FROM_IMPORT_IMPORT_TYPE
+    INVALID_SEED_FROM_IMPORT, SEED_FROM_IMPORT_IMPORT_TYPE, SEED_FROM_IMPORT_ENDPOINT
 from core.importers.importer import Importer, ResourceImporter
 from core.importers.input_parsers import ImportContentParser
 from core.importers.limits import (
@@ -59,10 +59,12 @@ def get_index_param(request):
     return index == 'true', None
 
 
-def get_seed_from_import_param(request):
+def get_seed_from_import_param(request, supported=True):
     seed_from_import = request.GET.get('seed_from_import', 'false')
     if seed_from_import not in ['true', 'false']:
         return None, Response({'exception': INVALID_SEED_FROM_IMPORT}, status=status.HTTP_400_BAD_REQUEST)
+    if seed_from_import == 'true' and not supported:
+        return None, Response({'exception': SEED_FROM_IMPORT_ENDPOINT}, status=status.HTTP_400_BAD_REQUEST)
     return seed_from_import == 'true', None
 
 
@@ -83,7 +85,7 @@ def import_response(request, import_queue, data, threads=None, inline=False, dep
     index, error_response = get_index_param(request)
     if error_response:
         return error_response
-    seed_from_import, error_response = get_seed_from_import_param(request)
+    seed_from_import, error_response = get_seed_from_import_param(request, supported=inline)
     if error_response:
         return error_response
 

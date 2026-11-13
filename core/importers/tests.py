@@ -4201,16 +4201,18 @@ class TasksTest(OCLTestCase):
     def test_bulk_import_inline(self, bulk_import_inline_mock):
         bulk_import_inline_mock.run = Mock()
 
-        bulk_import_inline([1, 2], 'username', True)
+        bulk_import_inline([1, 2], 'username', True)  # pylint: disable=no-value-for-parameter
         bulk_import_inline_mock.assert_called_once_with(  # the import's size decides
-            content=[1, 2], username='username', update_if_exists=True, index=None, isolated_version=False
+            content=[1, 2], username='username', update_if_exists=True, index=None, isolated_version=False,
+            self_task_id=ANY
         )
         bulk_import_inline_mock().run.assert_called_once()
 
         bulk_import_inline_mock.reset_mock()
-        bulk_import_inline([1, 2], 'username', True, False)
+        bulk_import_inline([1, 2], 'username', True, False)  # pylint: disable=no-value-for-parameter
         bulk_import_inline_mock.assert_called_once_with(
-            content=[1, 2], username='username', update_if_exists=True, index=False, isolated_version=False
+            content=[1, 2], username='username', update_if_exists=True, index=False, isolated_version=False,
+            self_task_id=ANY
         )
 
     @patch('core.importers.models.BulkImportParallelRunner')
@@ -6525,6 +6527,35 @@ class IsolatedVersionAPITest(OCLAPITestCase):
             '/importers/bulk-import/?seed_from_import=true', {'data': '{}', 'import_type': 'npm'},
             HTTP_AUTHORIZATION='Token ' + self.token, format='json')
         self.assertEqual(response.status_code, 400)
+
+    @patch('core.common.tasks.bulk_import')
+    def test_deprecated_upload_rejects_seed_from_import(self, bulk_import_mock):
+        response = self.client.post(
+            '/importers/bulk-import/upload/?seed_from_import=true',
+            {'file': SimpleUploadedFile('file.json', b'{"type": "Concept"}', 'application/json')},
+            HTTP_AUTHORIZATION='Token ' + self.token)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'exception': 'seed_from_import is not supported by this endpoint.'})
+        bulk_import_mock.apply_async.assert_not_called()
+
+    def test_hierarchy_endpoints_follow_each_version(self):
+        concept = IsolatedVersionImportTest.concept
+        version = IsolatedVersionImportTest.version
+        self.run_import([concept('P'), concept('A', parents=['P']), concept('B', parents=['P']), version('v1')])
+        self.run_import([concept('P'), concept('A', parents=['P']), version('v2')])
+
+        def get_ids(url):
+            response = self.client.get(url, HTTP_AUTHORIZATION='Token ' + self.token)
+            self.assertEqual(response.status_code, 200)
+            return sorted(item['id'] for item in response.data)
+
+        self.assertEqual(get_ids('/orgs/Regen/sources/LOINC/v1/concepts/P/children/'), ['A', 'B'])
+        self.assertEqual(get_ids('/orgs/Regen/sources/LOINC/v2/concepts/P/children/'), ['A'])
+        self.assertEqual(get_ids('/orgs/Regen/sources/LOINC/concepts/P/children/'), ['A'])
+        self.assertEqual(get_ids('/orgs/Regen/sources/LOINC/v1/concepts/B/parents/'), ['P'])
+        response = self.client.get(
+            '/orgs/Regen/sources/LOINC/concepts/B/', HTTP_AUTHORIZATION='Token ' + self.token)
+        self.assertEqual(response.status_code, 404)
 
 
 @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
