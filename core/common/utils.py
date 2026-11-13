@@ -1039,3 +1039,25 @@ def get_export_key_pattern(prefix):
     (1.8.24.1 under 1.8.24.) don't match.
     """
     return re.escape(prefix) + EXPORT_KEY_TIMESTAMP_PATTERN
+
+
+def drop_key_deep(value, key):
+    """A copy of a JSON value with `key` removed from every dict in it, at any depth."""
+    if isinstance(value, dict):
+        return {name: drop_key_deep(val, key) for name, val in value.items() if name != key}
+    if isinstance(value, list):
+        return [drop_key_deep(item, key) for item in value]
+    return value
+
+
+def get_url_origin(url):
+    """(scheme, host[:port]) of a URL with a host, lowercased, default port left out; None for a path or bad URL."""
+    try:
+        parsed = parse.urlparse(url)
+        host, port = parsed.hostname, parsed.port
+    except (ValueError, TypeError, AttributeError):
+        return None
+    if not host:
+        return None
+    scheme = parsed.scheme.lower()
+    return scheme, host if port in (None, {'http': 80, 'https': 443}.get(scheme)) else f'{host}:{port}'

@@ -6,11 +6,24 @@ from rest_framework.fields import CharField, DateTimeField, IntegerField, FileFi
 
 from core.common.constants import ACCESS_TYPE_NONE, INCLUDE_SUMMARY, INCLUDE_LOGS
 from core.common.serializers import PublicAccessField
-from core.common.utils import get_truthy_values
+from core.common.utils import get_truthy_values, drop_key_deep
 from core.map_projects.models import MapProject, AutomatchRun
 
 
-class MapProjectCreateUpdateSerializer(serializers.ModelSerializer):
+class TokenFlagsMixin:
+    """Endpoint tokens are write-only: a response shows has_token in their place."""
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if 'algorithms' in data:
+            data['algorithms'] = instance.get_algorithms_without_tokens(data['algorithms'])
+        if 'lookup_config' in data:
+            data['lookup_config'] = instance.get_lookup_config_without_token(data['lookup_config'])
+        if 'logs' in data:
+            data['logs'] = drop_key_deep(data['logs'], MapProject.TOKEN_KEY)
+        return data
+
+
+class MapProjectCreateUpdateSerializer(TokenFlagsMixin, serializers.ModelSerializer):
     id = IntegerField(read_only=True)
     file = FileField(write_only=True, required=False)
     user_id = IntegerField(write_only=True, required=False)
@@ -121,7 +134,7 @@ class MapProjectListSerializer(serializers.ModelSerializer):
         ]
 
 
-class MapProjectConfigurationsSerializer(serializers.ModelSerializer):
+class MapProjectConfigurationsSerializer(TokenFlagsMixin, serializers.ModelSerializer):
     class Meta:
         model = MapProject
         fields = [
@@ -173,8 +186,15 @@ class MapProjectDetailSerializer(MapProjectSerializer):
         model = MapProject
         fields = MapProjectSerializer.Meta.fields + ['file_url', 'matches', 'columns']
 
+    def update(self, instance, validated_data):
+        """A PATCH saves as a PUT does, so tokens are split out and model validation runs."""
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        self._errors.update(MapProject.persist_changes(instance, self.context['request'].user))
+        return instance
 
-class MapProjectLogsSerializer(serializers.ModelSerializer):
+
+class MapProjectLogsSerializer(TokenFlagsMixin, serializers.ModelSerializer):
     class Meta:
         model = MapProject
         fields = ['id', 'logs', 'url']
@@ -208,6 +228,13 @@ class AutomatchRunDetailSerializer(AutomatchRunListSerializer):
             'config_snapshot', 'client_user_agent', 'client_ip', 'created_at', 'updated_at',
         ]
 
+    def to_representation(self, instance):
+        # Snapshots are stripped on save; this also covers any written outside the API.
+        data = super().to_representation(instance)
+        if 'config_snapshot' in data:
+            data['config_snapshot'] = drop_key_deep(data['config_snapshot'], MapProject.TOKEN_KEY)
+        return data
+
 
 class AutomatchRunCreateSerializer(serializers.ModelSerializer):
     id = IntegerField(read_only=True)
@@ -222,6 +249,10 @@ class AutomatchRunCreateSerializer(serializers.ModelSerializer):
         # A run always starts 'running' (the model default); completion is reported
         # later via PATCH, so completion_status is intentionally not settable here.
         fields = ['id', 'url', 'intended_rows', 'config_snapshot', 'trigger_source', 'parent_run']
+
+    @staticmethod
+    def validate_config_snapshot(value):
+        return drop_key_deep(value, MapProject.TOKEN_KEY)
 
     def validate(self, attrs):
         # A retry must link to a run within the SAME project — both a data-integrity

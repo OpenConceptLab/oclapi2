@@ -1,17 +1,22 @@
 import json
+import re
 from collections import Counter
 
 from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
-from django.db import models, IntegrityError
+from django.db import models, IntegrityError, transaction
 from django.db.models import Sum
 from django.utils import timezone
 from pydash import get
 
 from core.common.constants import PERSIST_NEW_ERROR_MESSAGE, ACCESS_TYPE_CHOICES, ACCESS_TYPE_NONE
 from core.common.models import BaseModel
-from core.common.utils import get_export_service, generate_temp_version
+from core.common.utils import get_export_service, generate_temp_version, drop_key_deep, get_url_origin, \
+    get_api_base_url
+
+
+PERSIST_ERROR_MESSAGE = 'The map project could not be saved.'
 
 
 def default_score_configuration():
@@ -54,6 +59,8 @@ class MapProject(BaseModel):
     # No further migration needed at that point.
     input_locales = ArrayField(models.CharField(max_length=10), null=True, blank=True, default=list)
     use_lexical_variants = models.BooleanField(default=False)
+    # Endpoint tokens split out of algorithms and lookup_config; never serialized.
+    credentials = models.JSONField(default=dict, null=True, blank=True)
 
     # Fields that define how a project matches —
     # excluding identity, results, logs, and audit metadata.
@@ -64,8 +71,22 @@ class MapProject(BaseModel):
         'prompt_output_locale', 'input_locales', 'use_lexical_variants'
     ]
 
+    # Never returned by the API, in any response or export.
+    WRITE_ONLY_FIELDS = ['credentials']
+
+    TOKEN_KEY = 'token'
+    HAS_TOKEN_KEY = 'has_token'
+    ALGORITHMS_CREDENTIALS_KEY = 'algorithms'
+    LOOKUP_CREDENTIALS_KEY = 'lookup'
+    # Tokens 0041 found only in logs, kept so they can be revoked; never used or flagged.
+    LOGGED_CREDENTIALS_KEY = 'logs'
+
     class Meta:
         db_table = 'map_projects'
+
+    @classmethod
+    def get_readable_field_names(cls):
+        return [field.attname for field in cls._meta.concrete_fields if field.name not in cls.WRITE_ONLY_FIELDS]
 
     @property
     def mnemonic(self):
@@ -136,7 +157,13 @@ class MapProject(BaseModel):
             result = service.upload(key=key, file_content=input_file)
             if result == 204:
                 self.input_file_name = file_name
-                self.save()
+                self.save(update_fields=['input_file_name'])
+
+    def save(self, *args, **kwargs):
+        # Tokens never stay in logs, whichever path saves them.
+        if self.logs:
+            self.logs = drop_key_deep(self.logs, self.TOKEN_KEY)
+        super().save(*args, **kwargs)
 
     @classmethod
     def persist_new(cls, instance, user, **kwargs):
@@ -153,8 +180,9 @@ class MapProject(BaseModel):
                 instance.save()
                 persisted = True
                 instance.update_input_file(input_file)
-        except IntegrityError as ex:
-            errors.update({'__all__': ex.args})
+        except IntegrityError:
+            # The database's message can quote the failing row, credentials included.
+            errors.update({'__all__': [PERSIST_ERROR_MESSAGE]})
         except ValidationError as ex:
             errors = get(ex, 'message_dict', {}) or get(ex, 'error_dict', {})
         finally:
@@ -170,14 +198,21 @@ class MapProject(BaseModel):
             if input_file:  # without a new file, keep the stored one
                 instance.input_file_name = input_file.name
             instance.updated_by = user
-            instance.full_clean()
-            instance.save(**kwargs)
+            with transaction.atomic():
+                # Stored tokens are read under a row lock so a concurrent save can't drop a newly stored one.
+                instance.credentials = cls.objects.select_for_update().values_list(
+                    'credentials', flat=True).get(id=instance.id)
+                instance.full_clean()
+                instance.save(**kwargs)
             if input_file:
                 instance.update_input_file(input_file)
         except ValidationError as ex:
             errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
-        except IntegrityError as ex:
-            errors.update({'__all__': ex.args})
+        except IntegrityError:
+            # The database's message can quote the failing row, credentials included.
+            errors.update({'__all__': [PERSIST_ERROR_MESSAGE]})
+        except cls.DoesNotExist:
+            errors.update({'__all__': ['This map project no longer exists.']})
 
         return errors
 
@@ -243,6 +278,109 @@ class MapProject(BaseModel):
         self.clean_include_retired()
         self.clean_encoder_model()
         self.clean_matches()
+        self.clean_tokens()
+
+    def clean_tokens(self):
+        if self.lookup_config and not isinstance(self.lookup_config, dict):
+            raise ValidationError({'lookup_config': ['Must be an object.']})
+        if any(not isinstance(entry, dict) for entry in self.algorithms or []):
+            raise ValidationError({'algorithms': ['Each algorithm must be an object.']})
+        self.algorithms, self.lookup_config, self.credentials = self.split_tokens(
+            self.algorithms, self.lookup_config, self.credentials)
+
+    @staticmethod
+    def is_ocl_api_url(url):
+        """
+        A lookup URL the Mapper sends to this API: none (the target repo), a path, or a URL on its origin.
+        As in the Mapper, only an http(s):// URL, in any case, is absolute; anything else is a path on this API.
+        """
+        if not url:
+            return True
+        if not isinstance(url, str):
+            return False
+        if not re.match(r'https?://', url, re.IGNORECASE):
+            return True
+        return get_url_origin(url) == get_url_origin(get_api_base_url())
+
+    @staticmethod
+    def get_endpoint_url(entry):
+        url = entry.get('url')
+        return url if isinstance(url, str) else ''
+
+    @classmethod
+    def without_token(cls, entry):
+        entry = drop_key_deep(entry, cls.TOKEN_KEY)
+        entry.pop(cls.HAS_TOKEN_KEY, None)
+        return entry
+
+    @classmethod
+    def take_tokens(cls, entries, stored, field, accept_new=True):
+        """
+        Tokens of the entries by URL. A missing token keeps the stored one for the same URL, so changing
+        the URL drops it; an empty one clears it. Entries sharing a URL share one token.
+        """
+        new_tokens, kept_urls, cleared_urls = {}, set(), set()
+        for entry in entries:
+            url = cls.get_endpoint_url(entry)
+            token = entry.get(cls.TOKEN_KEY)
+            if cls.TOKEN_KEY not in entry or (token and not accept_new):
+                kept_urls.add(url)
+            elif not (isinstance(token, str) and token.strip()):
+                cleared_urls.add(url)
+            elif new_tokens.setdefault(url, token) != token:
+                raise ValidationError({field: ['Entries with the same URL must use the same token.']})
+        tokens = {url: stored[url] for url in kept_urls - cleared_urls if stored.get(url)}
+        return {**tokens, **new_tokens}
+
+    @classmethod
+    def split_tokens(cls, algorithms, lookup_config, credentials):
+        """
+        Returns (algorithms, lookup_config, credentials) with tokens moved into credentials. No token is kept
+        for an algorithm without a URL, nor a new one for an OCL API lookup, which gets the user's own.
+        """
+        credentials = credentials if isinstance(credentials, dict) else {}
+        algorithm_tokens, lookup_tokens = {}, {}
+        if isinstance(algorithms, list):
+            algorithm_tokens = cls.take_tokens(
+                [entry for entry in algorithms if isinstance(entry, dict) and cls.get_endpoint_url(entry)],
+                credentials.get(cls.ALGORITHMS_CREDENTIALS_KEY) or {}, 'algorithms'
+            )
+            algorithms = [cls.without_token(entry) if isinstance(entry, dict) else entry for entry in algorithms]
+        if isinstance(lookup_config, dict):
+            lookup_tokens = cls.take_tokens(
+                [lookup_config], credentials.get(cls.LOOKUP_CREDENTIALS_KEY) or {}, 'lookup_config',
+                accept_new=not cls.is_ocl_api_url(cls.get_endpoint_url(lookup_config))
+            )
+            lookup_config = cls.without_token(lookup_config)
+        return algorithms, lookup_config, {
+            key: tokens for key, tokens in (
+                (cls.ALGORITHMS_CREDENTIALS_KEY, algorithm_tokens), (cls.LOOKUP_CREDENTIALS_KEY, lookup_tokens),
+                (cls.LOGGED_CREDENTIALS_KEY, credentials.get(cls.LOGGED_CREDENTIALS_KEY)),
+            ) if tokens
+        }
+
+    def flag_token(self, entry, credentials_key):
+        """The entry without tokens; has_token where one is stored. OCL API lookups never show one."""
+        entry = self.without_token(entry)
+        url = self.get_endpoint_url(entry)
+        tokens = (self.credentials or {}).get(credentials_key) or {}
+        is_usable = bool(url) if credentials_key == self.ALGORITHMS_CREDENTIALS_KEY else not self.is_ocl_api_url(url)
+        return {**entry, self.HAS_TOKEN_KEY: True} if url in tokens and is_usable else entry
+
+    def get_algorithms_without_tokens(self, algorithms):
+        """The API's view of algorithms: no tokens, and has_token where one is stored."""
+        if not isinstance(algorithms, list):
+            return drop_key_deep(algorithms, self.TOKEN_KEY)
+        return [
+            self.flag_token(entry, self.ALGORITHMS_CREDENTIALS_KEY) if isinstance(entry, dict) else
+            drop_key_deep(entry, self.TOKEN_KEY) for entry in algorithms
+        ]
+
+    def get_lookup_config_without_token(self, lookup_config):
+        """The API's view of lookup_config: no token, and has_token where one is stored."""
+        if not isinstance(lookup_config, dict):
+            return drop_key_deep(lookup_config, self.TOKEN_KEY)
+        return self.flag_token(lookup_config, self.LOOKUP_CREDENTIALS_KEY)
 
     def clean_matches(self):
         if self.matches:

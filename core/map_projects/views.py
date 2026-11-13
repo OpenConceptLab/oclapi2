@@ -15,6 +15,7 @@ from core.common.swagger_parameters import q_param
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin
 from core.common.permissions import CanEditConceptDictionary, CanCreateOrgMapProjects, \
     CanUseCustomMapperAlgorithms, HasMapProjectParentOwnership, HasMapProjectCapacity
+from core.common.utils import drop_key_deep
 from core.common.views import BaseAPIView
 from core.map_projects.models import MapProject, AutomatchRun
 from core.map_projects.serializers import MapProjectCreateUpdateSerializer, \
@@ -71,7 +72,7 @@ class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListW
         if self.request.method == 'GET' and not self.is_verbose():
             queryset = queryset.defer(
                 'matches', 'columns', 'candidates', 'analysis', 'logs', 'extras', 'algorithms', 'filters',
-                'lookup_config', 'input_locales'
+                'lookup_config', 'input_locales', 'credentials'
             )
         return self.filter_queryset_by_public_access(self.filter_queryset_by_owner(queryset))
 
@@ -82,11 +83,19 @@ class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListW
                 Q(name__icontains=search_query) | Q(id_text__icontains=search_query))
         return super().filter_queryset_by_public_access(queryset)
 
+    @staticmethod
+    def csv_value_without_tokens(value):
+        return str(drop_key_deep(value, MapProject.TOKEN_KEY))
+
+    def get_csv_field_serializers(self):
+        """Verbose rows are raw columns, so settings stored in any shape lose their tokens as they're written."""
+        return {field: self.csv_value_without_tokens for field in ('algorithms', 'lookup_config', 'logs')}
+
     def get_csv_rows(self, queryset):
-        """A row per listed project, read again by id as the list may be a union; verbose keeps every column."""
+        """A row per listed project, read again by id as the list may be a union; verbose has every readable column."""
         rows = MapProject.objects.filter(id__in=[project.id for project in queryset]).order_by('id')
         if self.is_verbose():
-            return rows.values()
+            return rows.values(*MapProject.get_readable_field_names())
         return rows.values(
             'id', 'name', 'public_access', 'is_active', 'created_at', 'updated_at', 'created_by__username',
             'updated_by__username', 'organization__mnemonic', 'user__username')
@@ -193,7 +202,8 @@ class MapProjectLogsView(MapProjectBaseView, RetrieveAPIView, CreateAPIView):
         if new_logs:
             map_project.logs = new_logs
             map_project.updated_by = request.user
-            map_project.save()
+            # Only the log fields, so an older copy of the project's settings and tokens isn't written back.
+            map_project.save(update_fields=['logs', 'updated_by', 'updated_at'])
         return Response(status.HTTP_204_NO_CONTENT)
 
 
