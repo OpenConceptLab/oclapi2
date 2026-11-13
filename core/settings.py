@@ -732,6 +732,8 @@ CAPACITY_TASK_ID = os.environ.get('CAPACITY_TASK_ID', '')
 LIST_QUERY_TIMEOUT_MS = int(os.environ.get('LIST_QUERY_TIMEOUT_MS', 30000))
 # Largest page a concept, mapping or reference list serves, so one page stays a short request
 LIST_MAX_LIMIT = int(os.environ.get('LIST_MAX_LIMIT', 100))
+# Above this many new, removed or changed concepts and mappings, a changelog skips names, descriptions and prev_*
+CHANGELOG_ENRICHMENT_MAX_RESOURCES = int(os.environ.get('CHANGELOG_ENRICHMENT_MAX_RESOURCES', 50000))
 
 ANALYTICS_API = os.environ.get('ANALYTICS_API', 'http://host.docker.internal:8002')
 if ANALYTICS_API:

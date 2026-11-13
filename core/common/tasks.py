@@ -16,7 +16,7 @@ from django.core.mail import EmailMessage
 from django.core.management import call_command
 from django.core.paginator import Paginator
 from django.db import DatabaseError
-from django.db.models import Exists, OuterRef, F
+from django.db.models import Exists, OuterRef
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django_elasticsearch_dsl.registries import registry
@@ -266,40 +266,48 @@ def bulk_import(to_import, username, update_if_exists):
 
 
 @app.task(base=QueueOnceCustomTask, bind=True, retry_kwargs={'max_retries': 0})
-def bulk_import_parallel_inline(self, to_import, username, update_if_exists, threads=5, index=None):  # pylint: disable=too-many-arguments
+def bulk_import_parallel_inline(  # pylint: disable=too-many-arguments
+        self, to_import, username, update_if_exists, threads=5, index=None, isolated_version=False):
     from core.importers.models import BulkImportParallelRunner
     try:
         importer = BulkImportParallelRunner(
             content=to_import, username=username, update_if_exists=update_if_exists,
-            parallel=threads, self_task_id=self.request.id, index=index
+            parallel=threads, self_task_id=self.request.id, index=index, isolated_version=isolated_version
         )
     except JSONDecodeError as ex:
         return {'error': f"Invalid JSON ({ex.msg})"}
     except ValidationError as ex:
-        return {'error': f"Invalid Input ({ex.message})"}
+        return {'error': f"Invalid Input ({'; '.join(ex.messages)})"}
     return importer.run()
 
 
-@app.task(base=QueueOnceCustomTask, retry_kwargs={'max_retries': 0})
-def bulk_import_inline(to_import, username, update_if_exists, index=None):
+@app.task(bind=True, base=QueueOnceCustomTask, retry_kwargs={'max_retries': 0})
+def bulk_import_inline(  # pylint: disable=too-many-arguments
+        self, to_import, username, update_if_exists, index=None, isolated_version=False):
     from core.importers.models import BulkImportInline
     return BulkImportInline(
-        content=to_import, username=username, update_if_exists=update_if_exists, index=index).run()
+        content=to_import, username=username, update_if_exists=update_if_exists, index=index,
+        isolated_version=isolated_version, self_task_id=self.request.id).run()
 
 
 # pylint: disable=too-many-arguments
 @app.task(bind=True, base=QueueOnceCustomTask, retry_kwargs={'max_retries': 0})
-def bulk_import_new(self, path, username, owner_type, owner, import_type='default', index=None):
+def bulk_import_new(  # pylint: disable=too-many-arguments
+        self, path, username, owner_type, owner, import_type='default', index=None, isolated_version=False):
     from core.importers.importer import Importer
     task_id = self.request.id
-    return Importer(task_id, path, username, owner_type, owner, import_type, index).run()
+    return Importer(task_id, path, username, owner_type, owner, import_type, index, isolated_version).run()
 
 
 # pylint: disable=too-many-arguments
 @app.task(retry_kwargs={'max_retries': 0}, compression='gzip')
-def bulk_import_subtask(path, username, owner_type, owner, resource_type, files, index=True):
+def bulk_import_subtask(  # pylint: disable=too-many-arguments
+        path, username, owner_type, owner, resource_type, files, index=True, isolated=False, isolated_version=False,
+        previous_subtask_ids=None, import_task_id=None):
     from core.importers.importer import ImporterSubtask
-    return ImporterSubtask(path, username, owner_type, owner, resource_type, files, index).run()
+    return ImporterSubtask(
+        path, username, owner_type, owner, resource_type, files, index, isolated, isolated_version,
+        previous_subtask_ids, import_task_id).run()
 
 
 @app.task(retry_kwargs={'max_retries': 0}, compression='gzip')
@@ -335,11 +343,11 @@ def import_finisher(task_id):
 
 
 @app.task(bind=True, retry_kwargs={'max_retries': 0})
-def bulk_import_parts_inline(self, input_list, username, update_if_exists, index=True):
+def bulk_import_parts_inline(self, input_list, username, update_if_exists, index=True, isolated=False):  # pylint: disable=too-many-arguments
     from core.importers.models import BulkImportInline
     return BulkImportInline(
         content=None, username=username, update_if_exists=update_if_exists, input_list=input_list,
-        self_task_id=self.request.id, skip_hierarchy_tasks=True, index=index
+        self_task_id=self.request.id, skip_hierarchy_tasks=True, index=index, isolated=isolated
     ).run()
 
 
@@ -527,7 +535,8 @@ def process_hierarchy_for_new_concept(concept_id, initial_version_id, parent_con
     acks_late=True, reject_on_worker_lost=True
 )
 def process_hierarchy_for_concept_version(
-        latest_version_id, prev_version_id, parent_concept_uris, create_parent_version):
+        latest_version_id, prev_version_id, parent_concept_uris, create_parent_version,
+        create_removed_parent_versions=True):
     """
       Executed when a new concept version is created with new, updated or existing hierarchy
       1. Associates parent concepts to the latest concept version.
@@ -549,7 +558,7 @@ def process_hierarchy_for_concept_version(
     latest_version.set_parent_concepts_from_uris(create_parent_version)
     latest_version.versioned_object.parent_concepts.set(latest_version.parent_concepts.all())
 
-    if prev_version:
+    if prev_version and create_removed_parent_versions:
         removed_parent_urls = [
             url for url in old_parents if url not in list(latest_version.parent_concept_urls)
         ]
@@ -689,72 +698,14 @@ def index_expansion_mappings(expansion_id, count=None, mapping_ids=None):  # pyl
 
 
 @app.task
-def make_hierarchy(concept_map):  # pragma: no cover  # pylint: disable=too-many-locals
-    from core.concepts.models import Concept, HierarchicalConcepts
-
-    def chunks(values, size=5000):
-        values = list(values)
-        for index in range(0, len(values), size):
-            yield values[index:index + size]
-
-    def resolve(uris):
-        """uri -> (id, versioned_object_id); the lowest id wins for duplicate uris, like .first()"""
-        resolved = {}
-        for batch in chunks(uris):
-            for concept_id, versioned_object_id, uri in Concept.objects.filter(uri__in=batch).order_by(
-                    '-id').values_list('id', 'versioned_object_id', 'uri'):
-                resolved[uri] = (concept_id, versioned_object_id)
-        return resolved
-
-    def latest_versions(versioned_object_ids):
-        """versioned_object_id -> id of its newest active latest version, like Concept.get_latest_version()"""
-        latest = {}
-        for batch in chunks(versioned_object_ids):
-            for versioned_object_id, concept_id in Concept.objects.filter(
-                    versioned_object_id__in=batch, is_latest_version=True, is_active=True
-            ).exclude(id=F('versioned_object_id')).order_by('created_at').values_list('versioned_object_id', 'id'):
-                latest[versioned_object_id] = concept_id  # ascending created_at, so the newest wins
-        return latest
-
-    parents = resolve(concept_map.keys())
-    parent_latest = latest_versions({versioned_object_id for _, versioned_object_id in parents.values()})
-    children = resolve({
-        url for parent_uri, urls in concept_map.items()
-        if parent_uri in parents and parents[parent_uri][1] in parent_latest for url in urls})
-    child_latest = latest_versions({versioned_object_id for _, versioned_object_id in children.values()})
-
-    pairs = set()
-    for parent_uri, urls in concept_map.items():
-        if parent_uri not in parents:
-            logger.info('Could not find parent %s', parent_uri)
-            continue
-        parent_id = parent_latest.get(parents[parent_uri][1])
-        if not parent_id:
-            logger.info('Could not find parent %s latest_version', parent_uri)
-            continue
-        for url in urls:
-            if url not in children:
-                continue
-            child_id, child_versioned_object_id = children[url]
-            pairs.add((child_id, parent_id))
-            if child_versioned_object_id in child_latest:
-                pairs.add((child_latest[child_versioned_object_id], parent_id))
-            else:
-                logger.info('Could not find child %s latest_version', url)
-
-    if not pairs:
-        return
-    existing = set()
-    parent_id_set = {parent for _, parent in pairs}
-    for batch in chunks({child for child, _ in pairs}):
-        existing.update(
-            HierarchicalConcepts.objects.filter(
-                child_id__in=batch, parent_id__in=parent_id_set).values_list('child_id', 'parent_id'))
-    HierarchicalConcepts.objects.bulk_create(
-        [HierarchicalConcepts(child_id=child, parent_id=parent) for child, parent in pairs - existing],
-        batch_size=5000
-    )
-    logger.info('Added %s hierarchy links', len(pairs - existing))
+def make_hierarchy(concept_map):
+    """concept_map: parent uri -> child uris. Adds the links, never removes any."""
+    from core.concepts.models import ImportHierarchy
+    child_map = {}
+    for parent_uri, child_uris in concept_map.items():
+        for child_uri in child_uris:
+            child_map.setdefault(child_uri, []).append(parent_uri)
+    ImportHierarchy.from_uri_map(child_map).apply()
 
 
 @app.task(ignore_result=True, base=QueueOnceCustomTask)
@@ -974,6 +925,21 @@ def index_source_mappings(
                 parallel=parallel)
         finally:
             source.clear_mappings_cache()
+
+
+@app.task(
+    autoretry_for=(Exception, WorkerLostError, ), retry_backoff=True, retry_backoff_max=600, max_retries=5,
+    acks_late=True, reject_on_worker_lost=True
+)
+def index_dropped_source_children(source_id, concept_ids, mapping_ids, recount=True):
+    """
+    Reindexes one chunk of the concepts and mappings an import-seeded version dropped from HEAD, after the commit,
+    and recounts HEAD when asked. Retried with backoff; its Task records a final failure.
+    """
+    from core.sources.models import Source
+    source = Source.objects.filter(id=source_id).first()
+    if source:
+        source.index_dropped_children(concept_ids, mapping_ids, recount)
 
 
 @app.task(

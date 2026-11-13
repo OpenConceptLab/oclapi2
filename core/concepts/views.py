@@ -24,7 +24,7 @@ from core.bundles.serializers import BundleSerializer
 from core.collections.documents import CollectionDocument
 from core.common import ERRBIT_LOGGER
 from core.common.constants import (
-    HEAD, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE, LIST_DEFAULT_LIMIT)
+    HEAD, LATEST, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE, LIST_DEFAULT_LIMIT)
 from core.common.exceptions import Http400, Http403, Http409
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
 from core.capabilities.constants import MAPPER_MATCH_OPERATIONS_CAPABILITY_ID
@@ -602,7 +602,29 @@ class ConceptCloneView(ConceptCascadeView):
         return source
 
 
-class ConceptChildrenView(ConceptBaseView, ListWithHeadersMixin):
+class ConceptHierarchyMixin:
+    def get_source_version(self):
+        """The source version named in the URL, or None for HEAD and collection URLs."""
+        source, version = self.kwargs.get('source'), self.kwargs.get('version')
+        if not source or not version or version == HEAD:
+            return None
+        from core.sources.models import Source
+        if 'org' in self.kwargs:
+            filters = {'organization__mnemonic': self.kwargs['org']}
+        else:
+            filters = {'user__username': self.request.user.username if self.user_is_self else self.kwargs.get('user')}
+        if version == LATEST:
+            return Source.find_latest_released_version_by({**filters, 'mnemonic': source})
+        return Source.get_version(source, version, filters)
+
+    def get_hierarchy_queryset(self, instance, relation):
+        repo_version = self.get_source_version()
+        if repo_version:
+            return instance.get_version_hierarchy_queryset(relation, repo_version)
+        return instance.get_hierarchy_related_queryset(relation)
+
+
+class ConceptChildrenView(ConceptHierarchyMixin, ConceptBaseView, ListWithHeadersMixin):
     is_page_size_capped = True
     is_searchable = False  # a search would list the repo's concepts, not this concept's hierarchy
     serializer_class = ConceptChildrenSerializer
@@ -617,7 +639,7 @@ class ConceptChildrenView(ConceptBaseView, ListWithHeadersMixin):
             raise Http404()
 
         self.check_object_permissions(self.request, instance)
-        return get_viewable_concepts(instance.child_concept_queryset(), self.request)
+        return get_viewable_concepts(self.get_hierarchy_queryset(instance, 'child_concepts'), self.request)
 
     def filter_queryset(self, queryset=None):  # annotated here, not in get_queryset, to keep it out of CSV exports
         return Concept.annotate_has_children(super().filter_queryset(queryset))
@@ -626,7 +648,7 @@ class ConceptChildrenView(ConceptBaseView, ListWithHeadersMixin):
         return self.list(request, *args, **kwargs)
 
 
-class ConceptParentsView(ConceptBaseView, ListWithHeadersMixin):
+class ConceptParentsView(ConceptHierarchyMixin, ConceptBaseView, ListWithHeadersMixin):
     is_page_size_capped = True
     is_searchable = False  # a search would list the repo's concepts, not this concept's hierarchy
     serializer_class = ConceptParentsSerializer
@@ -641,7 +663,7 @@ class ConceptParentsView(ConceptBaseView, ListWithHeadersMixin):
             raise Http404()
 
         self.check_object_permissions(self.request, instance)
-        return get_viewable_concepts(instance.parent_concept_queryset(), self.request)
+        return get_viewable_concepts(self.get_hierarchy_queryset(instance, 'parent_concepts'), self.request)
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)

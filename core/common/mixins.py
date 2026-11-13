@@ -1,4 +1,5 @@
 import logging
+from copy import deepcopy
 from math import ceil
 from urllib import parse
 from urllib.parse import urlencode
@@ -669,6 +670,8 @@ class SourceChildMixin(ChecksumModel):
     _counted = models.BooleanField(default=True, null=True, blank=True)
     _index = models.BooleanField(default=True)
 
+    ISOLATED_VERSION_DEFAULTS = {'extras': {}, 'retired': False}
+
     # relations the list serializers read on every row, prefetched once per page by load_list_fields
     LIST_PREFETCHES = ()
     # relations named like the serializer field that reads them; prefetched by load_list_fields when it's serialized
@@ -1139,6 +1142,26 @@ class SourceChildMixin(ChecksumModel):
                 self.sources.remove(parent)
             if add_parent:
                 self.sources.add(parent)
+
+    def set_version_fields(self, data, fields, isolated=False):
+        for field in fields:
+            if isolated:
+                value = data.get(field)
+                setattr(self, field, deepcopy(self.ISOLATED_VERSION_DEFAULTS.get(field)) if value is None else value)
+            else:
+                setattr(self, field, data.get(field, getattr(self, field)))
+
+    def restore_to_head(self):
+        versioned_object = self.versioned_object
+        parent = versioned_object.parent
+        if not versioned_object.is_active:
+            versioned_object.is_active = True
+            versioned_object.save(update_fields=['is_active'])
+        versioned_object.sources.add(parent)
+        latest_version = versioned_object.get_latest_version()
+        if latest_version:
+            latest_version.sources.add(parent)
+        return latest_version
 
     def unmark_latest_version(self, index=True, parent=None):
         parent = parent or self.parent
