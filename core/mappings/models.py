@@ -376,28 +376,36 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             return None, url
 
         previous_from_source_url, previous_to_source_url = self.from_source_url, self.to_source_url
+        previous_from_concept_code, previous_to_concept_code = self.from_concept_code, self.to_concept_code
         self.from_source, self.from_source_url = get_source(from_source_url)
         self.to_source, self.to_source_url = get_source(to_source_url)
+
+        def has_moved(requested_url, previous_url, resolved_url):
+            """Whether the data points this end of the mapping to another repo than it already had."""
+            if not (requested_url and previous_url):
+                return False
+            resolved_url = separate_version(resolved_url)[1]
+            if resolved_url == previous_url:
+                return False
+            # a repo is named by its versionless URL once resolved, so only a differently spelled one is looked up
+            return resolved_url != separate_version(get_source(previous_url)[1])[1]
+
+        from_moved = has_moved(from_source_url, previous_from_source_url, self.from_source_url)
+        to_moved = has_moved(to_source_url, previous_to_source_url, self.to_source_url)
 
         if to_concept_code and not is_url_encoded_string(to_concept_code):
             to_concept_code = encode_string(to_concept_code)
         if from_concept_code and not is_url_encoded_string(from_concept_code):
             from_concept_code = encode_string(from_concept_code)
 
-        def keep_linked_concept(concept, requested_source_url, resolved_source_url, requested_code):
-            """Already linked concept, dropped when the data points that end of the mapping to another repo or code."""
-            if not concept:
-                return None
-            if requested_source_url and get(concept, 'parent.uri') != separate_version(resolved_source_url)[1]:
-                return None
-            if requested_code and get(concept, 'mnemonic') != requested_code:
-                return None
-            return concept
+        def keep_linked_concept(concept, moved, requested_code, previous_code):
+            """The linked concept stays, unless the data moves that end of the mapping to another repo or code."""
+            return None if moved or (requested_code and requested_code != previous_code) else concept
 
         linked_from_concept = keep_linked_concept(
-            get(self, 'from_concept'), data.get('from_source_url'), self.from_source_url, from_concept_code)
+            get(self, 'from_concept'), from_moved, from_concept_code, previous_from_concept_code)
         linked_to_concept = keep_linked_concept(
-            get(self, 'to_concept'), data.get('to_source_url'), self.to_source_url, to_concept_code)
+            get(self, 'to_concept'), to_moved, to_concept_code, previous_to_concept_code)
 
         if not to_concept_url and not linked_to_concept and self.to_source_url and (
                 to_concept_code or self.to_concept_code):
@@ -426,13 +434,13 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         self.to_concept_name = data.get('to_concept_name', None) or self.to_concept_name
         if self.to_source_url:
             to_source_version, to_source_url = separate_version(self.to_source_url)
-            if previous_to_source_url and to_source_url != previous_to_source_url:
+            if to_moved:
                 self.to_source_version = None  # a version carried over from the previous repo doesn't apply
             self.to_source_version = self.to_source_version or to_source_version
             self.to_source_url = to_source_url
         if self.from_source_url:
             from_source_version, from_source_url = separate_version(self.from_source_url)
-            if previous_from_source_url and from_source_url != previous_from_source_url:
+            if from_moved:
                 self.from_source_version = None  # a version carried over from the previous repo doesn't apply
             self.from_source_version = self.from_source_version or from_source_version
             self.from_source_url = from_source_url

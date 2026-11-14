@@ -50,6 +50,9 @@ from core.orgs.tests.factories import OrganizationFactory
 from core.sources.constants import AUTO_ID_SEQUENTIAL, AUTO_ID_UUID
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
+from core.toggles.models import Toggle
+from core.url_registry.constants import URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE
+from core.url_registry.factories import GlobalURLRegistryFactory
 from core.tasks.models import Task
 from core.capabilities.constants import IMPORTS_FILE_SIZE_CAPABILITY_ID
 from core.capabilities.models import UserCapabilityOverride
@@ -1408,6 +1411,79 @@ class BulkImportInlineTest(OCLTestCase):
             self.queued_mapped_code_ids(index_concepts_mapped_codes_mock) & {
                 old_from.versioned_object_id, new_from.versioned_object_id},
             {old_from.versioned_object_id, new_from.versioned_object_id})
+
+    def cloned_mapping_in_local_source(self):
+        """A mapping cloned into a local source: linked to local concepts, with its target URL kept on the origin."""
+        organization = OrganizationFactory(mnemonic='CloneOrg')
+        origin = OrganizationSourceFactory(organization=organization, mnemonic='Origin')
+        local = OrganizationSourceFactory(organization=organization, mnemonic='Local')
+        for source in (origin, local):
+            ConceptFactory(parent=source, mnemonic='From')
+        origin_to = ConceptFactory(parent=origin, mnemonic='To')
+        local_to = ConceptFactory(parent=local, mnemonic='To')
+        user = origin_to.created_by
+        mapping = MappingFactory.build(
+            from_concept=ConceptFactory.build(mnemonic='From'), to_concept=ConceptFactory.build(mnemonic='To'),
+            parent=local, mnemonic='cloned-map', map_type='Same As', to_source_url=origin.uri,
+            from_source_url=origin.uri)
+        local.clone_mappings([mapping], user)
+        mapping = Mapping.objects.get(parent=local, from_concept_code='From', id=F('versioned_object_id'))
+        self.assertEqual((mapping.to_concept_id, mapping.to_source_url), (local_to.id, origin.uri))
+        return origin, local, mapping
+
+    @patch('core.importers.models.batch_index_resources')
+    def test_mapping_import_with_id_keeps_the_local_link_of_a_cloned_mapping(self, batch_index_resources_mock):
+        """Re-sending the unchanged target of a cloned mapping with an edit must not repoint it to the origin."""
+        batch_index_resources_mock.__name__ = 'batch_index_resources'
+        origin, local, mapping = self.cloned_mapping_in_local_source()
+
+        importer = BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[{
+            'type': 'Mapping', 'id': mapping.mnemonic, 'map_type': 'Same As', 'owner_type': 'Organization',
+            'owner': local.organization.mnemonic, 'source': local.mnemonic,
+            'from_concept_url': local.uri + 'concepts/From/', 'to_source_url': origin.uri, 'to_concept_code': 'To',
+            'extras': {'edited': 'yes'}
+        }])
+        importer.run()
+
+        self.assertEqual((len(importer.created), len(importer.updated), len(importer.failed)), (0, 1, 0))
+        updated = Mapping.objects.get(parent=local, mnemonic=mapping.mnemonic, id=F('versioned_object_id'))
+        self.assertEqual(updated.extras, {'edited': 'yes'})
+        self.assertEqual(updated.to_concept_id, mapping.to_concept_id)
+        self.assertEqual(updated.to_source_url, origin.uri)
+
+    @patch('core.importers.models.batch_index_resources')
+    def test_mapping_import_with_id_keeps_the_pinned_version_when_the_canonical_url_now_resolves(
+            self, batch_index_resources_mock):
+        """A source version pinned under a canonical URL survives once that URL resolves to the same repo."""
+        batch_index_resources_mock.__name__ = 'batch_index_resources'
+        Toggle.objects.filter(name=URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE).update(
+            dev=True, qa=True, demo=True, staging=True, who_staging=True, production=True)
+        canonical_url = 'https://target.example.test/'
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='CanonicalOrg'))
+        target = OrganizationSourceFactory(
+            organization=source.organization, mnemonic='Target', version='HEAD', canonical_url=canonical_url)
+        ConceptFactory(parent=source, mnemonic='From')
+        ConceptFactory(parent=target, mnemonic='To')
+        line = {
+            'type': 'Mapping', 'id': 'pinned-map', 'map_type': 'Same As', 'owner_type': 'Organization',
+            'owner': source.organization.mnemonic, 'source': source.mnemonic,
+            'from_concept_url': source.uri + 'concepts/From/', 'to_source_url': canonical_url,
+            'to_concept_code': 'To'
+        }
+        BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[line]).run()
+        Mapping.objects.filter(parent=source, mnemonic='pinned-map').update(to_source_version='v1')
+        mapping = Mapping.objects.get(parent=source, mnemonic='pinned-map', id=F('versioned_object_id'))
+        self.assertEqual((mapping.to_source_id, mapping.to_source_url), (None, canonical_url))
+        GlobalURLRegistryFactory(url=canonical_url, namespace=target.organization.uri)
+
+        importer = BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[
+            {**line, 'extras': {'edited': 'yes'}}])
+        importer.run()
+
+        self.assertEqual((len(importer.created), len(importer.updated), len(importer.failed)), (0, 1, 0))
+        mapping.refresh_from_db()
+        self.assertEqual(mapping.to_source_id, target.id)
+        self.assertEqual(mapping.to_source_version, 'v1')
 
     @patch('core.importers.models.batch_index_resources')
     def test_mapping_import_with_autoid_assignment(self, batch_index_resources_mock):

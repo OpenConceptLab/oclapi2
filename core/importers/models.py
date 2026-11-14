@@ -573,17 +573,17 @@ class MappingImporter(BaseResourceImporter):
         if self.queryset:
             return self.queryset
 
-        from_concept_url = self.get('from_concept_url')
-        to_concept_url = self.get('to_concept_url')
-        to_concept_code = self.get('to_concept_code')
-        from_concept_code = self.get('from_concept_code')
-        to_source_url = self.get('to_source_url')
         parent_uri = f'/{"users" if self.is_user_owner() else "orgs"}/{self.get("owner")}/sources/{self.get("source")}/'
         if self.get('id'):
             self.queryset = Mapping.objects.filter(
                 parent__uri=parent_uri, id=F('versioned_object_id'), mnemonic=self.get('id'))
             return self.queryset
 
+        from_concept_url = self.get('from_concept_url')
+        to_concept_url = self.get('to_concept_url')
+        to_concept_code = self.get('to_concept_code')
+        from_concept_code = self.get('from_concept_code')
+        to_source_url = self.get('to_source_url')
         filters = {
             'parent__uri': parent_uri,
             'id': F('versioned_object_id'),
@@ -665,10 +665,12 @@ class MappingImporter(BaseResourceImporter):
                 self.instance = queryset.first().clone()
                 self.instance._counted = None  # pylint: disable=protected-access
                 self.instance._index = False  # pylint: disable=protected-access
-                if self.instance.from_concept_id and self.instance.from_source_id == self.instance.parent_id:
-                    # the update can move the mapping to another from concept, whose mapped codes then need a refresh
-                    self.instance.replaced_from_concept_id = self.instance.from_concept_id
+                previous_from_concept_id = self.instance.from_concept_id if (
+                    self.instance.from_source_id == self.instance.parent_id) else None
                 errors = Mapping.create_new_version_for(self.instance, self.data, self.user, cache=self.cache)
+                if previous_from_concept_id and previous_from_concept_id != self.instance.from_concept_id:
+                    # the mapping moved to another from concept, whose mapped codes then need a refresh
+                    self.instance.replaced_from_concept_id = previous_from_concept_id
                 if errors and Mapping.is_standard_checksum_error(errors):
                     return UNCHANGED
                 return errors or UPDATED
