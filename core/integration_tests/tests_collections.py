@@ -2391,9 +2391,10 @@ class CollectionReferencesPreviewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 3)
-        results = sorted(response.data, key=lambda ref: ref['reference'])
+        # keyed by reference: sorting the URIs as strings depends on the factory sequence (concept1000 < concept999)
+        results = {ref['reference']: ref for ref in response.data}
         self.assertEqual(
-            results[0],
+            results[concept2.uri],
             {
                 'reference': concept2.uri,
                 'concepts': [ConceptListSerializer(concept2).data],
@@ -2404,7 +2405,7 @@ class CollectionReferencesPreviewTest(OCLAPITestCase):
             }
         )
         self.assertEqual(
-            results[1],
+            results[concept3.uri],
             {
                 'reference': concept3.uri,
                 'concepts': [ConceptListSerializer(concept3).data],
@@ -2415,7 +2416,7 @@ class CollectionReferencesPreviewTest(OCLAPITestCase):
             }
         )
         self.assertEqual(
-            results[2],
+            results[mapping.uri],
             {
                 'reference': mapping.uri,
                 'concepts': [],
