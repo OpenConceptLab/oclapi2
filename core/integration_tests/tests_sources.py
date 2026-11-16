@@ -2751,6 +2751,7 @@ class SourceConceptsCloneViewTest(OCLAPITestCase):
         self.assertEqual(external_copy.to_source_url, external.uri)
         self.assertFalse(copies.filter(to_concept=existing_external).exists())
 
+
 class SourceVersionsChangelogOutputViewTest(OCLAPITestCase):
     def _build_changelog_output_fixture(self):  # pylint: disable=too-many-locals
         source = OrganizationSourceFactory()
