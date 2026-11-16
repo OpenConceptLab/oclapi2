@@ -1,4 +1,5 @@
 from django.core.cache import cache
+from django.db.models import F
 from django.test import override_settings, tag
 from rest_framework.exceptions import ErrorDetail
 
@@ -704,6 +705,32 @@ class MappingRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         self.mapping.refresh_from_db()
         self.assertEqual(self.mapping.sort_weight, 1.67983)
+
+    def test_put_200_keeps_the_local_link_of_a_cloned_mapping(self):
+        """A cloned mapping keeps its target URL on the origin; sending that URL and code back keeps the local link."""
+        origin = OrganizationSourceFactory(mnemonic='CloneOrigin')
+        ConceptFactory(parent=origin, mnemonic='To')
+        local_from = ConceptFactory(parent=self.source, mnemonic='From')
+        local_to = ConceptFactory(parent=self.source, mnemonic='To')
+        cloned = MappingFactory.build(
+            from_concept=ConceptFactory.build(mnemonic='From'), to_concept=ConceptFactory.build(mnemonic='To'),
+            parent=self.source, map_type=SAME_AS, to_source_url=origin.uri)
+        self.source.clone_mappings([cloned], self.user)
+        cloned = Mapping.objects.get(parent=self.source, from_concept_code='From', id=F('versioned_object_id'))
+        self.assertEqual((cloned.from_concept_id, cloned.to_concept_id), (local_from.id, local_to.id))
+
+        response = self.client.put(
+            cloned.uri,
+            {'to_source_url': origin.uri, 'to_concept_code': 'To', 'extras': {'edited': 'yes'}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        cloned.refresh_from_db()
+        self.assertEqual(cloned.extras, {'edited': 'yes'})
+        self.assertEqual((cloned.from_concept_id, cloned.to_concept_id), (local_from.id, local_to.id))
+        self.assertEqual(cloned.to_source_url, origin.uri)
 
     def test_put_400(self):
         self.assertEqual(self.mapping.versions.count(), 1)
