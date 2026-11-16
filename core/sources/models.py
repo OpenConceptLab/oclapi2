@@ -968,8 +968,8 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             mapping.from_concept_id = get(from_concept, 'id')
             mapping.to_concept_id = get(to_concept, 'id')
             mapping.to_concept_code = get(to_concept, 'mnemonic') or mapping.to_concept_code
-            mapping.to_source_id = get(to_concept, 'parent_id') or mapping.to_source_id
-            mapping.from_source_id = get(from_concept, 'parent_id') or mapping.from_source_id
+            self.set_cloned_mapping_source(mapping, 'from', from_concept)
+            self.set_cloned_mapping_source(mapping, 'to', to_concept)
             self._clone_resource(mapping, user)
             if mapping.id:
                 added.append(mapping)
@@ -978,6 +978,17 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         if _update_count:
             self.update_mappings_count()
         return added
+
+    @staticmethod
+    def set_cloned_mapping_source(mapping, side, concept):
+        source_id = get(concept, 'parent_id')
+        if not source_id:
+            return
+        if source_id != getattr(mapping, f'{side}_source_id') or not getattr(mapping, f'{side}_source_url'):
+            # a URL or version copied from the original mapping would point at the original's source
+            setattr(mapping, f'{side}_source_url', concept.parent.uri)
+            setattr(mapping, f'{side}_source_version', None)
+        setattr(mapping, f'{side}_source_id', source_id)
 
     def clone_concepts(self, cloned_concepts, user, update_count=True):
         _update_count = False

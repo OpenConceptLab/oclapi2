@@ -324,6 +324,51 @@ class MappingTest(OCLTestCase):
             persisted_mapping.version_url, persisted_mapping.uri
         )
 
+    def test_repair_mapping_source_urls(self):
+        source = OrganizationSourceFactory(version=HEAD, canonical_url='https://example.org/source')
+        other = OrganizationSourceFactory(version=HEAD, canonical_url='https://example.org/other')
+        concept = ConceptFactory(parent=source)
+        other_concept = ConceptFactory(parent=other)
+        stale_uri = MappingFactory(
+            parent=source, from_concept=concept, to_concept=other_concept, from_source=source, to_source=other)
+        stale_canonical = MappingFactory(
+            parent=source, from_concept=concept, to_concept=other_concept, from_source=source, to_source=other)
+        missing = MappingFactory(
+            parent=source, from_concept=concept, to_concept=other_concept, from_source=source, to_source=other)
+        own_canonical = MappingFactory(
+            parent=source, from_concept=concept, to_concept=other_concept, from_source=source, to_source=other)
+        unknown = MappingFactory(
+            parent=source, from_concept=concept, to_concept=other_concept, from_source=source, to_source=other)
+        Mapping.objects.filter(id=stale_uri.id).update(
+            from_source_url=other.uri, from_source_version='v1', to_source_url=source.uri, to_source_version='v2')
+        Mapping.objects.filter(id=stale_canonical.id).update(
+            from_source_url=other.canonical_url, from_source_version='v1')
+        Mapping.objects.filter(id=missing.id).update(from_source_url=None, to_source_url=None)
+        Mapping.objects.filter(id=own_canonical.id).update(
+            from_source_url=source.canonical_url, from_source_version='v1')
+        Mapping.objects.filter(id=unknown.id).update(from_source_url='/orgs/foo/sources/bar/')
+
+        def urls(mapping):
+            mapping.refresh_from_db()
+            return (mapping.from_source_url, mapping.from_source_version,
+                    mapping.to_source_url, mapping.to_source_version)
+
+        before = {mapping.id: urls(mapping) for mapping in (stale_uri, stale_canonical, missing)}
+        out = StringIO()
+        call_command('repair_mapping_source_urls', '--dry-run', stdout=out)
+        from_output, to_output = out.getvalue().split('on from_source_url')[1].split('on to_source_url')
+        self.assertIn(f'  {source.uri}: 3\n', from_output)
+        self.assertIn(f'  {other.uri}: 2\n', to_output)
+        self.assertEqual(before, {mapping.id: urls(mapping) for mapping in (stale_uri, stale_canonical, missing)})
+
+        call_command('repair_mapping_source_urls', stdout=StringIO())
+
+        self.assertEqual(urls(stale_uri), (source.uri, None, other.uri, None))
+        self.assertEqual(urls(stale_canonical), (source.uri, None, other.uri, None))
+        self.assertEqual(urls(missing), (source.uri, None, other.uri, None))
+        self.assertEqual(urls(own_canonical), (source.canonical_url, 'v1', other.uri, None))
+        self.assertEqual(urls(unknown), ('/orgs/foo/sources/bar/', None, other.uri, None))
+
     def test_save_as_new_version_and_repair_demote_every_version_flagged_latest(self):
         source = OrganizationSourceFactory(version=HEAD)
         mapping = MappingFactory(parent=source)

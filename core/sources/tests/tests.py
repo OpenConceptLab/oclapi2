@@ -2308,6 +2308,59 @@ class SourceTest(OCLTestCase):
 
         self.assertEqual(len(added), 1)
 
+    def test_clone_resources_points_mapping_source_urls_at_the_mapped_concepts_sources(self):
+        source = OrganizationSourceFactory(version=HEAD)
+        external = OrganizationSourceFactory(version=HEAD)
+        target = OrganizationSourceFactory(version=HEAD)
+        concept = ConceptFactory(parent=source, names=[ConceptNameFactory.build(locale_preferred=True)])
+        external_concept = ConceptFactory(parent=external, names=[ConceptNameFactory.build(locale_preferred=True)])
+        mapping = MappingFactory(
+            from_concept=concept, to_concept=external_concept, parent=source, map_type='SAME-AS',
+            from_source=source, to_source=external, from_source_version='v1', to_source_version='v2')
+        self.assertEqual(mapping.from_source_url, source.uri)
+
+        added_concepts, added_mappings = target.clone_resources(
+            concept.created_by, Concept.objects.filter(id=concept.id), Mapping.objects.filter(id=mapping.id),
+            equivalency_map_types='SAME-AS')
+
+        cloned_concept = added_concepts[0]
+        equivalency_mapping, cloned_mapping = added_mappings
+        for added in added_mappings:
+            added.refresh_from_db()
+            self.assertEqual(added.from_concept_id, cloned_concept.id)
+            self.assertEqual(added.from_source_id, target.id)
+            self.assertEqual(added.from_source_url, target.uri)
+            self.assertIsNone(added.from_source_version)
+        self.assertEqual(equivalency_mapping.to_source_id, source.id)
+        self.assertEqual(equivalency_mapping.to_source_url, source.uri)
+        self.assertEqual(cloned_mapping.to_concept_id, external_concept.id)
+        self.assertEqual(cloned_mapping.to_source_id, external.id)
+        self.assertEqual(cloned_mapping.to_source_url, external.uri)
+        self.assertEqual(cloned_mapping.to_source_version, 'v2')
+
+    def test_clone_resources_points_to_source_url_at_the_equivalent_concepts_source(self):
+        source = OrganizationSourceFactory(version=HEAD)
+        target = OrganizationSourceFactory(version=HEAD)
+        concept = ConceptFactory(parent=source, names=[ConceptNameFactory.build(locale_preferred=True)])
+        answer = ConceptFactory(parent=source, names=[ConceptNameFactory.build(locale_preferred=True)])
+        existing_answer = ConceptFactory(parent=target, names=[ConceptNameFactory.build(locale_preferred=True)])
+        MappingFactory(from_concept=existing_answer, to_concept=answer, parent=target, map_type='SAME-AS')
+        mapping = MappingFactory(
+            from_concept=concept, to_concept=answer, parent=source, map_type='Q-AND-A',
+            from_source=source, to_source=source, to_source_version='v1')
+        self.assertEqual(mapping.to_source_url, source.uri)
+
+        _, added_mappings = target.clone_resources(
+            concept.created_by, Concept.objects.filter(id=concept.id), Mapping.objects.filter(id=mapping.id),
+            equivalency_map_types='SAME-AS')
+
+        cloned_mapping = added_mappings[-1]
+        cloned_mapping.refresh_from_db()
+        self.assertEqual(cloned_mapping.to_concept_id, existing_answer.id)
+        self.assertEqual(cloned_mapping.to_source_id, target.id)
+        self.assertEqual(cloned_mapping.to_source_url, target.uri)
+        self.assertIsNone(cloned_mapping.to_source_version)
+
     @patch('core.sources.models.Source.update_mappings_count')
     def test_clone_mappings_updates_count_when_update_count_true(self, update_count_mock):
         source = OrganizationSourceFactory(version=HEAD)
