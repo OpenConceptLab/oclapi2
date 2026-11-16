@@ -1413,7 +1413,8 @@ class BulkImportInlineTest(OCLTestCase):
             {old_from.versioned_object_id, new_from.versioned_object_id})
 
     def cloned_mapping_in_local_source(self):
-        """A mapping cloned into a local source: linked to local concepts, with its target URL kept on the origin."""
+        """A mapping cloned into a local source before clones fixed source URLs: linked to local concepts, with its
+        target URL still on the origin."""
         organization = OrganizationFactory(mnemonic='CloneOrg')
         origin = OrganizationSourceFactory(organization=organization, mnemonic='Origin')
         local = OrganizationSourceFactory(organization=organization, mnemonic='Local')
@@ -1427,6 +1428,8 @@ class BulkImportInlineTest(OCLTestCase):
             parent=local, mnemonic='cloned-map', map_type='Same As', to_source_url=origin.uri,
             from_source_url=origin.uri)
         local.clone_mappings([mapping], user)
+        Mapping.objects.filter(parent=local, from_concept_code='From').update(
+            from_source_url=origin.uri, to_source_url=origin.uri)
         mapping = Mapping.objects.get(parent=local, from_concept_code='From', id=F('versioned_object_id'))
         self.assertEqual((mapping.to_concept_id, mapping.to_source_url), (local_to.id, origin.uri))
         return origin, local, mapping

@@ -296,12 +296,38 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         )
         if to_concept:
             mapping.to_concept = to_concept
+            mapping.set_to_source_from_concept(
+                to_concept, get(to_concept, 'parent_id') != get(self, 'to_concept.parent_id'))
         if from_concept:
             mapping.from_concept = from_concept
+            mapping.set_from_source_from_concept(
+                from_concept, get(from_concept, 'parent_id') != get(self, 'from_concept.parent_id'))
         if user:
             mapping.created_by = mapping.updated_by = user
 
         return mapping
+
+    def set_from_source_from_concept(self, concept, source_changed=False):
+        """Sets from_source to concept's source. Unless the source changed, a recorded URL and version are kept."""
+        source_id = get(concept, 'parent_id')
+        if not source_id:
+            return
+        if source_changed or not self.from_source_url:
+            self.from_source_url = concept.parent.uri
+        if source_changed:
+            self.from_source_version = None
+        self.from_source_id = source_id
+
+    def set_to_source_from_concept(self, concept, source_changed=False):
+        """Sets to_source to concept's source. Unless the source changed, a recorded URL and version are kept."""
+        source_id = get(concept, 'parent_id')
+        if not source_id:
+            return
+        if source_changed or not self.to_source_url:
+            self.to_source_url = concept.parent.uri
+        if source_changed:
+            self.to_source_version = None
+        self.to_source_id = source_id
 
     @classmethod
     def build(cls, map_type, from_concept, to_concept, **kwargs):

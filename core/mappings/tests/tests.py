@@ -324,21 +324,26 @@ class MappingTest(OCLTestCase):
             persisted_mapping.version_url, persisted_mapping.uri
         )
 
-    def test_repair_mapping_source_urls(self):
+    def test_repair_mapping_source_urls(self):  # pylint: disable=too-many-locals
         source = OrganizationSourceFactory(version=HEAD, canonical_url='https://example.org/source')
         other = OrganizationSourceFactory(version=HEAD, canonical_url='https://example.org/other')
         concept = ConceptFactory(parent=source)
         other_concept = ConceptFactory(parent=other)
         stale_uri = MappingFactory(
-            parent=source, from_concept=concept, to_concept=other_concept, from_source=source, to_source=other)
+            parent=source, from_concept=concept, to_concept=other_concept, from_source=source, to_source=other,
+            from_source_url=source.uri, to_source_url=other.uri)
         stale_canonical = MappingFactory(
-            parent=source, from_concept=concept, to_concept=other_concept, from_source=source, to_source=other)
+            parent=source, from_concept=concept, to_concept=other_concept, from_source=source, to_source=other,
+            from_source_url=source.uri, to_source_url=other.uri)
         missing = MappingFactory(
-            parent=source, from_concept=concept, to_concept=other_concept, from_source=source, to_source=other)
+            parent=source, from_concept=concept, to_concept=other_concept, from_source=source, to_source=other,
+            from_source_url=source.uri, to_source_url=other.uri)
         own_canonical = MappingFactory(
-            parent=source, from_concept=concept, to_concept=other_concept, from_source=source, to_source=other)
+            parent=source, from_concept=concept, to_concept=other_concept, from_source=source, to_source=other,
+            from_source_url=source.uri, to_source_url=other.uri)
         unknown = MappingFactory(
-            parent=source, from_concept=concept, to_concept=other_concept, from_source=source, to_source=other)
+            parent=source, from_concept=concept, to_concept=other_concept, from_source=source, to_source=other,
+            from_source_url=source.uri, to_source_url=other.uri)
         Mapping.objects.filter(id=stale_uri.id).update(
             from_source_url=other.uri, from_source_version='v1', to_source_url=source.uri, to_source_version='v2')
         Mapping.objects.filter(id=stale_canonical.id).update(
@@ -347,6 +352,9 @@ class MappingTest(OCLTestCase):
         Mapping.objects.filter(id=own_canonical.id).update(
             from_source_url=source.canonical_url, from_source_version='v1')
         Mapping.objects.filter(id=unknown.id).update(from_source_url='/orgs/foo/sources/bar/')
+        self.assertEqual(stale_uri.versioned_object_id, stale_uri.id)
+        stale_version = Mapping.create_initial_version(stale_uri)
+        Mapping.objects.filter(id=stale_version.id).update(from_source_url=other.uri, from_source_version='v1')
 
         def urls(mapping):
             mapping.refresh_from_db()
@@ -368,6 +376,7 @@ class MappingTest(OCLTestCase):
         self.assertEqual(urls(missing), (source.uri, None, other.uri, None))
         self.assertEqual(urls(own_canonical), (source.canonical_url, 'v1', other.uri, None))
         self.assertEqual(urls(unknown), ('/orgs/foo/sources/bar/', None, other.uri, None))
+        self.assertEqual(urls(stale_version)[:2], (other.uri, 'v1'))
 
     def test_save_as_new_version_and_repair_demote_every_version_flagged_latest(self):
         source = OrganizationSourceFactory(version=HEAD)

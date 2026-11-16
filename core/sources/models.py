@@ -960,16 +960,21 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         for mapping in cloned_mappings:
             to_concept = get(mapping, 'to_concept')
             from_concept = get(mapping, 'from_concept')
+            from_resolved = to_resolved = False
             if not get(from_concept, 'id'):
                 from_concept = self.find_concept_by_mnemonic(from_concept.mnemonic)
+                from_resolved = True
             if not get(to_concept, 'id') and get(to_concept, 'mnemonic'):
                 to_concept = self.find_concept_by_mnemonic(to_concept.mnemonic)
+                to_resolved = True
             mapping.from_concept_code = get(from_concept, 'mnemonic') or mapping.from_concept_code
             mapping.from_concept_id = get(from_concept, 'id')
             mapping.to_concept_id = get(to_concept, 'id')
             mapping.to_concept_code = get(to_concept, 'mnemonic') or mapping.to_concept_code
-            self.set_cloned_mapping_source(mapping, 'from', from_concept)
-            self.set_cloned_mapping_source(mapping, 'to', to_concept)
+            mapping.set_from_source_from_concept(
+                from_concept, from_resolved and get(from_concept, 'parent_id') != mapping.from_source_id)
+            mapping.set_to_source_from_concept(
+                to_concept, to_resolved and get(to_concept, 'parent_id') != mapping.to_source_id)
             self._clone_resource(mapping, user)
             if mapping.id:
                 added.append(mapping)
@@ -978,17 +983,6 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         if _update_count:
             self.update_mappings_count()
         return added
-
-    @staticmethod
-    def set_cloned_mapping_source(mapping, side, concept):
-        source_id = get(concept, 'parent_id')
-        if not source_id:
-            return
-        if source_id != getattr(mapping, f'{side}_source_id') or not getattr(mapping, f'{side}_source_url'):
-            # a URL or version copied from the original mapping would point at the original's source
-            setattr(mapping, f'{side}_source_url', concept.parent.uri)
-            setattr(mapping, f'{side}_source_version', None)
-        setattr(mapping, f'{side}_source_id', source_id)
 
     def clone_concepts(self, cloned_concepts, user, update_count=True):
         _update_count = False
