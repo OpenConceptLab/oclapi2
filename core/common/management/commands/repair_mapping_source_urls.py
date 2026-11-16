@@ -1,12 +1,12 @@
 from django.core.management import BaseCommand
 from django.db import transaction
-from django.db.models import F, Q
+from django.db.models import Exists, F, OuterRef, Q
 
 from core.common.constants import HEAD
 from core.mappings.models import Mapping
 from core.sources.models import Source
 
-# to first: retargeted mappings are told apart by comparing to_source_url with the not yet repaired from_source_url
+# to first: replaced targets are told apart by comparing to_source_url with the not yet repaired from_source_url
 SIDES = (
     ('to_source', 'to_source_url', 'to_source_version'),
     ('from_source', 'from_source_url', 'from_source_version'),
@@ -23,9 +23,10 @@ class Command(BaseCommand):
         "expansions holding a version keep the old URL. The next edit of a mapping creates its new version from "
         "the repaired HEAD. "
         "A mapping whose to_concept was moved into its own source while its to_source_url names a source other "
-        "than the one it was cloned from (from_source_url) had its target in another code system replaced by $clone. "
-        "Its to_source_url is the only record of that code system, so it is listed to be fixed by hand, not "
-        "repaired. Each source is repaired in its own transaction."
+        "than the one it was cloned from (from_source_url, matched by URI or canonical URL) had its target in "
+        "another code system replaced by $clone. Its to_source_url is the only record of that code system, so it is "
+        "listed with both URLs to be fixed by hand, and its to_source_url is not repaired. Each source is repaired "
+        "in its own transaction."
     )
 
     def add_arguments(self, parser):
@@ -43,8 +44,8 @@ class Command(BaseCommand):
                 self.stdout.write(
                     f'{len(skipped)} HEAD mapping(s) skipped on {url_field}: target in another code system was '
                     f'replaced by a concept in the same source, fix by hand')
-                for uri, url in skipped:
-                    self.stdout.write(f'  {uri} ({url_field} {url})')
+                for uri, from_url, to_url in skipped:
+                    self.stdout.write(f'  {uri} (from_source_url {from_url}, to_source_url {to_url})')
 
     @staticmethod
     def get_head_mappings():
@@ -53,6 +54,15 @@ class Command(BaseCommand):
     @staticmethod
     def url_missing(url_field):
         return Q(**{f'{url_field}__isnull': True}) | Q(**{url_field: ''})
+
+    @staticmethod
+    def source_url_is(url_field):
+        return Q(uri=OuterRef(url_field)) | (Q(canonical_url=OuterRef(url_field)) & ~Q(canonical_url=''))
+
+    def get_replaced_targets(self, rows):
+        same_source = Source.objects.filter(version=HEAD).filter(
+            self.source_url_is('to_source_url')).filter(self.source_url_is('from_source_url'))
+        return rows.filter(to_source_id=F('parent_id')).exclude(Exists(same_source))
 
     @staticmethod
     def source_url_in(url_field, sources):
@@ -88,8 +98,8 @@ class Command(BaseCommand):
             self.source_url_in(url_field, Source.objects.filter(version=HEAD).exclude(id=source.id)))
         skipped = []
         if source_field == 'to_source':
-            replaced_target = elsewhere.filter(to_source_id=F('parent_id')).exclude(to_source_url=F('from_source_url'))
-            skipped = list(replaced_target.order_by('uri').values_list('uri', 'to_source_url'))
+            replaced_target = self.get_replaced_targets(elsewhere)
+            skipped = list(replaced_target.order_by('uri').values_list('uri', 'from_source_url', 'to_source_url'))
             elsewhere = elsewhere.exclude(id__in=replaced_target.values('id'))
         if dry_run:
             return missing.count() + elsewhere.count(), skipped

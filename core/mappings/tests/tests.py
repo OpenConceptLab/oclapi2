@@ -325,7 +325,7 @@ class MappingTest(OCLTestCase):
         )
 
     def test_repair_mapping_source_urls(self):  # pylint: disable=too-many-locals
-        origin = OrganizationSourceFactory(version=HEAD)
+        origin = OrganizationSourceFactory(version=HEAD, canonical_url='https://example.org/origin')
         source = OrganizationSourceFactory(version=HEAD, canonical_url='https://example.org/source')
         other = OrganizationSourceFactory(version=HEAD, canonical_url='https://example.org/other')
         concept = ConceptFactory(parent=source)
@@ -351,20 +351,22 @@ class MappingTest(OCLTestCase):
         own_canonical = make(from_source_url=source.canonical_url, from_source_version='v1')
         unknown = make(from_source_url='/orgs/foo/sources/bar/')
         retargeted_answer = make(to_concept=answer, from_source_url=origin.uri, to_source_url=origin.uri)
+        canonical_answer = make(to_concept=answer, from_source_url=origin.uri, to_source_url=origin.canonical_url)
         replaced_target = make(to_concept=answer, from_source_url=origin.uri, to_source_url=other.uri)
         self.assertEqual(stale_uri.versioned_object_id, stale_uri.id)
         stale_version = Mapping.create_initial_version(stale_uri)
         Mapping.objects.filter(id=stale_version.id).update(from_source_url=other.uri, from_source_version='v1')
-        repaired = (stale_uri, stale_canonical, missing, retargeted_answer, replaced_target)
+        repaired = (stale_uri, stale_canonical, missing, retargeted_answer, canonical_answer, replaced_target)
+        replaced_line = f'  {replaced_target.uri} (from_source_url {origin.uri}, to_source_url {other.uri})\n'
 
         before = {mapping.id: urls(mapping) for mapping in repaired}
         out = StringIO()
         call_command('repair_mapping_source_urls', '--dry-run', stdout=out)
         to_output, from_output = out.getvalue().split('on from_source_url')
         self.assertIn(f'  {other.uri}: 2\n', to_output)
-        self.assertIn(f'  {source.uri}: 1\n', to_output)
-        self.assertIn(f'  {replaced_target.uri} (to_source_url {other.uri})\n', to_output)
-        self.assertIn(f'  {source.uri}: 5\n', from_output)
+        self.assertIn(f'  {source.uri}: 2\n', to_output)
+        self.assertIn(replaced_line, to_output)
+        self.assertIn(f'  {source.uri}: 6\n', from_output)
         self.assertEqual(before, {mapping.id: urls(mapping) for mapping in repaired})
 
         call_command('repair_mapping_source_urls', stdout=StringIO())
@@ -375,8 +377,17 @@ class MappingTest(OCLTestCase):
         self.assertEqual(urls(own_canonical), (source.canonical_url, 'v1', other.uri, None))
         self.assertEqual(urls(unknown), ('/orgs/foo/sources/bar/', None, other.uri, None))
         self.assertEqual(urls(retargeted_answer), (source.uri, None, source.uri, None))
+        self.assertEqual(urls(canonical_answer), (source.uri, None, source.uri, None))
         self.assertEqual(urls(replaced_target), (source.uri, None, other.uri, None))
         self.assertEqual(urls(stale_version)[:2], (other.uri, 'v1'))
+
+        out = StringIO()
+        call_command('repair_mapping_source_urls', stdout=out)
+        self.assertNotIn(f'  {source.uri}:', out.getvalue())
+        self.assertNotIn(f'  {other.uri}:', out.getvalue())
+        self.assertIn(f'  {replaced_target.uri} (from_source_url {source.uri}, to_source_url {other.uri})\n',
+                      out.getvalue())
+        self.assertEqual(urls(replaced_target), (source.uri, None, other.uri, None))
 
     def test_save_as_new_version_and_repair_demote_every_version_flagged_latest(self):
         source = OrganizationSourceFactory(version=HEAD)

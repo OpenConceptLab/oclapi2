@@ -2363,6 +2363,27 @@ class SourceTest(OCLTestCase):
         self.assertEqual(cloned_mapping.to_source_url, 'http://example.org/external')
         self.assertEqual(cloned_mapping.to_source_version, '2.74')
 
+    def test_clone_resources_copies_a_self_mapping_onto_the_cloned_concept(self):
+        source = OrganizationSourceFactory(version=HEAD)
+        target = OrganizationSourceFactory(version=HEAD)
+        concept = ConceptFactory(parent=source, names=[ConceptNameFactory.build(locale_preferred=True)])
+        mapping = MappingFactory(
+            from_concept=concept, to_concept=concept, parent=source, map_type='SAME-AS',
+            from_source=source, to_source=source, from_source_url=source.uri, to_source_url=source.uri)
+
+        added_concepts, added_mappings = target.clone_resources(
+            concept.created_by, Concept.objects.filter(id=concept.id), Mapping.objects.filter(id=mapping.id),
+            equivalency_map_types='SAME-AS')
+
+        cloned_concept = added_concepts[0]
+        self.assertEqual(len(added_mappings), 2)
+        cloned_mapping = added_mappings[-1]
+        cloned_mapping.refresh_from_db()
+        self.assertEqual((cloned_mapping.from_concept_id, cloned_mapping.to_concept_id),
+                         (cloned_concept.id, cloned_concept.id))
+        self.assertEqual((cloned_mapping.from_source_url, cloned_mapping.to_source_url), (target.uri, target.uri))
+        self.assertEqual(cloned_mapping.to_source_id, target.id)
+
     def test_clone_resources_points_to_source_url_at_the_equivalent_concepts_source(self):
         source = OrganizationSourceFactory(version=HEAD)
         target = OrganizationSourceFactory(version=HEAD)
