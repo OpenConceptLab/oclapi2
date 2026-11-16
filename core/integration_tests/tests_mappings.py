@@ -707,15 +707,16 @@ class MappingRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(self.mapping.sort_weight, 1.67983)
 
     def test_put_200_keeps_the_local_link_of_a_cloned_mapping(self):
-        """A cloned mapping keeps its target URL on the origin; sending that URL and code back keeps the local link."""
+        """A mapping cloned before clones fixed source URLs keeps its target URL on the origin; sending that URL and
+        code back keeps the local link."""
         origin = OrganizationSourceFactory(mnemonic='CloneOrigin')
         ConceptFactory(parent=origin, mnemonic='To')
         local_from = ConceptFactory(parent=self.source, mnemonic='From')
         local_to = ConceptFactory(parent=self.source, mnemonic='To')
         cloned = MappingFactory.build(
-            from_concept=ConceptFactory.build(mnemonic='From'), to_concept=ConceptFactory.build(mnemonic='To'),
-            parent=self.source, map_type=SAME_AS, to_source_url=origin.uri)
+            from_concept=local_from, to_concept=local_to, parent=self.source, map_type=SAME_AS)
         self.source.clone_mappings([cloned], self.user)
+        Mapping.objects.filter(parent=self.source, from_concept_code='From').update(to_source_url=origin.uri)
         cloned = Mapping.objects.get(parent=self.source, from_concept_code='From', id=F('versioned_object_id'))
         self.assertEqual((cloned.from_concept_id, cloned.to_concept_id), (local_from.id, local_to.id))
 

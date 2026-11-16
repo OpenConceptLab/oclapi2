@@ -1418,15 +1418,13 @@ class BulkImportInlineTest(OCLTestCase):
         organization = OrganizationFactory(mnemonic='CloneOrg')
         origin = OrganizationSourceFactory(organization=organization, mnemonic='Origin')
         local = OrganizationSourceFactory(organization=organization, mnemonic='Local')
-        for source in (origin, local):
-            ConceptFactory(parent=source, mnemonic='From')
+        ConceptFactory(parent=origin, mnemonic='From')
+        local_from = ConceptFactory(parent=local, mnemonic='From')
         origin_to = ConceptFactory(parent=origin, mnemonic='To')
         local_to = ConceptFactory(parent=local, mnemonic='To')
         user = origin_to.created_by
         mapping = MappingFactory.build(
-            from_concept=ConceptFactory.build(mnemonic='From'), to_concept=ConceptFactory.build(mnemonic='To'),
-            parent=local, mnemonic='cloned-map', map_type='Same As', to_source_url=origin.uri,
-            from_source_url=origin.uri)
+            from_concept=local_from, to_concept=local_to, parent=local, mnemonic='cloned-map', map_type='Same As')
         local.clone_mappings([mapping], user)
         Mapping.objects.filter(parent=local, from_concept_code='From').update(
             from_source_url=origin.uri, to_source_url=origin.uri)

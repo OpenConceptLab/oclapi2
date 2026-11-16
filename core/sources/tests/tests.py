@@ -2286,27 +2286,29 @@ class SourceTest(OCLTestCase):
 
         self.assertEqual(added_concepts, [])
 
-    def test_clone_mappings_resolves_missing_concepts_by_mnemonic(self):
+    def test_clone_resources_keeps_targets_in_other_code_systems(self):
         source = OrganizationSourceFactory(version=HEAD)
-        from_concept = ConceptFactory(
-            parent=source, names=[ConceptNameFactory.build(locale_preferred=True)])
-        to_concept = ConceptFactory(
-            parent=source, names=[ConceptNameFactory.build(locale_preferred=True)])
+        external = OrganizationSourceFactory(version=HEAD)
         target = OrganizationSourceFactory(version=HEAD)
-        user = from_concept.created_by
+        concept = ConceptFactory(parent=source, names=[ConceptNameFactory.build(locale_preferred=True)])
+        external_concept = ConceptFactory(parent=external, names=[ConceptNameFactory.build(locale_preferred=True)])
+        existing = ConceptFactory(parent=target, names=[ConceptNameFactory.build(locale_preferred=True)])
+        MappingFactory(from_concept=existing, to_concept=external_concept, parent=target, map_type='SAME-AS')
+        mapping = MappingFactory(
+            from_concept=concept, to_concept=external_concept, parent=source, map_type='BROADER-THAN',
+            from_source=source, to_source=external, from_source_url=source.uri, to_source_url=external.uri)
 
-        cloned_from = from_concept.versioned_object.clone()
-        target.clone_concepts([cloned_from], user, False)
-        cloned_to = to_concept.versioned_object.clone()
-        target.clone_concepts([cloned_to], user, False)
+        _, added_mappings = target.clone_resources(
+            concept.created_by, Concept.objects.filter(id=concept.id), Mapping.objects.filter(id=mapping.id),
+            equivalency_map_types='SAME-AS')
 
-        unsaved_from = ConceptFactory.build(mnemonic=cloned_from.mnemonic)
-        unsaved_to = ConceptFactory.build(mnemonic=cloned_to.mnemonic)
-        mapping = MappingFactory.build(from_concept=unsaved_from, to_concept=unsaved_to, parent=target)
-
-        added = target.clone_mappings([mapping], user)
-
-        self.assertEqual(len(added), 1)
+        cloned_mapping = added_mappings[-1]
+        cloned_mapping.refresh_from_db()
+        self.assertEqual(cloned_mapping.map_type, 'BROADER-THAN')
+        self.assertEqual(cloned_mapping.to_concept_id, external_concept.id)
+        self.assertEqual(cloned_mapping.to_concept_code, external_concept.mnemonic)
+        self.assertEqual(cloned_mapping.to_source_id, external.id)
+        self.assertEqual(cloned_mapping.to_source_url, external.uri)
 
     def test_clone_resources_points_mapping_source_urls_at_the_mapped_concepts_sources(self):
         source = OrganizationSourceFactory(version=HEAD)
@@ -2399,9 +2401,7 @@ class SourceTest(OCLTestCase):
         cloned_to = to_concept.versioned_object.clone()
         target.clone_concepts([cloned_to], user, False)
 
-        mapping = MappingFactory.build(
-            from_concept=ConceptFactory.build(mnemonic=cloned_from.mnemonic),
-            to_concept=ConceptFactory.build(mnemonic=cloned_to.mnemonic), parent=target)
+        mapping = MappingFactory.build(from_concept=cloned_from, to_concept=cloned_to, parent=target)
 
         target.clone_mappings([mapping], user)
 
