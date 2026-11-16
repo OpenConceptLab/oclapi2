@@ -76,7 +76,7 @@ class Command(BaseCommand):
             self.get_head_mappings().filter(**{f'{source_field}__isnull': False}).filter(candidates).exclude(
                 **{url_field: F(f'{source_field}__uri')}
             ).exclude(
-                **{url_field: F(f'{source_field}__canonical_url')}
+                Q(**{url_field: F(f'{source_field}__canonical_url')}) & ~Q(**{f'{source_field}__canonical_url': ''})
             ).order_by().values_list(f'{source_field}_id', flat=True).distinct()
         )
 

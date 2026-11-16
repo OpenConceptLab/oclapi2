@@ -324,13 +324,17 @@ class MappingTest(OCLTestCase):
             persisted_mapping.version_url, persisted_mapping.uri
         )
 
-    def test_repair_mapping_source_urls(self):  # pylint: disable=too-many-locals
+    def test_repair_mapping_source_urls(self):  # pylint: disable=too-many-locals,too-many-statements
         origin = OrganizationSourceFactory(version=HEAD, canonical_url='https://example.org/origin')
         source = OrganizationSourceFactory(version=HEAD, canonical_url='https://example.org/source')
         other = OrganizationSourceFactory(version=HEAD, canonical_url='https://example.org/other')
         concept = ConceptFactory(parent=source)
         answer = ConceptFactory(parent=source)
         other_concept = ConceptFactory(parent=other)
+        blank = OrganizationSourceFactory(version=HEAD, canonical_url='')
+        blank_concept = ConceptFactory(parent=blank)
+        blank.refresh_from_db()
+        self.assertEqual(blank.canonical_url, '')
 
         def make(to_concept=other_concept, **urls):
             mapping = MappingFactory(
@@ -353,10 +357,12 @@ class MappingTest(OCLTestCase):
         retargeted_answer = make(to_concept=answer, from_source_url=origin.uri, to_source_url=origin.uri)
         canonical_answer = make(to_concept=answer, from_source_url=origin.uri, to_source_url=origin.canonical_url)
         replaced_target = make(to_concept=answer, from_source_url=origin.uri, to_source_url=other.uri)
+        blank_canonical = make(to_concept=blank_concept, to_source_url='')
         self.assertEqual(stale_uri.versioned_object_id, stale_uri.id)
         stale_version = Mapping.create_initial_version(stale_uri)
         Mapping.objects.filter(id=stale_version.id).update(from_source_url=other.uri, from_source_version='v1')
-        repaired = (stale_uri, stale_canonical, missing, retargeted_answer, canonical_answer, replaced_target)
+        repaired = (
+            stale_uri, stale_canonical, missing, retargeted_answer, canonical_answer, replaced_target, blank_canonical)
         replaced_line = f'  {replaced_target.uri} (from_source_url {origin.uri}, to_source_url {other.uri})\n'
 
         before = {mapping.id: urls(mapping) for mapping in repaired}
@@ -366,6 +372,7 @@ class MappingTest(OCLTestCase):
         self.assertIn(f'  {other.uri}: 2\n', to_output)
         self.assertIn(f'  {source.uri}: 2\n', to_output)
         self.assertIn(replaced_line, to_output)
+        self.assertIn(f'  {blank.uri}: 1\n', to_output)
         self.assertIn(f'  {source.uri}: 6\n', from_output)
         self.assertEqual(before, {mapping.id: urls(mapping) for mapping in repaired})
 
@@ -378,6 +385,7 @@ class MappingTest(OCLTestCase):
         self.assertEqual(urls(unknown), ('/orgs/foo/sources/bar/', None, other.uri, None))
         self.assertEqual(urls(retargeted_answer), (source.uri, None, source.uri, None))
         self.assertEqual(urls(canonical_answer), (source.uri, None, source.uri, None))
+        self.assertEqual(urls(blank_canonical), (source.uri, None, blank.uri, None))
         self.assertEqual(urls(replaced_target), (source.uri, None, other.uri, None))
         self.assertEqual(urls(stale_version)[:2], (other.uri, 'v1'))
 

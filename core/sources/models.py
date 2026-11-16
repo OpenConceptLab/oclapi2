@@ -845,7 +845,7 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             concept_errors, mapping_errors = [], []
             equivalency_map_types = compact((kwargs.get('equivalency_map_types') or '').split(','))
             _concepts_to_add_mappings_for = []
-            for concept in concepts:
+            for concept in concepts.select_related('parent'):
                 if self.get_equivalent_concept(concept, equivalency_map_types):
                     continue
 
@@ -929,7 +929,7 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         return self.mappings_set.filter(
             map_type__in=equivalency_map_type, to_concept__versioned_object_id=concept.versioned_object_id,
             from_concept__parent_id=self.id, retired=False, id=F('versioned_object_id')
-        ).first() if equivalency_map_type and concept else None
+        ).select_related('from_concept__parent').first() if equivalency_map_type and concept else None
 
     def clone_with_cascade(self, concept_to_clone, user, resource_budget=None, **kwargs):
         """
