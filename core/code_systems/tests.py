@@ -908,6 +908,16 @@ class CodeSystemSupplementTest(OCLTestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(self.head().full_name, 'ICD-10 fr, edited')
 
+    def test_a_put_from_a_release_without_supplements_cant_clear_heads(self):
+        """A FHIR PUT starts from the latest release: one stored without supplements can't clear the one HEAD has."""
+        self.assertEqual(self.write().status_code, 201)
+        Source.objects.filter(mnemonic='icd10-fr').exclude(version='HEAD').update(supplements=None)
+
+        response = self.write('put', version='2', supplements=None)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('supplements', str(response.data))
+        self.assertEqual(self.head().supplements, SUPPLEMENTED)
+
     def test_a_supplement_without_a_language_keeps_its_display_in_the_default_locale(self):
         """
         HL7 Denmark's ICD-10 supplement has no language. Its display's language is then unknown, and is stored in the

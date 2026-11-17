@@ -302,18 +302,26 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
     def clean_supplements(self):
         """
-        A supplement must name what it supplements (FHIR csd-4); any source may. That's checked when content_type or
-        supplements is set or changed, so a supplement stored without one before the rule stays editable. The URL itself
-        is checked as a URI (clean_fields); here, at most one |version, which isn't empty.
+        A supplement must name what it supplements (FHIR csd-4); any source may. The row this saves over decides: a
+        supplement stored without one before the rule stays editable, and anything else must name one. The URL itself is
+        checked as a URI (clean_fields); here, at most one |version, which isn't empty.
         """
         self.supplements = self.supplements or None
         if not self.supplements:
-            if self.is_supplement and {'content_type', 'supplements'} & set(self.get_dirty_fields()):
+            if self.is_supplement and not self.is_stored_supplement_without_supplements():
                 raise ValidationError({'supplements': [SUPPLEMENTS_REQUIRED]})
             return
         _, version = split_canonical(self.supplements)
         if version is not None and (not version or '|' in version):
             raise ValidationError({'supplements': [SUPPLEMENTS_FORMAT]})
+
+    def is_stored_supplement_without_supplements(self):
+        """
+        Whether the stored row with this id is a supplement without supplements. That's the row itself, not where this
+        object was loaded from: a FHIR CodeSystem PUT loads the latest release and saves it over HEAD.
+        """
+        return bool(self.id) and Source.objects.filter(
+            id=self.id, content_type=CONTENT_TYPE_SUPPLEMENT, supplements__isnull=True).exists()
 
     def clean_match_algorithms(self):
         self.match_algorithms = self.match_algorithms or []
