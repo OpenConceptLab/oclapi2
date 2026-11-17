@@ -376,6 +376,11 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def display_locale(self):
         return get(self.preferred_locale, 'locale')
 
+    def preferred_name_in(self, locale):
+        """Its preferred name in `locale` that isn't retired, else None: from its names, which a list can prefetch."""
+        return next((name for name in self.names.all()
+                     if name.locale_preferred and not name.retired and name.locale == locale), None)
+
     @property
     def preferred_locale(self):
         try:

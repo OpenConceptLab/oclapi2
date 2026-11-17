@@ -49,7 +49,7 @@ from core.common.constants import HEAD
 from core.common.db_functions import ImmutableUnaccent
 from core.common.fhir_helpers import repository_prefixes
 from core.common.mixins import CustomPaginator
-from core.common.utils import to_int
+from core.common.utils import split_canonical, to_int
 from core.concepts.models import Concept
 from core.fhir import mapping_index, outcomes
 from core.fhir.constants import CONTROL_PARAMETERS, SEARCH_TOO_COSTLY
@@ -526,14 +526,17 @@ class Search:
     @staticmethod
     def by_supplements(value):
         """A CodeSystem supplementing the canonical URL named: any version of it, or only the one url|version names."""
-        url, _, version = value.partition('|')
+        url, version = split_canonical(value)
         if version:
             return Q(supplements=value)
         return Q(supplements=url) | Q(supplements__startswith=f'{url}|')
 
     @staticmethod
     def by_content_mode(value):
-        """The content a CodeSystem shows (CodeSystemDetailSerializer.get_content): a supplement's at any size."""
+        """
+        The content a CodeSystem shows: CodeSystemDetailSerializer.get_content's rule as a filter, so a change to one
+        is a change to both. A supplement is one at any size.
+        """
         supplement, over_limit = Q(content_type=CONTENT_TYPE_SUPPLEMENT), concepts_over_limit()
         if value == CONTENT_TYPE_SUPPLEMENT:
             return supplement

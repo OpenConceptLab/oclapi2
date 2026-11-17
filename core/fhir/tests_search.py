@@ -629,6 +629,11 @@ class CodeSystemSupplementSearchTest(SearchCorpusMixin, OCLTestCase):
         self.assertEqual(self.search('CodeSystem', **{mode: 'urn:x|supplement'})['total'], 0)
         Source.objects.filter(id=self.jdoe_codes_v1.id).update(content_type='example')
         self.assertEqual(self.keys(self.search('CodeSystem', **{mode: 'example'})), ['https://example.org/my-codes|v1'])
+        self.assertEqual(self.search('CodeSystem', **{mode: 'fragment'})['total'], 0)
+        Source.objects.filter(id=self.jdoe_codes_v1.id).update(content_type='fragment')
+        self.assertEqual(
+            self.keys(self.search('CodeSystem', **{mode: 'fragment'})), ['https://example.org/my-codes|v1'])
+        self.assertEqual(self.search('CodeSystem', **{mode: 'partial'})['total'], 0)  # not a content mode
 
         with override_settings(FHIR_CODE_SYSTEM_CONCEPT_LIMIT=0):
             self.assertEqual(self.keys(self.search('CodeSystem', **{mode: 'not-present'})), [f'{CIEL}|v2'])

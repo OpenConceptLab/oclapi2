@@ -3281,6 +3281,21 @@ class SourceSupplementsTest(OCLAPITestCase):
         self.assertIn('supplements', response.data)
         self.assertEqual(Source.objects.get(uri=url).supplements, self.ICD10)
 
+    def test_a_supplement_stored_without_supplements_stays_editable(self):
+        """
+        csd-4 is checked when content_type or supplements is set or changed, so a supplement stored without supplements
+        before the rule can still be edited for anything else. Making a source a supplement still needs one.
+        """
+        legacy = OrganizationSourceFactory(organization=self.org, mnemonic='legacy', content_type='supplement')
+        response = self.put(legacy.uri, description='edited')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(Source.objects.get(id=legacy.id).description, 'edited')
+
+        other = OrganizationSourceFactory(organization=self.org, mnemonic='other')
+        response = self.put(other.uri, content_type='supplement')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('supplements', response.data)
+
     def test_supplements_is_optional_for_other_content(self):
         """FHIR (csd-4) requires supplements only of a supplement."""
         response = self.post(id='plain', supplements=self.ICD10)

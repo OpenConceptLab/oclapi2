@@ -17,7 +17,7 @@ from core.common.fields import URIField
 from core.common.models import ConceptContainerModel
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings, \
     sync_source_concept_vectors, index_source_public_access
-from core.common.utils import to_camel_case
+from core.common.utils import split_canonical, to_camel_case
 from core.common.validators import validate_non_negative
 from core.concepts.models import ConceptName, Concept
 from core.services.storages.postgres import PostgresQL
@@ -302,16 +302,17 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
     def clean_supplements(self):
         """
-        A supplement must name what it supplements (FHIR csd-4); any source may. The URL itself is checked as a URI
-        (clean_fields); here, at most one |version, which isn't empty.
+        A supplement must name what it supplements (FHIR csd-4); any source may. That's checked when content_type or
+        supplements is set or changed, so a supplement stored without one before the rule stays editable. The URL itself
+        is checked as a URI (clean_fields); here, at most one |version, which isn't empty.
         """
         self.supplements = self.supplements or None
         if not self.supplements:
-            if self.is_supplement:
+            if self.is_supplement and {'content_type', 'supplements'} & set(self.get_dirty_fields()):
                 raise ValidationError({'supplements': [SUPPLEMENTS_REQUIRED]})
             return
-        version = self.supplements.split('|')[1:]
-        if len(version) > 1 or version == ['']:
+        _, version = split_canonical(self.supplements)
+        if version is not None and (not version or '|' in version):
             raise ValidationError({'supplements': [SUPPLEMENTS_FORMAT]})
 
     def clean_match_algorithms(self):

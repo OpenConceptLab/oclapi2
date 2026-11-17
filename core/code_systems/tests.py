@@ -1,5 +1,6 @@
 import json
 
+from django.conf import settings
 from django.test import override_settings
 from fhir.resources.R4B.codesystem import CodeSystem
 from mock.mock import patch, Mock
@@ -9,7 +10,7 @@ from core.code_systems.converter import CodeSystemConverter
 from core.code_systems.serializers import CodeSystemDetailSerializer
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLTestCase
-from core.concepts.models import Concept
+from core.concepts.models import Concept, ConceptName
 from core.concepts.tests.factories import ConceptFactory
 from core.fhir.serializers import SUBSETTED
 from core.orgs.tests.factories import OrganizationFactory
@@ -897,6 +898,61 @@ class CodeSystemSupplementTest(OCLTestCase):
         self.assertEqual([resource['content'], resource['count']], ['supplement', 2])
         self.assertNotIn('concept', resource)
         self.assertIn(SUBSETTED, resource['meta']['tag'])
+
+    def test_a_supplement_stored_without_supplements_stays_editable(self):
+        """A FHIR PUT that doesn't change content or supplements isn't refused for a supplement stored without one."""
+        self.assertEqual(self.write().status_code, 201)
+        Source.objects.filter(mnemonic='icd10-fr').update(supplements=None)
+
+        response = self.write('put', version='2', supplements=None, title='ICD-10 fr, edited')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(self.head().full_name, 'ICD-10 fr, edited')
+
+    def test_a_supplement_without_a_language_keeps_its_display_in_the_default_locale(self):
+        """
+        HL7 Denmark's ICD-10 supplement has no language. Its display's language is then unknown, and is stored in the
+        source's default locale, DEFAULT_LOCALE, as for any CodeSystem written without one; a read shows it again.
+        """
+        response = self.write(language=None, concept=[{'code': 'A00', 'display': 'Kolera'}])
+        self.assertEqual(response.status_code, 201, response.data)
+
+        self.assertEqual(self.names('A00'), [(settings.DEFAULT_LOCALE, 'Kolera', True)])
+        self.assertEqual(self.read()['concept'][0], {'code': 'A00', 'display': 'Kolera'})
+
+    def test_a_retired_supplement_concept_is_read_inactive(self):
+        inactive = [{'code': 'inactive', 'valueBoolean': True}]
+        response = self.write(concept=[{'code': 'A00', 'display': 'Choléra', 'property': inactive}])
+        self.assertEqual(response.status_code, 201, response.data)
+
+        self.assertEqual(self.read()['concept'][0], {'code': 'A00', 'display': 'Choléra', 'property': inactive})
+
+    def test_extension_must_be_a_list(self):
+        response = self.write(extension=LANG_PACK[0])
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('extension', str(response.data))
+        self.assertFalse(Source.objects.filter(mnemonic='icd10-fr').exists())
+
+    def test_a_put_without_extension_keeps_the_stored_ones(self):
+        """As for any field a FHIR PUT leaves out (SourceCreateOrUpdateSerializer.prepare_object); [] clears them."""
+        self.assertEqual(self.write(extension=LANG_PACK).status_code, 201)
+
+        self.assertEqual(self.write('put', version='2').status_code, 200)
+        self.assertEqual([self.head().supplement_type, self.head().supplement_global], ['lang-pack', True])
+        self.assertEqual(self.write('put', version='3', extension=[]).status_code, 200)
+        self.assertEqual([self.head().supplement_type, self.head().supplement_global], [None, None])
+
+    def test_a_display_with_a_type_is_also_a_designation_with_that_use(self):
+        """
+        A name's type is its designation's use, so the display is repeated when it has one: a FULLY_SPECIFIED name from
+        REST, TBv3 or a bulk import, as for a FHIR designation written with a use (a CodeSystem's read lists them all).
+        """
+        self.assertEqual(self.write(concept=[{'code': 'A00', 'display': 'Choléra'}]).status_code, 201)
+        ConceptName.objects.filter(name='Choléra').update(type='FULLY_SPECIFIED')
+
+        self.assertEqual(self.read()['concept'][0], {
+            'code': 'A00', 'display': 'Choléra',
+            'designation': [{'language': 'fr', 'value': 'Choléra', 'use': {'code': 'FULLY_SPECIFIED'}}]})
 
     def test_a_concept_with_designations_but_no_display_loads(self):
         response = self.write(content='complete', supplements=None, concept=[

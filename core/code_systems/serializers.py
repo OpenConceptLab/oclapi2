@@ -114,26 +114,24 @@ class CodeSystemConceptSerializer(ReadSerializerMixin, serializers.Serializer):
         if 'names' not in ret:
             ret.update({'names': []})
 
-        display = data.get('display')
-        if self.context.get('supplement'):  # nothing made up: a display is the name in the code system's language
-            self.add_preferred_name(ret['names'], display, self.context['language'])
-            if not ret['names']:  # refused here, before anything is saved: the concept wouldn't be
-                raise serializers.ValidationError({'designation': [SUPPLEMENT_CONCEPT_NEEDS_A_NAME]})
-        elif display or not ret['names']:  # a concept needs a name: the code, when it has no other
-            self.add_preferred_name(ret['names'], display or ret['mnemonic'], settings.DEFAULT_LOCALE)
-
+        self.add_names(ret, data.get('display'))
         return ret
 
-    @staticmethod
-    def add_preferred_name(names, name, locale):
-        """`name` as the preferred name in `locale`: the designation with that value there, else a new name."""
-        if not name:
+    def add_names(self, ret, display):
+        """The display as the preferred name in DEFAULT_LOCALE; a concept needs a name, so the code when it has none."""
+        if display or not ret['names']:
+            add_preferred_name(ret['names'], display or ret['mnemonic'], settings.DEFAULT_LOCALE)
+
+
+def add_preferred_name(names, name, locale):
+    """`name` as the preferred name in `locale`: the designation with that value there, else a new name."""
+    if not name:
+        return
+    for concept_name in names:
+        if concept_name['name'] == name and concept_name['locale'] == locale:
+            concept_name['locale_preferred'] = True
             return
-        for concept_name in names:
-            if concept_name['name'] == name and concept_name['locale'] == locale:
-                concept_name['locale_preferred'] = True
-                return
-        names.append({'name': name, 'locale': locale, 'locale_preferred': True})
+    names.append({'name': name, 'locale': locale, 'locale_preferred': True})
 
 
 class CodeSystemSupplementConceptSerializer(CodeSystemConceptSerializer):
@@ -141,18 +139,21 @@ class CodeSystemSupplementConceptSerializer(CodeSystemConceptSerializer):
     A supplement's concept has only what the supplement adds to the code: its names, and inactive when retired (no
     concept class or datatype, which are the supplemented code system's). Its preferred name in the code system's
     language (context language) is its display, FHIR's primary designation, and is repeated as a designation only
-    when it has a use of its own.
+    when it has a use of its own. Nothing is made up: a concept written with no name is refused.
     """
+    def add_names(self, ret, display):
+        add_preferred_name(ret['names'], display, self.context['language'])
+        if not ret['names']:  # refused here, before anything is saved: the concept wouldn't be
+            raise serializers.ValidationError({'designation': [SUPPLEMENT_CONCEPT_NEEDS_A_NAME]})
+
     def to_representation(self, instance):
-        names = list(instance.names.all())
-        display = next((name for name in names if name.locale_preferred and not name.retired and
-                        name.locale == self.context['language']), None)
+        display, designation = instance.preferred_name_in(self.context['language']), self.fields['designation'].child
         return OrderedDict([
             ('code', instance.mnemonic),
-            ('display', display.name if display else None),
+            ('display', get(display, 'name')),
             ('definition', self.fields['definition'].to_representation(instance)),
-            ('designation', CodeSystemConceptDesignationSerializer(
-                [name for name in names if name is not display or name.type], many=True).data),
+            ('designation', [
+                designation.to_representation(name) for name in instance.names.all() if name != display or name.type]),
             ('property', [{'code': 'inactive', 'valueBoolean': True}] if instance.retired else []),
         ])
 
@@ -174,13 +175,15 @@ def listed_concepts(context, source):
 
 
 class CodeSystemConceptField(serializers.Field):
+    """A CodeSystem's concepts, as a supplement's (CodeSystemSupplementConceptSerializer) or any other code system's."""
+    @staticmethod
+    def concepts_serializer(supplement, language, **kwargs):
+        serializer = CodeSystemSupplementConceptSerializer if supplement else CodeSystemConceptSerializer
+        return serializer(many=True, context={'language': language}, **kwargs)
+
     def to_internal_value(self, data):
-        """The concepts written, as the code system they're written to says: its content and its language."""
-        code_system, instance = self.parent.initial_data, self.parent.instance
-        content = code_system.get('content', get(instance, 'content_type'))
-        language = code_system.get('language') or get(instance, 'default_locale') or settings.DEFAULT_LOCALE
-        concepts = CodeSystemConceptSerializer(
-            data=data, many=True, context={'supplement': content == CONTENT_TYPE_SUPPLEMENT, 'language': language})
+        """As the code system written says: CodeSystemDetailSerializer.to_internal_value puts that in the context."""
+        concepts = self.concepts_serializer(self.context['supplement'], self.context['language'], data=data)
         concepts.is_valid(raise_exception=True)
         return {'concepts': concepts.validated_data}
 
@@ -193,10 +196,7 @@ class CodeSystemConceptField(serializers.Field):
         self.subsetted = concepts is None and value.is_supplement
         if not concepts:
             return []
-        if value.is_supplement:
-            return CodeSystemSupplementConceptSerializer(
-                concepts, many=True, context={'language': value.default_locale}).data
-        return CodeSystemConceptSerializer(concepts, many=True).data
+        return self.concepts_serializer(value.is_supplement, value.default_locale, instance=concepts).data
 
 
 class CodeSystemExtensionField(serializers.Field):
@@ -279,6 +279,16 @@ class CodeSystemDetailSerializer(FhirRepositorySerializerMixin, serializers.Mode
     def get_resource_type(_):
         return RESOURCE_TYPE
 
+    def to_internal_value(self, data):
+        """
+        Its concepts are written as the code system says (CodeSystemConceptField): whether it's a supplement, and its
+        language. An update that doesn't say keeps the stored ones.
+        """
+        self.context.update(
+            supplement=get(data, 'content', get(self.instance, 'content_type')) == CONTENT_TYPE_SUPPLEMENT,
+            language=get(data, 'language') or get(self.instance, 'default_locale') or settings.DEFAULT_LOCALE)
+        return super().to_internal_value(data)
+
     def get_total_count(self, obj):
         """A read's concept count; a search's summary has none (it only checks the limit)."""
         return None if self.context.get('has_many') else listed_concepts(self.context, obj)[0]
@@ -286,7 +296,9 @@ class CodeSystemDetailSerializer(FhirRepositorySerializerMixin, serializers.Mode
     def get_content(self, obj):
         """
         complete (or the content mode the CodeSystem was saved with) up to the concept limit, else not-present: a
-        search annotates concepts_over_limit, a read counts them. A supplement is one at any size.
+        search annotates concepts_over_limit, a read counts them. A supplement is one at any size. The content-mode
+        search parameter (fhir_search.Search.by_content_mode) is this rule as a filter, so a change to one is a change
+        to both.
         """
         if obj.is_supplement:
             return CONTENT_TYPE_SUPPLEMENT
@@ -295,7 +307,7 @@ class CodeSystemDetailSerializer(FhirRepositorySerializerMixin, serializers.Mode
             over_limit = listed_concepts(self.context, obj)[1] is None
         if over_limit:
             return 'not-present'
-        return obj.content_type if obj.content_type in ('example', 'fragment', 'supplement') else 'complete'
+        return obj.content_type if obj.content_type in fhir_search.STATED_CONTENT else 'complete'
 
     @staticmethod
     def get_property(obj):
