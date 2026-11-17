@@ -845,7 +845,7 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             concept_errors, mapping_errors = [], []
             equivalency_map_types = compact((kwargs.get('equivalency_map_types') or '').split(','))
             _concepts_to_add_mappings_for = []
-            for concept in concepts:
+            for concept in concepts.select_related('parent'):
                 if self.get_equivalent_concept(concept, equivalency_map_types):
                     continue
 
@@ -871,8 +871,13 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
             for concept_pair in _concepts_to_add_mappings_for:
                 concept, cloned_concept = concept_pair
-                for mapping in mappings.filter(from_concept__versioned_object_id=concept.versioned_object_id):
-                    existing_to_concept = self.get_equivalent_concept(mapping.to_concept, equivalency_map_types)
+                for mapping in mappings.filter(
+                        from_concept__versioned_object_id=concept.versioned_object_id
+                ).select_related('from_concept', 'to_concept'):
+                    # only targets in the source being cloned from move to their equivalent; other code systems stay
+                    existing_to_concept = self.get_equivalent_concept(
+                        mapping.to_concept, equivalency_map_types
+                    ) if get(mapping, 'to_concept.parent_id') == concept.parent_id else None
                     cloned_mapping = mapping.clone(user, cloned_concept, existing_to_concept)
                     self.clone_mappings([cloned_mapping], user, False)
                     if cloned_mapping.id:
@@ -924,7 +929,7 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         return self.mappings_set.filter(
             map_type__in=equivalency_map_type, to_concept__versioned_object_id=concept.versioned_object_id,
             from_concept__parent_id=self.id, retired=False, id=F('versioned_object_id')
-        ).first() if equivalency_map_type and concept else None
+        ).select_related('from_concept__parent').first() if equivalency_map_type and concept else None
 
     def clone_with_cascade(self, concept_to_clone, user, resource_budget=None, **kwargs):
         """
@@ -960,16 +965,10 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         for mapping in cloned_mappings:
             to_concept = get(mapping, 'to_concept')
             from_concept = get(mapping, 'from_concept')
-            if not get(from_concept, 'id'):
-                from_concept = self.find_concept_by_mnemonic(from_concept.mnemonic)
-            if not get(to_concept, 'id') and get(to_concept, 'mnemonic'):
-                to_concept = self.find_concept_by_mnemonic(to_concept.mnemonic)
             mapping.from_concept_code = get(from_concept, 'mnemonic') or mapping.from_concept_code
-            mapping.from_concept_id = get(from_concept, 'id')
-            mapping.to_concept_id = get(to_concept, 'id')
             mapping.to_concept_code = get(to_concept, 'mnemonic') or mapping.to_concept_code
-            mapping.to_source_id = get(to_concept, 'parent_id') or mapping.to_source_id
-            mapping.from_source_id = get(from_concept, 'parent_id') or mapping.from_source_id
+            mapping.set_from_source_from_concept(from_concept)
+            mapping.set_to_source_from_concept(to_concept)
             self._clone_resource(mapping, user)
             if mapping.id:
                 added.append(mapping)

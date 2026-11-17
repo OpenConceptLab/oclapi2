@@ -10,6 +10,7 @@ from celery_once import AlreadyQueued
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
+from django.db.models import F
 from django.test import override_settings, tag
 from mock import patch, Mock, ANY, PropertyMock
 from mock.mock import call
@@ -2716,6 +2717,40 @@ class SourceConceptsCloneViewTest(OCLAPITestCase):
             self.concept, self.concept.parent, self.clone_to_source, self.user, ANY, False,
             resource_budget=100, **parameters  # no group: the preview per-call budget (ocl_online#230)
         )
+
+    def test_post_retargets_answers_to_equivalents_and_keeps_targets_in_other_code_systems(self):  # pylint: disable=too-many-locals
+        def named_concept(parent):
+            return ConceptFactory(parent=parent, names=[ConceptNameFactory.build(locale_preferred=True)])
+
+        source = OrganizationSourceFactory()
+        external = OrganizationSourceFactory()
+        target = self.clone_to_source
+        question, answer, external_concept = named_concept(source), named_concept(source), named_concept(external)
+        existing_answer, existing_external = named_concept(target), named_concept(target)
+        for existing, original in ((existing_answer, answer), (existing_external, external_concept)):
+            MappingFactory(parent=target, from_concept=existing, to_concept=original, map_type='SAME-AS')
+        MappingFactory(
+            parent=source, from_concept=question, to_concept=answer, map_type='Q-AND-A',
+            from_source=source, to_source=source, from_source_url=source.uri, to_source_url=source.uri)
+        MappingFactory(
+            parent=source, from_concept=question, to_concept=external_concept, map_type='SAME-AS',
+            from_source=source, to_source=external, from_source_url=source.uri, to_source_url=external.uri)
+
+        response = self.post_clone(
+            [question.uri], user=UserProfileFactory(is_staff=True),
+            parameters={'mapTypes': 'Q-AND-A,SAME-AS', 'equivalencyMapType': 'SAME-AS'})
+
+        self.assertEqual(response.data[question.uri]['status'], 200)
+        copies = Mapping.objects.filter(parent=target, from_source_url=target.uri, id=F('versioned_object_id'))
+        answer_copy = copies.get(map_type='Q-AND-A')
+        self.assertEqual(answer_copy.to_concept_id, existing_answer.id)
+        self.assertEqual((answer_copy.to_source_id, answer_copy.to_source_url), (target.id, target.uri))
+        external_copy = copies.get(map_type='SAME-AS', to_source_id=external.id)
+        self.assertEqual(external_copy.to_concept_id, external_concept.id)
+        self.assertEqual(external_copy.to_concept_code, external_concept.mnemonic)
+        self.assertEqual(external_copy.to_source_url, external.uri)
+        self.assertFalse(copies.filter(to_concept=existing_external).exists())
+
 
 class SourceVersionsChangelogOutputViewTest(OCLAPITestCase):
     def _build_changelog_output_fixture(self):  # pylint: disable=too-many-locals
