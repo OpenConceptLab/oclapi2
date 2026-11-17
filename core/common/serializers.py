@@ -8,7 +8,7 @@ from core.code_systems.constants import RESOURCE_TYPE as CODE_SYSTEM_RESOURCE_TY
 from core.common.constants import INCLUDE_CONCEPTS_PARAM, INCLUDE_MAPPINGS_PARAM, LIMIT_PARAM, OFFSET_PARAM, \
     INCLUDE_VERBOSE_REFERENCES, INCLUDE_SEARCH_META_PARAM, ACCESS_TYPE_CHOICES, ACCESS_TYPE_VIEW
 from core.common.feeds import DEFAULT_LIMIT
-from core.common.fhir_helpers import to_fhir_path, to_ocl_path
+from core.common.fhir_helpers import to_fhir_path, to_ocl_path, bcp47
 from core.common.utils import to_int, get_truthy_values, normalize_public_access, cap_page_size
 from core.concept_maps.constants import RESOURCE_TYPE as CONCEPT_MAP_RESOURCE_TYPE
 from core.orgs.models import Organization
@@ -66,6 +66,13 @@ class StatusField(Field):
         if value.released:
             return 'active'
         return 'draft'
+
+
+class LanguageTagField(CharField):
+    """An OCL locale as a FHIR resource shows it, a BCP-47 language tag (pt_BR as pt-BR); written as it's given."""
+
+    def to_representation(self, value):
+        return bcp47(super().to_representation(value))
 
 
 class IdentifierTypeCodingSerializer(ReadSerializerMixin, Serializer):

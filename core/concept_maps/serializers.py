@@ -8,7 +8,7 @@ from rest_framework.fields import CharField, SerializerMethodField, \
 from core.common.fhir_helpers import delete_empty_fields
 from core.concept_maps.constants import RESOURCE_TYPE, RELATIONSHIP_MAP_TYPES
 from core.common.constants import HEAD
-from core.common.serializers import StatusField, IdentifierSerializer
+from core.common.serializers import StatusField, IdentifierSerializer, LanguageTagField
 from core.fhir.adapters import r4
 from core.fhir.ops.translate import concept_map_groups, relationship
 from core.fhir.resolve import FhirResolver
@@ -64,7 +64,7 @@ class ConceptMapDetailSerializer(FhirRepositorySerializerMixin, serializers.Mode
     url = CanonicalUrlField(source='canonical_url', required=False)
     title = CharField(source='full_name', required=False)
     status = StatusField(source='*')
-    language = CharField(source='default_locale', required=False)
+    language = LanguageTagField(source='default_locale', required=False)
     meta = SerializerMethodField()
     identifier = IdentifierSerializer(many=True, required=False)
     date = DateTimeField(source='revision_date', required=False)

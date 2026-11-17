@@ -5,6 +5,19 @@ REPOSITORY_KINDS = {'CodeSystem': 'sources', 'ConceptMap': 'sources', 'ValueSet'
 REPOSITORY_PATH = re.compile(r'/(orgs|users)/([^/]+)/([^/]+)/([^/]+)/?')
 
 
+def bcp47(locale):
+    """
+    An OCL locale as the BCP-47 language tag FHIR needs: OCL, after CIEL, writes pt_BR for pt-BR. Only the separator
+    changes; locales across the rest of OCL are OpenConceptLab/ocl_issues#2795.
+    """
+    return locale.replace('_', '-') if locale else locale
+
+
+def language_key(locale):
+    """A locale or language tag as languages are compared: in either spelling, ignoring case, as BCP-47 does."""
+    return bcp47(locale).lower() if locale else locale
+
+
 def delete_empty_fields(obj):
     if isinstance(obj, dict):
         for field in list(obj.keys()):
