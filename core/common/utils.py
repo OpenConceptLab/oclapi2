@@ -574,6 +574,15 @@ def canonical_url_to_url_and_version(canonical_url):
     return canonical_url, version
 
 
+def split_canonical(value):
+    """
+    A canonical reference's (url, version), like canonical_url_to_url_and_version but for any input: it splits at the
+    first |, so a second one stays in the version for the caller to refuse, and a url without one has None.
+    """
+    url, separator, version = value.partition('|')
+    return url, version if separator else None
+
+
 def generate_temp_version():
     return f"{TEMP_PREFIX}{str(uuid.uuid4())[:8]}"
 

@@ -2,12 +2,14 @@ import ast
 import logging
 from collections import OrderedDict
 
+from pydash import get
 from rest_framework import serializers
 from rest_framework.fields import CharField, BooleanField, SerializerMethodField, ChoiceField, \
     DateTimeField
 
 from core import settings
-from core.code_systems.constants import RESOURCE_TYPE
+from core.code_systems.constants import RESOURCE_TYPE, SUPPLEMENT_TYPE_EXTENSION, SUPPLEMENT_GLOBAL_EXTENSION, \
+    SUPPLEMENT_CONCEPT_NEEDS_A_NAME
 from core.common.constants import HEAD
 from core.common.fhir_helpers import delete_empty_fields
 from core.common.serializers import ReadSerializerMixin, StatusField, IdentifierSerializer, LanguageTagField
@@ -15,6 +17,7 @@ from core.concepts.models import Concept, ConceptName
 from core.concepts.serializers import ConceptDetailSerializer
 from core.fhir import search as fhir_search
 from core.fhir.serializers import CanonicalUrlField, FhirRepositorySerializerMixin, TitleField
+from core.sources.constants import CONTENT_TYPE_SUPPLEMENT
 from core.sources.models import Source
 from core.sources.serializers import SourceCreateOrUpdateSerializer
 
@@ -111,18 +114,48 @@ class CodeSystemConceptSerializer(ReadSerializerMixin, serializers.Serializer):
         if 'names' not in ret:
             ret.update({'names': []})
 
-        found = False
-        for concept_name in ret['names']:
-            if concept_name['name'] == data['display'] and concept_name['locale'] == settings.DEFAULT_LOCALE:
-                concept_name['locale_preferred'] = True
-                found = True
-                break
-
-        if not found:
-            ret['names'].append({'name': data.get('display', data.get('code', None)), 'locale': settings.DEFAULT_LOCALE,
-                                 'locale_preferred': True})
-
+        self.add_names(ret, data.get('display'))
         return ret
+
+    def add_names(self, ret, display):
+        """The display as the preferred name in DEFAULT_LOCALE; a concept needs a name, so the code when it has none."""
+        if display or not ret['names']:
+            add_preferred_name(ret['names'], display or ret['mnemonic'], settings.DEFAULT_LOCALE)
+
+
+def add_preferred_name(names, name, locale):
+    """`name` as the preferred name in `locale`: the designation with that value there, else a new name."""
+    if not name:
+        return
+    for concept_name in names:
+        if concept_name['name'] == name and concept_name['locale'] == locale:
+            concept_name['locale_preferred'] = True
+            return
+    names.append({'name': name, 'locale': locale, 'locale_preferred': True})
+
+
+class CodeSystemSupplementConceptSerializer(CodeSystemConceptSerializer):
+    """
+    A supplement's concept has only what the supplement adds to the code: its names, and inactive when retired (no
+    concept class or datatype, which are the supplemented code system's). Its preferred name in the code system's
+    language (context language) is its display, FHIR's primary designation, and is repeated as a designation only
+    when it has a use of its own. Nothing is made up: a concept written with no name is refused.
+    """
+    def add_names(self, ret, display):
+        add_preferred_name(ret['names'], display, self.context['language'])
+        if not ret['names']:  # refused here, before anything is saved: the concept wouldn't be
+            raise serializers.ValidationError({'designation': [SUPPLEMENT_CONCEPT_NEEDS_A_NAME]})
+
+    def to_representation(self, instance):
+        display, designation = instance.preferred_name_in(self.context['language']), self.fields['designation'].child
+        return OrderedDict([
+            ('code', instance.mnemonic),
+            ('display', get(display, 'name')),
+            ('definition', self.fields['definition'].to_representation(instance)),
+            ('designation', [
+                designation.to_representation(name) for name in instance.names.all() if name != display or name.type]),
+            ('property', [{'code': 'inactive', 'valueBoolean': True}] if instance.retired else []),
+        ])
 
 
 class CodeSystemPropertySerializer(ReadSerializerMixin, serializers.Serializer):
@@ -142,15 +175,48 @@ def listed_concepts(context, source):
 
 
 class CodeSystemConceptField(serializers.Field):
+    """A CodeSystem's concepts, as a supplement's (CodeSystemSupplementConceptSerializer) or any other code system's."""
+    @staticmethod
+    def concepts_serializer(supplement, language, **kwargs):
+        serializer = CodeSystemSupplementConceptSerializer if supplement else CodeSystemConceptSerializer
+        return serializer(many=True, context={'language': language}, **kwargs)
+
     def to_internal_value(self, data):
-        concepts = CodeSystemConceptSerializer(data=data, many=True)
+        """As the code system written says: CodeSystemDetailSerializer.to_internal_value puts that in the context."""
+        concepts = self.concepts_serializer(self.context['supplement'], self.context['language'], data=data)
         concepts.is_valid(raise_exception=True)
         return {'concepts': concepts.validated_data}
 
     def to_representation(self, value):
-        """Every concept, retired ones included, up to the limit; none above it (content not-present)."""
+        """
+        Every concept, retired ones included, up to the limit; none above it: content not-present, or for a supplement,
+        which stays one, SUBSETTED.
+        """
         concepts = listed_concepts(self.context, value)[1]
-        return CodeSystemConceptSerializer(concepts, many=True).data if concepts else []
+        self.subsetted = concepts is None and value.is_supplement
+        if not concepts:
+            return []
+        return self.concepts_serializer(value.is_supplement, value.default_locale, instance=concepts).data
+
+
+class CodeSystemExtensionField(serializers.Field):
+    """The extensions OCL keeps: a supplement's codesystem-supplement-type and codesystem-supplement-global."""
+    def to_internal_value(self, data):
+        if not isinstance(data, list):
+            raise serializers.ValidationError('extension must be a list.')
+        extensions = {item.get('url'): item for item in data if isinstance(item, dict)}
+        return {
+            'supplement_type': extensions.get(SUPPLEMENT_TYPE_EXTENSION, {}).get('valueCode'),
+            'supplement_global': extensions.get(SUPPLEMENT_GLOBAL_EXTENSION, {}).get('valueBoolean'),
+        }
+
+    def to_representation(self, value):
+        extensions = []
+        if value.supplement_type:
+            extensions.append({'url': SUPPLEMENT_TYPE_EXTENSION, 'valueCode': value.supplement_type})
+        if value.supplement_global is not None:
+            extensions.append({'url': SUPPLEMENT_GLOBAL_EXTENSION, 'valueBoolean': value.supplement_global})
+        return extensions
 
 
 class TextField(ReadSerializerMixin, serializers.Serializer):
@@ -187,6 +253,8 @@ class CodeSystemDetailSerializer(FhirRepositorySerializerMixin, serializers.Mode
         choices=['not-present', 'example', 'fragment', 'complete', 'supplement'],
         required=True
     )
+    supplements = CharField(required=False)
+    extension = CodeSystemExtensionField(source='*', required=False)
     property = SerializerMethodField()
     meta = SerializerMethodField()
     concept = CodeSystemConceptField(source='*', required=False)
@@ -201,7 +269,8 @@ class CodeSystemDetailSerializer(FhirRepositorySerializerMixin, serializers.Mode
 
     class Meta:
         model = Source
-        fields = ('resourceType', 'url', 'title', 'status', 'id', 'language', 'count', 'content', 'property', 'meta',
+        fields = ('resourceType', 'extension', 'url', 'title', 'status', 'id', 'language', 'count', 'content',
+                  'supplements', 'property', 'meta',
                   'version', 'identifier', 'contact', 'jurisdiction', 'name', 'description', 'publisher', 'purpose',
                   'copyright', 'revisionDate', 'experimental', 'caseSensitive', 'compositional', 'versionNeeded',
                   'collectionReference', 'hierarchyMeaning', 'concept', 'text', 'filters')
@@ -210,6 +279,16 @@ class CodeSystemDetailSerializer(FhirRepositorySerializerMixin, serializers.Mode
     def get_resource_type(_):
         return RESOURCE_TYPE
 
+    def to_internal_value(self, data):
+        """
+        Its concepts are written as the code system says (CodeSystemConceptField): whether it's a supplement, and its
+        language. An update that doesn't say keeps the stored ones.
+        """
+        self.context.update(
+            supplement=get(data, 'content', get(self.instance, 'content_type')) == CONTENT_TYPE_SUPPLEMENT,
+            language=get(data, 'language') or get(self.instance, 'default_locale') or settings.DEFAULT_LOCALE)
+        return super().to_internal_value(data)
+
     def get_total_count(self, obj):
         """A read's concept count; a search's summary has none (it only checks the limit)."""
         return None if self.context.get('has_many') else listed_concepts(self.context, obj)[0]
@@ -217,14 +296,18 @@ class CodeSystemDetailSerializer(FhirRepositorySerializerMixin, serializers.Mode
     def get_content(self, obj):
         """
         complete (or the content mode the CodeSystem was saved with) up to the concept limit, else not-present: a
-        search annotates concepts_over_limit, a read counts them.
+        search annotates concepts_over_limit, a read counts them. A supplement is one at any size. The content-mode
+        search parameter (fhir_search.Search.by_content_mode) is this rule as a filter, so a change to one is a change
+        to both.
         """
+        if obj.is_supplement:
+            return CONTENT_TYPE_SUPPLEMENT
         over_limit = getattr(obj, 'concepts_over_limit', None)
         if over_limit is None:
             over_limit = listed_concepts(self.context, obj)[1] is None
         if over_limit:
             return 'not-present'
-        return obj.content_type if obj.content_type in ('example', 'fragment', 'supplement') else 'complete'
+        return obj.content_type if obj.content_type in fhir_search.STATED_CONTENT else 'complete'
 
     @staticmethod
     def get_property(obj):
@@ -248,6 +331,8 @@ class CodeSystemDetailSerializer(FhirRepositorySerializerMixin, serializers.Mode
                 'type': 'Coding'
             }
         ]
+        if obj.is_supplement:  # its concepts have no concept class or datatype (CodeSystemSupplementConceptSerializer)
+            properties = [prop for prop in properties if prop['code'] == 'inactive']
         new_properties = [*(obj.properties or [])]
         defined_property_codes = {prop['code'] for prop in new_properties}
         for prop in properties:
