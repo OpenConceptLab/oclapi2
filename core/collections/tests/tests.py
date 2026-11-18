@@ -4049,7 +4049,7 @@ class ExpansionTest(OCLTestCase):
         self.assertEqual([report['key'] for report in reports], [f'{collection.uri} {reference.expression}'])
         self.assertEqual(reports[0]['toggles'], [EXPANSION_LOCKED_REPO_VERSION_TOGGLE])
 
-    def test_dry_run_heads_with_loose_locks_include_value_sets_locked_at_older_versions(self):
+    def test_dry_run_heads_with_loose_locks_are_locked_at_versions_other_than_latest_release(self):
         value_set = OrganizationCollectionFactory()
         older = OrganizationCollectionFactory(
             mnemonic=value_set.mnemonic, organization=value_set.organization, version='v1', released=True,
@@ -4061,10 +4061,22 @@ class ExpansionTest(OCLTestCase):
         locked_latest = self.locked_auto_expansion(OrganizationSourceFactory(version='v1', released=True))
         locked_latest.expansion.evaluated_collection_versions.add(latest)
 
-        heads = ExpansionDryRun.get_heads_with_loose_locks()
+        source = OrganizationSourceFactory()
+        source_v1 = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+        source_v2 = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v2', released=True)
+        locked_older_source = self.locked_auto_expansion(source_v1)
+        locked_latest_source = self.locked_auto_expansion(source_v2)
+        locked_head_source = self.locked_auto_expansion(source)
+
+        heads = list(ExpansionDryRun.get_heads_with_loose_locks())
 
         self.assertIn(locked_older, heads)
         self.assertNotIn(locked_latest, heads)
+        self.assertIn(locked_older_source, heads)
+        self.assertNotIn(locked_latest_source, heads)
+        self.assertIn(locked_head_source, heads)
 
     def test_dry_run_toggle_column(self):
         self.assertEqual(ExpansionDryRun.get_toggle_column('development'), 'dev')

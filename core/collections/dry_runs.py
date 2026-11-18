@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from unittest.mock import patch
 
 from django.db import transaction
-from django.db.models import F, Q
+from django.db.models import F
 from django.test import override_settings
 
 from core.celery import app
@@ -214,16 +214,30 @@ class ExpansionDryRun:
         uris = [uri for uri in source_uris if uri not in existing]
         return rng.sample(uris, min(size, len(uris)))
 
+    @classmethod
+    def get_heads_with_loose_locks(cls):
+        """HEADs locked to a source or value set version that isn't its repo's latest release, which the lock toggle
+        changes: with it off, new references resolve to the latest release and value set locks don't apply"""
+        expansion_ids = set()
+        for relation, klass in (('evaluated_source_versions', Source), ('evaluated_collection_versions', Collection)):
+            field = getattr(Expansion, relation).field
+            pairs = list(field.remote_field.through.objects.filter(
+                expansion__collection_version__version='HEAD').values_list('expansion_id', field.m2m_reverse_name()))
+            latest = cls.get_latest_release_ids(klass, {version_id for _, version_id in pairs})
+            expansion_ids |= {expansion_id for expansion_id, version_id in pairs if version_id not in latest}
+        return Collection.objects.filter(
+            version='HEAD', expansion_uri__in=Expansion.objects.filter(id__in=expansion_ids).values('uri'))
+
     @staticmethod
-    def get_heads_with_loose_locks():
-        """HEADs with a lock the lock toggle changes: a source at a HEAD, unreleased or retired version,
-        or a value set at any version but its latest, as value set locks apply only with the toggle on"""
-        loose = Q(version='HEAD') | Q(retired=True) | Q(released=False)
-        head_expansions = Expansion.objects.filter(collection_version__version='HEAD')
-        expansion_uris = {
-            *head_expansions.filter(evaluated_source_versions__in=Source.objects.filter(loose)).values_list(
-                'uri', flat=True),
-            *head_expansions.filter(evaluated_collection_versions__in=Collection.objects.filter(
-                loose | Q(is_latest_version=False))).values_list('uri', flat=True),
-        }
-        return Collection.objects.filter(version='HEAD', expansion_uri__in=expansion_uris)
+    def get_latest_release_ids(klass, version_ids):
+        """Ids of each repo's newest active, released, unretired version other than HEAD, for these versions' repos"""
+        repos = set(klass.objects.filter(id__in=version_ids).values_list('mnemonic', 'organization_id', 'user_id'))
+        latest = {}
+        releases = klass.objects.filter(
+            mnemonic__in={mnemonic for mnemonic, _, _ in repos}, is_active=True, released=True, retired=False
+        ).exclude(version='HEAD').values_list('id', 'mnemonic', 'organization_id', 'user_id', 'created_at')
+        for version_id, mnemonic, organization_id, user_id, created_at in releases:
+            repo = (mnemonic, organization_id, user_id)
+            if repo in repos and (repo not in latest or created_at > latest[repo][1]):
+                latest[repo] = (version_id, created_at)
+        return {version_id for version_id, _ in latest.values()}
