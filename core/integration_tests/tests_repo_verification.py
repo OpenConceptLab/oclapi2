@@ -130,7 +130,9 @@ class RepoVerificationTestsMixin:
                 self.assertIsNone(self.stored())
 
     def test_it_accepts_any_valid_date_time_precision_and_offset(self):
-        for verified_at in ['2026-11-20T14:02:11', '2026-11-20T14:02:11.1234567Z', '2026-11-20T14:02:11-03:00']:
+        for verified_at in [
+                '2026-11-20T14:02:11', '2026-11-20T14:02:11.1234567Z', '2026-11-20T14:02:11-03:00', '2026-11-20T14:02Z'
+        ]:
             with self.subTest(verified_at=verified_at):
                 response = self.put(
                     self.version.uri, {'verification': {**VALID, 'verified_at': verified_at}}, self.staff_token)
@@ -151,6 +153,22 @@ class RepoVerificationTestsMixin:
         self.head.full_clean()
 
         self.assertIsNone(self.head.verification)
+
+    def test_saving_only_the_record_changes_nothing_else_on_the_version(self):
+        self.model.objects.filter(id=self.version.id).update(revision_date=None)
+        self.model.objects.get(id=self.version.id).get_checksums(recalculate=False)  # the update view fills these once
+        before = self.model.objects.get(id=self.version.id)
+        export_before = dict(self.export_serializer(before).data)
+
+        response = self.put(self.version.uri, {'verification': VALID}, self.staff_token)
+
+        self.assertEqual(response.status_code, 200)
+        after = self.model.objects.get(id=self.version.id)
+        self.assertEqual(after.verification, VALID)
+        self.assertIsNone(after.revision_date)
+        self.assertEqual(after.updated_at, before.updated_at)
+        self.assertEqual(after.updated_by_id, before.updated_by_id)
+        self.assertEqual(dict(self.export_serializer(after).data), export_before)
 
     def test_it_is_left_out_of_the_export(self):
         self.version.verification = VALID

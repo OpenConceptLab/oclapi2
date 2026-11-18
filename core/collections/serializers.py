@@ -213,6 +213,9 @@ class CollectionCreateOrUpdateSerializer(RepoVerificationSerializerMixin, ModelS
         return collection
 
     def update(self, instance, validated_data):
+        if self.persist_verification_only(instance, validated_data):
+            return instance
+
         original_schema = instance.custom_validation_schema
         collection = self.prepare_object(validated_data, instance)
         if self._errors:

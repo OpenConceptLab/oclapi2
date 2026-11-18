@@ -427,34 +427,6 @@ class CodeSystemTest(OCLTestCase):
 
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
-    def test_put_code_system_new_version_does_not_carry_verification(self):
-        verification = {
-            'verified_at': '2026-11-20T14:02:11Z', 'process': 'ocl-verification-v1', 'hash': f'sha256:{"a" * 64}'
-        }
-        Source.objects.filter(mnemonic=self.user_source.mnemonic, user=self.user).exclude(version='HEAD').update(
-            verification=verification)
-
-        response = self.client.put(
-            f'/users/{self.user.mnemonic}/CodeSystem/{self.user_source.mnemonic}/',
-            HTTP_AUTHORIZATION='Token ' + self.user_token,
-            data={
-                'url': 'http://localhost/url',
-                'title': 'test',
-                'language': 'en',
-                'version': '2.0',
-                'name': 'test',
-                'id': self.user_source.mnemonic,
-                'status': 'draft',
-                'content': 'fragment'
-            },
-            format='json'
-        )
-
-        self.assertEqual(response.status_code, 200)
-        versions = Source.objects.filter(mnemonic=self.user_source.mnemonic, user=self.user)
-        self.assertIsNone(versions.get(version='HEAD').verification)
-        self.assertIsNone(versions.get(version='2.0').verification)
-
     def test_put_code_system_without_concepts(self):
         response = self.client.put(
             f'/users/{self.user.mnemonic}/CodeSystem/{self.user_source.mnemonic}/',
@@ -578,6 +550,37 @@ class CodeSystemTest(OCLTestCase):
         self.assertEqual(concept.display_name, 'Test')
         self.assertEqual(concept.is_head, False)
         self.assertEqual(len(concept.names.all()), 2)
+
+
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    def test_put_code_system_new_version_does_not_carry_verification(self):
+        verification = {
+            'verified_at': '2026-11-20T14:02:11Z', 'process': 'ocl-verification-v1', 'hash': f'sha256:{"a" * 64}'
+        }
+        Source.objects.filter(mnemonic=self.user_source.mnemonic, user=self.user).exclude(version='HEAD').update(
+            verification=verification)
+
+        response = self.client.put(
+            f'/users/{self.user.mnemonic}/CodeSystem/{self.user_source.mnemonic}/',
+            HTTP_AUTHORIZATION='Token ' + self.user_token,
+            data={
+                'url': 'http://localhost/url',
+                'title': 'test',
+                'language': 'en',
+                'version': '2.0',
+                'name': 'test',
+                'id': self.user_source.mnemonic,
+                'status': 'draft',
+                'content': 'fragment'
+            },
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        versions = Source.objects.filter(mnemonic=self.user_source.mnemonic, user=self.user)
+        self.assertIsNone(versions.get(version='HEAD').verification)
+        self.assertIsNone(versions.get(version='2.0').verification)
 
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))

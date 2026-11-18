@@ -212,6 +212,9 @@ class SourceCreateOrUpdateSerializer(RepoVerificationSerializerMixin, ModelSeria
         return source
 
     def update(self, instance, validated_data):
+        if self.persist_verification_only(instance, validated_data):
+            return instance
+
         original_schema = instance.custom_validation_schema
         source = self.prepare_object(validated_data, instance)
         user = self.context['request'].user
