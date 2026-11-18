@@ -1,4 +1,5 @@
 import base64
+import mimetypes
 import re
 import time
 
@@ -91,6 +92,16 @@ class BlobStorage(CloudStorageServiceInterface):
 
         return None
 
+    def upload(self, key, file_content, headers=None, metadata=None):
+        """
+        Uploads a file object to key, streaming it instead of loading it in memory.
+        Same contract as S3 and MinIO: returns 204 on success and raises on failure.
+        headers/metadata are only used for the content type, which is the only blob setting callers share.
+        """
+        content_settings = ContentSettings(content_type=self.__content_type(key, headers, metadata))
+        self.__upload_content(self.__get_blob_client(key), content_settings, file_content)
+        return 204  # Success, no content
+
     def upload_file(self, key, file_path=None, headers=None, binary=False, metadata=None):  # pylint: disable=too-many-arguments
         return self._upload(
             blob_name=key,
@@ -142,22 +153,19 @@ class BlobStorage(CloudStorageServiceInterface):
     def _upload(self, blob_name, file_content=None, file_path=None, read_directive=None, metadata=None):  # pylint: disable=too-many-arguments
         if not file_path and not file_content:
             return None
-        try:
-            content_settings = ContentSettings(content_type='application/octet-stream')
-            content_type = get(metadata, 'content-type') or get(metadata, 'ContentType')
-            if content_type and 'application/' in content_type:
-                content_settings.content_encoding = content_type.split('application/')[1]
+        content_settings = ContentSettings(content_type='application/octet-stream')
+        content_type = get(metadata, 'content-type') or get(metadata, 'ContentType')
+        if content_type and 'application/' in content_type:
+            content_settings.content_encoding = content_type.split('application/')[1]
 
-            blob_client = self.__get_blob_client(blob_name)
-            if file_content:
-                self.__upload_content(blob_client, content_settings, file_content)
-            else:
-                with open(file_path, read_directive or 'r') as data:
-                    self.__upload_content(blob_client, content_settings, data)
+        blob_client = self.__get_blob_client(blob_name)
+        if file_content:
+            self.__upload_content(blob_client, content_settings, file_content)
+        else:
+            with open(file_path, read_directive or 'r') as data:
+                self.__upload_content(blob_client, content_settings, data)
 
-            return blob_client.url
-        except:  # pylint: disable=bare-except
-            return None
+        return blob_client.url
 
     def _fetch_blobs(self, prefix, delimiter):
         if delimiter and prefix.endswith(delimiter):
@@ -170,6 +178,16 @@ class BlobStorage(CloudStorageServiceInterface):
 
     def _remove(self, blob_name):
         return self.__get_blob_client(blob_name).delete_blob()
+
+    @staticmethod
+    def __content_type(key, headers, metadata):
+        """
+        Resolves the content type from the headers, then from the S3 style metadata
+        ({'ContentType': ...}) that callers share with S3, then from the key extension.
+        """
+        header_type = next((v for k, v in (headers or {}).items() if k.lower() == 'content-type'), None)
+        return header_type or get(metadata or {}, 'ContentType') or mimetypes.guess_type(key)[0] \
+            or 'application/octet-stream'
 
     @staticmethod
     def __upload_content(blob_client, content_settings, file_content):

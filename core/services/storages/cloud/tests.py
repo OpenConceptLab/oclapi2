@@ -300,6 +300,75 @@ class BlobStorageTest(TestCase):
             }
         )
 
+    @staticmethod
+    def __storage_with_blob_client(blob_service_client):
+        """Builds a BlobStorage whose container client hands out one mocked blob client"""
+        blob_client = Mock(upload_blob=Mock(return_value='success'), url='https://some-url')
+        container_client = Mock(get_blob_client=Mock(return_value=blob_client))
+        blob_service_client.from_connection_string = Mock(
+            return_value=Mock(get_container_client=Mock(return_value=container_client)))
+        return BlobStorage(), blob_client
+
+    @patch('core.services.storages.cloud.azure.BlobServiceClient')
+    def test_upload(self, blob_service_client):
+        """upload() streams the file object as is and returns 204, like S3 and MinIO"""
+        blob_storage, blob_client = self.__storage_with_blob_client(blob_service_client)
+        file = io.BytesIO(b'a,b\n1,2\n')
+
+        result = blob_storage.upload('map_projects/1/input.csv', file)
+
+        self.assertEqual(result, 204)
+        blob_client.upload_blob.assert_called_once_with(data=file, content_settings=ANY, overwrite=True)
+        content_settings = blob_client.upload_blob.call_args[1]['content_settings']
+        self.assertEqual(content_settings.content_type, 'text/csv')
+        self.assertIsNone(content_settings.content_encoding)  # a content type is not a content encoding
+
+    @patch('core.services.storages.cloud.azure.BlobServiceClient')
+    def test_upload_content_type_precedence(self, blob_service_client):
+        """The content type comes from headers, then S3 style metadata, then the key extension"""
+        blob_storage, blob_client = self.__storage_with_blob_client(blob_service_client)
+
+        def uploaded_content_type(key='key.csv', **kwargs):
+            blob_storage.upload(key, io.BytesIO(b'x'), **kwargs)
+            return blob_client.upload_blob.call_args[1]['content_settings'].content_type
+
+        self.assertEqual(
+            uploaded_content_type(
+                headers={'Content-Type': 'application/x-header'}, metadata={'ContentType': 'application/x-metadata'}),
+            'application/x-header')
+        self.assertEqual(uploaded_content_type(metadata={'ContentType': 'application/x-metadata'}),
+                         'application/x-metadata')
+        self.assertEqual(uploaded_content_type(), 'text/csv')
+        self.assertEqual(uploaded_content_type(key='key'), 'application/octet-stream')
+
+    @patch('core.services.storages.cloud.azure.BlobServiceClient')
+    def test_upload_non_seekable_stream(self, blob_service_client):
+        """A stream with no known length (a raw HTTP response) is handed to the SDK untouched"""
+        blob_storage, blob_client = self.__storage_with_blob_client(blob_service_client)
+        stream = Mock(spec=['read'])
+
+        result = blob_storage.upload(
+            'key.bin', stream, headers={'content-type': 'application/octet-stream'},
+            metadata={'ContentType': 'application/octet-stream'})
+
+        self.assertEqual(result, 204)
+        blob_client.upload_blob.assert_called_once_with(data=stream, content_settings=ANY, overwrite=True)
+
+    @patch('core.services.storages.cloud.azure.BlobServiceClient')
+    def test_upload_failure_raises(self, blob_service_client):
+        """A failed upload is raised, never swallowed into a falsy result"""
+        blob_storage, blob_client = self.__storage_with_blob_client(blob_service_client)
+        blob_client.upload_blob.side_effect = Exception('boom')
+        file_path = os.path.join(os.path.dirname(__file__), '../../../', 'samples/sample_ocldev.json')
+        doc_base64 = 'extension/ext;base64,' + base64.b64encode(b'file-content').decode()
+
+        with self.assertRaises(Exception):
+            blob_storage.upload('key.csv', io.BytesIO(b'x'))
+        with self.assertRaises(Exception):
+            blob_storage.upload_file('key.json', file_path, binary=True)
+        with self.assertRaises(Exception):
+            blob_storage.upload_base64(doc_base64, 'some-file-name')
+
     @patch('core.services.storages.cloud.azure.BlobServiceClient', Mock())
     def test_public_url_for(self):
         blob_storage = BlobStorage()
@@ -749,3 +818,65 @@ class MinIOTest(TestCase):
             client.delete_objects(['test-file.txt'])
 
         self.assertIn("Could not delete object test-file.txt", str(context.exception))
+
+
+class StorageUploadContractTest(TestCase):
+    """The upload contract every cloud backend honours, whichever SDK sits behind it"""
+
+    SAMPLE_PATH = os.path.join(os.path.dirname(__file__), '../../../', 'samples/sample_ocldev.json')
+    DOC_BASE64 = 'extension/ext;base64,' + base64.b64encode(b'file-content').decode()
+
+    def _s3(self):
+        """Returns an S3 service and the SDK calls that perform its uploads"""
+        connection = Mock()
+        service = S3()
+        service._S3__get_connection = Mock(return_value=connection)  # pylint: disable=protected-access
+        return service, [connection.upload_fileobj]
+
+    def _minio(self):
+        """Returns a MinIO service and the SDK calls that perform its uploads"""
+        patcher = patch('core.services.storages.cloud.minio.Minio')
+        client = patcher.start().return_value
+        self.addCleanup(patcher.stop)
+        return MinIO(), [client.put_object, client.fput_object]
+
+    def _azure(self):
+        """Returns an Azure service and the SDK calls that perform its uploads"""
+        patcher = patch('core.services.storages.cloud.azure.BlobServiceClient')
+        blob_service_client = patcher.start()
+        self.addCleanup(patcher.stop)
+        blob_client = Mock(url='https://some-url')
+        container_client = Mock(get_blob_client=Mock(return_value=blob_client))
+        blob_service_client.from_connection_string.return_value.get_container_client.return_value = container_client
+        return BlobStorage(), [blob_client.upload_blob]
+
+    def _backends(self):
+        """Yields (name, service, sdk upload calls); each call builds fresh mocks"""
+        for name, factory in (('S3', self._s3), ('MinIO', self._minio), ('Azure', self._azure)):
+            service, sdk_calls = factory()
+            yield name, service, sdk_calls
+
+    def test_upload_returns_204(self):
+        for name, service, sdk_calls in self._backends():
+            with self.subTest(backend=name):
+                self.assertEqual(service.upload('some/key.csv', io.BytesIO(b'a,b\n1,2\n')), 204)
+                self.assertEqual(sum(call_.call_count for call_ in sdk_calls), 1)
+
+    def test_upload_base64_returns_file_name(self):
+        for name, service, _ in self._backends():
+            with self.subTest(backend=name):
+                self.assertEqual(service.upload_base64(self.DOC_BASE64, 'some-file-name'), 'some-file-name.ext')
+
+    def test_failed_upload_raises(self):
+        for name, service, sdk_calls in self._backends():
+            for call_ in sdk_calls:
+                call_.side_effect = Exception('boom')
+            with self.subTest(backend=name, source='file object'):
+                with self.assertRaises(Exception):
+                    service.upload('some/key.csv', io.BytesIO(b'x'))
+            with self.subTest(backend=name, source='path'):
+                with self.assertRaises(Exception):
+                    service.upload_file('some/key.json', self.SAMPLE_PATH, binary=True)
+            with self.subTest(backend=name, source='base64'):
+                with self.assertRaises(Exception):
+                    service.upload_base64(self.DOC_BASE64, 'some-file-name')
