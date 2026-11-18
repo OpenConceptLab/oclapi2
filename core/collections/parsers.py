@@ -91,7 +91,11 @@ class CollectionReferenceParser(CollectionReferenceAbstractParser):
             if self.collection:
                 # so a cascade run while parsing resolves in the collection's namespace
                 collection_reference.collection = self.collection
-            if should_cascade_now and collection_reference.code:
+            if should_cascade_now and collection_reference.code and \
+                    collection_reference.get_locked_transform_version(not collection_reference.version):
+                # under a lock, generated as a dict cascade is (generate_references), so both resolve within it
+                collection_reference.cascade = self.cascade
+            elif should_cascade_now and collection_reference.code:
                 uris = collection_reference.get_related_uris()
                 for uri in uris:
                     existing_uris = [collection_reference.expression, drop_version(collection_reference.expression)]
