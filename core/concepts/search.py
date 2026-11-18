@@ -7,6 +7,8 @@ from core.common.search import CustomESFacetedSearch, CustomESSearch, EXACT_OWNE
 from core.common.utils import get_embeddings, is_canonical_uri
 from core.concepts.models import Concept
 
+ES_MAX_RESULT_WINDOW = 10000  # index.max_result_window's default
+
 
 class BooleanTermsFacet(TermsFacet):
     """
@@ -189,7 +191,7 @@ class ConceptFuzzySearch:  # pragma: no cover
                 priority_criteria.append(
                     Q('term', **{f"properties.{property_code}.keyword": value.strip('\"').strip('\'')}))
 
-        knn_queries = []
+        knn_clauses = []
         name = None
         synonyms = []
         if is_semantic:
@@ -224,34 +226,25 @@ class ConceptFuzzySearch:  # pragma: no cover
                     minimum_should_match=1
                 ))
 
-            def get_knn_query(_field, _value, _boost):
-                return {
-                        "field": _field,
-                        "query_vector": get_embeddings(_value).tolist(),
-                        "k": k_nearest,
-                        "num_candidates": num_candidates,
-                        "filter": filter_query,
-                        "boost": _boost
-                }
             if name:
-                knn_queries.append(get_knn_query("_embeddings.vector", name, 0.3))
-                knn_queries.append(get_knn_query("_synonyms_embeddings.vector", name, 0.275))
+                knn_clauses.append((name, "_embeddings.vector", name, 0.3))
+                knn_clauses.append((name, "_synonyms_embeddings.vector", name, 0.275))
                 if variants_repo:
                     for name_variant in LexicalVariantDictionary.get_variant_terms(name, source_uri=variants_repo):
-                        knn_queries.append(get_knn_query("_embeddings.vector", name_variant, 0.285))
-                        knn_queries.append(get_knn_query("_synonyms_embeddings.vector", name_variant, 0.26))
+                        knn_clauses.append((name, "_embeddings.vector", name_variant, 0.285))
+                        knn_clauses.append((name, "_synonyms_embeddings.vector", name_variant, 0.26))
             for synonym in synonyms:
                 if synonym is not None:
-                    knn_queries.append(get_knn_query("_synonyms_embeddings.vector", synonym, 0.125))
-                    knn_queries.append(get_knn_query("_embeddings.vector", synonym, 0.15))
+                    knn_clauses.append((synonym, "_synonyms_embeddings.vector", synonym, 0.125))
+                    knn_clauses.append((synonym, "_embeddings.vector", synonym, 0.15))
                     if variants_repo:
                         synonym_variants = LexicalVariantDictionary.get_variant_terms(
                             synonym,
                             source_uri=variants_repo,
                         )
                         for synonym_variant in synonym_variants:
-                            knn_queries.append(get_knn_query("_synonyms_embeddings.vector", synonym_variant, 0.115))
-                            knn_queries.append(get_knn_query("_embeddings.vector", synonym_variant, 0.14))
+                            knn_clauses.append((synonym, "_synonyms_embeddings.vector", synonym_variant, 0.115))
+                            knn_clauses.append((synonym, "_embeddings.vector", synonym_variant, 0.14))
         else:
             for field in cls.fuzzy_fields:
                 value = data.get(field, None)
@@ -280,14 +273,18 @@ class ConceptFuzzySearch:  # pragma: no cover
             Q("bool", must=[Q(filter_query), clause])
             for clause in or_clauses
         ]
+        if knn_clauses:
+            wrapped_clauses.append(cls.get_knn_query(knn_clauses, filter_query, k_nearest, num_candidates))
 
         search = ConceptDocument.search()
-        for knn_query in knn_queries:
-            search = search.knn(**knn_query)
         if wrapped_clauses:
             search = search.query(Q("bool", should=wrapped_clauses, minimum_should_match=1))
         else:
             search = search.query(Q("bool", must=[Q(filter_query)]))
+        if knn_clauses:
+            # Global term statistics, as the top-level knn section's DFS phase used to give: with each shard's own,
+            # the lexical clauses' scores vary by shard more than the kNN part does
+            search = search.params(search_type="dfs_query_then_fetch")
 
         if is_semantic:
             if name:
@@ -368,6 +365,75 @@ class ConceptFuzzySearch:  # pragma: no cover
         search = search.highlight(*highlight)
         search = search.sort({'_score': {'order': 'desc'}})
         return search
+
+    @classmethod
+    def get_knn_query(cls, clauses, filter_query, k_nearest, num_candidates):  # pylint: disable=too-many-locals
+        """
+        The semantic part of the score, from (input term, vector field, text, boost) clauses. For each of the input's
+        terms (its name and each synonym, with their lexical variants) a concept scores by its best-matching name, not
+        the sum over its names (OpenConceptLab/ocl_online#592), and the terms add up. Each text is encoded once.
+        """
+        vectors = {text: get_embeddings(text).tolist() for text in dict.fromkeys(text for _, _, text, _ in clauses)}
+        nested_filter = cls.has_nested_query(filter_query.to_dict())
+        knn_filter = filter_query
+        if nested_filter:
+            # A nested filter matches nothing inside a nested knn query on ES 8.15 (elastic/elasticsearch#138184). The
+            # top-level knn section applies it, so it finds the candidates. They're scored here, pre-filtered by the
+            # filter without its nested parts, and the whole filter applies on top. Within a repo version a concept's
+            # rows share their names and mappings, so a candidate's mnemonic admits no row that only they would reject.
+            outer = cls.without_nested(filter_query.to_dict())
+            knn_filter = Q("bool", must=[
+                *([Q(outer)] if outer else []),
+                Q("terms", id_raw=cls.get_knn_candidates(clauses, vectors, filter_query, k_nearest, num_candidates))
+            ])
+        terms = {}
+        for term, field, text, boost in clauses:
+            terms.setdefault(term, []).append(Q("nested", path=field.split('.')[0], score_mode="max", query=Q(
+                "knn", field=field, query_vector=vectors[text], k=k_nearest, num_candidates=num_candidates,
+                filter=knn_filter, boost=boost)))
+        query = Q("bool", should=[Q("dis_max", queries=queries) for queries in terms.values()], minimum_should_match=1)
+        return Q("bool", must=[query], filter=[filter_query]) if nested_filter else query
+
+    @staticmethod
+    def get_knn_candidates(clauses, vectors, filter_query, k_nearest, num_candidates):  # pylint: disable=too-many-arguments
+        """The candidates' ids (mnemonics), from doc values: reading each hit's _id would load its stored _source."""
+        from core.concepts.documents import ConceptDocument
+        search = ConceptDocument.search().extra(stored_fields='_none_', docvalue_fields=['id_raw']).params(
+            track_total_hits=False)
+        for _, field, text, _ in clauses:
+            search = search.knn(
+                field=field, query_vector=vectors[text], k=k_nearest, num_candidates=num_candidates,
+                filter=filter_query)
+        hits = search[:min(k_nearest * len(clauses), ES_MAX_RESULT_WINDOW)].execute()
+        return sorted({mnemonic for hit in hits for mnemonic in hit.meta.fields.id_raw})
+
+    @classmethod
+    def has_nested_query(cls, query):
+        if isinstance(query, dict):
+            return 'nested' in query or any(cls.has_nested_query(value) for value in query.values())
+        if isinstance(query, list):
+            return any(cls.has_nested_query(value) for value in query)
+        return False
+
+    @classmethod
+    def without_nested(cls, query):
+        """
+        A query dict loosened to have no nested query, so it matches everything the query does: a must or filter clause
+        with one is loosened too, and a should or must_not group with one is dropped. None when nothing is left.
+        """
+        if 'bool' not in query:
+            return None if cls.has_nested_query(query) else query
+        loosened = {}
+        for occur, value in query['bool'].items():
+            if occur in ('must', 'filter'):
+                kept = [c for c in map(cls.without_nested, value if isinstance(value, list) else [value]) if c]
+                if kept:
+                    loosened[occur] = kept
+            elif occur not in ('should', 'must_not') or not cls.has_nested_query(value):
+                loosened[occur] = value
+        if 'should' not in loosened:
+            loosened.pop('minimum_should_match', None)
+        return {'bool': loosened} if {'must', 'filter', 'should', 'must_not'} & set(loosened) else None
 
     @classmethod
     def get_mapped_code_queries(cls, data, map_config):
