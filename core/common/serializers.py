@@ -40,7 +40,7 @@ class RepoVerificationSerializerMixin:
 
     def persist_verification_only(self, instance, validated_data):
         """A write of only the record leaves the rest of the version, and so its export, unchanged."""
-        if set(self.initial_data) != {'verification'}:
+        if set(getattr(self, 'initial_data', {})) != {'verification'}:
             return False
         instance.verification = validated_data['verification']
         instance.save(update_fields=['verification'])
