@@ -12,7 +12,8 @@
 #   ./release_version.sh current           print the version currently in VERSION_FILE
 #   ./release_version.sh full-version      print "<current>-<sha>" for build artifacts
 #   ./release_version.sh publish           create a published GitHub Release with a changelog for the current
-#                                           version, then bump MINOR in VERSION_FILE and push the bump commit
+#                                           version, then bump MINOR in VERSION_FILE and push the bump commit.
+#                                           If RELEASE_IMAGE is set, the notes name it as the release's image.
 set -euo pipefail
 
 # --- Per-repo config (only these two lines differ across repos) ---
@@ -84,6 +85,7 @@ cmd_publish() {
   fi
   [ -n "$changelog" ] || changelog="No changes recorded."
   changelog="Source commit: ${sha}"$'\n\n'"${changelog}"
+  [ -z "${RELEASE_IMAGE:-}" ] || changelog="Image: \`${RELEASE_IMAGE}\`"$'\n\n'"${changelog}"
 
   is_prerelease "$current_version" && prerelease_args=(--prerelease)
 
