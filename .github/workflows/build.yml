@@ -147,6 +147,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       image: ${{ env.IMAGE_REPOSITORY }}:${{ steps.version.outputs.tag }}
+      digest: ${{ steps.push.outputs.digest }}
 
     steps:
     - name: Free Disk Space
@@ -220,7 +221,20 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_TOKEN }}
       - name: Publish release and bump version
-        run: bash release_version.sh publish
+        id: publish
+        run: |
+          echo "tag=$(bash release_version.sh current)" >> "$GITHUB_OUTPUT"
+          bash release_version.sh publish
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          RELEASE_IMAGE: ${{ needs.build.outputs.image }}
+      # The tag can be pushed again, so the digest pins the image this release approved.
+      - name: Name the release's image in its notes
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          RELEASE_TAG: ${{ steps.publish.outputs.tag }}
+          IMAGE: ${{ needs.build.outputs.image }}
+          DIGEST: ${{ needs.build.outputs.digest }}
+        run: |
+          notes="$(gh release view "$RELEASE_TAG" --json body --jq .body)"
+          gh release edit "$RELEASE_TAG" --notes "$(printf 'Image: `%s`\n\nDigest: `%s`\n\n%s' "$IMAGE" "$DIGEST" "$notes")"
+          echo "Release $RELEASE_TAG: $IMAGE ($DIGEST)"
