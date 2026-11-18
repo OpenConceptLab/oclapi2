@@ -37,6 +37,7 @@ from core.mappings.models import Mapping
 from core.mappings.serializers import MappingVersionExportSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
+from core.sources.constants import SEED_MEMBERS_WRITTEN, SEED_RELEASE_INDEXED, SEED_STAGE
 from core.sources.models import Source, CloneLimitExceeded
 from core.sources.serializers import SourceDetailSerializer, SourceVersionExportSerializer
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
@@ -3540,7 +3541,7 @@ class SourceReleaseWhileSeedingTest(OCLAPITestCase):
     @patch.object(Source, 'index_resources_for_self_as_latest_released')
     def test_release_after_the_seed_task_read_released_is_indexed_by_the_request(self, index_release):
         def release_after_the_check(*_, **__):
-            self.assertNotIn(self.seed_task.id, self.processing_ids())
+            self.assertFalse(Source.objects.get(id=self.version.id).is_awaiting_members)
             self.set_released()
 
         with patch.object(Source, 'index_children', side_effect=release_after_the_check) as index_children:
@@ -3564,11 +3565,77 @@ class SourceReleaseWhileSeedingTest(OCLAPITestCase):
             (self.previous.id, {'is_in_latest_source_version': False}, self.version.id, 1),
             (self.version.id, {'_append_source_version': 'v2', 'is_in_latest_source_version': True}, None, 1),
         ])
+        self.assertEqual(Task.objects.get(id=self.seed_task.id).summary, {SEED_STAGE: SEED_RELEASE_INDEXED})
+
+    @patch.object(Source, 'index_children', Mock())
+    @patch.object(Source, 'index_resources_for_self_as_latest_released')
+    def test_request_that_loaded_the_version_before_the_members_were_written_still_indexes(self, index_release):
+        loaded_earlier = Source.objects.get(id=self.version.id)
+        self.run_seed_task()
+
+        loaded_earlier.released = True
+        self.assertEqual(Source.persist_changes(loaded_earlier, self.user, None), {})
+
+        index_release.assert_called_once_with(only_update=True)
+
+    @patch.object(Source, 'index_resources_for_self_as_latest_released')
+    def test_clearing_the_processing_flag_does_not_end_the_wait_for_members(self, index_release):
+        self.version.clear_processing()
+
+        self.set_released()
+
+        index_release.assert_not_called()
+
+    def test_release_flag_gone_stale_before_indexing_keeps_the_membership_tag(self):
+        partial_doc = {'_append_source_version': 'v2', 'is_in_latest_source_version': True}
+
+        for task in (index_source_concepts, index_source_mappings):
+            with self.subTest(task=task.__name__):
+                with patch('core.common.tasks.batch_index_with_summary') as batch_index:
+                    task(self.version.id, partial_doc)  # v2 isn't released, so its True flag is out of date
+
+                self.assertEqual(batch_index.call_args[1]['partial_doc'], {'_append_source_version': 'v2'})
+
+    def test_release_unflags_the_releases_superseded_while_they_were_seeding(self):
+        Source.objects.filter(id=self.version.id).update(released=True)
+        latest = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v3', released=True)
+
+        with patch.object(Source, 'index_children_async', autospec=True) as index_children_async:
+            latest.index_resources_for_self_as_latest_released()
+
+        self.assertEqual(
+            [args[0][0].id for args in index_children_async.call_args_list if args[1].get('exclude_members_of')],
+            [self.version.id, self.previous.id])
+
+    def test_release_stops_unflagging_at_a_release_that_was_indexed(self):
+        Source.objects.filter(id=self.version.id).update(released=True)
+        Task.objects.filter(id=self.seed_task.id).update(summary={SEED_STAGE: SEED_RELEASE_INDEXED})
+        latest = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v3', released=True)
+
+        with patch.object(Source, 'index_children_async', autospec=True) as index_children_async:
+            latest.index_resources_for_self_as_latest_released()
+
+        self.assertEqual(
+            [args[0][0].id for args in index_children_async.call_args_list if args[1].get('exclude_members_of')],
+            [self.version.id])
+
+    @patch.object(Source, 'index_children')
+    @patch.object(Source, 'index_resources_for_self_as_latest_released')
+    def test_seed_task_of_a_superseded_release_still_tags_its_members(self, index_release, index_children):
+        Source.objects.filter(id=self.version.id).update(released=True)
+        OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v3', released=True)
+
+        self.run_seed_task()
+
+        index_release.assert_not_called()
+        index_children.assert_called_once()
 
     @patch.object(Source, 'index_resources_for_self_as_latest_released')
     def test_release_of_a_seeded_version_is_indexed_straight_away(self, index_release):
-        self.version.remove_processing(self.seed_task.id)
-        Task.objects.filter(id=self.seed_task.id).update(state=SUCCESS)
+        Task.objects.filter(id=self.seed_task.id).update(summary={SEED_STAGE: SEED_MEMBERS_WRITTEN})
 
         self.set_released()
 
@@ -3583,7 +3650,7 @@ class SourceReleaseWhileSeedingTest(OCLAPITestCase):
         index_release.assert_called_once_with(only_update=True)
 
     @patch.object(Source, 'index_resources_for_self_as_latest_released')
-    def test_a_finished_seed_task_left_in_the_processing_ids_holds_nothing_back(self, index_release):
+    def test_a_finished_seed_task_holds_nothing_back(self, index_release):
         for state in (SUCCESS, FAILURE, REVOKED):
             with self.subTest(state=state):
                 Task.objects.filter(id=self.seed_task.id).update(state=state)

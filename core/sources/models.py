@@ -24,7 +24,8 @@ from core.concepts.models import ConceptName, Concept
 from core.services.storages.postgres import PostgresQL
 from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE, \
     HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID, LOCALE_EXTERNAL_AUTO_ID_CHOICES, \
-    CONTENT_TYPE_SUPPLEMENT, SUPPLEMENTS_REQUIRED, SUPPLEMENTS_FORMAT
+    CONTENT_TYPE_SUPPLEMENT, SUPPLEMENTS_REQUIRED, SUPPLEMENTS_FORMAT, SEED_MEMBERS_WRITTEN, SEED_RELEASE_INDEXED, \
+    SEED_STAGE
 from core.tasks.models import Task
 
 
@@ -504,10 +505,9 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         if self.is_latest_released:
             user = self.created_by
 
-            prev_released_version = self.get_prev_released_version()
-            if prev_released_version:
+            for version in self.get_released_versions_to_unflag():
                 # Members shared with this release keep their True: the False request leaves them out
-                prev_released_version.index_children_async(
+                version.index_children_async(
                     user, {'is_in_latest_source_version': False}, exclude_members_of=self.id)
 
             if only_update:
@@ -516,6 +516,7 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 self.index_children_async(
                     user, {'_append_source_version': self.version, 'is_in_latest_source_version': True}
                 )
+            self.record_seed_stage(SEED_RELEASE_INDEXED)
 
     def index_resources_for_self_as_unreleased(self):
         """
@@ -640,6 +641,12 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             return bool(excluding and excluding.is_latest_released)
         return not self.released
 
+    def without_stale_release_flag(self, partial_doc=None, exclude_members_of=None):
+        """The partial doc to write: a release flag that's no longer current goes, the rest of the doc still applies."""
+        if self.flag_write_is_current(partial_doc, exclude_members_of):
+            return partial_doc
+        return {key: value for key, value in partial_doc.items() if key != 'is_in_latest_source_version'}
+
     def sync_concept_vectors_async(self, user=None, recheck=True, countdown=None):
         """
         Queues this version's vector sync (sync_source_concept_vectors) on the indexing queue, with its arguments
@@ -703,15 +710,30 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
     @property
     def is_awaiting_members(self):
-        """
-        Whether the seed task has yet to write this version's members. The task takes its id off the processing ids
-        once they're written, so this reads them from the database rather than from this instance.
-        """
+        """Whether the seed task has yet to write this version's members."""
         seed_task = self.get_seed_new_version_task()
         return bool(
-            seed_task and seed_task.state not in (SUCCESS, FAILURE, REVOKED) and
-            Source.objects.filter(id=self.id, _background_process_ids__contains=[seed_task.id]).exists()
+            seed_task and seed_task.state not in (SUCCESS, FAILURE, REVOKED) and not get(seed_task.summary, SEED_STAGE)
         )
+
+    def record_seed_stage(self, stage):
+        """Kept on the seed task, which requests saving a copy of this version loaded earlier can't overwrite."""
+        seed_task = self.get_seed_new_version_task()
+        if seed_task:
+            Task.objects.filter(id=seed_task.id).update(summary={SEED_STAGE: stage})
+
+    def get_released_versions_to_unflag(self):
+        """
+        The previous release, and those before it for as long as a release didn't get to unflag its own previous
+        release: one superseded while it was seeding leaves that to the release that superseded it.
+        """
+        versions = []
+        for version in self.released_versions.exclude(id=self.id).order_by('-created_at').iterator():
+            versions.append(version)
+            seed_task = version.get_seed_new_version_task()
+            if not seed_task or get(seed_task.summary, SEED_STAGE) == SEED_RELEASE_INDEXED:
+                break
+        return versions
 
     def get_changelog_task(self):
         return self.get_changelog_task_by_name('source_version_compare')
