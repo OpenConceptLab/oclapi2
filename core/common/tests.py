@@ -1097,18 +1097,17 @@ class UtilsTest(OCLTestCase):
         self.assertEqual(es_id_in(search, [1, 2, 3]), 'search')
         search.query.assert_called_once_with("terms", _id=[1, 2, 3])
 
-    @staticmethod
-    def search_with_client(ids, total=None):
-        """A Search on a registered connection whose client answers with these hit ids"""
+    def search_with_client(self, ids, total=None):
+        """A Search on a connection, registered for this test only, whose client answers with these hit ids"""
         hits = [{'_index': 'concepts', '_id': _id} for _id in ids]
         body = {'hits': {'total': {'value': len(ids) if total is None else total, 'relation': 'eq'}, 'hits': hits}}
         client = Mock(search=Mock(return_value=Mock(body=body)))
         es_connections.add_connection('es_to_pks_test', client)
+        self.addCleanup(es_connections.remove_connection, 'es_to_pks_test')
         return Search(using='es_to_pks_test', index='concepts'), client
 
     def test_es_to_pks(self):
         search, client = self.search_with_client(['1', '2'])
-        self.addCleanup(es_connections.remove_connection, 'es_to_pks_test')
 
         self.assertEqual(es_to_pks(es_id_in(search, [1, 2, 3]).params(request_timeout=300), 3), ['1', '2'])
 
@@ -1124,7 +1123,6 @@ class UtilsTest(OCLTestCase):
 
     def test_es_to_pks_raises_when_hits_exceed_size(self):
         search, _ = self.search_with_client(['1', '2'], total=5)
-        self.addCleanup(es_connections.remove_connection, 'es_to_pks_test')
 
         with self.assertRaisesMessage(ValueError, '5 hits, more than the 2 read at once'):
             es_to_pks(search, 2)
@@ -1141,6 +1139,13 @@ class UtilsTest(OCLTestCase):
         self.assertEqual(next(batches), ids[:2])
         Organization.objects.filter(id=ids[0]).delete()  # an offset would now skip ids[2]
         self.assertEqual(list(batches), [ids[2:4], ids[4:]])
+
+    def test_id_batches_pages_a_union_by_offset(self):
+        from core.orgs.tests.factories import OrganizationFactory
+        ids = sorted(OrganizationFactory().id for _ in range(5))
+        union = Organization.objects.filter(id__in=ids[:3]).union(Organization.objects.filter(id__in=ids[3:]))
+
+        self.assertEqual(list(id_batches(union, 2)), [ids[:2], ids[2:4], ids[4:]])
 
     @patch('core.common.utils.settings')
     def test_web_url(self, settings_mock):

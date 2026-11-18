@@ -877,15 +877,14 @@ def es_to_pks(search, size):
 
 def id_batches(queryset, batch_size=1000):
     """The queryset's ids in id order, each list starting after the last id read, so rows added or removed during
-    the read can't make a batch skip or repeat a row; never yields an empty list"""
-    last_id = None
-    while True:
-        batch = queryset if last_id is None else queryset.filter(id__gt=last_id)
-        ids = list(batch.order_by('id').values_list('id', flat=True)[:batch_size])
-        if not ids:
-            return
+    the read can't make a batch skip or repeat a row; a union can't be filtered, so it pages by offset"""
+    id_qs = queryset.order_by('id').values_list('id', flat=True)
+    keyset = not id_qs.query.combinator
+    start, ids = 0, list(id_qs[:batch_size])
+    while ids:
         yield ids
-        last_id = ids[-1]
+        start += batch_size
+        ids = list(id_qs.filter(id__gt=ids[-1])[:batch_size] if keyset else id_qs[start:start + batch_size])
 
 
 def split_list_by_condition(items, predicate):
