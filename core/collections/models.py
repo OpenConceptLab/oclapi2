@@ -1473,22 +1473,27 @@ class CollectionReference(models.Model):
                 return recorded
         return compact([self._get_resolved_system_version(system_version_cache)])
 
-    def _get_resolved_valueset_versions(self, valueset_version_cache=None):
-        """Resolve and optionally cache collection versions for this reference."""
-        if valueset_version_cache is None:
-            return self.resolve_valueset_versions
-
+    def _get_resolved_valueset_versions(self, valueset_version_cache=None, expansion_cache=None):
+        """The value set versions its collection version's expansion recorded for it, else resolved now"""
+        expansion = self.get_default_expansion(expansion_cache) if self.collection_id else None
         versions = []
-        if isinstance(self.valueset, list):
-            for valueset in self.valueset:  # pylint: disable=not-an-iterable
-                if valueset:
-                    cache_key = (self.resolution_namespace, valueset, None)
-                    if cache_key not in valueset_version_cache:
-                        version, _ = Collection.resolve_reference_expression(valueset, self.resolution_namespace)
-                        valueset_version_cache[cache_key] = version if version.id else None
-                    if valueset_version_cache[cache_key]:
-                        versions.append(valueset_version_cache[cache_key])
+        for valueset in self.valueset if isinstance(self.valueset, list) else []:
+            version = self._get_valueset_version(valueset, valueset_version_cache) if valueset else None
+            if version:
+                recorded = expansion.get_collection_versions_resolved_by(valueset, version) if expansion else []
+                versions += recorded or [version]
         return versions
+
+    def _get_valueset_version(self, valueset, valueset_version_cache=None):
+        """Resolved now: under the collection's lock without a cache, as before; with one, its latest release"""
+        if valueset_version_cache is None:
+            version = self.resolve_valueset_version(valueset)
+            return version if version.id else None
+        cache_key = (self.resolution_namespace, valueset, None)
+        if cache_key not in valueset_version_cache:
+            version, _ = Collection.resolve_reference_expression(valueset, self.resolution_namespace)
+            valueset_version_cache[cache_key] = version if version.id else None
+        return valueset_version_cache[cache_key]
 
     def get_resolved_repo_versions_serialized(  # pylint: disable=too-many-arguments
             self, system_version_cache=None, valueset_version_cache=None, expansion_cache=None, user=None):
@@ -1497,7 +1502,7 @@ class CollectionReference(models.Model):
             version for version in self._get_resolved_system_versions(system_version_cache, expansion_cache)
             if version.has_view_access(user)]
         valueset_versions = [
-            version for version in self._get_resolved_valueset_versions(valueset_version_cache)
+            version for version in self._get_resolved_valueset_versions(valueset_version_cache, expansion_cache)
             if version.has_view_access(user)]
         data = []
         if system_versions:
@@ -2291,6 +2296,14 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
     def recorded_source_versions(self):
         return [*self.recorded_explicit_source_versions, *self.recorded_evaluated_source_versions]
 
+    @cached_property
+    def recorded_explicit_collection_versions(self):
+        return list(self.explicit_collection_versions.all())
+
+    @cached_property
+    def recorded_evaluated_collection_versions(self):
+        return list(self.evaluated_collection_versions.all())
+
     @staticmethod
     def get_versions_of_repo(versions, repo_version):
         repo_uri = drop_version(repo_version.uri)
@@ -2310,6 +2323,13 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             locked = self.get_versions_of_repo(self.recorded_evaluated_source_versions, repo_version)
             return compact([CollectionReference.pick_repo_version_with_resource_version(holders, locked)]) or explicit
         return [repo_version]
+
+    def get_collection_versions_resolved_by(self, valueset, repo_version):
+        """The value set versions of repo_version's repository this expansion recorded for a reference's value set"""
+        if CollectionReference.is_explicit_valueset(valueset):
+            return [repo_version]
+        return self.get_versions_of_repo(self.recorded_evaluated_collection_versions, repo_version) or \
+            self.get_versions_of_repo(self.recorded_explicit_collection_versions, repo_version)
 
     def is_unresolved_resource_version(self, reference):
         return reference.is_resource_versioned and reference.to_unresolved_resource_version() in (

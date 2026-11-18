@@ -1062,6 +1062,52 @@ class CollectionReferenceTest(OCLTestCase):
             [item['version_url'] for item in versionless_reference.get_resolved_repo_versions_serialized()],
             [v1.uri, v2.uri])
 
+    @staticmethod
+    def valueset_with_releases():
+        valueset = OrganizationCollectionFactory()
+        v1 = OrganizationCollectionFactory(
+            mnemonic=valueset.mnemonic, organization=valueset.organization, version='v1', released=True)
+        v2 = OrganizationCollectionFactory(
+            mnemonic=valueset.mnemonic, organization=valueset.organization, version='v2', released=True)
+        return valueset, v1, v2
+
+    def test_get_resolved_repo_versions_serialized_reads_valueset_versions_from_expansion(self):
+        valueset, v1, v2 = self.valueset_with_releases()
+        collection = OrganizationCollectionFactory()
+        reference = CollectionReference(expression=valueset.uri, collection=collection, valueset=[valueset.uri])
+
+        def resolved(**caches):
+            return [item['version_url'] for item in reference.get_resolved_repo_versions_serialized(**caches)]
+
+        self.assertEqual(resolved(), [v2.uri])
+
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.evaluated_collection_versions.add(v1)
+
+        self.assertEqual(resolved(), [v1.uri])
+        self.assertEqual(resolved(valueset_version_cache={}, expansion_cache={}), [v1.uri])
+
+    def test_get_resolved_repo_versions_serialized_valueset_named_with_a_version_or_not_recorded(self):
+        _, v1, v2 = self.valueset_with_releases()
+        other, _, other_v2 = self.valueset_with_releases()
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.evaluated_collection_versions.add(v1)
+        named = CollectionReference(expression=v2.uri, collection=collection, valueset=[v2.uri])
+        unrecorded = CollectionReference(expression=other.uri, collection=collection, valueset=[other.uri])
+
+        for caches in ({}, {'valueset_version_cache': {}, 'expansion_cache': {}}):
+            with self.subTest(caches=bool(caches)):
+                self.assertEqual(
+                    [item['version_url'] for item in named.get_resolved_repo_versions_serialized(**caches)], [v2.uri])
+                self.assertEqual(
+                    [item['version_url'] for item in unrecorded.get_resolved_repo_versions_serialized(**caches)],
+                    [other_v2.uri])
+
     def test_reference_as_concept_version(self):
         collection = OrganizationCollectionFactory()
         concept = ConceptFactory()
