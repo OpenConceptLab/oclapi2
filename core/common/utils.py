@@ -865,38 +865,26 @@ def es_id_in(search, ids):
     return search
 
 
-def es_to_pks(search):
-    # doesn't care about the order
-    default_limit = 25
-    limit = default_limit
-    offset = 0
-    result_count = 25
-    pks = []
-    while result_count > 0:
-        hits = search[offset:limit].execute().hits
-        result_count = len(hits)
-        if result_count:
-            pks += [hit.meta.id for hit in hits]
-        offset += default_limit
-        limit += default_limit
+def es_to_pks(search, size):
+    """Ids of all hits, at most size, in one request: unsorted pages skip or repeat hits across shard copies.
+    Elasticsearch refuses a partial answer, so a failed shard raises instead of returning fewer hits."""
+    response = search.source(False).params(allow_partial_search_results=False)[0:size].execute()
+    pks = [hit.meta.id for hit in response.hits]
+    if response.hits.total.value > len(pks):
+        raise ValueError(f'{response.hits.total.value} hits, more than the {size} read at once')
     return pks
 
 
-def batch_qs(qs, batch_size=1000):
-    """
-    Returns a sub-queryset for each batch in the given queryset.
-
-    Usage:
-        # Make sure to order your querset
-        article_qs = Article.objects.order_by('id')
-        for qs in batch_qs(article_qs):
-            for article in qs:
-                print article.body
-    """
-    total = qs.count()
-    for start in range(0, total, batch_size):
-        end = min(start + batch_size, total)
-        yield qs[start:end]
+def id_batches(queryset, batch_size=1000):
+    """The queryset's ids in id order, each list starting after the last id read, so rows added or removed during
+    the read can't make a batch skip or repeat a row; a union can't be filtered, so it pages by offset"""
+    id_qs = queryset.order_by('id').values_list('id', flat=True)
+    keyset = not id_qs.query.combinator
+    start, ids = 0, list(id_qs[:batch_size])
+    while ids:
+        yield ids
+        start += batch_size
+        ids = list(id_qs.filter(id__gt=ids[-1])[:batch_size] if keyset else id_qs[start:start + batch_size])
 
 
 def split_list_by_condition(items, predicate):
