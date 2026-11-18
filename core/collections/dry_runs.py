@@ -18,16 +18,23 @@ from core.toggles.models import Toggle
 
 class ExpansionDryRun:
     """
-    Runs expansion changes twice, with production's toggles and then with the given toggles on as well,
+    Runs expansion changes twice, with base_env's toggles and then with the given toggles on as well,
     each in a transaction that is rolled back, and reports what the toggles change.
     No Celery task is queued and nothing is indexed.
     """
-    BASE_ENV = 'production'
     DRY_RUN_VERSION = 'dry-run'
 
-    def __init__(self, toggles):
+    def __init__(self, toggles, base_env='production'):
         self.toggles = set(toggles)
+        self.toggle_column = self.get_toggle_column(base_env)
         self.blocked_tasks = Counter()
+
+    @staticmethod
+    def get_toggle_column(env):
+        """The toggles table column an environment reads, as Toggle.to_dict maps it"""
+        if not env or env in ['development', 'ci']:
+            return 'dev'
+        return 'who_staging' if env == 'who-staging' else env
 
     @staticmethod
     def unknown_toggles(names):
@@ -36,7 +43,7 @@ class ExpansionDryRun:
     def get_toggle(self, name, toggles_on):
         if name in toggles_on:
             return True
-        return Toggle.objects.filter(name=name, is_active=True).values_list(self.BASE_ENV, flat=True).first()
+        return Toggle.objects.filter(name=name, is_active=True).values_list(self.toggle_column, flat=True).first()
 
     def block_send(self, name, *args, **kwargs):  # pylint: disable=unused-argument
         self.blocked_tasks[name] += 1
@@ -92,6 +99,13 @@ class ExpansionDryRun:
         report, _ = self.compare(expansion.uri, expansion, action)
         return {'expansion': expansion.uri, **report}
 
+    def rebuild_against_stored(self, expansion):
+        """A rebuild under base_env's toggles, compared with the stored expansion"""
+        with self.rolled_back(set()):
+            report = expansion.dry_run_rebuild()
+        expansion.refresh_from_db()
+        return {'key': expansion.uri, **report}
+
     def add(self, collection_version, reference):
         """The reference and its members are removed, then the reference is added again as new"""
         def action():
@@ -116,7 +130,10 @@ class ExpansionDryRun:
         }
 
     def create_version(self, head):
-        """A release of HEAD, seeded in this transaction by the version create task, compared with HEAD's expansion"""
+        """
+        A release of HEAD, seeded in this transaction by the version create task, compared with HEAD's expansion.
+        Version creation locks the HEAD row, so writes to HEAD wait until each run rolls back.
+        """
         def action():
             version = Collection(
                 mnemonic=head.mnemonic, version=self.DRY_RUN_VERSION, organization=head.organization, user=head.user,
@@ -158,7 +175,7 @@ class ExpansionDryRun:
         held = newest.filter(sources__id__in=[version.id for version in versions]).distinct()
         return newest.count() - held.count()
 
-    def import_references(self, collection_version, expressions):
+    def import_references(self, collection_version, expressions, size=None):
         """Imported as the bulk importer adds references; off, on, on, off, so a warm cache favours neither"""
         def action():
             collection = Collection.objects.get(id=collection_version.id)
@@ -167,7 +184,8 @@ class ExpansionDryRun:
             return collection.expansion, {'added': len(added), 'errors': len(errors)}
 
         report, runs = self.compare(
-            f'{collection_version.uri} {len(expressions)}', collection_version.expansion, action,
+            self.get_import_key(collection_version, len(expressions) if size is None else size),
+            collection_version.expansion, action,
             order=('off', 'on', 'on', 'off'))
         return {
             'collection_version': collection_version.uri, 'size': len(expressions),
@@ -177,13 +195,22 @@ class ExpansionDryRun:
         }
 
     @staticmethod
-    def get_import_expressions(collection_version, source, size):
-        """Versionless expressions of the source's active concepts not yet in the collection version's expansion"""
-        concepts = Concept.objects.filter(
-            parent_id=source.id, id=F('versioned_object_id'), is_active=True, retired=False)
-        if collection_version.expansion_uri:
-            concepts = concepts.exclude(id__in=collection_version.expansion.concepts.values('versioned_object_id'))
-        uris = sorted(concepts.values_list('uri', flat=True))
+    def get_import_key(collection_version, size):
+        return f'{collection_version.uri} {size}'
+
+    @staticmethod
+    def get_source_concept_uris(source):
+        """Versionless URIs of the source's active concepts, sorted so a seeded sample repeats"""
+        return sorted(Concept.objects.filter(
+            parent_id=source.id, id=F('versioned_object_id'), is_active=True, retired=False
+        ).values_list('uri', flat=True))
+
+    @staticmethod
+    def get_import_expressions(collection_version, source_uris, size):
+        """A sample of the source URIs not yet in the collection version's expansion"""
+        existing = set(collection_version.expansion.concepts.values_list(
+            'versioned_object__uri', flat=True)) if collection_version.expansion_uri else set()
+        uris = [uri for uri in source_uris if uri not in existing]
         return random.sample(uris, min(size, len(uris)))
 
     @staticmethod

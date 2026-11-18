@@ -3978,6 +3978,7 @@ class ExpansionTest(OCLTestCase):
         _, old, v1, v2 = CollectionReferenceTest.source_with_replaced_concept_version()
         collection = self.locked_auto_expansion(v1)
         collection.add_expressions({'expressions': [old.versioned_object.uri]}, collection.created_by)
+        Concept.objects.filter(id=old.id).update(is_latest_version=False)
 
         report = ExpansionDryRun([EXPANSION_LOCKED_REPO_VERSION_TOGGLE]).create_version(collection)
 
@@ -3987,13 +3988,17 @@ class ExpansionTest(OCLTestCase):
         self.assertIsNone(report['off']['built_with'])
         self.assertEqual(report['on']['built_with'], 'lock')
         self.assertEqual(report['on']['versus_head']['concepts'], {})
+        self.assertEqual(report['off']['newest_not_in_source_versions'], 0)
+        self.assertEqual(report['on']['newest_not_in_source_versions'], 1)
         self.assertFalse(Collection.objects.filter(mnemonic=collection.mnemonic, version='dry-run').exists())
 
     def test_dry_run_import_with_lock_toggle(self):
         source, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
         collection = self.locked_auto_expansion(v1)
-        expressions = ExpansionDryRun.get_import_expressions(collection, source, 5)
-        self.assertEqual(expressions, [old.versioned_object.uri])
+        source_uris = ExpansionDryRun.get_source_concept_uris(source)
+        self.assertEqual(source_uris, [old.versioned_object.uri])
+        self.assertEqual(ExpansionDryRun.get_import_expressions(collection, source_uris, 5), source_uris)
+        expressions = source_uris
 
         report = ExpansionDryRun([EXPANSION_LOCKED_REPO_VERSION_TOGGLE]).import_references(collection, expressions)
 
@@ -4011,12 +4016,12 @@ class ExpansionTest(OCLTestCase):
 
         toggle = RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE
 
-        call_command('dry_run_expansions', collection.uri, '--toggle', toggle, stdout=out)
+        call_command('dry_run_expansions', f'{collection.uri}HEAD/', '--toggle', toggle, stdout=out)
 
         self.assertIn('concepts: 1 added, 0 removed, 0 changed', out.getvalue())
         for args in (
                 ['--mode', 'add'], ['--toggle', 'NOPE'], ['--toggle', toggle, '--env', 'production'],
-                ['--mode', 'import', '--toggle', toggle]):
+                ['--mode', 'import', '--toggle', toggle], ['--mode', 'version', '--toggle', toggle, '--loose-locks']):
             with self.assertRaises(CommandError):
                 call_command('dry_run_expansions', collection.uri, *args, stdout=out)
 
@@ -4040,6 +4045,28 @@ class ExpansionTest(OCLTestCase):
 
         self.assertEqual([report['key'] for report in reports], [f'{collection.uri} {reference.expression}'])
         self.assertEqual(reports[0]['toggles'], [EXPANSION_LOCKED_REPO_VERSION_TOGGLE])
+
+    def test_dry_run_expansions_command_retries_failures_and_rejects_other_files(self):
+        _, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection = self.locked_auto_expansion(v1)
+        collection.add_expressions({'expressions': [old.versioned_object.uri]}, collection.created_by)
+        key = f'{collection.uri} {collection.references.get().expression}'
+        args = ['dry_run_expansions', collection.uri, '--mode', 'add', '--toggle', EXPANSION_LOCKED_REPO_VERSION_TOGGLE]
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'report.jsonl')
+            with open(path, 'w') as file:
+                file.write(json.dumps({'key': key, 'error': 'OperationalError()'}) + '\n')
+            out = StringIO()
+            call_command(*args, '--output', path, stdout=out)
+            self.assertIn('0 already in', out.getvalue())
+            self.assertIn(f'{key} (', out.getvalue())
+
+            old_format = os.path.join(directory, 'report.json')
+            with open(old_format, 'w') as file:
+                json.dump([{'expansion': collection.expansion.uri}], file, indent=2)
+            with self.assertRaises(CommandError):
+                call_command(*args, '--output', old_format, stdout=StringIO())
 
     def _source_with_pins_in_releases(self):
         """c1's pinned version is held by v1 and v3, c2's only by v1"""

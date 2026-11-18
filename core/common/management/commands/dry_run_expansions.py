@@ -3,8 +3,8 @@ import os
 import random
 from functools import partial
 
+from django.conf import settings
 from django.core.management import BaseCommand, CommandError
-from django.test import override_settings
 
 from core.collections.dry_runs import ExpansionDryRun
 from core.collections.models import Collection, Expansion
@@ -27,7 +27,8 @@ class Command(BaseCommand):
         parser.add_argument(
             '--mode', choices=self.MODES, default='rebuild',
             help='rebuild: rebuild the expansion; add: remove each sampled reference and add it again; '
-                 'version: create a release from HEAD; import: bulk import --size concepts of --source')
+                 'version: create a release from HEAD (HEAD stays locked until each run rolls back); '
+                 'import: bulk import --size concepts of --source')
         parser.add_argument(
             '--toggle', action='append', default=[],
             help='Compare production\'s toggles with these on as well (repeatable). Required except for rebuild')
@@ -35,13 +36,14 @@ class Command(BaseCommand):
         parser.add_argument('--sample', type=int, default=0, help='Also dry run this many random expansions or HEADs')
         parser.add_argument(
             '--loose-locks', action='store_true',
-            help='add: sample only HEADs whose expansion locks a HEAD, unreleased or retired version')
+            help='add only: sample only HEADs whose expansion locks a HEAD, unreleased or retired version')
         parser.add_argument('--references', type=int, default=5, help='add: references per HEAD, at random')
         parser.add_argument('--source', help='import: source URI whose concepts are imported')
         parser.add_argument('--size', type=int, default=100, help='import: number of concepts to import')
         parser.add_argument('--seed', type=int, help='Random seed, so a rerun samples the same')
         parser.add_argument(
-            '--output', help='Append each report as a JSON line to this file; a rerun skips those already in it')
+            '--output',
+            help='Append each report as a JSON line to this file; a rerun skips those already in it, except failures')
 
     def handle(self, *args, **options):
         mode, toggles = options['mode'], options['toggle']
@@ -54,10 +56,13 @@ class Command(BaseCommand):
             raise CommandError(f'Unknown toggles: {", ".join(unknown)}')
         if mode == 'import' and not options['source']:
             raise CommandError('--mode import needs --source')
+        if options['loose_locks'] and mode != 'add':
+            raise CommandError('--loose-locks applies only to --mode add')
         if options['seed'] is not None:
             random.seed(options['seed'])
 
-        self.dry_run = ExpansionDryRun(toggles)
+        self.dry_run = ExpansionDryRun(toggles) if toggles else \
+            ExpansionDryRun([], base_env=options['env'] or settings.ENV)
         self.options = options
         self.done = self.get_done_keys()
         targets = self.get_expansions() if mode == 'rebuild' else self.get_heads()
@@ -73,32 +78,39 @@ class Command(BaseCommand):
     def get_expansions(self):
         expansions = [self.get_expansion(uri) for uri in self.options['uris']]
         if self.options['sample']:
-            expansions += list(Expansion.objects.filter(is_processing=False).order_by('?')[:self.options['sample']])
+            ids = list(Expansion.objects.filter(is_processing=False).order_by('id').values_list('id', flat=True))
+            expansions += list(Expansion.objects.filter(id__in=self.sample(ids)).order_by('uri'))
         return expansions
+
+    def sample(self, ids):
+        return random.sample(ids, min(self.options['sample'], len(ids)))
 
     def get_heads(self):
         heads = [self.get_head(uri) for uri in self.options['uris']]
         if self.options['sample']:
             queryset = ExpansionDryRun.get_heads_with_loose_locks() if self.options['loose_locks'] else \
                 Collection.objects.filter(version='HEAD')
-            ids = list(queryset.exclude(expansion_uri=None).exclude(expansion_uri='').values_list('id', flat=True))
-            heads += list(Collection.objects.filter(
-                id__in=random.sample(ids, min(self.options['sample'], len(ids)))).order_by('uri'))
+            ids = list(queryset.exclude(expansion_uri=None).exclude(expansion_uri='').order_by('id').values_list(
+                'id', flat=True))
+            heads += list(Collection.objects.filter(id__in=self.sample(ids)).order_by('uri'))
         return heads
 
     @staticmethod
-    def get_expansion(uri):
+    def to_collection_version_uri(uri):
+        """A HEAD's URI has no HEAD segment"""
+        return uri[:-len('HEAD/')] if uri.endswith('/HEAD/') else uri
+
+    def get_expansion(self, uri):
         expansion = Expansion.objects.filter(uri=uri).first()
         if not expansion:
-            collection_version = Collection.objects.filter(uri=uri).first()
+            collection_version = Collection.objects.filter(uri=self.to_collection_version_uri(uri)).first()
             expansion = collection_version.expansion if collection_version else None
         if not expansion:
             raise CommandError(f'No expansion found for {uri}')
         return expansion
 
-    @staticmethod
-    def get_head(uri):
-        head = Collection.objects.filter(uri=uri, version='HEAD').first()
+    def get_head(self, uri):
+        head = Collection.objects.filter(uri=self.to_collection_version_uri(uri), version='HEAD').first()
         if not head or not head.expansion_uri:
             raise CommandError(f'No HEAD collection version with an expansion found for {uri}')
         return head
@@ -107,8 +119,14 @@ class Command(BaseCommand):
         path = self.options['output']
         if not path or not os.path.exists(path):
             return set()
-        with open(path) as file:
-            done = {json.loads(line).get('key') for line in file if line.strip()}
+        try:
+            with open(path) as file:
+                reports = [json.loads(line) for line in file if line.strip()]
+        except json.JSONDecodeError as ex:
+            raise CommandError(f'{path} is not a JSON lines report from this command') from ex
+        if not all(isinstance(report, dict) for report in reports):
+            raise CommandError(f'{path} is not a JSON lines report from this command')
+        done = {report.get('key') for report in reports if 'error' not in report}
         self.stdout.write(f'{len(done)} already in {path}, skipping them')
         return done
 
@@ -136,16 +154,12 @@ class Command(BaseCommand):
         for expansion in expansions:
             if self.is_skipped(expansion.uri, expansion):
                 continue
-            run = self.dry_run.rebuild if self.dry_run.toggles else self.rebuild_against_stored
+            run = self.dry_run.rebuild if self.dry_run.toggles else self.dry_run.rebuild_against_stored
             self.run_safely(expansion.uri, partial(run, expansion), self.write_summary)
-
-    def rebuild_against_stored(self, expansion):
-        with override_settings(**({'ENV': self.options['env']} if self.options['env'] else {})):
-            return {'key': expansion.uri, **expansion.dry_run_rebuild()}
 
     def run_add(self, heads):
         for head in heads:
-            references = list(head.references.filter(include=True))
+            references = list(head.references.filter(include=True).order_by('id'))
             versionless = [reference for reference in references if not reference.names_repo_version]
             candidates = versionless or references
             for reference in random.sample(candidates, min(self.options['references'], len(candidates))):
@@ -163,12 +177,16 @@ class Command(BaseCommand):
         source = Source.objects.filter(uri=self.options['source']).first()
         if not source:
             raise CommandError(f'No source found for {self.options["source"]}')
+        source_uris = None
+        size = self.options['size']
         for head in heads:
-            expressions = ExpansionDryRun.get_import_expressions(head, source, self.options['size'])
-            key = f'{head.uri} {len(expressions)}'
-            if not self.is_skipped(key, head.expansion):
-                self.run_safely(
-                    key, partial(self.dry_run.import_references, head, expressions), self.write_summary)
+            key = ExpansionDryRun.get_import_key(head, size)
+            if self.is_skipped(key, head.expansion):
+                continue
+            if source_uris is None:
+                source_uris = ExpansionDryRun.get_source_concept_uris(source)
+            expressions = ExpansionDryRun.get_import_expressions(head, source_uris, size)
+            self.run_safely(key, partial(self.dry_run.import_references, head, expressions, size), self.write_summary)
 
     def write_summary(self, report):
         seconds = report['seconds']
