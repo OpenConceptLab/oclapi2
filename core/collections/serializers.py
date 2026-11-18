@@ -13,7 +13,7 @@ from core.collections.constants import VERSION_EXPANSION_CHOICES, VERSION_EXPANS
 from core.collections.models import Collection, CollectionReference, Expansion
 from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, INCLUDE_SUMMARY, \
     INCLUDE_CLIENT_CONFIGS, INVALID_EXPANSION_URL, INCLUDE_STATES, INCLUDE_TASKS, INCLUDE_RESOLVED_REPO_VERSIONS, \
-    INCLUDE_EXTERNAL_EXPORTS, INCLUDE_LATEST_RELEASED_VERSION
+    INCLUDE_EXTERNAL_EXPORTS, INCLUDE_LATEST_RELEASED_VERSION, VERSION_EXPORT_EXCLUDED_FIELDS
 from core.common.serializers import AbstractRepoResourcesSerializer, AbstractResourceSerializer, PublicAccessField, \
     RepoVerificationSerializerMixin
 from core.common.utils import get_truthy_values
@@ -643,7 +643,9 @@ class CollectionVersionExportSerializer(CollectionVersionDetailSerializer):
     class Meta:
         model = Collection
         fields = (
-            *(field for field in CollectionVersionDetailSerializer.Meta.fields if field != 'verification'), 'collection'
+            *(field for field in CollectionVersionDetailSerializer.Meta.fields
+              if field not in VERSION_EXPORT_EXCLUDED_FIELDS),
+            'collection'
         )
 
 

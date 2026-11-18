@@ -551,7 +551,6 @@ class CodeSystemTest(OCLTestCase):
         self.assertEqual(concept.is_head, False)
         self.assertEqual(len(concept.names.all()), 2)
 
-
     @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
     @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
     def test_put_code_system_new_version_does_not_carry_verification(self):

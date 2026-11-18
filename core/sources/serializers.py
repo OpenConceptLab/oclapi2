@@ -11,7 +11,7 @@ from rest_framework.serializers import ModelSerializer, ValidationError
 from core.client_configs.serializers import ClientConfigSerializer
 from core.common.constants import DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, HEAD, \
     INCLUDE_SUMMARY, INCLUDE_CLIENT_CONFIGS, INCLUDE_HIERARCHY_ROOT, INCLUDE_STATES, INCLUDE_TASKS, \
-    INCLUDE_EXTERNAL_EXPORTS, INCLUDE_LATEST_RELEASED_VERSION
+    INCLUDE_EXTERNAL_EXPORTS, INCLUDE_LATEST_RELEASED_VERSION, VERSION_EXPORT_EXCLUDED_FIELDS
 from core.common.serializers import AbstractRepoResourcesSerializer, AbstractResourceSerializer, PublicAccessField, \
     RepoVerificationSerializerMixin
 from core.common.utils import get_truthy_values
@@ -606,5 +606,7 @@ class SourceVersionExportSerializer(SourceVersionDetailSerializer):
     class Meta:
         model = Source
         fields = (
-            *(field for field in SourceVersionDetailSerializer.Meta.fields if field != 'verification'), 'source'
+            *(field for field in SourceVersionDetailSerializer.Meta.fields
+              if field not in VERSION_EXPORT_EXCLUDED_FIELDS),
+            'source'
         )

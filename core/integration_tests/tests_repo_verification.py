@@ -1,3 +1,5 @@
+from unittest.mock import patch, Mock
+
 from core.collections.models import Collection
 from core.collections.serializers import CollectionVersionExportSerializer, CollectionVersionDetailSerializer
 from core.collections.tests.factories import OrganizationCollectionFactory
@@ -66,6 +68,70 @@ class RepoVerificationTestsMixin:
         self.assertEqual(response.status_code, 403)
         self.assertEqual(self.stored(), VALID)
 
+    def get_body(self, url):
+        return self.client.get(url, HTTP_AUTHORIZATION=f'Token {self.member_token}').json()
+
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    def test_a_repository_admin_can_send_back_the_whole_version_they_read(self):
+        for record in [None, VALID]:
+            with self.subTest(record=record):
+                self.model.objects.filter(id=self.version.id).update(verification=record)
+                body = self.get_body(self.version.uri)
+                self.assertEqual(body['verification'], record)
+
+                response = self.put(self.version.uri, {**body, 'description': 'edited'}, self.member_token)
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(self.stored(), record)
+                self.assertEqual(self.model.objects.get(id=self.version.id).description, 'edited')
+
+    def test_a_repository_admin_can_send_back_the_empty_record_head_returns(self):
+        self.assertIsNone(self.get_body(f'{self.head.uri}HEAD/')['verification'])
+
+        response = self.put(
+            f'{self.head.uri}HEAD/', {'description': 'edited', 'verification': None}, self.member_token)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(self.model.objects.get(id=self.head.id).verification)
+
+    def test_a_repository_admin_cannot_change_it_inside_a_whole_version(self):
+        self.model.objects.filter(id=self.version.id).update(verification=VALID)
+        body = self.get_body(self.version.uri)
+        other = {**VALID, 'process': 'ocl-verification-v2'}
+
+        for record in [other, None]:
+            with self.subTest(record=record):
+                response = self.put(
+                    self.version.uri, {**body, 'description': 'edited', 'verification': record}, self.member_token)
+
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(self.stored(), VALID)
+                self.assertNotEqual(self.model.objects.get(id=self.version.id).description, 'edited')
+
+    def test_sending_only_the_unchanged_record_saves_nothing(self):
+        self.model.objects.filter(id=self.version.id).update(verification=VALID)
+        before = self.model.objects.get(id=self.version.id)
+
+        for token in [self.member_token, self.staff_token]:
+            response = self.put(self.version.uri, {'verification': dict(reversed(VALID.items()))}, token)
+
+            self.assertEqual(response.status_code, 200)
+            after = self.model.objects.get(id=self.version.id)
+            self.assertEqual(after.verification, VALID)
+            self.assertEqual(after.updated_at, before.updated_at)
+
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    def test_an_empty_record_is_accepted_when_creating_a_version(self):
+        data = {'id': 'v2', 'description': 'new', 'verification': None}
+
+        response = self.client.post(
+            f'{self.head.uri}versions/', data, HTTP_AUTHORIZATION=f'Token {self.member_token}', format='json')
+
+        self.assertEqual(response.status_code, 201)
+        self.assertIsNone(self.model.objects.get(mnemonic=self.head.mnemonic, version='v2').verification)
+
     def test_a_repository_admin_cannot_set_it_through_the_latest_version_route(self):
         response = self.put(f'{self.head.uri}latest/', {'verification': VALID}, self.member_token)
 
@@ -113,10 +179,14 @@ class RepoVerificationTestsMixin:
                 {**VALID, 'verified_at': '2026-11-20T14:02:11+00:60'},
                 {**VALID, 'verified_at': '2026-11-20T14:02:11+24:00'},
                 {**VALID, 'verified_at': '2026-11-20T14:02:11Z\n'},
+                {**VALID, 'verified_at': '2026-11-20T14:02:11'},
+                {**VALID, 'verified_at': '2026-11-20T14:02Z'},
+                {**VALID, 'verified_at': '2026-11-20T14:02'},
                 {**VALID, 'verified_at': 20261120},
                 {**VALID, 'process': 'ocl verification'},
                 {**VALID, 'process': 'ocl_verification'},
                 {**VALID, 'process': ''},
+                {**VALID, 'process': 'a' * 65},
                 {**VALID, 'hash': 'a' * 64},
                 {**VALID, 'hash': f'sha256:{"A" * 64}'},
                 {**VALID, 'hash': f'sha256:{"a" * 63}'},
@@ -129,15 +199,18 @@ class RepoVerificationTestsMixin:
                 self.assertIn('verification', response.data)
                 self.assertIsNone(self.stored())
 
-    def test_it_accepts_any_valid_date_time_precision_and_offset(self):
-        for verified_at in [
-                '2026-11-20T14:02:11', '2026-11-20T14:02:11.1234567Z', '2026-11-20T14:02:11-03:00', '2026-11-20T14:02Z'
-        ]:
+    def test_it_accepts_fractional_seconds_and_any_offset(self):
+        for verified_at in ['2026-11-20T14:02:11.1234567Z', '2026-11-20T14:02:11-03:00']:
             with self.subTest(verified_at=verified_at):
                 response = self.put(
                     self.version.uri, {'verification': {**VALID, 'verified_at': verified_at}}, self.staff_token)
 
                 self.assertEqual(response.status_code, 200)
+
+    def test_a_process_of_the_longest_allowed_length_is_accepted(self):
+        response = self.put(self.version.uri, {'verification': {**VALID, 'process': 'a' * 64}}, self.staff_token)
+
+        self.assertEqual(response.status_code, 200)
 
     def test_it_is_not_copied_to_a_new_version(self):
         self.head.verification = VALID
