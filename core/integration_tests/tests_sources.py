@@ -3544,6 +3544,8 @@ class SourceReleaseWhileSeedingTest(OCLAPITestCase):
         def record(version, _user=None, partial_doc=None, exclude_members_of=None):
             members = Concept.sources.through.objects.filter(source_id=self.version.id).count()
             writes.append((version.id, partial_doc, exclude_members_of, members))
+            # recorded first, so a worker that picks up this write can't read the stage from before it
+            self.assertEqual(Task.objects.get(id=self.seed_task.id).summary, {SEED_STAGE: SEED_RELEASE_INDEXED})
 
         with patch.object(Source, 'index_children_async', autospec=True, side_effect=record):
             self.set_released()
@@ -3553,7 +3555,6 @@ class SourceReleaseWhileSeedingTest(OCLAPITestCase):
             (self.previous.id, {'is_in_latest_source_version': False}, self.version.id, 1),
             (self.version.id, {'_append_source_version': 'v2', 'is_in_latest_source_version': True}, None, 1),
         ])
-        self.assertEqual(Task.objects.get(id=self.seed_task.id).summary, {SEED_STAGE: SEED_RELEASE_INDEXED})
 
     @patch.object(Source, 'index_children', Mock())
     @patch.object(Source, 'index_resources_for_self_as_latest_released')

@@ -503,8 +503,11 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         """
         if self.is_latest_released:
             user = self.created_by
+            versions_to_unflag = self.get_released_versions_to_unflag()
+            # Before the writes, which can read it as soon as they're queued
+            self.record_seed_stage(SEED_RELEASE_INDEXED)
 
-            for version in self.get_released_versions_to_unflag():
+            for version in versions_to_unflag:
                 # Members shared with this release keep their True: the False request leaves them out
                 version.index_children_async(
                     user, {'is_in_latest_source_version': False}, exclude_members_of=self.id)
@@ -515,7 +518,6 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 self.index_children_async(
                     user, {'_append_source_version': self.version, 'is_in_latest_source_version': True}
                 )
-            self.record_seed_stage(SEED_RELEASE_INDEXED)
             return True
         return False
 
@@ -651,11 +653,13 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         if self.flag_write_is_current(partial_doc, exclude_members_of):
             return partial_doc, exclude_members_of
         latest = self.get_latest_released_version()
-        if exclude_members_of and partial_doc['is_in_latest_source_version'] is False and latest and latest.id != self.id:
+        is_unflag = exclude_members_of and partial_doc['is_in_latest_source_version'] is False
+        if is_unflag and latest and latest.id != self.id:
             if not latest.is_awaiting_members:
                 return partial_doc, latest.id
             superseded = Source.objects.filter(id=exclude_members_of).first()
-            if superseded and get(superseded.get_seed_new_version_task(), 'summary') == {SEED_STAGE: SEED_RELEASE_INDEXED}:
+            seed_task = superseded.get_seed_new_version_task() if superseded else None
+            if get(seed_task, 'summary') == {SEED_STAGE: SEED_RELEASE_INDEXED}:
                 superseded.record_seed_stage(SEED_MEMBERS_WRITTEN)
         return {key: value for key, value in partial_doc.items() if key != 'is_in_latest_source_version'}, None
 
