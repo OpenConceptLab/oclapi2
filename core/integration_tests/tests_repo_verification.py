@@ -244,7 +244,8 @@ class RepoVerificationTestsMixin:
         self.assertEqual(dict(self.export_serializer(after).data), export_before)
 
     def test_the_repository_route_for_a_version_also_saves_only_the_record(self):
-        self.model.objects.get(id=self.version.id).get_checksums(recalculate=False)  # the update view fills these once
+        stale = {'standard': 'stale', 'smart': 'stale'}
+        self.model.objects.filter(id=self.version.id).update(checksums=stale)
         before = self.model.objects.get(id=self.version.id)
         url = f'{self.head.uri}?version=v1'
 
@@ -255,6 +256,12 @@ class RepoVerificationTestsMixin:
             after = self.model.objects.get(id=self.version.id)
             self.assertEqual(after.verification, VALID)
             self.assertEqual(after.updated_at, before.updated_at)
+            self.assertEqual(after.checksums, stale)
+
+        response = self.put(url, {'description': 'edited'}, self.member_token)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotEqual(self.model.objects.get(id=self.version.id).checksums, stale)
 
     def test_a_nested_serializer_without_a_payload_skips_the_check(self):
         self.assertEqual(self.detail_serializer().validate({'name': 'nested'}), {'name': 'nested'})

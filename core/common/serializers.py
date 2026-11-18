@@ -27,6 +27,7 @@ TRUTHY = get_truthy_values()
 
 class RepoVerificationSerializerMixin:
     """Every repository write passes here, so only staff can change `verification` on any of them."""
+    saved_verification_only = False
 
     @staticmethod
     def is_valid_verification(value):
@@ -68,6 +69,7 @@ class RepoVerificationSerializerMixin:
         if 'verification' in validated_data:
             instance.verification = validated_data['verification']
             instance.save(update_fields=['verification'])
+        self.saved_verification_only = True
         return True
 
 
