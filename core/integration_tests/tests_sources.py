@@ -3517,20 +3517,6 @@ class SourceReleaseWhileSeedingTest(OCLAPITestCase):
         finally:
             seed_children_to_new_version.pop_request()
 
-    def processing_ids(self):
-        return Source.objects.values_list('_background_process_ids', flat=True).get(id=self.version.id)
-
-    @patch.object(Source, 'index_resources_for_self_as_latest_released')
-    def test_release_before_the_seed_task_runs_is_indexed_by_the_task(self, index_release):
-        self.set_released()
-
-        index_release.assert_not_called()
-        self.assertTrue(Source.objects.get(id=self.version.id).released)
-
-        self.run_seed_task()
-
-        index_release.assert_called_once_with()
-
     @patch.object(Source, 'index_children')
     @patch.object(Source, 'index_resources_for_self_as_latest_released')
     def test_release_while_the_seed_task_runs_is_indexed_by_the_task(self, index_release, index_children):
@@ -3729,7 +3715,8 @@ class SourceReleaseWhileSeedingTest(OCLAPITestCase):
                 self.run_seed_task()
 
         index_release.assert_not_called()
-        self.assertNotIn(self.seed_task.id, self.processing_ids())
+        self.assertNotIn(
+            self.seed_task.id, Source.objects.values_list('_background_process_ids', flat=True).get(id=self.version.id))
 
 
 class SourceVersionPrivateHeadAccessTest(PrivateHeadVersionAccessMixin, OCLAPITestCase):

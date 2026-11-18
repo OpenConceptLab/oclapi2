@@ -740,9 +740,6 @@ class VersionedModel(BaseResourceModel):
             versions = versions.exclude(version=HEAD)
         return versions.order_by('-created_at').first()
 
-    def get_prev_released_version(self):
-        return self.released_versions.exclude(id=self.id).order_by('-created_at').first()
-
     @property
     def is_latest_released(self):
         latest_released = self.get_latest_released_version()

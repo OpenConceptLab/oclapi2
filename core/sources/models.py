@@ -1,7 +1,6 @@
 import uuid
 from collections import OrderedDict
 
-from celery.states import SUCCESS
 from celery_once import AlreadyQueued
 from dirtyfields import DirtyFieldsMixin
 from django.conf import settings
@@ -725,7 +724,7 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     def is_awaiting_members(self):
         """Whether this version's members are yet to be written. A failed or revoked seed task hasn't written them."""
         seed_task = self.get_seed_new_version_task()
-        return bool(seed_task and seed_task.state != SUCCESS and not get(seed_task.summary, SEED_STAGE))
+        return bool(seed_task and not seed_task.is_success and not get(seed_task.summary, SEED_STAGE))
 
     def record_seed_stage(self, stage):
         """Kept on the seed task, which requests saving a copy of this version loaded earlier can't overwrite."""
