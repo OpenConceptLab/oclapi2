@@ -656,7 +656,7 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             if not latest.is_awaiting_members:
                 return partial_doc, latest.id
             superseded = Source.objects.filter(id=exclude_members_of).first()
-            if superseded:
+            if superseded and get(superseded.get_seed_new_version_task(), 'summary') == {SEED_STAGE: SEED_RELEASE_INDEXED}:
                 superseded.record_seed_stage(SEED_MEMBERS_WRITTEN)
         return {key: value for key, value in partial_doc.items() if key != 'is_in_latest_source_version'}, None
 

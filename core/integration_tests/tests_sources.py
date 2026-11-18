@@ -3666,6 +3666,17 @@ class SourceReleaseWhileSeedingTest(OCLAPITestCase):
         self.assertEqual(
             [version.id for version in latest.get_released_versions_to_unflag()], [self.version.id, self.previous.id])
 
+    def test_queued_unflag_does_not_record_members_for_an_unfinished_seed(self):
+        Source.objects.filter(id=self.version.id).update(released=True)
+        latest = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v3', released=True)
+        Task.new(user=self.user, name='seed_children_to_new_version', args=['source', latest.id, False, False])
+
+        index_source_concepts(
+            self.previous.id, {'is_in_latest_source_version': False}, exclude_members_of=self.version.id)
+
+        self.assertTrue(Source.objects.get(id=self.version.id).is_awaiting_members)
+
     @patch.object(Source, 'index_resources_for_self_as_latest_released')
     def test_release_of_a_seeded_version_is_indexed_straight_away(self, index_release):
         Task.objects.filter(id=self.seed_task.id).update(summary={SEED_STAGE: SEED_MEMBERS_WRITTEN})
