@@ -163,7 +163,7 @@ INDEX_BATCH_SIZE = 500
 
 VERIFICATION_FIELDS = {'verified_at', 'process', 'hash'}
 VERIFICATION_VERIFIED_AT_REGEX = r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}' \
-                                 r'(\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})?'
+                                 r'(\.[0-9]+)?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])?'
 VERIFICATION_PROCESS_REGEX = r'[A-Za-z0-9.-]+'
 VERIFICATION_HASH_REGEX = r'sha256:[0-9a-f]{64}'
 VERIFICATION_INVALID = 'Must have exactly verified_at (ISO 8601 date-time), process (letters, digits, . and -) ' \

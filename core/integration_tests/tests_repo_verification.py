@@ -110,6 +110,8 @@ class RepoVerificationTestsMixin:
                 {key: value for key, value in VALID.items() if key != 'hash'},
                 {**VALID, 'verified_at': '2026-11-20'},
                 {**VALID, 'verified_at': '2026-13-20T14:02:11Z'},
+                {**VALID, 'verified_at': '2026-11-20T14:02:11+00:60'},
+                {**VALID, 'verified_at': '2026-11-20T14:02:11+24:00'},
                 {**VALID, 'verified_at': '2026-11-20T14:02:11Z\n'},
                 {**VALID, 'verified_at': 20261120},
                 {**VALID, 'process': 'ocl verification'},
@@ -127,13 +129,28 @@ class RepoVerificationTestsMixin:
                 self.assertIn('verification', response.data)
                 self.assertIsNone(self.stored())
 
+    def test_it_accepts_any_valid_date_time_precision_and_offset(self):
+        for verified_at in ['2026-11-20T14:02:11', '2026-11-20T14:02:11.1234567Z', '2026-11-20T14:02:11-03:00']:
+            with self.subTest(verified_at=verified_at):
+                response = self.put(
+                    self.version.uri, {'verification': {**VALID, 'verified_at': verified_at}}, self.staff_token)
+
+                self.assertEqual(response.status_code, 200)
+
     def test_it_is_not_copied_to_a_new_version(self):
         self.head.verification = VALID
-        new_version = self.model(mnemonic=self.head.mnemonic, version='v2')
+        new_version = self.model(mnemonic=self.head.mnemonic, version='v2', verification=VALID)
 
         new_version.update_version_data(self.head)
 
         self.assertIsNone(new_version.verification)
+
+    def test_head_never_keeps_it_when_saved(self):
+        self.head.verification = VALID
+
+        self.head.full_clean()
+
+        self.assertIsNone(self.head.verification)
 
     def test_it_is_left_out_of_the_export(self):
         self.version.verification = VALID
