@@ -1,4 +1,8 @@
 import importlib
+import json
+import os
+import random
+import tempfile
 from io import StringIO
 
 from celery_once import AlreadyQueued
@@ -13,7 +17,9 @@ from mock.mock import ANY
 from rest_framework import status
 from rest_framework.response import Response
 
-from core.collections.constants import SOURCE_TO_CONCEPTS, TRANSFORM_TO_RESOURCE_VERSIONS
+from core.collections.constants import SOURCE_TO_CONCEPTS, TRANSFORM_TO_RESOURCE_VERSIONS, \
+    EXPANSION_LOCKED_REPO_VERSION_TOGGLE, RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE
+from core.collections.dry_runs import ExpansionDryRun
 from core.collections.documents import CollectionDocument
 from core.common.constants import SERIALIZATION_RETRY_ATTEMPTS
 from core.collections.models import CollectionReference, Collection, Expansion
@@ -29,7 +35,7 @@ from core.collections.utils import is_mapping, is_concept, is_version_specified,
     get_concept_by_expression
 from core.common.constants import OPENMRS_VALIDATION_SCHEMA, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, \
     RETIRED_ACCESS_TYPE_EDIT
-from core.common.tasks import add_references, seed_children_to_new_version
+from core.common.tasks import add_references, seed_children_to_new_version, seed_children_to_expansion
 from core.common.tasks import update_collection_active_concepts_count
 from core.common.tasks import update_collection_active_mappings_count
 from core.common.tests import OCLTestCase, OCLAPITestCase
@@ -3923,6 +3929,193 @@ class ExpansionTest(OCLTestCase):
             call_command('dry_run_expansions', stdout=out)
         with self.assertRaises(CommandError):
             call_command('dry_run_expansions', collection.uri, '--env', 'nowhere', stdout=out)
+
+    def test_dry_run_rolls_back_and_queues_no_task(self):
+        dry_run = ExpansionDryRun([EXPANSION_LOCKED_REPO_VERSION_TOGGLE])
+
+        with dry_run.rolled_back(set()):
+            OrganizationCollectionFactory(mnemonic='dry')
+            seed_children_to_expansion.apply_async((0,))
+            self.assertFalse(Toggle.get(EXPANSION_LOCKED_REPO_VERSION_TOGGLE))
+        with dry_run.rolled_back(dry_run.toggles):
+            self.assertTrue(Toggle.get(EXPANSION_LOCKED_REPO_VERSION_TOGGLE))
+
+        self.assertFalse(Collection.objects.filter(mnemonic='dry').exists())
+        self.assertEqual(dry_run.blocked_tasks, {seed_children_to_expansion.name: 1})
+        self.assertEqual(ExpansionDryRun.unknown_toggles([EXPANSION_LOCKED_REPO_VERSION_TOGGLE, 'NOPE']), ['NOPE'])
+
+    def test_dry_run_rebuild_with_toggle(self):
+        source, old, _, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection, expansion, reference = self._expansion_with_resource_version_reference(source, old)
+        self._rebuild(collection, expansion)
+
+        report = ExpansionDryRun([RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE]).rebuild(expansion)
+
+        added = {'type': 'concepts', 'status': 'added', 'before': None, 'after': old.uri}
+        self.assertEqual(report['key'], expansion.uri)
+        self.assertEqual(report['concepts'], {'added': 1, 'removed': 0, 'changed': 0})
+        self.assertEqual(report['references'], {reference.expression: [added]})
+        self.assertEqual(len(report['seconds']), 2)
+        self.assertEqual(list(expansion.concepts.all()), [old])
+
+    def test_dry_run_add_with_lock_toggle(self):
+        _, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection = self.locked_auto_expansion(v1)
+        collection.add_expressions({'expressions': [old.versioned_object.uri]}, collection.created_by)
+        reference = collection.references.get()
+
+        report = ExpansionDryRun([EXPANSION_LOCKED_REPO_VERSION_TOGGLE]).add(collection, reference)
+
+        self.assertEqual(report['key'], f'{collection.uri} {reference.expression}')
+        changes = report['references'][reference.expression]
+        self.assertEqual(len(changes), 1)
+        self.assertNotEqual(changes[0]['before'], old.uri)
+        self.assertEqual(changes[0]['after'], old.uri)
+        self.assertEqual(report['errors'], [{}, {}])
+        self.assertEqual(list(collection.references.all()), [reference])
+        self.assertEqual(list(collection.expansion.concepts.all()), [old])
+
+    def test_dry_run_create_version_with_lock_toggle(self):
+        _, old, v1, v2 = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection = self.locked_auto_expansion(v1)
+        collection.add_expressions({'expressions': [old.versioned_object.uri]}, collection.created_by)
+        Concept.objects.filter(id=old.id).update(is_latest_version=False)
+
+        report = ExpansionDryRun([EXPANSION_LOCKED_REPO_VERSION_TOGGLE]).create_version(collection)
+
+        self.assertEqual(report['key'], collection.uri)
+        self.assertEqual(report['concepts'], {'added': 0, 'removed': 0, 'changed': 0})
+        self.assertEqual(report['evaluated_source_versions'], {'before': [v2.uri], 'after': [v1.uri]})
+        self.assertIsNone(report['off']['built_with'])
+        self.assertEqual(report['on']['built_with'], 'lock')
+        self.assertEqual(report['on']['versus_head']['concepts'], {})
+        self.assertEqual(report['off']['newest_not_in_source_versions'], 0)
+        self.assertEqual(report['on']['newest_not_in_source_versions'], 1)
+        self.assertFalse(Collection.objects.filter(mnemonic=collection.mnemonic, version='dry-run').exists())
+
+    def test_dry_run_import_with_lock_toggle(self):
+        source, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection = self.locked_auto_expansion(v1)
+        source_uris = ExpansionDryRun.get_source_concept_uris(source)
+        self.assertEqual(source_uris, [old.versioned_object.uri])
+        self.assertEqual(ExpansionDryRun.get_import_expressions(collection, source_uris, 5), source_uris)
+        self.assertEqual(
+            ExpansionDryRun.get_import_expressions(collection, source_uris, 5, random.Random('1 a')), source_uris)
+        expressions = source_uris
+
+        report = ExpansionDryRun([EXPANSION_LOCKED_REPO_VERSION_TOGGLE]).import_references(collection, expressions)
+
+        self.assertEqual(report['key'], f'{collection.uri} 1')
+        self.assertEqual(report['added'], [1, 1])
+        self.assertEqual(report['errors'], [0, 0])
+        self.assertEqual([change['after'] for change in report['unattributed']], [old.uri])
+        self.assertFalse(collection.references.exists())
+
+    def test_dry_run_expansions_command_with_toggle(self):
+        source, old, _, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection, expansion, _ = self._expansion_with_resource_version_reference(source, old)
+        self._rebuild(collection, expansion)
+        out = StringIO()
+
+        toggle = RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE
+
+        call_command('dry_run_expansions', f'{collection.uri}HEAD/', '--toggle', toggle, stdout=out)
+
+        self.assertIn('concepts: 1 added, 0 removed, 0 changed', out.getvalue())
+        for args in (
+                ['--mode', 'add'], ['--toggle', 'NOPE'], ['--toggle', toggle, '--env', 'production'],
+                ['--mode', 'import', '--toggle', toggle], ['--mode', 'version', '--toggle', toggle, '--loose-locks']):
+            with self.assertRaises(CommandError):
+                call_command('dry_run_expansions', collection.uri, *args, stdout=out)
+
+    def test_dry_run_expansions_command_add_mode_resumes_from_output(self):
+        _, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection = self.locked_auto_expansion(v1)
+        collection.add_expressions({'expressions': [old.versioned_object.uri]}, collection.created_by)
+        reference = collection.references.get()
+        args = ['dry_run_expansions', collection.uri, '--mode', 'add', '--toggle', EXPANSION_LOCKED_REPO_VERSION_TOGGLE]
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'report.jsonl')
+            out = StringIO()
+            call_command(*args, '--output', path, stdout=out)
+            self.assertIn(f'{collection.uri} {reference.expression} (', out.getvalue())
+            out = StringIO()
+            call_command(*args, '--output', path, stdout=out)
+            self.assertIn(f'1 already in {path}', out.getvalue())
+            with open(path) as file:
+                reports = [json.loads(line) for line in file]
+
+        self.assertEqual([report['key'] for report in reports], [f'{collection.uri} {reference.expression}'])
+        self.assertEqual(reports[0]['toggles'], [EXPANSION_LOCKED_REPO_VERSION_TOGGLE])
+
+    def test_dry_run_heads_with_loose_locks_are_locked_at_versions_other_than_latest_release(self):
+        value_set = OrganizationCollectionFactory()
+        older = OrganizationCollectionFactory(
+            mnemonic=value_set.mnemonic, organization=value_set.organization, version='v1', released=True,
+            is_latest_version=False)
+        latest = OrganizationCollectionFactory(
+            mnemonic=value_set.mnemonic, organization=value_set.organization, version='v2', released=True)
+        locked_older = self.locked_auto_expansion(OrganizationSourceFactory(version='v1', released=True))
+        locked_older.expansion.evaluated_collection_versions.add(older)
+        locked_latest = self.locked_auto_expansion(OrganizationSourceFactory(version='v1', released=True))
+        locked_latest.expansion.evaluated_collection_versions.add(latest)
+
+        source = OrganizationSourceFactory()
+        source_v1 = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+        source_v2 = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v2', released=True)
+        locked_older_source = self.locked_auto_expansion(source_v1)
+        locked_latest_source = self.locked_auto_expansion(source_v2)
+        locked_head_source = self.locked_auto_expansion(source)
+
+        heads = list(ExpansionDryRun.get_heads_with_loose_locks())
+
+        self.assertIn(locked_older, heads)
+        self.assertNotIn(locked_latest, heads)
+        self.assertIn(locked_older_source, heads)
+        self.assertNotIn(locked_latest_source, heads)
+        self.assertIn(locked_head_source, heads)
+
+    def test_dry_run_toggle_column(self):
+        self.assertEqual(ExpansionDryRun.get_toggle_column('development'), 'dev')
+        self.assertEqual(ExpansionDryRun.get_toggle_column('who-staging'), 'who_staging')
+        self.assertEqual(ExpansionDryRun.get_toggle_column('staging'), 'staging')
+        self.assertIsNone(ExpansionDryRun.get_toggle_column('local'))
+        self.assertIsNone(ExpansionDryRun([], base_env='local').get_toggle(EXPANSION_LOCKED_REPO_VERSION_TOGGLE, set()))
+
+    def test_dry_run_expansions_command_rejects_head_without_expansion(self):
+        collection = OrganizationCollectionFactory()
+        collection.expansion_uri = f'{collection.uri}HEAD/expansions/gone/'
+        collection.save()
+
+        with self.assertRaises(CommandError):
+            call_command(
+                'dry_run_expansions', collection.uri, '--mode', 'add', '--toggle',
+                EXPANSION_LOCKED_REPO_VERSION_TOGGLE, stdout=StringIO())
+
+    def test_dry_run_expansions_command_retries_failures_and_rejects_other_files(self):
+        _, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection = self.locked_auto_expansion(v1)
+        collection.add_expressions({'expressions': [old.versioned_object.uri]}, collection.created_by)
+        key = f'{collection.uri} {collection.references.get().expression}'
+        args = ['dry_run_expansions', collection.uri, '--mode', 'add', '--toggle', EXPANSION_LOCKED_REPO_VERSION_TOGGLE]
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'report.jsonl')
+            with open(path, 'w') as file:
+                file.write(json.dumps({'key': key, 'error': 'OperationalError()'}) + '\n')
+            out = StringIO()
+            call_command(*args, '--output', path, stdout=out)
+            self.assertIn('0 already in', out.getvalue())
+            self.assertIn(f'{key} (', out.getvalue())
+
+            old_format = os.path.join(directory, 'report.json')
+            with open(old_format, 'w') as file:
+                json.dump([{'expansion': collection.expansion.uri}], file, indent=2)
+            with self.assertRaises(CommandError):
+                call_command(*args, '--output', old_format, stdout=StringIO())
 
     def _source_with_pins_in_releases(self):
         """c1's pinned version is held by v1 and v3, c2's only by v1"""
