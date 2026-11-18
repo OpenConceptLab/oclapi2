@@ -12,7 +12,7 @@ from django.core.management import call_command, CommandError
 from django.http import QueryDict
 from django.test import override_settings, tag
 from django.db import OperationalError
-from mock import patch, Mock
+from mock import patch, Mock, PropertyMock
 from mock.mock import ANY
 from rest_framework import status
 from rest_framework.response import Response
@@ -1107,6 +1107,20 @@ class CollectionReferenceTest(OCLTestCase):
                 self.assertEqual(
                     [item['version_url'] for item in unrecorded.get_resolved_repo_versions_serialized(**caches)],
                     [other_v2.uri])
+
+    def test_get_resolved_repo_versions_serialized_valueset_without_a_version_ignores_explicit_versions(self):
+        valueset, v1, v2 = self.valueset_with_releases()
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.explicit_collection_versions.add(v1)
+        reference = CollectionReference(expression=valueset.uri, collection=collection, valueset=[valueset.uri])
+
+        with patch.object(Collection, 'expansion', new_callable=PropertyMock, return_value=expansion) as expansion_mock:
+            self.assertEqual(
+                [item['version_url'] for item in reference.get_resolved_repo_versions_serialized()], [v2.uri])
+        self.assertEqual(expansion_mock.call_count, 1)
 
     def test_reference_as_concept_version(self):
         collection = OrganizationCollectionFactory()

@@ -1498,6 +1498,7 @@ class CollectionReference(models.Model):
     def get_resolved_repo_versions_serialized(  # pylint: disable=too-many-arguments
             self, system_version_cache=None, valueset_version_cache=None, expansion_cache=None, user=None):
         """Serialize repository versions resolved from this reference's system and valuesets that `user` can view."""
+        expansion_cache = {} if expansion_cache is None else expansion_cache
         system_versions = [
             version for version in self._get_resolved_system_versions(system_version_cache, expansion_cache)
             if version.has_view_access(user)]
@@ -2297,10 +2298,6 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         return [*self.recorded_explicit_source_versions, *self.recorded_evaluated_source_versions]
 
     @cached_property
-    def recorded_explicit_collection_versions(self):
-        return list(self.explicit_collection_versions.all())
-
-    @cached_property
     def recorded_evaluated_collection_versions(self):
         return list(self.evaluated_collection_versions.all())
 
@@ -2325,11 +2322,11 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         return [repo_version]
 
     def get_collection_versions_resolved_by(self, valueset, repo_version):
-        """The value set versions of repo_version's repository this expansion recorded for a reference's value set"""
+        """The value set versions of repo_version's repository this expansion recorded for a reference's value set;
+        a value set named without a version evaluates into evaluated_collection_versions only, never explicit"""
         if CollectionReference.is_explicit_valueset(valueset):
             return [repo_version]
-        return self.get_versions_of_repo(self.recorded_evaluated_collection_versions, repo_version) or \
-            self.get_versions_of_repo(self.recorded_explicit_collection_versions, repo_version)
+        return self.get_versions_of_repo(self.recorded_evaluated_collection_versions, repo_version)
 
     def is_unresolved_resource_version(self, reference):
         return reference.is_resource_versioned and reference.to_unresolved_resource_version() in (
