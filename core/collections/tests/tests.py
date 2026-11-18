@@ -1578,6 +1578,20 @@ class CollectionReferenceTest(OCLTestCase):
         no_match_concepts, _ = no_match_reference.get_concepts()
         self.assertEqual(no_match_concepts.count(), 0)
 
+    def test_get_concepts_applies_es_filter_to_more_matches_than_a_page(self):
+        source = OrganizationSourceFactory()
+        concepts = [ConceptFactory(parent=source, concept_class='Diagnosis') for _ in range(30)]
+        other_concept = ConceptFactory(parent=source, concept_class='Procedure')
+        ConceptDocument().update([*concepts, other_concept])
+
+        reference = CollectionReference(
+            system=source.uri, created_by=source.created_by,
+            filter=[{'property': 'concept_class', 'value': 'Diagnosis', 'op': '='}]
+        )
+        matched, _ = reference.get_concepts()
+
+        self.assertEqual(sorted(matched.values_list('id', flat=True)), sorted(concept.id for concept in concepts))
+
     def test_get_concepts_applies_es_filter_with_case_switch_extras_and_unknown_property(self):
         source = OrganizationSourceFactory()
         concept = ConceptFactory(parent=source, concept_class='Diagnosis', extras={'nested': 'val1'})

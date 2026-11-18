@@ -65,7 +65,8 @@ from core.common.utils import (
     to_parent_uri_from_kwargs,
     set_current_user, get_current_user, set_request_url, get_request_url, nested_dict_values, chunks, api_get,
     split_list_by_condition, is_zip_file, get_date_range_label, get_prev_month, from_string_to_date, get_end_of_month,
-    get_start_of_month, es_id_in, web_url, get_queue_task_names, get_resource_class_from_resource_uri, encode_string,
+    get_start_of_month, es_id_in, es_to_pks, web_url, get_queue_task_names, get_resource_class_from_resource_uri,
+    encode_string,
     to_parent_kwargs_from_uri, reverse_resource, reverse_resource_version, write_export_file, queue_bulk_import,
     get_bulk_import_celery_once_lock_key, generic_sort, get_embeddings, encode_texts, get_lm_model, cap_page_size)
 from core.concepts.documents import ConceptDocument
@@ -1094,6 +1095,14 @@ class UtilsTest(OCLTestCase):
 
         self.assertEqual(es_id_in(search, [1, 2, 3]), 'search')
         search.query.assert_called_once_with("terms", _id=[1, 2, 3])
+
+    def test_es_to_pks(self):
+        search = MagicMock(scan=Mock(return_value=iter([Mock(meta=Mock(id='1')), Mock(meta=Mock(id='2'))])))
+
+        self.assertEqual(es_to_pks(search), ['1', '2'])
+        search.scan.assert_called_once_with()
+        search.__getitem__.assert_not_called()
+        search.execute.assert_not_called()
 
     @patch('core.common.utils.settings')
     def test_web_url(self, settings_mock):

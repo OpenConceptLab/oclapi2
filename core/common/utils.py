@@ -866,20 +866,9 @@ def es_id_in(search, ids):
 
 
 def es_to_pks(search):
-    # doesn't care about the order
-    default_limit = 25
-    limit = default_limit
-    offset = 0
-    result_count = 25
-    pks = []
-    while result_count > 0:
-        hits = search[offset:limit].execute().hits
-        result_count = len(hits)
-        if result_count:
-            pks += [hit.meta.id for hit in hits]
-        offset += default_limit
-        limit += default_limit
-    return pks
+    # one scroll reads a consistent snapshot of each shard; unsorted pages can skip or repeat hits across replicas
+    # and it raises if a shard fails, instead of returning fewer hits
+    return [hit.meta.id for hit in search.scan()]
 
 
 def batch_qs(qs, batch_size=1000):
