@@ -2660,18 +2660,21 @@ class TasksTest(OCLTestCase):
         valueset = OrganizationCollectionFactory()
         default_lock, _ = self.valueset_release(valueset, 'v1')
         own_lock, own_concept = self.valueset_release(valueset, 'v2')
-        _, latest_concept = self.valueset_release(valueset, 'v3')
+        self.valueset_release(valueset, 'v3')
         head, _ = self.head_with_valueset_reference(default_lock)
 
-        for is_locked, expected in ((True, own_concept), (False, latest_concept)):
+        for is_locked, expected in ((True, [own_concept]), (False, [])):
             with self.subTest(is_locked=is_locked), \
                     patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=is_locked):
                 manual = ExpansionFactory(collection_version=head, mnemonic=f'manual-{is_locked}')
                 manual.evaluated_collection_versions.add(own_lock)
+                references = list(head.references.all())
 
-                manual.add_references(head.references.all(), index=False)
+                manual.add_references(references, index=False)
 
-                self.assertEqual(list(manual.concepts.all()), [expected])
+                # with the toggle off a value-set-only reference isn't evaluated, as before
+                self.assertEqual(list(manual.concepts.all()), expected)
+                self.assertIsNone(references[0]._valueset_locks)  # pylint: disable=protected-access
 
     @override_settings(TEST_MODE=False)
     @patch('core.collections.models.batch_index_resources')

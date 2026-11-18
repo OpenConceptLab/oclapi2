@@ -1890,6 +1890,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         lock_filters = {} if use_any_lock else {'released': True, 'retired': False}
         should_write_back = use_any_lock and self.is_default
         valueset_locks = None
+        valueset_locked_refs = []
         if use_any_lock:
             # this expansion's own value set locks, not the default expansion's
             valueset_locks = list(self.evaluated_collection_versions.filter(is_active=True).order_by('-id')) \
@@ -1943,6 +1944,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             nonlocal unresolved_repo_versions
             if valueset_locks is not None:
                 ref.set_valueset_locks(valueset_locks)
+                valueset_locked_refs.append(ref)
             _explicit_valueset_versions, _evaluated_valueset_versions, _unresolved_valueset_versions = (
                 ref.resolve_valueset_versions_with_unresolved)
             explicit_valueset_versions += _explicit_valueset_versions
@@ -2050,6 +2052,9 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                     else:
                         batch_index_resources.apply_async(('mapping', filters), queue='indexing', permanent=False)
 
+        for reference in valueset_locked_refs:
+            # so the caller's references resolve as they did before
+            reference.set_valueset_locks(None)
         CollectionReference.objects.filter(id__in=resolved_ref_ids).update(last_resolved_at=timezone.now())
         CollectionReference.objects.filter(id__in=unresolved_ref_ids).update(last_resolved_at=None)
         self.explicit_collection_versions.add(*compact(explicit_valueset_versions))
