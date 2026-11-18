@@ -1,12 +1,14 @@
 from django.db.models.manager import BaseManager
 from pydash import get
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.fields import CharField, JSONField, SerializerMethodField, FloatField, ChoiceField
 from rest_framework.serializers import Serializer, Field, ValidationError, ModelSerializer, ListSerializer
 
 from core import settings
 from core.code_systems.constants import RESOURCE_TYPE as CODE_SYSTEM_RESOURCE_TYPE
 from core.common.constants import INCLUDE_CONCEPTS_PARAM, INCLUDE_MAPPINGS_PARAM, LIMIT_PARAM, OFFSET_PARAM, \
-    INCLUDE_VERBOSE_REFERENCES, INCLUDE_SEARCH_META_PARAM, ACCESS_TYPE_CHOICES, ACCESS_TYPE_VIEW
+    INCLUDE_VERBOSE_REFERENCES, INCLUDE_SEARCH_META_PARAM, ACCESS_TYPE_CHOICES, ACCESS_TYPE_VIEW, \
+    VERIFICATION_INVALID, VERIFICATION_ONLY_ON_VERSION
 from core.common.feeds import DEFAULT_LIMIT
 from core.common.fhir_helpers import to_fhir_path, to_ocl_path, bcp47
 from core.common.utils import to_int, get_truthy_values, normalize_public_access, cap_page_size
@@ -17,6 +19,24 @@ from core.value_sets.constants import RESOURCE_TYPE as VALUESET_RESOURCE_TYPE
 
 
 TRUTHY = get_truthy_values()
+
+
+class RepoVerificationSerializerMixin:
+    """Every repository write passes here, so `verification` is staff-only on each of them."""
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if 'verification' not in self.initial_data:
+            return attrs
+        if not get(self.context, 'request.user.is_staff'):
+            raise PermissionDenied()
+        if not self.instance or self.instance.is_head:
+            raise ValidationError({'verification': [VERIFICATION_ONLY_ON_VERSION]})
+        value = self.initial_data['verification']
+        if value is not None and not self.Meta.model.is_valid_verification(value):
+            raise ValidationError({'verification': [VERIFICATION_INVALID]})
+        attrs['verification'] = value
+        return attrs
 
 
 class RootSerializer(Serializer):  # pylint: disable=abstract-method

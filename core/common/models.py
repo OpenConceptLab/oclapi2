@@ -16,6 +16,7 @@ from django.db import models, IntegrityError, OperationalError, transaction
 from django.db.models import Value, Q, Count, Func
 from django.db.models.expressions import CombinedExpression, F
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.utils.functional import cached_property
 from django.utils.text import get_valid_filename
 from django_elasticsearch_dsl.registries import registry
@@ -32,7 +33,8 @@ from core.common.utils import reverse_resource, reverse_resource_version, parse_
     canonical_url_to_url_and_version, get_current_authorized_user, encode_string, decode_string, \
     normalize_public_access, get_export_key_pattern, EXPORT_KEY_TIMESTAMP_PATTERN
 from core.common.utils import to_owner_uri
-from core.common.constants import VERSION_UNCOPYABLE_EXTRAS, SERIALIZATION_RETRY_ATTEMPTS
+from core.common.constants import VERSION_UNCOPYABLE_EXTRAS, SERIALIZATION_RETRY_ATTEMPTS, VERIFICATION_FIELDS, \
+    VERIFICATION_HASH_REGEX, VERIFICATION_PROCESS_REGEX, VERIFICATION_VERIFIED_AT_REGEX
 from core.settings import DEFAULT_LOCALE
 from . import ERRBIT_LOGGER
 from .checksums import ChecksumModel
@@ -819,6 +821,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     revision_date = models.DateTimeField(null=True, blank=True)
     text = models.TextField(null=True, blank=True)  # for about description (markup)
     snapshot = models.JSONField(null=True, blank=True, default=dict)
+    verification = models.JSONField(null=True, blank=True, default=None)
     experimental = models.BooleanField(null=True, blank=True, default=None)
     meta = models.JSONField(null=True, blank=True)
     active_concepts = models.IntegerField(null=True, blank=True, default=None)
@@ -1424,6 +1427,21 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 failed_concept_validations.append(concept_validation_error)
 
         return failed_concept_validations
+
+    @staticmethod
+    def is_valid_verification(value):
+        if not isinstance(value, dict) or set(value) != VERIFICATION_FIELDS:
+            return False
+        if not all(isinstance(item, str) for item in value.values()):
+            return False
+        if not re.fullmatch(VERIFICATION_PROCESS_REGEX, value['process']) or \
+                not re.fullmatch(VERIFICATION_HASH_REGEX, value['hash']) or \
+                not re.fullmatch(VERIFICATION_VERIFIED_AT_REGEX, value['verified_at']):
+            return False
+        try:
+            return parse_datetime(value['verified_at']) is not None
+        except ValueError:
+            return False
 
     def update_version_data(self, head):
         self.description = self.description or head.description
