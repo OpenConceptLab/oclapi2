@@ -1383,10 +1383,10 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 update_validation_schema.apply_async(
                     (obj.app_name, obj.id, target_schema), task_id=task.id, queue='default')
             if should_reindex_resources:
-                if obj.released:
-                    obj.index_resources_for_self_as_latest_released(only_update=True)
-                else:
+                if not obj.released:
                     obj.index_resources_for_self_as_unreleased()
+                elif not obj.is_awaiting_members:  # else the seed task indexes the release, with its members written
+                    obj.index_resources_for_self_as_latest_released(only_update=True)
             if concepts_reindex_filters is not None:
                 obj.index_concepts_async(obj.updated_by, **concepts_reindex_filters)
             if should_sync_vectors:

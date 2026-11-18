@@ -1,6 +1,7 @@
 import uuid
 from collections import OrderedDict
 
+from celery.states import FAILURE, REVOKED, SUCCESS
 from celery_once import AlreadyQueued
 from dirtyfields import DirtyFieldsMixin
 from django.conf import settings
@@ -699,6 +700,18 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
     def get_seed_new_version_task(self):
         return Task.find(name__iendswith='seed_children_to_new_version', args__contains=['source', self.id])
+
+    @property
+    def is_awaiting_members(self):
+        """
+        Whether the seed task has yet to write this version's members. The task takes its id off the processing ids
+        once they're written, so this reads them from the database rather than from this instance.
+        """
+        seed_task = self.get_seed_new_version_task()
+        return bool(
+            seed_task and seed_task.state not in (SUCCESS, FAILURE, REVOKED) and
+            Source.objects.filter(id=self.id, _background_process_ids__contains=[seed_task.id]).exists()
+        )
 
     def get_changelog_task(self):
         return self.get_changelog_task_by_name('source_version_compare')

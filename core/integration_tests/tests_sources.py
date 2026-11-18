@@ -6,6 +6,7 @@ import zipfile
 import boto3
 from moto import mock_aws
 
+from celery.states import FAILURE, REVOKED, SUCCESS
 from celery_once import AlreadyQueued
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -21,7 +22,8 @@ from core.capabilities.constants import CLONE_RESOURCES_PER_CALL_CAPABILITY_ID
 from core.capabilities.models import UserCapabilityOverride
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory, UserCollectionFactory
 from core.common.models import BaseModel
-from core.common.tasks import export_source, index_source_concepts, index_source_mappings
+from core.common.tasks import export_source, index_source_concepts, index_source_mappings, \
+    seed_children_to_new_version
 from core.common.tests import OCLAPITestCase
 from core.integration_tests.tests_access_control import PrivateHeadVersionAccessMixin
 from core.common.utils import get_latest_dir_in_path, get_export_key_pattern
@@ -39,6 +41,7 @@ from core.sources.models import Source, CloneLimitExceeded
 from core.sources.serializers import SourceDetailSerializer, SourceVersionExportSerializer
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.services.storages.cloud.aws import S3
+from core.tasks.models import Task
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -3475,6 +3478,140 @@ class SourceReleaseFlagsTest(OCLAPITestCase):
         self.assertEqual(actions[0]['doc'], {'public_can_view': True})
         self.assertNotIn('doc_as_upsert', actions[0])
         self.assertNotIn('on_bulk_error', by_ids.call_args[1])  # default handler full-indexes 404s
+
+
+class SourceReleaseWhileSeedingTest(OCLAPITestCase):
+    """
+    A version can be created and then released in two calls, so the release can arrive while the version is still
+    being seeded (ocl_online#684). The previous release's False write leaves out the new release's members, so it has
+    to wait for them, and a release arriving at any moment has to be indexed by the request or by the seed task.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.organization = Organization.objects.first()
+        self.user = UserProfile.objects.filter(is_superuser=True).first()
+        self.token = self.user.get_token()
+        self.source = OrganizationSourceFactory(organization=self.organization)
+        self.previous = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v1', released=True)
+        self.version = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v2', released=False)
+        self.concept = ConceptFactory(parent=self.source, sources=[self.source])
+        self.seed_task = Task.new(
+            user=self.user, name='seed_children_to_new_version', args=['source', self.version.id, False, False])
+        self.version.add_processing(self.seed_task.id)
+
+    def set_released(self, released=True):
+        response = self.client.put(
+            self.version.uri, {'released': released}, HTTP_AUTHORIZATION='Token ' + self.token, format='json')
+        self.assertEqual(response.status_code, 200)
+
+    def run_seed_task(self):
+        seed_children_to_new_version.push_request(id=self.seed_task.id)
+        try:
+            seed_children_to_new_version.run('source', self.version.id, False)
+        finally:
+            seed_children_to_new_version.pop_request()
+
+    def processing_ids(self):
+        return Source.objects.values_list('_background_process_ids', flat=True).get(id=self.version.id)
+
+    @patch.object(Source, 'index_resources_for_self_as_latest_released')
+    def test_release_before_the_seed_task_runs_is_indexed_by_the_task(self, index_release):
+        self.set_released()
+
+        index_release.assert_not_called()
+        self.assertTrue(Source.objects.get(id=self.version.id).released)
+
+        self.run_seed_task()
+
+        index_release.assert_called_once_with()
+
+    @patch.object(Source, 'index_children')
+    @patch.object(Source, 'index_resources_for_self_as_latest_released')
+    def test_release_while_the_seed_task_runs_is_indexed_by_the_task(self, index_release, index_children):
+        with patch.object(Source, 'update_children_counts', side_effect=lambda *_: self.set_released()):
+            self.run_seed_task()
+
+        index_release.assert_called_once_with()
+        index_children.assert_not_called()
+
+    @patch.object(Source, 'index_resources_for_self_as_latest_released')
+    def test_release_after_the_seed_task_read_released_is_indexed_by_the_request(self, index_release):
+        def release_after_the_check(*_, **__):
+            self.assertNotIn(self.seed_task.id, self.processing_ids())
+            self.set_released()
+
+        with patch.object(Source, 'index_children', side_effect=release_after_the_check) as index_children:
+            self.run_seed_task()
+
+        index_children.assert_called_once()
+        index_release.assert_called_once_with(only_update=True)
+
+    def test_previous_release_is_unflagged_once_the_members_are_written(self):
+        writes = []
+
+        def record(version, _user=None, partial_doc=None, exclude_members_of=None):
+            members = Concept.sources.through.objects.filter(source_id=self.version.id).count()
+            writes.append((version.id, partial_doc, exclude_members_of, members))
+
+        with patch.object(Source, 'index_children_async', autospec=True, side_effect=record):
+            self.set_released()
+            self.run_seed_task()
+
+        self.assertEqual(writes, [
+            (self.previous.id, {'is_in_latest_source_version': False}, self.version.id, 1),
+            (self.version.id, {'_append_source_version': 'v2', 'is_in_latest_source_version': True}, None, 1),
+        ])
+
+    @patch.object(Source, 'index_resources_for_self_as_latest_released')
+    def test_release_of_a_seeded_version_is_indexed_straight_away(self, index_release):
+        self.version.remove_processing(self.seed_task.id)
+        Task.objects.filter(id=self.seed_task.id).update(state=SUCCESS)
+
+        self.set_released()
+
+        index_release.assert_called_once_with(only_update=True)
+
+    @patch.object(Source, 'index_resources_for_self_as_latest_released')
+    def test_release_of_a_version_without_a_seed_task_is_indexed_straight_away(self, index_release):
+        self.seed_task.delete()
+
+        self.set_released()
+
+        index_release.assert_called_once_with(only_update=True)
+
+    @patch.object(Source, 'index_resources_for_self_as_latest_released')
+    def test_a_finished_seed_task_left_in_the_processing_ids_holds_nothing_back(self, index_release):
+        for state in (SUCCESS, FAILURE, REVOKED):
+            with self.subTest(state=state):
+                Task.objects.filter(id=self.seed_task.id).update(state=state)
+                Source.objects.filter(id=self.version.id).update(released=False)
+                index_release.reset_mock()
+
+                self.set_released()
+
+                index_release.assert_called_once_with(only_update=True)
+
+    @patch.object(Source, 'index_resources_for_self_as_unreleased')
+    def test_unrelease_while_seeding_is_indexed_straight_away(self, index_unreleased):
+        Source.objects.filter(id=self.version.id).update(released=True)
+
+        self.set_released(False)
+
+        index_unreleased.assert_called_once_with()
+
+    @patch.object(Source, 'index_resources_for_self_as_latest_released')
+    def test_failed_seed_task_indexes_nothing_and_stops_processing(self, index_release):
+        self.set_released()
+
+        with patch.object(Source, 'seed_concepts', side_effect=ValueError('seed failed')):
+            with self.assertRaises(ValueError):
+                self.run_seed_task()
+
+        index_release.assert_not_called()
+        self.assertNotIn(self.seed_task.id, self.processing_ids())
 
 
 class SourceVersionPrivateHeadAccessTest(PrivateHeadVersionAccessMixin, OCLAPITestCase):

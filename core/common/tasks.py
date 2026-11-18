@@ -429,13 +429,16 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                 instance.seed_concepts(index=False)
                 instance.seed_mappings(index=False)
                 instance.update_children_counts(sync)
+                # The members are written. In this order, a release request either saw this task still seeding, and
+                # its released is read below, or comes after and indexes the release itself (persist_changes).
+                instance.remove_processing(task_id)
                 # A semantic version's vectors come from this sync. Seeding copies HEAD's membership only, and the
                 # indexing below only appends this version to its members' docs, a partial update that never
                 # computes vectors: with a lexical HEAD, those docs have none, so this sync is what embeds the
                 # version; with a semantic HEAD it's a cheap, read-only check. The flag is read now, not as it was
                 # when the task started: an opt-in while seeding ran synced before any of this version's members
                 # existed. Whether or not it's still the latest release, and however its indexing below goes.
-                instance.refresh_from_db(fields=['match_algorithms'])
+                instance.refresh_from_db(fields=['match_algorithms', 'released'])
                 if instance.has_semantic_match_algorithm:
                     instance.sync_concept_vectors_async(instance.created_by)
                 if instance.released:
