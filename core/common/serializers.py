@@ -61,7 +61,9 @@ class RepoVerificationSerializerMixin:
 
     def persist_verification_only(self, instance, validated_data):
         """A write of only the record leaves the rest of the version, and so its export, unchanged."""
-        if set(getattr(self, 'initial_data', {})) != {'verification'}:
+        payload = getattr(self, 'initial_data', {})
+        # the repository route adds an empty supported_locales to every payload
+        if {key for key, value in payload.items() if value or key != 'supported_locales'} != {'verification'}:
             return False
         if 'verification' in validated_data:
             instance.verification = validated_data['verification']
