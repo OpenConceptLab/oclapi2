@@ -865,10 +865,14 @@ def es_id_in(search, ids):
     return search
 
 
-def es_to_pks(search):
-    # one scroll reads a consistent snapshot of each shard; unsorted pages can skip or repeat hits across replicas
-    # and it raises if a shard fails, instead of returning fewer hits
-    return [hit.meta.id for hit in search.scan()]
+def es_to_pks(search, size):
+    """Ids of all hits, at most size, in one request: unsorted pages skip or repeat hits across shard copies.
+    Elasticsearch refuses a partial answer, so a failed shard raises instead of returning fewer hits."""
+    response = search.source(False).params(allow_partial_search_results=False)[0:size].execute()
+    pks = [hit.meta.id for hit in response.hits]
+    if response.hits.total.value > len(pks):
+        raise ValueError(f'{response.hits.total.value} hits, more than the {size} read at once')
+    return pks
 
 
 def batch_qs(qs, batch_size=1000):

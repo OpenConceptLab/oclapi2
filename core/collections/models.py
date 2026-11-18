@@ -1084,8 +1084,8 @@ class CollectionReference(models.Model):
                     search = search.filter("match", **{to_snake_case(filter_def["property"]): filter_def["value"]})
             for _queryset in batch_qs(queryset.order_by('id'), 500):
                 # iterating on queryset because ES has max_clause limit default to 1024
-                search_within_queryset = es_id_in(search, list(_queryset.values_list('id', flat=True)))
-                pks += es_to_pks(search_within_queryset.params(request_timeout=ES_REQUEST_TIMEOUT_ASYNC))
+                ids = list(_queryset.values_list('id', flat=True))
+                pks += es_to_pks(es_id_in(search, ids).params(request_timeout=ES_REQUEST_TIMEOUT_ASYNC), len(ids))
             if pks:
                 resource_versions = resource_klass.objects.filter(id__in=set(pks))
                 if self.version or self.valueset or self.is_static_transform or \
@@ -2520,8 +2520,8 @@ class ExpansionTextFilterParameter(ExpansionParameter):
                     self.value, document.get_match_phrase_attrs(), document.get_exact_match_attrs())
             )
             for _queryset in batch_qs(queryset.order_by('id'), 500):
-                new_search = es_id_in(search, list(_queryset.values_list('id', flat=True)))
-                pks += es_to_pks(new_search.params(request_timeout=ES_REQUEST_TIMEOUT))
+                ids = list(_queryset.values_list('id', flat=True))
+                pks += es_to_pks(es_id_in(search, ids).params(request_timeout=ES_REQUEST_TIMEOUT), len(ids))
             queryset = klass.objects.filter(id__in=set(pks)) if pks else klass.objects.none()
 
         return queryset

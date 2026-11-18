@@ -23,6 +23,7 @@ from django.test.runner import DiscoverRunner
 from django.urls import clear_url_caches, resolve
 from django.utils import timezone
 from elastic_transport import Transport
+from elasticsearch_dsl import Search
 from mock.mock import call
 from requests import ConnectTimeout
 from requests.auth import HTTPBasicAuth
@@ -1096,13 +1097,34 @@ class UtilsTest(OCLTestCase):
         self.assertEqual(es_id_in(search, [1, 2, 3]), 'search')
         search.query.assert_called_once_with("terms", _id=[1, 2, 3])
 
-    def test_es_to_pks(self):
-        search = MagicMock(scan=Mock(return_value=iter([Mock(meta=Mock(id='1')), Mock(meta=Mock(id='2'))])))
+    @staticmethod
+    def get_es_client(ids, total=None):
+        hits = [{'_index': 'concepts', '_id': _id} for _id in ids]
+        body = {'hits': {'total': {'value': len(ids) if total is None else total, 'relation': 'eq'}, 'hits': hits}}
+        return Mock(search=Mock(return_value=Mock(body=body)))
 
-        self.assertEqual(es_to_pks(search), ['1', '2'])
-        search.scan.assert_called_once_with()
-        search.__getitem__.assert_not_called()
-        search.execute.assert_not_called()
+    @patch('elasticsearch_dsl._sync.search.get_connection')
+    def test_es_to_pks(self, get_connection_mock):
+        client = self.get_es_client(['1', '2'])
+        get_connection_mock.return_value = client
+        search = es_id_in(Search(index='concepts'), [1, 2, 3]).params(request_timeout=300)
+
+        self.assertEqual(es_to_pks(search, 3), ['1', '2'])
+
+        client.search.assert_called_once()
+        kwargs = client.search.call_args.kwargs
+        self.assertEqual(kwargs['request_timeout'], 300)
+        self.assertFalse(kwargs['allow_partial_search_results'])
+        self.assertEqual(kwargs['body']['_source'], False)
+        self.assertEqual((kwargs['body']['from'], kwargs['body']['size']), (0, 3))
+        self.assertEqual(kwargs['body']['query'], {'terms': {'_id': [1, 2, 3]}})
+
+    @patch('elasticsearch_dsl._sync.search.get_connection')
+    def test_es_to_pks_raises_when_hits_exceed_size(self, get_connection_mock):
+        get_connection_mock.return_value = self.get_es_client(['1', '2'], total=5)
+
+        with self.assertRaisesMessage(ValueError, '5 hits, more than the 2 read at once'):
+            es_to_pks(Search(index='concepts'), 2)
 
     @patch('core.common.utils.settings')
     def test_web_url(self, settings_mock):
