@@ -12,7 +12,7 @@ from django.core.management import call_command, CommandError
 from django.http import QueryDict
 from django.test import override_settings, tag
 from django.db import OperationalError
-from mock import patch, Mock, PropertyMock
+from mock import patch, Mock
 from mock.mock import ANY
 from rest_framework import status
 from rest_framework.response import Response
@@ -1117,10 +1117,17 @@ class CollectionReferenceTest(OCLTestCase):
         expansion.explicit_collection_versions.add(v1)
         reference = CollectionReference(expression=valueset.uri, collection=collection, valueset=[valueset.uri])
 
-        with patch.object(Collection, 'expansion', new_callable=PropertyMock, return_value=expansion) as expansion_mock:
+        with patch.object(
+                CollectionReference, 'get_default_expansion', autospec=True,
+                side_effect=CollectionReference.get_default_expansion) as expansion_mock:
             self.assertEqual(
                 [item['version_url'] for item in reference.get_resolved_repo_versions_serialized()], [v2.uri])
-        self.assertEqual(expansion_mock.call_count, 1)
+
+        # sources and value sets share one expansion cache, so the default expansion is loaded once
+        caches = [call.args[1] for call in expansion_mock.call_args_list]
+        self.assertEqual(len(caches), 2)
+        self.assertIs(caches[0], caches[1])
+        self.assertEqual(caches[0], {collection.id: expansion})
 
     def test_reference_as_concept_version(self):
         collection = OrganizationCollectionFactory()
