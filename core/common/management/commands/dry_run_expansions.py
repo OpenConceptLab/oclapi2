@@ -36,7 +36,7 @@ class Command(BaseCommand):
         parser.add_argument('--sample', type=int, default=0, help='Also dry run this many random expansions or HEADs')
         parser.add_argument(
             '--loose-locks', action='store_true',
-            help='add only: sample only HEADs whose expansion locks a HEAD, unreleased or retired version')
+            help='add only: sample only HEADs locked to a version that isn\'t its repo\'s latest release')
         parser.add_argument('--references', type=int, default=5, help='add: references per HEAD, at random')
         parser.add_argument('--source', help='import: source URI whose concepts are imported')
         parser.add_argument('--size', type=int, default=100, help='import: number of concepts to import')
