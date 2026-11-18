@@ -17,7 +17,7 @@ from mock.mock import ANY
 from rest_framework import status
 from rest_framework.response import Response
 
-from core.collections.constants import SOURCE_TO_CONCEPTS, TRANSFORM_TO_RESOURCE_VERSIONS, \
+from core.collections.constants import SOURCE_TO_CONCEPTS, TRANSFORM_TO_RESOURCE_VERSIONS, TRANSFORM_TO_EXTENSIONAL, \
     EXPANSION_LOCKED_REPO_VERSION_TOGGLE, RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE
 from core.collections.dry_runs import ExpansionDryRun
 from core.collections.documents import CollectionDocument
@@ -39,7 +39,7 @@ from core.common.tasks import add_references, seed_children_to_new_version, seed
 from core.common.tasks import update_collection_active_concepts_count
 from core.common.tasks import update_collection_active_mappings_count
 from core.common.tests import OCLTestCase, OCLAPITestCase
-from core.common.utils import to_owner_uri, get_falsy_values
+from core.common.utils import to_owner_uri, get_falsy_values, drop_version
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept, HierarchicalConcepts
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
@@ -2613,6 +2613,66 @@ class TasksTest(OCLTestCase):
         self.assertEqual(list(copy.evaluated_collection_versions.all()), [locked])
         self.assertNotIn(newer, copy.evaluated_collection_versions.all())
 
+    def head_with_valueset_reference(self, lock):
+        head = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=head, mnemonic='autoexpand-HEAD')
+        expansion.evaluated_collection_versions.add(lock)
+        head.expansion_uri = expansion.uri
+        head.save()
+        valueset = drop_version(lock.uri)
+        reference = CollectionReference(
+            expression=valueset, collection=head, valueset=[valueset], reference_type='concepts')
+        reference.clean()
+        reference.save()
+        return head, expansion
+
+    @patch('core.common.tasks.export_collection')
+    def test_rebuild_keeps_the_valueset_locks_a_version_was_created_with(self, _):
+        valueset = OrganizationCollectionFactory()
+        locked, locked_concept = self.valueset_release(valueset, 'v1')
+        head, _ = self.head_with_valueset_reference(locked)
+        version = OrganizationCollectionFactory(organization=head.organization, version='v1', mnemonic=head.mnemonic)
+        seed_children_to_new_version('collection', version.id, False, expansion='lock')  # pylint: disable=no-value-for-parameter
+        self.valueset_release(valueset, 'v2')
+        version.refresh_from_db()
+
+        for is_locked in (True, False):
+            with self.subTest(is_locked=is_locked), \
+                    patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=is_locked):
+                expansion = Expansion.objects.get(uri=version.expansion_uri)
+                expansion.seed_children(index=False, force_reevaluate=True)
+
+                self.assertEqual(list(expansion.concepts.all()), [locked_concept])
+                self.assertEqual(list(expansion.evaluated_collection_versions.all()), [locked])
+
+    def test_rebuild_of_an_expansion_not_built_with_lock_resolves_valuesets_again(self):
+        valueset = OrganizationCollectionFactory()
+        locked, _ = self.valueset_release(valueset, 'v1')
+        newer, newer_concept = self.valueset_release(valueset, 'v2')
+        _, expansion = self.head_with_valueset_reference(locked)
+
+        expansion.seed_children(index=False, force_reevaluate=True)
+
+        self.assertEqual(list(expansion.concepts.all()), [newer_concept])
+        self.assertEqual(list(expansion.evaluated_collection_versions.all()), [newer])
+
+    def test_manual_expansion_resolves_valuesets_under_its_own_lock(self):
+        valueset = OrganizationCollectionFactory()
+        default_lock, _ = self.valueset_release(valueset, 'v1')
+        own_lock, own_concept = self.valueset_release(valueset, 'v2')
+        _, latest_concept = self.valueset_release(valueset, 'v3')
+        head, _ = self.head_with_valueset_reference(default_lock)
+
+        for is_locked, expected in ((True, own_concept), (False, latest_concept)):
+            with self.subTest(is_locked=is_locked), \
+                    patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=is_locked):
+                manual = ExpansionFactory(collection_version=head, mnemonic=f'manual-{is_locked}')
+                manual.evaluated_collection_versions.add(own_lock)
+
+                manual.add_references(head.references.all(), index=False)
+
+                self.assertEqual(list(manual.concepts.all()), [expected])
+
     @override_settings(TEST_MODE=False)
     @patch('core.collections.models.batch_index_resources')
     @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
@@ -3070,6 +3130,29 @@ class ExpansionTest(OCLTestCase):
             cascade={'method': SOURCE_TO_CONCEPTS}, transform=TRANSFORM_TO_RESOURCE_VERSIONS)], collection.created_by)
 
         self.assertEqual(list(collection.references.values_list('version', flat=True)), ['v1'])
+
+    def test_string_cascade_gives_the_members_of_the_equivalent_dict_cascade_under_a_lock(self):
+        for lock_name in ('release', 'retired release', 'HEAD'):
+            for transform in (TRANSFORM_TO_RESOURCE_VERSIONS, TRANSFORM_TO_EXTENSIONAL):
+                with self.subTest(lock=lock_name, transform=transform):
+                    source, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+                    if lock_name == 'retired release':
+                        Source.objects.filter(id=v1.id).update(retired=True)
+                        v1.refresh_from_db()
+                    lock = source if lock_name == 'HEAD' else v1
+                    string_cascade = self.locked_auto_expansion(lock)
+                    string_cascade.add_expressions(
+                        {'expressions': [old.versioned_object.uri]}, string_cascade.created_by,
+                        cascade=SOURCE_TO_CONCEPTS, transform=transform)
+                    dict_cascade = self.locked_auto_expansion(lock)
+                    dict_cascade.add_references([CollectionReference(
+                        system=source.uri, code=old.mnemonic, reference_type='concepts',
+                        created_by=dict_cascade.created_by, cascade={'method': SOURCE_TO_CONCEPTS},
+                        transform=transform)], dict_cascade.created_by)
+
+                    members = sorted(dict_cascade.expansion.concepts.values_list('id', flat=True))
+                    self.assertTrue(members)
+                    self.assertEqual(sorted(string_cascade.expansion.concepts.values_list('id', flat=True)), members)
 
     def test_add_references_resolves_within_locked_version(self):
         source, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
