@@ -1,6 +1,7 @@
 import importlib
 import json
 import os
+import random
 import tempfile
 from io import StringIO
 
@@ -3998,6 +3999,8 @@ class ExpansionTest(OCLTestCase):
         source_uris = ExpansionDryRun.get_source_concept_uris(source)
         self.assertEqual(source_uris, [old.versioned_object.uri])
         self.assertEqual(ExpansionDryRun.get_import_expressions(collection, source_uris, 5), source_uris)
+        self.assertEqual(
+            ExpansionDryRun.get_import_expressions(collection, source_uris, 5, random.Random('1 a')), source_uris)
         expressions = source_uris
 
         report = ExpansionDryRun([EXPANSION_LOCKED_REPO_VERSION_TOGGLE]).import_references(collection, expressions)
@@ -4045,6 +4048,40 @@ class ExpansionTest(OCLTestCase):
 
         self.assertEqual([report['key'] for report in reports], [f'{collection.uri} {reference.expression}'])
         self.assertEqual(reports[0]['toggles'], [EXPANSION_LOCKED_REPO_VERSION_TOGGLE])
+
+    def test_dry_run_heads_with_loose_locks_include_value_sets_locked_at_older_versions(self):
+        value_set = OrganizationCollectionFactory()
+        older = OrganizationCollectionFactory(
+            mnemonic=value_set.mnemonic, organization=value_set.organization, version='v1', released=True,
+            is_latest_version=False)
+        latest = OrganizationCollectionFactory(
+            mnemonic=value_set.mnemonic, organization=value_set.organization, version='v2', released=True)
+        locked_older = self.locked_auto_expansion(OrganizationSourceFactory(version='v1', released=True))
+        locked_older.expansion.evaluated_collection_versions.add(older)
+        locked_latest = self.locked_auto_expansion(OrganizationSourceFactory(version='v1', released=True))
+        locked_latest.expansion.evaluated_collection_versions.add(latest)
+
+        heads = ExpansionDryRun.get_heads_with_loose_locks()
+
+        self.assertIn(locked_older, heads)
+        self.assertNotIn(locked_latest, heads)
+
+    def test_dry_run_toggle_column(self):
+        self.assertEqual(ExpansionDryRun.get_toggle_column('development'), 'dev')
+        self.assertEqual(ExpansionDryRun.get_toggle_column('who-staging'), 'who_staging')
+        self.assertEqual(ExpansionDryRun.get_toggle_column('staging'), 'staging')
+        self.assertIsNone(ExpansionDryRun.get_toggle_column('local'))
+        self.assertIsNone(ExpansionDryRun([], base_env='local').get_toggle(EXPANSION_LOCKED_REPO_VERSION_TOGGLE, set()))
+
+    def test_dry_run_expansions_command_rejects_head_without_expansion(self):
+        collection = OrganizationCollectionFactory()
+        collection.expansion_uri = f'{collection.uri}HEAD/expansions/gone/'
+        collection.save()
+
+        with self.assertRaises(CommandError):
+            call_command(
+                'dry_run_expansions', collection.uri, '--mode', 'add', '--toggle',
+                EXPANSION_LOCKED_REPO_VERSION_TOGGLE, stdout=StringIO())
 
     def test_dry_run_expansions_command_retries_failures_and_rejects_other_files(self):
         _, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()

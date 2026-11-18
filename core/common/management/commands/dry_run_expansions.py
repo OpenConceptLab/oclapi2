@@ -82,6 +82,11 @@ class Command(BaseCommand):
             expansions += list(Expansion.objects.filter(id__in=self.sample(ids)).order_by('uri'))
         return expansions
 
+    def get_random(self, uri):
+        """Seeded per item, so a resumed run samples each item as an uninterrupted one would"""
+        seed = self.options['seed']
+        return random if seed is None else random.Random(f'{seed} {uri}')
+
     def sample(self, ids):
         return random.sample(ids, min(self.options['sample'], len(ids)))
 
@@ -90,7 +95,7 @@ class Command(BaseCommand):
         if self.options['sample']:
             queryset = ExpansionDryRun.get_heads_with_loose_locks() if self.options['loose_locks'] else \
                 Collection.objects.filter(version='HEAD')
-            ids = list(queryset.exclude(expansion_uri=None).exclude(expansion_uri='').order_by('id').values_list(
+            ids = list(queryset.filter(expansion_uri__in=Expansion.objects.values('uri')).order_by('id').values_list(
                 'id', flat=True))
             heads += list(Collection.objects.filter(id__in=self.sample(ids)).order_by('uri'))
         return heads
@@ -111,7 +116,7 @@ class Command(BaseCommand):
 
     def get_head(self, uri):
         head = Collection.objects.filter(uri=self.to_collection_version_uri(uri), version='HEAD').first()
-        if not head or not head.expansion_uri:
+        if not head or not head.expansion:
             raise CommandError(f'No HEAD collection version with an expansion found for {uri}')
         return head
 
@@ -132,6 +137,9 @@ class Command(BaseCommand):
 
     def is_skipped(self, key, expansion):
         if key in self.done:
+            return True
+        if not expansion:
+            self.stdout.write(f'{key}: skipped, it has no expansion')
             return True
         if expansion.is_processing:
             self.stdout.write(f'{key}: skipped, it is being processed')
@@ -185,7 +193,7 @@ class Command(BaseCommand):
                 continue
             if source_uris is None:
                 source_uris = ExpansionDryRun.get_source_concept_uris(source)
-            expressions = ExpansionDryRun.get_import_expressions(head, source_uris, size)
+            expressions = ExpansionDryRun.get_import_expressions(head, source_uris, size, self.get_random(head.uri))
             self.run_safely(key, partial(self.dry_run.import_references, head, expressions, size), self.write_summary)
 
     def write_summary(self, report):

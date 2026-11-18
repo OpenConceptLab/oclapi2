@@ -17,12 +17,10 @@ from core.toggles.models import Toggle
 
 
 class ExpansionDryRun:
-    """
-    Runs expansion changes twice, with base_env's toggles and then with the given toggles on as well,
-    each in a transaction that is rolled back, and reports what the toggles change.
-    No Celery task is queued and nothing is indexed.
-    """
+    """Runs expansion changes with base_env's toggles, then with the given toggles on too, each rolled back.
+    Reports what the toggles change; no Celery task is queued and nothing is indexed."""
     DRY_RUN_VERSION = 'dry-run'
+    TOGGLE_COLUMNS = ('dev', 'qa', 'demo', 'staging', 'who_staging', 'production')
 
     def __init__(self, toggles, base_env='production'):
         self.toggles = set(toggles)
@@ -31,10 +29,11 @@ class ExpansionDryRun:
 
     @staticmethod
     def get_toggle_column(env):
-        """The toggles table column an environment reads, as Toggle.to_dict maps it"""
+        """The toggles table column an environment reads, as Toggle.to_dict maps it; None for another env"""
         if not env or env in ['development', 'ci']:
             return 'dev'
-        return 'who_staging' if env == 'who-staging' else env
+        column = 'who_staging' if env == 'who-staging' else env
+        return column if column in ExpansionDryRun.TOGGLE_COLUMNS else None
 
     @staticmethod
     def unknown_toggles(names):
@@ -43,6 +42,8 @@ class ExpansionDryRun:
     def get_toggle(self, name, toggles_on):
         if name in toggles_on:
             return True
+        if not self.toggle_column:
+            return None
         return Toggle.objects.filter(name=name, is_active=True).values_list(self.toggle_column, flat=True).first()
 
     def block_send(self, name, *args, **kwargs):  # pylint: disable=unused-argument
@@ -206,22 +207,23 @@ class ExpansionDryRun:
         ).values_list('uri', flat=True))
 
     @staticmethod
-    def get_import_expressions(collection_version, source_uris, size):
+    def get_import_expressions(collection_version, source_uris, size, rng=random):
         """A sample of the source URIs not yet in the collection version's expansion"""
         existing = set(collection_version.expansion.concepts.values_list(
             'versioned_object__uri', flat=True)) if collection_version.expansion_uri else set()
         uris = [uri for uri in source_uris if uri not in existing]
-        return random.sample(uris, min(size, len(uris)))
+        return rng.sample(uris, min(size, len(uris)))
 
     @staticmethod
     def get_heads_with_loose_locks():
-        """HEADs whose default expansion locks a HEAD, unreleased or retired version, where the lock toggle matters"""
+        """HEADs with a lock the lock toggle changes: a source at a HEAD, unreleased or retired version,
+        or a value set at any version but its latest, as value set locks apply only with the toggle on"""
         loose = Q(version='HEAD') | Q(retired=True) | Q(released=False)
         head_expansions = Expansion.objects.filter(collection_version__version='HEAD')
         expansion_uris = {
             *head_expansions.filter(evaluated_source_versions__in=Source.objects.filter(loose)).values_list(
                 'uri', flat=True),
-            *head_expansions.filter(evaluated_collection_versions__in=Collection.objects.filter(loose)).values_list(
-                'uri', flat=True),
+            *head_expansions.filter(evaluated_collection_versions__in=Collection.objects.filter(
+                loose | Q(is_latest_version=False))).values_list('uri', flat=True),
         }
         return Collection.objects.filter(version='HEAD', expansion_uri__in=expansion_uris)
