@@ -3156,6 +3156,9 @@ class ExpansionTest(OCLTestCase):
                     members = sorted(dict_cascade.expansion.concepts.values_list('id', flat=True))
                     self.assertTrue(members)
                     self.assertEqual(sorted(string_cascade.expansion.concepts.values_list('id', flat=True)), members)
+                    self.assertEqual(
+                        list(string_cascade.references.values_list('version', flat=True)),
+                        list(dict_cascade.references.values_list('version', flat=True)))
 
     def test_add_references_resolves_within_locked_version(self):
         source, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()

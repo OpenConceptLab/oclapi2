@@ -957,14 +957,20 @@ class CollectionReference(models.Model):
             # read before get_concepts, whose transform sets version to the resource's latest release
             is_versionless = not self.version
             concepts, mappings = self.get_concepts()
-            system_version = self.resolve_system_version
-            locked_version = system_version if is_versionless and system_version and system_version.id in [
-                locked.id for locked in self.get_locked_system_versions(system_version)] else None
+            locked_version = self.get_locked_transform_version(is_versionless)
             references += self.__generate_references_for_type(concepts, 'concepts', locked_version)
             references += self.__generate_references_for_type(mappings, 'mappings', locked_version)
         else:
             references.append(self)
         return references
+
+    def get_locked_transform_version(self, is_versionless):
+        """The locked source version a cascade-and-transform reference named without a version resolved to"""
+        system_version = self.resolve_system_version
+        if is_versionless and system_version and system_version.id in [
+                locked.id for locked in self.get_locked_system_versions(system_version)]:
+            return system_version
+        return None
 
     def should_generate_multiple_references(self):
         return self.include and self.cascade and self.transform and self.code
@@ -2023,38 +2029,40 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 explicit_system_versions += ref_system_versions
             return _concepts, _mappings
 
-        for reference in include_refs:
-            concepts, mappings = get_ref_results(reference)
-            concepts_updated = self.__include_resources(self.concepts, concepts, True)
-            if index and concepts_updated is not False:
-                index_concepts = [*index_concepts, *concepts_updated.values_list('id', flat=True)]
-            mappings_updated = self.__include_resources(self.mappings, mappings, False)
-            if index and mappings_updated is not False:
-                index_mappings = [*index_mappings, *mappings_updated.values_list('id', flat=True)]
+        try:
+            for reference in include_refs:
+                concepts, mappings = get_ref_results(reference)
+                concepts_updated = self.__include_resources(self.concepts, concepts, True)
+                if index and concepts_updated is not False:
+                    index_concepts = [*index_concepts, *concepts_updated.values_list('id', flat=True)]
+                mappings_updated = self.__include_resources(self.mappings, mappings, False)
+                if index and mappings_updated is not False:
+                    index_mappings = [*index_mappings, *mappings_updated.values_list('id', flat=True)]
 
-        for reference in exclude_refs:
-            concepts, mappings = get_ref_results(reference)
-            concepts_updated = self.__exclude_resources(reference, self.concepts, concepts, Concept)
-            mappings_updated = self.__exclude_resources(reference, self.mappings, mappings, Mapping)
-            if index:
-                if concepts_updated is not False:
-                    filters = {
-                        'id__in': list(concepts_updated.values_list('id', flat=True))}
-                    if get(settings, 'TEST_MODE', False):
-                        batch_index_resources('concept', filters)
-                    else:
-                        batch_index_resources.apply_async(('concept', filters), queue='indexing', permanent=False)
-                if mappings_updated is not False:
-                    filters = {
-                        'id__in': list(mappings_updated.values_list('id', flat=True))}
-                    if get(settings, 'TEST_MODE', False):
-                        batch_index_resources('mapping', filters)
-                    else:
-                        batch_index_resources.apply_async(('mapping', filters), queue='indexing', permanent=False)
+            for reference in exclude_refs:
+                concepts, mappings = get_ref_results(reference)
+                concepts_updated = self.__exclude_resources(reference, self.concepts, concepts, Concept)
+                mappings_updated = self.__exclude_resources(reference, self.mappings, mappings, Mapping)
+                if index:
+                    if concepts_updated is not False:
+                        filters = {
+                            'id__in': list(concepts_updated.values_list('id', flat=True))}
+                        if get(settings, 'TEST_MODE', False):
+                            batch_index_resources('concept', filters)
+                        else:
+                            batch_index_resources.apply_async(('concept', filters), queue='indexing', permanent=False)
+                    if mappings_updated is not False:
+                        filters = {
+                            'id__in': list(mappings_updated.values_list('id', flat=True))}
+                        if get(settings, 'TEST_MODE', False):
+                            batch_index_resources('mapping', filters)
+                        else:
+                            batch_index_resources.apply_async(('mapping', filters), queue='indexing', permanent=False)
 
-        for reference in valueset_locked_refs:
-            # so the caller's references resolve as they did before
-            reference.set_valueset_locks(None)
+        finally:
+            for reference in valueset_locked_refs:
+                # so the caller's references resolve as they did before
+                reference.set_valueset_locks(None)
         CollectionReference.objects.filter(id__in=resolved_ref_ids).update(last_resolved_at=timezone.now())
         CollectionReference.objects.filter(id__in=unresolved_ref_ids).update(last_resolved_at=None)
         self.explicit_collection_versions.add(*compact(explicit_valueset_versions))
