@@ -1,4 +1,7 @@
 import importlib
+import json
+import os
+import tempfile
 from io import StringIO
 
 from celery_once import AlreadyQueued
@@ -13,7 +16,9 @@ from mock.mock import ANY
 from rest_framework import status
 from rest_framework.response import Response
 
-from core.collections.constants import SOURCE_TO_CONCEPTS, TRANSFORM_TO_RESOURCE_VERSIONS
+from core.collections.constants import SOURCE_TO_CONCEPTS, TRANSFORM_TO_RESOURCE_VERSIONS, \
+    EXPANSION_LOCKED_REPO_VERSION_TOGGLE, RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE
+from core.collections.dry_runs import ExpansionDryRun
 from core.collections.documents import CollectionDocument
 from core.common.constants import SERIALIZATION_RETRY_ATTEMPTS
 from core.collections.models import CollectionReference, Collection, Expansion
@@ -29,7 +34,7 @@ from core.collections.utils import is_mapping, is_concept, is_version_specified,
     get_concept_by_expression
 from core.common.constants import OPENMRS_VALIDATION_SCHEMA, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, \
     RETIRED_ACCESS_TYPE_EDIT
-from core.common.tasks import add_references, seed_children_to_new_version
+from core.common.tasks import add_references, seed_children_to_new_version, seed_children_to_expansion
 from core.common.tasks import update_collection_active_concepts_count
 from core.common.tasks import update_collection_active_mappings_count
 from core.common.tests import OCLTestCase, OCLAPITestCase
@@ -3923,6 +3928,118 @@ class ExpansionTest(OCLTestCase):
             call_command('dry_run_expansions', stdout=out)
         with self.assertRaises(CommandError):
             call_command('dry_run_expansions', collection.uri, '--env', 'nowhere', stdout=out)
+
+    def test_dry_run_rolls_back_and_queues_no_task(self):
+        dry_run = ExpansionDryRun([EXPANSION_LOCKED_REPO_VERSION_TOGGLE])
+
+        with dry_run.rolled_back(set()):
+            OrganizationCollectionFactory(mnemonic='dry')
+            seed_children_to_expansion.apply_async((0,))
+            self.assertFalse(Toggle.get(EXPANSION_LOCKED_REPO_VERSION_TOGGLE))
+        with dry_run.rolled_back(dry_run.toggles):
+            self.assertTrue(Toggle.get(EXPANSION_LOCKED_REPO_VERSION_TOGGLE))
+
+        self.assertFalse(Collection.objects.filter(mnemonic='dry').exists())
+        self.assertEqual(dry_run.blocked_tasks, {seed_children_to_expansion.name: 1})
+        self.assertEqual(ExpansionDryRun.unknown_toggles([EXPANSION_LOCKED_REPO_VERSION_TOGGLE, 'NOPE']), ['NOPE'])
+
+    def test_dry_run_rebuild_with_toggle(self):
+        source, old, _, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection, expansion, reference = self._expansion_with_resource_version_reference(source, old)
+        self._rebuild(collection, expansion)
+
+        report = ExpansionDryRun([RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE]).rebuild(expansion)
+
+        added = {'type': 'concepts', 'status': 'added', 'before': None, 'after': old.uri}
+        self.assertEqual(report['key'], expansion.uri)
+        self.assertEqual(report['concepts'], {'added': 1, 'removed': 0, 'changed': 0})
+        self.assertEqual(report['references'], {reference.expression: [added]})
+        self.assertEqual(len(report['seconds']), 2)
+        self.assertEqual(list(expansion.concepts.all()), [old])
+
+    def test_dry_run_add_with_lock_toggle(self):
+        _, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection = self.locked_auto_expansion(v1)
+        collection.add_expressions({'expressions': [old.versioned_object.uri]}, collection.created_by)
+        reference = collection.references.get()
+
+        report = ExpansionDryRun([EXPANSION_LOCKED_REPO_VERSION_TOGGLE]).add(collection, reference)
+
+        self.assertEqual(report['key'], f'{collection.uri} {reference.expression}')
+        changes = report['references'][reference.expression]
+        self.assertEqual(len(changes), 1)
+        self.assertNotEqual(changes[0]['before'], old.uri)
+        self.assertEqual(changes[0]['after'], old.uri)
+        self.assertEqual(report['errors'], [{}, {}])
+        self.assertEqual(list(collection.references.all()), [reference])
+        self.assertEqual(list(collection.expansion.concepts.all()), [old])
+
+    def test_dry_run_create_version_with_lock_toggle(self):
+        _, old, v1, v2 = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection = self.locked_auto_expansion(v1)
+        collection.add_expressions({'expressions': [old.versioned_object.uri]}, collection.created_by)
+
+        report = ExpansionDryRun([EXPANSION_LOCKED_REPO_VERSION_TOGGLE]).create_version(collection)
+
+        self.assertEqual(report['key'], collection.uri)
+        self.assertEqual(report['concepts'], {'added': 0, 'removed': 0, 'changed': 0})
+        self.assertEqual(report['evaluated_source_versions'], {'before': [v2.uri], 'after': [v1.uri]})
+        self.assertIsNone(report['off']['built_with'])
+        self.assertEqual(report['on']['built_with'], 'lock')
+        self.assertEqual(report['on']['versus_head']['concepts'], {})
+        self.assertFalse(Collection.objects.filter(mnemonic=collection.mnemonic, version='dry-run').exists())
+
+    def test_dry_run_import_with_lock_toggle(self):
+        source, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection = self.locked_auto_expansion(v1)
+        expressions = ExpansionDryRun.get_import_expressions(collection, source, 5)
+        self.assertEqual(expressions, [old.versioned_object.uri])
+
+        report = ExpansionDryRun([EXPANSION_LOCKED_REPO_VERSION_TOGGLE]).import_references(collection, expressions)
+
+        self.assertEqual(report['key'], f'{collection.uri} 1')
+        self.assertEqual(report['added'], [1, 1])
+        self.assertEqual(report['errors'], [0, 0])
+        self.assertEqual([change['after'] for change in report['unattributed']], [old.uri])
+        self.assertFalse(collection.references.exists())
+
+    def test_dry_run_expansions_command_with_toggle(self):
+        source, old, _, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection, expansion, _ = self._expansion_with_resource_version_reference(source, old)
+        self._rebuild(collection, expansion)
+        out = StringIO()
+
+        toggle = RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE
+
+        call_command('dry_run_expansions', collection.uri, '--toggle', toggle, stdout=out)
+
+        self.assertIn('concepts: 1 added, 0 removed, 0 changed', out.getvalue())
+        for args in (
+                ['--mode', 'add'], ['--toggle', 'NOPE'], ['--toggle', toggle, '--env', 'production'],
+                ['--mode', 'import', '--toggle', toggle]):
+            with self.assertRaises(CommandError):
+                call_command('dry_run_expansions', collection.uri, *args, stdout=out)
+
+    def test_dry_run_expansions_command_add_mode_resumes_from_output(self):
+        _, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection = self.locked_auto_expansion(v1)
+        collection.add_expressions({'expressions': [old.versioned_object.uri]}, collection.created_by)
+        reference = collection.references.get()
+        args = ['dry_run_expansions', collection.uri, '--mode', 'add', '--toggle', EXPANSION_LOCKED_REPO_VERSION_TOGGLE]
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'report.jsonl')
+            out = StringIO()
+            call_command(*args, '--output', path, stdout=out)
+            self.assertIn(f'{collection.uri} {reference.expression} (', out.getvalue())
+            out = StringIO()
+            call_command(*args, '--output', path, stdout=out)
+            self.assertIn(f'1 already in {path}', out.getvalue())
+            with open(path) as file:
+                reports = [json.loads(line) for line in file]
+
+        self.assertEqual([report['key'] for report in reports], [f'{collection.uri} {reference.expression}'])
+        self.assertEqual(reports[0]['toggles'], [EXPANSION_LOCKED_REPO_VERSION_TOGGLE])
 
     def _source_with_pins_in_releases(self):
         """c1's pinned version is held by v1 and v3, c2's only by v1"""
