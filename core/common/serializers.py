@@ -26,7 +26,7 @@ class RepoVerificationSerializerMixin:
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
-        if 'verification' not in self.initial_data:
+        if 'verification' not in getattr(self, 'initial_data', {}):  # a nested serializer has no payload of its own
             return attrs
         if not get(self.context, 'request.user.is_staff'):
             raise PermissionDenied()

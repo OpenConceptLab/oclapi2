@@ -170,6 +170,9 @@ class RepoVerificationTestsMixin:
         self.assertEqual(after.updated_by_id, before.updated_by_id)
         self.assertEqual(dict(self.export_serializer(after).data), export_before)
 
+    def test_a_nested_serializer_without_a_payload_skips_the_check(self):
+        self.assertEqual(self.detail_serializer().validate({'name': 'nested'}), {'name': 'nested'})
+
     def test_it_is_left_out_of_the_export(self):
         self.version.verification = VALID
 
