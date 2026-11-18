@@ -1,7 +1,7 @@
 import uuid
 from collections import OrderedDict
 
-from celery.states import FAILURE, REVOKED, SUCCESS
+from celery.states import SUCCESS
 from celery_once import AlreadyQueued
 from dirtyfields import DirtyFieldsMixin
 from django.conf import settings
@@ -517,6 +517,8 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                     user, {'_append_source_version': self.version, 'is_in_latest_source_version': True}
                 )
             self.record_seed_stage(SEED_RELEASE_INDEXED)
+            return True
+        return False
 
     def index_resources_for_self_as_unreleased(self):
         """
@@ -641,11 +643,22 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             return bool(excluding and excluding.is_latest_released)
         return not self.released
 
-    def without_stale_release_flag(self, partial_doc=None, exclude_members_of=None):
-        """The partial doc to write: a release flag that's no longer current goes, the rest of the doc still applies."""
+    def current_release_write(self, partial_doc=None, exclude_members_of=None):
+        """
+        What a queued write should do now, as (partial_doc, exclude_members_of). A False write whose release has been
+        superseded leaves out the latest release's members instead, or, while those aren't written yet, is left to the
+        latest release to repeat. Any other release flag that's out of date goes, and the rest of the doc still applies.
+        """
         if self.flag_write_is_current(partial_doc, exclude_members_of):
-            return partial_doc
-        return {key: value for key, value in partial_doc.items() if key != 'is_in_latest_source_version'}
+            return partial_doc, exclude_members_of
+        latest = self.get_latest_released_version()
+        if exclude_members_of and partial_doc['is_in_latest_source_version'] is False and latest and latest.id != self.id:
+            if not latest.is_awaiting_members:
+                return partial_doc, latest.id
+            superseded = Source.objects.filter(id=exclude_members_of).first()
+            if superseded:
+                superseded.record_seed_stage(SEED_MEMBERS_WRITTEN)
+        return {key: value for key, value in partial_doc.items() if key != 'is_in_latest_source_version'}, None
 
     def sync_concept_vectors_async(self, user=None, recheck=True, countdown=None):
         """
@@ -710,11 +723,9 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
     @property
     def is_awaiting_members(self):
-        """Whether the seed task has yet to write this version's members."""
+        """Whether this version's members are yet to be written. A failed or revoked seed task hasn't written them."""
         seed_task = self.get_seed_new_version_task()
-        return bool(
-            seed_task and seed_task.state not in (SUCCESS, FAILURE, REVOKED) and not get(seed_task.summary, SEED_STAGE)
-        )
+        return bool(seed_task and seed_task.state != SUCCESS and not get(seed_task.summary, SEED_STAGE))
 
     def record_seed_stage(self, stage):
         """Kept on the seed task, which requests saving a copy of this version loaded earlier can't overwrite."""

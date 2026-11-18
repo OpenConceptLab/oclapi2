@@ -442,9 +442,7 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                 instance.refresh_from_db(fields=['match_algorithms', 'released'])
                 if instance.has_semantic_match_algorithm:
                     instance.sync_concept_vectors_async(instance.created_by)
-                if instance.is_latest_released:
-                    instance.index_resources_for_self_as_latest_released()
-                else:
+                if not (instance.released and instance.index_resources_for_self_as_latest_released()):
                     instance.index_children(sync=False, user=instance.created_by)
             elif autoexpand:
                 if not seed_from_head:
@@ -774,7 +772,8 @@ def index_source_concepts(  # pylint: disable=too-many-arguments,too-many-locals
     """
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
-    partial_doc = source.without_stale_release_flag(partial_doc, exclude_members_of) if source else partial_doc
+    if source:
+        partial_doc, exclude_members_of = source.current_release_write(partial_doc, exclude_members_of)
     if source and partial_doc != {}:
         prefetch = ['sources', 'names', 'descriptions'] if should_prefetch else []
         select_related = [
@@ -956,7 +955,8 @@ def index_source_mappings(
     """
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
-    partial_doc = source.without_stale_release_flag(partial_doc, exclude_members_of) if source else partial_doc
+    if source:
+        partial_doc, exclude_members_of = source.current_release_write(partial_doc, exclude_members_of)
     if source and partial_doc != {}:
         from core.mappings.documents import MappingDocument
         prefetch = ['sources'] if should_prefetch else []
