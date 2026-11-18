@@ -36,7 +36,7 @@ from core.common.tasks import seed_children_to_expansion, batch_index_resources,
     index_expansion_mappings, readd_references_to_expansion_on_references_removal
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
     get_resource_class_from_resource_name, to_snake_case, \
-    es_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
+    es_to_pks, id_batches, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
     get_truthy_values, get_falsy_values, get_current_authorized_user, to_camel_case, to_parent_kwargs_from_uri, \
     is_versioned_uri, canonical_url_to_url_and_version
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
@@ -1082,9 +1082,8 @@ class CollectionReference(models.Model):
                     search = search.filter("match", **{filter_def["property"]: filter_def["value"]})
                 else:
                     search = search.filter("match", **{to_snake_case(filter_def["property"]): filter_def["value"]})
-            for _queryset in batch_qs(queryset.order_by('id'), 500):
+            for ids in id_batches(queryset, 500):
                 # iterating on queryset because ES has max_clause limit default to 1024
-                ids = list(_queryset.values_list('id', flat=True))
                 pks += es_to_pks(es_id_in(search, ids).params(request_timeout=ES_REQUEST_TIMEOUT_ASYNC), len(ids))
             if pks:
                 resource_versions = resource_klass.objects.filter(id__in=set(pks))
@@ -2519,8 +2518,7 @@ class ExpansionTextFilterParameter(ExpansionParameter):
                 CustomESSearch.get_exact_match_criterion(
                     self.value, document.get_match_phrase_attrs(), document.get_exact_match_attrs())
             )
-            for _queryset in batch_qs(queryset.order_by('id'), 500):
-                ids = list(_queryset.values_list('id', flat=True))
+            for ids in id_batches(queryset, 500):
                 pks += es_to_pks(es_id_in(search, ids).params(request_timeout=ES_REQUEST_TIMEOUT), len(ids))
             queryset = klass.objects.filter(id__in=set(pks)) if pks else klass.objects.none()
 

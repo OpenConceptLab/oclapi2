@@ -875,21 +875,17 @@ def es_to_pks(search, size):
     return pks
 
 
-def batch_qs(qs, batch_size=1000):
-    """
-    Returns a sub-queryset for each batch in the given queryset.
-
-    Usage:
-        # Make sure to order your querset
-        article_qs = Article.objects.order_by('id')
-        for qs in batch_qs(article_qs):
-            for article in qs:
-                print article.body
-    """
-    total = qs.count()
-    for start in range(0, total, batch_size):
-        end = min(start + batch_size, total)
-        yield qs[start:end]
+def id_batches(queryset, batch_size=1000):
+    """The queryset's ids in id order, each list starting after the last id read, so rows added or removed during
+    the read can't make a batch skip or repeat a row; never yields an empty list"""
+    last_id = None
+    while True:
+        batch = queryset if last_id is None else queryset.filter(id__gt=last_id)
+        ids = list(batch.order_by('id').values_list('id', flat=True)[:batch_size])
+        if not ids:
+            return
+        yield ids
+        last_id = ids[-1]
 
 
 def split_list_by_condition(items, predicate):
