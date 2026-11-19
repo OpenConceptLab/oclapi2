@@ -9,7 +9,7 @@ from celery.utils.log import get_task_logger
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Q
 from ocldev.oclfleximporter import OclFlexImporter
 from pydash import compact, get
 
@@ -431,8 +431,8 @@ class MappingMatcher:
     matches, the importer updates the first one not retired, else the newest, with the lines before it already applied.
     """
     FIELDS = ('id', 'mnemonic', 'retired', 'is_active', 'map_type', 'from_concept__versioned_object_id',
-              'from_concept_code', 'from_source_url', 'to_concept__versioned_object_id', 'to_concept_code',
-              'to_source_url', 'to_source__uri')
+              'from_concept_code', 'from_source_id', 'from_source_url', 'to_concept__versioned_object_id',
+              'to_concept_code', 'to_source_url', 'to_source__uri')
 
     def __init__(self, head):
         self.rows, self.by_mnemonic, self.by_from_id, self.by_from_code = {}, {}, {}, {}
@@ -466,12 +466,15 @@ class MappingMatcher:
         source_uris = {to_parent_uri(drop_version(line['to_concept_url'])) for line in unnamed
                        if line.get('to_concept_url') and not line.get('to_source_url')}
         existing_sources = set(Source.objects.filter(uri__in=source_uris).values_list('uri', flat=True))
+        from_source_ids = {url: MappingImporter.get_source_id_by_url(url) for url in {
+            to_parent_uri(drop_version(line['from_concept_url'])) for line in unnamed
+            if line.get('from_concept_url') and drop_version(line['from_concept_url']) not in resolved}}
         kept = set()
         for line in lines:
             if line.get('id') not in (None, ''):
                 row_id = self.by_mnemonic.get(str(line['id']))
             else:
-                row_id = self.choose(self.get_candidates(line, resolved, existing_sources))
+                row_id = self.choose(self.get_candidates(line, resolved, existing_sources, from_source_ids))
             if row_id:
                 # a seeding import leaves a field it doesn't send at its default, so the next line sees this
                 self.rows[row_id]['retired'] = line.get('retired') in (True, 'true', 'True')
@@ -479,7 +482,14 @@ class MappingMatcher:
                     kept.add(row_id)
         return kept
 
-    def get_candidates(self, line, resolved, existing_sources):  # pylint: disable=too-many-locals
+    @staticmethod
+    def is_same_from_source(row, from_source_url, from_source_id):
+        """MappingImporter.get_same_from_source_criteria, for one row."""
+        if row['from_source_id']:
+            return row['from_source_id'] == from_source_id
+        return row['from_source_url'] == drop_version(from_source_url)
+
+    def get_candidates(self, line, resolved, existing_sources, from_source_ids):  # pylint: disable=too-many-locals
         map_type, from_code = line.get('map_type'), line.get('from_concept_code')
         from_url = drop_version(line.get('from_concept_url') or '')
         from_id = resolved.get(from_url)
@@ -489,8 +499,9 @@ class MappingMatcher:
         else:
             codes = self.variations(from_code) if from_code else {self.last_segment(from_url)} if from_url else set()
             candidates = [row_id for code in codes for row_id in self.by_from_code.get((map_type, code), [])]
-            from_source_url = drop_version(to_parent_uri(from_url))
-            checks.append(lambda row: row['from_source_url'] == from_source_url)
+            from_source_url = to_parent_uri(from_url)
+            checks.append(lambda row: self.is_same_from_source(
+                row, from_source_url, from_source_ids.get(from_source_url)))
         if from_code and from_id:
             checks.append(lambda row: row['from_concept_code'] in self.variations(from_code))
         to_url, to_code, to_source_url = drop_version(line.get('to_concept_url') or ''), line.get(
@@ -922,11 +933,14 @@ class MappingImporter(BaseResourceImporter):
 
         versionless_from_concept_url = drop_version(from_concept_url)
         from_concept_id = self.get_cached_versioned_concept_id_by_uri(versionless_from_concept_url)
+        same_from_source = Q()
         if from_concept_id is not None:
             filters['from_concept__versioned_object_id'] = from_concept_id
         else:
             # a code the URL doesn't resolve matches only within the URL's source, never another source's mapping
-            filters['from_source_url'] = drop_version(to_parent_uri(versionless_from_concept_url))
+            from_source_url = to_parent_uri(versionless_from_concept_url)
+            from_source_id = self.get_cached_source_id_by_url(from_source_url)
+            same_from_source = self.get_same_from_source_criteria(from_source_url, from_source_id)
             if not from_concept_code:
                 filters['from_concept_code'] = compact(versionless_from_concept_url.split('/'))[-1]
         if to_concept_url:
@@ -949,9 +963,30 @@ class MappingImporter(BaseResourceImporter):
             filters['to_concept_code__in'] = [
                 *Concept.get_encoded_str_variations(to_concept_code), to_concept_code.replace(' ', '+')]
 
-        self.queryset = Mapping.objects.filter(**filters)
+        self.queryset = Mapping.objects.filter(same_from_source, **filters)
 
         return self.queryset
+
+    @staticmethod
+    def get_source_id_by_url(url):
+        """The source a mapping saved with this from source URL is linked to: the one it resolves to, as on save."""
+        source, _ = Source.resolve_reference_expression(url, None, HEAD)
+        return source.id if isinstance(source, Source) else None
+
+    def get_cached_source_id_by_url(self, url):
+        cache = self.cache.setdefault('source_id_by_url', {})
+        if url not in cache:
+            cache[url] = self.get_source_id_by_url(url)
+        return cache[url]
+
+    @staticmethod
+    def get_same_from_source_criteria(from_source_url, from_source_id):
+        """
+        A mapping from the source a from source URL names: one linked to a source, if that's the source the URL
+        resolves to, and one that isn't, if it was saved with that URL. MappingMatcher.is_same_from_source alike.
+        """
+        criteria = Q(from_source__isnull=True, from_source_url=drop_version(from_source_url))
+        return criteria | Q(from_source_id=from_source_id) if from_source_id else criteria
 
     def parse(self):
         source = self.get_cached_parent_source()

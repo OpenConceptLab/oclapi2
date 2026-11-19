@@ -1451,27 +1451,30 @@ class BulkImportInlineTest(OCLTestCase):
 
         return {'inline': inline, 'parallel': parallel_part}
 
+    @staticmethod
+    def register_canonical_url(source, canonical_url):
+        Toggle.objects.filter(name=URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE).update(
+            dev=True, qa=True, demo=True, staging=True, who_staging=True, production=True)
+        Source.objects.filter(id=source.id).update(canonical_url=canonical_url)
+        GlobalURLRegistryFactory(url=canonical_url, namespace=source.organization.uri)
+        return canonical_url
+
     @patch('core.importers.models.batch_index_resources', Mock())
     def test_mapping_line_without_id_never_updates_another_sources_mapping_by_code(self):
         for path, run in self.import_paths().items():
-            with self.subTest(path):
-                mapping, line = self.cross_source_mapping(f'CrossUpdate{path}')
-                sources_uri = mapping.parent.organization.uri + 'sources/'
-                versions = Mapping.objects.filter(versioned_object_id=mapping.id).count()
+            for from_source in ('S2', 'S3'):
+                for extra in ({}, {'from_concept_code': 'X'}):
+                    with self.subTest(path, from_source=from_source, **extra):
+                        mapping, line = self.cross_source_mapping(f'CrossUpdate{path}{from_source}{len(extra)}')
+                        versions = Mapping.objects.filter(versioned_object_id=mapping.id).count()
 
-                reports = [run([line(from_source, extras={'from': from_source}, **extra)])
-                           for from_source in ('S2', 'S3') for extra in ({}, {'from_concept_code': 'X'})]
+                        report = run([line(from_source, extras={'edited': True}, **extra)])
 
-                # each source's first line creates its own mapping, which the second line, naming the code, matches
-                self.assertEqual([(report['created'], report['failed']) for report in reports],
-                                 [(1, 0), (0, 0), (1, 0), (0, 0)])
-                mapping.refresh_from_db()
-                self.assertEqual((mapping.from_source_url, mapping.extras), (sources_uri + 'S1/', {}))
-                self.assertEqual(Mapping.objects.filter(versioned_object_id=mapping.id).count(), versions)
-                self.assertEqual(
-                    sorted(Mapping.objects.filter(parent=mapping.parent, id=F('versioned_object_id')).values_list(
-                        'from_source_url', flat=True)),
-                    [f'{sources_uri}{source}/' for source in ('S1', 'S2', 'S3')])
+                        self.assertEqual((report['created'], report['updated'], report['failed']), (1, 0, 0))
+                        mapping.refresh_from_db()
+                        self.assertEqual((mapping.from_source_url, mapping.extras),
+                                         (mapping.parent.organization.uri + 'sources/S1/', {}))
+                        self.assertEqual(Mapping.objects.filter(versioned_object_id=mapping.id).count(), versions)
 
     @patch('core.importers.models.batch_index_resources', Mock())
     def test_mapping_delete_line_without_id_never_retires_another_sources_mapping_by_code(self):
@@ -1500,6 +1503,46 @@ class BulkImportInlineTest(OCLTestCase):
                                  [(1, 0), (1, 0), (0, 1)])
                 mapping.refresh_from_db()
                 self.assertEqual((mapping.extras, mapping.retired), ({'edit': 2}, True))
+
+    @patch('core.importers.models.batch_index_resources', Mock())
+    def test_mapping_line_without_id_through_a_canonical_url_matches_the_source_it_resolves_to(self):
+        """The mapping is saved linked to S1 under S1's own URL, so a line naming S1's canonical URL still finds it."""
+        for path, run in self.import_paths().items():
+            with self.subTest(path):
+                mapping, line = self.cross_source_mapping(f'CrossCanonical{path}')
+                canonical_url = self.register_canonical_url(
+                    Source.objects.get(organization=mapping.parent.organization, mnemonic='S1', version='HEAD'),
+                    f'https://s1-{path}.example.test/')
+                canonical_line = {**line('S1'), 'from_concept_url': canonical_url + 'concepts/X/'}
+
+                self.assertEqual(MappingMatcher(mapping.parent).kept([canonical_line]), {mapping.id})
+                reports = [run([{**canonical_line, 'extras': {'edit': 1}}]),
+                           run([{**canonical_line, 'extras': {'edit': 2}, 'from_concept_code': 'X'}]),
+                           run([{**canonical_line, '__action': 'DELETE'}])]
+
+                self.assertEqual([(report['updated'], report['deleted'], report['failed']) for report in reports],
+                                 [(1, 0, 0), (1, 0, 0), (0, 1, 0)])
+                mapping.refresh_from_db()
+                self.assertEqual((mapping.extras, mapping.retired), ({'edit': 2}, True))
+
+    @patch('core.importers.models.batch_index_resources', Mock())
+    def test_mapping_delete_line_without_id_never_retires_a_mapping_linked_to_another_source(self):
+        """A mapping linked to S1 that still has a URL now registered to S2 isn't S2's to retire."""
+        for path, run in self.import_paths().items():
+            with self.subTest(path):
+                mapping, line = self.cross_source_mapping(f'CrossLinked{path}')
+                canonical_url = self.register_canonical_url(
+                    Source.objects.get(organization=mapping.parent.organization, mnemonic='S2', version='HEAD'),
+                    f'https://s2-{path}.example.test/')
+                Mapping.objects.filter(versioned_object_id=mapping.id).update(from_source_url=canonical_url)
+                stale_line = {**line('S1'), 'from_concept_url': canonical_url + 'concepts/X/'}
+
+                self.assertEqual(MappingMatcher(mapping.parent).kept([stale_line]), set())
+                report = run([{**stale_line, '__action': 'DELETE'}])
+
+                self.assertEqual((report['deleted'], report['not_found']), (0, 1))
+                mapping.refresh_from_db()
+                self.assertFalse(mapping.retired)
 
     @patch('core.importers.models.batch_index_resources', Mock())
     def test_seeding_preflight_matches_a_code_only_within_the_from_urls_source(self):
