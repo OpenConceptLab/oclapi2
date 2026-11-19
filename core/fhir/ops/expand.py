@@ -243,15 +243,15 @@ def stored_expansion(value_set):
 def unresolved(reference, value_set):
     """
     The 422 not-found for the first reference an expansion of the value set version couldn't resolve: a value set; a
-    pinned concept or mapping, as the version's reference that pinned it is one (its type, else its expression, as the
-    expansion evaluated it), or as the expression reads when the version no longer has that reference; else a code
-    system.
+    pinned concept or mapping, as the version's references that pinned it are (their type, else their expression, as
+    the expansion evaluated them) when they agree, else as the expression reads; else a code system.
     """
     url, version = reference.get('url') or '', reference.get('version') or None
     kind = reference.get('type')
     if kind == UNRESOLVED_RESOURCE_VERSION_TYPE:
-        pinned = value_set.references.filter(expression=url, resource_version=version).first()
-        kind = 'mapping' if (pinned.is_mapping if pinned else is_mapping(url)) else 'concept'
+        kinds = {pinned.is_mapping for pinned in value_set.references.filter(
+            expression=url, resource_version=version).only('reference_type', 'expression')}
+        kind = 'mapping' if (kinds.pop() if len(kinds) == 1 else is_mapping(url)) else 'concept'
     message_id, message = UNRESOLVED.get(kind, UNRESOLVED['system'])[bool(version)]
     return outcomes.NotFoundError(message.format(url=url, version=version), tx_issue_type='not-found',
                                   message_id=message_id, status_code=422)
