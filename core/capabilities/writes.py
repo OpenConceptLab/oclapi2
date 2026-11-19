@@ -81,7 +81,9 @@ class BatchWriteRefusals:
         key = (user.pk, type(content), content.pk, action)
         now = monotonic()
         if key not in self.answers or now - self.answers[key][1] >= self.answer_seconds:
-            self.answers[key] = (get_write_refusal(user, content, action, self.policy), now)
+            # asked about the row as stored now: a batch keeps the rows it loaded, and their access may have changed
+            current = type(content).objects.filter(pk=content.pk).first() or content
+            self.answers[key] = (get_write_refusal(user, current, action, self.policy), now)
         return self.answers[key][0]
 
 

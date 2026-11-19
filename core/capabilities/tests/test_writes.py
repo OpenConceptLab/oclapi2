@@ -618,6 +618,16 @@ class ImportWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
             self.assertEqual(write_refusals.get(self.user, self.source, WRITE_ACTION_EDIT), ReadOnlyPolicy.body)
         self.assertEqual(len(ReadOnlyPolicy.calls), 2)
 
+    def test_an_answer_asked_again_is_about_the_row_as_stored_now(self):
+        write_refusals = BatchWriteRefusals()
+        Source.objects.filter(id=self.source.id).update(public_access=ACCESS_TYPE_NONE)
+        loaded = Source.objects.get(id=self.source.id)
+        Source.objects.filter(id=self.source.id).update(public_access='View')  # made public during the batch
+
+        write_refusals.get(self.user, loaded, WRITE_ACTION_EDIT)
+
+        self.assertEqual(ReadOnlyPolicy.calls[0][1].public_access, 'View')
+
     def test_the_rows_of_a_package_file_share_their_answers(self):
         importer = ResourceImporter(write_refusals=BatchWriteRefusals())
 
