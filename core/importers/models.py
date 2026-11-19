@@ -938,9 +938,7 @@ class MappingImporter(BaseResourceImporter):
             filters['from_concept__versioned_object_id'] = from_concept_id
         else:
             # a code the URL doesn't resolve matches only within the URL's source, never another source's mapping
-            from_source_url = to_parent_uri(versionless_from_concept_url)
-            from_source_id = self.get_cached_source_id_by_url(from_source_url)
-            same_from_source = self.get_same_from_source_criteria(from_source_url, from_source_id)
+            same_from_source = self.get_same_from_source_criteria(to_parent_uri(versionless_from_concept_url))
             if not from_concept_code:
                 filters['from_concept_code'] = compact(versionless_from_concept_url.split('/'))[-1]
         if to_concept_url:
@@ -979,12 +977,12 @@ class MappingImporter(BaseResourceImporter):
             cache[url] = self.get_source_id_by_url(url)
         return cache[url]
 
-    @staticmethod
-    def get_same_from_source_criteria(from_source_url, from_source_id):
+    def get_same_from_source_criteria(self, from_source_url):
         """
         A mapping from the source a from source URL names: one linked to a source, if that's the source the URL
         resolves to, and one that isn't, if it was saved with that URL. MappingMatcher.is_same_from_source alike.
         """
+        from_source_id = self.get_cached_source_id_by_url(from_source_url)
         criteria = Q(from_source__isnull=True, from_source_url=drop_version(from_source_url))
         return criteria | Q(from_source_id=from_source_id) if from_source_id else criteria
 
