@@ -60,8 +60,8 @@ class MappedCodes:
     - its own fields hold HEAD's codes when HEAD holds the row, or when no source version does (a row only a
       collection holds); otherwise those of the latest release that holds it;
     - each other release whose own mappings (the active ones, as Concept.get_version_mappings reads them) give other
-      codes gets an entry in release_map_codes, which a search in that release reads instead
-      (ConceptDocument.scope_map_codes_to_release).
+      codes is in an entry of release_map_codes (one per distinct set of codes, naming its releases), which a search
+      in that release reads instead (ConceptDocument.scope_map_codes_to_release).
     Two queries for all the rows, plus HEAD's mappings for each row HEAD holds.
     """
     def __init__(self, concepts):
@@ -98,12 +98,13 @@ class MappedCodes:
             codes = to_mapped_codes(concept.get_unidirectional_mappings().values(*MAPPING_VALUES))
         else:
             codes = self.get_release_codes(concept, releases[-1][0])
-        entries = []
+        entries = {}  # one per distinct set of codes, with every release that has it
         for source_id, version in sorted(releases, key=lambda release: release[1]):
             release_codes = self.get_release_codes(concept, source_id)
-            if get_codes_key(release_codes) != get_codes_key(codes):
-                entries.append({'version': version, **self.to_fields(release_codes)})
-        return {**self.to_fields(codes), RELEASE_MAP_CODES: entries}
+            key = get_codes_key(release_codes)
+            if key != get_codes_key(codes):
+                entries.setdefault(repr(key), {'version': [], **self.to_fields(release_codes)})['version'].append(version)
+        return {**self.to_fields(codes), RELEASE_MAP_CODES: list(entries.values())}
 
     @staticmethod
     def to_fields(codes):

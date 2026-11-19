@@ -579,11 +579,15 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def map_codes_release(self):
         """
         The release (not HEAD) a concept search runs in, whose own mapped codes it matches
-        (OpenConceptLab/ocl_online#703).
+        (OpenConceptLab/ocl_online#703): the source version in the URL, or a fuzzy search's one source_version.
         """
-        if not self.is_concept_document() or 'source' not in self.kwargs or 'collection' in self.kwargs:
+        if not self.is_concept_document() or 'collection' in self.kwargs:
             return None
-        version = self.get_kwargs_filters().get('source_version')
+        if 'source' in self.kwargs:
+            version = self.get_kwargs_filters().get('source_version')
+        else:
+            source_versions = get(self, '_source_versions') if self.is_fuzzy_search else None
+            version = source_versions[0].version if source_versions and len(source_versions) == 1 else None
         return None if version in (None, HEAD) else version
 
     def scope_map_codes(self, results):

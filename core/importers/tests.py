@@ -7183,7 +7183,7 @@ class IsolatedVersionImportTest(OCLTestCase):
         self.assertEqual(get_codes(v1_row), ([], []))
         v2_row = Source.objects.get(mnemonic='LOINC', version='v2').concepts.get(mnemonic='A')
         self.assertEqual(  # HEAD and v3 share v2's row, without the mapping v3 dropped
-            get_codes(v2_row), ([], [('v2', ['B'])]) if v2_row.is_latest_version else (['B'], []))
+            get_codes(v2_row), ([], [(['v2'], ['B'])]) if v2_row.is_latest_version else (['B'], []))
 
     def test_new_ids_skip_those_of_dropped_codes(self):
         self.run_import([self.concept('A'), self.concept('B'), self.mapping('1', 'A', 'B'), self.mapping('2', 'B', 'A'),

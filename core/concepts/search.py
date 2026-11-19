@@ -50,7 +50,7 @@ class ReleaseMappedCodesFacet(Facet):
         for bucket in [*data.own.inner.inner.buckets, *data.release.inner.inner.inner.buckets]:
             counts[bucket.key] = counts.get(bucket.key, 0) + bucket.doc_count
         return [(key, count, key in filter_values) for key, count in
-                sorted(counts.items(), key=lambda item: (-item[1], item[0]))]
+                sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:FACET_SIZE]]
 
 
 class ConceptFacetedSearch(CustomESFacetedSearch):
@@ -202,8 +202,15 @@ class ConceptFuzzySearch:  # pragma: no cover
         from core.concepts.documents import ConceptDocument
         map_config = map_config or []
         repo_params = repo_params or cls.get_target_repo_params(repo_url)
-        filter_query = cls.get_filter_criteria(
-            data, include_retired, repo_params, repo_url, additional_filter_criterion)
+        release = repo_params.get('source_version')
+
+        def scoped(query):  # in a release, its own mapped codes (OpenConceptLab/ocl_online#703)
+            if not release or release == HEAD:
+                return query
+            return Q(ConceptDocument.scope_map_codes_to_release(query.to_dict(), release))
+
+        filter_query = scoped(cls.get_filter_criteria(
+            data, include_retired, repo_params, repo_url, additional_filter_criterion))
         or_clauses = []
 
         priority_criteria = []
@@ -311,7 +318,7 @@ class ConceptFuzzySearch:  # pragma: no cover
             or_clauses.append(Q("bool", should=nested_mapped_codes_queries, minimum_should_match=1, boost=0.1))
 
         wrapped_clauses = [
-            Q("bool", must=[Q(filter_query), clause])
+            Q("bool", must=[Q(filter_query), scoped(clause)])
             for clause in or_clauses
         ]
 
@@ -319,11 +326,7 @@ class ConceptFuzzySearch:  # pragma: no cover
         for knn_query in knn_queries:
             search = search.knn(**knn_query)
         if wrapped_clauses:
-            query = Q("bool", should=wrapped_clauses, minimum_should_match=1)
-            release = repo_params.get('source_version')
-            if release and release != HEAD:  # a release's own mapped codes (OpenConceptLab/ocl_online#703)
-                query = Q(ConceptDocument.scope_map_codes_to_release(query.to_dict(), release))
-            search = search.query(query)
+            search = search.query(Q("bool", should=wrapped_clauses, minimum_should_match=1))
         else:
             search = search.query(Q("bool", must=[Q(filter_query)]))
 

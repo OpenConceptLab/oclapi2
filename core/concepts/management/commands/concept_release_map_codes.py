@@ -17,7 +17,8 @@ class Command(BaseCommand):
         'mappings differ from those of the doc it shares) to an existing concepts index, then checks it. Additive: '
         'nothing is reindexed. Run it before deploying the code that writes the field: once a doc carries it, ES has '
         'mapped it dynamically, as an object rather than nested, and this can no longer apply. With --source, it then '
-        "fills the field on the docs of that source's releases that need an entry."
+        "rewrites the mapped codes of that source's release docs in the concepts index: a doc indexed before this "
+        "carries HEAD's codes, and a row HEAD doesn't hold now takes its latest release's."
     )
 
     def add_arguments(self, parser):
@@ -25,9 +26,12 @@ class Command(BaseCommand):
         parser.add_argument('--index', help='The index (default: the concepts index).')
         parser.add_argument(
             '--source', action='append', default=[],
-            help="A source's URL, such as /orgs/Regenstrief/sources/LOINC/, whose release docs to fill. Repeatable.")
+            help="A source's URL, such as /orgs/Regenstrief/sources/LOINC/, whose release docs to rewrite. "
+                 "Repeatable; not with --index.")
 
     def handle(self, *args, **options):
+        if options['index'] and options['source']:  # the updates go to the concepts index
+            raise CommandError('--source rewrites docs in the concepts index only: leave out --index')
         index = options['index'] or ConceptDocument._index._name  # pylint: disable=protected-access
         sources = [self.get_source(url) for url in options['source']]
         es = connections.get_connection()
@@ -46,7 +50,7 @@ class Command(BaseCommand):
 
         if not options['check']:
             for source in sources:
-                self.stdout.write(f'{source.uri}: {self.backfill(source)} docs given release entries')
+                self.stdout.write(f'{source.uri}: {self.backfill(source)} docs updated')
 
     @staticmethod
     def get_expected_mapping():
@@ -61,20 +65,11 @@ class Command(BaseCommand):
 
     @staticmethod
     def backfill(source):
-        """Updates the mapped codes of the docs of `source`'s release rows that get release entries."""
+        """Rewrites the mapped codes of the docs of every row `source`'s releases hold. Returns how many."""
         concept_ids = sorted(set(Concept.sources.through.objects.filter(
             source_id__in=source.versions.exclude(version=HEAD).values('id')).values_list('concept_id', flat=True)))
-        updated = 0
-
-        def get_actions(ids):
-            nonlocal updated
-            for action in Concept.get_mapped_codes_actions(ids):
-                if action['doc'][RELEASE_MAP_CODES]:
-                    updated += 1
-                    yield action
-
         for ids in chunks(concept_ids, BACKFILL_CHUNK_SIZE):
             Concept.batch_index_partial_by_ids(
-                Concept.objects.filter(id__in=ids), ConceptDocument, get_actions, single_batch=True, parallel=False,
-                refresh=False)
-        return updated
+                Concept.objects.filter(id__in=ids), ConceptDocument, Concept.get_mapped_codes_actions,
+                single_batch=True, parallel=False, refresh=False)
+        return len(concept_ids)
