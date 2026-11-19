@@ -1334,18 +1334,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             criteria |= Q(to_concept__versioned_object_id=self.versioned_object_id)
         return repo_version.mappings.filter(criteria, is_active=True)
 
-    def get_indexed_mappings(self):
-        """
-        The mappings this row's search document takes its mapped codes from: HEAD's for a row HEAD serves, else those
-        of the releases the row is in.
-        """
-        if self.is_versioned_object or self.is_latest_version or not self.id:
-            return self.get_unidirectional_mappings()
-        from core.mappings.models import Mapping
-        return Mapping.objects.filter(
-            sources__in=self.sources.all(), from_concept__versioned_object_id=self.versioned_object_id, is_active=True
-        ).distinct()
-
     def get_bidirectional_mappings(self):
         return self.get_unidirectional_mappings() | self.get_indirect_mappings()
 
@@ -1391,14 +1379,14 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     @classmethod
     def get_mapped_codes_actions(cls, ids):
         """Partial updates of these concepts' mapped codes, the fields their documents build from their mappings."""
-        from core.concepts.documents import ConceptDocument, ReleaseMapCodes
+        from core.concepts.documents import ConceptDocument, MappedCodes
         index_name = ConceptDocument()._index._name  # pylint: disable=protected-access
         concepts = list(cls.objects.filter(id__in=ids))
-        release_map_codes = ReleaseMapCodes(concepts)
+        mapped_codes = MappedCodes(concepts)
         for concept in concepts:
             yield {
                 '_op_type': 'update', '_index': index_name, '_id': concept.id, 'retry_on_conflict': 3,
-                'doc': ConceptDocument.get_mapped_codes_fields(concept, release_map_codes),
+                'doc': mapped_codes.get_fields(concept),
             }
 
     @classmethod

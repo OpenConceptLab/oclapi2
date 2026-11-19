@@ -7,7 +7,7 @@ from django.test import override_settings, tag
 from mock import patch, Mock
 
 from core.common.tests import OCLAPITestCase, OCLTestCase
-from core.concepts.documents import ConceptDocument, ReleaseMapCodes, RELEASE_MAP_CODES
+from core.concepts.documents import ConceptDocument, MappedCodes, RELEASE_MAP_CODES
 from core.concepts.models import Concept
 from core.concepts.search import ConceptFuzzySearch
 from core.importers.models import BulkImportInline
@@ -55,24 +55,44 @@ class ReleasesFixture:
         }
         importer = BulkImportInline(
             '\n'.join(json.dumps(line) for line in [source_line, *lines]), 'ocladmin', True, isolated_version=True)
-        with self.captureOnCommitCallbacks(execute=True):  # pylint: disable=no-member
-            importer.run()
-        self.assertEqual(importer.failed, [])  # pylint: disable=no-member
-
-    def create_releases(self):
-        OrganizationFactory(mnemonic='Regen')
         with ExitStack() as stack:
             for target in ('core.sources.models.index_source_mappings', 'core.sources.models.index_source_concepts',
                            'core.importers.models.batch_index_resources'):
                 stack.enter_context(patch(target, Mock(__name__=target.rsplit('.', 1)[-1])))
             stack.enter_context(patch('core.importers.models.index_concepts_mapped_codes', Mock()))
-            self.run_import([
-                self.concept('A'), self.concept('B'), self.mapping('M1', 'A', 'X01'),
-                self.mapping('M5', 'A', 'X05', 'NARROWER-THAN'), self.mapping('M2', 'B', 'X02'), self.version('v1')])
-            with override_settings(SEED_FROM_IMPORT_LARGE_DROP_MIN=10):
-                self.run_import([
-                    self.concept('A'), self.concept('B'), self.mapping('M2', 'B', 'X02'),
-                    self.mapping('M3', 'B', 'X03'), self.version('v2')])
+            stack.enter_context(override_settings(SEED_FROM_IMPORT_LARGE_DROP_MIN=10))
+            stack.enter_context(self.captureOnCommitCallbacks(execute=True))  # pylint: disable=no-member
+            importer.run()
+        self.assertEqual(importer.failed, [])  # pylint: disable=no-member
+
+    def create_releases(self):
+        OrganizationFactory(mnemonic='Regen')
+        self.run_import([
+            self.concept('A'), self.concept('B'), self.mapping('M1', 'A', 'X01'),
+            self.mapping('M5', 'A', 'X05', 'NARROWER-THAN'), self.mapping('M2', 'B', 'X02'), self.version('v1')])
+        self.run_import([
+            self.concept('A'), self.concept('B'), self.mapping('M2', 'B', 'X02'), self.mapping('M3', 'B', 'X03'),
+            self.version('v2')])
+
+    def edit_a_in_v3(self):
+        """v3 edits A, so A's v1/v2 row leaves HEAD: only v1 and v2 hold it."""
+        edited_a = {**self.concept('A'), 'names': [{'name': 'A edited', 'locale': 'en', 'locale_preferred': True}]}
+        self.run_import([
+            edited_a, self.concept('B'), self.mapping('M2', 'B', 'X02'), self.mapping('M3', 'B', 'X03'),
+            self.version('v3')])
+
+    def drop_b_in_v3(self):
+        """v3 drops B and its mappings: only v1 and v2 hold B's row."""
+        self.run_import([self.concept('A'), self.version('v3')])
+
+    @staticmethod
+    def fields(row):
+        return MappedCodes([row]).get_fields(row)
+
+    @staticmethod
+    def entries(fields):
+        return [(entry['version'], sorted(entry['same_as_map_codes']), entry['other_map_codes'])
+                for entry in fields[RELEASE_MAP_CODES]]
 
     @staticmethod
     def row(version, mnemonic):
@@ -92,7 +112,7 @@ class ReleaseMapCodesTest(ReleasesFixture, OCLTestCase):
         self.assertEqual(self.row('v1', 'A').id, row_a.id)  # one row, so one search document
         self.assertEqual(self.row('v1', 'B').id, row_b.id)
 
-        fields = ConceptDocument.get_mapped_codes_fields(row_a)
+        fields = self.fields(row_a)
         self.assertEqual((fields['same_as_map_codes'], fields['other_map_codes']), ([], []))
         entry, = fields[RELEASE_MAP_CODES]
         self.assertEqual(
@@ -101,14 +121,14 @@ class ReleaseMapCodesTest(ReleasesFixture, OCLTestCase):
             {'source': ICD, 'code': 'X01', 'map_type': 'SAME-AS'},
             {'source': ICD, 'code': 'X05', 'map_type': 'NARROWER-THAN'}])
 
-        fields = ConceptDocument.get_mapped_codes_fields(row_b)
+        fields = self.fields(row_b)
         self.assertEqual(sorted(fields['same_as_map_codes']), ['X02', 'X03'])
         self.assertEqual(fields[RELEASE_MAP_CODES], [{
             'version': 'v1', 'same_as_map_codes': ['X02'], 'other_map_codes': [],
             'mapped_codes': [{'source': ICD, 'code': 'X02', 'map_type': 'SAME-AS'}]}])
 
         # HEAD's own rows are in no release
-        self.assertEqual(ConceptDocument.get_mapped_codes_fields(row_a.versioned_object)[RELEASE_MAP_CODES], [])
+        self.assertEqual(self.fields(row_a.versioned_object)[RELEASE_MAP_CODES], [])
 
     def test_partial_updates_carry_the_entries(self):
         row_a = self.row('HEAD', 'A')
@@ -121,10 +141,41 @@ class ReleaseMapCodesTest(ReleasesFixture, OCLTestCase):
         rows = list(Concept.objects.filter(parent__mnemonic='LOINC'))
 
         with self.assertNumQueries(2):
-            release_map_codes = ReleaseMapCodes(rows)
+            mapped_codes = MappedCodes(rows)
 
-        self.assertEqual(
-            {row.mnemonic for row in rows if release_map_codes.get_entries(row, ([], [], []))}, {'A', 'B'})
+        self.assertEqual({row.mnemonic for row in rows if mapped_codes.get_fields(row)[RELEASE_MAP_CODES]}, {'A', 'B'})
+
+    def test_a_row_only_releases_hold_reads_its_latest_release(self):
+        self.edit_a_in_v3()
+        old_a = self.row('v1', 'A')
+        self.assertEqual(old_a.id, self.row('v2', 'A').id)
+        self.assertNotEqual(old_a.id, self.row('HEAD', 'A').id)
+
+        fields = self.fields(old_a)
+
+        self.assertEqual((fields['same_as_map_codes'], fields['other_map_codes']), ([], []))  # v2's, not v1's too
+        self.assertEqual(self.entries(fields), [('v1', ['X01'], ['X05'])])
+
+    def test_a_dropped_row_reads_its_latest_release(self):
+        self.drop_b_in_v3()
+        row_b = self.row('v2', 'B')
+        self.assertTrue(row_b.is_latest_version)
+        self.assertFalse(Source.objects.get(mnemonic='LOINC', version='HEAD').concepts.filter(id=row_b.id).exists())
+
+        fields = self.fields(row_b)
+
+        self.assertEqual(sorted(fields['same_as_map_codes']), ['X02', 'X03'])  # v2's, not HEAD's (none)
+        self.assertEqual(self.entries(fields), [('v1', ['X02'], [])])
+
+    def test_a_row_no_source_version_holds_reads_heads_mappings(self):
+        self.edit_a_in_v3()
+        old_a = self.row('v1', 'A')
+        old_a.sources.clear()  # as for a version only a collection holds
+
+        fields = self.fields(old_a)
+
+        self.assertEqual((fields['same_as_map_codes'], fields['other_map_codes']), (['X01'], ['X05']))
+        self.assertEqual(fields[RELEASE_MAP_CODES], [])
 
     def test_release_clauses_read_the_entry_for_the_release(self):
         code = {'match': {'same_as_map_codes': {'query': 'X01', 'boost': 5.5}}}
@@ -182,6 +233,13 @@ class ReleaseMapCodesSearchTest(ReleasesFixture, OCLAPITestCase):
     def test_a_release_skips_the_codes_head_added(self):
         self.assertEqual(self.search('?q=X03'), {None: ['B'], 'v1': [], 'v2': ['B'], 'latest': ['B']})
         self.assertEqual(self.search('?q=X02'), {None: ['B'], 'v1': ['B'], 'v2': ['B'], 'latest': ['B']})
+
+    def test_a_dropped_concept_is_found_in_its_releases(self):
+        self.drop_b_in_v3()
+        ConceptDocument().update(Concept.objects.filter(parent__mnemonic='LOINC'))
+
+        self.assertEqual(self.search('?q=X03'), {None: [], 'v1': [], 'v2': ['B'], 'latest': []})
+        self.assertEqual(self.get_ids('v3', '?q=X03'), [])
 
     def test_the_target_repo_filter_reads_the_release(self):
         self.assertEqual(
