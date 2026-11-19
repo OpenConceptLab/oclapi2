@@ -7,6 +7,7 @@ groups:
       mapper.match_operations: 100
       ai_assistant.calls: 6
       ai_assistant.change_comments: 100
+      ai_assistant.decision_calls: 100
       imports.file_size_kb: 500
       clone.resources_per_call: 100
   preview_grandfathered:
