@@ -418,6 +418,7 @@ class ConceptViewsAPITest(OCLAPITestCase):
         user = UserProfileFactory()
         user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
         org = OrganizationFactory()
+        org.members.add(user)
         project = MapProjectFactory(organization=org, created_by=user)
 
         response = self.client.post(
@@ -432,18 +433,49 @@ class ConceptViewsAPITest(OCLAPITestCase):
         self.assertEqual(event.algorithm, 'ocl-semantic')
         self.assertEqual(event.map_project_id, project.id)
 
+    @override_settings(CAPABILITY_POLICY='core.capabilities.tests.tests.OwnerRecordingPolicy')
     @patch('core.concepts.views.MetadataToConceptsListView.filter_queryset', return_value=[])
-    def test_match_concepts_ignores_map_project_id_the_user_does_not_own(self, _filter_queryset_mock):
-        # A client-supplied map_project_id from this header must not let a caller
-        # attribute usage to (or pollute the audit trail of) a project it doesn't own -
-        # usage still charges the right user's quota, it just stays unattributed.
+    def test_match_concepts_is_for_the_owner_of_a_project_a_member_works_on(self, _filter_queryset_mock):
+        # any member may edit an organization's project, not only the member who created it
         from core.capabilities.models import UsageEvent
+        from core.capabilities.tests.tests import OwnerRecordingPolicy
         from core.map_projects.tests.factories import MapProjectFactory
+        OwnerRecordingPolicy.calls = []
+        user = UserProfileFactory()
+        user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
+        org = OrganizationFactory()
+        org.members.add(user)
+        project = MapProjectFactory(organization=org, created_by=UserProfileFactory())
+
+        response = self.client.post(
+            '/concepts/$match/',
+            {'rows': [{'id': 1}], 'target_repo_url': '/orgs/org/sources/src/'},
+            format='json', HTTP_AUTHORIZATION=f"Token {user.get_token()}",
+            HTTP_X_OCL_EVENT_METADATA=json.dumps({'map_project_id': str(project.id)}),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        event = UsageEvent.objects.get(user=user, action='match_concepts')
+        self.assertEqual(event.map_project_id, project.id)
+        self.assertIsNone(event.organization_id)
+        self.assertEqual(OwnerRecordingPolicy.owners('consume'), [org])
+
+    @override_settings(CAPABILITY_POLICY='core.capabilities.tests.tests.OwnerRecordingPolicy')
+    @patch('core.concepts.views.MetadataToConceptsListView.filter_queryset', return_value=[])
+    def test_match_concepts_ignores_map_project_id_the_user_may_not_edit(self, _filter_queryset_mock):
+        # A client-supplied map_project_id from this header must not let a caller
+        # attribute usage to (or pollute the audit trail of) a project it may not edit,
+        # nor make the use count for that project's owner - it stays the user's own.
+        from core.capabilities.models import UsageEvent
+        from core.capabilities.tests.tests import OwnerRecordingPolicy
+        from core.map_projects.tests.factories import MapProjectFactory
+        OwnerRecordingPolicy.calls = []
         user = UserProfileFactory()
         user.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
         other_user = UserProfileFactory()
         org = OrganizationFactory()
-        someone_elses_project = MapProjectFactory(organization=org, created_by=other_user)
+        org.members.add(other_user)
+        someone_elses_project = MapProjectFactory(organization=org, created_by=user)
 
         response = self.client.post(
             '/concepts/$match/',
@@ -456,6 +488,7 @@ class ConceptViewsAPITest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         event = UsageEvent.objects.get(user=user, action='match_concepts')
         self.assertIsNone(event.map_project_id)
+        self.assertEqual(OwnerRecordingPolicy.owners('consume'), [None])
 
     @patch('core.concepts.views.MetadataToConceptsListView.filter_queryset', return_value=[])
     def test_match_concepts_consumption_without_event_metadata_leaves_attribution_null(self, _filter_queryset_mock):

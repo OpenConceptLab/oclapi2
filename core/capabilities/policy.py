@@ -27,9 +27,10 @@ class CapabilityPolicy(ABC):
     get_capability_policy() returns one, and core.capabilities.checks checks it at start-up.
 
     `user` is who is acting. `owner`, optional, is the user or organization whose content the use is for. A call site
-    takes it from that content, never from a request field. A request can name content that isn't the user's, so a
-    policy that decides by `owner` first checks that `user` may act for it. Windows, counters, events and reversals
-    stay per user.
+    takes it from that content, never from a request field, and passes it only for content `user` may edit. A
+    policy that decides by `owner` still checks that `user` may act for it. Every event records `user`; a policy that
+    counts an organization's use together records that organization on the event (`UsageEvent.organization`), and
+    its reverse() gives units back to the count the event names.
     """
 
     @abstractmethod
@@ -73,6 +74,14 @@ class CapabilityPolicy(ABC):
         """The capabilities a user detail with `includeCapabilities` lists for `user`: by default, all of them."""
         return Capability.objects.all()
 
+    def check_new_member(self, user, organization, member):  # pylint: disable=unused-argument
+        """
+        Runs before `member` joins `organization` at `user`'s request, once `user` may add them, in the transaction
+        that adds them and under a lock on the organization. Raises UsageRefused, whose `detail` is the body sent, to
+        refuse. By default, allows every new member.
+        """
+        return None
+
     def get_write_refusal(self, user, content, action):  # pylint: disable=unused-argument
         """
         Whether `user` may write to `content`: a policy may keep content read-only and refuse writes to it. Asked only
@@ -89,7 +98,10 @@ class CapabilityPolicy(ABC):
 
 
 class GroupLimitPolicy(CapabilityPolicy):
-    """Limits from a per-user override, else from the user's groups. Ignores `owner`: all of it is the user's."""
+    """
+    Limits from a per-user override, else from the user's groups. Ignores `owner`: all of it is the user's, and no
+    event records an organization.
+    """
 
     def get_window_start(self, user, capability_id):  # pylint: disable=unused-argument
         """When the usage window counting now began. None is one window that never ends."""

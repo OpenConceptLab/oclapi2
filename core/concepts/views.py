@@ -963,7 +963,8 @@ def get_match_operations_attribution(request):
     AnalyticsEventEmitter.ALLOWED_REQUEST_HEADERS); this pulls just enough out
     of it to enrich the mapper.match_operations UsageEvent audit row. Best
     effort: a missing/malformed header never blocks the match, it only means
-    the UsageEvent stays algorithm=None/map_project=None.
+    the UsageEvent stays algorithm=None/map_project=None. The project's owner is
+    the owner the use is for; with no project, the use is the user's own.
     """
     metadata = get_event_metadata(request)
     if not metadata:
@@ -977,11 +978,9 @@ def get_match_operations_attribution(request):
     map_project_id = parse_id(metadata.get('map_project_id'))
     if map_project_id is not None:
         from core.map_projects.models import MapProject
-        # Scoped to request.user: the id is client-supplied (this header), so without
-        # this a caller could attribute their UsageEvent to a project they don't own,
-        # corrupting per-project attribution even though usage still charges the right
-        # user's quota.
-        map_project = MapProject.objects.filter(id=int(map_project_id), created_by=request.user).only('id').first()
+        # Only a project the user may edit: the id is client-supplied (this header), so without this a caller could
+        # attribute their UsageEvent to, and count it for the owner of, a project that isn't theirs to work on.
+        map_project = MapProject.editable_by(request.user).filter(id=int(map_project_id)).first()
 
     return algorithm_id, map_project
 
@@ -1283,7 +1282,7 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
             try:
                 usage_event, already_consumed = policy.consume(
                     request.user, MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, units=len(rows), action='match_concepts',
-                    algorithm=algorithm_id, map_project=map_project
+                    algorithm=algorithm_id, map_project=map_project, owner=map_project.parent if map_project else None
                 )
             except UsageRefused as ex:
                 return Response(

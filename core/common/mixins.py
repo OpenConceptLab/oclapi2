@@ -565,7 +565,8 @@ class ConceptDictionaryUpdateMixin(ConceptDictionaryMixin):
         if serializer.is_valid():
             self.object = serializer.save(**save_kwargs)
             if serializer.is_valid():
-                self.object.get_checksums(recalculate=True)
+                if not getattr(serializer, 'saved_verification_only', False):  # FHIR serializers have no such write
+                    self.object.get_checksums(recalculate=True)
                 serializer = self.get_detail_serializer(self.object)
                 if get(self.object, '_public_access_task'):
                     success_status_code = status.HTTP_202_ACCEPTED

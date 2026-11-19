@@ -816,6 +816,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     revision_date = models.DateTimeField(null=True, blank=True)
     text = models.TextField(null=True, blank=True)  # for about description (markup)
     snapshot = models.JSONField(null=True, blank=True, default=dict)
+    verification = models.JSONField(null=True, blank=True, default=None)
     experimental = models.BooleanField(null=True, blank=True, default=None)
     meta = models.JSONField(null=True, blank=True)
     active_concepts = models.IntegerField(null=True, blank=True, default=None)
@@ -1443,6 +1444,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         self.revision_date = head.revision_date
         self.text = head.text
         self.experimental = head.experimental
+        self.verification = None
         self.custom_validation_schema = head.custom_validation_schema
         self.extras = {
             key: value for key, value in (head.extras or {}).items()
@@ -1821,6 +1823,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         if self.released and not self.revision_date:
             self.revision_date = timezone.now()
+
+        if self.is_head:  # a FHIR update saves the latest version's values onto HEAD
+            self.verification = None
 
     @property
     def map_types_count(self):
