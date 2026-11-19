@@ -431,8 +431,8 @@ class MappingMatcher:
     matches, the importer updates the first one not retired, else the newest, with the lines before it already applied.
     """
     FIELDS = ('id', 'mnemonic', 'retired', 'is_active', 'map_type', 'from_concept__versioned_object_id',
-              'from_concept_code', 'from_source_id', 'from_source_url', 'to_concept__versioned_object_id',
-              'to_concept_code', 'to_source_url', 'to_source__uri')
+              'from_concept_code', 'from_concept__parent', 'from_source_id', 'from_source_url',
+              'to_concept__versioned_object_id', 'to_concept_code', 'to_source_url', 'to_source__uri')
 
     def __init__(self, head):
         self.rows, self.by_mnemonic, self.by_from_id, self.by_from_code = {}, {}, {}, {}
@@ -466,7 +466,7 @@ class MappingMatcher:
         source_uris = {to_parent_uri(drop_version(line['to_concept_url'])) for line in unnamed
                        if line.get('to_concept_url') and not line.get('to_source_url')}
         existing_sources = set(Source.objects.filter(uri__in=source_uris).values_list('uri', flat=True))
-        from_source_ids = {url: MappingImporter.get_source_id_by_url(url) for url in {
+        from_sources = {url: MappingImporter.get_from_source_by_url(url) for url in {
             to_parent_uri(drop_version(line['from_concept_url'])) for line in unnamed
             if line.get('from_concept_url') and drop_version(line['from_concept_url']) not in resolved}}
         kept = set()
@@ -474,7 +474,7 @@ class MappingMatcher:
             if line.get('id') not in (None, ''):
                 row_id = self.by_mnemonic.get(str(line['id']))
             else:
-                row_id = self.choose(self.get_candidates(line, resolved, existing_sources, from_source_ids))
+                row_id = self.choose(self.get_candidates(line, resolved, existing_sources, from_sources))
             if row_id:
                 # a seeding import leaves a field it doesn't send at its default, so the next line sees this
                 self.rows[row_id]['retired'] = line.get('retired') in (True, 'true', 'True')
@@ -483,13 +483,15 @@ class MappingMatcher:
         return kept
 
     @staticmethod
-    def is_same_from_source(row, from_source_url, from_source_id):
-        """MappingImporter.get_same_from_source_criteria, for one row."""
-        if row['from_source_id']:
-            return row['from_source_id'] == from_source_id
-        return row['from_source_url'] == drop_version(from_source_url)
+    def is_same_from_source(row, from_source):
+        """MappingImporter.get_same_from_source_criteria, for one row and MappingImporter.get_from_source_by_url."""
+        source_id, urls = from_source
+        linked_id = row['from_source_id'] or row['from_concept__parent']
+        if source_id and linked_id:
+            return linked_id == source_id
+        return row['from_source_url'] in urls
 
-    def get_candidates(self, line, resolved, existing_sources, from_source_ids):  # pylint: disable=too-many-locals
+    def get_candidates(self, line, resolved, existing_sources, from_sources):  # pylint: disable=too-many-locals
         map_type, from_code = line.get('map_type'), line.get('from_concept_code')
         from_url = drop_version(line.get('from_concept_url') or '')
         from_id = resolved.get(from_url)
@@ -499,9 +501,8 @@ class MappingMatcher:
         else:
             codes = self.variations(from_code) if from_code else {self.last_segment(from_url)} if from_url else set()
             candidates = [row_id for code in codes for row_id in self.by_from_code.get((map_type, code), [])]
-            from_source_url = to_parent_uri(from_url)
-            checks.append(lambda row: self.is_same_from_source(
-                row, from_source_url, from_source_ids.get(from_source_url)))
+            from_source = from_sources.get(to_parent_uri(from_url), (None, set()))
+            checks.append(lambda row: self.is_same_from_source(row, from_source))
         if from_code and from_id:
             checks.append(lambda row: row['from_concept_code'] in self.variations(from_code))
         to_url, to_code, to_source_url = drop_version(line.get('to_concept_url') or ''), line.get(
@@ -966,25 +967,31 @@ class MappingImporter(BaseResourceImporter):
         return self.queryset
 
     @staticmethod
-    def get_source_id_by_url(url):
-        """The source a mapping saved with this from source URL is linked to: the one it resolves to, as on save."""
+    def get_from_source_by_url(url):
+        """
+        The source a from source URL names: (the id of the source it resolves to, versionless, or None; the URLs a
+        mapping saved with it stores, versionless, as Mapping.populate_fields_from_relations stores them).
+        """
+        url = drop_version(url)
         source, _ = Source.resolve_reference_expression(url, None, HEAD)
-        return source.id if isinstance(source, Source) else None
-
-    def get_cached_source_id_by_url(self, url):
-        cache = self.cache.setdefault('source_id_by_url', {})
-        if url not in cache:
-            cache[url] = self.get_source_id_by_url(url)
-        return cache[url]
+        return source.id if isinstance(source, Source) else None, {url, drop_version(source.resolution_url or url)}
 
     def get_same_from_source_criteria(self, from_source_url):
         """
-        A mapping from the source a from source URL names: one linked to a source, if that's the source the URL
-        resolves to, and one that isn't, if it was saved with that URL. MappingMatcher.is_same_from_source alike.
+        A mapping from the source a from source URL names. When the URL resolves to a source and the mapping is linked
+        to one, by its from source or else its from concept's, the two are the same; otherwise the mapping stored one
+        of the URL's forms. MappingMatcher.is_same_from_source alike.
         """
-        from_source_id = self.get_cached_source_id_by_url(from_source_url)
-        criteria = Q(from_source__isnull=True, from_source_url=drop_version(from_source_url))
-        return criteria | Q(from_source_id=from_source_id) if from_source_id else criteria
+        cache = self.cache.setdefault('from_source_by_url', {})
+        if from_source_url not in cache:
+            cache[from_source_url] = self.get_from_source_by_url(from_source_url)
+        source_id, urls = cache[from_source_url]
+        by_url = Q(from_source_url__in=urls)
+        if not source_id:
+            return by_url
+        unlinked = Q(from_source__isnull=True)
+        return Q(from_source_id=source_id) | (unlinked & Q(from_concept__parent=source_id)) | (
+            unlinked & Q(from_concept__isnull=True) & by_url)
 
     def parse(self):
         source = self.get_cached_parent_source()
