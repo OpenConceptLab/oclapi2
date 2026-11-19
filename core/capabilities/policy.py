@@ -11,7 +11,7 @@ from core.capabilities.constants import (
     MAPPER_PROJECTS_CAPABILITY_ID, MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID,
 )
 from core.capabilities.exceptions import CapabilityExceeded
-from core.capabilities.models import GroupCapability, UsageCounter, UsageEvent
+from core.capabilities.models import Capability, GroupCapability, UsageCounter, UsageEvent
 from core.users.constants import PREVIEW_GROUP
 
 logger = logging.getLogger('oclapi')
@@ -68,6 +68,10 @@ class CapabilityPolicy(ABC):
             'limit': self.get_limit(user, capability_id, owner=owner),
             **self.get_usage(user, capability_id, owner=owner)
         }
+
+    def listed_capabilities(self, user):  # pylint: disable=unused-argument
+        """The capabilities a user detail with `includeCapabilities` lists for `user`: by default, all of them."""
+        return Capability.objects.all()
 
 
 class GroupLimitPolicy(CapabilityPolicy):
