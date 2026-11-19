@@ -142,6 +142,9 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
     def head(self, request, **kwargs):
         self.set_parent_resource(False)
         self.check_parent_permissions(request)
+        # the count reads the filtered queryset as before, not the parent version's page
+        self.kwargs.pop('parent_resource', None)
+        self.parent_resource = None
         return super().head(request, **kwargs)
 
     def set_parent_resource(self, __pop=True):

@@ -1090,6 +1090,10 @@ class CollectionVersionConceptsView(CollectionBaseView, ListWithHeadersMixin):
         self.get_object()  # to set instance on request for references
         return self.list(request, *args, **kwargs)
 
+    def head(self, request, **kwargs):
+        self.get_object()  # checks the version before a search counts its expansion
+        return super().head(request, **kwargs)
+
 
 class CollectionVersionResourceRetrieveView(CollectionBaseView):
     def get_expansion(self):
@@ -1193,6 +1197,10 @@ class CollectionVersionMappingsView(CollectionBaseView, ListWithHeadersMixin):
     def get(self, request, *args, **kwargs):
         self.get_object()  # to set instance on request for references
         return self.list(request, *args, **kwargs)
+
+    def head(self, request, **kwargs):
+        self.get_object()  # checks the version before a search counts its expansion
+        return super().head(request, **kwargs)
 
 
 class CollectionVersionMappingRetrieveView(CollectionVersionResourceRetrieveView, RetrieveAPIView):

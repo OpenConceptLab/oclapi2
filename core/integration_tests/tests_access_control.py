@@ -661,13 +661,14 @@ class PrivateHeadVersionAccessMixin(AccessTestMixin):
 
         for url in urls:
             self.assertEqual(
+                self.client.head(url, HTTP_AUTHORIZATION=f'Token {self.member.get_token()}').status_code, 200, url)
+        for url in [*urls, *(url + '?q=c' for url in urls)]:
+            self.assertEqual(
                 self.client.head(url, HTTP_AUTHORIZATION=f'Token {self.outsider.get_token()}').status_code, 403, url)
             self.assertEqual(self.client.head(url).status_code, 401, url)
-            self.assertEqual(
-                self.client.head(url, HTTP_AUTHORIZATION=f'Token {self.member.get_token()}').status_code, 200, url)
         for url in (version.uri + 'concepts/', head.uri + 'latest/concepts/'):
             response = self.client.head(url, HTTP_AUTHORIZATION=f'Token {self.member.get_token()}')
-            self.assertEqual(response['num_found'], '1', url)
+            self.assertEqual(response.headers['num_found'], '1', url)
 
     def test_latest_is_hidden_when_released_version_is_private_beside_a_version_named_latest(self):
         head = self.org_repo_factory(organization=self.org, public_access=ACCESS_TYPE_VIEW)
