@@ -1394,6 +1394,48 @@ class OrganizationNewMemberCheckTest(OCLAPITestCase):
         self.assertEqual(RecordingMemberPolicy.calls, [])
 
 
+class TwoMembersAtMostPolicy(GroupLimitPolicy):
+    """Refuses a third member, after a pause between counting and adding."""
+
+    def check_new_member(self, user, organization, member):
+        members = organization.members.count()
+        time.sleep(0.5)  # widens the gap between the count and the add
+        if members >= 2:
+            raise UsageRefused({'detail': 'Not now.'})
+
+
+@override_settings(CAPABILITY_POLICY='core.integration_tests.tests_orgs.TwoMembersAtMostPolicy')
+class OrganizationNewMemberConcurrencyTest(OCLAPITransactionTestCase):
+    """Runs two adds at once, on separate connections, to check that the policy counts them one after the other."""
+
+    def test_two_members_added_at_once_are_checked_in_turn(self):
+        admin = UserProfileFactory(username='admin')
+        org = OrganizationFactory(mnemonic='race-org', created_by=admin, updated_by=admin)
+        newcomers = [UserProfileFactory(username='carol'), UserProfileFactory(username='dave')]
+        token = admin.get_token()
+        barrier = threading.Barrier(2)
+        statuses = {}
+
+        def add(newcomer):
+            try:
+                client = APIClient()
+                barrier.wait()
+                response = client.put(
+                    f'/orgs/race-org/members/{newcomer}/', HTTP_AUTHORIZATION='Token ' + token)
+                statuses[newcomer] = response.status_code
+            finally:
+                connection.close()
+
+        threads = [threading.Thread(target=add, args=(newcomer.username, )) for newcomer in newcomers]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(sorted(statuses.values()), [204, 403])
+        self.assertEqual(org.members.count(), 2)
+
+
 @override_settings(CAPABILITY_POLICY='core.capabilities.policy.GroupLimitPolicy')
 class OrganizationNewMemberDefaultTest(OCLAPITestCase):
     def test_the_default_policy_never_refuses_a_new_member(self):
