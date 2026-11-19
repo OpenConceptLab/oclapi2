@@ -89,15 +89,16 @@ class CapabilityPolicy(ABC):
 
         `content` is the repository row written (a Source or a Collection: its HEAD, or the version a write to a
         version changes) or a MapProject. `action` is one of core.capabilities.constants' WRITE_ACTION_*: `edit`,
-        `delete` (the whole repository or map project), or `publish` (the change leaves a repository row that is
-        private, public_access 'None', viewable by others). Any other change to a map project, its public_access
-        included, is an `edit`.
+        `delete` (the whole repository or map project), or `publish` (the change makes a repository row that others
+        can't view viewable by others). Any other change to a map project, its public_access included, is an `edit`.
 
-        Not asked: reads and exports; creating a repository; writes that change no content (`writes_content = False`);
+        Not asked: reads, and generating or downloading an export (uploading or removing an external export is an
+        `edit` of its version); creating a repository; writes that change no content (`writes_content = False`);
         routes only staff may use (`IsAdminUser`: a mapping's hard delete, a concept or mapping version's DELETE, the
         hierarchy amend route); and deleting an owner (an organization, by its route or an import line, or a user, by
-        staff), which deletes its repositories without asking about each. A queued write is asked when it's requested,
-        and only a reference add asks again when it runs.
+        staff), which deletes its repositories without asking about each. A bulk import's lines are asked in the
+        worker as it writes them (a batch keeps an answer for a minute). Other queued writes are asked when they're
+        requested, and only a reference add asks again when it runs.
 
         Returns None to allow the write, or the refusal body to send. By default, every write is allowed.
         """
