@@ -221,7 +221,11 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
         response = self.request('put', f'{self.org.uri}CodeSystem/{self.source.mnemonic}/', resource)
 
         self.assertEqual(response.status_code, 403, response.content)
+        # FHIR routes answer every refusal as an OperationOutcome: the body's values are its issues
         self.assertEqual(response.json()['resourceType'], 'OperationOutcome')
+        issues = json.dumps(response.json()['issue'])
+        for value in PrivateGatePolicy.body.values():
+            self.assertIn(str(value), issues)
         self.assert_asked_to_make_private(self.take_calls(), row_id=self.source.id)
         self.assertFalse(self.source.versions.filter(version='v2').exists())
 
