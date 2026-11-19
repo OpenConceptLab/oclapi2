@@ -1249,6 +1249,16 @@ class SourceChildCommonBaseView(BaseAPIView):
             self.check_object_permissions(request, parent)
 
 
+class SourceVersionListHeadMixin:
+    """HEAD on a source version's concept or mapping list: GET's access check, then the filtered count as before."""
+    def head(self, request, **kwargs):
+        self.set_parent_resource(False)
+        self.check_parent_permissions(request)
+        # the count reads the filtered queryset, not the parent version's page
+        self.kwargs.pop('parent_resource', None)
+        self.parent_resource = None
+        return super().head(request, **kwargs)
+
 class SourceChildExtrasBaseView:
     default_qs_sort_attr = '-created_at'
 

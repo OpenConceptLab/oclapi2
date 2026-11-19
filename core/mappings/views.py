@@ -16,7 +16,7 @@ from core.common.swagger_parameters import (
     include_facets_header, updated_since_param, include_retired_param,
     compress_header, include_source_versions_param, include_collection_versions_param, search_from_latest_repo_header)
 from core.common.utils import to_int
-from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
+from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, SourceVersionListHeadMixin, \
     SourceChildExtraRetrieveUpdateDestroyView
 from core.concepts.permissions import CanEditParentDictionary, CanViewParentDictionary
 from core.mappings.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_MAPPING
@@ -43,7 +43,7 @@ class MappingBaseView(SourceChildCommonBaseView):
         return Mapping.get_base_queryset(self.params)
 
 
-class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
+class MappingListView(SourceVersionListHeadMixin, MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
     is_page_size_capped = True
     serializer_class = MappingListSerializer
 
@@ -138,14 +138,6 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
         self.set_parent_resource(False)
         self.check_parent_permissions(request)
         return self.list(request, *args, **kwargs)
-
-    def head(self, request, **kwargs):
-        self.set_parent_resource(False)
-        self.check_parent_permissions(request)
-        # the count reads the filtered queryset as before, not the parent version's page
-        self.kwargs.pop('parent_resource', None)
-        self.parent_resource = None
-        return super().head(request, **kwargs)
 
     def set_parent_resource(self, __pop=True):
         from core.sources.models import Source

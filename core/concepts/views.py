@@ -47,7 +47,7 @@ from core.common.tasks import delete_concept, make_hierarchy
 from core.common.throttling import ThrottleUtil
 from core.common.utils import (generate_temp_version, get_truthy_values, to_int,
                                drop_version, get_falsy_values, parse_id, get_event_metadata)
-from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
+from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, SourceVersionListHeadMixin, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
 from core.concepts.constants import (
     CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY,
@@ -171,7 +171,7 @@ class ConceptDefaultLocalesView(ListAPIView, BaseAPIView):  # pragma: no cover
         raise Http404()
 
 
-class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
+class ConceptListView(SourceVersionListHeadMixin, ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
     is_page_size_capped = True
     serializer_class = ConceptListSerializer
 
@@ -278,14 +278,6 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         self.set_parent_resource(False)
         self.check_parent_permissions(request)
         return self.list(request, *args, **kwargs)
-
-    def head(self, request, **kwargs):
-        self.set_parent_resource(False)
-        self.check_parent_permissions(request)
-        # the count reads the filtered queryset as before, not the parent version's page
-        self.kwargs.pop('parent_resource', None)
-        self.parent_resource = None
-        return super().head(request, **kwargs)
 
     def post(self, request, **_):
         self.set_parent_resource()
