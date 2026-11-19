@@ -7,7 +7,7 @@ from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models, transaction, OperationalError
-from django.db.models import UniqueConstraint, F, QuerySet, Max, OuterRef, Subquery, Exists
+from django.db.models import UniqueConstraint, F, QuerySet, Max, OuterRef, Subquery
 from django.utils import timezone
 from django.utils.functional import cached_property
 from pydash import get, compact, find
@@ -38,7 +38,7 @@ from core.common.utils import drop_version, to_owner_uri, generate_temp_version,
     get_resource_class_from_resource_name, to_snake_case, \
     es_to_pks, id_batches, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
     get_truthy_values, get_falsy_values, get_current_authorized_user, to_camel_case, to_parent_kwargs_from_uri, \
-    is_versioned_uri, canonical_url_to_url_and_version
+    is_versioned_uri, canonical_url_to_url_and_version, chunks
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -2160,19 +2160,29 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             return value
         return locked
 
-    @staticmethod
-    def replace_head_rows(rows, owner, field, klass):
+    REPLACE_HEAD_ROWS_BATCH_SIZE = 10000
+
+    @classmethod
+    def replace_head_rows(cls, rows, owner, field, klass):
         """Points rows at each HEAD resource's latest resource version, dropping rows that already hold it"""
         latest = klass.objects.filter(
             versioned_object_id=OuterRef(f'{field}_id'), is_latest_version=True
-        ).exclude(id=F('versioned_object_id')).values('id')[:1]
-        head_rows = rows.filter(**{f'{field}_id': F(f'{field}__versioned_object_id')}).annotate(
-            latest_id=Subquery(latest)).filter(latest_id__isnull=False)
-        holds_latest = rows.filter(**{f'{owner}_id': OuterRef(f'{owner}_id'), f'{field}_id': OuterRef('latest_id')})
-        duplicate_ids = list(head_rows.filter(Exists(holds_latest)).values_list('id', flat=True))
-        if duplicate_ids:
-            rows.model.objects.filter(id__in=duplicate_ids)._raw_delete(rows.db)  # pylint: disable=protected-access
-        rows.model.objects.filter(id__in=head_rows.values('id')).update(**{f'{field}_id': Subquery(latest)})
+        ).exclude(id=F('versioned_object_id')).order_by('-id').values('id')[:1]
+        # matched here, not with a correlated EXISTS, which Postgres runs once per pair of one owner's rows
+        candidates = list(rows.filter(**{f'{field}_id': F(f'{field}__versioned_object_id')}).annotate(
+            latest_id=Subquery(latest)).filter(latest_id__isnull=False).values_list('id', f'{owner}_id', 'latest_id'))
+        size = cls.REPLACE_HEAD_ROWS_BATCH_SIZE
+        held = set()
+        for batch in chunks(list({latest_id for _, _, latest_id in candidates}), size):
+            held.update(rows.filter(**{f'{field}_id__in': batch}).values_list(f'{owner}_id', f'{field}_id'))
+        duplicate_ids, update_ids = [], []
+        for row_id, owner_id, latest_id in candidates:
+            (duplicate_ids if (owner_id, latest_id) in held else update_ids).append(row_id)
+            held.add((owner_id, latest_id))
+        for batch in chunks(duplicate_ids, size):
+            rows.model.objects.filter(id__in=batch)._raw_delete(rows.db)  # pylint: disable=protected-access
+        for batch in chunks(update_ids, size):
+            rows.model.objects.filter(id__in=batch).update(**{f'{field}_id': Subquery(latest)})
 
     def seed_children(self, index=True, force_reevaluate=False):
         version = self.collection_version

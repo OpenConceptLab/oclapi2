@@ -3311,6 +3311,43 @@ class ExpansionTest(OCLTestCase):
             sorted(rows.values_list('concept_id', flat=True)),
             sorted([concept.get_latest_version().id, duplicated.get_latest_version().id, other.id]))
 
+    def test_replace_head_rows_drops_a_duplicate_only_in_the_reference_holding_it(self):
+        concepts = [ConceptFactory() for _ in range(3)]
+        collection = OrganizationCollectionFactory()
+        holding, other = (
+            CollectionReference(expression=f'/concepts/{index}/', collection=collection) for index in range(2))
+        holding.save()
+        other.save()
+        holding.concepts.add(*concepts, *[concept.get_latest_version() for concept in concepts])
+        other.concepts.add(*concepts)
+        rows = CollectionReference.concepts.through.objects.filter(reference__collection_id=collection.id)
+
+        with self.assertNumQueries(4):
+            Expansion.replace_head_rows(rows, 'reference', 'concept', Concept)
+
+        latest_ids = sorted(concept.get_latest_version().id for concept in concepts)
+        self.assertEqual(sorted(holding.concepts.values_list('id', flat=True)), latest_ids)
+        self.assertEqual(sorted(other.concepts.values_list('id', flat=True)), latest_ids)
+
+    def test_replace_head_rows_of_mappings_in_batches(self):
+        mappings = [MappingFactory() for _ in range(2)]
+        collection = OrganizationCollectionFactory()
+        holding, other = (
+            CollectionReference(expression=f'/mappings/{index}/', collection=collection) for index in range(2))
+        holding.save()
+        other.save()
+        holding.mappings.add(*mappings, mappings[0].get_latest_version())
+        other.mappings.add(*mappings)
+        rows = CollectionReference.mappings.through.objects.filter(reference__collection_id=collection.id)
+
+        with patch.object(Expansion, 'REPLACE_HEAD_ROWS_BATCH_SIZE', 1):
+            Expansion.replace_head_rows(rows, 'reference', 'mapping', Mapping)
+
+        latest_ids = sorted(mapping.get_latest_version().id for mapping in mappings)
+        self.assertEqual(sorted(holding.mappings.values_list('id', flat=True)), latest_ids)
+        self.assertEqual(sorted(other.mappings.values_list('id', flat=True)), latest_ids)
+        self.assertEqual(rows.count(), 4)
+
     def test_is_explicit_valueset(self):
         uri = '/orgs/org/collections/coll/'
         for valueset in (f'{uri}|r2', f'{uri}r2/', f'{uri}r2', 'http://x.org/vs|r2'):
