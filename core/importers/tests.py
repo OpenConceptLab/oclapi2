@@ -42,7 +42,7 @@ from core.importers.models import BulkImport, BulkImportInline, BulkImportParall
     CREATED, UPDATED, DELETED, PERMISSION_DENIED, UNCHANGED, FAILED, NOT_FOUND, \
     BaseImporter, BaseResourceImporter, OrganizationImporter, SourceImporter, SourceVersionImporter, \
     CollectionImporter, CollectionVersionImporter, ConceptImporter, MappingImporter, ReferenceImporter, ImportIndexer, \
-    IsolatedVersionCommit
+    IsolatedVersionCommit, MappingMatcher
 from core.importers.views import csv_file_data_to_input_list, ImportRetrieveDestroyMixin
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
@@ -1416,6 +1416,102 @@ class BulkImportInlineTest(OCLTestCase):
             self.queued_mapped_code_ids(index_concepts_mapped_codes_mock) & {
                 old_from.versioned_object_id, new_from.versioned_object_id},
             {old_from.versioned_object_id, new_from.versioned_object_id})
+
+    @staticmethod
+    def cross_source_mapping(org_mnemonic):
+        """
+        A mapping in Maps from X in S1 to T/Y, where S1 has no concept X, so a line's from URL doesn't resolve. S2
+        exists and has no X either, and S3 doesn't exist.
+        """
+        org = OrganizationFactory(mnemonic=org_mnemonic)
+        maps = OrganizationSourceFactory(organization=org, mnemonic='Maps')
+        OrganizationSourceFactory(organization=org, mnemonic='S1')
+        OrganizationSourceFactory(organization=org, mnemonic='S2')
+        ConceptFactory(parent=OrganizationSourceFactory(organization=org, mnemonic='T'), mnemonic='Y')
+
+        def line(from_source, **extra):
+            return {
+                'type': 'Mapping', 'map_type': 'Same As', 'owner_type': 'Organization', 'owner': org.mnemonic,
+                'source': maps.mnemonic, 'from_concept_url': f'{org.uri}sources/{from_source}/concepts/X/',
+                'to_concept_url': f'{org.uri}sources/T/concepts/Y/', **extra
+            }
+
+        BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[line('S1')]).run()
+        return Mapping.objects.get(parent=maps, id=F('versioned_object_id')), line
+
+    @staticmethod
+    def import_paths():
+        """An ordinary inline import's report, and that of one part of a parallel import, as its worker runs it."""
+        def inline(lines):
+            return BulkImportInline(
+                content=None, username='ocladmin', update_if_exists=True, input_list=lines).run()['report']
+
+        def parallel_part(lines):
+            return bulk_import_parts_inline(lines, 'ocladmin', True)['report']  # pylint: disable=no-value-for-parameter
+
+        return {'inline': inline, 'parallel': parallel_part}
+
+    @patch('core.importers.models.batch_index_resources', Mock())
+    def test_mapping_line_without_id_never_updates_another_sources_mapping_by_code(self):
+        for path, run in self.import_paths().items():
+            with self.subTest(path):
+                mapping, line = self.cross_source_mapping(f'CrossUpdate{path}')
+                sources_uri = mapping.parent.organization.uri + 'sources/'
+                versions = Mapping.objects.filter(versioned_object_id=mapping.id).count()
+
+                reports = [run([line(from_source, extras={'from': from_source}, **extra)])
+                           for from_source in ('S2', 'S3') for extra in ({}, {'from_concept_code': 'X'})]
+
+                # each source's first line creates its own mapping, which the second line, naming the code, matches
+                self.assertEqual([(report['created'], report['failed']) for report in reports],
+                                 [(1, 0), (0, 0), (1, 0), (0, 0)])
+                mapping.refresh_from_db()
+                self.assertEqual((mapping.from_source_url, mapping.extras), (sources_uri + 'S1/', {}))
+                self.assertEqual(Mapping.objects.filter(versioned_object_id=mapping.id).count(), versions)
+                self.assertEqual(
+                    sorted(Mapping.objects.filter(parent=mapping.parent, id=F('versioned_object_id')).values_list(
+                        'from_source_url', flat=True)),
+                    [f'{sources_uri}{source}/' for source in ('S1', 'S2', 'S3')])
+
+    @patch('core.importers.models.batch_index_resources', Mock())
+    def test_mapping_delete_line_without_id_never_retires_another_sources_mapping_by_code(self):
+        for path, run in self.import_paths().items():
+            with self.subTest(path):
+                mapping, line = self.cross_source_mapping(f'CrossDelete{path}')
+
+                reports = [run([{**line(from_source, **extra), '__action': 'DELETE'}])
+                           for from_source in ('S2', 'S3') for extra in ({}, {'from_concept_code': 'X'})]
+
+                self.assertEqual([(report['deleted'], report['not_found']) for report in reports], [(0, 1)] * 4)
+                mapping.refresh_from_db()
+                self.assertFalse(mapping.retired)
+
+    @patch('core.importers.models.batch_index_resources', Mock())
+    def test_mapping_line_without_id_still_matches_its_own_sources_mapping_by_code(self):
+        for path, run in self.import_paths().items():
+            with self.subTest(path):
+                mapping, line = self.cross_source_mapping(f'CrossSame{path}')
+
+                reports = [run([line('S1', extras={'edit': 1})]),
+                           run([line('S1', extras={'edit': 2}, from_concept_code='X')]),
+                           run([{**line('S1', from_concept_code='X'), '__action': 'DELETE'}])]
+
+                self.assertEqual([(report['updated'], report['deleted']) for report in reports],
+                                 [(1, 0), (1, 0), (0, 1)])
+                mapping.refresh_from_db()
+                self.assertEqual((mapping.extras, mapping.retired), ({'edit': 2}, True))
+
+    @patch('core.importers.models.batch_index_resources', Mock())
+    def test_seeding_preflight_matches_a_code_only_within_the_from_urls_source(self):
+        mapping, line = self.cross_source_mapping('CrossMatcher')
+
+        for lines, kept in (
+                ([line(source, **extra) for source in ('S2', 'S3') for extra in ({}, {'from_concept_code': 'X'})],
+                 set()),
+                ([line('S1')], {mapping.id}),
+                ([line('S1', from_concept_code='X')], {mapping.id}),
+        ):
+            self.assertEqual(MappingMatcher(mapping.parent).kept(lines), kept)
 
     def cloned_mapping_in_local_source(self):
         """A mapping cloned into a local source before clones fixed source URLs: linked to local concepts, with its

@@ -427,12 +427,12 @@ class SourceVersionImporter(BaseResourceImporter):
 class MappingMatcher:
     """
     Which of HEAD's mappings an import's lines would update, found as MappingImporter finds them: by id, else by map
-    type, the from concept or code, and the target concept, code or source the line names. Of several matches, the
-    importer updates the first one not retired, else the newest, with the lines before it already applied.
+    type, the from concept or its source and code, and the target concept, code or source the line names. Of several
+    matches, the importer updates the first one not retired, else the newest, with the lines before it already applied.
     """
     FIELDS = ('id', 'mnemonic', 'retired', 'is_active', 'map_type', 'from_concept__versioned_object_id',
-              'from_concept_code', 'to_concept__versioned_object_id', 'to_concept_code', 'to_source_url',
-              'to_source__uri')
+              'from_concept_code', 'from_source_url', 'to_concept__versioned_object_id', 'to_concept_code',
+              'to_source_url', 'to_source__uri')
 
     def __init__(self, head):
         self.rows, self.by_mnemonic, self.by_from_id, self.by_from_code = {}, {}, {}, {}
@@ -483,12 +483,14 @@ class MappingMatcher:
         map_type, from_code = line.get('map_type'), line.get('from_concept_code')
         from_url = drop_version(line.get('from_concept_url') or '')
         from_id = resolved.get(from_url)
+        checks = []
         if from_id:
             candidates = self.by_from_id.get((map_type, from_id), [])
         else:
             codes = self.variations(from_code) if from_code else {self.last_segment(from_url)} if from_url else set()
             candidates = [row_id for code in codes for row_id in self.by_from_code.get((map_type, code), [])]
-        checks = []
+            from_source_url = drop_version(to_parent_uri(from_url))
+            checks.append(lambda row: row['from_source_url'] == from_source_url)
         if from_code and from_id:
             checks.append(lambda row: row['from_concept_code'] in self.variations(from_code))
         to_url, to_code, to_source_url = drop_version(line.get('to_concept_url') or ''), line.get(
@@ -922,8 +924,11 @@ class MappingImporter(BaseResourceImporter):
         from_concept_id = self.get_cached_versioned_concept_id_by_uri(versionless_from_concept_url)
         if from_concept_id is not None:
             filters['from_concept__versioned_object_id'] = from_concept_id
-        elif not from_concept_code:
-            filters['from_concept_code'] = compact(versionless_from_concept_url.split('/'))[-1]
+        else:
+            # a code the URL doesn't resolve matches only within the URL's source, never another source's mapping
+            filters['from_source_url'] = drop_version(to_parent_uri(versionless_from_concept_url))
+            if not from_concept_code:
+                filters['from_concept_code'] = compact(versionless_from_concept_url.split('/'))[-1]
         if to_concept_url:
             versionless_to_concept_url = drop_version(to_concept_url)
             to_concept_id = self.get_cached_versioned_concept_id_by_uri(versionless_to_concept_url)
