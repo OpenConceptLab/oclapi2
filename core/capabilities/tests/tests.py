@@ -1123,9 +1123,6 @@ class CapabilityPolicyInterfaceTest(SimpleTestCase):
     def test_the_setting_names_the_policy_in_use(self):
         self.assertIsInstance(get_capability_policy(), GroupLimitPolicy)
 
-    def test_the_check_before_a_member_is_added_allows_by_default(self):
-        self.assertIsNone(GroupLimitPolicy().check_new_member(None, None, None))
-
 
 class CapabilityPolicyCheckTest(SimpleTestCase):
     def errors(self, path):

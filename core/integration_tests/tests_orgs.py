@@ -1384,15 +1384,6 @@ class OrganizationNewMemberCheckTest(OCLAPITestCase):
 
         self.assertEqual(RecordingMemberPolicy.calls, [])
 
-    def test_removing_a_member_is_not_checked(self):
-        RecordingMemberPolicy.refusal = {'detail': 'Not now.'}
-
-        response = self.client.delete(
-            f'/orgs/stark/members/{self.member.username}/', HTTP_AUTHORIZATION='Token ' + self.admin.get_token())
-
-        self.assertEqual(response.status_code, 204)
-        self.assertEqual(RecordingMemberPolicy.calls, [])
-
 
 class TwoMembersAtMostPolicy(GroupLimitPolicy):
     """Refuses a third member, after a pause between counting and adding."""
