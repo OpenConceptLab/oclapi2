@@ -31,6 +31,7 @@ from core.common.utils import write_export_file, web_url, get_resource_class_fro
     get_date_range_label
 from core.concepts.embeddings import sync_concept_vectors
 from core.reports.models import ResourceUsageReport
+from core.sources.constants import SEED_MEMBERS_WRITTEN
 from core.tasks.models import QueueOnceCustomTask, Task
 
 logger = get_task_logger(__name__)
@@ -429,19 +430,25 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                 instance.seed_concepts(index=False)
                 instance.seed_mappings(index=False)
                 instance.update_children_counts(sync)
-                # A semantic version's vectors come from this sync. Seeding copies HEAD's membership only, and the
-                # indexing below only appends this version to its members' docs, a partial update that never
-                # computes vectors: with a lexical HEAD, those docs have none, so this sync is what embeds the
-                # version; with a semantic HEAD it's a cheap, read-only check. The flag is read now, not as it was
-                # when the task started: an opt-in while seeding ran synced before any of this version's members
-                # existed. Whether or not it's still the latest release, and however its indexing below goes.
-                instance.refresh_from_db(fields=['match_algorithms'])
-                if instance.has_semantic_match_algorithm:
-                    instance.sync_concept_vectors_async(instance.created_by)
-                if instance.released:
-                    instance.index_resources_for_self_as_latest_released()
-                else:
-                    instance.index_children(sync=False, user=instance.created_by)
+                # Recorded before released is read below, so a release request is read there, indexes the release
+                # itself on seeing this stage (persist_changes), or both. Both only repeats the same writes.
+                instance.record_seed_stage(SEED_MEMBERS_WRITTEN)
+                try:
+                    # A semantic version's vectors come from this sync. Seeding copies HEAD's membership only, and the
+                    # indexing below only appends this version to its members' docs, a partial update that never
+                    # computes vectors: with a lexical HEAD, those docs have none, so this sync is what embeds the
+                    # version; with a semantic HEAD it's a cheap, read-only check. The flag is read now, not as it was
+                    # when the task started: an opt-in while seeding ran synced before any of this version's members
+                    # existed. Whether or not it's still the latest release, and however its indexing below goes.
+                    instance.refresh_from_db(fields=['match_algorithms', 'released'])
+                    if instance.has_semantic_match_algorithm:
+                        instance.sync_concept_vectors_async(instance.created_by)
+                    if not (instance.released and instance.index_resources_for_self_as_latest_released()):
+                        instance.index_children(sync=False, user=instance.created_by)
+                except Exception:
+                    # A release request may have left its indexing here: it waits for a rerun, as on a failed seed
+                    instance.record_seed_stage(None)
+                    raise
             elif autoexpand:
                 if not seed_from_head:
                     instance.cascade_children_to_expansion(index=True, sync=sync)
@@ -770,7 +777,9 @@ def index_source_concepts(  # pylint: disable=too-many-arguments,too-many-locals
     """
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
-    if source and source.flag_write_is_current(partial_doc, exclude_members_of):
+    if source:
+        partial_doc, exclude_members_of = source.current_release_write(partial_doc, exclude_members_of)
+    if source and partial_doc != {}:
         prefetch = ['sources', 'names', 'descriptions'] if should_prefetch else []
         select_related = [
             'parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by'
@@ -951,7 +960,9 @@ def index_source_mappings(
     """
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
-    if source and source.flag_write_is_current(partial_doc, exclude_members_of):
+    if source:
+        partial_doc, exclude_members_of = source.current_release_write(partial_doc, exclude_members_of)
+    if source and partial_doc != {}:
         from core.mappings.documents import MappingDocument
         prefetch = ['sources'] if should_prefetch else []
         select_related = [
