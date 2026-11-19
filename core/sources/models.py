@@ -258,8 +258,9 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             self.seeded_from = {'type': SEEDED_FROM_REPO_VERSION, 'url': head.get_version_url(HEAD)}
             return
         head.seeded_from = {'type': SEEDED_FROM_REPO_VERSION, 'url': head.get_version_url(self.version)}
-        was_semantic = bool(head.has_semantic_match_algorithm)
-        fields = [field for field in get(self, '_metadata_fields') or [] if field in ISOLATED_METADATA_FIELDS]
+        # HEAD keeps its own match algorithms, as after POST .../versions/: the line sets them on the version only
+        fields = [field for field in get(self, '_metadata_fields') or [] if field in ISOLATED_METADATA_FIELDS and
+                  field != 'match_algorithms']
         for field in fields:
             setattr(head, field, getattr(self, field))
         for field in ISOLATED_REQUIRED_METADATA_FIELDS:
@@ -271,8 +272,6 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 **(self.extras or {})
             }
         head.save()
-        if bool(head.has_semantic_match_algorithm) != was_semantic:  # as an edit of HEAD does
-            transaction.on_commit(lambda: head.sync_concept_vectors_async(self.created_by), robust=True)
 
     def queue_index_dropped_children(self, concept_ids, mapping_ids):
         """

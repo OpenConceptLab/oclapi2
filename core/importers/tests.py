@@ -6997,14 +6997,21 @@ class IsolatedVersionImportTest(OCLTestCase):
         self.assertIn('filters', importer.failed[0]['errors'])
         self.assertFalse(Source.objects.filter(mnemonic='LOINC', version='v2').exists())
 
-    def test_seeding_line_match_algorithms_reach_head(self):
+    @patch('core.sources.models.Source.sync_concept_vectors_async', autospec=True)
+    def test_seeding_line_match_algorithms_stay_off_head(self, sync_mock):
         self.run_import([self.concept('A'), self.version('v1')])
-        Source.objects.filter(mnemonic='LOINC', version='HEAD').update(match_algorithms=['es', 'llm'])
 
-        self.run_import([self.concept('A'), self.version('v2', match_algorithms=['es'])])
+        for version, head_algorithms, line_algorithms in (('v2', ['es'], ['es', 'llm']), ('v3', ['es', 'llm'], ['es'])):
+            Source.objects.filter(mnemonic='LOINC', version='HEAD').update(match_algorithms=head_algorithms)
 
-        self.assertEqual(Source.objects.get(mnemonic='LOINC', version='HEAD').match_algorithms, ['es'])
-        self.assertEqual(Source.objects.get(mnemonic='LOINC', version='v2').match_algorithms, ['es'])
+            self.run_import([self.concept('A'), self.version(version, match_algorithms=line_algorithms)])
+
+            self.assertEqual(
+                sorted(Source.objects.get(mnemonic='LOINC', version='HEAD').match_algorithms), head_algorithms)
+            self.assertEqual(
+                sorted(Source.objects.get(mnemonic='LOINC', version=version).match_algorithms), line_algorithms)
+        # the semantic version syncs its own vectors; HEAD's aren't touched
+        self.assertNotIn('HEAD', [call_args.args[0].version for call_args in sync_mock.call_args_list])
 
     def test_plural_user_owner_type_is_read_as_the_importers_read_it(self):
         users_line = {'owner_type': 'users', 'owner': 'Regen', 'source': 'LOINC'}
@@ -7206,17 +7213,6 @@ class IsolatedVersionImportTest(OCLTestCase):
         self.assertEqual(set(head.get_concepts_queryset().values_list('mnemonic', flat=True)), {'A'})
         self.assertFalse(head.get_mappings_queryset().exists())
         self.assertGreater(head.last_child_update, last_update)
-
-    @patch('core.sources.models.Source.sync_concept_vectors_async')
-    def test_semantic_change_on_head_syncs_its_vectors(self, sync_mock):
-        self.run_import([self.concept('A'), self.version('v1')])
-        Source.objects.filter(mnemonic='LOINC', version='HEAD').update(match_algorithms=['es', 'llm'])
-
-        self.run_import([self.concept('A'), self.version('v2', match_algorithms=['es'])])
-        sync_mock.assert_called_once()
-        sync_mock.reset_mock()
-        self.run_import([self.concept('A'), self.version('v3', match_algorithms=['es'])])
-        sync_mock.assert_not_called()
 
     def test_hierarchy_repair_links_a_child_version_url(self):
         from core.common.tasks import make_hierarchy
