@@ -50,23 +50,32 @@ class CapabilityBaseView(APIView):
             return None, Response({'detail': '"units" must be a positive integer.'}, status=status.HTTP_400_BAD_REQUEST)
         return units, None
 
-    def get_owned_map_project_and_run(self):
+    def get_editable_map_project_and_run(self):
+        """
+        The project and run the request names, each only if the user may edit its project, as the ids are
+        client-supplied. A run without a project in the request brings its own.
+        """
         from core.map_projects.models import AutomatchRun, MapProject
 
         request = self.request
+        editable = MapProject.editable_by(request.user)
         map_project = None
         map_project_id = parse_id(request.data.get('map_project', None))
         if map_project_id is not None:
-            # .only('id'): these rows only feed the UsageEvent FKs
-            map_project = MapProject.objects.filter(id=int(map_project_id), created_by=request.user).only('id').first()
+            # these rows only feed the UsageEvent FKs and the owner
+            map_project = editable.filter(id=int(map_project_id)).first()
 
         run = None
         run_id = parse_id(request.data.get('run', None))
         if run_id is not None:
             run_qs = AutomatchRun.objects.filter(id=int(run_id))
             run_qs = run_qs.filter(map_project=map_project) if map_project else run_qs.filter(
-                map_project__created_by=request.user)
-            run = run_qs.only('id').first()
+                map_project__in=editable.values('id'))
+            # the run's project and its owner in the same query, so neither can vanish in between
+            run = run_qs.select_related('map_project__organization', 'map_project__user').only(
+                'id', 'map_project__id', 'map_project__organization', 'map_project__user').first()
+            if run and not map_project:
+                map_project = run.map_project
 
         return map_project, run
 
@@ -90,7 +99,8 @@ class CapabilityConsumeView(CapabilityBaseView):
         idempotency_key, error_response = self.get_idempotency_key()
         if error_response:
             return error_response
-        map_project, run = self.get_owned_map_project_and_run()
+        map_project, run = self.get_editable_map_project_and_run()
+        owner = map_project.parent if map_project else None
 
         # one policy for the whole response, so what it reports is what it counted
         policy = get_capability_policy()
@@ -98,7 +108,7 @@ class CapabilityConsumeView(CapabilityBaseView):
             event, already_consumed = policy.consume(
                 request.user, capability_id, units=units, idempotency_key=idempotency_key,
                 action=request.data.get('action', ''), algorithm=request.data.get('algorithm'),
-                map_project=map_project, run=run,
+                map_project=map_project, run=run, owner=owner,
             )
         except UsageRefused as ex:
             return Response(
@@ -113,7 +123,7 @@ class CapabilityConsumeView(CapabilityBaseView):
         return Response(
             {
                 'capability': capability_name,
-                **policy.describe(request.user, capability_id),
+                **policy.describe(request.user, capability_id, owner=owner),
                 'usage_event_id': event.id,
                 'units': event.units,
                 'already_consumed': already_consumed,

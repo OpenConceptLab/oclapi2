@@ -121,6 +121,10 @@ class UsageEvent(models.Model):
     reversed_units = models.BigIntegerField(default=0, db_default=0)
     # the counter window the units counted in
     window_start = models.DateTimeField(null=True, blank=True)
+    # the organization the units counted for, set by a policy that counts by owner; None is the user's own count
+    organization = models.ForeignKey(
+        'orgs.Organization', on_delete=models.SET_NULL, null=True, blank=True, related_name='usage_events'
+    )
     action = models.CharField(max_length=100, blank=True, default='')
     algorithm = models.CharField(max_length=100, null=True, blank=True)
     map_project = models.ForeignKey(

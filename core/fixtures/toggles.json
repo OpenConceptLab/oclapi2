@@ -52,7 +52,7 @@
       "dev": true,
       "qa": true,
       "staging": true,
-      "production": false
+      "production": true
     }
   },
   {

@@ -3956,6 +3956,11 @@ class ExpansionTest(OCLTestCase):
         return collection, expansion, reference
 
     @staticmethod
+    def _resolution_off_in_production():
+        """These dry runs compare production with the resolution toggle on, whatever the fixture says"""
+        Toggle.objects.filter(name=RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE).update(production=False)
+
+    @staticmethod
     def _rebuild(collection, expansion):
         with patch.object(Expansion, 'index_resources'), patch.object(Expansion, 'full_index_resources'):
             expansion.add_references(
@@ -4045,6 +4050,7 @@ class ExpansionTest(OCLTestCase):
         source, old, v1, v2 = CollectionReferenceTest.source_with_replaced_concept_version()
         collection, expansion, reference = self._expansion_with_resource_version_reference(source, old)
         self._rebuild(collection, expansion)
+        self._resolution_off_in_production()
 
         with override_settings(ENV='production'):
             report = expansion.dry_run_rebuild()
@@ -4084,6 +4090,7 @@ class ExpansionTest(OCLTestCase):
         source, old, _, _ = CollectionReferenceTest.source_with_replaced_concept_version()
         collection, expansion, reference = self._expansion_with_resource_version_reference(source, old)
         self._rebuild(collection, expansion)
+        self._resolution_off_in_production()
         out = StringIO()
 
         call_command(
@@ -4118,6 +4125,7 @@ class ExpansionTest(OCLTestCase):
         source, old, _, _ = CollectionReferenceTest.source_with_replaced_concept_version()
         collection, expansion, reference = self._expansion_with_resource_version_reference(source, old)
         self._rebuild(collection, expansion)
+        self._resolution_off_in_production()
 
         report = ExpansionDryRun([RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE]).rebuild(expansion)
 
@@ -4185,6 +4193,7 @@ class ExpansionTest(OCLTestCase):
         source, old, _, _ = CollectionReferenceTest.source_with_replaced_concept_version()
         collection, expansion, _ = self._expansion_with_resource_version_reference(source, old)
         self._rebuild(collection, expansion)
+        self._resolution_off_in_production()
         out = StringIO()
 
         toggle = RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE
