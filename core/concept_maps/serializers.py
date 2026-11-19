@@ -174,6 +174,8 @@ class ConceptMapDetailSerializer(FhirRepositorySerializerMixin, serializers.Mode
         source.version = HEAD
         source.released = False  # HEAD must never be released
         source.custom_validation_schema = source_head.custom_validation_schema
+        # a FHIR resource carries no access: HEAD keeps its own, not the resolved release's (ocl_online#698)
+        source.public_access = source_head.public_access
 
         errors = Source.persist_changes(source, user, None)
 

@@ -7,12 +7,11 @@ from core.capabilities.constants import WRITE_ACTION_EDIT, WRITE_ACTION_MAKE_PRI
 from core.capabilities.exceptions import WriteRefused
 from core.capabilities.policy import GroupLimitPolicy
 from core.capabilities.writes import makes_private
-from core.code_systems.serializers import CodeSystemDetailSerializer
 from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
 from core.common.tests import OCLAPITestCase
-from core.importers.importer import ImportRequest, ResourceImporter
+from core.importers.importer import ResourceImporter
 from core.importers.models import BulkImportInline
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
@@ -209,35 +208,32 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
                 self.assertEqual(repo.versions.get(version='v2').public_access, ACCESS_TYPE_NONE)
                 self.assertEqual([call[2] for call in self.take_calls()], [WRITE_ACTION_EDIT])
 
-    def test_a_fhir_update_that_would_copy_a_private_release_onto_its_head_is_refused(self):
-        OrganizationSourceFactory(
-            organization=self.org, mnemonic=self.source.mnemonic, version='v1', released=True,
-            public_access=ACCESS_TYPE_NONE)
-        resource = {
-            'resourceType': 'CodeSystem', 'id': self.source.mnemonic, 'status': 'draft', 'content': 'fragment',
-            'version': 'v2', 'name': 'Renamed', 'title': 'Renamed'
-        }
+    def test_a_fhir_update_keeps_its_head_s_own_access_whatever_the_release_s(self):
+        """A FHIR resource carries no access, so HEAD keeps its own, and the update is never asked make_private."""
+        concept_map = OrganizationSourceFactory(organization=self.org)
+        for head_access, release_access in ((ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE), (ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW)):
+            for repo, factory, resource_type, extra in (
+                    (self.source, OrganizationSourceFactory, 'CodeSystem', {'content': 'fragment'}),
+                    (concept_map, OrganizationSourceFactory, 'ConceptMap', {}),
+                    (self.collection, OrganizationCollectionFactory, 'ValueSet', {})):
+                with self.subTest(resource_type=resource_type, head=head_access):
+                    type(repo).objects.filter(id=repo.id).update(public_access=head_access)
+                    version = f'{head_access}-{release_access}'
+                    factory(
+                        organization=self.org, mnemonic=repo.mnemonic, version=f'r-{version}', released=True,
+                        public_access=release_access)
+                    resource = {
+                        'resourceType': resource_type, 'id': repo.mnemonic, 'status': 'draft', 'version': version,
+                        'name': 'Renamed', 'title': 'Renamed', **extra
+                    }
 
-        response = self.request('put', f'{self.org.uri}CodeSystem/{self.source.mnemonic}/', resource)
+                    response = self.request('put', f'{self.org.uri}{resource_type}/{repo.mnemonic}/', resource)
 
-        self.assertEqual(response.status_code, 403, response.content)
-        # FHIR routes answer every refusal as an OperationOutcome: the body's values are its issues
-        self.assertEqual(response.json()['resourceType'], 'OperationOutcome')
-        issues = json.dumps(response.json()['issue'])
-        for value in PrivateGatePolicy.body.values():
-            self.assertIn(str(value), issues)
-        self.assert_asked_to_make_private(self.take_calls(), row_id=self.source.id)
-        self.assertFalse(self.source.versions.filter(version='v2').exists())
-
-        result = ResourceImporter.save_fhir_resource(
-            CodeSystemDetailSerializer, self.source.versions.get(version='v1'), self.org, {**resource, 'version': 'v3'},
-            ImportRequest('orgs', self.org.mnemonic, self.user.username, 'CodeSystem'))
-
-        self.assertIsInstance(result, WriteRefused)
-        self.assertEqual(result.detail, PrivateGatePolicy.body)
-        self.source.refresh_from_db()
-        self.assertEqual(self.source.public_access, ACCESS_TYPE_VIEW)
-        self.assertFalse(self.source.versions.filter(version='v3').exists())
+                    self.assertEqual(response.status_code, 200, response.content)
+                    repo.refresh_from_db()
+                    self.assertEqual(repo.public_access, head_access)
+                    self.assertEqual(repo.versions.get(version=version).public_access, head_access)
+                    self.assertEqual([call[2] for call in self.take_calls()], [WRITE_ACTION_EDIT])
 
 
 @override_settings(CAPABILITY_POLICY=PRIVATE_GATE_POLICY)
