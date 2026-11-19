@@ -29,6 +29,7 @@ from core.common.utils import queue_bulk_import, is_csv_file, get_truthy_values,
     get_export_service
 from core.importers.constants import ALREADY_QUEUED, INVALID_UPDATE_IF_EXISTS, NO_CONTENT_TO_IMPORT, INVALID_INDEX, \
     INVALID_SEED_FROM_IMPORT, SEED_FROM_IMPORT_IMPORT_TYPE, SEED_FROM_IMPORT_ENDPOINT
+from core.sources.constants import SEED_FROM_IMPORT_NEEDS_UPDATE
 from core.importers.importer import Importer, ResourceImporter
 from core.importers.input_parsers import ImportContentParser
 from core.importers.limits import (
@@ -65,6 +66,8 @@ def get_seed_from_import_param(request, supported=True):
         return None, Response({'exception': INVALID_SEED_FROM_IMPORT}, status=status.HTTP_400_BAD_REQUEST)
     if seed_from_import == 'true' and not supported:
         return None, Response({'exception': SEED_FROM_IMPORT_ENDPOINT}, status=status.HTTP_400_BAD_REQUEST)
+    if seed_from_import == 'true' and request.GET.get('update_if_exists', 'true') == 'false':
+        return None, Response({'exception': SEED_FROM_IMPORT_NEEDS_UPDATE}, status=status.HTTP_400_BAD_REQUEST)
     return seed_from_import == 'true', None
 
 

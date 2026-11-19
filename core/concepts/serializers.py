@@ -248,14 +248,16 @@ class ConceptAbstractSerializer(SourceVersionFieldMixin, AbstractResourceSeriali
         return None
 
     def mapping_serializer_class(self):
-        from core.mappings.serializers import MappingDetailSerializer, MappingMinimalSerializer
+        from core.mappings.serializers import MappingDetailSerializer, MappingMinimalSerializer, \
+            EmbeddedMappingMinimalSerializer
         request = get(self, 'context.request')
-        is_mapping_brief = request.query_params.get('mappingBrief', None) in TRUTHY
-        return MappingMinimalSerializer if is_mapping_brief else MappingDetailSerializer
+        if request.query_params.get('mappingBrief', None) not in TRUTHY:
+            return MappingDetailSerializer
+        return EmbeddedMappingMinimalSerializer if get(self, 'context.repo_version') else MappingMinimalSerializer
 
     def preloads_direct_mappings(self):
         return 'mappings' in self.fields and self.include_direct_mappings and not (
-            self.include_indirect_mappings or 'collection' in self.view_kwargs or get(self, 'context.repo_version'))
+            self.include_indirect_mappings or 'collection' in self.view_kwargs)
 
     def preload_page(self, instances):
         """Loads the direct mappings of a whole page of concepts in one go, instead of per concept."""
@@ -264,14 +266,21 @@ class ConceptAbstractSerializer(SourceVersionFieldMixin, AbstractResourceSeriali
             return
         from core.mappings.models import Mapping
         params = request.query_params
-        concept_ids = {
-            concept.id: set(compact([
-                concept.id, concept.versioned_object_id, get(concept.get_latest_version(), 'id')]))
-            for concept in instances
-        }
-        mappings = Mapping.objects.filter(
-            parent_id__in={concept.parent_id for concept in instances},
-            from_concept_id__in=set().union(*concept_ids.values()), id=F('versioned_object_id'))
+        repo_version = get(self, 'context.repo_version')
+        if repo_version:  # a source version's own mappings
+            versioned_object_ids = {concept.versioned_object_id for concept in instances}
+            mappings = repo_version.mappings.filter(
+                is_active=True, from_concept__versioned_object_id__in=versioned_object_ids
+            ).annotate(from_versioned_object_id=F('from_concept__versioned_object_id'))
+        else:
+            concept_ids = {
+                concept.id: set(compact([
+                    concept.id, concept.versioned_object_id, get(concept.get_latest_version(), 'id')]))
+                for concept in instances
+            }
+            mappings = Mapping.objects.filter(
+                parent_id__in={concept.parent_id for concept in instances},
+                from_concept_id__in=set().union(*concept_ids.values()), id=F('versioned_object_id'))
         if map_types := compact((params.get('mapTypes', '') or '').split(',')):
             mappings = mappings.filter(map_type__in=map_types)
         if target_repo_urls := compact((params.get('targetRepoUrls', '') or '').split(',')):
@@ -281,6 +290,10 @@ class ConceptAbstractSerializer(SourceVersionFieldMixin, AbstractResourceSeriali
         mappings = list(mappings.order_by('id'))
         Mapping.load_list_fields(mappings, self.mapping_serializer_class()().fields.keys(), None, request.user)
         for concept in instances:
+            if repo_version:
+                concept._preloaded_mappings = [  # pylint: disable=protected-access
+                    mapping for mapping in mappings if mapping.from_versioned_object_id == concept.versioned_object_id]
+                continue
             is_heads = concept.is_versioned_object or concept.is_latest_version  # HEAD's leave out what it dropped
             concept._preloaded_mappings = [  # pylint: disable=protected-access
                 mapping for mapping in mappings
@@ -288,18 +301,16 @@ class ConceptAbstractSerializer(SourceVersionFieldMixin, AbstractResourceSeriali
                 and (mapping.is_active or not is_heads)]
 
     def get_mappings(self, obj):  # pylint: disable=too-many-locals
-        from core.mappings.serializers import MappingDetailSerializer, MappingMinimalSerializer
         context = get(self, 'context')
         request = get(context, 'request')
         preloaded = getattr(obj, '_preloaded_mappings', None)
         if preloaded is not None and self.preloads_direct_mappings():
             child = self.mapping_serializer_class()()
             return [child.to_representation(mapping) for mapping in preloaded]
-        is_mapping_brief = request.query_params.get('mappingBrief', None) in TRUTHY
         map_types = compact((request.query_params.get('mapTypes', '') or '').split(','))
         target_repo_urls = compact((request.query_params.get('targetRepoUrls', '') or '').split(','))
         include_retired = request.query_params.get(INCLUDE_RETIRED_PARAM, None) in TRUTHY
-        serializer_class = MappingMinimalSerializer if is_mapping_brief else MappingDetailSerializer
+        serializer_class = self.mapping_serializer_class()
         is_collection = 'collection' in self.view_kwargs
         collection_version = self.view_kwargs.get('version', HEAD) if is_collection else None
         parent_uri = get_collection_uri_from_view(get(context, 'view'), request) if is_collection else None

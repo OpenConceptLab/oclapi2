@@ -28,6 +28,7 @@ ISOLATED_VERSION_TARGET_MISMATCH = \
 ALLOW_LARGE_DROP = 'allow_large_drop'
 ISOLATED_VERSION_META_INVALID = 'meta must be an object, and meta.display.concept_filter_order a list of codes.'
 ISOLATED_VERSION_LIST_FIELD_INVALID = '{field} must be a list.'
+SEED_FROM_IMPORT_NEEDS_UPDATE = 'A seed_from_import import updates what it resends, so update_if_exists must be true.'
 ISOLATED_VERSION_DELETE_LINE = \
     'A seed_from_import import cannot delete codes. Leave a code out of the file to drop it from HEAD.'
 ISOLATED_METADATA_FIELDS = (

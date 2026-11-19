@@ -175,7 +175,38 @@ class ConceptDefaultLocalesView(ListAPIView, BaseAPIView):  # pragma: no cover
         raise Http404()
 
 
-class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
+class ConceptHierarchyMixin:
+    def get_source_version(self):
+        """The source version named in the URL, or None for HEAD (latest included, when it is HEAD) and collections."""
+        if '_source_version' not in self.__dict__:
+            repo_version = self.find_source_version()
+            self._source_version = None if get(repo_version, 'is_head') else repo_version
+        return self._source_version
+
+    def find_source_version(self):
+        source, version = self.kwargs.get('source'), self.kwargs.get('version')
+        if not source or not version or version == HEAD:
+            return None
+        from core.sources.models import Source
+        if 'org' in self.kwargs:
+            filters = {'organization__mnemonic': self.kwargs['org']}
+        else:
+            filters = {'user__username': self.request.user.username if self.user_is_self else self.kwargs.get('user')}
+        if version == LATEST:
+            return Source.find_latest_released_version_by({**filters, 'mnemonic': source})
+        return Source.get_version(source, version, filters)
+
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), 'repo_version': self.get_source_version()}
+
+    def get_hierarchy_queryset(self, instance, relation):
+        repo_version = self.get_source_version()
+        if repo_version:
+            return instance.get_version_hierarchy_queryset(relation, repo_version)
+        return instance.get_hierarchy_related_queryset(relation)
+
+
+class ConceptListView(ConceptHierarchyMixin, ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
     is_page_size_capped = True
     serializer_class = ConceptListSerializer
 
@@ -355,36 +386,6 @@ class ConceptCollectionMembershipView(ConceptBaseView, ListWithHeadersMixin):
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
-
-
-class ConceptHierarchyMixin:
-    def get_source_version(self):
-        """The source version named in the URL, or None for HEAD and collection URLs."""
-        if '_source_version' not in self.__dict__:
-            self._source_version = self.find_source_version()
-        return self._source_version
-
-    def find_source_version(self):
-        source, version = self.kwargs.get('source'), self.kwargs.get('version')
-        if not source or not version or version == HEAD:
-            return None
-        from core.sources.models import Source
-        if 'org' in self.kwargs:
-            filters = {'organization__mnemonic': self.kwargs['org']}
-        else:
-            filters = {'user__username': self.request.user.username if self.user_is_self else self.kwargs.get('user')}
-        if version == LATEST:
-            return Source.find_latest_released_version_by({**filters, 'mnemonic': source})
-        return Source.get_version(source, version, filters)
-
-    def get_serializer_context(self):
-        return {**super().get_serializer_context(), 'repo_version': self.get_source_version()}
-
-    def get_hierarchy_queryset(self, instance, relation):
-        repo_version = self.get_source_version()
-        if repo_version:
-            return instance.get_version_hierarchy_queryset(relation, repo_version)
-        return instance.get_hierarchy_related_queryset(relation)
 
 
 class ConceptRetrieveUpdateDestroyView(ConceptHierarchyMixin, ConceptBaseView, RetrieveAPIView, UpdateAPIView,

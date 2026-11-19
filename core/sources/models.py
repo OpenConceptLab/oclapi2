@@ -1036,9 +1036,9 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     def get_max_mnemonic_for_resource(queryset):
         return get(
             queryset.filter(
-                mnemonic__regex=r'^\d+$'
+                mnemonic__regex=r'^\d{1,18}$'  # fits a bigint, so one oversized id can't fail the whole query
             ).annotate(
-                mnemonic_int=Cast('mnemonic', models.IntegerField())
+                mnemonic_int=Cast('mnemonic', models.BigIntegerField())
             ).aggregate(
                 max_val=Max('mnemonic_int')), 'max_val', None
         )

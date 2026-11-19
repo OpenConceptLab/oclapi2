@@ -26,7 +26,7 @@ from core.orgs.models import Organization
 from core.sources.constants import ISOLATED_METADATA_FIELDS, ISOLATED_VERSION_CONTENT_FAILED, \
     ISOLATED_VERSION_LINE_INVALID, ISOLATED_VERSION_EXISTS, ISOLATED_VERSION_NO_EDIT_ACCESS, SEEDED_FROM_IMPORT, \
     ISOLATED_VERSION_LARGE_DROP, ALLOW_LARGE_DROP, ISOLATED_VERSION_META_INVALID, HIERARCHY_ROOT_CANNOT_BE_DROPPED, \
-    ISOLATED_VERSION_DELETE_LINE, ISOLATED_VERSION_LIST_FIELD_INVALID
+    ISOLATED_VERSION_DELETE_LINE, ISOLATED_VERSION_LIST_FIELD_INVALID, SEED_FROM_IMPORT_NEEDS_UPDATE
 from core.sources.models import Source
 from core.tasks.models import Task
 from core.users.models import UserProfile
@@ -428,7 +428,7 @@ class MappingMatcher:
     """
     Which of HEAD's mappings an import's lines would update, found as MappingImporter finds them: by id, else by map
     type, the from concept or code, and the target concept, code or source the line names. Of several matches, the
-    importer updates the first one not retired, else the newest.
+    importer updates the first one not retired, else the newest, with the lines before it already applied.
     """
     FIELDS = ('id', 'mnemonic', 'retired', 'is_active', 'map_type', 'from_concept__versioned_object_id',
               'from_concept_code', 'to_concept__versioned_object_id', 'to_concept_code', 'to_source_url',
@@ -472,8 +472,11 @@ class MappingMatcher:
                 row_id = self.by_mnemonic.get(str(line['id']))
             else:
                 row_id = self.choose(self.get_candidates(line, resolved, existing_sources))
-            if row_id and self.rows[row_id]['is_active']:
-                kept.add(row_id)
+            if row_id:
+                # a seeding import leaves a field it doesn't send at its default, so the next line sees this
+                self.rows[row_id]['retired'] = line.get('retired') in (True, 'true', 'True')
+                if self.rows[row_id]['is_active']:
+                    kept.add(row_id)
         return kept
 
     def get_candidates(self, line, resolved, existing_sources):  # pylint: disable=too-many-locals
@@ -583,6 +586,8 @@ class IsolatedVersionCommit:
         Runs before any content imports, so a version that would be rejected leaves HEAD untouched. content_lines are
         the import's Concept and Mapping lines, for what HEAD would lose.
         """
+        if not self.update_if_exists:
+            raise ValidationError({'__all__': [SEED_FROM_IMPORT_NEEDS_UPDATE]})
         importer = SourceVersionImporter({**self.version_line}, self.user, self.update_if_exists, isolated_version=True)
         rejected, result = self.get_rejection(importer, needs_head=False)
         if rejected:
@@ -909,7 +914,7 @@ class MappingImporter(BaseResourceImporter):
             'map_type': self.get('map_type'),
         }
         if from_concept_code:
-            filters['from_concept_code'] = [
+            filters['from_concept_code__in'] = [
                 *Concept.get_encoded_str_variations(from_concept_code), from_concept_code.replace(' ', '+')
             ]
 

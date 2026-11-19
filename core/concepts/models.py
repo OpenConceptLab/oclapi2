@@ -1334,6 +1334,18 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             criteria |= Q(to_concept__versioned_object_id=self.versioned_object_id)
         return repo_version.mappings.filter(criteria, is_active=True)
 
+    def get_indexed_mappings(self):
+        """
+        The mappings this row's search document takes its mapped codes from: HEAD's for a row HEAD serves, else those
+        of the releases the row is in.
+        """
+        if self.is_versioned_object or self.is_latest_version or not self.id:
+            return self.get_unidirectional_mappings()
+        from core.mappings.models import Mapping
+        return Mapping.objects.filter(
+            sources__in=self.sources.all(), from_concept__versioned_object_id=self.versioned_object_id, is_active=True
+        ).distinct()
+
     def get_bidirectional_mappings(self):
         return self.get_unidirectional_mappings() | self.get_indirect_mappings()
 
