@@ -1091,6 +1091,17 @@ class CapabilityConsumeOwnerTest(OCLAPITestCase):
         self.assertEqual((event.map_project, event.run), (None, None))
         self.assertEqual(OwnerRecordingPolicy.owners('consume'), [None])
 
+    def test_an_inactive_project_and_its_runs_are_left_out(self):
+        run = AutomatchRunFactory(map_project=self.project)
+        self.project.is_active = False
+        self.project.save(update_fields=['is_active'])
+
+        for data in ({'map_project': self.project.id}, {'run': run.id}):
+            with self.subTest(**data):
+                event = self.consume(**data)
+                self.assertEqual((event.map_project, event.run), (None, None))
+        self.assertEqual(OwnerRecordingPolicy.owners('consume'), [None, None])
+
     def test_a_personal_project_is_for_its_user(self):
         project = MapProjectFactory(organization=None, user=self.user)
 

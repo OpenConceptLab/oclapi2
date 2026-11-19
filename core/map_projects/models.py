@@ -102,11 +102,16 @@ class MapProject(BaseModel):
 
     @classmethod
     def editable_by(cls, user):
-        """The projects `user` may edit, as CanEditConceptDictionary decides: all for staff, else their own and their
-        organizations'. A project with an organization is the organization's, whatever its user."""
+        """
+        The active projects `user` may edit, as the project views decide: all for staff, else their own and their
+        organizations'. A project with an organization is the organization's, whatever its user. Each comes with its
+        owner, loaded in the same query, and no more of itself than its id.
+        """
+        projects = cls.objects.filter(is_active=True).select_related('organization', 'user').only(
+            'id', 'organization', 'user')
         if user.is_staff:
-            return cls.objects.all()
-        return cls.objects.filter(
+            return projects
+        return projects.filter(
             models.Q(organization__isnull=True, user_id=user.id) |
             models.Q(organization__in=user.organizations.values('id')))
 

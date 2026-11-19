@@ -63,7 +63,7 @@ class CapabilityBaseView(APIView):
         map_project_id = parse_id(request.data.get('map_project', None))
         if map_project_id is not None:
             # these rows only feed the UsageEvent FKs and the owner
-            map_project = editable.filter(id=int(map_project_id)).only('id', 'organization_id', 'user_id').first()
+            map_project = editable.filter(id=int(map_project_id)).first()
 
         run = None
         run_id = parse_id(request.data.get('run', None))
@@ -71,9 +71,9 @@ class CapabilityBaseView(APIView):
             run_qs = AutomatchRun.objects.filter(id=int(run_id))
             run_qs = run_qs.filter(map_project=map_project) if map_project else run_qs.filter(
                 map_project__in=editable.values('id'))
-            # the run's project in the same query, so it can't vanish between the two
-            run = run_qs.select_related('map_project').only(
-                'id', 'map_project__id', 'map_project__organization_id', 'map_project__user_id').first()
+            # the run's project and its owner in the same query, so neither can vanish in between
+            run = run_qs.select_related('map_project__organization', 'map_project__user').only(
+                'id', 'map_project__id', 'map_project__organization', 'map_project__user').first()
             if run and not map_project:
                 map_project = run.map_project
 

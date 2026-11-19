@@ -31,6 +31,7 @@ class MapProjectModelTest(OCLTestCase):
         someone_elses = MapProjectFactory(organization=None, user=UserProfileFactory())
         # a project with both owners is its organization's, as HasPrivateAccess reads `parent`
         both_owners = MapProjectFactory(user=user)
+        MapProjectFactory(organization=org, is_active=False)
 
         self.assertEqual(set(MapProject.editable_by(user)), {own, orgs})
         self.assertEqual(both_owners.parent, both_owners.organization)

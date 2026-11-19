@@ -123,8 +123,9 @@ class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListW
             # owner's, serializes creates by the same user and under the same
             # organization; re-check capacity under the locks before persisting.
             locked_user = type(request.user).objects.select_for_update().get(pk=request.user.pk)
-            if isinstance(self.parent_resource, Organization):
-                Organization.objects.select_for_update(no_key=True).only('id').get(pk=self.parent_resource.pk)
+            if isinstance(self.parent_resource, Organization) and not Organization.objects.select_for_update(
+                    no_key=True).only('id').filter(pk=self.parent_resource.pk).first():
+                return Response(status=status.HTTP_404_NOT_FOUND)
             check_map_project_capacity(locked_user, get_capability_policy(), self.parent_resource)
 
             instance = serializer.save(force_insert=True)

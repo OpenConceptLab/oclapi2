@@ -978,8 +978,7 @@ def get_match_operations_attribution(request):
         from core.map_projects.models import MapProject
         # Only a project the user may edit: the id is client-supplied (this header), so without this a caller could
         # attribute their UsageEvent to, and count it for the owner of, a project that isn't theirs to work on.
-        map_project = MapProject.editable_by(request.user).filter(id=int(map_project_id)).only(
-            'id', 'organization_id', 'user_id').first()
+        map_project = MapProject.editable_by(request.user).filter(id=int(map_project_id)).first()
 
     return algorithm_id, map_project
 
