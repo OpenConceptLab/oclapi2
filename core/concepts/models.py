@@ -1321,16 +1321,18 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         from core.mappings.models import Mapping
         mappings = Mapping.objects.filter(parent_id=self.parent_id, **filters)
 
-        if is_latest:
-            return mappings.filter(is_latest_version=True)
-        return mappings.filter(id=F('versioned_object_id'), is_active=True)  # not those dropped from HEAD
+        mappings = mappings.filter(is_latest_version=True) if is_latest else mappings.filter(
+            id=F('versioned_object_id'))
+        if self.is_versioned_object or self.is_latest_version:  # HEAD's: not those dropped from it
+            mappings = mappings.filter(is_active=True)
+        return mappings
 
     def get_version_mappings(self, repo_version, include_indirect=False):
         """The mappings of repo_version from this concept, and with include_indirect those to it."""
         criteria = Q(from_concept__versioned_object_id=self.versioned_object_id)
         if include_indirect:
             criteria |= Q(to_concept__versioned_object_id=self.versioned_object_id)
-        return repo_version.mappings.filter(criteria)
+        return repo_version.mappings.filter(criteria, is_active=True)
 
     def get_bidirectional_mappings(self):
         return self.get_unidirectional_mappings() | self.get_indirect_mappings()
@@ -2065,9 +2067,8 @@ class ImportHierarchy:
     def from_uri_map(cls, hierarchy_map, user=None):
         """hierarchy_map: child uri -> parent uris. With a user, only children it can edit and parents it can view."""
         from core.sources.models import Source
-        # a parent URL naming one of a concept's versions links to that concept
-        parent_uri_of = {uri: drop_version(uri) for uris in hierarchy_map.values() for uri in uris}
-        resolved = Concept.get_versioned_objects_by_uri({*hierarchy_map, *parent_uri_of.values()})
+        # children's URLs are versionless, so one lookup resolves them with their parents
+        resolved = cls.resolve_parents({*hierarchy_map, *(uri for uris in hierarchy_map.values() for uri in uris)})
         editable = viewable = None
         if user:
             sources = Source.objects.filter(id__in={source_id for _, source_id in resolved.values()})
@@ -2079,9 +2080,24 @@ class ImportHierarchy:
             if not child_id or (editable is not None and child_source_id not in editable):
                 continue
             links.setdefault(child_id, set()).update(
-                resolved[parent_uri_of[uri]][0] for uri in parent_uris
-                if parent_uri_of[uri] in resolved and (viewable is None or resolved[parent_uri_of[uri]][1] in viewable))
+                resolved[uri][0] for uri in parent_uris
+                if uri in resolved and (viewable is None or resolved[uri][1] in viewable))
         return cls(links)
+
+    @classmethod
+    def resolve_parents(cls, uris):
+        """
+        uri -> (concept id, source id) of each parent URL: the concept a URL names, or the concept of the exact version
+        it names. A version that doesn't exist resolves to nothing.
+        """
+        versioned_uris = {uri for uri in uris if drop_version(uri) != uri}
+        versionless_uris = set(uris) - versioned_uris
+        resolved = Concept.get_versioned_objects_by_uri(versionless_uris) if versionless_uris else {}
+        for batch in chunks(sorted(versioned_uris), cls.CHUNK_SIZE):
+            for uri, versioned_object_id, source_id in Concept.objects.filter(uri__in=batch).values_list(
+                    'uri', 'versioned_object_id', 'parent_id'):
+                resolved[uri] = (versioned_object_id, source_id)
+        return resolved
 
     @classmethod
     def link_child_versions(cls, version_child_map):
@@ -2093,9 +2109,8 @@ class ImportHierarchy:
             for row_id, versioned_object_id, uri in Concept.objects.filter(uri__in=batch).values_list(
                     'id', 'versioned_object_id', 'uri'):
                 rows[uri] = (row_id, versioned_object_id)
-        parent_uris = {drop_version(uri) for uris in version_child_map.values() for uri in uris}
-        parents = {
-            uri: concept_id for uri, (concept_id, _) in Concept.get_versioned_objects_by_uri(parent_uris).items()}
+        parents = {uri: concept_id for uri, (concept_id, _) in cls.resolve_parents(
+            {uri for uris in version_child_map.values() for uri in uris}).items()}
         latest = Concept.get_latest_version_ids_by_versioned_object_id(
             {*parents.values(), *(versioned_object_id for _, versioned_object_id in rows.values())})
         pairs = set()
@@ -2104,7 +2119,7 @@ class ImportHierarchy:
                 continue
             row_id, versioned_object_id = rows[child_uri]
             for parent_uri in uris:
-                parent_id = latest.get(parents.get(drop_version(parent_uri)))
+                parent_id = latest.get(parents.get(parent_uri))
                 if parent_id:
                     pairs.add((row_id, parent_id))
                     if versioned_object_id in latest:

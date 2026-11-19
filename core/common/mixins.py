@@ -1157,7 +1157,8 @@ class SourceChildMixin(ChecksumModel):
         parent = versioned_object.parent
         if not versioned_object.is_active:
             versioned_object.is_active = True
-            versioned_object.save(update_fields=['is_active'])
+            # updated_at moves, so HEAD's cached comparisons and exports see it back
+            versioned_object.save(update_fields=['is_active', 'updated_at'])
         versioned_object.sources.add(parent)
         latest_version = versioned_object.get_latest_version()
         if latest_version:

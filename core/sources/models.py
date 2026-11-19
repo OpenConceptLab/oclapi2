@@ -308,11 +308,11 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         for model, document, ids in ((Concept, ConceptDocument, concept_ids), (Mapping, MappingDocument, mapping_ids)):
             for chunk in chunks(ids, DROPPED_CHILDREN_CHUNK_SIZE):
                 self.batch_index(model.objects.filter(id__in=chunk), document)
-        for chunk in chunks(mapping_ids, DROPPED_CHILDREN_CHUNK_SIZE):  # their concepts no longer map to the dropped
-            from_concepts = Mapping.objects.filter(id__in=chunk)
+        for chunk in chunks(mapping_ids, DROPPED_CHILDREN_CHUNK_SIZE):
+            # the rows that serve HEAD no longer map to the dropped; older releases' rows keep their codes
+            from_concept_ids = Mapping.objects.filter(id__in=chunk).values('from_concept__versioned_object_id')
             Concept.index_mapped_codes(Concept.objects.filter(
-                Q(id__in=from_concepts.values('from_concept_id')) |
-                Q(id__in=from_concepts.values('from_concept__versioned_object_id'))))
+                Q(id__in=from_concept_ids) | Q(versioned_object_id__in=from_concept_ids, is_latest_version=True)))
         if recount:
             self.update_children_counts(sync=True)
 
@@ -1022,10 +1022,15 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         return get(self.get_mappings_queryset().aggregate(max_val=Max(attribute)), 'max_val', None)
 
     def get_max_concept_mnemonic(self):
-        return self.get_max_mnemonic_for_resource(self.get_concepts_queryset())
+        # over every concept HEAD has had, so a dropped one's id isn't given out again
+        queryset = self.concepts_set.filter(
+            id=F('versioned_object_id')) if self.is_head else self.get_concepts_queryset()
+        return self.get_max_mnemonic_for_resource(queryset)
 
     def get_max_mapping_mnemonic(self):
-        return self.get_max_mnemonic_for_resource(self.get_mappings_queryset())
+        queryset = self.mappings_set.filter(
+            id=F('versioned_object_id')) if self.is_head else self.get_mappings_queryset()
+        return self.get_max_mnemonic_for_resource(queryset)
 
     @staticmethod
     def get_max_mnemonic_for_resource(queryset):

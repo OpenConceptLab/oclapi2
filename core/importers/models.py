@@ -2,7 +2,6 @@ import json
 import time
 from collections import deque
 from datetime import datetime
-from urllib.parse import unquote
 
 from celery import group
 from celery.utils.log import get_task_logger
@@ -27,7 +26,7 @@ from core.orgs.models import Organization
 from core.sources.constants import ISOLATED_METADATA_FIELDS, ISOLATED_VERSION_CONTENT_FAILED, \
     ISOLATED_VERSION_LINE_INVALID, ISOLATED_VERSION_EXISTS, ISOLATED_VERSION_NO_EDIT_ACCESS, SEEDED_FROM_IMPORT, \
     ISOLATED_VERSION_LARGE_DROP, ALLOW_LARGE_DROP, ISOLATED_VERSION_META_INVALID, HIERARCHY_ROOT_CANNOT_BE_DROPPED, \
-    ISOLATED_VERSION_DELETE_LINE
+    ISOLATED_VERSION_DELETE_LINE, ISOLATED_VERSION_LIST_FIELD_INVALID
 from core.sources.models import Source
 from core.tasks.models import Task
 from core.users.models import UserProfile
@@ -386,6 +385,9 @@ class SourceVersionImporter(BaseResourceImporter):
         The checks a source's save runs, on the metadata a version line sets; persisting a version skips them. Values
         a version takes from HEAD aren't checked again.
         """
+        for field in ('properties', 'filters', 'match_algorithms'):
+            if line.get(field) is not None and not isinstance(line[field], list):
+                raise ValidationError({field: [ISOLATED_VERSION_LIST_FIELD_INVALID.format(field=field)]})
         probe = Source(**{field: line[field] for field in ISOLATED_METADATA_FIELDS if field in line})
         probe.clean_properties()
         probe.clean_filters()
@@ -422,59 +424,91 @@ class SourceVersionImporter(BaseResourceImporter):
             source.match_algorithms = head.get_match_algorithms_for_new_version()
 
 
-class MappingKeys:
+class MappingMatcher:
     """
-    Which of HEAD's mappings an import's lines would update: by id, else as MappingImporter matches a line without
-    one, by map type and the concepts it links, or their codes and the target source.
+    Which of HEAD's mappings an import's lines would update, found as MappingImporter finds them: by id, else by map
+    type, the from concept or code, and the target concept, code or source the line names. Of several matches, the
+    importer updates the first one not retired, else the newest.
     """
-    def __init__(self, ids, concept_keys, code_keys):
-        self.ids, self.concept_keys, self.code_keys = ids, concept_keys, code_keys
+    FIELDS = ('id', 'mnemonic', 'retired', 'is_active', 'map_type', 'from_concept__versioned_object_id',
+              'from_concept_code', 'to_concept__versioned_object_id', 'to_concept_code', 'to_source_url',
+              'to_source__uri')
+
+    def __init__(self, head):
+        self.rows, self.by_mnemonic, self.by_from_id, self.by_from_code = {}, {}, {}, {}
+        for row in head.mappings_set.filter(id=F('versioned_object_id')).values(*self.FIELDS):
+            self.rows[row['id']] = row
+            self.by_mnemonic[row['mnemonic']] = row['id']
+            from_key = (row['map_type'], row['from_concept__versioned_object_id'])
+            self.by_from_id.setdefault(from_key, []).append(row['id'])
+            self.by_from_code.setdefault((row['map_type'], row['from_concept_code']), []).append(row['id'])
+
+    @property
+    def active_ids(self):
+        return {row_id for row_id, row in self.rows.items() if row['is_active']}
 
     @staticmethod
-    def code(value):
-        return unquote(str(value)) if value not in (None, '') else None
+    def variations(code):
+        code = str(code)
+        return {*Concept.get_encoded_str_variations(code), code.replace(' ', '+')}
 
-    @classmethod
-    def from_head(cls, head):
-        """mnemonic -> (concept key, code key) of each of HEAD's active mappings."""
-        return {
-            mnemonic: ((map_type, from_id, to_id) if from_id and to_id else None,
-                       (map_type, cls.code(from_code), cls.code(to_code), drop_version(to_source_url) or None))
-            for mnemonic, map_type, from_id, to_id, from_code, to_code, to_source_url in head.mappings_set.filter(
-                id=F('versioned_object_id'), is_active=True).values_list(
-                    'mnemonic', 'map_type', 'from_concept__versioned_object_id', 'to_concept__versioned_object_id',
-                    'from_concept_code', 'to_concept_code', 'to_source_url')
-        }
+    @staticmethod
+    def last_segment(url):
+        return compact(url.split('/'))[-1]
 
-    @classmethod
-    def from_lines(cls, lines):
-        ids, unnamed = set(), []
+    def kept(self, lines):
+        """The ids of HEAD's active mappings these lines would update."""
+        unnamed = [line for line in lines if line.get('id') in (None, '')]
+        concept_urls = {drop_version(line.get(key)) for line in unnamed
+                        for key in ('from_concept_url', 'to_concept_url') if line.get(key)}
+        resolved = {uri: concept_id for uri, (concept_id, _) in Concept.get_versioned_objects_by_uri(
+            concept_urls).items()}
+        source_uris = {to_parent_uri(drop_version(line['to_concept_url'])) for line in unnamed
+                       if line.get('to_concept_url') and not line.get('to_source_url')}
+        existing_sources = set(Source.objects.filter(uri__in=source_uris).values_list('uri', flat=True))
+        kept = set()
         for line in lines:
             if line.get('id') not in (None, ''):
-                ids.add(str(line['id']))
+                row_id = self.by_mnemonic.get(str(line['id']))
             else:
-                unnamed.append(line)
-        urls = {drop_version(line.get(key)) for line in unnamed for key in ('from_concept_url', 'to_concept_url')
-                if line.get(key)}
-        resolved = Concept.get_versioned_objects_by_uri(urls)
-        concept_keys, code_keys = set(), set()
-        for line in unnamed:
-            from_url, to_url = drop_version(line.get('from_concept_url')), drop_version(line.get('to_concept_url'))
-            from_id, to_id = (resolved.get(from_url) or (None,))[0], (resolved.get(to_url) or (None,))[0]
-            if from_id and to_id:
-                concept_keys.add((line.get('map_type'), from_id, to_id))
-            to_source_url = drop_version(line.get('to_source_url')) or (to_parent_uri(to_url) if to_url else None)
-            code_keys.add((
-                line.get('map_type'),
-                cls.code(line.get('from_concept_code') or (compact(from_url.split('/'))[-1] if from_url else None)),
-                cls.code(line.get('to_concept_code') or (compact(to_url.split('/'))[-1] if to_url else None)),
-                to_source_url or None))
-        return cls(ids, concept_keys, code_keys)
+                row_id = self.choose(self.get_candidates(line, resolved, existing_sources))
+            if row_id and self.rows[row_id]['is_active']:
+                kept.add(row_id)
+        return kept
 
-    def kept(self, head_mappings):
-        return {mnemonic for mnemonic, (concept_key, code_key) in head_mappings.items()
-                if mnemonic in self.ids or (concept_key and concept_key in self.concept_keys)
-                or code_key in self.code_keys}
+    def get_candidates(self, line, resolved, existing_sources):  # pylint: disable=too-many-locals
+        map_type, from_code = line.get('map_type'), line.get('from_concept_code')
+        from_url = drop_version(line.get('from_concept_url') or '')
+        from_id = resolved.get(from_url)
+        if from_id:
+            candidates = self.by_from_id.get((map_type, from_id), [])
+        else:
+            codes = self.variations(from_code) if from_code else {self.last_segment(from_url)} if from_url else set()
+            candidates = [row_id for code in codes for row_id in self.by_from_code.get((map_type, code), [])]
+        checks = []
+        if from_code and from_id:
+            checks.append(lambda row: row['from_concept_code'] in self.variations(from_code))
+        to_url, to_code, to_source_url = drop_version(line.get('to_concept_url') or ''), line.get(
+            'to_concept_code'), line.get('to_source_url')
+        if to_url:
+            to_id = resolved.get(to_url)
+            if to_id:
+                checks.append(lambda row: row['to_concept__versioned_object_id'] == to_id)
+            else:
+                checks.append(lambda row: row['to_concept_code'] == self.last_segment(to_url))
+                if not to_source_url and to_parent_uri(to_url) in existing_sources:
+                    checks.append(lambda row: row['to_source__uri'] == to_parent_uri(to_url))
+        if to_source_url:
+            checks.append(lambda row: row['to_source_url'] == drop_version(to_source_url))
+        if to_code:
+            checks.append(lambda row: row['to_concept_code'] in self.variations(to_code))
+        return [row_id for row_id in dict.fromkeys(candidates) if all(check(self.rows[row_id]) for check in checks)]
+
+    def choose(self, candidates):
+        if len(candidates) <= 1:
+            return candidates[0] if candidates else None
+        not_retired = [row_id for row_id in candidates if not self.rows[row_id]['retired']]
+        return min(not_retired) if not_retired else max(candidates)
 
 
 class IsolatedVersionRollback(Exception):
@@ -564,7 +598,7 @@ class IsolatedVersionCommit:
         """
         Refuses, before any content imports, a file with a delete line, one that leaves out HEAD's hierarchy root, or
         one that leaves out at least SEED_FROM_IMPORT_LARGE_DROP_MIN of HEAD's codes and more than its percent of them,
-        unless allow_large_drop. A mapping line without an id keeps the HEAD mapping it would update.
+        unless allow_large_drop. A mapping line without an id keeps the one HEAD mapping it would update.
         """
         if any((line.get('__action', '') or '').lower() == 'delete' for line in content_lines):
             raise ValidationError({'__all__': [ISOLATED_VERSION_DELETE_LINE]})
@@ -580,10 +614,11 @@ class IsolatedVersionCommit:
         root_mnemonic = get(head, 'hierarchy_root.mnemonic')
         if root_mnemonic and root_mnemonic in head_concepts and root_mnemonic not in concept_ids:
             raise ValidationError({'hierarchy_root': [HIERARCHY_ROOT_CANNOT_BE_DROPPED]})
-        head_mappings = MappingKeys.from_head(head)
+        matcher = MappingMatcher(head)
+        head_mappings = matcher.active_ids
         dropped = {
             'concepts': len(head_concepts - concept_ids),
-            'mappings': len(head_mappings) - len(MappingKeys.from_lines(mapping_lines).kept(head_mappings))
+            'mappings': len(head_mappings - matcher.kept(mapping_lines))
         }
         total = dropped['concepts'] + dropped['mappings']
         if not self.allow_large_drop and total >= settings.SEED_FROM_IMPORT_LARGE_DROP_MIN and \

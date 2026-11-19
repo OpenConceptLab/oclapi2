@@ -255,7 +255,7 @@ class ConceptAbstractSerializer(SourceVersionFieldMixin, AbstractResourceSeriali
 
     def preloads_direct_mappings(self):
         return 'mappings' in self.fields and self.include_direct_mappings and not (
-            self.include_indirect_mappings or 'collection' in self.view_kwargs)
+            self.include_indirect_mappings or 'collection' in self.view_kwargs or get(self, 'context.repo_version'))
 
     def preload_page(self, instances):
         """Loads the direct mappings of a whole page of concepts in one go, instead of per concept."""
@@ -281,9 +281,11 @@ class ConceptAbstractSerializer(SourceVersionFieldMixin, AbstractResourceSeriali
         mappings = list(mappings.order_by('id'))
         Mapping.load_list_fields(mappings, self.mapping_serializer_class()().fields.keys(), None, request.user)
         for concept in instances:
+            is_heads = concept.is_versioned_object or concept.is_latest_version  # HEAD's leave out what it dropped
             concept._preloaded_mappings = [  # pylint: disable=protected-access
                 mapping for mapping in mappings
-                if mapping.parent_id == concept.parent_id and mapping.from_concept_id in concept_ids[concept.id]]
+                if mapping.parent_id == concept.parent_id and mapping.from_concept_id in concept_ids[concept.id]
+                and (mapping.is_active or not is_heads)]
 
     def get_mappings(self, obj):  # pylint: disable=too-many-locals
         from core.mappings.serializers import MappingDetailSerializer, MappingMinimalSerializer
@@ -301,16 +303,23 @@ class ConceptAbstractSerializer(SourceVersionFieldMixin, AbstractResourceSeriali
         is_collection = 'collection' in self.view_kwargs
         collection_version = self.view_kwargs.get('version', HEAD) if is_collection else None
         parent_uri = get_collection_uri_from_view(get(context, 'view'), request) if is_collection else None
+        repo_version = None if is_collection else get(context, 'repo_version')  # a source version's own mappings
         if self.include_indirect_mappings:
-            mappings = obj.get_bidirectional_mappings_for_collection(
-                parent_uri, collection_version
-            ) if is_collection else obj.get_bidirectional_mappings()
+            if repo_version:
+                mappings = obj.get_version_mappings(repo_version, include_indirect=True)
+            else:
+                mappings = obj.get_bidirectional_mappings_for_collection(
+                    parent_uri, collection_version
+                ) if is_collection else obj.get_bidirectional_mappings()
             if not include_retired:
                 mappings = mappings.filter(retired=False)
             return serializer_class(mappings.order_by('id'), many=True).data
         if self.include_direct_mappings:
-            mappings = obj.get_unidirectional_mappings_for_collection(
-                parent_uri, collection_version) if is_collection else obj.get_unidirectional_mappings()
+            if repo_version:
+                mappings = obj.get_version_mappings(repo_version)
+            else:
+                mappings = obj.get_unidirectional_mappings_for_collection(
+                    parent_uri, collection_version) if is_collection else obj.get_unidirectional_mappings()
             if map_types:
                 mappings = mappings.filter(map_type__in=map_types)
             if target_repo_urls:
