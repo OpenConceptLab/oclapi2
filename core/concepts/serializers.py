@@ -36,7 +36,7 @@ def get_viewable_concepts(queryset, request):
 class ViewableHierarchyUrlsField(ListField):
     """
     A concept's parent or child concept URLs (`relation`), of concepts in repos the requester can view: the context's
-    `user`, else its request's user.
+    `user`, else its request's user. With a `repo_version` in the context, those in that version.
     """
     def __init__(self, relation, **kwargs):
         self.relation = relation
@@ -44,7 +44,7 @@ class ViewableHierarchyUrlsField(ListField):
 
     def get_attribute(self, instance):
         user = self.context['user'] if 'user' in self.context else get(self.context, 'request.user')
-        return instance.get_viewable_hierarchy_concept_urls(self.relation, user)
+        return instance.get_viewable_hierarchy_concept_urls(self.relation, user, self.context.get('repo_version'))
 
 
 class LocalizedNameSerializer(ModelSerializer):

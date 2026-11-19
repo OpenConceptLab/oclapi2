@@ -8,7 +8,7 @@ from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from django.db.models import UniqueConstraint, F, Max, Count
+from django.db.models import UniqueConstraint, F, Max, Count, Q
 from django.db.models.functions import Cast
 from django.utils import timezone
 from pydash import get, compact
@@ -258,6 +258,7 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             self.seeded_from = {'type': SEEDED_FROM_REPO_VERSION, 'url': head.get_version_url(HEAD)}
             return
         head.seeded_from = {'type': SEEDED_FROM_REPO_VERSION, 'url': head.get_version_url(self.version)}
+        was_semantic = bool(head.has_semantic_match_algorithm)
         fields = [field for field in get(self, '_metadata_fields') or [] if field in ISOLATED_METADATA_FIELDS]
         for field in fields:
             setattr(head, field, getattr(self, field))
@@ -270,6 +271,8 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 **(self.extras or {})
             }
         head.save()
+        if bool(head.has_semantic_match_algorithm) != was_semantic:  # as an edit of HEAD does
+            transaction.on_commit(lambda: head.sync_concept_vectors_async(self.created_by), robust=True)
 
     def queue_index_dropped_children(self, concept_ids, mapping_ids):
         """
@@ -305,6 +308,11 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         for model, document, ids in ((Concept, ConceptDocument, concept_ids), (Mapping, MappingDocument, mapping_ids)):
             for chunk in chunks(ids, DROPPED_CHILDREN_CHUNK_SIZE):
                 self.batch_index(model.objects.filter(id__in=chunk), document)
+        for chunk in chunks(mapping_ids, DROPPED_CHILDREN_CHUNK_SIZE):  # their concepts no longer map to the dropped
+            from_concepts = Mapping.objects.filter(id__in=chunk)
+            Concept.index_mapped_codes(Concept.objects.filter(
+                Q(id__in=from_concepts.values('from_concept_id')) |
+                Q(id__in=from_concepts.values('from_concept__versioned_object_id'))))
         if recount:
             self.update_children_counts(sync=True)
 
@@ -324,7 +332,8 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 for chunk in chunks(sorted(ids), 5000):
                     latest_ids = list(model.objects.filter(
                         versioned_object_id__in=chunk, is_latest_version=True).values_list('id', flat=True))
-                    model.objects.filter(id__in=chunk).update(is_active=False)
+                    # a new updated_at, so HEAD's exports and comparisons see the change
+                    model.objects.filter(id__in=chunk).update(is_active=False, updated_at=timezone.now())
                     model.sources.through.objects.filter(
                         source_id=self.id, **{f'{model.__name__.lower()}_id__in': [*chunk, *latest_ids]}).delete()
                     if model is Concept:
@@ -1334,8 +1343,8 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         return Source.objects.filter(id__in=self.get_mappings_queryset().values_list('to_source_id', flat=True))
 
     def get_concepts_queryset(self):
-        if self.is_head:
-            return self.concepts_set.filter(id=F('versioned_object_id'))
+        if self.is_head:  # what an import seeding a version dropped isn't HEAD's
+            return self.concepts_set.filter(id=F('versioned_object_id'), is_active=True)
 
         return Concept.objects.filter(
             id__in=Concept.sources.through.objects.filter(source_id=self.id).values_list('concept_id', flat=True)
@@ -1343,7 +1352,7 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
     def get_mappings_queryset(self):
         if self.is_head:
-            return self.mappings_set.filter(id=F('versioned_object_id'))
+            return self.mappings_set.filter(id=F('versioned_object_id'), is_active=True)
 
         from core.mappings.models import Mapping
         return Mapping.objects.filter(

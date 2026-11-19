@@ -51,7 +51,8 @@ from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.constants import AUTO_ID_SEQUENTIAL, AUTO_ID_UUID, ISOLATED_VERSION_CONTENT_FAILED, \
     ISOLATED_VERSION_EXISTS, ISOLATED_VERSION_LINE_INVALID, ISOLATED_VERSION_NO_EDIT_ACCESS, \
-    ISOLATED_VERSION_LARGE_DROP, ISOLATED_VERSION_TARGET_MISMATCH
+    ISOLATED_VERSION_LARGE_DROP, ISOLATED_VERSION_TARGET_MISMATCH, ISOLATED_VERSION_DELETE_LINE, \
+    ISOLATED_VERSION_META_INVALID
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.toggles.models import Toggle
@@ -6914,6 +6915,100 @@ class IsolatedVersionImportTest(OCLTestCase):
         self.assertEqual(Source.get_import_target(users_line), ('org', 'Regen', 'LOINC'))
         self.assertEqual(Source.get_import_target({**users_line, 'owner_type': 'User'}), ('user', 'Regen', 'LOINC'))
 
+    @staticmethod
+    def unnamed_mapping(from_concept, to_concept, map_type='SAME-AS'):
+        line = {**IsolatedVersionImportTest.mapping('ignored', from_concept, to_concept), 'map_type': map_type}
+        line.pop('id')
+        return line
+
+    @override_settings(SEED_FROM_IMPORT_LARGE_DROP_MIN=2, SEED_FROM_IMPORT_LARGE_DROP_PERCENT=10)
+    def test_unnamed_mappings_count_toward_the_drop(self):
+        concepts = [self.concept(code) for code in 'ABC']
+        pairs = (('A', 'B'), ('B', 'C'), ('A', 'C'))
+        self.run_import([*concepts, *(self.unnamed_mapping(*pair) for pair in pairs), self.version('v1')])
+
+        importer = self.run_import([*concepts, *(self.unnamed_mapping(*pair) for pair in pairs), self.version('v2')])
+        self.assertEqual(len(importer.failed), 0)
+        self.assertEqual(importer.json_result['dropped'], {'concepts': 0, 'mappings': 0})
+
+        with self.assertRaises(DjangoValidationError) as ex:
+            self.run_import([*concepts, *(self.unnamed_mapping(*pair, map_type='NARROWER-THAN') for pair in pairs),
+                             self.version('v3')])
+        self.assertEqual(ex.exception.message_dict, {'__all__': [ISOLATED_VERSION_LARGE_DROP.format(
+            concepts=0, mappings=3)]})
+
+    @override_settings(SEED_FROM_IMPORT_LARGE_DROP_MIN=1, SEED_FROM_IMPORT_LARGE_DROP_PERCENT=1)
+    def test_numeric_ids_match_their_stored_codes(self):
+        self.run_import([self.concept('A'), self.concept('B'), self.mapping('3', 'A', 'B'), self.version('v1')])
+
+        importer = self.run_import([self.concept('A'), self.concept('B'), {**self.mapping('3', 'A', 'B'), 'id': 3},
+                                    self.version('v2')])
+
+        self.assertEqual(importer.json_result['dropped'], {'concepts': 0, 'mappings': 0})
+
+    def test_delete_lines_are_refused(self):
+        self.run_import([self.concept('A'), self.concept('B'), self.version('v1')])
+
+        with self.assertRaises(DjangoValidationError) as ex:
+            self.run_import([self.concept('A'), {**self.concept('B'), '__action': 'DELETE'}, self.version('v2')])
+
+        self.assertEqual(ex.exception.message_dict, {'__all__': [ISOLATED_VERSION_DELETE_LINE]})
+        self.assertEqual(self.head_concepts(), {'A', 'B'})
+
+    def test_malformed_display_metadata_is_refused(self):
+        self.run_import([self.concept('A'), self.version('v1')])
+
+        for meta in ({'display': {'concept_filter_order': 1}}, {'display': 'x'}, ['x']):
+            with self.assertRaises(DjangoValidationError) as ex:
+                self.run_import([self.concept('A'), self.version('v2', meta=meta)])
+            self.assertEqual(ex.exception.message_dict, {'meta': [ISOLATED_VERSION_META_INVALID]})
+        self.run_import([self.concept('A'), self.version('v2', meta={'display': {'concept_filter_order': ['x']}})])
+        self.assertEqual(Source.objects.get(mnemonic='LOINC', version='HEAD').concept_filter_order, ['x'])
+
+    def test_dropped_codes_leave_heads_queries_and_bump_its_last_update(self):
+        self.run_import([self.concept('A'), self.concept('B'), self.mapping('M1', 'A', 'B'), self.version('v1')])
+        head = Source.objects.get(mnemonic='LOINC', version='HEAD')
+        last_update = head.last_child_update
+
+        self.run_import([self.concept('A'), self.version('v2')])
+
+        head.refresh_from_db()
+        self.assertEqual(set(head.get_concepts_queryset().values_list('mnemonic', flat=True)), {'A'})
+        self.assertFalse(head.get_mappings_queryset().exists())
+        self.assertGreater(head.last_child_update, last_update)
+
+    @patch('core.sources.models.Source.sync_concept_vectors_async')
+    def test_semantic_change_on_head_syncs_its_vectors(self, sync_mock):
+        self.run_import([self.concept('A'), self.version('v1')])
+        Source.objects.filter(mnemonic='LOINC', version='HEAD').update(match_algorithms=['es', 'llm'])
+
+        self.run_import([self.concept('A'), self.version('v2', match_algorithms=['es'])])
+        sync_mock.assert_called_once()
+        sync_mock.reset_mock()
+        self.run_import([self.concept('A'), self.version('v3', match_algorithms=['es'])])
+        sync_mock.assert_not_called()
+
+    def test_hierarchy_repair_links_a_child_version_url(self):
+        from core.common.tasks import make_hierarchy
+        self.run_import([self.concept('P'), self.concept('C'), self.version('v1')])
+        child_version = Concept.objects.get(mnemonic='C', is_latest_version=True)
+
+        make_hierarchy({'/orgs/Regen/sources/LOINC/concepts/P/': [child_version.uri]})
+
+        parent_latest = Concept.objects.get(mnemonic='P', is_latest_version=True)
+        self.assertTrue(HierarchicalConcepts.objects.filter(child=child_version, parent=parent_latest).exists())
+
+    def test_archive_preflight_reads_each_line_whole(self):
+        importer = Importer('task-id', '/tmp/x.zip', 'ocladmin', 'Organization', 'Regen', isolated_version=True)
+        content = '\n'.join(json.dumps(line) for line in [
+            self.concept('A', extras={'nested': {'x': 1}}), {**self.concept('B'), '__action': 'DELETE'},
+            self.version('v1', filters=['status'])])
+        importer.categorize_resources(
+            io.BytesIO(content.encode()), 'path', 'file.json', ['Concept', 'Source Version'], {})
+
+        self.assertEqual(importer.version_lines[0]['filters'], ['status'])
+        self.assertEqual([line['__action'] for line in importer.content_lines], [None, 'DELETE'])
+
     @override_settings(SEED_FROM_IMPORT_LARGE_DROP_MIN=2, SEED_FROM_IMPORT_LARGE_DROP_PERCENT=50)
     def test_small_drop_needs_no_confirmation(self):
         self.run_import([self.concept(code) for code in 'ABCDE'] + [self.version('v1')])
@@ -7166,9 +7261,31 @@ class IsolatedVersionAPITest(OCLAPITestCase):
         self.assertFalse(get_child('v2')['has_children'])
         self.assertEqual(get_child('v2')['child_concepts'], [])
         response = self.client.get(
+            '/orgs/Regen/sources/LOINC/v2/concepts/P/children/?includeChildConceptURLs=true',
+            HTTP_AUTHORIZATION='Token ' + self.token)
+        self.assertEqual(response.data[0]['child_concept_urls'], [])
+        response = self.client.get(
             '/orgs/Regen/sources/LOINC/v1/concepts/B/parents/?includeParentConcepts=true',
             HTTP_AUTHORIZATION='Token ' + self.token)
         self.assertEqual(response.data[0]['parents'], ['/orgs/Regen/sources/LOINC/concepts/P/'])
+
+    def test_dropped_mappings_leave_head_and_newer_versions_concepts(self):
+        concept = IsolatedVersionImportTest.concept
+        version = IsolatedVersionImportTest.version
+        self.run_import([concept('A'), concept('B'), IsolatedVersionImportTest.mapping('M1', 'A', 'B'), version('v1')])
+        self.run_import([concept('A'), concept('B'), version('v2')])
+
+        def get_mapping_ids(url):
+            response = self.client.get(url, HTTP_AUTHORIZATION='Token ' + self.token)
+            self.assertEqual(response.status_code, 200)
+            return [item['id'] for item in response.data]
+
+        self.assertEqual(get_mapping_ids('/orgs/Regen/sources/LOINC/concepts/A/mappings/'), [])
+        self.assertEqual(get_mapping_ids('/orgs/Regen/sources/LOINC/v2/concepts/A/mappings/'), [])
+        self.assertEqual(get_mapping_ids('/orgs/Regen/sources/LOINC/v1/concepts/A/mappings/'), ['M1'])
+        response = self.client.get(
+            '/orgs/Regen/sources/LOINC/concepts/A/?includeMappings=true', HTTP_AUTHORIZATION='Token ' + self.token)
+        self.assertEqual(response.data['mappings'], [])
 
 
 @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
@@ -7247,6 +7364,11 @@ class IsolatedVersionZipImportTest(OCLTestCase):
         self.assertEqual(
             Concept.objects.get(mnemonic='N3', id=F('versioned_object_id')).extras, {'rank': 1.5, 'order': 2})
 
+    def test_import_summary_round_trips_with_or_without_drop_counts(self):
+        for dropped in (None, {'concepts': 1, 'mappings': 0}):
+            summary = ImportTaskSummary(dropped=dropped)
+            self.assertEqual(ImportTaskSummary(**json.loads(summary.model_dump_json())).dropped, dropped)
+
     def test_categorize_resources_keeps_only_source_version_lines(self):
         importer = Importer('task-id', '/tmp/loinc.zip', 'ocladmin', 'Organization', 'Regen', isolated_version=True)
         resources = {}
@@ -7259,7 +7381,7 @@ class IsolatedVersionZipImportTest(OCLTestCase):
             '/tmp/loinc.zip', 'lines.json', ['Source', 'Source Version'], resources)
 
         self.assertEqual(importer.version_lines, [{
-            **IsolatedVersionImportTest.version('v1'), 'name': 'v1', 'extras': {}}])
+            **IsolatedVersionImportTest.version('v1'), 'name': 'v1', 'extras': {'a': [1]}}])
         self.assertEqual(
             importer.validate_versioning(resources, ['Source', 'Source Version', 'Concept', 'Mapping']),
             ['Source', 'Concept', 'Mapping', 'Source Version'])

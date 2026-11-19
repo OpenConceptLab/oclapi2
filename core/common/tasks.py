@@ -705,13 +705,19 @@ def index_expansion_mappings(expansion_id, count=None, mapping_ids=None):  # pyl
 
 @app.task
 def make_hierarchy(concept_map):
-    """concept_map: parent uri -> child uris. Adds the links, never removes any."""
+    """
+    concept_map: parent uri -> child uris. Adds the links, never removes any. A child URL naming a concept version
+    links that version and its concept's latest version.
+    """
+    from core.common.utils import drop_version
     from core.concepts.models import ImportHierarchy
-    child_map = {}
+    child_map, version_child_map = {}, {}
     for parent_uri, child_uris in concept_map.items():
         for child_uri in child_uris:
-            child_map.setdefault(child_uri, []).append(parent_uri)
+            target = version_child_map if drop_version(child_uri) != child_uri else child_map
+            target.setdefault(child_uri, []).append(parent_uri)
     ImportHierarchy.from_uri_map(child_map).apply()
+    ImportHierarchy.link_child_versions(version_child_map)
 
 
 @app.task(ignore_result=True, base=QueueOnceCustomTask)

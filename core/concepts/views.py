@@ -725,7 +725,7 @@ class ConceptVersionsView(ConceptBaseView, ConceptDictionaryMixin, ListWithHeade
         return self.list(request, *args, **kwargs)
 
 
-class ConceptMappingsView(ConceptBaseView, ListWithHeadersMixin):
+class ConceptMappingsView(ConceptHierarchyMixin, ConceptBaseView, ListWithHeadersMixin):
     is_page_size_capped = True
     serializer_class = MappingListSerializer
     permission_classes = (CanViewParentDictionary,)
@@ -741,7 +741,10 @@ class ConceptMappingsView(ConceptBaseView, ListWithHeadersMixin):
         is_collection = 'collection' in self.kwargs
         collection_version = self.kwargs.get('version', HEAD) if is_collection else None
         parent_uri = get_collection_uri_from_view(self, self.request) if is_collection else None
-        if include_indirect_mappings:
+        repo_version = None if is_collection else self.get_source_version()
+        if repo_version:
+            mappings_queryset = concept.get_version_mappings(repo_version, include_indirect_mappings)
+        elif include_indirect_mappings:
             mappings_queryset = concept.get_bidirectional_mappings_for_collection(
                 parent_uri, collection_version
             ) if is_collection else concept.get_bidirectional_mappings()

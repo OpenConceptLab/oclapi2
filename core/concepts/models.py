@@ -1323,7 +1323,14 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
         if is_latest:
             return mappings.filter(is_latest_version=True)
-        return mappings.filter(id=F('versioned_object_id'))
+        return mappings.filter(id=F('versioned_object_id'), is_active=True)  # not those dropped from HEAD
+
+    def get_version_mappings(self, repo_version, include_indirect=False):
+        """The mappings of repo_version from this concept, and with include_indirect those to it."""
+        criteria = Q(from_concept__versioned_object_id=self.versioned_object_id)
+        if include_indirect:
+            criteria |= Q(to_concept__versioned_object_id=self.versioned_object_id)
+        return repo_version.mappings.filter(criteria)
 
     def get_bidirectional_mappings(self):
         return self.get_unidirectional_mappings() | self.get_indirect_mappings()
@@ -2075,6 +2082,34 @@ class ImportHierarchy:
                 resolved[parent_uri_of[uri]][0] for uri in parent_uris
                 if parent_uri_of[uri] in resolved and (viewable is None or resolved[parent_uri_of[uri]][1] in viewable))
         return cls(links)
+
+    @classmethod
+    def link_child_versions(cls, version_child_map):
+        """version_child_map: child version uri -> parent uris. Links each named row and its latest version."""
+        if not version_child_map:
+            return
+        rows = {}
+        for batch in chunks(sorted(version_child_map), cls.CHUNK_SIZE):
+            for row_id, versioned_object_id, uri in Concept.objects.filter(uri__in=batch).values_list(
+                    'id', 'versioned_object_id', 'uri'):
+                rows[uri] = (row_id, versioned_object_id)
+        parent_uris = {drop_version(uri) for uris in version_child_map.values() for uri in uris}
+        parents = {
+            uri: concept_id for uri, (concept_id, _) in Concept.get_versioned_objects_by_uri(parent_uris).items()}
+        latest = Concept.get_latest_version_ids_by_versioned_object_id(
+            {*parents.values(), *(versioned_object_id for _, versioned_object_id in rows.values())})
+        pairs = set()
+        for child_uri, uris in version_child_map.items():
+            if child_uri not in rows:
+                continue
+            row_id, versioned_object_id = rows[child_uri]
+            for parent_uri in uris:
+                parent_id = latest.get(parents.get(drop_version(parent_uri)))
+                if parent_id:
+                    pairs.add((row_id, parent_id))
+                    if versioned_object_id in latest:
+                        pairs.add((latest[versioned_object_id], parent_id))
+        cls.add_links(pairs)
 
     def apply(self, replace_head=False):
         for batch in chunks(sorted(self.links), self.CHUNK_SIZE):

@@ -2,9 +2,11 @@ import json
 import time
 from collections import deque
 from datetime import datetime
+from urllib.parse import unquote
 
 from celery import group
 from celery.utils.log import get_task_logger
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -24,7 +26,8 @@ from core.mappings.models import Mapping
 from core.orgs.models import Organization
 from core.sources.constants import ISOLATED_METADATA_FIELDS, ISOLATED_VERSION_CONTENT_FAILED, \
     ISOLATED_VERSION_LINE_INVALID, ISOLATED_VERSION_EXISTS, ISOLATED_VERSION_NO_EDIT_ACCESS, SEEDED_FROM_IMPORT, \
-    ISOLATED_VERSION_LARGE_DROP, ALLOW_LARGE_DROP, ISOLATED_VERSION_META_INVALID, HIERARCHY_ROOT_CANNOT_BE_DROPPED
+    ISOLATED_VERSION_LARGE_DROP, ALLOW_LARGE_DROP, ISOLATED_VERSION_META_INVALID, HIERARCHY_ROOT_CANNOT_BE_DROPPED, \
+    ISOLATED_VERSION_DELETE_LINE
 from core.sources.models import Source
 from core.tasks.models import Task
 from core.users.models import UserProfile
@@ -388,8 +391,24 @@ class SourceVersionImporter(BaseResourceImporter):
         probe.clean_filters()
         if 'match_algorithms' in line:
             probe.clean_match_algorithms()
-        if probe.meta is not None and not isinstance(probe.meta, dict):
+        if not SourceVersionImporter.is_valid_meta(probe.meta):
             raise ValidationError({'meta': [ISOLATED_VERSION_META_INVALID]})
+
+    @staticmethod
+    def is_valid_meta(meta):
+        """meta is an object, and its display.concept_filter_order, which source responses read, a list of codes."""
+        if meta is None:
+            return True
+        if not isinstance(meta, dict):
+            return False
+        display = meta.get('display')
+        if display is None:
+            return True
+        if not isinstance(display, dict):
+            return False
+        filter_order = display.get('concept_filter_order')
+        return filter_order is None or (
+            isinstance(filter_order, list) and all(isinstance(code, str) for code in filter_order))
 
     def set_head_defaults(self, source):
         """What the line leaves out comes from HEAD, as for POST .../versions/."""
@@ -401,6 +420,61 @@ class SourceVersionImporter(BaseResourceImporter):
                 setattr(source, field, getattr(head, field))
         if 'match_algorithms' not in self.data:
             source.match_algorithms = head.get_match_algorithms_for_new_version()
+
+
+class MappingKeys:
+    """
+    Which of HEAD's mappings an import's lines would update: by id, else as MappingImporter matches a line without
+    one, by map type and the concepts it links, or their codes and the target source.
+    """
+    def __init__(self, ids, concept_keys, code_keys):
+        self.ids, self.concept_keys, self.code_keys = ids, concept_keys, code_keys
+
+    @staticmethod
+    def code(value):
+        return unquote(str(value)) if value not in (None, '') else None
+
+    @classmethod
+    def from_head(cls, head):
+        """mnemonic -> (concept key, code key) of each of HEAD's active mappings."""
+        return {
+            mnemonic: ((map_type, from_id, to_id) if from_id and to_id else None,
+                       (map_type, cls.code(from_code), cls.code(to_code), drop_version(to_source_url) or None))
+            for mnemonic, map_type, from_id, to_id, from_code, to_code, to_source_url in head.mappings_set.filter(
+                id=F('versioned_object_id'), is_active=True).values_list(
+                    'mnemonic', 'map_type', 'from_concept__versioned_object_id', 'to_concept__versioned_object_id',
+                    'from_concept_code', 'to_concept_code', 'to_source_url')
+        }
+
+    @classmethod
+    def from_lines(cls, lines):
+        ids, unnamed = set(), []
+        for line in lines:
+            if line.get('id') not in (None, ''):
+                ids.add(str(line['id']))
+            else:
+                unnamed.append(line)
+        urls = {drop_version(line.get(key)) for line in unnamed for key in ('from_concept_url', 'to_concept_url')
+                if line.get(key)}
+        resolved = Concept.get_versioned_objects_by_uri(urls)
+        concept_keys, code_keys = set(), set()
+        for line in unnamed:
+            from_url, to_url = drop_version(line.get('from_concept_url')), drop_version(line.get('to_concept_url'))
+            from_id, to_id = (resolved.get(from_url) or (None,))[0], (resolved.get(to_url) or (None,))[0]
+            if from_id and to_id:
+                concept_keys.add((line.get('map_type'), from_id, to_id))
+            to_source_url = drop_version(line.get('to_source_url')) or (to_parent_uri(to_url) if to_url else None)
+            code_keys.add((
+                line.get('map_type'),
+                cls.code(line.get('from_concept_code') or (compact(from_url.split('/'))[-1] if from_url else None)),
+                cls.code(line.get('to_concept_code') or (compact(to_url.split('/'))[-1] if to_url else None)),
+                to_source_url or None))
+        return cls(ids, concept_keys, code_keys)
+
+    def kept(self, head_mappings):
+        return {mnemonic for mnemonic, (concept_key, code_key) in head_mappings.items()
+                if mnemonic in self.ids or (concept_key and concept_key in self.concept_keys)
+                or code_key in self.code_keys}
 
 
 class IsolatedVersionRollback(Exception):
@@ -415,6 +489,10 @@ class IsolatedVersionCommit:
     of what the import didn't contain and the version share one transaction. preflight() runs the same checks before
     any content imports.
     """
+
+    CONTENT_LINE_KEYS = (
+        'type', 'id', '__action', 'owner', 'owner_type', 'source', 'map_type', 'from_concept_url', 'to_concept_url',
+        'from_concept_code', 'to_concept_code', 'to_source_url')
 
     def __init__(  # pylint: disable=too-many-arguments
             self, version_line, user, update_if_exists=False, hierarchy_map=None, seen_concept_ids=None,
@@ -484,30 +562,28 @@ class IsolatedVersionCommit:
 
     def check_planned_drop(self, head, content_lines):
         """
-        Refuses, before any content imports, a file that leaves out HEAD's hierarchy root, or that leaves out at least
-        SEED_FROM_IMPORT_LARGE_DROP_MIN of HEAD's codes and more than its percent of them, unless allow_large_drop.
-        Mapping lines without an id are matched at import, so each is counted as keeping one of HEAD's mappings.
+        Refuses, before any content imports, a file with a delete line, one that leaves out HEAD's hierarchy root, or
+        one that leaves out at least SEED_FROM_IMPORT_LARGE_DROP_MIN of HEAD's codes and more than its percent of them,
+        unless allow_large_drop. A mapping line without an id keeps the HEAD mapping it would update.
         """
-        concept_ids, mapping_ids, unnamed_mappings = set(), set(), 0
-        for line in content_lines:
-            line_id = line.get('id')
-            if (line.get('type', '') or '').lower() == 'concept':
-                if line_id:
-                    concept_ids.add(line_id if is_url_encoded_string(line_id) else encode_string(line_id, safe=''))
-            elif line_id:
-                mapping_ids.add(line_id)
-            else:
-                unnamed_mappings += 1
+        if any((line.get('__action', '') or '').lower() == 'delete' for line in content_lines):
+            raise ValidationError({'__all__': [ISOLATED_VERSION_DELETE_LINE]})
+        concept_lines = [line for line in content_lines if (line.get('type', '') or '').lower() == 'concept']
+        mapping_lines = [line for line in content_lines if (line.get('type', '') or '').lower() == 'mapping']
+        concept_ids = set()
+        for line in concept_lines:
+            if line.get('id') not in (None, ''):
+                line_id = str(line['id'])
+                concept_ids.add(line_id if is_url_encoded_string(line_id) else encode_string(line_id, safe=''))
         head_concepts = set(head.concepts_set.filter(
-            id=F('versioned_object_id'), is_active=True).values_list('mnemonic', flat=True))
-        head_mappings = set(head.mappings_set.filter(
             id=F('versioned_object_id'), is_active=True).values_list('mnemonic', flat=True))
         root_mnemonic = get(head, 'hierarchy_root.mnemonic')
         if root_mnemonic and root_mnemonic in head_concepts and root_mnemonic not in concept_ids:
             raise ValidationError({'hierarchy_root': [HIERARCHY_ROOT_CANNOT_BE_DROPPED]})
+        head_mappings = MappingKeys.from_head(head)
         dropped = {
             'concepts': len(head_concepts - concept_ids),
-            'mappings': max(len(head_mappings - mapping_ids) - unnamed_mappings, 0)
+            'mappings': len(head_mappings) - len(MappingKeys.from_lines(mapping_lines).kept(head_mappings))
         }
         total = dropped['concepts'] + dropped['mappings']
         if not self.allow_large_drop and total >= settings.SEED_FROM_IMPORT_LARGE_DROP_MIN and \

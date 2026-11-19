@@ -80,7 +80,7 @@ class ImportTaskSummary(BaseModel):
     unchanged: int = 0
     failures: list = []
     dependencies: list = []
-    dropped: dict = None
+    dropped: dict | None = None
 
 
 class ImportTask(BaseModel):
@@ -517,9 +517,9 @@ class Importer:
 
         try:
             parser = ijson.parse(json_file, multiple_values=True, allow_comments=True)
-            line = None  # top-level scalar fields of the current resource, to keep its Source Version lines
+            builder = None  # the current resource, built whole only for a seeding import
             for prefix, event, value in parser:
-                line = self.collect_version_line(line, prefix, event, value)
+                builder = self.collect_seeding_line(builder, prefix, event, value)
                 # Expect {"resourceType": ""}{"resourceType": ""} or {"type": ""}{"type": ""}
                 if event == 'string' and (prefix in {'resourceType', 'type'}):
                     # Categorize files based on resourceType
@@ -537,22 +537,24 @@ class Importer:
         except JSONError as json_error:
             raise JSONError(f'Failed to process {path}/{file_path}') from json_error
 
-    def collect_version_line(self, line, prefix, event, value):
-        if not prefix:
-            if event == 'start_map':
-                return {}
-            if event == 'end_map' and get(line, 'type') == 'Source Version':
-                self.version_lines.append(line)
-            elif event == 'end_map' and get(line, 'type') in ('Concept', 'Mapping') and self.isolated_version:
-                self.content_targets.add(Source.get_import_target(line))
-                self.content_lines.append({'type': line['type'], 'id': line.get('id')})
-            return line if event == 'map_key' else None
-        if line is not None and '.' not in prefix:
-            if event in ('string', 'number', 'boolean', 'null'):
-                line[prefix] = value
-            elif event in ('start_map', 'start_array'):
-                line[prefix] = {} if event == 'start_map' else []
-        return line
+    def collect_seeding_line(self, builder, prefix, event, value):
+        """Builds each resource of a seeding import whole, for preflight to read as the importers will."""
+        if not self.isolated_version:
+            return None
+        if not prefix and event == 'start_map':
+            builder = ijson.ObjectBuilder()
+        if builder is None:
+            return None
+        builder.event(event, value)
+        if prefix or event != 'end_map':
+            return builder
+        line = builder.value
+        if line.get('type') == 'Source Version':
+            self.version_lines.append(line)
+        elif line.get('type') in ('Concept', 'Mapping'):
+            self.content_targets.add(Source.get_import_target(line))
+            self.content_lines.append({key: line.get(key) for key in IsolatedVersionCommit.CONTENT_LINE_KEYS})
+        return None
 
 
 class ImportRequest:
