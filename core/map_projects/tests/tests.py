@@ -641,6 +641,7 @@ class AutomatchRunListViewTest(MapProjectAbstractViewTest):
         )
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.data['error_code'], 'mapper_rows_per_project_limit_reached')
+        self.assertEqual(response.data['detail'], 'This run is larger than the row limit for a project.')
         self.assertEqual(response.data['limit'], 25)
         self.assertEqual(response.data['requested'], 26)
         self.assertEqual(self.project.auto_match_runs.count(), 0)
