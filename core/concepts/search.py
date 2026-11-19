@@ -1,5 +1,6 @@
 from itertools import count
 
+from django.db.models import Q as DBQ
 from elasticsearch_dsl import TermsFacet, Q, NestedFacet, A
 from elasticsearch_dsl.faceted_search import Facet
 from pydash import flatten, is_number, compact, get
@@ -33,9 +34,9 @@ class ReleaseMappedCodesFacet(Facet):
     """
     agg_type = 'filter'
 
-    def __init__(self, release, field):
+    def __init__(self, release_id, field):
         from core.concepts.documents import RELEASE_MAP_CODES, MAPPED_CODES_PATH
-        in_release = Q('term', **{f'{RELEASE_MAP_CODES}.version': release})
+        in_release = Q('term', **{f'{RELEASE_MAP_CODES}.source_version_id': release_id})
         release_path = f'{RELEASE_MAP_CODES}.{MAPPED_CODES_PATH}'
         super().__init__(filter=Q('match_all'), aggs={
             'own': A('filter', filter=~Q('nested', path=RELEASE_MAP_CODES, query=in_release), aggs={
@@ -186,6 +187,24 @@ class ConceptFuzzySearch:  # pragma: no cover
         return {}
 
     @staticmethod
+    def get_release_id(repo_params):
+        """
+        The id of the source version, not HEAD, that repo_params (as get_repo_params gives them) name, if exactly one
+        (OpenConceptLab/ocl_online#703).
+        """
+        version = repo_params.get('source_version')
+        if not version or version == HEAD:
+            return None
+        from core.sources.models import Source
+        owner = repo_params.get('owner')
+        owner_criteria = {
+            'Organization': DBQ(organization__mnemonic=owner), 'User': DBQ(user__username=owner)
+        }.get(repo_params.get('owner_type'), DBQ(organization__mnemonic=owner) | DBQ(user__username=owner))
+        ids = list(Source.objects.filter(
+            owner_criteria, mnemonic=repo_params.get('source'), version=version).values_list('id', flat=True)[:2])
+        return ids[0] if len(ids) == 1 else None
+
+    @staticmethod
     def get_exact_and_contains_criteria(field, value, boost=0, add_boost=True):
         return (CustomESSearch.get_match_criteria(field, value, boost) |
                 Q('match_phrase', **{
@@ -204,14 +223,14 @@ class ConceptFuzzySearch:  # pragma: no cover
         from core.concepts.documents import ConceptDocument, RELEASE_MAP_CODES
         map_config = map_config or []
         repo_params = repo_params or cls.get_target_repo_params(repo_url)
-        release = repo_params.get('source_version')
+        release_id = cls.get_release_id(repo_params)
         inner_hit_names = (f'{RELEASE_MAP_CODES}_{index}' for index in count())
 
         def scoped(query, highlight=False):  # in a release, its own mapped codes (OpenConceptLab/ocl_online#703)
-            if not release or release == HEAD:
+            if not release_id:
                 return query
             return Q(ConceptDocument.scope_map_codes_to_release(
-                query.to_dict(), release, inner_hit_names if highlight else None))
+                query.to_dict(), release_id, inner_hit_names if highlight else None))
 
         filter_query = scoped(cls.get_filter_criteria(
             data, include_retired, repo_params, repo_url, additional_filter_criterion))

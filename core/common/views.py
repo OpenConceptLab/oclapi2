@@ -578,21 +578,28 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     @cached_property
     def map_codes_release(self):
         """
-        The release (not HEAD) a concept search runs in, whose own mapped codes it matches
-        (OpenConceptLab/ocl_online#703).
+        The id of the release (a source version, not HEAD) a concept search runs in, whose own mapped codes it
+        matches (OpenConceptLab/ocl_online#703); None if the user can't view it.
         """
         if not self.is_concept_document() or 'source' not in self.kwargs or 'collection' in self.kwargs:
             return None
         version = self.get_kwargs_filters().get('source_version')
-        return None if version in (None, HEAD) else version
+        if version in (None, HEAD):
+            return None
+        from core.sources.models import Source
+        owner = {'organization__mnemonic': self.kwargs['org']} if 'org' in self.kwargs else {
+            'user__username': self.kwargs['user'] if 'user' in self.kwargs else self.request.user.username}
+        release = Source.objects.filter(**owner, mnemonic=self.kwargs['source'], version=version).first()
+        return release.id if release and release.has_view_access(self.request.user) else None
 
     def scope_map_codes(self, results):
         """In a release, `results` with its mapped-code clauses reading that release's own codes."""
-        release = self.map_codes_release
-        query = results.to_dict().get('query') if release else None
+        release_id = self.map_codes_release
+        query = results.to_dict().get('query') if release_id else None
         if query:
             from core.concepts.documents import ConceptDocument
-            results = results.update_from_dict({'query': ConceptDocument.scope_map_codes_to_release(query, release)})
+            results = results.update_from_dict(
+                {'query': ConceptDocument.scope_map_codes_to_release(query, release_id)})
         return results
 
     def get_latest_version_filter_field_for_source_child(self):
@@ -909,7 +916,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             results = results.highlight(
                 *self.clean_fields_for_highlight(set(compact(self.get_wildcard_search_fields().keys()))))
 
-        return self.scope_map_codes(results)
+        return results
 
     def __get_search_aggregations(
             self, source_versions=None, other_filters=None

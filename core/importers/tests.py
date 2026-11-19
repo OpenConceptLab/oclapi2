@@ -7167,8 +7167,9 @@ class IsolatedVersionImportTest(OCLTestCase):
     def test_older_concept_version_indexes_its_releases_mappings(self):
         def get_codes(row):
             fields = MappedCodes([row]).get_fields(row)
-            return fields['same_as_map_codes'], [
-                (entry['version'], entry['same_as_map_codes']) for entry in fields['release_map_codes']]
+            return fields['same_as_map_codes'], [(
+                list(Source.objects.filter(id__in=entry['source_version_id']).values_list('version', flat=True)),
+                entry['same_as_map_codes']) for entry in fields['release_map_codes']]
 
         self.run_import([self.concept('A'), self.concept('B'), self.version('v1')])
         self.run_import([self.concept('A', names=[{'name': 'A edited', 'locale': 'en', 'locale_preferred': True}]),

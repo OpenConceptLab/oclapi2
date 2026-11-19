@@ -9,15 +9,6 @@ class ESScript:
             if (!ctx._source.source_version.contains(params.version)) {
                 ctx._source.source_version.add(params.version);
             }
-            // a new release has HEAD's codes: an entry naming a deleted release of the same name is stale
-            // (OpenConceptLab/ocl_online#703)
-            if (ctx._source.release_map_codes != null) {
-                def version = params.version;
-                for (entry in ctx._source.release_map_codes) {
-                    if (entry.version instanceof List) { entry.version.removeIf(name -> name == version); }
-                }
-                ctx._source.release_map_codes.removeIf(item -> item.version instanceof List && item.version.isEmpty());
-            }
         }
         if (params.containsKey('is_in_latest_source_version')) {
             ctx._source.is_in_latest_source_version = params.is_in_latest_source_version;
