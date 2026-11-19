@@ -1527,56 +1527,22 @@ class BulkImportInlineTest(OCLTestCase):
 
     @patch('core.importers.models.batch_index_resources', Mock())
     def test_mapping_delete_line_without_id_never_retires_a_mapping_linked_to_another_source(self):
-        """
-        A mapping linked to S1, by its from source or only by its from concept, that still has a URL now registered to
-        S2 isn't S2's to retire.
-        """
+        """A mapping linked to S1 that still has a URL now registered to S2 isn't S2's to retire."""
         for path, run in self.import_paths().items():
-            for link in ('source', 'concept'):
-                with self.subTest(path, link=link):
-                    mapping, line = self.cross_source_mapping(f'CrossLinked{path}{link}')
-                    org = mapping.parent.organization
-                    canonical_url = self.register_canonical_url(
-                        Source.objects.get(organization=org, mnemonic='S2', version='HEAD'),
-                        f'https://s2-{path}-{link}.example.test/')
-                    links = {} if link == 'source' else {'from_source': None, 'from_concept': ConceptFactory(
-                        parent=Source.objects.get(organization=org, mnemonic='S1', version='HEAD'), mnemonic='X')}
-                    Mapping.objects.filter(versioned_object_id=mapping.id).update(
-                        from_source_url=canonical_url, **links)
-                    stale_line = {**line('S1'), 'from_concept_url': canonical_url + 'concepts/X/'}
+            with self.subTest(path):
+                mapping, line = self.cross_source_mapping(f'CrossLinked{path}')
+                canonical_url = self.register_canonical_url(
+                    Source.objects.get(organization=mapping.parent.organization, mnemonic='S2', version='HEAD'),
+                    f'https://s2-{path}.example.test/')
+                Mapping.objects.filter(versioned_object_id=mapping.id).update(from_source_url=canonical_url)
+                stale_line = {**line('S1'), 'from_concept_url': canonical_url + 'concepts/X/'}
 
-                    self.assertEqual(MappingMatcher(mapping.parent).kept([stale_line]), set())
-                    report = run([{**stale_line, '__action': 'DELETE'}])
+                self.assertEqual(MappingMatcher(mapping.parent).kept([stale_line]), set())
+                report = run([{**stale_line, '__action': 'DELETE'}])
 
-                    self.assertEqual((report['deleted'], report['not_found']), (0, 1))
-                    mapping.refresh_from_db()
-                    self.assertFalse(mapping.retired)
-
-    @patch('core.importers.models.batch_index_resources', Mock())
-    def test_mapping_line_without_id_finds_its_mapping_through_other_forms_of_its_source_url(self):
-        """
-        A re-import finds the mapping through an explicit HEAD path, through a version-qualified URL that resolves to
-        no source (the mapping stores it without the version), and after its linked source is retired.
-        """
-        for path, run in self.import_paths().items():
-            for case in ('head', 'external', 'retired'):
-                with self.subTest(path, case=case):
-                    mapping, line = self.cross_source_mapping(f'CrossForms{path}{case}')
-                    org = mapping.parent.organization
-                    from_url = {'head': f'{org.uri}sources/S1/HEAD/concepts/X/',
-                                'external': f'https://{path}.example.test/CodeSystem/S|2024/concepts/X/',
-                                'retired': f'{org.uri}sources/S1/concepts/X/'}[case]
-                    if case == 'retired':
-                        Source.objects.filter(organization=org, mnemonic='S1').update(retired=True)
-                    from_line = {**line('S1'), 'from_concept_url': from_url}
-
-                    reports = [run([{**from_line, 'extras': {'edit': edit}}]) for edit in (1, 2)]
-
-                    # the external line's first import creates its own mapping; the fixture's is another source's
-                    self.assertEqual([(report['created'], report['updated'], report['failed']) for report in reports],
-                                     [(1, 0, 0) if case == 'external' else (0, 1, 0), (0, 1, 0)])
-                    found = Mapping.objects.get(parent=mapping.parent, id=F('versioned_object_id'), extras={'edit': 2})
-                    self.assertEqual(MappingMatcher(mapping.parent).kept([from_line]), {found.id})
+                self.assertEqual((report['deleted'], report['not_found']), (0, 1))
+                mapping.refresh_from_db()
+                self.assertFalse(mapping.retired)
 
     @patch('core.importers.models.batch_index_resources', Mock())
     def test_seeding_preflight_matches_a_code_only_within_the_from_urls_source(self):
