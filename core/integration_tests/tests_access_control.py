@@ -615,12 +615,51 @@ class PrivateHeadVersionAccessMixin(AccessTestMixin):
         self.assertEqual(
             self.request('get', f'{version.uri}concepts/{concept.mnemonic}/$cascade/', self.outsider).status_code, 200)
 
+    latest_content_suffixes = ('latest/concepts/', 'latest/mappings/')
+
     def test_latest_released_version_is_hidden_when_head_is_private(self):
         head, version = self.create_org_version()
         self.model.objects.filter(id=version.id).update(released=True)
 
-        for suffix in ('latest/', 'latest/summary/'):
+        for suffix in ('latest/', 'latest/summary/', *self.latest_content_suffixes):
             self.assert_hidden_from_non_members(head.uri + suffix)
+
+    def test_latest_released_version_content_is_visible_to_members_when_head_is_private(self):
+        head, version = self.create_org_version()
+        concept = self.add_concept(head, version)
+        self.model.objects.filter(id=version.id).update(released=True)
+
+        for suffix in self.latest_content_suffixes:
+            self.assert_visible_to_members(head.uri + suffix)
+        response = self.request('get', head.uri + 'latest/concepts/', self.member)
+        self.assertEqual([item['id'] for item in response.data], [concept.mnemonic])
+
+    def test_private_latest_released_version_of_public_head_stays_hidden(self):
+        head = self.org_repo_factory(organization=self.org, public_access=ACCESS_TYPE_VIEW)
+        self.org_repo_factory(
+            mnemonic=head.mnemonic, organization=self.org, version='v1', released=True, public_access=ACCESS_TYPE_NONE)
+
+        for suffix in self.latest_content_suffixes:
+            self.assert_hidden_from_non_members(head.uri + suffix)
+            self.assert_visible_to_members(head.uri + suffix)
+
+    def test_latest_released_version_of_public_head_stays_visible(self):
+        head = self.org_repo_factory(organization=self.org, public_access=ACCESS_TYPE_VIEW)
+        self.org_repo_factory(
+            mnemonic=head.mnemonic, organization=self.org, version='v1', released=True, public_access=ACCESS_TYPE_VIEW)
+
+        for suffix in self.latest_content_suffixes:
+            self.assertEqual(self.request('get', head.uri + suffix, self.outsider).status_code, 200, suffix)
+            self.assertEqual(self.request('get', head.uri + suffix).status_code, 200, suffix)
+
+    def test_latest_released_version_of_user_owned_private_head_is_visible_to_owner_only(self):
+        head = self.user_repo_factory(user=self.owner, public_access=ACCESS_TYPE_NONE)
+        self.user_repo_factory(
+            mnemonic=head.mnemonic, user=self.owner, version='v1', released=True, public_access=ACCESS_TYPE_NONE)
+
+        for suffix in self.latest_content_suffixes:
+            self.assert_hidden_from_non_members(head.uri + suffix)
+            self.assertEqual(self.request('get', head.uri + suffix, self.owner).status_code, 200, suffix)
 
     def test_version_endpoints_are_visible_to_members_when_head_is_private(self):
         _, version = self.create_org_version()

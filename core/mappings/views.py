@@ -136,8 +136,7 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
     )
     def get(self, request, *args, **kwargs):
         self.set_parent_resource(False)
-        if self.parent_resource:
-            self.check_object_permissions(request, self.parent_resource)
+        self.check_parent_permissions(request)
         return self.list(request, *args, **kwargs)
 
     def set_parent_resource(self, __pop=True):
@@ -146,11 +145,7 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
         collection = self.kwargs.pop('collection', None) if __pop else self.kwargs.get('collection', None)
         container_version = self.kwargs.pop('version', HEAD) if __pop else self.kwargs.get('version', HEAD)
         parent_resource = None
-        if 'org' in self.kwargs:
-            filters = {'organization__mnemonic': self.kwargs['org']}
-        else:
-            username = self.request.user.username if self.user_is_self else self.kwargs.get('user')
-            filters = {'user__username': username}
+        filters = self.get_parent_owner_filters()
         if source:
             parent_resource = Source.get_version(source, container_version or HEAD, filters)
         if collection:

@@ -1227,6 +1227,26 @@ class SourceChildCommonBaseView(BaseAPIView):
             limit = self.limit if self.params.get(LIMIT_PARAM) else self.cap_limit(LIST_DEFAULT_LIMIT)
             self.limit = to_int(CSV_DEFAULT_LIMIT if self.params.get('csv') else limit, LIST_DEFAULT_LIMIT)
 
+    def get_parent_owner_filters(self):
+        """The owner of the repository in the URL, as filters on Source or Collection."""
+        if 'org' in self.kwargs:
+            return {'organization__mnemonic': self.kwargs['org']}
+        username = self.request.user.username if self.user_is_self else self.kwargs.get('user')
+        return {'user__username': username}
+
+    def check_parent_permissions(self, request):
+        """
+        A list of a source version's concepts or mappings answers only to those who can view that version. For
+        `latest`, that's the newest released version, which the list answers from.
+        """
+        parent = self.parent_resource
+        if not parent and self.kwargs.get('version') == LATEST and 'source' in self.kwargs:
+            from core.sources.models import Source
+            parent = Source.find_latest_released_version_by(
+                {**self.get_parent_owner_filters(), 'mnemonic': self.kwargs['source']})
+        if parent:
+            self.check_object_permissions(request, parent)
+
 
 class SourceChildExtrasBaseView:
     default_qs_sort_attr = '-created_at'
