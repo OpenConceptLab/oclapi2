@@ -15,26 +15,25 @@ def is_repository(obj):
 
 
 def get_write_target(obj):
-    """What a write to `obj` is asked about: a repository's HEAD, or a map project. None for anything else."""
+    """
+    What a write to `obj` is asked about: the repository row it changes (its HEAD, or a version, which keeps its own
+    public_access), or a map project. None for anything else.
+    """
     from core.map_projects.models import MapProject
-    if is_repository(obj):
-        return obj.head
-    if isinstance(obj, MapProject):
+    if is_repository(obj) or isinstance(obj, MapProject):
         return obj
     return None
 
 
 def get_own_write_action(obj, method, data, applies_public_access=True):
     """
-    The action of a write to `obj` itself, not to something it holds. Only a repository's HEAD or a map project is the
-    whole of it: a DELETE deletes it, and a change that leaves a private repository viewable by others publishes it
-    (when the write applies `public_access` at all). Anything else, a write to a repository's other versions included,
-    is an edit.
+    The action of a write to `obj` itself, not to something it holds. A DELETE of a repository's HEAD or of a map
+    project deletes the whole of it; a DELETE of another version is an edit of the repository. A change that leaves a
+    private repository row (its HEAD or a version) viewable by others publishes it, when the write applies
+    `public_access` at all. Anything else is an edit.
     """
-    if is_repository(obj) and not obj.is_head:
-        return WRITE_ACTION_EDIT
     if method == 'DELETE':
-        return WRITE_ACTION_DELETE
+        return WRITE_ACTION_EDIT if is_repository(obj) and not obj.is_head else WRITE_ACTION_DELETE
     public_access = data.get('public_access') if isinstance(data, dict) else None
     if applies_public_access and is_repository(obj) and not obj.public_can_view and isinstance(public_access, str) \
             and obj.is_public_access(public_access):

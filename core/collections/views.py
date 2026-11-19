@@ -17,6 +17,9 @@ from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.capabilities.constants import WRITE_ACTION_EDIT
+from core.capabilities.exceptions import WriteRefused
+from core.capabilities.writes import check_write, get_write_target
 from core.client_configs.views import ResourceClientConfigsView
 from core.collections.constants import (
     INCLUDE_REFERENCES_PARAM, CONCEPT_VERSION_ADDED_TO_COLLECTION,
@@ -525,6 +528,8 @@ class CollectionReferencesView(
         added_references_ids, errors = result
         if get(errors, 'error') == 'Collection not found':  # async task, collection may be deleted
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+        if isinstance(errors, dict) and 'write_refused' in errors:
+            raise WriteRefused(errors['write_refused'])
 
         added_references = CollectionReference.objects.filter(
             id__in=added_references_ids) if added_references_ids else []
@@ -765,6 +770,7 @@ class CollectionVersionListView(CollectionVersionBaseView, CreateAPIView, ListWi
 
 class CollectionLatestVersionRetrieveUpdateView(CollectionVersionBaseView, RetrieveAPIView, UpdateAPIView):
     serializer_class = CollectionVersionDetailSerializer
+    writes_own_object = True  # its PUT/PATCH can publish the version it resolves to
 
     def get_permissions(self):
         if self.request.method in ['GET', 'HEAD']:
@@ -802,7 +808,7 @@ class CollectionLatestVersionRetrieveUpdateView(CollectionVersionBaseView, Retri
 
 class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPIView, UpdateAPIView, TaskMixin):
     serializer_class = CollectionVersionDetailSerializer
-    writes_own_object = True  # on HEAD/, its DELETE deletes the repository and its PUT/PATCH can publish it
+    writes_own_object = True  # its PUT/PATCH can publish the version, and on HEAD/ its DELETE deletes the repository
 
     def get_permissions(self):
         if self.request.method == 'GET':
@@ -886,6 +892,9 @@ class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, 
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         version = self.get_object()
+        if version.should_auto_expand and not version.expansion_uri:
+            # the new expansion becomes the version's default, which is what the version holds: an edit of it
+            check_write(request.user, get_write_target(version), WRITE_ACTION_EDIT)
         errors = self.get_system_version_errors(serializer.validated_data.get('parameters'), version)
         if errors:
             return Response({'parameters': {ExpansionParameters.INCLUDE_SYSTEM: errors}},
@@ -986,6 +995,9 @@ class CollectionVersionExpansionReEvaluateView(CollectionVersionExpansionBaseVie
 
     def post(self, request, **kwargs):  # pylint: disable=unused-argument
         obj = self.get_object()
+        if obj.is_default:
+            # rebuilds what the version holds, and can rewrite its references' members: an edit of it
+            check_write(request.user, get_write_target(obj.collection_version), WRITE_ACTION_EDIT)
 
         if obj.is_processing:
             return Response({'detail': 'Expansion is already being processed'}, status=status.HTTP_409_CONFLICT)

@@ -65,4 +65,4 @@ AUTHORING_CAPABILITY_DEFAULT_LIMITS = {
 # How a write changes the content a capability policy is asked about (CapabilityPolicy.get_write_refusal)
 WRITE_ACTION_EDIT = 'edit'
 WRITE_ACTION_DELETE = 'delete'  # the whole repository or map project
-WRITE_ACTION_PUBLISH = 'publish'  # a private repository (public_access 'None') becomes viewable by others
+WRITE_ACTION_PUBLISH = 'publish'  # a private repository, or a private version of one, becomes viewable by others

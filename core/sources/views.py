@@ -303,6 +303,7 @@ class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeader
 
 class SourceLatestVersionRetrieveUpdateView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):
     serializer_class = SourceVersionDetailSerializer
+    writes_own_object = True  # its PUT/PATCH can publish the version it resolves to
 
     def get_permissions(self):
         if self.request.method in ['GET', 'HEAD']:
@@ -476,7 +477,7 @@ class SourceConceptsCloneView(SourceBaseView):
 
 class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):
     serializer_class = SourceVersionDetailSerializer
-    writes_own_object = True  # on HEAD/, its DELETE deletes the repository and its PUT/PATCH can publish it
+    writes_own_object = True  # its PUT/PATCH can publish the version, and on HEAD/ its DELETE deletes the repository
 
     def get_permissions(self):
         if self.request.method == 'GET':

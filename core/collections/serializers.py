@@ -477,7 +477,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer, Abst
     type = CharField(source='resource_version_type')
     uuid = CharField(source='id')
     id = CharField(source='version')
-    short_code = CharField(source='mnemonic')
+    short_code = CharField(source='mnemonic', read_only=True)  # a version never moves to another repository
     owner = CharField(source='parent_resource')
     owner_type = CharField(source='parent_resource_type')
     owner_url = CharField(source='parent_url')

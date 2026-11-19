@@ -179,10 +179,15 @@ def add_references(  # pylint: disable=too-many-arguments,too-many-locals
 ):
     from core.users.models import UserProfile
     from core.collections.models import Collection
+    from core.capabilities.constants import WRITE_ACTION_EDIT
+    from core.capabilities.writes import get_write_refusal, get_write_target
     user = UserProfile.objects.get(id=user_id)
     collection = Collection.objects.filter(id=collection_id).first()
     if not collection:
         return [], {'error': 'Collection not found'}
+    refusal = get_write_refusal(user, get_write_target(collection), WRITE_ACTION_EDIT)
+    if refusal is not None:  # writable when queued, the collection may be read-only by now
+        return [], {'write_refused': refusal}
     head = collection.get_head()
     head.add_processing(self.request.id)
 
@@ -569,18 +574,14 @@ def process_hierarchy_for_concept_version(
 )
 def process_hierarchy_for_new_parent_concept_version(prev_version_id, latest_version_id):
     """
-      Associates latest parent version to child concepts, except those in repositories the capability policy refuses
-      the version's author an edit of (Concept.is_hierarchy_write_refused)
+      Associates latest parent version to child concepts
     """
-    from core.capabilities.policy import get_capability_policy
     from core.concepts.models import Concept
     prev_version = Concept.objects.filter(id=prev_version_id).first()
     latest_version = Concept.objects.filter(id=latest_version_id).first()
     if prev_version and latest_version:
-        policy = get_capability_policy()
         for concept in Concept.objects.filter(parent_concepts__uri=prev_version.uri):
-            if not latest_version.is_hierarchy_write_refused(concept, policy):
-                concept.parent_concepts.add(latest_version)
+            concept.parent_concepts.add(latest_version)
 
 
 @app.task

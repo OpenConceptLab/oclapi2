@@ -91,13 +91,15 @@ class ChecksWrites(BasePermission):
     def get_write_action(self, request, view, obj):
         """
         A view whose PUT, PATCH and DELETE act on the object they're checked against sets `writes_own_object = True`:
-        when that object is a repository's HEAD or a map project, a DELETE deletes the whole of it and a change can
-        publish it (core.capabilities.writes.get_own_write_action), unless the view sets `applies_public_access = False`
-        because its writes never apply the `public_access` they're sent. Any other write is an edit.
+        a DELETE of a repository's HEAD or of a map project deletes the whole of it, and a change can publish a
+        repository row (core.capabilities.writes.get_own_write_action), unless the view sets
+        `applies_public_access = False` because its writes never apply the `public_access` they're sent. Any other
+        write is an edit.
         """
         if getattr(view, 'writes_own_object', False):
-            return get_own_write_action(
-                obj, request.method, request.data, getattr(view, 'applies_public_access', True))
+            # a DELETE's body is never read: it needn't parse
+            data = None if request.method == 'DELETE' else request.data
+            return get_own_write_action(obj, request.method, data, getattr(view, 'applies_public_access', True))
         return WRITE_ACTION_EDIT
 
 
@@ -131,8 +133,8 @@ class HasAccessToVersionedObject(BasePermission):
 
 class CanEditConceptDictionaryVersion(ChecksWrites, HasAccessToVersionedObject):
     """
-    HasAccessToVersionedObject, and the capability policy doesn't refuse the write to the version's HEAD (an edit,
-    unless the view writes its own object and that's the HEAD: ChecksWrites.get_write_action).
+    HasAccessToVersionedObject, and the capability policy doesn't refuse the write to the version (an edit, unless the
+    view writes its own object: ChecksWrites.get_write_action).
     """
 
 

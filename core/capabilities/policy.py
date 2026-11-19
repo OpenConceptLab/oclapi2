@@ -78,9 +78,10 @@ class CapabilityPolicy(ABC):
         Whether `user` may write to `content`: a policy may keep content read-only and refuse writes to it. Asked only
         once the user's own access allows the write (core.capabilities.writes).
 
-        `content` is a repository's HEAD (a Source or a Collection) or a MapProject. `action` is one of
-        core.capabilities.constants' WRITE_ACTION_*: `edit`, `delete` (the whole repository or map project), or
-        `publish` (the change leaves a repository that is private, public_access 'None', viewable by others).
+        `content` is the repository row written (a Source or a Collection: its HEAD, or the version a write to a
+        version changes) or a MapProject. `action` is one of core.capabilities.constants' WRITE_ACTION_*: `edit`,
+        `delete` (the whole repository or map project), or `publish` (the change leaves a row that is private,
+        public_access 'None', viewable by others).
 
         Returns None to allow the write, or the refusal body to send. By default, every write is allowed.
         """
