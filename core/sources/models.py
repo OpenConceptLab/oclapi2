@@ -748,6 +748,17 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         except AlreadyQueued:
             pass
 
+    def index_release_rows_mapped_codes_async(self):
+        """
+        After this release's public_access changed, rebuilds the mapped codes of the rows only releases hold: their own
+        fields take the public releases' codes (MappedCodes, OpenConceptLab/ocl_online#703).
+        """
+        from core.common.tasks import index_concepts_mapped_codes
+        concept_ids = sorted(self.concepts.exclude(id=F('versioned_object_id')).exclude(
+            is_latest_version=True).values_list('id', flat=True))
+        for chunk in chunks(concept_ids, DROPPED_CHILDREN_CHUNK_SIZE):
+            index_concepts_mapped_codes.apply_async((chunk,), queue='indexing', permanent=False)
+
     def index_public_access_async(self, user=None):
         """
         Queues the public_can_view re-index of this source's docs once the change is committed, marking the source

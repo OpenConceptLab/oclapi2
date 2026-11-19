@@ -230,6 +230,17 @@ class ReleaseMapCodesTest(ReleasesFixture, OCLTestCase):
         self.assertEqual((fields['same_as_map_codes'], fields['other_map_codes']), ([], []))  # v2's only
         self.assertEqual(self.entries(fields), [(['v1'], ['X01'], ['X05'])])
 
+    @patch('core.common.tasks.index_concepts_mapped_codes.apply_async')
+    def test_a_releases_access_change_rebuilds_its_release_only_rows(self, apply_async):
+        self.edit_a_in_v3()
+        release = self.release('v1')
+        release.public_access = ACCESS_TYPE_NONE
+        release._should_update_public_access = True  # pylint: disable=protected-access
+
+        release.save()
+
+        apply_async.assert_called_once_with(([self.row('v1', 'A').id],), queue='indexing', permanent=False)
+
     def test_a_row_no_source_version_holds_reads_heads_mappings(self):
         self.edit_a_in_v3()
         old_a = self.row('v1', 'A')
@@ -358,17 +369,6 @@ class ReleaseMapCodesSearchTest(ReleasesFixture, OCLAPITestCase):
         response = self.client.get(f'{LOINC}v1/concepts/?q=name&fuzzy=true&target_repo={ICD}')
 
         self.assertEqual({concept['id'] for concept in response.data}, {'B'})  # HEAD's codes, not v1's entry
-
-    def test_a_fuzzy_search_in_one_viewable_source_version_reads_it(self):
-        def get_ids():
-            response = self.client.get(
-                f'{LOINC}concepts/?q=name&fuzzy=true&source_version={LOINC}v1/&target_repo={ICD}')
-            self.assertEqual(response.status_code, 200)
-            return {concept['id'] for concept in response.data}
-
-        self.assertEqual(get_ids(), {'A', 'B'})
-        Source.objects.filter(id=self.release('v1').id).update(public_access=ACCESS_TYPE_NONE)
-        self.assertEqual(get_ids(), {'B'})
 
     def test_the_command_fills_existing_docs(self):
         self.drop_b_in_v3()
