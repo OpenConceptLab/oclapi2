@@ -3719,6 +3719,14 @@ class SourceReleaseWhileSeedingTest(OCLAPITestCase):
         self.assertNotIn(
             self.seed_task.id, Source.objects.values_list('_background_process_ids', flat=True).get(id=self.version.id))
 
+    def test_seed_task_failing_after_the_members_are_written_keeps_the_release_waiting(self):
+        with patch.object(Source, 'update_children_counts', side_effect=lambda *_: self.set_released()), \
+                patch.object(Source, 'index_resources_for_self_as_latest_released', side_effect=ValueError('broker')):
+            with self.assertRaises(ValueError):
+                self.run_seed_task()
+
+        self.assertTrue(Source.objects.get(id=self.version.id).is_awaiting_members)
+
 
 class SourceVersionPrivateHeadAccessTest(PrivateHeadVersionAccessMixin, OCLAPITestCase):
     model = Source
