@@ -3,6 +3,7 @@ import json
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError
+from django.test import override_settings
 from django.utils import timezone
 from mock import patch, ANY, Mock
 from rest_framework.test import APIRequestFactory
@@ -19,6 +20,19 @@ from core.users.tests.factories import UserProfileFactory
 class MapProjectModelTest(OCLTestCase):
     def test_mnemonic(self):
         self.assertEqual(MapProject(id=5).mnemonic, 5)
+
+    def test_editable_by(self):
+        user = UserProfileFactory()
+        org = OrganizationFactory()
+        org.members.add(user)
+        own = MapProjectFactory(organization=None, user=user)
+        orgs = MapProjectFactory(organization=org, created_by=UserProfileFactory())
+        created_elsewhere = MapProjectFactory(created_by=user)
+        someone_elses = MapProjectFactory(organization=None, user=UserProfileFactory())
+
+        self.assertEqual(set(MapProject.editable_by(user)), {own, orgs})
+        staff = UserProfileFactory(is_staff=True)
+        self.assertEqual(set(MapProject.editable_by(staff)), {own, orgs, created_elsewhere, someone_elses})
 
     def test_matches_summary(self):
         project = MapProject(matches=[
@@ -214,6 +228,38 @@ class MapProjectListViewTest(MapProjectAbstractViewTest):
         self.assertEqual(event.map_project_id, response.data['id'])
         upload_mock.assert_called_once_with(
             key=f"map_projects/{response.data['id']}/input.csv", file_content=ANY)
+
+    @override_settings(CAPABILITY_POLICY='core.capabilities.tests.tests.OwnerRecordingPolicy')
+    @patch('core.services.storages.cloud.aws.S3.upload')
+    def test_post_counts_projects_under_the_parent(self, _upload_mock):
+        from django.contrib.auth.models import Permission
+        from core.capabilities.constants import MAPPER_PROJECTS_CAPABILITY_ID
+        from core.capabilities.models import UserCapabilityOverride
+        from core.capabilities.tests.tests import OwnerRecordingPolicy
+        OwnerRecordingPolicy.calls = []
+        self.user.user_permissions.add(Permission.objects.get(codename='mapper_org_projects'))
+        UserCapabilityOverride.objects.create(user=self.user, capability_id=MAPPER_PROJECTS_CAPABILITY_ID, limit=5)
+        columns = json.dumps([{'label': 'name', 'hidden': False, 'dataKey': 'name', 'original': 'name'}])
+
+        response = self.client.post(
+            '/orgs/CIEL/map-projects/', data={'name': 'Org Project', 'file': self.file, 'columns': columns},
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+        self.assertEqual(response.status_code, 201)
+        response = self.client.post(
+            f'/users/{self.user.username}/map-projects/',
+            data={'name': 'Own Project', 'file': SimpleUploadedFile('input.csv', b'content'), 'columns': columns},
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+        self.assertEqual(response.status_code, 201)
+
+        # checked by the permission, then again under the lock
+        self.assertEqual(
+            OwnerRecordingPolicy.owners('get_limit', MAPPER_PROJECTS_CAPABILITY_ID),
+            [self.org, self.org, self.user, self.user])
+        self.assertEqual(
+            OwnerRecordingPolicy.owners('get_usage', MAPPER_PROJECTS_CAPABILITY_ID),
+            [self.org, self.org, self.user, self.user])
+        # the default counts by creator, whoever the owner
+        self.assertEqual(self.user.get_capability_usage(MAPPER_PROJECTS_CAPABILITY_ID, owner=self.org), 2)
 
     @patch('core.services.storages.cloud.aws.S3.upload')
     def test_post_via_current_user_shortcut(self, _upload_mock):
@@ -535,6 +581,19 @@ class AutomatchRunListViewTest(MapProjectAbstractViewTest):
         self.assertEqual(self.project.auto_match_runs.count(), 1)
         # client metadata is captured server-side from the request, not the payload
         self.assertEqual(self.project.auto_match_runs.first().client_ip, '127.0.0.1')
+
+    @override_settings(CAPABILITY_POLICY='core.capabilities.tests.tests.OwnerRecordingPolicy')
+    def test_post_checks_rows_for_the_projects_owner(self):
+        from core.capabilities.constants import MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID
+        from core.capabilities.tests.tests import OwnerRecordingPolicy
+        OwnerRecordingPolicy.calls = []
+
+        response = self.client.post(
+            self.url, data={'intended_rows': 5, 'trigger_source': 'api'}, format='json',
+            HTTP_AUTHORIZATION='Token ' + self.user.get_token())
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(OwnerRecordingPolicy.owners('get_limit', MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID), [self.org])
 
     def test_post_captures_user_agent(self):
         response = self.client.post(

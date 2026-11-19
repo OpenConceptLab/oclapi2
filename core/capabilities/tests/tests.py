@@ -20,6 +20,7 @@ from core.capabilities.exceptions import CapabilityExceeded, UsageRefused
 from core.capabilities.models import Capability, GroupCapability, UsageCounter, UsageEvent, UserCapabilityOverride
 from core.capabilities.policy import CapabilityPolicy, GroupLimitPolicy, get_capability_policy
 from core.common.tests import OCLAPITestCase, PREVIEW_GROUP_NAME
+from core.map_projects.tests.factories import AutomatchRunFactory, MapProjectFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.users.constants import PREVIEW_GROUP, PREVIEW_GRANDFATHERED_GROUP
 from core.users.tests.factories import UserProfileFactory
@@ -1015,6 +1016,95 @@ class ReplacedPolicyOwnerTest(OCLAPITestCase):
 
         self.user.check_and_consume_capability(self.capability_id, owner=self.owner)
         self.assertEqual(self.user.get_capability_usage(self.capability_id), 5)
+
+
+class OwnerRecordingPolicy(GroupLimitPolicy):
+    """Decides as the default does, and records the owner each call is given. Reset `calls` in setUp."""
+    calls = []
+
+    def get_limit(self, user, capability_id, owner=None):
+        self.calls.append(('get_limit', capability_id, owner))
+        return super().get_limit(user, capability_id, owner=owner)
+
+    def get_usage(self, user, capability_id, owner=None):
+        self.calls.append(('get_usage', capability_id, owner))
+        return super().get_usage(user, capability_id, owner=owner)
+
+    def consume(  # pylint: disable=too-many-arguments
+            self, user, capability_id, units=1, *, idempotency_key=None, owner=None, **attribution
+    ):
+        self.calls.append(('consume', capability_id, owner))
+        return super().consume(
+            user, capability_id, units, idempotency_key=idempotency_key, owner=owner, **attribution)
+
+    @classmethod
+    def owners(cls, method, capability_id=None):
+        return [owner for name, capability, owner in cls.calls
+                if name == method and capability_id in (None, capability)]
+
+
+@override_settings(CAPABILITY_POLICY='core.capabilities.tests.tests.OwnerRecordingPolicy')
+class CapabilityConsumeOwnerTest(OCLAPITestCase):
+    """/capabilities/consume/ is for the owner of the project it names, and only of a project the user may edit."""
+
+    def setUp(self):
+        super().setUp()
+        OwnerRecordingPolicy.calls = []
+        self.user = UserProfileFactory()
+        self.org = OrganizationFactory()
+        self.org.members.add(self.user)
+        self.project = MapProjectFactory(organization=self.org, created_by=UserProfileFactory())
+
+    def consume(self, user=None, **data):
+        user = user or self.user
+        UserCapabilityOverride.objects.get_or_create(
+            user=user, capability_id=MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, defaults={'limit': 0})
+        response = self.client.post(
+            '/capabilities/consume/', data={'capability': 'mapper.match_operations', **data}, format='json',
+            HTTP_AUTHORIZATION='Token ' + user.get_token())
+        self.assertEqual(response.status_code, 200)
+        return UsageEvent.objects.get(id=response.data['usage_event_id'])
+
+    def test_a_members_use_of_an_organization_project_is_for_the_organization(self):
+        event = self.consume(map_project=self.project.id)
+
+        self.assertEqual((event.user, event.map_project), (self.user, self.project))
+        self.assertIsNone(event.organization)
+        self.assertEqual(OwnerRecordingPolicy.owners('consume'), [self.org])
+        # the response reports what was counted for that owner
+        self.assertEqual(OwnerRecordingPolicy.owners('get_usage'), [self.org])
+
+    def test_a_run_alone_brings_its_project(self):
+        run = AutomatchRunFactory(map_project=self.project)
+
+        event = self.consume(run=run.id)
+
+        self.assertEqual((event.map_project, event.run), (self.project, run))
+        self.assertEqual(OwnerRecordingPolicy.owners('consume'), [self.org])
+
+    def test_a_project_the_user_may_not_edit_is_left_out(self):
+        project = MapProjectFactory(created_by=self.user)
+        run = AutomatchRunFactory(map_project=project)
+
+        event = self.consume(map_project=project.id, run=run.id)
+
+        self.assertEqual((event.map_project, event.run), (None, None))
+        self.assertEqual(OwnerRecordingPolicy.owners('consume'), [None])
+
+    def test_a_personal_project_is_for_its_user(self):
+        project = MapProjectFactory(organization=None, user=self.user)
+
+        self.consume(map_project=project.id)
+
+        self.assertEqual(OwnerRecordingPolicy.owners('consume'), [self.user])
+
+    def test_staff_may_name_any_project_and_the_policy_decides(self):
+        staff = UserProfileFactory(is_staff=True)
+
+        event = self.consume(user=staff, map_project=self.project.id)
+
+        self.assertEqual(event.map_project, self.project)
+        self.assertEqual(OwnerRecordingPolicy.owners('consume'), [self.org])
 
 
 class PartialPolicy(CapabilityPolicy):

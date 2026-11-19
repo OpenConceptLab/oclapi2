@@ -10,11 +10,11 @@ from rest_framework.response import Response
 
 from core.capabilities.constants import CAPABILITY_EXCEEDED_ERROR_CODE, CAPABILITY_NOT_ENTITLED_ERROR_CODE, \
     MAPPER_PROJECTS_CAPABILITY_ID, MAPPER_ROWS_PER_PROJECT_CAPABILITY, MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID
-from core.capabilities.exceptions import MapProjectCapacityExceeded
+from core.capabilities.policy import get_capability_policy
 from core.common.swagger_parameters import q_param
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin
 from core.common.permissions import CanEditConceptDictionary, CanCreateOrgMapProjects, \
-    CanUseCustomMapperAlgorithms, HasMapProjectParentOwnership, HasMapProjectCapacity
+    CanUseCustomMapperAlgorithms, HasMapProjectParentOwnership, HasMapProjectCapacity, check_map_project_capacity
 from core.common.utils import drop_key_deep
 from core.common.views import BaseAPIView
 from core.map_projects.models import MapProject, AutomatchRun
@@ -22,6 +22,7 @@ from core.map_projects.serializers import MapProjectCreateUpdateSerializer, \
     MapProjectDetailSerializer, MapProjectSummarySerializer, MapProjectLogsSerializer, MapProjectListSerializer, \
     MapProjectConfigurationsSerializer, AutomatchRunListSerializer, AutomatchRunDetailSerializer, \
     AutomatchRunCreateSerializer, AutomatchRunUpdateSerializer
+from core.orgs.models import Organization
 
 
 class MapProjectBaseView(BaseAPIView):
@@ -117,16 +118,14 @@ class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListW
 
         with transaction.atomic():
             # HasMapProjectCapacity already checked capacity, but that read happens
-            # outside any lock, so two concurrent creates from the same user can both
-            # pass it before either commits (TOCTOU). Locking the user row here
-            # serializes creates from the same user; re-check capacity under the lock
-            # before persisting.
-            locked_user = type(request.user).objects.select_for_update().get(pk=request.user.pk)
-            limit = locked_user.get_capability_limit(MAPPER_PROJECTS_CAPABILITY_ID)
-            if limit != 0:
-                used = locked_user.map_projects_used
-                if limit is None or used >= limit:
-                    raise MapProjectCapacityExceeded(limit, used)
+            # outside any lock, so two concurrent creates can both pass it before
+            # either commits (TOCTOU). Locking the user row, then an organization
+            # owner's, serializes creates by the same user and under the same
+            # organization; re-check capacity under the locks before persisting.
+            type(request.user).objects.select_for_update().get(pk=request.user.pk)
+            if isinstance(self.parent_resource, Organization):
+                Organization.objects.select_for_update(no_key=True).only('id').get(pk=self.parent_resource.pk)
+            check_map_project_capacity(request.user, get_capability_policy(), self.parent_resource)
 
             instance = serializer.save(force_insert=True)
             if not instance.pk:
@@ -137,8 +136,8 @@ class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListW
                 # rather than raising. Without this check that unsaved instance would reach
                 # log_capability_event() below and crash on the UsageEvent.map_project FK.
                 return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            # mapper.projects is enforced against the live map_projects_used count (see
-            # get_capability_usage()), not a monotonic counter - deleting a project
+            # mapper.projects is enforced against the live count of projects (the
+            # policy's get_usage()), not a monotonic counter - deleting a project
             # correctly frees the slot. This only records the event for attribution.
             request.user.log_capability_event(
                 MAPPER_PROJECTS_CAPABILITY_ID, action='create_map_project', map_project=instance
@@ -285,7 +284,8 @@ class AutomatchRunListView(AutomatchRunBaseView, ListWithHeadersMixin):
         # is checked on its own, so re-running Auto Match costs match quota only.
         # 0 = unlimited, -1 = blocked, None = not entitled (blocked).
         if not is_retry:
-            rows_limit = request.user.get_capability_limit(MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID)
+            rows_limit = request.user.get_capability_limit(
+                MAPPER_ROWS_PER_PROJECT_CAPABILITY_ID, owner=self.get_map_project().parent)
             if rows_limit != 0 and (rows_limit is None or intended_rows > rows_limit):
                 not_entitled = rows_limit is None or rows_limit < 0  # -1 = blocked: "not available", no -1 count
                 return Response(

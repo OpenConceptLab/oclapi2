@@ -3,6 +3,7 @@ from rest_framework.permissions import BasePermission
 
 from core.capabilities.constants import MAPPER_PROJECTS_CAPABILITY_ID
 from core.capabilities.exceptions import MapProjectCapacityExceeded
+from core.capabilities.policy import get_capability_policy
 from core.users.constants import (
     MAPPER_CUSTOM_ALGORITHMS_PERMISSION, MAPPER_ORG_PROJECTS_PERMISSION, MAPPER_USE_PERMISSION,
 )
@@ -201,20 +202,26 @@ class HasMapProjectParentOwnership(BasePermission):
 
 class HasMapProjectCapacity(BasePermission):
     """
-    mapper.projects: how many map projects a user may have. Only meaningful at
-    creation time - unlike the other three Mapper gates this isn't a plain
-    permission check but a numeric usage comparison, so it lives here instead
-    of as a view-method-level cap check.
+    mapper.projects: how many map projects a user may have under the owner they create
+    one for. Only meaningful at creation time - unlike the other three Mapper gates
+    this isn't a plain permission check but a numeric usage comparison, so it lives
+    here instead of as a view-method-level cap check.
     """
     def has_permission(self, request, view):
-        user = request.user
-        limit = user.get_capability_limit(MAPPER_PROJECTS_CAPABILITY_ID)
-        # explicit grant only - None (unconfigured) is blocked, not uncapped.
-        # kill switch = set the limit to -1 in groups.yaml (a deleted row is recreated on restart).
-        # (0 is NOT the kill switch - it means unlimited; see get_capability_limit's docstring.)
-        if limit == 0:
-            return True
-        used = user.map_projects_used
-        if limit is None or used >= limit:
-            raise MapProjectCapacityExceeded(limit, used)
+        # the parent the project is created under is its owner; HasMapProjectParentOwnership, listed first, resolves it
+        # and checks the user may create there
+        check_map_project_capacity(request.user, get_capability_policy(), getattr(view, 'parent_resource', None))
         return True
+
+
+def check_map_project_capacity(user, policy, owner):
+    """
+    Raises MapProjectCapacityExceeded unless `user` may create one more map project under `owner`.
+    Explicit grant only - None (unconfigured) is blocked, not uncapped. Kill switch = a limit of -1; 0 is unlimited.
+    """
+    limit = policy.get_limit(user, MAPPER_PROJECTS_CAPABILITY_ID, owner=owner)
+    if limit == 0:
+        return
+    used = policy.get_usage(user, MAPPER_PROJECTS_CAPABILITY_ID, owner=owner)['used']
+    if limit is None or used >= limit:
+        raise MapProjectCapacityExceeded(limit, used)
