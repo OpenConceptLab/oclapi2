@@ -59,7 +59,7 @@ class MappedCodes:
     every release that holds it:
     - its own fields hold HEAD's codes for HEAD's rows (the versioned object and the latest version, which global
       search reads too) and for a row no release holds (one only a collection holds); otherwise the codes of every
-      release that holds it, which collection searches read;
+      public release that holds it, which collection searches read;
     - each release whose own mappings (the active ones, as Concept.get_version_mappings reads them) give other codes
       is in an entry of release_map_codes (one per distinct set of codes, naming its releases by id), which a search
       in that release reads instead (ConceptDocument.scope_map_codes_to_release).
@@ -68,12 +68,15 @@ class MappedCodes:
     def __init__(self, concepts):
         from core.mappings.models import Mapping
         self.releases = defaultdict(list)  # concept id: [source version id]
+        self.public_releases = set()  # source version ids
         self.mappings = defaultdict(dict)  # (source version id, versioned object id): {mapping id: mapping values}
         ids = [concept.id for concept in concepts if concept.id]
-        for concept_id, source_id in Concept.sources.through.objects.filter(
+        for concept_id, source_id, public_access in Concept.sources.through.objects.filter(
                 concept_id__in=ids).exclude(source__version=HEAD).order_by('source_id').values_list(
-                    'concept_id', 'source_id'):
+                    'concept_id', 'source_id', 'source__public_access'):
             self.releases[concept_id].append(source_id)
+            if Concept.is_public_access(public_access):
+                self.public_releases.add(source_id)
         if not self.releases:
             return
         source_ids = {source_id for releases in self.releases.values() for source_id in releases}
@@ -92,9 +95,9 @@ class MappedCodes:
         releases = self.releases.get(concept.id, [])
         if concept.is_versioned_object or concept.is_latest_version or not releases:
             codes = to_mapped_codes(concept.get_unidirectional_mappings().values(*MAPPING_VALUES))
-        else:  # every release's mappings, once each
+        else:  # every public release's mappings, once each: a private release's are only in its entry
             codes = to_mapped_codes({
-                mapping_id: values for source_id in releases
+                mapping_id: values for source_id in releases if source_id in self.public_releases
                 for mapping_id, values in self.get_release_mappings(concept, source_id).items()}.values())
         entries = {}  # one per distinct set of codes, with every release that has it
         own_key = get_codes_key(codes)

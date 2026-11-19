@@ -592,9 +592,21 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         release = Source.objects.filter(**owner, mnemonic=self.kwargs['source'], version=version).first()
         return release.id if release and release.has_view_access(self.request.user) else None
 
-    def scope_map_codes(self, results):
-        """In a release, `results` with its mapped-code clauses reading that release's own codes."""
-        release_id = self.map_codes_release
+    @cached_property
+    def fuzzy_map_codes_release(self):
+        """
+        The id of the one source version (not HEAD) a fuzzy concept search selects with source_version, whose own
+        mapped codes it matches (OpenConceptLab/ocl_online#703); None if the user can't view it.
+        """
+        source_versions = get(self, '_source_versions') if self.is_concept_document() else None
+        if not source_versions or len(source_versions) != 1:
+            return None
+        release = source_versions[0]
+        return release.id if release.version != HEAD and release.has_view_access(self.request.user) else None
+
+    @staticmethod
+    def scope_map_codes(results, release_id):
+        """With a release's id, `results` with its mapped-code clauses reading that release's own codes."""
         query = results.to_dict().get('query') if release_id else None
         if query:
             from core.concepts.documents import ConceptDocument
@@ -916,7 +928,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             results = results.highlight(
                 *self.clean_fields_for_highlight(set(compact(self.get_wildcard_search_fields().keys()))))
 
-        return results
+        return self.scope_map_codes(results, self.fuzzy_map_codes_release)
 
     def __get_search_aggregations(
             self, source_versions=None, other_filters=None
@@ -1076,7 +1088,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             )
         if fields and highlight and self.request.query_params.get(INCLUDE_SEARCH_META_PARAM) in get_truthy_values():
             results = results.highlight(*self.clean_fields_for_highlight(fields))
-        results = self.scope_map_codes(results.source(excludes=['_synonyms_embeddings', '_embeddings']))
+        results = self.scope_map_codes(
+            results.source(excludes=['_synonyms_embeddings', '_embeddings']), self.map_codes_release)
         return results.sort(*sort_attrs) if sort else results
 
     def get_mandatory_words_criteria(self):

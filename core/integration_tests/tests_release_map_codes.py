@@ -221,6 +221,15 @@ class ReleaseMapCodesTest(ReleasesFixture, OCLTestCase):
         self.assertEqual(fields['same_as_map_codes'], [])  # HEAD's, as global search reads the latest version
         self.assertEqual(self.entries(fields), [(['v1'], ['X02'], []), (['v2'], ['X02', 'X03'], [])])
 
+    def test_a_private_releases_codes_stay_out_of_a_rows_own_fields(self):
+        self.edit_a_in_v3()
+        Source.objects.filter(id=self.release('v1').id).update(public_access=ACCESS_TYPE_NONE)
+
+        fields = self.fields(self.row('v1', 'A'))
+
+        self.assertEqual((fields['same_as_map_codes'], fields['other_map_codes']), ([], []))  # v2's only
+        self.assertEqual(self.entries(fields), [(['v1'], ['X01'], ['X05'])])
+
     def test_a_row_no_source_version_holds_reads_heads_mappings(self):
         self.edit_a_in_v3()
         old_a = self.row('v1', 'A')
@@ -349,6 +358,17 @@ class ReleaseMapCodesSearchTest(ReleasesFixture, OCLAPITestCase):
         response = self.client.get(f'{LOINC}v1/concepts/?q=name&fuzzy=true&target_repo={ICD}')
 
         self.assertEqual({concept['id'] for concept in response.data}, {'B'})  # HEAD's codes, not v1's entry
+
+    def test_a_fuzzy_search_in_one_viewable_source_version_reads_it(self):
+        def get_ids():
+            response = self.client.get(
+                f'{LOINC}concepts/?q=name&fuzzy=true&source_version={LOINC}v1/&target_repo={ICD}')
+            self.assertEqual(response.status_code, 200)
+            return {concept['id'] for concept in response.data}
+
+        self.assertEqual(get_ids(), {'A', 'B'})
+        Source.objects.filter(id=self.release('v1').id).update(public_access=ACCESS_TYPE_NONE)
+        self.assertEqual(get_ids(), {'B'})
 
     def test_the_command_fills_existing_docs(self):
         self.drop_b_in_v3()
