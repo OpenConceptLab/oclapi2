@@ -17,7 +17,7 @@ from lxml import etree
 from mock.mock import patch
 from rest_framework.test import APIClient
 
-from core.collections.models import Collection, Expansion
+from core.collections.models import Collection, CollectionReference, Expansion
 from core.collections.tests.factories import ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLTestCase, OCLAPITransactionTestCase
@@ -505,6 +505,32 @@ class ExpandCases(OpsCorpusMixin):
         expansion.save()
         self.assertEqual(issues_of(self.expand(url=FEVERS)),
                          ['error|not-found|not-found||VS_EXP_IMPORT_UNK_PINNED'])
+        # a pinned concept or mapping is named as one, not as a code system; a code system keeps its message
+        cannot = 'could not be found, so the value set cannot be expanded'
+        concept, mapping = '/orgs/Acme/sources/CS/concepts/fever/', '/orgs/Acme/sources/CS/mappings/1/'
+        sct = 'http://snomed.info/sct'
+
+        def pinned(expression, version=None):  # as an expansion records a pinned reference it couldn't resolve
+            return CollectionReference(expression=expression, resource_version=version).to_unresolved_resource_version()
+
+        for reference, message_id, text in (
+                (pinned(f'{concept}38/', '38'), 'OCL_UNKNOWN_CONCEPT_VERSION_EXP',
+                 f"The concept '{concept}38/' version '38' {cannot}"),
+                (pinned(f'{mapping}10/', '10'), 'OCL_UNKNOWN_MAPPING_VERSION_EXP',
+                 f"The mapping '{mapping}10/' version '10' {cannot}"),
+                (pinned(concept), 'OCL_UNKNOWN_CONCEPT_EXP', f"The concept '{concept}' {cannot}"),
+                (pinned(mapping), 'OCL_UNKNOWN_MAPPING_EXP', f"The mapping '{mapping}' {cannot}"),
+                ({'url': sct, 'type': 'reference.system', 'version': '2024'}, 'UNKNOWN_CODESYSTEM_VERSION_EXP',
+                 f"A definition for CodeSystem '{sct}' version '2024' {cannot}"),
+                ({'url': sct, 'type': 'expansion.parameters.system-version'}, 'UNKNOWN_CODESYSTEM_EXP',
+                 f"A definition for CodeSystem '{sct}' {cannot}"),
+        ):
+            expansion.unresolved_repo_versions = [reference]
+            expansion.save()
+            response = self.expand(url=FEVERS)
+            self.assertEqual(response.status_code, 422, message_id)
+            self.assertEqual(issues_of(response), [f'error|not-found|not-found||{message_id}'])
+            self.assertEqual(response.data['issue'][0]['details']['text'], text)
         expansion.unresolved_repo_versions = []
         expansion.is_processing = True
         expansion.save()
