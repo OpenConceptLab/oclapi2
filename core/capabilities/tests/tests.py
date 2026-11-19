@@ -1053,6 +1053,13 @@ class NoUserListPolicy(GroupLimitPolicy):
         return Capability.objects.all()
 
 
+class NoMemberCheckArgumentsPolicy(GroupLimitPolicy):
+    """check_new_member() can't take who is added."""
+
+    def check_new_member(self, user, organization):  # pylint: disable=arguments-differ
+        return None
+
+
 class RequiredInitPolicy(GroupLimitPolicy):
     def __init__(self, setting):
         self.setting = setting
@@ -1157,6 +1164,7 @@ class CapabilityPolicyCheckTest(SimpleTestCase):
                 ('core.capabilities.tests.tests.NarrowRefundPolicy', 'refund'),
                 ('core.capabilities.tests.tests.NoOwnerPolicy', 'get_limit'),
                 ('core.capabilities.tests.tests.NoUserListPolicy', 'listed_capabilities'),
+                ('core.capabilities.tests.tests.NoMemberCheckArgumentsPolicy', 'check_new_member'),
                 ('core.capabilities.tests.tests.RequiredInitPolicy', '__init__'),
         ):
             with self.subTest(path):

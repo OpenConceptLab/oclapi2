@@ -1,13 +1,16 @@
 import threading
 import time
 
-from django.db import connection
+from django.db import DEFAULT_DB_ALIAS, OperationalError, connection, connections
 from django.test import override_settings, tag
 from mock import patch
 from mock.mock import Mock, ANY
+from psycopg2.errorcodes import LOCK_NOT_AVAILABLE
 from rest_framework.exceptions import ErrorDetail
 from rest_framework.test import APIClient
 
+from core.capabilities.exceptions import UsageRefused
+from core.capabilities.policy import GroupLimitPolicy
 from core.collections.documents import CollectionDocument
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT, ROLE_ADMIN, \
@@ -1304,3 +1307,164 @@ class PaginationParamsValidationTest(OCLAPITestCase):
 
     def test_valid_limit_and_page_return_200(self):
         self.assertEqual(self.client.get('/orgs/?limit=5&page=1', **self.headers).status_code, 200)
+
+
+class RecordingMemberPolicy(GroupLimitPolicy):
+    """Records each check before a member is added, and refuses when `refusal` is set."""
+    calls = []
+    refusal = None
+
+    def check_new_member(self, user, organization, member):
+        self.calls.append((user, organization, member))
+        if self.refusal:
+            raise UsageRefused(self.refusal)
+
+
+@override_settings(CAPABILITY_POLICY='core.integration_tests.tests_orgs.RecordingMemberPolicy')
+class OrganizationNewMemberCheckTest(OCLAPITestCase):
+    """The policy's check runs before someone joins an org, and its refusal is sent as it built it."""
+
+    def setUp(self):
+        super().setUp()
+        self.admin = UserProfileFactory()
+        self.org = OrganizationFactory(mnemonic='stark', created_by=self.admin, updated_by=self.admin)
+        self.member = UserProfileFactory(organizations=[self.org])
+        RecordingMemberPolicy.calls = []
+        RecordingMemberPolicy.refusal = None
+
+    def put(self, target, data=None, actor=None):
+        return self.client.put(
+            f'/orgs/stark/members/{target.username}/', data, format='json',
+            HTTP_AUTHORIZATION='Token ' + (actor or self.admin).get_token())
+
+    def test_a_new_member_is_checked_with_who_adds_them(self):
+        user = UserProfileFactory()
+
+        self.assertEqual(self.put(user).status_code, 204)
+
+        self.assertEqual(RecordingMemberPolicy.calls, [(self.admin, self.org, user)])
+        self.assertTrue(self.org.is_member(user))
+
+    def test_a_refusal_is_sent_as_built_and_adds_no_one(self):
+        RecordingMemberPolicy.refusal = {'detail': 'Not now.', 'error_code': 'example_refusal', 'limit': 2, 'used': 2}
+        user = UserProfileFactory()
+
+        for role in (None, ROLE_ADMIN):
+            with self.subTest(role=role):
+                response = self.put(user, {'role': role} if role else None)
+
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(
+                    response.json(), {'detail': 'Not now.', 'error_code': 'example_refusal', 'limit': 2, 'used': 2})
+                self.assertFalse(self.org.is_member(user))
+                self.assertFalse(Event.objects.filter(event_type=Event.JOINED, object_url=user.uri).exists())
+
+    def test_a_refusal_applies_to_staff_too(self):
+        RecordingMemberPolicy.refusal = {'detail': 'Not now.'}
+        staff = UserProfileFactory(is_staff=True)
+        user = UserProfileFactory()
+
+        self.assertEqual(self.put(user, actor=staff).status_code, 403)
+        self.assertEqual(RecordingMemberPolicy.calls, [(staff, self.org, user)])
+        self.assertFalse(self.org.is_member(user))
+
+    def test_an_existing_member_s_role_change_is_not_checked(self):
+        RecordingMemberPolicy.refusal = {'detail': 'Not now.'}
+
+        self.assertEqual(self.put(self.member, {'role': ROLE_ADMIN}).status_code, 204)
+        self.assertEqual(self.put(self.member).status_code, 204)
+
+        self.assertEqual(RecordingMemberPolicy.calls, [])
+        self.assertEqual(self.org.get_member_role(self.member), ROLE_ADMIN)
+
+    def test_a_request_refused_first_is_not_checked(self):
+        user = UserProfileFactory()
+
+        self.assertEqual(self.put(user, actor=self.member).status_code, 403)
+        self.assertEqual(self.put(user, {'role': 'owner'}).status_code, 400)
+
+        self.assertEqual(RecordingMemberPolicy.calls, [])
+
+
+class TwoMembersAtMostPolicy(GroupLimitPolicy):
+    """
+    Refuses a third member, after a pause between counting and adding. Records, for each check, whether another
+    connection found the organization locked and whether the member had joined yet.
+    """
+    seen = []
+
+    def check_new_member(self, user, organization, member):
+        self.seen.append((self.is_locked(organization), organization.is_member(member)))
+        members = organization.members.count()
+        time.sleep(0.5)  # widens the gap between the count and the add
+        if members >= 2:
+            raise UsageRefused({'detail': 'Not now.'})
+
+    @staticmethod
+    def is_locked(organization):
+        other = connections.create_connection(DEFAULT_DB_ALIAS)
+        try:
+            with other.cursor() as cursor:
+                cursor.execute('SELECT id FROM organizations WHERE id = %s FOR UPDATE NOWAIT', [organization.id])
+            return False
+        except OperationalError as error:
+            if getattr(error.__cause__, 'pgcode', None) == LOCK_NOT_AVAILABLE:
+                return True
+            raise
+        finally:
+            other.close()
+
+
+@override_settings(CAPABILITY_POLICY='core.integration_tests.tests_orgs.TwoMembersAtMostPolicy')
+class OrganizationNewMemberConcurrencyTest(OCLAPITransactionTestCase):
+    """Runs two adds at once, on separate connections, to check that the policy counts them one after the other."""
+
+    def test_two_members_added_at_once_are_checked_in_turn(self):
+        TwoMembersAtMostPolicy.seen = []
+        admin = UserProfileFactory(username='admin')
+        org = OrganizationFactory(mnemonic='race-org', created_by=admin, updated_by=admin)
+        newcomers = [UserProfileFactory(username='carol'), UserProfileFactory(username='dave')]
+        token = admin.get_token()
+        barrier = threading.Barrier(2)
+        statuses = {}
+
+        def add(newcomer):
+            try:
+                client = APIClient()
+                barrier.wait()
+                response = client.put(
+                    f'/orgs/race-org/members/{newcomer}/', HTTP_AUTHORIZATION='Token ' + token)
+                statuses[newcomer] = response.status_code
+            finally:
+                connection.close()
+
+        threads = [threading.Thread(target=add, args=(newcomer.username, )) for newcomer in newcomers]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(sorted(statuses.values()), [204, 403])
+        self.assertEqual(org.members.count(), 2)
+        # each check ran under the organization's lock, before its member joined
+        self.assertEqual(TwoMembersAtMostPolicy.seen, [(True, False), (True, False)])
+
+
+@override_settings(CAPABILITY_POLICY='core.capabilities.policy.GroupLimitPolicy')
+class OrganizationNewMemberDefaultTest(OCLAPITestCase):
+    def test_the_default_policy_never_refuses_a_new_member(self):
+        admin = UserProfileFactory()
+        org = OrganizationFactory(mnemonic='big-org', created_by=admin, updated_by=admin)
+        for _ in range(20):
+            org.set_member_role(UserProfileFactory())
+
+        for actor in (admin, UserProfileFactory(is_staff=True)):
+            with self.subTest(actor=actor.username):
+                user = UserProfileFactory()
+
+                response = self.client.put(
+                    f'/orgs/big-org/members/{user.username}/', format='json',
+                    HTTP_AUTHORIZATION='Token ' + actor.get_token())
+
+                self.assertEqual(response.status_code, 204)
+                self.assertTrue(org.is_member(user))

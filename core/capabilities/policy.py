@@ -73,6 +73,14 @@ class CapabilityPolicy(ABC):
         """The capabilities a user detail with `includeCapabilities` lists for `user`: by default, all of them."""
         return Capability.objects.all()
 
+    def check_new_member(self, user, organization, member):  # pylint: disable=unused-argument
+        """
+        Runs before `member` joins `organization` at `user`'s request, once `user` may add them, in the transaction
+        that adds them and under a lock on the organization. Raises UsageRefused, whose `detail` is the body sent, to
+        refuse. By default, allows every new member.
+        """
+        return None
+
 
 class GroupLimitPolicy(CapabilityPolicy):
     """Limits from a per-user override, else from the user's groups. Ignores `owner`: all of it is the user's."""
