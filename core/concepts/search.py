@@ -1,3 +1,5 @@
+from itertools import count
+
 from elasticsearch_dsl import TermsFacet, Q, NestedFacet, A
 from elasticsearch_dsl.faceted_search import Facet
 from pydash import flatten, is_number, compact, get
@@ -199,15 +201,17 @@ class ConceptFuzzySearch:  # pragma: no cover
             is_semantic=False, num_candidates=2000, k_nearest=50, map_config=None, additional_filter_criterion=None,
             locale_filter=None, variants_repo=None
     ):
-        from core.concepts.documents import ConceptDocument
+        from core.concepts.documents import ConceptDocument, RELEASE_MAP_CODES
         map_config = map_config or []
         repo_params = repo_params or cls.get_target_repo_params(repo_url)
         release = repo_params.get('source_version')
+        inner_hit_names = (f'{RELEASE_MAP_CODES}_{index}' for index in count())
 
-        def scoped(query):  # in a release, its own mapped codes (OpenConceptLab/ocl_online#703)
+        def scoped(query, highlight=False):  # in a release, its own mapped codes (OpenConceptLab/ocl_online#703)
             if not release or release == HEAD:
                 return query
-            return Q(ConceptDocument.scope_map_codes_to_release(query.to_dict(), release))
+            return Q(ConceptDocument.scope_map_codes_to_release(
+                query.to_dict(), release, inner_hit_names if highlight else None))
 
         filter_query = scoped(cls.get_filter_criteria(
             data, include_retired, repo_params, repo_url, additional_filter_criterion))
@@ -318,7 +322,7 @@ class ConceptFuzzySearch:  # pragma: no cover
             or_clauses.append(Q("bool", should=nested_mapped_codes_queries, minimum_should_match=1, boost=0.1))
 
         wrapped_clauses = [
-            Q("bool", must=[Q(filter_query), scoped(clause)])
+            Q("bool", must=[Q(filter_query), scoped(clause, highlight=True)])
             for clause in or_clauses
         ]
 

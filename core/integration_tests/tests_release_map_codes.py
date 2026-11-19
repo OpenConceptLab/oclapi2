@@ -8,6 +8,7 @@ from elasticsearch_dsl import Q
 from mock import patch, Mock
 import numpy
 
+from core.common.search import CustomESSearch
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.concepts.documents import ConceptDocument, MappedCodes, RELEASE_MAP_CODES, MAPPING_VALUES, to_mapped_codes
 from core.concepts.models import Concept
@@ -173,7 +174,8 @@ class ReleaseMapCodesTest(ReleasesFixture, OCLTestCase):
             return [json.dumps(knn['filter'].to_dict() if hasattr(knn['filter'], 'to_dict') else knn['filter'])
                     for knn in search['knn']]
 
-        self.assertTrue(all(RELEASE_MAP_CODES in knn_filter for knn_filter in get_knn_filters(f'{LOINC}v1/')))
+        self.assertTrue(all('{"release_map_codes.version": "v1"}' in knn_filter
+                            for knn_filter in get_knn_filters(f'{LOINC}v1/')))
         self.assertFalse(any(RELEASE_MAP_CODES in knn_filter for knn_filter in get_knn_filters(f'{LOINC}HEAD/')))
 
     def test_a_row_only_releases_hold_reads_its_latest_release(self):
@@ -187,7 +189,7 @@ class ReleaseMapCodesTest(ReleasesFixture, OCLTestCase):
         self.assertEqual((fields['same_as_map_codes'], fields['other_map_codes']), ([], []))  # v2's, not v1's too
         self.assertEqual(self.entries(fields), [(['v1'], ['X01'], ['X05'])])
 
-    def test_a_dropped_row_reads_its_latest_release(self):
+    def test_a_dropped_rows_releases_read_their_own_codes(self):
         self.drop_b_in_v3()
         row_b = self.row('v2', 'B')
         self.assertTrue(row_b.is_latest_version)
@@ -195,8 +197,8 @@ class ReleaseMapCodesTest(ReleasesFixture, OCLTestCase):
 
         fields = self.fields(row_b)
 
-        self.assertEqual(sorted(fields['same_as_map_codes']), ['X02', 'X03'])  # v2's, not HEAD's (none)
-        self.assertEqual(self.entries(fields), [(['v1'], ['X02'], [])])
+        self.assertEqual(fields['same_as_map_codes'], [])  # HEAD's, as global search reads the latest version
+        self.assertEqual(self.entries(fields), [(['v1'], ['X02'], []), (['v2'], ['X02', 'X03'], [])])
 
     def test_a_row_no_source_version_holds_reads_heads_mappings(self):
         self.edit_a_in_v3()
@@ -271,6 +273,8 @@ class ReleaseMapCodesSearchTest(ReleasesFixture, OCLAPITestCase):
 
         self.assertEqual(self.search('?q=X03'), {None: [], 'v1': [], 'v2': ['B'], 'latest': []})
         self.assertEqual(self.get_ids('v3', '?q=X03'), [])
+        response = self.client.get('/concepts/?q=X03')  # global search, as before
+        self.assertEqual([concept['id'] for concept in response.data], [])
 
     def test_the_target_repo_filter_reads_the_release(self):
         self.assertEqual(
@@ -304,15 +308,22 @@ class ReleaseMapCodesSearchTest(ReleasesFixture, OCLAPITestCase):
         self.assertEqual(match(f'{LOINC}v1/'), ['A'])
         self.assertEqual(match(f'{LOINC}v2/'), [])
 
-    def test_a_fuzzy_search_in_one_source_version_reads_it(self):
-        def get_ids(version):
-            response = self.client.get(
-                f'/concepts/?q=name&fuzzy=true&source_version={LOINC}{version}/&target_repo={ICD}')
-            self.assertEqual(response.status_code, 200)
-            return sorted(concept['id'] for concept in response.data)
+    def test_a_match_highlights_a_releases_own_code(self):
+        es_search = CustomESSearch(
+            ConceptFuzzySearch.search({'other_map_codes': 'X05'}, f'{LOINC}v1/')[0:10], ConceptDocument)
+        es_search.to_queryset(False, True, False)
 
-        self.assertEqual(get_ids('v1'), ['A', 'B'])
-        self.assertEqual(get_ids('v2'), ['B'])
+        self.assertEqual(list(es_search.queryset.values_list('mnemonic', flat=True)), ['A'])
+        self.assertEqual(es_search.highlights[self.row('v1', 'A').id], {'other_map_codes': ['<em>X05</em>']})
+
+    def test_a_new_release_drops_a_deleted_releases_entry_of_the_same_name(self):
+        row_a = self.row('v1', 'A')
+        with override_settings(TEST_MODE=False):  # v1 deleted and made again from HEAD: its label is appended
+            Concept.batch_index_source_version_append(Concept.objects.filter(id=row_a.id), ConceptDocument, 'v1')
+        ConceptDocument._index.refresh()  # pylint: disable=protected-access
+
+        self.assertEqual(self.get_ids('v1', '?q=X01'), [])
+        self.assertEqual(self.get_ids('v1', '?q=X02'), ['B'])  # B's v1 entry wasn't touched
 
     def test_the_command_fills_existing_docs(self):
         self.drop_b_in_v3()
@@ -331,5 +342,5 @@ class ReleaseMapCodesSearchTest(ReleasesFixture, OCLAPITestCase):
 
         self.assertIn(f'{LOINC}: 2 docs updated', out.getvalue())
         self.assertEqual(self.get_ids('v1', '?q=X01'), ['A'])  # an entry
-        self.assertEqual(self.get_ids('v2', '?q=X03'), ['B'])  # a dropped concept's own codes
+        self.assertEqual(self.get_ids('v2', '?q=X03'), ['B'])  # a dropped concept's entry
         self.assertEqual(self.get_ids(None, '?q=X01'), [])
