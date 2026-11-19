@@ -5,7 +5,9 @@ policy refuses nothing.
 """
 from time import monotonic
 
-from core.capabilities.constants import WRITE_ACTION_DELETE, WRITE_ACTION_EDIT, WRITE_ACTION_PUBLISH
+from core.capabilities.constants import (
+    WRITE_ACTION_DELETE, WRITE_ACTION_EDIT, WRITE_ACTION_MAKE_PRIVATE, WRITE_ACTION_PUBLISH,
+)
 from core.capabilities.exceptions import WriteRefused
 from core.capabilities.policy import get_capability_policy
 
@@ -48,6 +50,24 @@ def makes_viewable(row, public_access):
         return False
     head = None if row.is_head else row.head
     return head is None or head.public_can_view
+
+
+def makes_private(row, stored):
+    """
+    Whether saving repository row `row` makes it one others can't view by its own public_access: it's new (`stored`,
+    the row as stored now, is None), others could view `stored` by its own public_access, or it moves to another owner.
+    Its HEAD's access isn't read: a version keeps its own (is_publicly_viewable).
+    """
+    if row.public_can_view:
+        return False
+    return stored is None or stored.public_can_view or \
+        (stored.user_id, stored.organization_id) != (row.user_id, row.organization_id)
+
+
+def check_make_private(user, row, stored):
+    """Raises WriteRefused, with the policy's body, when saving `row` makes it private and the policy refuses that."""
+    if makes_private(row, stored):
+        check_write(user, row, WRITE_ACTION_MAKE_PRIVATE)
 
 
 def get_write_refusal(user, content, action, policy=None):

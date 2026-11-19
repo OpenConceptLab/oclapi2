@@ -89,12 +89,20 @@ class CapabilityPolicy(ABC):
 
         `content` is the repository row written (a Source or a Collection: its HEAD, or the version a write to a
         version changes) or a MapProject. `action` is one of core.capabilities.constants' WRITE_ACTION_*: `edit`,
-        `delete` (the whole repository or map project), or `publish` (a write whose public_access value makes a
-        repository row others can't view viewable by them). A FHIR update is always an `edit`, since it never
-        applies the public_access it's sent, and so is any change to a map project, its public_access included.
+        `delete` (the whole repository or map project), `publish` (a write whose public_access value makes a
+        repository row others can't view viewable by them), or `make_private`. A FHIR update is always an `edit`,
+        since it never applies the public_access it's sent, and so is any change to a map project, its public_access
+        included.
+
+        `make_private` is asked whenever a repository row is saved as one others can't view by its own public_access
+        (is_public_access) when it's new, when it could be viewed by its own public_access before, or when it moves to
+        another owner. `content` is then the row as it will be saved, before it's saved (a new repository has no pk
+        yet), and the question is asked on every path that saves it (ConceptContainerModel.persist_new and
+        persist_changes: the REST routes, import lines and FHIR writes), after any question about the write itself.
 
         Not asked: reads, and generating or downloading an export (uploading or removing an external export is an
-        `edit` of its version); creating a repository; writes that change no content (`writes_content = False`);
+        `edit` of its version); creating a repository others can view, and creating a version, which takes its HEAD's
+        public_access; writes that change no content (`writes_content = False`);
         routes only staff may use (`IsAdminUser`: a mapping's hard delete, a concept or mapping version's DELETE, the
         hierarchy amend route); deleting an owner (an organization, by its route or an import line, or a user, by
         staff), which deletes its repositories without asking about each; and linking a parent's new version to the

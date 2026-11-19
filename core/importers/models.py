@@ -305,7 +305,10 @@ class SourceImporter(BaseResourceImporter):
     def process(self):
         source = Source(**self.data)
         if source.has_parent_edit_access(self.user):
-            errors = Source.persist_new(source, self.user)
+            try:
+                errors = Source.persist_new(source, self.user)
+            except WriteRefused as ex:  # a new private repository the capability policy refused: the line's result
+                return ex
             return errors or CREATED
         return PERMISSION_DENIED
 
@@ -403,7 +406,10 @@ class CollectionImporter(BaseResourceImporter):
     def process(self):
         coll = Collection(**self.data)
         if coll.has_parent_edit_access(self.user):
-            errors = Collection.persist_new(coll, self.user)
+            try:
+                errors = Collection.persist_new(coll, self.user)
+            except WriteRefused as ex:  # a new private repository the capability policy refused: the line's result
+                return ex
             return errors or CREATED
         return PERMISSION_DENIED
 

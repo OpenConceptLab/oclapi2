@@ -24,6 +24,7 @@ from elasticsearch import ApiError, TransportError
 from elasticsearch.helpers import BulkIndexError, parallel_bulk, streaming_bulk
 from pydash import get
 
+from core.capabilities.writes import check_make_private
 from core.celery import app as celery_app
 from core.common.tasks import update_collection_active_concepts_count, update_collection_active_mappings_count, \
     delete_s3_objects
@@ -1235,6 +1236,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         persisted = False
         obj.version = HEAD
+        check_make_private(user, obj, None)  # a new private repository: the capability policy may refuse it
         try:
             obj.save(**kwargs)
             if obj.id:
@@ -1368,6 +1370,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         if updated_by:
             obj.updated_by = updated_by
+        # a row made private, or moved while private: the capability policy may refuse it
+        check_make_private(obj.updated_by, obj, original_repo)
         try:
             if queue_schema_update_task:
                 target_schema = obj.custom_validation_schema
