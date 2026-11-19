@@ -24,7 +24,7 @@ from core.mappings.models import Mapping
 from core.orgs.models import Organization
 from core.sources.constants import ISOLATED_METADATA_FIELDS, ISOLATED_VERSION_CONTENT_FAILED, \
     ISOLATED_VERSION_LINE_INVALID, ISOLATED_VERSION_EXISTS, ISOLATED_VERSION_NO_EDIT_ACCESS, SEEDED_FROM_IMPORT, \
-    ISOLATED_VERSION_LARGE_DROP, ALLOW_LARGE_DROP
+    ISOLATED_VERSION_LARGE_DROP, ALLOW_LARGE_DROP, ISOLATED_VERSION_META_INVALID, HIERARCHY_ROOT_CANNOT_BE_DROPPED
 from core.sources.models import Source
 from core.tasks.models import Task
 from core.users.models import UserProfile
@@ -327,7 +327,7 @@ class SourceImporter(BaseResourceImporter):
 class SourceVersionImporter(BaseResourceImporter):
     mandatory_fields = {"id"}
     allowed_fields = [
-        "id", "released", "name", "default_locale", "supported_locales", "extras", "match_algorithms",
+        "id", "released", "name", "default_locale", "supported_locales", "extras",
         *ISOLATED_METADATA_FIELDS
     ]
 
@@ -364,6 +364,10 @@ class SourceVersionImporter(BaseResourceImporter):
     def process(self):
         source = Source(**self.data)
         self.set_head_defaults(source)
+        try:
+            self.validate_metadata(self.data)
+        except ValidationError as ex:
+            return ex.message_dict
         if self.isolated_version:
             source.seeded_from = {'type': SEEDED_FROM_IMPORT, 'task': self.import_task_id}
         source._metadata_fields = list(self.data.keys())  # pylint: disable=protected-access
@@ -372,6 +376,20 @@ class SourceVersionImporter(BaseResourceImporter):
             return errors or CREATED
         return PERMISSION_DENIED
 
+
+    @staticmethod
+    def validate_metadata(line):
+        """
+        The checks a source's save runs, on the metadata a version line sets; persisting a version skips them. Values
+        a version takes from HEAD aren't checked again.
+        """
+        probe = Source(**{field: line[field] for field in ISOLATED_METADATA_FIELDS if field in line})
+        probe.clean_properties()
+        probe.clean_filters()
+        if 'match_algorithms' in line:
+            probe.clean_match_algorithms()
+        if probe.meta is not None and not isinstance(probe.meta, dict):
+            raise ValidationError({'meta': [ISOLATED_VERSION_META_INVALID]})
 
     def set_head_defaults(self, source):
         """What the line leaves out comes from HEAD, as for POST .../versions/."""
@@ -415,6 +433,7 @@ class IsolatedVersionCommit:
     def add_seen(self, seen):
         self.seen_concept_ids.update(get(seen, 'concepts') or [])
         self.seen_mapping_ids.update(get(seen, 'mappings') or [])
+        self.hierarchy_map.update(get(seen, 'hierarchy') or {})
 
     def add_runner_result(self, result):
         """Folds in one BulkImportInline part's result, so the parts are read once and not kept."""
@@ -433,11 +452,9 @@ class IsolatedVersionCommit:
                 self.content_failures += 1
 
     def get_head(self):
-        owner_type = (self.version_line.get('owner_type', '') or '').lower()
-        owner_filter = 'user__username' if owner_type in ['user', 'users'] else 'organization__mnemonic'
-        return Source.objects.filter(
-            **{owner_filter: self.version_line.get('owner')}, mnemonic=self.version_line.get('source'),
-            version=HEAD).first()
+        owner_kind, owner, source = Source.get_import_target(self.version_line)
+        owner_filter = 'user__username' if owner_kind == 'user' else 'organization__mnemonic'
+        return Source.objects.filter(**{owner_filter: owner}, mnemonic=source, version=HEAD).first()
 
     def get_rejection(self, importer, needs_head=True):
         """(True, result) when this version would be rejected. A HEAD the import itself creates isn't there yet."""
@@ -449,14 +466,53 @@ class IsolatedVersionCommit:
             return True, PERMISSION_DENIED
         return False, None
 
-    def preflight(self):
-        """Runs before any content imports, so a version that would be rejected leaves HEAD untouched."""
+    def preflight(self, content_lines=()):
+        """
+        Runs before any content imports, so a version that would be rejected leaves HEAD untouched. content_lines are
+        the import's Concept and Mapping lines, for what HEAD would lose.
+        """
         importer = SourceVersionImporter({**self.version_line}, self.user, self.update_if_exists, isolated_version=True)
         rejected, result = self.get_rejection(importer, needs_head=False)
         if rejected:
             raise ValidationError(result if isinstance(result, dict) else {'__all__': [{
                 False: ISOLATED_VERSION_LINE_INVALID, None: ISOLATED_VERSION_EXISTS,
                 PERMISSION_DENIED: ISOLATED_VERSION_NO_EDIT_ACCESS}[result]]})
+        SourceVersionImporter.validate_metadata(self.version_line)
+        head = self.get_head()
+        if head:
+            self.check_planned_drop(head, content_lines)
+
+    def check_planned_drop(self, head, content_lines):
+        """
+        Refuses, before any content imports, a file that leaves out HEAD's hierarchy root, or that leaves out at least
+        SEED_FROM_IMPORT_LARGE_DROP_MIN of HEAD's codes and more than its percent of them, unless allow_large_drop.
+        Mapping lines without an id are matched at import, so each is counted as keeping one of HEAD's mappings.
+        """
+        concept_ids, mapping_ids, unnamed_mappings = set(), set(), 0
+        for line in content_lines:
+            line_id = line.get('id')
+            if (line.get('type', '') or '').lower() == 'concept':
+                if line_id:
+                    concept_ids.add(line_id if is_url_encoded_string(line_id) else encode_string(line_id, safe=''))
+            elif line_id:
+                mapping_ids.add(line_id)
+            else:
+                unnamed_mappings += 1
+        head_concepts = set(head.concepts_set.filter(
+            id=F('versioned_object_id'), is_active=True).values_list('mnemonic', flat=True))
+        head_mappings = set(head.mappings_set.filter(
+            id=F('versioned_object_id'), is_active=True).values_list('mnemonic', flat=True))
+        root_mnemonic = get(head, 'hierarchy_root.mnemonic')
+        if root_mnemonic and root_mnemonic in head_concepts and root_mnemonic not in concept_ids:
+            raise ValidationError({'hierarchy_root': [HIERARCHY_ROOT_CANNOT_BE_DROPPED]})
+        dropped = {
+            'concepts': len(head_concepts - concept_ids),
+            'mappings': max(len(head_mappings - mapping_ids) - unnamed_mappings, 0)
+        }
+        total = dropped['concepts'] + dropped['mappings']
+        if not self.allow_large_drop and total >= settings.SEED_FROM_IMPORT_LARGE_DROP_MIN and \
+                total * 100 > settings.SEED_FROM_IMPORT_LARGE_DROP_PERCENT * (len(head_concepts) + len(head_mappings)):
+            raise ValidationError({'__all__': [ISOLATED_VERSION_LARGE_DROP.format(**dropped)]})
 
     def run(self):
         if self.content_failures:
@@ -472,8 +528,6 @@ class IsolatedVersionCommit:
             with transaction.atomic():
                 Concept.reconcile_import_hierarchy(self.hierarchy_map, self.user, replace_head=True)
                 self.dropped = head.drop_unseen_children(self.seen_concept_ids, self.seen_mapping_ids)
-                if self.is_large_drop():
-                    raise IsolatedVersionRollback({'__all__': [ISOLATED_VERSION_LARGE_DROP.format(**self.dropped)]})
                 result = importer.process()
                 if result != CREATED:
                     raise IsolatedVersionRollback(result)
@@ -482,15 +536,6 @@ class IsolatedVersionCommit:
         except ValidationError as ex:
             return get(ex, 'message_dict') or {'__all__': ex.messages}
         return CREATED
-
-    def is_large_drop(self):
-        """At least SEED_FROM_IMPORT_LARGE_DROP_MIN of HEAD's codes leave it, and more than its percent of them."""
-        if self.allow_large_drop:
-            return False
-        dropped = self.dropped['concepts'] + self.dropped['mappings']
-        kept = len(self.seen_concept_ids) + len(self.seen_mapping_ids)
-        return dropped >= settings.SEED_FROM_IMPORT_LARGE_DROP_MIN and \
-            dropped * 100 > settings.SEED_FROM_IMPORT_LARGE_DROP_PERCENT * (dropped + kept)
 
 
 class CollectionImporter(BaseResourceImporter):
@@ -601,6 +646,14 @@ class ConceptImporter(BaseResourceImporter):
         self.skip_hierarchy_tasks = skip_hierarchy_tasks
         self.version = False
         self.instance = None
+        self.assigns_id = not get(data, 'id')
+        self.line_parent_urls = get(data, 'parent_concept_urls') or []
+
+    def get_assigned_hierarchy(self, result):
+        """A new concept's parents when the import assigned its id, so the version commit can link it."""
+        if self.isolated and self.assigns_id and result == CREATED and get(self, 'instance.uri'):
+            return {drop_version(self.instance.uri): self.line_parent_urls}
+        return {}
 
     def exists(self):
         return self.get_queryset().exists()
@@ -1031,6 +1084,7 @@ class BulkImportInline(BaseImporter):
         self.isolated = isolated or isolated_version
         self.seen_concept_ids = set()
         self.seen_mapping_ids = set()
+        self.assigned_hierarchy = {}
         # Lookup cache shared across this run's items (see ConceptImporter/MappingImporter).
         # It caches misses too (None/False), so it's only safe because a chunk is single-resource-type
         # in the production parallel path (BulkImportParallelRunner.make_parts splits concepts and
@@ -1066,7 +1120,8 @@ class BulkImportInline(BaseImporter):
 
     def preflight_isolated_version(self, version_line):
         if version_line:
-            IsolatedVersionCommit(version_line, self.user, self.update_if_exists).preflight()
+            IsolatedVersionCommit(version_line, self.user, self.update_if_exists).preflight(
+                Source.get_import_content_lines(self.input_list))
 
     def set_task(self):
         self.task = Task.objects.filter(id=self.self_task_id).first()
@@ -1082,7 +1137,8 @@ class BulkImportInline(BaseImporter):
             return SourceVersionImporter(item, self.user, self.update_if_exists).run()
         commit = IsolatedVersionCommit(
             item, self.user, self.update_if_exists,
-            hierarchy_map=Concept.get_import_hierarchy_map(self.input_list, include_parentless=True),
+            hierarchy_map={**Concept.get_import_hierarchy_map(self.input_list, include_parentless=True),
+                           **self.assigned_hierarchy},
             seen_concept_ids=self.seen_concept_ids, seen_mapping_ids=self.seen_mapping_ids,
             content_failures=self.content_failures_count, import_task_id=self.self_task_id
         )
@@ -1199,6 +1255,7 @@ class BulkImportInline(BaseImporter):
                         _result = concept_importer.delete() if action == 'delete' else concept_importer.run()
                         indexer.add(concept_importer.instance)
                         self.seen_concept_ids.update(compact([concept_importer.get_seen_versioned_object_id(_result)]))
+                        self.assigned_hierarchy.update(concept_importer.get_assigned_hierarchy(_result))
                     except Exception as ex:
                         ERRBIT_LOGGER.log(ex)
                         _result = {'__all__': str(ex)}
@@ -1274,7 +1331,9 @@ class BulkImportInline(BaseImporter):
             'report': self.report
         }
         if self.isolated and not self.isolated_version:
-            self.result['seen'] = {'concepts': sorted(self.seen_concept_ids), 'mappings': sorted(self.seen_mapping_ids)}
+            self.result['seen'] = {
+                'concepts': sorted(self.seen_concept_ids), 'mappings': sorted(self.seen_mapping_ids),
+                'hierarchy': self.assigned_hierarchy}
 
 
 class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
@@ -1309,7 +1368,8 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self.index = should_index_import(index, self.total)
         version_line = Source.get_import_version_line(self.input_list, self.isolated_version)
         if version_line:
-            IsolatedVersionCommit(version_line, self.user, self.update_if_exists).preflight()
+            IsolatedVersionCommit(version_line, self.user, self.update_if_exists).preflight(
+                Source.get_import_content_lines(self.input_list))
         self.make_resource_distribution()
         self.make_parts()
         self.collect_concept_hierarchy_map()

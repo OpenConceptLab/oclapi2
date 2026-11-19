@@ -80,6 +80,7 @@ class ImportTaskSummary(BaseModel):
     unchanged: int = 0
     failures: list = []
     dependencies: list = []
+    dropped: dict = None
 
 
 class ImportTask(BaseModel):
@@ -160,6 +161,7 @@ class ImportTask(BaseModel):
 
                 for result in results:
                     if isinstance(result, dict):
+                        summary.dropped = result.get('dropped', summary.dropped)
                         continue
                     summary.processed += 1
                     if result == CREATED:
@@ -238,6 +240,7 @@ class Importer:
         self.isolated_version = isolated_version
         self.version_lines = []
         self.content_targets = set()
+        self.content_lines = []  # what preflight needs of each Concept and Mapping line in a seeding import
 
     def validate_versioning(self, resources, resource_types):
         if not self.isolated_version:
@@ -247,7 +250,8 @@ class Importer:
                 raise ValidationError(ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION)
             Source.validate_import_targets(self.version_lines[0], self.content_targets)
             IsolatedVersionCommit(
-                self.version_lines[0], UserProfile.objects.filter(username=self.username).first(), True).preflight()
+                self.version_lines[0], UserProfile.objects.filter(username=self.username).first(), True).preflight(
+                    self.content_lines)
         except DjangoValidationError as ex:
             raise ValidationError(ex.message_dict if hasattr(ex, 'error_dict') else ex.messages) from ex
         return self.get_isolated_version_resource_types(resource_types)
@@ -541,6 +545,7 @@ class Importer:
                 self.version_lines.append(line)
             elif event == 'end_map' and get(line, 'type') in ('Concept', 'Mapping') and self.isolated_version:
                 self.content_targets.add(Source.get_import_target(line))
+                self.content_lines.append({'type': line['type'], 'id': line.get('id')})
             return line if event == 'map_key' else None
         if line is not None and '.' not in prefix:
             if event in ('string', 'number', 'boolean', 'null'):
@@ -734,7 +739,9 @@ class ImporterSubtask:
         self.isolated_version = isolated_version
         self.previous_subtask_ids = previous_subtask_ids or []
         self.import_task_id = import_task_id
+        self.dropped = None
         self.seen = {'concepts': set(), 'mappings': set()}
+        self.assigned_hierarchy = {}
         self.hierarchy_map = {}
 
     def run(self):  # pylint: disable=too-many-branches
@@ -779,7 +786,8 @@ class ImporterSubtask:
 
         self.indexer.finish()
         if self.isolated and not self.isolated_version:
-            results.append({'seen': {key: sorted(value) for key, value in self.seen.items()}})
+            results.append({'seen': {
+                **{key: sorted(value) for key, value in self.seen.items()}, 'hierarchy': self.assigned_hierarchy}})
         return results
 
     def collect_hierarchy_map(self, temp, is_zipped, is_tarred):
@@ -811,7 +819,9 @@ class ImporterSubtask:
             import_task_id=self.import_task_id)
         for results in self.iter_previous_results():
             commit.add_subtask_results(results)
-        return commit.run()
+        result = commit.run()
+        self.dropped = commit.dropped
+        return result
 
     def iter_previous_results(self):
         """Each earlier subtask's results in turn, so only one is held at a time."""
@@ -877,6 +887,8 @@ class ImporterSubtask:
         versioned_object_id = importer.get_seen_versioned_object_id(result) if importer else None
         if versioned_object_id:
             self.seen['concepts' if isinstance(importer, ConceptImporter) else 'mappings'].add(versioned_object_id)
+        if isinstance(importer, ConceptImporter):
+            self.assigned_hierarchy.update(importer.get_assigned_hierarchy(result))
 
     @staticmethod
     def add_exception_to_results(file, start_index, end_index, count, ex, results):
@@ -919,6 +931,8 @@ class ImporterSubtask:
                     if isinstance(result, int):
                         results.append(result)
                         self.add_seen(get(resource_importer, 'importer'), result)
+                        if self.dropped is not None:
+                            results.append({'dropped': self.dropped})
                     else:
                         results.append(f'{error} due to: {result}')
                 except Exception as e:

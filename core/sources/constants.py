@@ -26,12 +26,13 @@ ISOLATED_VERSION_LARGE_DROP = \
 ISOLATED_VERSION_TARGET_MISMATCH = \
     'Every concept and mapping in a seed_from_import import must be in the source of its Source Version line.'
 ALLOW_LARGE_DROP = 'allow_large_drop'
+ISOLATED_VERSION_META_INVALID = 'meta must be an object.'
 ISOLATED_METADATA_FIELDS = (
     'description', 'full_name', 'website', 'external_id', 'canonical_url', 'identifier', 'contact', 'jurisdiction',
     'publisher', 'purpose', 'copyright', 'revision_date', 'text', 'experimental', 'source_type', 'content_type',
     'supplements', 'supplement_type', 'supplement_global',
     'collection_reference', 'hierarchy_meaning', 'case_sensitive', 'compositional', 'version_needed',
-    'meta', 'properties', 'filters',
+    'meta', 'properties', 'filters', 'match_algorithms',
 )
 ISOLATED_REQUIRED_METADATA_FIELDS = ('name', 'default_locale', 'supported_locales')
 HIERARCHY_MEANINGS = (

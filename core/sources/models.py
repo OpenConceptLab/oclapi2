@@ -353,10 +353,14 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         return version_line
 
     @staticmethod
+    def get_import_content_lines(input_list):
+        return [line for line in input_list if (line.get('type', '') or '').lower() in ('concept', 'mapping')]
+
+    @staticmethod
     def get_import_target(line):
-        """The source an import line names: (owner kind, owner, source mnemonic)."""
+        """The source an import line names: (owner kind, owner, source mnemonic), read as the importers read it."""
         owner_type = (line.get('owner_type', '') or '').lower()
-        return 'user' if owner_type in ('user', 'users') else 'org', line.get('owner'), line.get('source')
+        return 'user' if owner_type == 'user' else 'org', line.get('owner'), line.get('source')
 
     @staticmethod
     def validate_import_targets(version_line, targets):

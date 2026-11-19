@@ -6564,10 +6564,10 @@ class IsolatedVersionImportTest(OCLTestCase):
         head.hierarchy_root = Concept.objects.get(mnemonic='ROOT', id=F('versioned_object_id'))
         head.save()
 
-        importer = self.run_import([self.concept('A'), self.version('v2')])
+        with self.assertRaises(DjangoValidationError) as ex:
+            self.run_import([self.concept('A'), self.version('v2')])
 
-        self.assertEqual(len(importer.failed), 1)
-        self.assertIn('hierarchy_root', importer.failed[0]['errors'])
+        self.assertIn('hierarchy_root', ex.exception.message_dict)
         self.assertFalse(Source.objects.filter(mnemonic='LOINC', version='v2').exists())
         self.assertTrue(Concept.objects.get(mnemonic='ROOT', id=F('versioned_object_id')).is_active)
 
@@ -6742,25 +6742,26 @@ class IsolatedVersionImportTest(OCLTestCase):
         head.hierarchy_root = Concept.objects.get(mnemonic='ROOT', id=F('versioned_object_id'))
         head.save()
 
-        importer = self.run_import([self.concept('P1'), self.concept('C'), self.version('v2')])
+        with self.assertRaises(DjangoValidationError) as ex:
+            self.run_import([self.concept('P1'), self.concept('C'), self.version('v2')])
 
-        self.assertIn('hierarchy_root', importer.failed[0]['errors'])
+        self.assertIn('hierarchy_root', ex.exception.message_dict)
         self.assertEqual(self.head_concepts(), {'ROOT', 'P1', 'C'})
         self.assertEqual(self.head_parents('C'), {'P1'})
 
     def test_rejected_version_leaves_new_and_moved_children_unlinked(self):
-        release = [self.concept('ROOT'), self.concept('P1'), self.concept('P2'), self.concept('C', parents=['P1'])]
+        release = [self.concept('P1'), self.concept('P2'), self.concept('C', parents=['P1'])]
         self.run_import([*release, self.version('v1')])
         self.run_import([*release, self.version('v1.1')])  # a parent's first re-import versions it once
-        head = Source.objects.get(mnemonic='LOINC', version='HEAD')
-        head.hierarchy_root = Concept.objects.get(mnemonic='ROOT', id=F('versioned_object_id'))
-        head.save()
+        failing_line = self.concept('BAD')
+        failing_line.pop('concept_class')
 
         importer = self.run_import([
             self.concept('P1'), self.concept('P2'), self.concept('C', parents=['P2']),
-            self.concept('N', parents=['P1']), self.version('v2')])
+            self.concept('N', parents=['P1']), failing_line, self.version('v2')])
 
-        self.assertIn('hierarchy_root', importer.failed[0]['errors'])
+        self.assertEqual(importer.failed[-1]['errors'], {'__all__': [ISOLATED_VERSION_CONTENT_FAILED]})
+        self.assertFalse(Source.objects.filter(mnemonic='LOINC', version='v2').exists())
         p1 = Concept.objects.get(mnemonic='P1', id=F('versioned_object_id'))
         p2 = Concept.objects.get(mnemonic='P2', id=F('versioned_object_id'))
         self.assertEqual(set(p1.child_concept_queryset().values_list('mnemonic', flat=True)), {'C'})
@@ -6796,33 +6797,34 @@ class IsolatedVersionImportTest(OCLTestCase):
     def test_version_takes_what_the_line_leaves_out_from_head(self):
         self.run_import([self.concept('A'), self.version('v1')])
         head = Source.objects.get(mnemonic='LOINC', version='HEAD')
-        head.properties = [{'code': 'p1'}]
-        head.filters = [{'code': 'f1'}]
+        head.properties = [{'code': 'p1', 'type': 'string'}]
+        head.filters = [{'code': 'f1', 'operator': ['='], 'value': 'x'}]
         head.meta = {'profile': ['x']}
         head.save()
 
         self.run_import([self.concept('A'), self.version('v2')])
         response_version = Source.objects.get(mnemonic='LOINC', version='v2')
-        self.assertEqual(response_version.properties, [{'code': 'p1'}])
-        self.assertEqual(response_version.filters, [{'code': 'f1'}])
+        self.assertEqual(response_version.properties, [{'code': 'p1', 'type': 'string'}])
+        self.assertEqual(response_version.filters, [{'code': 'f1', 'operator': ['='], 'value': 'x'}])
         self.assertEqual(response_version.meta, {'profile': ['x']})
         self.assertEqual(response_version.match_algorithms, ['es'])
 
-        self.run_import([self.concept('A'), self.version('v3', properties=[{'code': 'p2'}])])
+        self.run_import([self.concept('A'), self.version('v3', properties=[{'code': 'p2', 'type': 'string'}])])
         head.refresh_from_db()
-        self.assertEqual(head.properties, [{'code': 'p2'}])
-        self.assertEqual(Source.objects.get(mnemonic='LOINC', version='v3').properties, [{'code': 'p2'}])
-        self.assertEqual(Source.objects.get(mnemonic='LOINC', version='v3').filters, [{'code': 'f1'}])
+        self.assertEqual(head.properties, [{'code': 'p2', 'type': 'string'}])
+        version = Source.objects.get(mnemonic='LOINC', version='v3')
+        self.assertEqual(version.properties, [{'code': 'p2', 'type': 'string'}])
+        self.assertEqual(version.filters, [{'code': 'f1', 'operator': ['='], 'value': 'x'}])
 
     @override_settings(SEED_FROM_IMPORT_LARGE_DROP_MIN=2, SEED_FROM_IMPORT_LARGE_DROP_PERCENT=50)
     def test_large_drop_needs_allow_large_drop(self):
         self.run_import([self.concept('A'), self.concept('B'), self.concept('C'), self.version('v1')])
 
-        importer = self.run_import([self.concept('A'), self.version('v2')])
+        with self.assertRaises(DjangoValidationError) as ex:
+            self.run_import([self.concept('A'), self.version('v2')])
 
-        self.assertEqual(importer.failed[0]['errors'], {'__all__': [ISOLATED_VERSION_LARGE_DROP.format(
+        self.assertEqual(ex.exception.message_dict, {'__all__': [ISOLATED_VERSION_LARGE_DROP.format(
             concepts=2, mappings=0)]})
-        self.assertEqual(importer.json_result['dropped'], {'concepts': 2, 'mappings': 0})
         self.assertEqual(self.head_concepts(), {'A', 'B', 'C'})
         self.assertFalse(Source.objects.filter(mnemonic='LOINC', version='v2').exists())
 
@@ -6832,6 +6834,85 @@ class IsolatedVersionImportTest(OCLTestCase):
         self.assertEqual(importer.json_result['dropped'], {'concepts': 2, 'mappings': 0})
         self.assertEqual(self.head_concepts(), {'A'})
         self.assertNotIn('allow_large_drop', Source.objects.get(mnemonic='LOINC', version='v2').extras or {})
+
+    @override_settings(SEED_FROM_IMPORT_LARGE_DROP_MIN=2, SEED_FROM_IMPORT_LARGE_DROP_PERCENT=50)
+    def test_refused_drop_leaves_head_content_unchanged(self):
+        self.run_import([self.concept('P'), self.concept('C', parents=['P']), self.concept('D'), self.concept('E'),
+                         self.version('v1')])
+
+        with self.assertRaises(DjangoValidationError):
+            self.run_import([self.concept('P', names=[{'name': 'P renamed', 'locale': 'en', 'locale_preferred': True}]),
+                             self.concept('N', parents=['P']), self.version('v2')])
+
+        self.assertEqual(self.head_concepts(), {'P', 'C', 'D', 'E'})
+        self.assertEqual(Concept.objects.get(mnemonic='P', id=F('versioned_object_id')).display_name, 'P name')
+        self.assertFalse(Concept.objects.filter(mnemonic='N').exists())
+        self.assertEqual(self.head_parents('C'), {'P'})
+
+    @override_settings(SEED_FROM_IMPORT_LARGE_DROP_MIN=2, SEED_FROM_IMPORT_LARGE_DROP_PERCENT=50)
+    def test_new_codes_do_not_dilute_the_drop(self):
+        self.run_import([self.concept('A'), self.concept('B'), self.version('v1')])
+
+        with self.assertRaises(DjangoValidationError) as ex:
+            self.run_import([self.concept(f'N{index}') for index in range(5)] + [self.version('v2')])
+
+        self.assertEqual(ex.exception.message_dict, {'__all__': [ISOLATED_VERSION_LARGE_DROP.format(
+            concepts=2, mappings=0)]})
+        self.assertEqual(self.head_concepts(), {'A', 'B'})
+
+    def test_concept_with_an_assigned_id_keeps_its_parents(self):
+        self.run_import([self.concept('P'), self.version('v1')])
+        head = Source.objects.get(mnemonic='LOINC', version='HEAD')
+        head.autoid_concept_mnemonic = AUTO_ID_SEQUENTIAL
+        head.save()  # creates the sequence
+        line = self.concept('ignored', parents=['P'])
+        line.pop('id')
+
+        importer = self.run_import([self.concept('P'), line, self.version('v2')])
+
+        self.assertEqual(len(importer.failed), 0)
+        new = Concept.objects.get(id=F('versioned_object_id'), parent__mnemonic='LOINC', mnemonic__regex=r'^[0-9]+$')
+        self.assertEqual(self.head_parents(new.mnemonic), {'P'})
+        self.assertEqual(self.members('v2'), {'P', new.mnemonic})
+        self.assertEqual(set(new.get_version_hierarchy_queryset(
+            'parent_concepts', Source.objects.get(mnemonic='LOINC', version='v2')).values_list('mnemonic', flat=True)),
+            {'P'})
+
+    def test_parent_url_naming_a_concept_version_links_the_concept(self):
+        self.run_import([self.concept('P'), self.version('v1')])
+        version_uri = Concept.objects.get(mnemonic='P', is_latest_version=True).uri
+
+        self.run_import([self.concept('P'), {**self.concept('C'), 'parent_concept_urls': [version_uri]},
+                         self.version('v2')])
+
+        self.assertEqual(self.head_parents('C'), {'P'})
+
+    def test_version_line_metadata_is_validated_before_content(self):
+        self.run_import([self.concept('A'), self.version('v1')])
+
+        with self.assertRaises(DjangoValidationError) as ex:
+            self.run_import([self.concept('A'), self.concept('B'), self.version('v2', filters=['status'])])
+
+        self.assertIn('filters', ex.exception.message_dict)
+        self.assertEqual(self.head_concepts(), {'A'})
+        self.assertEqual(Source.objects.get(mnemonic='LOINC', version='HEAD').filters, [])
+        importer = self.run_import([self.version('v2', filters=['status'])], isolated_version=False)
+        self.assertIn('filters', importer.failed[0]['errors'])
+        self.assertFalse(Source.objects.filter(mnemonic='LOINC', version='v2').exists())
+
+    def test_seeding_line_match_algorithms_reach_head(self):
+        self.run_import([self.concept('A'), self.version('v1')])
+        Source.objects.filter(mnemonic='LOINC', version='HEAD').update(match_algorithms=['es', 'llm'])
+
+        self.run_import([self.concept('A'), self.version('v2', match_algorithms=['es'])])
+
+        self.assertEqual(Source.objects.get(mnemonic='LOINC', version='HEAD').match_algorithms, ['es'])
+        self.assertEqual(Source.objects.get(mnemonic='LOINC', version='v2').match_algorithms, ['es'])
+
+    def test_plural_user_owner_type_is_read_as_the_importers_read_it(self):
+        users_line = {'owner_type': 'users', 'owner': 'Regen', 'source': 'LOINC'}
+        self.assertEqual(Source.get_import_target(users_line), ('org', 'Regen', 'LOINC'))
+        self.assertEqual(Source.get_import_target({**users_line, 'owner_type': 'User'}), ('user', 'Regen', 'LOINC'))
 
     @override_settings(SEED_FROM_IMPORT_LARGE_DROP_MIN=2, SEED_FROM_IMPORT_LARGE_DROP_PERCENT=50)
     def test_small_drop_needs_no_confirmation(self):
@@ -7080,8 +7161,10 @@ class IsolatedVersionAPITest(OCLAPITestCase):
 
         self.assertEqual(get_child('v1')['children'], ['/orgs/Regen/sources/LOINC/concepts/B/'])
         self.assertTrue(get_child('v1')['has_children'])
+        self.assertEqual([item['id'] for item in get_child('v1')['child_concepts']], ['B'])
         self.assertEqual(get_child('v2')['children'], [])
         self.assertFalse(get_child('v2')['has_children'])
+        self.assertEqual(get_child('v2')['child_concepts'], [])
         response = self.client.get(
             '/orgs/Regen/sources/LOINC/v1/concepts/B/parents/?includeParentConcepts=true',
             HTTP_AUTHORIZATION='Token ' + self.token)
@@ -7124,8 +7207,11 @@ class IsolatedVersionZipImportTest(OCLTestCase):
                 import_task_id='zip-task-id').run()
 
     def test_isolated_version_zip_import(self):
-        self.assertEqual(self.import_zip([('A',), ('B',)], [('M1', 'A', 'B')], 'v1'), [CREATED])
-        self.assertEqual(self.import_zip([('B',), ('C', ['B'])], [], 'v2'), [CREATED])
+        self.assertEqual(
+            self.import_zip([('A',), ('B',)], [('M1', 'A', 'B')], 'v1'),
+            [CREATED, {'dropped': {'concepts': 0, 'mappings': 0}}])
+        self.assertEqual(
+            self.import_zip([('B',), ('C', ['B'])], [], 'v2'), [CREATED, {'dropped': {'concepts': 1, 'mappings': 1}}])
 
         self.assertEqual(IsolatedVersionImportTest.members('v1'), {'A', 'B'})
         self.assertEqual(IsolatedVersionImportTest.members('v2'), {'B', 'C'})

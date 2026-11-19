@@ -1478,8 +1478,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             owner = line.get('owner')
             source = line.get('source')
             if (parent_urls or include_parentless) and concept_id and owner and source:
-                owner_type = line.get('owner_type', '').lower()
-                owner_prefix = 'users' if owner_type in ['user', 'users'] else 'orgs'
+                owner_type = (line.get('owner_type', '') or '').lower()
+                owner_prefix = 'users' if owner_type == 'user' else 'orgs'  # as the concept importer reads it
                 if not is_url_encoded_string(concept_id):
                     concept_id = encode_string(concept_id, safe='')
                 hierarchy_map[f'/{owner_prefix}/{owner}/sources/{source}/concepts/{concept_id}/'] = parent_urls
@@ -2058,8 +2058,9 @@ class ImportHierarchy:
     def from_uri_map(cls, hierarchy_map, user=None):
         """hierarchy_map: child uri -> parent uris. With a user, only children it can edit and parents it can view."""
         from core.sources.models import Source
-        resolved = Concept.get_versioned_objects_by_uri(
-            {*hierarchy_map, *(uri for uris in hierarchy_map.values() for uri in uris)})
+        # a parent URL naming one of a concept's versions links to that concept
+        parent_uri_of = {uri: drop_version(uri) for uris in hierarchy_map.values() for uri in uris}
+        resolved = Concept.get_versioned_objects_by_uri({*hierarchy_map, *parent_uri_of.values()})
         editable = viewable = None
         if user:
             sources = Source.objects.filter(id__in={source_id for _, source_id in resolved.values()})
@@ -2071,8 +2072,8 @@ class ImportHierarchy:
             if not child_id or (editable is not None and child_source_id not in editable):
                 continue
             links.setdefault(child_id, set()).update(
-                resolved[uri][0] for uri in parent_uris
-                if uri in resolved and (viewable is None or resolved[uri][1] in viewable))
+                resolved[parent_uri_of[uri]][0] for uri in parent_uris
+                if parent_uri_of[uri] in resolved and (viewable is None or resolved[parent_uri_of[uri]][1] in viewable))
         return cls(links)
 
     def apply(self, replace_head=False):

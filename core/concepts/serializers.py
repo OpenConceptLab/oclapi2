@@ -323,15 +323,22 @@ class ConceptAbstractSerializer(SourceVersionFieldMixin, AbstractResourceSeriali
 
     def get_child_concepts(self, obj):
         if self.include_child_concepts:
-            return ConceptDetailSerializer(
-                get_viewable_concepts(obj.child_concepts.all(), get(self, 'context.request')), many=True).data
+            return ConceptDetailSerializer(get_viewable_concepts(
+                self.get_related_concepts(obj, 'child_concepts'), get(self, 'context.request')), many=True).data
         return None
 
     def get_parent_concepts(self, obj):
         if self.include_parent_concepts:
-            return ConceptDetailSerializer(
-                get_viewable_concepts(obj.parent_concepts.all(), get(self, 'context.request')), many=True).data
+            return ConceptDetailSerializer(get_viewable_concepts(
+                self.get_related_concepts(obj, 'parent_concepts'), get(self, 'context.request')), many=True).data
         return None
+
+    def get_related_concepts(self, obj, relation):
+        """The concept's own links, or with a source version in the context, those in that version."""
+        repo_version = get(self, 'context.repo_version')
+        if repo_version:
+            return obj.get_version_hierarchy_queryset(relation, repo_version)
+        return getattr(obj, relation).all()
 
     def get_hierarchy_path(self, obj):
         if self.include_hierarchy_path:
