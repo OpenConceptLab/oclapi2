@@ -619,14 +619,17 @@ class ImportWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
         self.assertEqual(len(ReadOnlyPolicy.calls), 2)
 
     def test_an_answer_asked_again_is_about_the_row_as_stored_now(self):
+        """A batch keeps the rows it loaded: one made public during the batch is asked about as public."""
         write_refusals = BatchWriteRefusals()
         Source.objects.filter(id=self.source.id).update(public_access=ACCESS_TYPE_NONE)
         loaded = Source.objects.get(id=self.source.id)
-        Source.objects.filter(id=self.source.id).update(public_access='View')  # made public during the batch
 
-        write_refusals.get(self.user, loaded, WRITE_ACTION_EDIT)
+        with patch('core.capabilities.writes.monotonic', side_effect=[0, 60]):
+            write_refusals.get(self.user, loaded, WRITE_ACTION_EDIT)
+            Source.objects.filter(id=self.source.id).update(public_access='View')
+            write_refusals.get(self.user, loaded, WRITE_ACTION_EDIT)
 
-        self.assertEqual(ReadOnlyPolicy.calls[0][1].public_access, 'View')
+        self.assertEqual([call[1].public_access for call in ReadOnlyPolicy.calls], [ACCESS_TYPE_NONE, 'View'])
 
     def test_the_rows_of_a_package_file_share_their_answers(self):
         importer = ResourceImporter(write_refusals=BatchWriteRefusals())
