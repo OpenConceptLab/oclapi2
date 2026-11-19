@@ -122,7 +122,10 @@ class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListW
             # either commits (TOCTOU). Locking the user row, then an organization
             # owner's, serializes creates by the same user and under the same
             # organization; re-check capacity under the locks before persisting.
-            locked_user = type(request.user).objects.select_for_update().get(pk=request.user.pk)
+            # No key update, as consume() locks the user: an organization edit
+            # holding that row and checking its foreign key to this user then
+            # can't deadlock with this create.
+            locked_user = type(request.user).objects.select_for_update(no_key=True).get(pk=request.user.pk)
             if isinstance(self.parent_resource, Organization) and not Organization.objects.select_for_update(
                     no_key=True).only('id').filter(pk=self.parent_resource.pk).first():
                 return Response(status=status.HTTP_404_NOT_FOUND)
