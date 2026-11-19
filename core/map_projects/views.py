@@ -296,7 +296,7 @@ class AutomatchRunListView(AutomatchRunBaseView, ListWithHeadersMixin):
                 return Response(
                     {
                         'detail': 'You do not have a configured row allowance for this project.'
-                        if not_entitled else 'This run is larger than the preview row limit for a project.',
+                        if not_entitled else 'This run is larger than the row limit for a project.',
                         'error_code': CAPABILITY_NOT_ENTITLED_ERROR_CODE[MAPPER_ROWS_PER_PROJECT_CAPABILITY]
                         if not_entitled else CAPABILITY_EXCEEDED_ERROR_CODE[MAPPER_ROWS_PER_PROJECT_CAPABILITY],
                         'limit': None if not_entitled else rows_limit, 'requested': intended_rows,
