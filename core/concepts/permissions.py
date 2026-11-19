@@ -1,6 +1,8 @@
 from rest_framework.permissions import BasePermission, IsAuthenticatedOrReadOnly
 
-from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasPrivateAccess
+from core.capabilities.constants import WRITE_ACTION_EDIT
+from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasPrivateAccess, \
+    ChecksWrites
 
 
 class CanAccessParentDictionary(BasePermission):
@@ -23,13 +25,26 @@ class CanViewParentDictionary(IsAuthenticatedOrReadOnly, CanAccessParentDictiona
     parent_permission_class = CanViewConceptDictionary
 
 
+class CanEditDictionaryContent(CanEditConceptDictionary):
+    """
+    For a write to what a repository holds (a concept, a mapping, a name, an extra): whatever the method, the capability
+    policy is asked about an edit of the repository, never its deletion or publication.
+    """
+    def get_write_action(self, request, view, content):  # pylint: disable=unused-argument
+        return WRITE_ACTION_EDIT
+
+
+class CanAdministerDictionaryContent(ChecksWrites, HasPrivateAccess):
+    """HasPrivateAccess, and the capability policy doesn't refuse the write: an edit of the repository."""
+
+
 class CanEditParentDictionary(IsAuthenticatedOrReadOnly, CanAccessParentDictionary, CanEditConceptDictionary):
-    parent_permission_class = CanEditConceptDictionary
+    parent_permission_class = CanEditDictionaryContent
 
 
 class CanAdministerParentDictionary(IsAuthenticatedOrReadOnly, CanAccessParentDictionary, HasPrivateAccess):
     """Repo admins: platform staff or the dictionary's owner/org-members (its authors/editors)."""
-    parent_permission_class = HasPrivateAccess
+    parent_permission_class = CanAdministerDictionaryContent
 
 
 class CanViewParentDictionaryAsGuest(CanAccessParentDictionary, CanViewConceptDictionary):

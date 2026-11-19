@@ -73,6 +73,19 @@ class CapabilityPolicy(ABC):
         """The capabilities a user detail with `includeCapabilities` lists for `user`: by default, all of them."""
         return Capability.objects.all()
 
+    def get_write_refusal(self, user, content, action):  # pylint: disable=unused-argument
+        """
+        Whether `user` may write to `content`: a policy may keep content read-only and refuse writes to it. Asked only
+        once the user's own access allows the write (core.capabilities.writes).
+
+        `content` is a repository's HEAD (a Source or a Collection) or a MapProject. `action` is one of
+        core.capabilities.constants' WRITE_ACTION_*: `edit`, `delete` (the whole repository or map project), or
+        `publish` (the change leaves a repository that is private, public_access 'None', viewable by others).
+
+        Returns None to allow the write, or the refusal body to send. By default, every write is allowed.
+        """
+        return None
+
 
 class GroupLimitPolicy(CapabilityPolicy):
     """Limits from a per-user override, else from the user's groups. Ignores `owner`: all of it is the user's."""

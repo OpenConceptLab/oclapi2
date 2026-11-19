@@ -20,8 +20,8 @@ from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM
 from core.common.exceptions import Http405, Http400
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin, \
     ConceptContainerExportMixin, ConceptContainerProcessingMixin
-from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
-    CanViewConceptDictionaryVersion
+from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, \
+    CanEditConceptDictionaryVersion, CanViewConceptDictionaryVersion
 from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, \
     page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header, \
     canonical_url_param, all_versions_param
@@ -180,6 +180,7 @@ class SourceRetrieveUpdateDestroyView(
     SourceBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, UpdateAPIView, TaskMixin
 ):
     serializer_class = SourceDetailSerializer
+    writes_own_object = True  # its DELETE deletes the repository, and its PUT/PATCH can publish it
 
     def get_object(self, queryset=None):
         instance = self.get_queryset().filter(is_active=True).order_by('-created_at').first()
@@ -233,7 +234,7 @@ class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeader
         if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionary(), ]
 
-        return [IsAuthenticated(), HasAccessToVersionedObject()]
+        return [IsAuthenticated(), CanEditConceptDictionaryVersion()]
 
     def get_head(self):
         head = get(self.get_queryset().first(), 'head')
@@ -307,7 +308,7 @@ class SourceLatestVersionRetrieveUpdateView(SourceVersionBaseView, RetrieveAPIVi
         if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionaryVersion(), ]
 
-        return [IsAuthenticated(), HasAccessToVersionedObject()]
+        return [IsAuthenticated(), CanEditConceptDictionaryVersion()]
 
     def get_object(self, queryset=None):
         obj = self.get_queryset().first()
@@ -479,7 +480,7 @@ class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIV
     def get_permissions(self):
         if self.request.method == 'GET':
             return [CanViewConceptDictionaryVersion()]
-        return [HasAccessToVersionedObject()]
+        return [CanEditConceptDictionaryVersion()]
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())

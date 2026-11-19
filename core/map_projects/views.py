@@ -151,6 +151,7 @@ class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListW
 
 class MapProjectView(MapProjectBaseView, RetrieveUpdateDestroyAPIView):
     serializer_class = MapProjectDetailSerializer
+    writes_own_object = True  # its DELETE deletes the map project
     lookup_url_kwarg = 'project'
     lookup_field = 'project'
     pk_field = 'id'
