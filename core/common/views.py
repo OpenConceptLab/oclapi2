@@ -1237,14 +1237,15 @@ class SourceChildCommonBaseView(BaseAPIView):
     def check_parent_permissions(self, request):
         """
         A list of a source version's concepts or mappings answers only to those who can view that version. For
-        `latest`, that's the newest released version, which the list answers from.
+        `latest`, that's the newest released version, which the list and its search answer from, as well as any
+        version named `latest`.
         """
-        parent = self.parent_resource
-        if not parent and self.kwargs.get('version') == LATEST and 'source' in self.kwargs:
+        parents = [self.parent_resource]
+        if self.kwargs.get('version') == LATEST and 'source' in self.kwargs:
             from core.sources.models import Source
-            parent = Source.find_latest_released_version_by(
-                {**self.get_parent_owner_filters(), 'mnemonic': self.kwargs['source']})
-        if parent:
+            parents.append(Source.find_latest_released_version_by(
+                {**self.get_parent_owner_filters(), 'mnemonic': self.kwargs['source']}))
+        for parent in compact(parents):
             self.check_object_permissions(request, parent)
 
 

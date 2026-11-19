@@ -279,6 +279,11 @@ class ConceptListView(ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
         self.check_parent_permissions(request)
         return self.list(request, *args, **kwargs)
 
+    def head(self, request, **kwargs):
+        self.set_parent_resource(False)
+        self.check_parent_permissions(request)
+        return super().head(request, **kwargs)
+
     def post(self, request, **_):
         self.set_parent_resource()
         if not self.parent_resource or isinstance(request.data, list):

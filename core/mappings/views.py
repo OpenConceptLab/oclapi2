@@ -139,6 +139,11 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
         self.check_parent_permissions(request)
         return self.list(request, *args, **kwargs)
 
+    def head(self, request, **kwargs):
+        self.set_parent_resource(False)
+        self.check_parent_permissions(request)
+        return super().head(request, **kwargs)
+
     def set_parent_resource(self, __pop=True):
         from core.sources.models import Source
         source = self.kwargs.pop('source', None) if __pop else self.kwargs.get('source', None)
