@@ -720,13 +720,18 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def can_write_hierarchy_of(self, concept, policy):
         """
         Whether this concept's hierarchy change may save a new version of `concept`: `created_by` has edit access to its
-        repository and, when that's another repository, the capability policy doesn't refuse the edit.
+        repository and the capability policy doesn't refuse the edit (is_hierarchy_write_refused).
         """
-        repository = concept.parent
-        if not repository.has_edit_access(self.created_by):
-            return False
-        return repository.id == self.parent_id or get_write_refusal(
-            self.created_by, get_write_target(repository), WRITE_ACTION_EDIT, policy) is None
+        return concept.parent.has_edit_access(self.created_by) and not self.is_hierarchy_write_refused(concept, policy)
+
+    def is_hierarchy_write_refused(self, concept, policy):
+        """
+        Whether the capability policy refuses `created_by` an edit of `concept`'s repository, when that's another
+        repository than this concept's: this concept's hierarchy change then leaves `concept` as it is, its parent links
+        included.
+        """
+        return concept.parent_id != self.parent_id and get_write_refusal(
+            self.created_by, get_write_target(concept.parent), WRITE_ACTION_EDIT, policy) is not None
 
     def set_parent_concepts_from_uris(self, create_parent_version=True):
         parent_concepts = get(self, '_parent_concepts', [])
@@ -750,9 +755,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 )
                 new_latest_version = parent.get_latest_version()
                 for uri in current_latest_version.child_concept_urls:
-                    Concept.objects.filter(
-                        uri=uri
-                    ).first().get_latest_version().parent_concepts.add(new_latest_version)
+                    child = Concept.objects.filter(uri=uri).first().get_latest_version()
+                    if not new_latest_version.is_hierarchy_write_refused(child, policy):
+                        child.parent_concepts.add(new_latest_version)
 
         if parent_concepts:
             self.parent_concepts.set([parent.get_latest_version() for parent in parent_concepts])
@@ -783,7 +788,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 for uri in current_latest_version.child_concept_urls:
                     if uri != child_versioned_object_uri:
                         child = Concept.objects.filter(uri=uri).first().get_latest_version()
-                        child.parent_concepts.add(new_latest_version)
+                        if not new_latest_version.is_hierarchy_write_refused(child, policy):
+                            child.parent_concepts.add(new_latest_version)
 
     def create_mappings(self, mappings):
         from core.mappings.serializers import MappingDetailSerializer

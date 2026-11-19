@@ -732,7 +732,9 @@ class CollectionVersionListView(CollectionVersionBaseView, CreateAPIView, ListWi
             raise Http404()
         version = request.data.pop('id', None)
         payload = {
-            "mnemonic": head_object.mnemonic, "id": head_object.mnemonic, "name": head_object.name, **request.data,
+            "name": head_object.name, **request.data,
+            # the version is the URL's repository's, whatever the body says
+            "mnemonic": head_object.mnemonic, "id": head_object.mnemonic,
             "organization_id": head_object.organization_id, "user_id": head_object.user_id,
             'version': version
         }
@@ -800,6 +802,7 @@ class CollectionLatestVersionRetrieveUpdateView(CollectionVersionBaseView, Retri
 
 class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPIView, UpdateAPIView, TaskMixin):
     serializer_class = CollectionVersionDetailSerializer
+    writes_own_object = True  # on HEAD/, its DELETE deletes the repository and its PUT/PATCH can publish it
 
     def get_permissions(self):
         if self.request.method == 'GET':

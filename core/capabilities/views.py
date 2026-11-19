@@ -7,7 +7,7 @@ from rest_framework.views import APIView
 
 from core.capabilities.constants import CAPABILITY_ID_BY_NAME
 from core.capabilities.exceptions import UsageRefused
-from core.capabilities.models import UserCapabilityOverride
+from core.capabilities.models import Capability, UserCapabilityOverride
 from core.capabilities.policy import get_capability_policy
 from core.capabilities.serializers import UserCapabilityOverrideSerializer
 from core.common.mixins import ListWithHeadersMixin
@@ -216,7 +216,8 @@ class UserCapabilityOverrideListView(UserCapabilityOverrideBaseView, ListWithHea
 
 class UserCapabilityOverrideDetailView(UserCapabilityOverrideBaseView, RetrieveUpdateDestroyAPIView):
     def get_capability_id(self):
-        capability_id = CAPABILITY_ID_BY_NAME.get(self.kwargs['capability'])
+        """Any capability in the capabilities table, by its name (a deployment may add its own); a 404 if none."""
+        capability_id = Capability.objects.filter(name=self.kwargs['capability']).values_list('id', flat=True).first()
         if capability_id is None:
             raise Http404()
         return capability_id

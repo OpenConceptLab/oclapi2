@@ -11,10 +11,10 @@ from django.db.models import F
 from ocldev.oclfleximporter import OclFlexImporter
 from pydash import compact, get
 
-from core.capabilities.constants import WRITE_ACTION_DELETE, WRITE_ACTION_EDIT
+from core.capabilities.constants import WRITE_ACTION_EDIT
 from core.capabilities.exceptions import WriteRefused
 from core.capabilities.policy import get_capability_policy
-from core.capabilities.writes import get_write_refusal, get_write_target
+from core.capabilities.writes import get_own_write_action, get_write_refusal, get_write_target
 from core.celery import app
 from core.collections.models import Collection
 from core.common import ERRBIT_LOGGER
@@ -315,7 +315,8 @@ class SourceImporter(BaseResourceImporter):
             source = self.get_queryset().first()
             try:
                 if source.has_parent_edit_access(self.user):
-                    refusal = self.get_write_refusal(source, WRITE_ACTION_DELETE)
+                    # deleting the HEAD deletes the repository; deleting another version is an edit
+                    refusal = self.get_write_refusal(source, get_own_write_action(source, 'DELETE', None))
                     if refusal is not None:
                         return refusal
                     source.delete()
@@ -412,7 +413,8 @@ class CollectionImporter(BaseResourceImporter):
             collection = self.get_queryset().first()
             try:
                 if collection.has_parent_edit_access(self.user):
-                    refusal = self.get_write_refusal(collection, WRITE_ACTION_DELETE)
+                    # deleting the HEAD deletes the repository; deleting another version is an edit
+                    refusal = self.get_write_refusal(collection, get_own_write_action(collection, 'DELETE', None))
                     if refusal is not None:
                         return refusal
                     collection.delete()

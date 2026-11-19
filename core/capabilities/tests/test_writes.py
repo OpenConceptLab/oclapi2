@@ -8,18 +8,28 @@ from core.capabilities.constants import WRITE_ACTION_DELETE, WRITE_ACTION_EDIT, 
 from core.capabilities.exceptions import WriteRefused
 from core.capabilities.policy import GroupLimitPolicy
 from core.capabilities.writes import check_write, get_write_target
+from core.code_systems.serializers import CodeSystemDetailSerializer
+from core.code_systems.views import CodeSystemRetrieveUpdateView
 from core.collections.tests.factories import ExpansionFactory, OrganizationCollectionFactory
+from core.collections.views import CollectionRetrieveUpdateDestroyView
 from core.common.constants import ACCESS_TYPE_NONE
+from core.common.permissions import ChecksWrites
+from core.common.tasks import process_hierarchy_for_new_parent_concept_version
 from core.common.tests import OCLAPITestCase
+from core.concept_maps.serializers import ConceptMapDetailSerializer
+from core.concept_maps.views import ConceptMapRetrieveUpdateView
+from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
-from core.importers.importer import ResourceImporter
+from core.importers.importer import ImportRequest, ResourceImporter
 from core.importers.models import BulkImportInline
 from core.map_projects.tests.factories import AutomatchRunFactory, MapProjectFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.serializers import SourceDetailSerializer
 from core.sources.tests.factories import OrganizationSourceFactory
+from core.sources.views import SourceRetrieveUpdateDestroyView
 from core.users.tests.factories import UserProfileFactory
+from core.value_sets.views import ValueSetRetrieveUpdateView
 
 READ_ONLY_POLICY = 'core.capabilities.tests.test_writes.ReadOnlyPolicy'
 
@@ -33,6 +43,10 @@ class ReadOnlyPolicy(GroupLimitPolicy):
     def get_write_refusal(self, user, content, action):
         self.calls.append((user, content, action))
         return dict(self.body) if content in self.read_only else None
+
+
+def new_concept(source, **kwargs):
+    return ConceptFactory(parent=source, names=[ConceptNameFactory.build(locale='en', locale_preferred=True)], **kwargs)
 
 
 def concept_payload(mnemonic):
@@ -81,6 +95,54 @@ class DefaultPolicyAllowsWritesTest(WriteCheckpointTestMixin, OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.source.refresh_from_db()
         self.assertEqual(self.source.full_name, 'Renamed')
+
+    def test_a_public_access_that_is_not_a_string_is_a_validation_error(self):
+        self.source.public_access = ACCESS_TYPE_NONE
+        self.source.save()
+
+        for public_access in (5, ['View'], {'a': 'View'}):
+            with self.subTest(public_access=public_access):
+                response = self.request('put', self.source.uri, {'public_access': public_access})
+
+                self.assertEqual(response.status_code, 400)
+                self.assertIn('public_access', response.data)
+
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    def test_a_version_is_created_on_the_repository_in_the_url(self):
+        other_source = OrganizationSourceFactory(organization=self.org)
+        other_collection = OrganizationCollectionFactory(organization=self.org)
+        for repo, other in ((self.source, other_source), (self.collection, other_collection)):
+            with self.subTest(repo=repo):
+                response = self.request('post', repo.uri + 'versions/', {'id': 'v2', 'mnemonic': other.mnemonic})
+
+                self.assertEqual(response.status_code, 201, response.data)
+                self.assertTrue(repo.versions.filter(version='v2').exists())
+                self.assertFalse(other.versions.filter(version='v2').exists())
+
+    def test_a_fhir_update_writes_only_the_repository_it_was_asked_about(self):
+        other = OrganizationSourceFactory(organization=self.org, full_name='Other')
+        OrganizationSourceFactory(organization=self.org, mnemonic=self.source.mnemonic, version='v1', released=True)
+        resource = {
+            'resourceType': 'CodeSystem', 'id': other.mnemonic, 'status': 'draft', 'content': 'fragment',
+            'version': 'v2', 'name': 'Renamed', 'title': 'Renamed'
+        }
+
+        response = self.request('put', f'{self.org.uri}CodeSystem/{self.source.mnemonic}/', resource)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('The id must be', json.dumps(response.json()))
+        for serializer_class, resource_type in (
+                (CodeSystemDetailSerializer, 'CodeSystem'), (ConceptMapDetailSerializer, 'ConceptMap')):
+            with self.subTest(resource_type=resource_type):
+                result = ResourceImporter.save_fhir_resource(
+                    serializer_class, self.source, self.org, {**resource, 'resourceType': resource_type},
+                    ImportRequest('orgs', self.org.mnemonic, self.user.username, resource_type))
+
+                self.assertIn('id', result)
+        other.refresh_from_db()
+        self.assertEqual(other.full_name, 'Other')
+        self.assertFalse(Source.objects.filter(version='v2').exists())
 
     def test_the_target_is_the_repository_head_or_the_map_project(self):
         version = OrganizationSourceFactory(organization=self.org, mnemonic=self.source.mnemonic, version='v1')
@@ -131,6 +193,59 @@ class RepositoryWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
         # a repository others can view already is only edited
         self.assert_refused(
             self.request('put', self.collection.uri, {'public_access': 'View'}), self.collection, WRITE_ACTION_EDIT)
+
+    def test_the_head_version_route_classifies_like_the_repository_route(self):
+        self.source.public_access = ACCESS_TYPE_NONE
+        self.source.save()
+
+        self.assert_refused(
+            self.request('put', self.source.uri + 'HEAD/', {'public_access': 'View'}), self.source,
+            WRITE_ACTION_PUBLISH)
+        for repo in (self.source, self.collection):
+            with self.subTest(repo=repo):
+                self.assert_refused(
+                    self.request('patch', repo.uri + 'HEAD/', {'description': 'Changed'}), repo, WRITE_ACTION_EDIT)
+                self.assert_refused(self.request('delete', repo.uri + 'HEAD/'), repo, WRITE_ACTION_DELETE)
+                repo.refresh_from_db()
+                self.assertTrue(repo.is_active)
+
+    def test_a_fhir_write_to_a_release_is_an_edit_and_never_publishes(self):
+        self.source.public_access = ACCESS_TYPE_NONE
+        self.source.save()
+        for repo, factory, resource_type in (
+                (self.source, OrganizationSourceFactory, 'CodeSystem'),
+                (self.collection, OrganizationCollectionFactory, 'ValueSet')):
+            with self.subTest(resource_type=resource_type):
+                release = factory(organization=self.org, mnemonic=repo.mnemonic, version='v1', released=True)
+                url = f'{self.org.uri}{resource_type}/{repo.mnemonic}/'
+
+                for method, data in (('put', {'public_access': 'View', 'title': 'Renamed'}), ('delete', None)):
+                    response = self.request(method, url, data)
+
+                    self.assertEqual(response.status_code, 403)
+                    self.assertEqual(ReadOnlyPolicy.calls, [(self.user, repo, WRITE_ACTION_EDIT)])
+                    ReadOnlyPolicy.calls = []
+                release.refresh_from_db()
+                self.assertTrue(release.is_active)
+
+        # a CodeSystem without a release is its HEAD: its DELETE deletes the repository
+        source = OrganizationSourceFactory(organization=self.org)
+        ReadOnlyPolicy.read_only.append(source)
+        self.assertEqual(self.request('delete', f'{self.org.uri}CodeSystem/{source.mnemonic}/').status_code, 403)
+        self.assertEqual(ReadOnlyPolicy.calls, [(self.user, source, WRITE_ACTION_DELETE)])
+
+    def test_fhir_views_never_publish(self):
+        self.source.public_access = self.collection.public_access = ACCESS_TYPE_NONE
+        request = SimpleNamespace(method='PUT', data={'public_access': 'View'})
+        for view, repo in (
+                (CodeSystemRetrieveUpdateView, self.source), (ConceptMapRetrieveUpdateView, self.source),
+                (ValueSetRetrieveUpdateView, self.collection)):
+            with self.subTest(view=view):
+                self.assertEqual(ChecksWrites().get_write_action(request, view, repo), WRITE_ACTION_EDIT)
+        for view, repo in (
+                (SourceRetrieveUpdateDestroyView, self.source), (CollectionRetrieveUpdateDestroyView, self.collection)):
+            with self.subTest(view=view):
+                self.assertEqual(ChecksWrites().get_write_action(request, view, repo), WRITE_ACTION_PUBLISH)
 
     def test_extras_and_logo_writes_are_edits(self):
         self.assert_refused(
@@ -192,6 +307,21 @@ class RepositoryWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
         version.refresh_from_db()
         self.assertTrue(version.is_active)
         self.assertNotEqual(version.description, 'Changed')
+
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    def test_a_version_of_a_writable_repository_never_lands_in_a_read_only_one(self):
+        for read_only, writable in (
+                (self.source, OrganizationSourceFactory(organization=self.org)),
+                (self.collection, OrganizationCollectionFactory(organization=self.org))):
+            with self.subTest(repo=writable):
+                response = self.request(
+                    'post', writable.uri + 'versions/', {'id': 'v2', 'mnemonic': read_only.mnemonic})
+
+                self.assertEqual(response.status_code, 201, response.data)
+                self.assertEqual(ReadOnlyPolicy.calls, [(self.user, writable, WRITE_ACTION_EDIT)])
+                ReadOnlyPolicy.calls = []
+                self.assertFalse(read_only.versions.filter(version='v2').exists())
 
     def test_clone_into_a_read_only_source_is_an_edit(self):
         other_concept = ConceptFactory(
@@ -315,6 +445,21 @@ class ImportWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
                 (self.user, self.source, WRITE_ACTION_DELETE),
             ])
 
+    def test_a_line_deleting_a_release_is_an_edit(self):
+        release = OrganizationSourceFactory(organization=self.org, mnemonic=self.source.mnemonic, version='v1')
+        importer = BulkImportInline(
+            json.dumps({'type': 'Source', '__action': 'DELETE', 'id': self.source.mnemonic, 'name': 'x',
+                        'owner': self.org.mnemonic, 'owner_type': 'Organization'}),
+            self.user.username, True)
+
+        with patch('core.importers.models.SourceImporter.get_queryset', return_value=Source.objects.filter(
+                id=release.id)):
+            importer.run()
+
+        self.assertEqual([item['errors'] for item in importer.permission_denied], [ReadOnlyPolicy.body])
+        self.assertEqual(ReadOnlyPolicy.calls, [(self.user, self.source, WRITE_ACTION_EDIT)])
+        self.assertTrue(Source.objects.filter(id=release.id).exists())
+
     def test_a_refused_fhir_update_fails_with_the_body(self):
         result = ResourceImporter.save_fhir_resource(
             SourceDetailSerializer, self.source, self.org, {'full_name': 'Renamed'}, SimpleNamespace(user=self.user))
@@ -347,3 +492,43 @@ class HierarchyWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
         self.assertEqual(
             sorted(child.parent_concepts.values_list('versioned_object_id', flat=True)),
             sorted(parent.id for parent in parents))
+
+    def test_a_child_in_a_read_only_repository_keeps_its_parent_links(self):
+        """A parent's new version is linked to its existing children, except those in read-only repositories."""
+        read_only_source, parent_source = (OrganizationSourceFactory(organization=self.org) for _ in range(2))
+        parent = new_concept(parent_source)
+        children = [new_concept(source) for source in (self.source, read_only_source)]
+        for child in children:
+            child.get_latest_version().parent_concepts.add(parent.get_latest_version())
+        ReadOnlyPolicy.read_only = [read_only_source]
+        new_child = new_concept(self.source, created_by=self.user)
+        versions_before = parent.versions.count()
+
+        new_child._parent_concepts = [parent]  # pylint: disable=protected-access
+        new_child.set_parent_concepts_from_uris()
+
+        new_version = parent.get_latest_version()
+        self.assertEqual(parent.versions.count(), versions_before + 1)
+        self.assertEqual(
+            [new_version in child.get_latest_version().parent_concepts.all() for child in children], [True, False])
+        self.assertIn((self.user, read_only_source, WRITE_ACTION_EDIT), ReadOnlyPolicy.calls)
+
+    def test_the_parent_version_task_leaves_a_read_only_child_as_it_is(self):
+        read_only_source = OrganizationSourceFactory(organization=self.org)
+        parent = new_concept(self.source)
+        prev_version = parent.get_latest_version()
+        children = [new_concept(source) for source in (self.source, read_only_source)]
+        for child in children:
+            child.get_latest_version().parent_concepts.add(prev_version)
+        ReadOnlyPolicy.read_only = [read_only_source]
+        Concept.create_new_version_for(
+            parent.clone(), {'names': [name.to_dict() for name in parent.names.all()]}, self.user,
+            create_parent_version=False, _hierarchy_processing=True)
+        new_version = parent.get_latest_version()
+        ReadOnlyPolicy.calls = []
+
+        process_hierarchy_for_new_parent_concept_version(prev_version.id, new_version.id)
+
+        self.assertEqual(
+            [new_version in child.get_latest_version().parent_concepts.all() for child in children], [True, False])
+        self.assertEqual(ReadOnlyPolicy.calls, [(self.user, read_only_source, WRITE_ACTION_EDIT)])

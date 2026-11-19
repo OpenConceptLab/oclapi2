@@ -85,23 +85,27 @@ class ChecksWrites(BasePermission):
         if request.method not in SAFE_METHODS and getattr(view, 'writes_content', True):
             content = get_write_target(obj)
             if content is not None:
-                check_write(request.user, content, self.get_write_action(request, view, content))
+                check_write(request.user, content, self.get_write_action(request, view, obj))
         return True
 
-    def get_write_action(self, request, view, content):  # pylint: disable=unused-argument
+    def get_write_action(self, request, view, obj):
+        """
+        A view whose PUT, PATCH and DELETE act on the object they're checked against sets `writes_own_object = True`:
+        when that object is a repository's HEAD or a map project, a DELETE deletes the whole of it and a change can
+        publish it (core.capabilities.writes.get_own_write_action), unless the view sets `applies_public_access = False`
+        because its writes never apply the `public_access` they're sent. Any other write is an edit.
+        """
+        if getattr(view, 'writes_own_object', False):
+            return get_own_write_action(
+                obj, request.method, request.data, getattr(view, 'applies_public_access', True))
         return WRITE_ACTION_EDIT
 
 
 class CanEditConceptDictionary(ChecksWrites, HasPrivateAccess):
     """
     The user is staff, the repo's owner, or a member of the owning organization, and the capability policy doesn't
-    refuse the write (ChecksWrites). A view whose PUT, PATCH and DELETE act on the repository or map project itself
-    sets `writes_own_object = True`: its DELETE deletes it and its change can publish it. Any other write is an edit.
+    refuse the write (ChecksWrites).
     """
-    def get_write_action(self, request, view, content):
-        if getattr(view, 'writes_own_object', False):
-            return get_own_write_action(content, request.method, request.data)
-        return WRITE_ACTION_EDIT
 
 
 class HasAccessToVersionedObject(BasePermission):
@@ -126,7 +130,10 @@ class HasAccessToVersionedObject(BasePermission):
 
 
 class CanEditConceptDictionaryVersion(ChecksWrites, HasAccessToVersionedObject):
-    """HasAccessToVersionedObject, and the capability policy doesn't refuse the write: an edit of the version's HEAD."""
+    """
+    HasAccessToVersionedObject, and the capability policy doesn't refuse the write to the version's HEAD (an edit,
+    unless the view writes its own object and that's the HEAD: ChecksWrites.get_write_action).
+    """
 
 
 class CanViewConceptDictionaryVersion(HasAccessToVersionedObject):

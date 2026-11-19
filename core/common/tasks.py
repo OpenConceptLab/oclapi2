@@ -569,14 +569,18 @@ def process_hierarchy_for_concept_version(
 )
 def process_hierarchy_for_new_parent_concept_version(prev_version_id, latest_version_id):
     """
-      Associates latest parent version to child concepts
+      Associates latest parent version to child concepts, except those in repositories the capability policy refuses
+      the version's author an edit of (Concept.is_hierarchy_write_refused)
     """
+    from core.capabilities.policy import get_capability_policy
     from core.concepts.models import Concept
     prev_version = Concept.objects.filter(id=prev_version_id).first()
     latest_version = Concept.objects.filter(id=latest_version_id).first()
     if prev_version and latest_version:
+        policy = get_capability_policy()
         for concept in Concept.objects.filter(parent_concepts__uri=prev_version.uri):
-            concept.parent_concepts.add(latest_version)
+            if not latest_version.is_hierarchy_write_refused(concept, policy):
+                concept.parent_concepts.add(latest_version)
 
 
 @app.task

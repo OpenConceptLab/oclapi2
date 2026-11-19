@@ -33,6 +33,7 @@ class ValueSetValidateCodeView(FhirOperationView):
 class ValueSetRetrieveUpdateView(FhirViewMixin, FhirReadMixin, CollectionRetrieveUpdateDestroyView):
     resource_type = 'ValueSet'
     serializer_class = ValueSetDetailSerializer
+    applies_public_access = False  # a ValueSet has no public_access, so an update never publishes
 
     def get_filter_params(self, default_version_to_head=True):
         return super().get_filter_params(False)

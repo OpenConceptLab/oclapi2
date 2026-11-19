@@ -39,6 +39,7 @@ class CodeSystemValidateCodeView(FhirOperationView):
 class CodeSystemRetrieveUpdateView(FhirViewMixin, FhirReadMixin, SourceRetrieveUpdateDestroyView):
     resource_type = 'CodeSystem'
     serializer_class = CodeSystemDetailSerializer
+    applies_public_access = False  # a CodeSystem has no public_access, so an update never publishes
 
     def get_filter_params(self, default_version_to_head=True):
         return super().get_filter_params(False)

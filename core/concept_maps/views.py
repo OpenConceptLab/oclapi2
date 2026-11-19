@@ -27,6 +27,7 @@ class ConceptMapListView(FhirViewMixin, FhirSearchMixin, SourceListView):
 class ConceptMapRetrieveUpdateView(FhirViewMixin, FhirReadMixin, SourceRetrieveUpdateDestroyView):
     resource_type = 'ConceptMap'
     serializer_class = ConceptMapDetailSerializer
+    applies_public_access = False  # a ConceptMap has no public_access, so an update never publishes
 
     def get_filter_params(self, default_version_to_head=True):
         return super().get_filter_params(False)

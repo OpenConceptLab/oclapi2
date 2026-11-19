@@ -30,7 +30,7 @@ class CanEditDictionaryContent(CanEditConceptDictionary):
     For a write to what a repository holds (a concept, a mapping, a name, an extra): whatever the method, the capability
     policy is asked about an edit of the repository, never its deletion or publication.
     """
-    def get_write_action(self, request, view, content):  # pylint: disable=unused-argument
+    def get_write_action(self, request, view, obj):  # pylint: disable=unused-argument
         return WRITE_ACTION_EDIT
 
 

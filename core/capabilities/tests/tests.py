@@ -164,6 +164,23 @@ class UserCapabilityOverrideViewTest(OCLAPITestCase):
         self.assertEqual(
             response.data, {'capability': {'name': 'mapper.projects', 'limit': 7, 'used': 0}, 'limit': 7})
 
+    def test_any_capability_in_the_table_can_be_overridden(self):
+        capability = Capability.objects.create(name='example.extra')
+        url = self.url + 'example.extra/'
+        token = 'Token ' + self.staff.get_token()
+
+        response = self.client.put(url, data={'limit': 4}, format='json', HTTP_AUTHORIZATION=token)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['limit'], 4)
+        self.assertEqual(response.data['capability']['name'], 'example.extra')
+        self.assertTrue(
+            UserCapabilityOverride.objects.filter(user=self.target, capability=capability, limit=4).exists())
+        self.assertEqual(self.client.get(url, HTTP_AUTHORIZATION=token).data['limit'], 4)
+
+        response = self.client.delete(url, HTTP_AUTHORIZATION=token)
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(UserCapabilityOverride.objects.filter(user=self.target).exists())
+
     def test_override_does_not_leak_across_users(self):
         other_user = UserProfileFactory()
         UserCapabilityOverride.objects.create(
