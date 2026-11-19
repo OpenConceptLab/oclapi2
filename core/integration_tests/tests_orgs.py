@@ -5,6 +5,7 @@ from django.db import DEFAULT_DB_ALIAS, OperationalError, connection, connection
 from django.test import override_settings, tag
 from mock import patch
 from mock.mock import Mock, ANY
+from psycopg2.errorcodes import LOCK_NOT_AVAILABLE
 from rest_framework.exceptions import ErrorDetail
 from rest_framework.test import APIClient
 
@@ -1406,8 +1407,10 @@ class TwoMembersAtMostPolicy(GroupLimitPolicy):
             with other.cursor() as cursor:
                 cursor.execute('SELECT id FROM organizations WHERE id = %s FOR UPDATE NOWAIT', [organization.id])
             return False
-        except OperationalError:
-            return True
+        except OperationalError as error:
+            if getattr(error.__cause__, 'pgcode', None) == LOCK_NOT_AVAILABLE:
+                return True
+            raise
         finally:
             other.close()
 
