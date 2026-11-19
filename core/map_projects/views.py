@@ -122,10 +122,10 @@ class MapProjectListView(MapProjectBaseView, ConceptDictionaryCreateMixin, ListW
             # either commits (TOCTOU). Locking the user row, then an organization
             # owner's, serializes creates by the same user and under the same
             # organization; re-check capacity under the locks before persisting.
-            type(request.user).objects.select_for_update().get(pk=request.user.pk)
+            locked_user = type(request.user).objects.select_for_update().get(pk=request.user.pk)
             if isinstance(self.parent_resource, Organization):
                 Organization.objects.select_for_update(no_key=True).only('id').get(pk=self.parent_resource.pk)
-            check_map_project_capacity(request.user, get_capability_policy(), self.parent_resource)
+            check_map_project_capacity(locked_user, get_capability_policy(), self.parent_resource)
 
             instance = serializer.save(force_insert=True)
             if not instance.pk:

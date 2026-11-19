@@ -29,10 +29,14 @@ class MapProjectModelTest(OCLTestCase):
         orgs = MapProjectFactory(organization=org, created_by=UserProfileFactory())
         created_elsewhere = MapProjectFactory(created_by=user)
         someone_elses = MapProjectFactory(organization=None, user=UserProfileFactory())
+        # a project with both owners is its organization's, as HasPrivateAccess reads `parent`
+        both_owners = MapProjectFactory(user=user)
 
         self.assertEqual(set(MapProject.editable_by(user)), {own, orgs})
+        self.assertEqual(both_owners.parent, both_owners.organization)
         staff = UserProfileFactory(is_staff=True)
-        self.assertEqual(set(MapProject.editable_by(staff)), {own, orgs, created_elsewhere, someone_elses})
+        self.assertEqual(
+            set(MapProject.editable_by(staff)), {own, orgs, created_elsewhere, someone_elses, both_owners})
 
     def test_matches_summary(self):
         project = MapProject(matches=[

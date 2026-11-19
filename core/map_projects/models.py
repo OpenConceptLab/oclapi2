@@ -103,11 +103,12 @@ class MapProject(BaseModel):
     @classmethod
     def editable_by(cls, user):
         """The projects `user` may edit, as CanEditConceptDictionary decides: all for staff, else their own and their
-        organizations'."""
+        organizations'. A project with an organization is the organization's, whatever its user."""
         if user.is_staff:
             return cls.objects.all()
         return cls.objects.filter(
-            models.Q(user_id=user.id) | models.Q(organization__in=user.organizations.values('id')))
+            models.Q(organization__isnull=True, user_id=user.id) |
+            models.Q(organization__in=user.organizations.values('id')))
 
     @property
     def matches_summary(self):

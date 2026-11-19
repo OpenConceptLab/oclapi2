@@ -71,9 +71,11 @@ class CapabilityBaseView(APIView):
             run_qs = AutomatchRun.objects.filter(id=int(run_id))
             run_qs = run_qs.filter(map_project=map_project) if map_project else run_qs.filter(
                 map_project__in=editable.values('id'))
-            run = run_qs.only('id', 'map_project_id').first()
+            # the run's project in the same query, so it can't vanish between the two
+            run = run_qs.select_related('map_project').only(
+                'id', 'map_project__id', 'map_project__organization_id', 'map_project__user_id').first()
             if run and not map_project:
-                map_project = MapProject.objects.only('id', 'organization_id', 'user_id').get(id=run.map_project_id)
+                map_project = run.map_project
 
         return map_project, run
 
