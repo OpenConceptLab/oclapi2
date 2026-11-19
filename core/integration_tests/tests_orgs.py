@@ -1,7 +1,7 @@
 import threading
 import time
 
-from django.db import connection
+from django.db import DEFAULT_DB_ALIAS, OperationalError, connection, connections
 from django.test import override_settings, tag
 from mock import patch
 from mock.mock import Mock, ANY
@@ -1386,13 +1386,30 @@ class OrganizationNewMemberCheckTest(OCLAPITestCase):
 
 
 class TwoMembersAtMostPolicy(GroupLimitPolicy):
-    """Refuses a third member, after a pause between counting and adding."""
+    """
+    Refuses a third member, after a pause between counting and adding. Records, for each check, whether another
+    connection found the organization locked and whether the member had joined yet.
+    """
+    seen = []
 
     def check_new_member(self, user, organization, member):
+        self.seen.append((self.is_locked(organization), organization.is_member(member)))
         members = organization.members.count()
         time.sleep(0.5)  # widens the gap between the count and the add
         if members >= 2:
             raise UsageRefused({'detail': 'Not now.'})
+
+    @staticmethod
+    def is_locked(organization):
+        other = connections.create_connection(DEFAULT_DB_ALIAS)
+        try:
+            with other.cursor() as cursor:
+                cursor.execute('SELECT id FROM organizations WHERE id = %s FOR UPDATE NOWAIT', [organization.id])
+            return False
+        except OperationalError:
+            return True
+        finally:
+            other.close()
 
 
 @override_settings(CAPABILITY_POLICY='core.integration_tests.tests_orgs.TwoMembersAtMostPolicy')
@@ -1400,6 +1417,7 @@ class OrganizationNewMemberConcurrencyTest(OCLAPITransactionTestCase):
     """Runs two adds at once, on separate connections, to check that the policy counts them one after the other."""
 
     def test_two_members_added_at_once_are_checked_in_turn(self):
+        TwoMembersAtMostPolicy.seen = []
         admin = UserProfileFactory(username='admin')
         org = OrganizationFactory(mnemonic='race-org', created_by=admin, updated_by=admin)
         newcomers = [UserProfileFactory(username='carol'), UserProfileFactory(username='dave')]
@@ -1425,6 +1443,8 @@ class OrganizationNewMemberConcurrencyTest(OCLAPITransactionTestCase):
 
         self.assertEqual(sorted(statuses.values()), [204, 403])
         self.assertEqual(org.members.count(), 2)
+        # each check ran under the organization's lock, before its member joined
+        self.assertEqual(TwoMembersAtMostPolicy.seen, [(True, False), (True, False)])
 
 
 @override_settings(CAPABILITY_POLICY='core.capabilities.policy.GroupLimitPolicy')
