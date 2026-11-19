@@ -3,6 +3,8 @@ The write checkpoint: a capability policy may keep content read-only and refuse 
 (CapabilityPolicy.get_write_refusal). A call site asks only once the user's own access allows the write. The default
 policy refuses nothing.
 """
+from time import monotonic
+
 from core.capabilities.constants import WRITE_ACTION_DELETE, WRITE_ACTION_EDIT, WRITE_ACTION_PUBLISH
 from core.capabilities.exceptions import WriteRefused
 from core.capabilities.policy import get_capability_policy
@@ -63,21 +65,24 @@ def get_write_refusal(user, content, action, policy=None):
 class BatchWriteRefusals:
     """
     The write checks of one batch (an import's lines): one capability policy, asked once per user, saved repository
-    row and action. An import line never changes the access of a row that already exists, which is what the policy's
-    answer turns on, so the answer holds for the rest of the batch.
+    row and action, then again once that answer is `answer_seconds` old. An import line never changes the access of a
+    row that already exists; anything else that changes the policy's answer reaches a long batch within that time.
     """
+    answer_seconds = 60
+
     def __init__(self):
         self.policy = get_capability_policy()
-        self.answers = {}
+        self.answers = {}  # (refusal, when it was asked) by question
 
     def get(self, user, content, action):
-        """get_write_refusal, asked once for a saved row; a row not saved yet (a new version) is asked every time."""
+        """get_write_refusal, kept a while for a saved row; a row not saved yet (a new version) is asked every time."""
         if content is None or content.pk is None:
             return get_write_refusal(user, content, action, self.policy)
         key = (user.pk, type(content), content.pk, action)
-        if key not in self.answers:
-            self.answers[key] = get_write_refusal(user, content, action, self.policy)
-        return self.answers[key]
+        now = monotonic()
+        if key not in self.answers or now - self.answers[key][1] >= self.answer_seconds:
+            self.answers[key] = (get_write_refusal(user, content, action, self.policy), now)
+        return self.answers[key][0]
 
 
 def check_write(user, content, action, policy=None):

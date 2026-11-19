@@ -165,16 +165,20 @@ class DefaultPolicyAllowsWritesTest(WriteCheckpointTestMixin, OCLAPITestCase):
                     self.assertEqual((version.mnemonic, version.description), (repo.mnemonic, 'Changed'))
                     self.assertFalse(other.versions.filter(version='v1').exists())
 
-    def test_a_version_relabelled_head_keeps_its_repository(self):
+    def test_a_row_takes_a_new_mnemonic_only_as_a_head_that_stays_one(self):
+        """A version relabelled HEAD, or a HEAD relabelled a version, keeps its repository."""
         for repo, factory, serializer in (
                 (self.source, OrganizationSourceFactory, SourceVersionDetailSerializer),
                 (self.collection, OrganizationCollectionFactory, CollectionVersionDetailSerializer)):
             with self.subTest(repo=repo):
                 version = factory(organization=self.org, mnemonic=repo.mnemonic, version='v1')
 
-                prepared = serializer().prepare_object({'version': 'HEAD', 'mnemonic': 'elsewhere'}, version)
-
-                self.assertEqual(prepared.mnemonic, repo.mnemonic)
+                for row, label in ((version, 'HEAD'), (repo, 'v9')):
+                    row = type(row).objects.get(id=row.id)
+                    prepared = serializer().prepare_object({'version': label, 'mnemonic': 'elsewhere'}, row)
+                    self.assertEqual(prepared.mnemonic, repo.mnemonic)
+                head = type(repo).objects.get(id=repo.id)
+                self.assertEqual(serializer().prepare_object({'mnemonic': 'renamed'}, head).mnemonic, 'renamed')
 
     def test_a_version_without_an_active_head_is_published_as_it_would_be_viewed(self):
         version = OrganizationSourceFactory(
@@ -601,6 +605,18 @@ class ImportWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
         self.assertEqual(
             ReadOnlyPolicy.calls,
             [(self.user, self.source, WRITE_ACTION_EDIT), (self.user, self.writable_source, WRITE_ACTION_EDIT)])
+
+    def test_a_batch_asks_again_once_an_answer_is_a_minute_old(self):
+        """A change in the policy's answer (a date passing, an override) reaches a long import within the minute."""
+        write_refusals = BatchWriteRefusals()
+        ReadOnlyPolicy.read_only = []
+
+        with patch('core.capabilities.writes.monotonic', side_effect=[0, 59, 60]):
+            self.assertIsNone(write_refusals.get(self.user, self.source, WRITE_ACTION_EDIT))
+            ReadOnlyPolicy.read_only = [self.source]
+            self.assertIsNone(write_refusals.get(self.user, self.source, WRITE_ACTION_EDIT))
+            self.assertEqual(write_refusals.get(self.user, self.source, WRITE_ACTION_EDIT), ReadOnlyPolicy.body)
+        self.assertEqual(len(ReadOnlyPolicy.calls), 2)
 
     def test_the_rows_of_a_package_file_share_their_answers(self):
         importer = ResourceImporter(write_refusals=BatchWriteRefusals())

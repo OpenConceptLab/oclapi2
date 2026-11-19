@@ -168,9 +168,11 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
 
     def prepare_object(self, validated_data, instance=None):
         collection = instance if instance else Collection()
-        renames = not instance or instance.is_head  # a version never moves to another repository
+        was_head = instance is not None and instance.is_head
         collection.version = validated_data.get('version', collection.version) or HEAD
-        if renames:
+        # a stored row takes a new mnemonic only as a HEAD that stays one: a version, or a HEAD the body makes one,
+        # never moves to another repository
+        if instance is None or (was_head and collection.is_head):
             collection.mnemonic = validated_data.get(self.Meta.lookup_field, collection.mnemonic)
         collection.public_access = validated_data.get('public_access', collection.public_access or DEFAULT_ACCESS_TYPE)
         collection.default_locale = validated_data.get('default_locale', collection.default_locale or DEFAULT_LOCALE)
