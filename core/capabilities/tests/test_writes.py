@@ -530,7 +530,7 @@ class MapProjectWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
         self.assertFalse(self.project.auto_match_runs.exists())
 
     def test_a_started_run_records_its_progress_and_finishes_without_being_asked(self):
-        """A project can turn read-only during a run (its creator's limit drops): the run still closes."""
+        """The policy's answer for a project can change during a run: the run still closes."""
         run = AutomatchRunFactory(map_project=self.project)
 
         response = self.request(
