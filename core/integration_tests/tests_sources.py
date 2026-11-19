@@ -3664,6 +3664,23 @@ class SourceReleaseWhileSeedingTest(OCLAPITestCase):
 
         self.assertTrue(Source.objects.get(id=self.version.id).is_awaiting_members)
 
+    def test_queued_unflag_runs_as_queued_when_the_superseded_release_has_no_seed_task(self):
+        only_in_previous = ConceptFactory(parent=self.source)
+        in_superseded_too = ConceptFactory(parent=self.source)
+        only_in_previous.sources.add(self.previous)
+        in_superseded_too.sources.add(self.previous, self.version)
+        Source.objects.filter(id=self.version.id).update(released=True)
+        self.seed_task.delete()  # as for a version seeded inline (FHIR), or a task that expired
+        latest = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v3', released=True)
+        Task.new(user=self.user, name='seed_children_to_new_version', args=['source', latest.id, False, False])
+
+        with patch('core.common.tasks.batch_index_with_summary') as batch_index:
+            index_source_concepts(
+                self.previous.id, {'is_in_latest_source_version': False}, exclude_members_of=self.version.id)
+
+        self.assertEqual(set(batch_index.call_args[0][1].values_list('id', flat=True)), {only_in_previous.id})
+
     @patch.object(Source, 'index_resources_for_self_as_latest_released')
     def test_release_of_a_seeded_version_is_indexed_straight_away(self, index_release):
         Task.objects.filter(id=self.seed_task.id).update(summary={SEED_STAGE: SEED_MEMBERS_WRITTEN})

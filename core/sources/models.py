@@ -648,7 +648,8 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         """
         What a queued write should do now, as (partial_doc, exclude_members_of). A False write whose release has been
         superseded leaves out the latest release's members instead, or, while those aren't written yet, is left to the
-        latest release to repeat. Any other release flag that's out of date goes, and the rest of the doc still applies.
+        latest release to repeat. A superseded release with no seed task can't be reopened for that, so the write runs
+        as queued. Any other release flag that's out of date goes, and the rest of the doc still applies.
         """
         if self.flag_write_is_current(partial_doc, exclude_members_of):
             return partial_doc, exclude_members_of
@@ -659,6 +660,9 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 return partial_doc, latest.id
             superseded = Source.objects.filter(id=exclude_members_of).first()
             seed_task = superseded.get_seed_new_version_task() if superseded else None
+            if not seed_task:
+                # The latest release's walk stops at it: its True write, queued once seeded, restores shared members
+                return partial_doc, exclude_members_of
             if get(seed_task, 'summary') == {SEED_STAGE: SEED_RELEASE_INDEXED}:
                 superseded.record_seed_stage(SEED_MEMBERS_WRITTEN)
         return {key: value for key, value in partial_doc.items() if key != 'is_in_latest_source_version'}, None
