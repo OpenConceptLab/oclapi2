@@ -108,15 +108,6 @@ class MakesPrivateTest(OCLAPITestCase):
             with self.subTest(new=(new.public_access, new.parent), stored=stored and stored.public_access):
                 self.assertEqual(makes_private(new, stored), expected)
 
-    def test_a_version_is_private_by_its_own_access_whatever_its_head_s(self):
-        head = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
-        version = OrganizationSourceFactory(
-            organization=head.organization, mnemonic=head.mnemonic, version='v1', public_access=ACCESS_TYPE_VIEW)
-        stored = Source.objects.get(id=version.id)
-        version.public_access = ACCESS_TYPE_NONE
-
-        self.assertTrue(makes_private(version, stored))
-
 
 @override_settings(CAPABILITY_POLICY=PRIVATE_GATE_POLICY)
 class CreatePrivateRepositoryTest(MakePrivateTestMixin, OCLAPITestCase):
@@ -164,7 +155,7 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
         self.assertEqual(row.public_access, ACCESS_TYPE_VIEW)
 
     def test_making_a_head_private_is_refused_on_every_route(self):
-        for repo in (self.source, self.collection):
+        for repo in (self.source, self.collection, UserSourceFactory(user=self.user)):
             for url in (repo.uri, repo.uri + 'HEAD/'):
                 with self.subTest(url=url):
                     self.assert_refused(self.request('put', url, {'public_access': 'None'}), repo)
@@ -181,11 +172,6 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
                 # under a private HEAD too: the version keeps its own access, which others view once the HEAD is public
                 type(repo).objects.filter(id=repo.id).update(public_access=ACCESS_TYPE_NONE)
                 self.assert_refused(self.request('put', version.uri, {'public_access': 'None'}), version)
-
-    def test_a_user_owned_repository_made_private_is_refused(self):
-        source = UserSourceFactory(user=self.user)
-
-        self.assert_refused(self.request('put', source.uri, {'public_access': 'None'}), source)
 
     def test_private_rows_edited_or_made_public_are_not_asked(self):
         PrivateGatePolicy.refuse = True
