@@ -89,17 +89,18 @@ class CapabilityPolicy(ABC):
 
         `content` is the repository row written (a Source or a Collection: its HEAD, or the version a write to a
         version changes) or a MapProject. `action` is one of core.capabilities.constants' WRITE_ACTION_*: `edit`,
-        `delete` (the whole repository or map project), or `publish` (a write that sets public_access so that a
-        repository row others can't view becomes viewable by them). A FHIR update is always an `edit`, since it never
+        `delete` (the whole repository or map project), or `publish` (a write whose public_access value makes a
+        repository row others can't view viewable by them). A FHIR update is always an `edit`, since it never
         applies the public_access it's sent, and so is any change to a map project, its public_access included.
 
         Not asked: reads, and generating or downloading an export (uploading or removing an external export is an
         `edit` of its version); creating a repository; writes that change no content (`writes_content = False`);
         routes only staff may use (`IsAdminUser`: a mapping's hard delete, a concept or mapping version's DELETE, the
-        hierarchy amend route); and deleting an owner (an organization, by its route or an import line, or a user, by
-        staff), which deletes its repositories without asking about each. Writes a worker makes on its own (a bulk
-        import's lines, a parent's new version in another repository during a hierarchy update) are asked in the
-        worker. Other queued writes are asked when they're requested, and a reference add asks again when it runs.
+        hierarchy amend route); deleting an owner (an organization, by its route or an import line, or a user, by
+        staff), which deletes its repositories without asking about each; and linking a parent's new version to the
+        children it already has. Writes a worker makes on its own (a bulk import's lines, a parent's new version in
+        another repository during a hierarchy update) are asked in the worker. Other queued writes are asked when
+        they're requested, and a reference add asks again when it runs.
 
         Returns None to allow the write, or the refusal body to send. By default, every write is allowed.
         """
