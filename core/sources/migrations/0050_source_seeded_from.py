@@ -37,7 +37,7 @@ def backfill_seeded_from(apps, schema_editor):  # pylint: disable=unused-argumen
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('sources', '0048_source_versioning_mode'),
+        ('sources', '0049_source_versioning_mode'),
     ]
 
     operations = [
