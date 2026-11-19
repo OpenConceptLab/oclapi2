@@ -9,6 +9,7 @@ from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAuthenticate
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.capabilities.policy import get_capability_policy
 from core.client_configs.views import ResourceClientConfigsView
 from core.collections.views import CollectionListView
 from core.common.constants import NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, HEAD, UPDATED_BY_USERNAME_PARAM, \
@@ -254,6 +255,9 @@ class OrganizationMemberView(generics.GenericAPIView):
                 return Response({'role': [INVALID_ROLE]}, status=status.HTTP_400_BAD_REQUEST)
             if role == ROLE_MEMBER and self.organization.is_last_admin(self.userprofile):
                 return Response({'detail': CANNOT_REMOVE_LAST_ADMIN}, status=status.HTTP_409_CONFLICT)
+            if not self.organization.is_member(self.userprofile):
+                # a refusal raises UsageRefused, sent as the policy built it
+                get_capability_policy().check_new_member(request.user, self.organization, self.userprofile)
             joined = self.organization.set_member_role(self.userprofile, role)
 
         if joined:
