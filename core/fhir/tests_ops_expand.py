@@ -513,7 +513,13 @@ class ExpandCases(OpsCorpusMixin):
         def pinned(expression, version=None):  # as an expansion records a pinned reference it couldn't resolve
             return CollectionReference(expression=expression, resource_version=version).to_unresolved_resource_version()
 
+        # the version's own reference decides, as it did for the expansion: a mapping whose expression doesn't say so
+        typed = CollectionReference.objects.create(
+            collection=self.fevers_v1, expression='https://example.org/map/1/10', reference_type='mappings',
+            system='/orgs/Acme/sources/CS/', code='1', resource_version='10')
         for reference, message_id, text in (
+                (typed.to_unresolved_resource_version(), 'OCL_UNKNOWN_MAPPING_VERSION_EXP',
+                 f"The mapping 'https://example.org/map/1/10' version '10' {cannot}"),
                 (pinned(f'{concept}38/', '38'), 'OCL_UNKNOWN_CONCEPT_VERSION_EXP',
                  f"The concept '{concept}38/' version '38' {cannot}"),
                 (pinned(f'{mapping}10/', '10'), 'OCL_UNKNOWN_MAPPING_VERSION_EXP',

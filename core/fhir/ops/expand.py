@@ -236,19 +236,22 @@ def stored_expansion(value_set):
     if expansion.is_processing:
         raise outcomes.ProcessingError(f'The expansion of the value set {name} is being computed: try again shortly.')
     if expansion.unresolved_repo_versions:
-        raise unresolved(expansion.unresolved_repo_versions[0])
+        raise unresolved(expansion.unresolved_repo_versions[0], value_set)
     return expansion
 
 
-def unresolved(reference):
+def unresolved(reference, value_set):
     """
-    The 422 not-found for the first reference an expansion couldn't resolve: a value set; a pinned concept or mapping,
-    told apart by its expression as the reference tells them apart; else a code system.
+    The 422 not-found for the first reference an expansion of the value set version couldn't resolve: a value set; a
+    pinned concept or mapping, as the version's reference that pinned it is one (its type, else its expression, as the
+    expansion evaluated it), or as the expression reads when the version no longer has that reference; else a code
+    system.
     """
     url, version = reference.get('url') or '', reference.get('version') or None
     kind = reference.get('type')
     if kind == UNRESOLVED_RESOURCE_VERSION_TYPE:
-        kind = 'mapping' if is_mapping(url) else 'concept'
+        pinned = value_set.references.filter(expression=url, resource_version=version).first()
+        kind = 'mapping' if (pinned.is_mapping if pinned else is_mapping(url)) else 'concept'
     message_id, message = UNRESOLVED.get(kind, UNRESOLVED['system'])[bool(version)]
     return outcomes.NotFoundError(message.format(url=url, version=version), tx_issue_type='not-found',
                                   message_id=message_id, status_code=422)
