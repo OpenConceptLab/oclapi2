@@ -163,7 +163,8 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
     def prepare_object(self, validated_data, instance=None):
         source = instance if instance else Source()
         source.version = validated_data.get('version', source.version) or HEAD
-        source.mnemonic = validated_data.get(self.Meta.lookup_field, source.mnemonic)
+        if not instance or instance.is_head:  # a version never moves to another repository
+            source.mnemonic = validated_data.get(self.Meta.lookup_field, source.mnemonic)
         source.public_access = validated_data.get('public_access', source.public_access or DEFAULT_ACCESS_TYPE)
         source.default_locale = validated_data.get('default_locale', source.default_locale or DEFAULT_LOCALE)
 
@@ -491,7 +492,7 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
     type = CharField(source='resource_version_type')
     uuid = CharField(source='id')
     id = CharField(source='version')
-    short_code = CharField(source='mnemonic', read_only=True)  # a version never moves to another repository
+    short_code = CharField(source='mnemonic')
     owner = CharField(source='parent_resource')
     owner_type = CharField(source='parent_resource_type')
     owner_url = CharField(source='parent_url')

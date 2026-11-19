@@ -28,6 +28,7 @@ class ConceptMapRetrieveUpdateView(FhirViewMixin, FhirReadMixin, SourceRetrieveU
     resource_type = 'ConceptMap'
     serializer_class = ConceptMapDetailSerializer
     applies_public_access = False  # a ConceptMap has no public_access, so an update never publishes
+    updates_head = True  # an update saves onto HEAD and adds a version, whichever version the URL resolves
 
     def get_filter_params(self, default_version_to_head=True):
         return super().get_filter_params(False)

@@ -154,12 +154,15 @@ class DefaultPolicyAllowsWritesTest(WriteCheckpointTestMixin, OCLAPITestCase):
                 other = factory(organization=self.org)
                 version = factory(organization=self.org, mnemonic=repo.mnemonic, version='v1')
 
-                response = self.request('put', version.uri, {'short_code': other.mnemonic, 'description': 'Changed'})
+                for url, data in (
+                        (version.uri, {'short_code': other.mnemonic, 'description': 'Changed'}),
+                        (repo.uri + '?version=v1', {'id': other.mnemonic, 'description': 'Changed'})):
+                    response = self.request('put', url, data)
 
-                self.assertEqual(response.status_code, 200, response.data)
-                version.refresh_from_db()
-                self.assertEqual((version.mnemonic, version.description), (repo.mnemonic, 'Changed'))
-                self.assertFalse(other.versions.filter(version='v1').exists())
+                    self.assertEqual(response.status_code, 200, response.data)
+                    version.refresh_from_db()
+                    self.assertEqual((version.mnemonic, version.description), (repo.mnemonic, 'Changed'))
+                    self.assertFalse(other.versions.filter(version='v1').exists())
 
     @patch('core.map_projects.models.MapProject._delete_uploaded_file', Mock())
     def test_a_delete_body_is_never_read(self):
@@ -236,6 +239,29 @@ class RepositoryWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
                 repo.refresh_from_db()
                 self.assertTrue(repo.is_active)
 
+    @patch('core.sources.models.index_source_concepts', Mock(__name__='index_source_concepts'))
+    @patch('core.sources.models.index_source_mappings', Mock(__name__='index_source_mappings'))
+    def test_a_fhir_update_is_asked_about_the_head_it_saves_onto(self):
+        ReadOnlyPolicy.read_only = []
+        release = OrganizationSourceFactory(
+            organization=self.org, mnemonic=self.source.mnemonic, version='v1', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        ReadOnlyPolicy.read_only = [release]
+        resource = {
+            'resourceType': 'CodeSystem', 'id': self.source.mnemonic, 'status': 'draft', 'content': 'fragment',
+            'version': 'v2', 'name': 'Renamed', 'title': 'Renamed'
+        }
+
+        response = self.request('put', f'{self.org.uri}CodeSystem/{self.source.mnemonic}/', resource)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(ReadOnlyPolicy.calls, [(self.user, self.source, WRITE_ACTION_EDIT)])
+        ReadOnlyPolicy.calls = []
+        ResourceImporter.save_fhir_resource(
+            CodeSystemDetailSerializer, release, self.org, {**resource, 'version': 'v3'},
+            ImportRequest('orgs', self.org.mnemonic, self.user.username, 'CodeSystem'))
+        self.assertEqual(ReadOnlyPolicy.calls, [(self.user, self.source, WRITE_ACTION_EDIT)])
+
     def test_a_fhir_write_to_a_release_is_an_edit_and_never_publishes(self):
         self.source.public_access = ACCESS_TYPE_NONE
         self.source.save()
@@ -246,11 +272,12 @@ class RepositoryWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
                 release = factory(organization=self.org, mnemonic=repo.mnemonic, version='v1', released=True)
                 url = f'{self.org.uri}{resource_type}/{repo.mnemonic}/'
 
-                for method, data in (('put', {'public_access': 'View', 'title': 'Renamed'}), ('delete', None)):
+                for method, data, content in (
+                        ('put', {'public_access': 'View', 'title': 'Renamed'}, repo), ('delete', None, release)):
                     response = self.request(method, url, data)
 
                     self.assertEqual(response.status_code, 403)
-                    self.assertEqual(ReadOnlyPolicy.calls, [(self.user, release, WRITE_ACTION_EDIT)])
+                    self.assertEqual(ReadOnlyPolicy.calls, [(self.user, content, WRITE_ACTION_EDIT)])
                     ReadOnlyPolicy.calls = []
                 release.refresh_from_db()
                 self.assertTrue(release.is_active)
@@ -373,6 +400,11 @@ class RepositoryWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
                 version.refresh_from_db()
                 self.assertEqual((version.public_access, version.description), (ACCESS_TYPE_NONE, description))
 
+                # under a private HEAD, the version stays hidden: making it viewable is only an edit
+                type(repo).objects.filter(id=repo.id).update(public_access=ACCESS_TYPE_NONE)
+                self.assert_refused(
+                    self.request('put', version.uri, {'public_access': 'View'}), version, WRITE_ACTION_EDIT)
+
     @patch('core.collections.views.seed_children_to_expansion', Mock(__name__='seed_children_to_expansion'))
     def test_rebuilding_or_setting_a_default_expansion_is_an_edit(self):
         version = OrganizationCollectionFactory(organization=self.org, mnemonic=self.collection.mnemonic, version='v1')
@@ -404,6 +436,14 @@ class RepositoryWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
             add_references(self.user.id, data, self.collection.id),  # pylint: disable=no-value-for-parameter
             ([], {'write_refused': ReadOnlyPolicy.body}))
         self.assertFalse(self.collection.references.exists())
+
+    def test_external_export_uploads_and_removals_are_edits_of_the_version(self):
+        version = OrganizationSourceFactory(organization=self.org, mnemonic=self.source.mnemonic, version='v1')
+        url = version.uri + 'export/fhir/'
+
+        self.assert_refused(self.request('post', url, {'file': 'x'}), version, WRITE_ACTION_EDIT)
+        self.assert_refused(self.request('delete', url), version, WRITE_ACTION_EDIT)
+        self.assertFalse(version.external_exports.exists())
 
     def test_clone_into_a_read_only_source_is_an_edit(self):
         other_concept = ConceptFactory(

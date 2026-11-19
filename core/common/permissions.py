@@ -83,10 +83,20 @@ class ChecksWrites(BasePermission):
         if not super().has_object_permission(request, view, obj):
             return False
         if request.method not in SAFE_METHODS and getattr(view, 'writes_content', True):
-            content = get_write_target(obj)
+            content = get_write_target(self.get_written_object(request, view, obj))
             if content is not None:
                 check_write(request.user, content, self.get_write_action(request, view, obj))
         return True
+
+    @staticmethod
+    def get_written_object(request, view, obj):
+        """
+        `obj`, unless the view sets `updates_head = True` because its PUT and PATCH save onto the HEAD of the
+        repository row they resolve, whichever row that is (a FHIR update, which also adds a version).
+        """
+        if getattr(view, 'updates_head', False) and request.method in ('PUT', 'PATCH') and get(obj, 'head'):
+            return obj.head
+        return obj
 
     def get_write_action(self, request, view, obj):
         """

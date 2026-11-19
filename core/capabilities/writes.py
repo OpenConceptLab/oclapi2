@@ -3,6 +3,8 @@ The write checkpoint: a capability policy may keep content read-only and refuse 
 (CapabilityPolicy.get_write_refusal). A call site asks only once the user's own access allows the write. The default
 policy refuses nothing.
 """
+from pydash import get
+
 from core.capabilities.constants import WRITE_ACTION_DELETE, WRITE_ACTION_EDIT, WRITE_ACTION_PUBLISH
 from core.capabilities.exceptions import WriteRefused
 from core.capabilities.policy import get_capability_policy
@@ -29,16 +31,22 @@ def get_own_write_action(obj, method, data, applies_public_access=True):
     """
     The action of a write to `obj` itself, not to something it holds. A DELETE of a repository's HEAD or of a map
     project deletes the whole of it; a DELETE of another version is an edit of the repository. A change that leaves a
-    private repository row (its HEAD or a version) viewable by others publishes it, when the write applies
-    `public_access` at all. Anything else is an edit.
+    private repository row (its HEAD, or a version whose HEAD others can view) viewable by others publishes it, when
+    the write applies `public_access` at all. Anything else is an edit.
     """
     if method == 'DELETE':
         return WRITE_ACTION_EDIT if is_repository(obj) and not obj.is_head else WRITE_ACTION_DELETE
     public_access = data.get('public_access') if isinstance(data, dict) else None
-    if applies_public_access and is_repository(obj) and not obj.public_can_view and isinstance(public_access, str) \
-            and obj.is_public_access(public_access):
+    if applies_public_access and is_repository(obj) and makes_viewable(obj, public_access):
         return WRITE_ACTION_PUBLISH
     return WRITE_ACTION_EDIT
+
+
+def makes_viewable(row, public_access):
+    """Whether setting `public_access` lets others view repository row `row` (a version: only under a viewable HEAD)"""
+    if row.public_can_view or not isinstance(public_access, str) or not row.is_public_access(public_access):
+        return False
+    return row.is_head or get(row, 'head.public_can_view', False)
 
 
 def get_write_refusal(user, content, action, policy=None):

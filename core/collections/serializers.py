@@ -169,7 +169,8 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
     def prepare_object(self, validated_data, instance=None):
         collection = instance if instance else Collection()
         collection.version = validated_data.get('version', collection.version) or HEAD
-        collection.mnemonic = validated_data.get(self.Meta.lookup_field, collection.mnemonic)
+        if not instance or instance.is_head:  # a version never moves to another repository
+            collection.mnemonic = validated_data.get(self.Meta.lookup_field, collection.mnemonic)
         collection.public_access = validated_data.get('public_access', collection.public_access or DEFAULT_ACCESS_TYPE)
         collection.default_locale = validated_data.get('default_locale', collection.default_locale or DEFAULT_LOCALE)
         supported_locales = validated_data.get('supported_locales')
@@ -477,7 +478,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer, Abst
     type = CharField(source='resource_version_type')
     uuid = CharField(source='id')
     id = CharField(source='version')
-    short_code = CharField(source='mnemonic', read_only=True)  # a version never moves to another repository
+    short_code = CharField(source='mnemonic')
     owner = CharField(source='parent_resource')
     owner_type = CharField(source='parent_resource_type')
     owner_url = CharField(source='parent_url')

@@ -578,7 +578,8 @@ class ResourceImporter:
         if existing:
             if not existing.has_edit_access(request.user):
                 return PERMISSION_DENIED
-            refusal = get_write_refusal(request.user, get_write_target(existing), WRITE_ACTION_EDIT)
+            # the update saves onto the HEAD, whichever row has the canonical URL
+            refusal = get_write_refusal(request.user, get_write_target(existing.head), WRITE_ACTION_EDIT)
             if refusal is not None:
                 return WriteRefused(refusal)
             serializer = serializer_class(existing, data=resource, context={'request': request})
