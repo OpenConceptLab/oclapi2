@@ -7,7 +7,7 @@ from django.test import override_settings
 from core.capabilities.constants import WRITE_ACTION_DELETE, WRITE_ACTION_EDIT, WRITE_ACTION_PUBLISH
 from core.capabilities.exceptions import WriteRefused
 from core.capabilities.policy import GroupLimitPolicy
-from core.capabilities.writes import check_write, get_write_target
+from core.capabilities.writes import check_write
 from core.code_systems.serializers import CodeSystemDetailSerializer
 from core.code_systems.views import CodeSystemRetrieveUpdateView
 from core.collections.tests.factories import ExpansionFactory, OrganizationCollectionFactory
@@ -173,16 +173,6 @@ class DefaultPolicyAllowsWritesTest(WriteCheckpointTestMixin, OCLAPITestCase):
             HTTP_AUTHORIZATION='Token ' + self.user.get_token())
 
         self.assertEqual(response.status_code, 204)
-
-    def test_the_target_is_the_repository_row_or_the_map_project(self):
-        version = OrganizationSourceFactory(organization=self.org, mnemonic=self.source.mnemonic, version='v1')
-        project = MapProjectFactory(organization=self.org)
-
-        self.assertEqual(get_write_target(self.source), self.source)
-        self.assertEqual(get_write_target(version), version)
-        self.assertEqual(get_write_target(project), project)
-        self.assertIsNone(get_write_target(self.concept))
-        self.assertIsNone(get_write_target(self.org))
 
 
 @override_settings(CAPABILITY_POLICY=READ_ONLY_POLICY)

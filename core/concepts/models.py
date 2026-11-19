@@ -731,7 +731,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     def set_parent_concepts_from_uris(self, create_parent_version=True):
         parent_concepts = get(self, '_parent_concepts', [])
-        if create_parent_version and parent_concepts:
+        if create_parent_version:
             policy = get_capability_policy()
             for parent in parent_concepts:
                 if not self.can_write_hierarchy_of(parent, policy):
