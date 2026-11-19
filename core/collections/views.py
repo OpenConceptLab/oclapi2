@@ -935,7 +935,7 @@ class CollectionVersionExpansionBaseView(CollectionBaseView):
     serializer_class = ExpansionSerializer
 
     def get_permissions(self):
-        if self.request.method == 'GET':
+        if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionaryVersion()]
         return [HasAccessToVersionedObject()]
 
