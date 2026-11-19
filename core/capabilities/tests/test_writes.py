@@ -7,10 +7,11 @@ from django.test import override_settings
 from core.capabilities.constants import WRITE_ACTION_DELETE, WRITE_ACTION_EDIT, WRITE_ACTION_PUBLISH
 from core.capabilities.exceptions import WriteRefused
 from core.capabilities.policy import GroupLimitPolicy
-from core.capabilities.writes import check_write
+from core.capabilities.writes import check_write, get_own_write_action
 from core.code_systems.serializers import CodeSystemDetailSerializer
 from core.code_systems.views import CodeSystemRetrieveUpdateView
 from core.collections.tests.factories import ExpansionFactory, OrganizationCollectionFactory
+from core.collections.serializers import CollectionVersionDetailSerializer
 from core.collections.views import CollectionRetrieveUpdateDestroyView
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.permissions import ChecksWrites
@@ -24,7 +25,7 @@ from core.importers.models import BulkImportInline
 from core.map_projects.tests.factories import AutomatchRunFactory, MapProjectFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
-from core.sources.serializers import SourceDetailSerializer
+from core.sources.serializers import SourceDetailSerializer, SourceVersionDetailSerializer
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.sources.views import SourceRetrieveUpdateDestroyView
 from core.users.tests.factories import UserProfileFactory
@@ -163,6 +164,30 @@ class DefaultPolicyAllowsWritesTest(WriteCheckpointTestMixin, OCLAPITestCase):
                     version.refresh_from_db()
                     self.assertEqual((version.mnemonic, version.description), (repo.mnemonic, 'Changed'))
                     self.assertFalse(other.versions.filter(version='v1').exists())
+
+    def test_a_version_relabelled_head_keeps_its_repository(self):
+        for repo, factory, serializer in (
+                (self.source, OrganizationSourceFactory, SourceVersionDetailSerializer),
+                (self.collection, OrganizationCollectionFactory, CollectionVersionDetailSerializer)):
+            with self.subTest(repo=repo):
+                version = factory(organization=self.org, mnemonic=repo.mnemonic, version='v1')
+
+                prepared = serializer().prepare_object({'version': 'HEAD', 'mnemonic': 'elsewhere'}, version)
+
+                self.assertEqual(prepared.mnemonic, repo.mnemonic)
+
+    def test_a_version_without_an_active_head_is_published_as_it_would_be_viewed(self):
+        version = OrganizationSourceFactory(
+            organization=self.org, mnemonic=self.source.mnemonic, version='v1', public_access=ACCESS_TYPE_NONE)
+        data = {'public_access': 'View'}
+
+        self.assertEqual(get_own_write_action(version, 'PUT', data), WRITE_ACTION_PUBLISH)
+        Source.objects.filter(id=self.source.id).update(is_active=False)
+        version = Source.objects.get(id=version.id)
+        self.assertEqual(get_own_write_action(version, 'PUT', data), WRITE_ACTION_PUBLISH)
+        Source.objects.filter(id=self.source.id).update(is_active=True, public_access=ACCESS_TYPE_NONE)
+        version = Source.objects.get(id=version.id)
+        self.assertEqual(get_own_write_action(version, 'PUT', data), WRITE_ACTION_EDIT)
 
     @patch('core.map_projects.models.MapProject._delete_uploaded_file', Mock())
     def test_a_delete_body_is_never_read(self):

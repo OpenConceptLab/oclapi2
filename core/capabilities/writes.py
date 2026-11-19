@@ -3,8 +3,6 @@ The write checkpoint: a capability policy may keep content read-only and refuse 
 (CapabilityPolicy.get_write_refusal). A call site asks only once the user's own access allows the write. The default
 policy refuses nothing.
 """
-from pydash import get
-
 from core.capabilities.constants import WRITE_ACTION_DELETE, WRITE_ACTION_EDIT, WRITE_ACTION_PUBLISH
 from core.capabilities.exceptions import WriteRefused
 from core.capabilities.policy import get_capability_policy
@@ -43,10 +41,11 @@ def get_own_write_action(obj, method, data, applies_public_access=True):
 
 
 def makes_viewable(row, public_access):
-    """Whether setting `public_access` lets others view repository row `row` (a version: only under a viewable HEAD)"""
+    """Whether setting `public_access` lets others view repository row `row` (is_publicly_viewable, once it's set)"""
     if row.public_can_view or not isinstance(public_access, str) or not row.is_public_access(public_access):
         return False
-    return row.is_head or get(row, 'head.public_can_view', False)
+    head = None if row.is_head else row.head
+    return head is None or head.public_can_view
 
 
 def get_write_refusal(user, content, action, policy=None):
