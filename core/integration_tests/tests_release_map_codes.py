@@ -237,7 +237,9 @@ class ReleaseMapCodesTest(ReleasesFixture, OCLTestCase):
         release.public_access = ACCESS_TYPE_NONE
         release._should_update_public_access = True  # pylint: disable=protected-access
 
-        release.save()
+        with self.captureOnCommitCallbacks(execute=True):
+            release.save()
+            apply_async.assert_not_called()  # not before the change commits
 
         apply_async.assert_called_once_with(([self.row('v1', 'A').id],), queue='indexing', permanent=False)
 
@@ -369,6 +371,8 @@ class ReleaseMapCodesSearchTest(ReleasesFixture, OCLAPITestCase):
         response = self.client.get(f'{LOINC}v1/concepts/?q=name&fuzzy=true&target_repo={ICD}')
 
         self.assertEqual({concept['id'] for concept in response.data}, {'B'})  # HEAD's codes, not v1's entry
+        response = self.client.get(f'{LOINC}concepts/?q=name&fuzzy=true&source_version={LOINC}v1/&target_repo={ICD}')
+        self.assertEqual({concept['id'] for concept in response.data}, {'B'})  # with v1 selected too
 
     def test_the_command_fills_existing_docs(self):
         self.drop_b_in_v3()

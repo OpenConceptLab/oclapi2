@@ -756,8 +756,11 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         from core.common.tasks import index_concepts_mapped_codes
         concept_ids = sorted(self.concepts.exclude(id=F('versioned_object_id')).exclude(
             is_latest_version=True).values_list('id', flat=True))
-        for chunk in chunks(concept_ids, DROPPED_CHILDREN_CHUNK_SIZE):
-            index_concepts_mapped_codes.apply_async((chunk,), queue='indexing', permanent=False)
+
+        def queue():  # once the access change is committed, which the tasks read
+            for chunk in chunks(concept_ids, DROPPED_CHILDREN_CHUNK_SIZE):
+                index_concepts_mapped_codes.apply_async((chunk,), queue='indexing', permanent=False)
+        transaction.on_commit(queue)
 
     def index_public_access_async(self, user=None):
         """
