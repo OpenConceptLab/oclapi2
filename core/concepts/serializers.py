@@ -804,7 +804,8 @@ class ConceptChildrenSerializer(ConceptListSerializer):
 
     def get_children(self, obj):
         if self.include_child_concepts:
-            return obj.get_viewable_hierarchy_concept_urls('child_concepts', get(self, 'context.request.user'))
+            return obj.get_viewable_hierarchy_concept_urls(
+                'child_concepts', get(self, 'context.request.user'), get(self, 'context.repo_version'))
         return None
 
 
@@ -835,5 +836,6 @@ class ConceptParentsSerializer(ModelSerializer):
 
     def get_parents(self, obj):
         if self.include_parent_concepts:
-            return obj.get_viewable_hierarchy_concept_urls('parent_concepts', get(self, 'context.request.user'))
+            return obj.get_viewable_hierarchy_concept_urls(
+                'parent_concepts', get(self, 'context.request.user'), get(self, 'context.repo_version'))
         return None

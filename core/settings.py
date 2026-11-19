@@ -734,6 +734,10 @@ LIST_QUERY_TIMEOUT_MS = int(os.environ.get('LIST_QUERY_TIMEOUT_MS', 30000))
 LIST_MAX_LIMIT = int(os.environ.get('LIST_MAX_LIMIT', 100))
 # Above this many new, removed or changed concepts and mappings, a changelog skips names, descriptions and prev_*
 CHANGELOG_ENRICHMENT_MAX_RESOURCES = int(os.environ.get('CHANGELOG_ENRICHMENT_MAX_RESOURCES', 50000))
+# An import that seeds a version is refused when it drops at least this many concepts and mappings from HEAD, and
+# more than this share of them, unless its Source Version line sets allow_large_drop
+SEED_FROM_IMPORT_LARGE_DROP_MIN = int(os.environ.get('SEED_FROM_IMPORT_LARGE_DROP_MIN', 1000))
+SEED_FROM_IMPORT_LARGE_DROP_PERCENT = float(os.environ.get('SEED_FROM_IMPORT_LARGE_DROP_PERCENT', 10))
 
 ANALYTICS_API = os.environ.get('ANALYTICS_API', 'http://host.docker.internal:8002')
 if ANALYTICS_API:

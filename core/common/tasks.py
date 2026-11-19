@@ -542,8 +542,7 @@ def process_hierarchy_for_new_concept(concept_id, initial_version_id, parent_con
     acks_late=True, reject_on_worker_lost=True
 )
 def process_hierarchy_for_concept_version(
-        latest_version_id, prev_version_id, parent_concept_uris, create_parent_version,
-        create_removed_parent_versions=True, update_head=True):
+        latest_version_id, prev_version_id, parent_concept_uris, create_parent_version):
     """
       Executed when a new concept version is created with new, updated or existing hierarchy
       1. Associates parent concepts to the latest concept version.
@@ -563,10 +562,9 @@ def process_hierarchy_for_concept_version(
         uri__in=parent_concept_uris) if parent_concept_uris else Concept.objects.none()
     latest_version._parent_concepts = parent_concepts  # pylint: disable=protected-access
     latest_version.set_parent_concepts_from_uris(create_parent_version)
-    if update_head:
-        latest_version.versioned_object.parent_concepts.set(latest_version.parent_concepts.all())
+    latest_version.versioned_object.parent_concepts.set(latest_version.parent_concepts.all())
 
-    if prev_version and create_removed_parent_versions:
+    if prev_version:
         removed_parent_urls = [
             url for url in old_parents if url not in list(latest_version.parent_concept_urls)
         ]

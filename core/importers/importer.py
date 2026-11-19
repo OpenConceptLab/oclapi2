@@ -237,6 +237,7 @@ class Importer:
         self.index = index
         self.isolated_version = isolated_version
         self.version_lines = []
+        self.content_targets = set()
 
     def validate_versioning(self, resources, resource_types):
         if not self.isolated_version:
@@ -244,10 +245,11 @@ class Importer:
         try:
             if sum(get(resources, 'Source Version', {}).values()) != 1:
                 raise ValidationError(ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION)
+            Source.validate_import_targets(self.version_lines[0], self.content_targets)
             IsolatedVersionCommit(
                 self.version_lines[0], UserProfile.objects.filter(username=self.username).first(), True).preflight()
         except DjangoValidationError as ex:
-            raise ValidationError(ex.message_dict) from ex
+            raise ValidationError(ex.message_dict if hasattr(ex, 'error_dict') else ex.messages) from ex
         return self.get_isolated_version_resource_types(resource_types)
 
     @staticmethod
@@ -537,6 +539,8 @@ class Importer:
                 return {}
             if event == 'end_map' and get(line, 'type') == 'Source Version':
                 self.version_lines.append(line)
+            elif event == 'end_map' and get(line, 'type') in ('Concept', 'Mapping') and self.isolated_version:
+                self.content_targets.add(Source.get_import_target(line))
             return line if event == 'map_key' else None
         if line is not None and '.' not in prefix:
             if event in ('string', 'number', 'boolean', 'null'):

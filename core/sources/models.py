@@ -27,8 +27,8 @@ from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_R
     HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID, LOCALE_EXTERNAL_AUTO_ID_CHOICES, \
     SEEDED_FROM_REPO_VERSION, SEEDED_FROM_IMPORT, ISOLATED_METADATA_FIELDS, ISOLATED_REQUIRED_METADATA_FIELDS, \
     HIERARCHY_ROOT_CANNOT_BE_DROPPED, ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION, DROPPED_CHILDREN_CHUNK_SIZE, \
-    CONTENT_TYPE_SUPPLEMENT, SUPPLEMENTS_REQUIRED, SUPPLEMENTS_FORMAT, SEED_MEMBERS_WRITTEN, SEED_RELEASE_INDEXED, \
-    SEED_STAGE
+    ISOLATED_VERSION_TARGET_MISMATCH, CONTENT_TYPE_SUPPLEMENT, SUPPLEMENTS_REQUIRED, SUPPLEMENTS_FORMAT, \
+    SEED_MEMBERS_WRITTEN, SEED_RELEASE_INDEXED, SEED_STAGE
 from core.tasks.models import Task
 
 
@@ -347,7 +347,22 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         content_indexes = [index for index, _type in enumerate(types) if _type in ('concept', 'mapping')]
         if len(version_indexes) != 1 or (content_indexes and content_indexes[-1] > version_indexes[0]):
             raise ValidationError(ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION)
-        return input_list[version_indexes[0]]
+        version_line = input_list[version_indexes[0]]
+        Source.validate_import_targets(
+            version_line, {Source.get_import_target(input_list[index]) for index in content_indexes})
+        return version_line
+
+    @staticmethod
+    def get_import_target(line):
+        """The source an import line names: (owner kind, owner, source mnemonic)."""
+        owner_type = (line.get('owner_type', '') or '').lower()
+        return 'user' if owner_type in ('user', 'users') else 'org', line.get('owner'), line.get('source')
+
+    @staticmethod
+    def validate_import_targets(version_line, targets):
+        """A seeding import's content must all be in the version's source, or the commit would empty that HEAD."""
+        if any(target != Source.get_import_target(version_line) for target in targets):
+            raise ValidationError(ISOLATED_VERSION_TARGET_MISMATCH)
 
     def get_concept_name_locales(self):
         return ConceptName.objects.filter(concept__in=self.get_active_concepts())

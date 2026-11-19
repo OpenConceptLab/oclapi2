@@ -605,6 +605,11 @@ class ConceptCloneView(ConceptCascadeView):
 class ConceptHierarchyMixin:
     def get_source_version(self):
         """The source version named in the URL, or None for HEAD and collection URLs."""
+        if '_source_version' not in self.__dict__:
+            self._source_version = self.find_source_version()
+        return self._source_version
+
+    def find_source_version(self):
         source, version = self.kwargs.get('source'), self.kwargs.get('version')
         if not source or not version or version == HEAD:
             return None
@@ -616,6 +621,9 @@ class ConceptHierarchyMixin:
         if version == LATEST:
             return Source.find_latest_released_version_by({**filters, 'mnemonic': source})
         return Source.get_version(source, version, filters)
+
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), 'repo_version': self.get_source_version()}
 
     def get_hierarchy_queryset(self, instance, relation):
         repo_version = self.get_source_version()
@@ -642,7 +650,7 @@ class ConceptChildrenView(ConceptHierarchyMixin, ConceptBaseView, ListWithHeader
         return get_viewable_concepts(self.get_hierarchy_queryset(instance, 'child_concepts'), self.request)
 
     def filter_queryset(self, queryset=None):  # annotated here, not in get_queryset, to keep it out of CSV exports
-        return Concept.annotate_has_children(super().filter_queryset(queryset))
+        return Concept.annotate_has_children(super().filter_queryset(queryset), self.get_source_version())
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)

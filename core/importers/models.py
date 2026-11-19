@@ -23,7 +23,8 @@ from core.concepts.models import Concept
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
 from core.sources.constants import ISOLATED_METADATA_FIELDS, ISOLATED_VERSION_CONTENT_FAILED, \
-    ISOLATED_VERSION_LINE_INVALID, ISOLATED_VERSION_EXISTS, ISOLATED_VERSION_NO_EDIT_ACCESS, SEEDED_FROM_IMPORT
+    ISOLATED_VERSION_LINE_INVALID, ISOLATED_VERSION_EXISTS, ISOLATED_VERSION_NO_EDIT_ACCESS, SEEDED_FROM_IMPORT, \
+    ISOLATED_VERSION_LARGE_DROP, ALLOW_LARGE_DROP
 from core.sources.models import Source
 from core.tasks.models import Task
 from core.users.models import UserProfile
@@ -196,8 +197,9 @@ class BaseResourceImporter:
     def process(self):
         raise NotImplementedError()
 
-    def track_isolated_result(self, result):
-        if self.isolated and result in (UPDATED, UNCHANGED) and get(self, 'instance.versioned_object_id'):
+    def track_result(self, result):
+        """A code dropped from HEAD that any import updates, or sends unchanged, is back in HEAD."""
+        if result in (UPDATED, UNCHANGED) and get(self, 'instance.versioned_object_id'):
             if not self.instance.versioned_object.is_active:
                 self.instance.restore_to_head()
         return result
@@ -325,7 +327,7 @@ class SourceImporter(BaseResourceImporter):
 class SourceVersionImporter(BaseResourceImporter):
     mandatory_fields = {"id"}
     allowed_fields = [
-        "id", "released", "name", "default_locale", "supported_locales", "extras",
+        "id", "released", "name", "default_locale", "supported_locales", "extras", "match_algorithms",
         *ISOLATED_METADATA_FIELDS
     ]
 
@@ -361,6 +363,7 @@ class SourceVersionImporter(BaseResourceImporter):
 
     def process(self):
         source = Source(**self.data)
+        self.set_head_defaults(source)
         if self.isolated_version:
             source.seeded_from = {'type': SEEDED_FROM_IMPORT, 'task': self.import_task_id}
         source._metadata_fields = list(self.data.keys())  # pylint: disable=protected-access
@@ -368,6 +371,18 @@ class SourceVersionImporter(BaseResourceImporter):
             errors = Source.persist_new_version(source, self.user)
             return errors or CREATED
         return PERMISSION_DENIED
+
+
+    def set_head_defaults(self, source):
+        """What the line leaves out comes from HEAD, as for POST .../versions/."""
+        head = source.head
+        if not head:
+            return
+        for field in ('meta', 'properties', 'filters'):
+            if field not in self.data:
+                setattr(source, field, getattr(head, field))
+        if 'match_algorithms' not in self.data:
+            source.match_algorithms = head.get_match_algorithms_for_new_version()
 
 
 class IsolatedVersionRollback(Exception):
@@ -386,7 +401,9 @@ class IsolatedVersionCommit:
     def __init__(  # pylint: disable=too-many-arguments
             self, version_line, user, update_if_exists=False, hierarchy_map=None, seen_concept_ids=None,
             seen_mapping_ids=None, content_failures=0, import_task_id=None):
-        self.version_line = version_line
+        self.version_line = {key: value for key, value in version_line.items() if key != ALLOW_LARGE_DROP}
+        self.allow_large_drop = version_line.get(ALLOW_LARGE_DROP) in (True, 'true')
+        self.dropped = None
         self.import_task_id = import_task_id
         self.user = user
         self.update_if_exists = update_if_exists
@@ -454,7 +471,9 @@ class IsolatedVersionCommit:
         try:
             with transaction.atomic():
                 Concept.reconcile_import_hierarchy(self.hierarchy_map, self.user, replace_head=True)
-                head.drop_unseen_children(self.seen_concept_ids, self.seen_mapping_ids)
+                self.dropped = head.drop_unseen_children(self.seen_concept_ids, self.seen_mapping_ids)
+                if self.is_large_drop():
+                    raise IsolatedVersionRollback({'__all__': [ISOLATED_VERSION_LARGE_DROP.format(**self.dropped)]})
                 result = importer.process()
                 if result != CREATED:
                     raise IsolatedVersionRollback(result)
@@ -463,6 +482,15 @@ class IsolatedVersionCommit:
         except ValidationError as ex:
             return get(ex, 'message_dict') or {'__all__': ex.messages}
         return CREATED
+
+    def is_large_drop(self):
+        """At least SEED_FROM_IMPORT_LARGE_DROP_MIN of HEAD's codes leave it, and more than its percent of them."""
+        if self.allow_large_drop:
+            return False
+        dropped = self.dropped['concepts'] + self.dropped['mappings']
+        kept = len(self.seen_concept_ids) + len(self.seen_mapping_ids)
+        return dropped >= settings.SEED_FROM_IMPORT_LARGE_DROP_MIN and \
+            dropped * 100 > settings.SEED_FROM_IMPORT_LARGE_DROP_PERCENT * (dropped + kept)
 
 
 class CollectionImporter(BaseResourceImporter):
@@ -626,20 +654,20 @@ class ConceptImporter(BaseResourceImporter):
                     add_prev_version_children=False, isolated=self.isolated
                 )
                 if errors and Concept.is_standard_checksum_error(errors):
-                    return self.track_isolated_result(UNCHANGED)
-                return errors or self.track_isolated_result(UPDATED)
+                    return self.track_result(UNCHANGED)
+                return errors or self.track_result(UPDATED)
 
             if 'update_comment' in self.data:
                 self.data['comment'] = self.data['update_comment']
                 self.data.pop('update_comment')
             persist_data = {**self.data, '_counted': None, '_index': False}
-            if self.skip_hierarchy_tasks:
+            if self.skip_hierarchy_tasks or self.isolated:  # a seeding import links them when it commits
                 persist_data['_skip_hierarchy_tasks'] = True
             self.instance = Concept.persist_new(
                 data=persist_data,
                 user=self.user, create_parent_version=False)
             if self.instance.id:
-                return self.track_isolated_result(CREATED)
+                return self.track_result(CREATED)
             return self.instance.errors or errors or FAILED
 
         return PERMISSION_DENIED
@@ -653,7 +681,7 @@ class ConceptImporter(BaseResourceImporter):
             try:
                 if parent.has_edit_access(self.user):
                     self.retire_resource(self.get_queryset().first())
-                    return self.track_isolated_result(DELETED)
+                    return self.track_result(DELETED)
                 return PERMISSION_DENIED
             except Exception as ex:
                 return {'errors': ex.args}
@@ -800,15 +828,15 @@ class MappingImporter(BaseResourceImporter):
                     # the mapping moved to another from concept, whose mapped codes then need a refresh
                     self.instance.replaced_from_concept_id = previous_from_concept_id
                 if errors and Mapping.is_standard_checksum_error(errors):
-                    return self.track_isolated_result(UNCHANGED)
-                return errors or self.track_isolated_result(UPDATED)
+                    return self.track_result(UNCHANGED)
+                return errors or self.track_result(UPDATED)
             if 'update_comment' in self.data:
                 self.data['comment'] = self.data['update_comment']
                 self.data.pop('update_comment')
             self.instance = Mapping.persist_new(
                 {**self.data, '_counted': None, '_index': False}, self.user, cache=self.cache)
             if self.instance.id:
-                return self.track_isolated_result(CREATED)
+                return self.track_result(CREATED)
             return self.instance.errors or errors or FAILED
 
         return PERMISSION_DENIED
@@ -822,7 +850,7 @@ class MappingImporter(BaseResourceImporter):
             try:
                 if parent.has_edit_access(self.user):
                     self.retire_resource(self.get_queryset().first())
-                    return self.track_isolated_result(DELETED)
+                    return self.track_result(DELETED)
                 return PERMISSION_DENIED
             except Exception as ex:
                 return {'errors': ex.args}
@@ -1027,6 +1055,7 @@ class BulkImportInline(BaseImporter):
         self.permission_denied = []
         self.unchanged = []
         self.others = []
+        self.dropped = None
         self.processed = 0
         self.total = len(self.input_list)
         self.start_time = time.time()
@@ -1051,12 +1080,15 @@ class BulkImportInline(BaseImporter):
     def import_source_version(self, item):
         if not self.isolated_version:
             return SourceVersionImporter(item, self.user, self.update_if_exists).run()
-        return IsolatedVersionCommit(
+        commit = IsolatedVersionCommit(
             item, self.user, self.update_if_exists,
             hierarchy_map=Concept.get_import_hierarchy_map(self.input_list, include_parentless=True),
             seen_concept_ids=self.seen_concept_ids, seen_mapping_ids=self.seen_mapping_ids,
             content_failures=self.content_failures_count, import_task_id=self.self_task_id
-        ).run()
+        )
+        result = commit.run()
+        self.dropped = commit.dropped
+        return result
 
     def handle_item_import_result(self, result, item):  # pylint: disable=too-many-return-statements
         if result is None:
@@ -1225,7 +1257,8 @@ class BulkImportInline(BaseImporter):
             'unchanged': self.unchanged,
             'others': self.others,
             'unknown': self.unknown,
-            'elapsed_seconds': self.elapsed_seconds
+            'elapsed_seconds': self.elapsed_seconds,
+            **({'dropped': self.dropped} if self.dropped is not None else {})
         }
 
     @property
@@ -1252,6 +1285,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         super().__init__(content, username, update_if_exists, None, False)
         self.isolated_version = isolated_version
         self.isolated_version_results = {}
+        self.dropped = None
         self.start_time = time.time()
         self.self_task_id = self_task_id
         self.set_task()
@@ -1421,6 +1455,12 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self.hierarchy_reconciliation_done = True
         self.notify_progress()
 
+    def get_source_version_index(self, part_list):
+        if not self.isolated_version:
+            return None
+        return next((index for index, line in enumerate(part_list or [])
+                     if (line.get('type', '') or '').lower() == 'source version'), None)
+
     def commit_isolated_version(self, version_line):
         commit = IsolatedVersionCommit(
             version_line, UserProfile.objects.filter(username=self.username).first(), self.update_if_exists,
@@ -1436,6 +1476,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             else:
                 commit.add_failed_part()
         result = commit.run()
+        self.dropped = commit.dropped
         # the commit owns the hierarchy, so a rejected version leaves it untouched
         self.hierarchy_reconciliation_done = True
         self.isolated_version_results.setdefault(self.get_result_key(result), []).append(
@@ -1482,7 +1523,11 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             print("***************")
         while len(self.parts) > 0:
             part_list = self.parts.popleft()
-            if part_list and self.isolated_version and get(part_list, '0.type', '').lower() == 'source version':
+            version_index = self.get_source_version_index(part_list)
+            if version_index:  # lines grouped before the Source Version run first, then it commits
+                self.parts.appendleft(part_list[version_index:])
+                part_list = part_list[:version_index]
+            elif version_index == 0:
                 self.commit_isolated_version(part_list[0])
                 part_list = part_list[1:]
             if part_list:
@@ -1572,6 +1617,8 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         total_result['start_time'] = self.start_time_formatted
         total_result['elapsed_seconds'] = self.elapsed_seconds
         total_result['child_resource_time_distribution'] = self.resource_wise_time
+        if self.dropped is not None:
+            total_result['dropped'] = self.dropped
         self._json_result = total_result
         return self._json_result
 

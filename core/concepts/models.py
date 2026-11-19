@@ -1276,10 +1276,10 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 task.apply_async((prev_latest.id, self.id), queue='concurrent', permanent=False)
 
     def _process_latest_version_hierarchy(self, prev_latest, parent_concept_uris=None, create_parent_version=True):
+        if get(self, '_isolated'):  # a seeding import links the hierarchy when it commits the version
+            return
         task = process_hierarchy_for_concept_version
         args = (self.id, get(prev_latest, 'id'), parent_concept_uris, create_parent_version)
-        if get(self, '_isolated'):
-            args = (*args, False, False)
         if get(settings, 'TEST_MODE', False):
             task(*args)
         else:
@@ -1399,8 +1399,14 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             return queryset.exclude(public_access=ACCESS_TYPE_NONE)
         return Concept.apply_user_criteria(queryset, user)
 
-    def get_viewable_hierarchy_concept_urls(self, relation, user):
-        """parent_concept_urls or child_concept_urls (`relation`), of concepts in repos `user` can view."""
+    def get_viewable_hierarchy_concept_urls(self, relation, user, repo_version=None):
+        """
+        parent_concept_urls or child_concept_urls (`relation`), of concepts in repos `user` can view; with
+        repo_version, those in that version.
+        """
+        if repo_version:
+            queryset = self.get_version_hierarchy_queryset(relation, repo_version)
+            return list(self.get_viewable(queryset, user).values_list('versioned_object__uri', flat=True))
         return list(self.get_viewable(
             self.get_hierarchy_related_queryset(relation), user).values_list('uri', flat=True))
 
@@ -1443,8 +1449,14 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return queryset.filter(is_active=True) if self.is_versioned_object else queryset
 
     @staticmethod
-    def annotate_has_children(queryset):
-        """has_children for each row as part of the list query, by the same rules as the has_children property."""
+    def annotate_has_children(queryset, repo_version=None):
+        """
+        has_children for each row as part of the list query, by the same rules as the has_children property; with
+        repo_version, whether the row has children in that version.
+        """
+        if repo_version:
+            return queryset.annotate(has_children_annotated=Exists(repo_version.concepts.filter(
+                parent_concepts__versioned_object_id=OuterRef('versioned_object_id'))))
         own = HierarchicalConcepts.objects.filter(parent_id=OuterRef('id'))
         of_head = HierarchicalConcepts.objects.filter(parent_id=OuterRef('versioned_object_id'))
         newest_latest_version = Concept.objects.filter(
