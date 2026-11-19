@@ -60,6 +60,26 @@ def get_write_refusal(user, content, action, policy=None):
     return policy.get_write_refusal(user, content, action)
 
 
+class BatchWriteRefusals:
+    """
+    The write checks of one batch (an import's lines): one capability policy, asked once per user, saved repository
+    row and action. An import line never changes the access of a row that already exists, which is what the policy's
+    answer turns on, so the answer holds for the rest of the batch.
+    """
+    def __init__(self):
+        self.policy = get_capability_policy()
+        self.answers = {}
+
+    def get(self, user, content, action):
+        """get_write_refusal, asked once for a saved row; a row not saved yet (a new version) is asked every time."""
+        if content is None or content.pk is None:
+            return get_write_refusal(user, content, action, self.policy)
+        key = (user.pk, type(content), content.pk, action)
+        if key not in self.answers:
+            self.answers[key] = get_write_refusal(user, content, action, self.policy)
+        return self.answers[key]
+
+
 def check_write(user, content, action, policy=None):
     """Raises WriteRefused, a 403 with the policy's body, when the policy refuses `user` this write to `content`."""
     refusal = get_write_refusal(user, content, action, policy)

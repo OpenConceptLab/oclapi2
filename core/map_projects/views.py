@@ -329,6 +329,9 @@ class AutomatchRunView(AutomatchRunBaseView, RetrieveUpdateAPIView):
     # authz, so lookup_field/pk_field are unused.
     http_method_names = ['get', 'patch', 'head', 'options']
     lookup_url_kwarg = 'run'
+    # a PATCH records a started run's progress and changes no project content, so CanEditConceptDictionary doesn't
+    # ask the capability policy: a run allowed to start can always finish
+    writes_content = False
 
     def get_serializer_class(self):
         if self.request.method == 'PATCH':

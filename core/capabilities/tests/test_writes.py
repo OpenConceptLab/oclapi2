@@ -7,7 +7,7 @@ from django.test import override_settings
 from core.capabilities.constants import WRITE_ACTION_DELETE, WRITE_ACTION_EDIT, WRITE_ACTION_PUBLISH
 from core.capabilities.exceptions import WriteRefused
 from core.capabilities.policy import GroupLimitPolicy
-from core.capabilities.writes import check_write, get_own_write_action
+from core.capabilities.writes import BatchWriteRefusals, check_write, get_own_write_action
 from core.code_systems.serializers import CodeSystemDetailSerializer
 from core.code_systems.views import CodeSystemRetrieveUpdateView
 from core.collections.tests.factories import ExpansionFactory, OrganizationCollectionFactory
@@ -421,22 +421,21 @@ class RepositoryWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
                     self.request('put', version.uri, {'public_access': 'View'}), version, WRITE_ACTION_EDIT)
 
     @patch('core.collections.views.seed_children_to_expansion', Mock(__name__='seed_children_to_expansion'))
-    def test_rebuilding_or_setting_a_default_expansion_is_an_edit(self):
+    def test_every_expansion_write_is_an_edit_of_the_version(self):
+        """An expansion is what the version resolves to, default or not."""
         version = OrganizationCollectionFactory(organization=self.org, mnemonic=self.collection.mnemonic, version='v1')
         default, other = ExpansionFactory(collection_version=version), ExpansionFactory(collection_version=version)
-        expansion_data = {'mnemonic': 'e1', 'parameters': {'activeOnly': False}}
-
-        self.assert_refused(
-            self.request('post', version.uri + 'expansions/', expansion_data), version, WRITE_ACTION_EDIT)
         version.expansion_uri = default.uri
         version.save()
-        self.assert_refused(self.request('post', default.url + 're-evaluate/'), version, WRITE_ACTION_EDIT)
-        default.refresh_from_db()
-        self.assertFalse(default.is_processing)
 
-        self.assertEqual(self.request('post', other.url + 're-evaluate/').status_code, 204)
-        self.assertEqual(self.request('post', version.uri + 'expansions/', expansion_data).status_code, 201)
-        self.assertEqual(ReadOnlyPolicy.calls, [])
+        self.assert_refused(
+            self.request('post', version.uri + 'expansions/', {'mnemonic': 'e1', 'parameters': {'activeOnly': False}}),
+            version, WRITE_ACTION_EDIT)
+        self.assert_refused(self.request('delete', other.url), version, WRITE_ACTION_EDIT)
+        for expansion in (default, other):
+            self.assert_refused(self.request('post', expansion.url + 're-evaluate/'), version, WRITE_ACTION_EDIT)
+        self.assertEqual(sorted(version.expansions.values_list('id', flat=True)), sorted([default.id, other.id]))
+        self.assertFalse(version.expansions.filter(is_processing=True).exists())
 
     def test_a_queued_reference_add_is_asked_about_again_when_it_runs(self):
         ReadOnlyPolicy.read_only = []
@@ -473,7 +472,7 @@ class RepositoryWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
             self.source, WRITE_ACTION_EDIT)
         self.assertFalse(self.source.concepts_set.filter(mnemonic=other_concept.mnemonic).exists())
 
-    def test_reads_exports_expansions_and_processing_are_not_asked_about(self):
+    def test_reads_exports_and_processing_are_not_asked_about(self):
         version = OrganizationSourceFactory(organization=self.org, mnemonic=self.source.mnemonic, version='v1')
         collection_version = OrganizationCollectionFactory(
             organization=self.org, mnemonic=self.collection.mnemonic, version='v1')
@@ -486,11 +485,8 @@ class RepositoryWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
             self.assertEqual(self.request('get', version.uri + 'export/').status_code, 204)
         with patch('core.services.storages.cloud.aws.S3.has_path', return_value=True):
             self.assertEqual(self.request('post', version.uri + 'export/').status_code, 303)
-        self.collection.expansion_uri = ExpansionFactory(collection_version=self.collection).uri
-        self.collection.save()
-        expansion_data = {'mnemonic': 'e1', 'parameters': {'activeOnly': False}}
-        self.assertEqual(
-            self.request('post', self.collection.uri + 'HEAD/expansions/', expansion_data).status_code, 201)
+        self.assertEqual(self.request('get', collection_version.uri + 'expansions/').status_code, 200)
+        self.assertEqual(self.request('get', expansion.url).status_code, 200)
         self.assertEqual(self.request('post', version.uri + 'processing/').status_code, 200)
         self.assertEqual(self.request('post', collection_version.uri + 'processing/').status_code, 200)
         self.assertEqual(self.request('post', expansion.url + 'processing/').status_code, 200)
@@ -525,18 +521,25 @@ class MapProjectWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
         self.assertTrue(self.project.is_active)
         self.assertNotEqual(self.project.name, 'Renamed')
 
-    def test_logs_and_auto_match_runs_are_edits(self):
-        run = AutomatchRunFactory(map_project=self.project)
-
+    def test_logs_and_starting_an_auto_match_run_are_edits(self):
         self.assert_refused(
             self.request('post', self.url + 'logs/', {'logs': {'a': 1}}), self.project, WRITE_ACTION_EDIT)
         self.assert_refused(
             self.request('post', self.url + 'auto-match-runs/', {'intended_rows': 5, 'trigger_source': 'api'}),
             self.project, WRITE_ACTION_EDIT)
-        self.assert_refused(
-            self.request('patch', f'/auto-match-runs/{run.id}/', {'completed_rows': 5}), self.project,
-            WRITE_ACTION_EDIT)
-        self.assertEqual(self.project.auto_match_runs.count(), 1)
+        self.assertFalse(self.project.auto_match_runs.exists())
+
+    def test_a_started_run_records_its_progress_and_finishes_without_being_asked(self):
+        """A project can turn read-only during a run (its creator's limit drops): the run still closes."""
+        run = AutomatchRunFactory(map_project=self.project)
+
+        response = self.request(
+            'patch', f'/auto-match-runs/{run.id}/', {'completed_rows': 5, 'completion_status': 'completed'})
+
+        self.assertEqual(response.status_code, 200, response.data)
+        run.refresh_from_db()
+        self.assertEqual((run.completed_rows, run.completion_status), (5, 'completed'))
+        self.assertEqual(ReadOnlyPolicy.calls, [])
 
     def test_reads_are_not_asked_about(self):
         self.assertEqual(self.request('get', self.url).status_code, 200)
@@ -583,6 +586,31 @@ class ImportWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
                 (self.user, self.source, WRITE_ACTION_EDIT), (self.user, self.writable_source, WRITE_ACTION_EDIT),
                 (self.user, self.source, WRITE_ACTION_DELETE),
             ])
+
+    def test_a_batch_asks_once_per_repository_and_action(self):
+        importer = BulkImportInline(
+            '\n'.join(
+                json.dumps(self.concept_line(source, f'{source.mnemonic}-{i}'))
+                for source in (self.source, self.writable_source) for i in range(3)
+            ),
+            self.user.username, True)
+        importer.run()
+
+        self.assertEqual(len(importer.created), 3)
+        self.assertEqual([item['errors'] for item in importer.permission_denied], [ReadOnlyPolicy.body] * 3)
+        self.assertEqual(
+            ReadOnlyPolicy.calls,
+            [(self.user, self.source, WRITE_ACTION_EDIT), (self.user, self.writable_source, WRITE_ACTION_EDIT)])
+
+    def test_the_rows_of_a_package_file_share_their_answers(self):
+        importer = ResourceImporter(write_refusals=BatchWriteRefusals())
+
+        for mnemonic in ('a', 'b'):
+            importer.import_resource(
+                self.concept_line(self.writable_source, mnemonic), self.user.username, 'Organization',
+                self.org.mnemonic)
+
+        self.assertEqual(ReadOnlyPolicy.calls, [(self.user, self.writable_source, WRITE_ACTION_EDIT)])
 
     def test_a_line_deleting_a_release_is_an_edit(self):
         release = OrganizationSourceFactory(organization=self.org, mnemonic=self.source.mnemonic, version='v1')
