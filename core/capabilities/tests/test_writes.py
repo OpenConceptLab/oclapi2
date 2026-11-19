@@ -4,7 +4,9 @@ from unittest.mock import Mock, patch
 
 from django.test import override_settings
 
-from core.capabilities.constants import WRITE_ACTION_DELETE, WRITE_ACTION_EDIT, WRITE_ACTION_PUBLISH
+from core.capabilities.constants import (
+    WRITE_ACTION_DELETE, WRITE_ACTION_EDIT, WRITE_ACTION_MAKE_PRIVATE, WRITE_ACTION_PUBLISH,
+)
 from core.capabilities.exceptions import WriteRefused
 from core.capabilities.policy import GroupLimitPolicy
 from core.capabilities.writes import BatchWriteRefusals, check_write, get_own_write_action
@@ -274,7 +276,10 @@ class RepositoryWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
         response = self.request('put', f'{self.org.uri}CodeSystem/{self.source.mnemonic}/', resource)
 
         self.assertEqual(response.status_code, 200, response.content)
-        self.assertEqual(ReadOnlyPolicy.calls, [(self.user, self.source, WRITE_ACTION_EDIT)])
+        # the update copies the private release's access onto HEAD, so it's asked about making HEAD private too
+        # (test_make_private), and that saved row is the new version by now
+        self.assertEqual(ReadOnlyPolicy.calls[0], (self.user, self.source, WRITE_ACTION_EDIT))
+        self.assertEqual([call[2] for call in ReadOnlyPolicy.calls[1:]], [WRITE_ACTION_MAKE_PRIVATE])
         ReadOnlyPolicy.calls = []
         ResourceImporter.save_fhir_resource(
             CodeSystemDetailSerializer, release, self.org, {**resource, 'version': 'v3'},

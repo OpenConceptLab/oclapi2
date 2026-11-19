@@ -7,11 +7,12 @@ from core.capabilities.constants import WRITE_ACTION_EDIT, WRITE_ACTION_MAKE_PRI
 from core.capabilities.exceptions import WriteRefused
 from core.capabilities.policy import GroupLimitPolicy
 from core.capabilities.writes import makes_private
+from core.code_systems.serializers import CodeSystemDetailSerializer
 from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
 from core.common.tests import OCLAPITestCase
-from core.importers.importer import ResourceImporter
+from core.importers.importer import ImportRequest, ResourceImporter
 from core.importers.models import BulkImportInline
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
@@ -208,32 +209,66 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
                 self.assertEqual(repo.versions.get(version='v2').public_access, ACCESS_TYPE_NONE)
                 self.assertEqual([call[2] for call in self.take_calls()], [WRITE_ACTION_EDIT])
 
-    def test_a_fhir_update_keeps_its_head_s_own_access_whatever_the_release_s(self):
-        """A FHIR resource carries no access, so HEAD keeps its own, and the update is never asked make_private."""
-        concept_map = OrganizationSourceFactory(organization=self.org)
-        for head_access, release_access in ((ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE), (ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW)):
-            for repo, factory, resource_type, extra in (
-                    (self.source, OrganizationSourceFactory, 'CodeSystem', {'content': 'fragment'}),
-                    (concept_map, OrganizationSourceFactory, 'ConceptMap', {}),
-                    (self.collection, OrganizationCollectionFactory, 'ValueSet', {})):
-                with self.subTest(resource_type=resource_type, head=head_access):
-                    type(repo).objects.filter(id=repo.id).update(public_access=head_access)
-                    version = f'{head_access}-{release_access}'
-                    factory(
-                        organization=self.org, mnemonic=repo.mnemonic, version=f'r-{version}', released=True,
-                        public_access=release_access)
-                    resource = {
-                        'resourceType': resource_type, 'id': repo.mnemonic, 'status': 'draft', 'version': version,
-                        'name': 'Renamed', 'title': 'Renamed', **extra
-                    }
+    def fhir_update(self, repo, factory, resource_type, release_access, **extra):
+        """PUTs a FHIR update of `repo` that resolves to a new release with `release_access`. The new version's id."""
+        version = f'r-{release_access}'
+        factory(
+            organization=self.org, mnemonic=repo.mnemonic, version=version, released=True,
+            public_access=release_access)
+        resource = {
+            'resourceType': resource_type, 'id': repo.mnemonic, 'status': 'draft', 'version': f'{version}-2',
+            'name': 'Renamed', 'title': 'Renamed', **extra
+        }
+        return self.request('put', f'{self.org.uri}{resource_type}/{repo.mnemonic}/', resource), resource
 
-                    response = self.request('put', f'{self.org.uri}{resource_type}/{repo.mnemonic}/', resource)
+    def fhir_repositories(self):
+        return (
+            (self.source, OrganizationSourceFactory, 'CodeSystem', {'content': 'fragment'}),
+            (OrganizationSourceFactory(organization=self.org), OrganizationSourceFactory, 'ConceptMap', {}),
+            (self.collection, OrganizationCollectionFactory, 'ValueSet', {}),
+        )
 
-                    self.assertEqual(response.status_code, 200, response.content)
-                    repo.refresh_from_db()
-                    self.assertEqual(repo.public_access, head_access)
-                    self.assertEqual(repo.versions.get(version=version).public_access, head_access)
-                    self.assertEqual([call[2] for call in self.take_calls()], [WRITE_ACTION_EDIT])
+    def test_a_fhir_update_never_makes_a_private_head_viewable(self):
+        """A FHIR resource carries no access: a public release's isn't copied onto a private HEAD."""
+        for repo, factory, resource_type, extra in self.fhir_repositories():
+            with self.subTest(resource_type=resource_type):
+                type(repo).objects.filter(id=repo.id).update(public_access=ACCESS_TYPE_NONE)
+
+                response, resource = self.fhir_update(repo, factory, resource_type, ACCESS_TYPE_VIEW, **extra)
+
+                self.assertEqual(response.status_code, 200, response.content)
+                repo.refresh_from_db()
+                self.assertEqual(repo.public_access, ACCESS_TYPE_NONE)
+                self.assertEqual(repo.versions.get(version=resource['version']).public_access, ACCESS_TYPE_NONE)
+                self.assertEqual([call[2] for call in self.take_calls()], [WRITE_ACTION_EDIT])
+
+    def test_a_fhir_update_that_would_copy_a_private_release_onto_a_viewable_head_is_refused(self):
+        """It copies the release's other values too, so HEAD takes the release's access and asks make_private."""
+        for repo, factory, resource_type, extra in self.fhir_repositories():
+            with self.subTest(resource_type=resource_type):
+                response, resource = self.fhir_update(repo, factory, resource_type, ACCESS_TYPE_NONE, **extra)
+
+                # FHIR routes answer every refusal as an OperationOutcome: the body's values are its issues
+                self.assertEqual(response.status_code, 403, response.content)
+                self.assertEqual(response.json()['resourceType'], 'OperationOutcome')
+                issues = json.dumps(response.json()['issue'])
+                for value in PrivateGatePolicy.body.values():
+                    self.assertIn(str(value), issues)
+                self.assert_asked_to_make_private(self.take_calls(), row_id=repo.id)
+                repo.refresh_from_db()
+                self.assertEqual(repo.public_access, ACCESS_TYPE_VIEW)
+                self.assertFalse(repo.versions.filter(version=resource['version']).exists())
+
+        result = ResourceImporter.save_fhir_resource(
+            CodeSystemDetailSerializer, self.source.versions.get(version='r-None'), self.org,
+            {**resource, 'resourceType': 'CodeSystem', 'id': self.source.mnemonic, 'content': 'fragment',
+             'version': 'v3'},
+            ImportRequest('orgs', self.org.mnemonic, self.user.username, 'CodeSystem'))
+
+        self.assertIsInstance(result, WriteRefused)
+        self.assertEqual(result.detail, PrivateGatePolicy.body)
+        self.source.refresh_from_db()
+        self.assertEqual(self.source.public_access, ACCESS_TYPE_VIEW)
 
 
 @override_settings(CAPABILITY_POLICY=PRIVATE_GATE_POLICY)

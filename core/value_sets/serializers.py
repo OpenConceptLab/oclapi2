@@ -214,8 +214,11 @@ class ValueSetDetailSerializer(FhirRepositorySerializerMixin, serializers.ModelS
         collection.version = HEAD
         collection.released = False  # HEAD must never be released
         collection.expansion_uri = head_collection.expansion_uri
-        # a FHIR resource carries no access: HEAD keeps its own, not the resolved release's (ocl_online#698)
-        collection.public_access = head_collection.public_access
+        # a FHIR resource carries no access: the update never makes a private HEAD viewable by copying the resolved
+        # release's (ocl_online#698). A private release's access still goes onto a viewable HEAD, with its other
+        # values, which asks make_private.
+        if not head_collection.public_can_view:
+            collection.public_access = head_collection.public_access
 
         user = self.context['request'].user
         errors = Collection.persist_changes(collection, user, None)
