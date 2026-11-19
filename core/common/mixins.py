@@ -1367,6 +1367,8 @@ class ConceptContainerProcessingMixin:
     List this mixin before the base view in the class bases, or APIView.get_permissions takes precedence over this
     one. BaseAPIView.get_object loads the version and checks these permissions.
     """
+    writes_content = False  # clearing the flag changes no content, so CanEditConceptDictionary doesn't ask the policy
+
     def get_permissions(self):
         if self.request.method == 'POST':
             return [CanEditConceptDictionary(), ]

@@ -149,6 +149,8 @@ class ConceptMapDetailSerializer(FhirRepositorySerializerMixin, serializers.Mode
             first.get('map_type', None) == second.get('map_type', None)
 
     def update(self, instance, validated_data):
+        if self.refuses_another_id(instance, validated_data):
+            return instance
         mappings = validated_data.pop('mappings', [])
         new_version = validated_data.get('version')
 

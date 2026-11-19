@@ -24,6 +24,9 @@ from pydash import get
 from rest_framework.exceptions import ValidationError
 
 from core import settings
+from core.capabilities.constants import WRITE_ACTION_EDIT
+from core.capabilities.exceptions import WriteRefused
+from core.capabilities.writes import BatchWriteRefusals, get_write_refusal, get_write_target
 from core.common.serializers import IdentifierSerializer
 from core.common.tasks import bulk_import_subtask, bulk_import_subtask_empty, bulk_import_queue
 from core.common.tasks import import_finisher
@@ -514,8 +517,9 @@ class ResourceImporter:
     converters = [CodeSystemConverter]
     result_type = [CREATED, UPDATED, FAILED, DELETED, NOT_FOUND, PERMISSION_DENIED, UNCHANGED]
 
-    def __init__(self, indexer=None):
+    def __init__(self, indexer=None, write_refusals=None):
         self.indexer = indexer  # collects the concepts and mappings imported with _index=False
+        self.write_refusals = write_refusals  # the write checks the rows of one file share (BatchWriteRefusals)
 
     @staticmethod
     def get_resource_types():
@@ -543,7 +547,7 @@ class ResourceImporter:
             for resource_importer in self.resource_importers:
                 if resource_importer.can_handle(resource):
                     user_profile = UserProfile.objects.get(username=username)
-                    importer = resource_importer(resource, user_profile, True)
+                    importer = resource_importer(resource, user_profile, True, write_refusals=self.write_refusals)
                     result = importer.run()
                     if self.indexer:
                         self.indexer.add(get(importer, 'instance'))
@@ -568,10 +572,17 @@ class ResourceImporter:
     # pylint: disable=too-many-arguments
     @staticmethod
     def save_fhir_resource(serializer_class, existing, owner, resource, request):
-        """Updates need edit access on the existing repo, creates need edit access on the owner."""
+        """
+        Updates need edit access on the existing repo, and no refusal from the capability policy (the WriteRefused
+        then is the resource's result), creates need edit access on the owner.
+        """
         if existing:
             if not existing.has_edit_access(request.user):
                 return PERMISSION_DENIED
+            # the update saves onto the HEAD, whichever row has the canonical URL
+            refusal = get_write_refusal(request.user, get_write_target(existing.head), WRITE_ACTION_EDIT)
+            if refusal is not None:
+                return WriteRefused(refusal)
             serializer = serializer_class(existing, data=resource, context={'request': request})
             result = UPDATED
         else:
@@ -784,6 +795,7 @@ class ImporterSubtask:
             count = None
 
         results = []
+        resource_importer = ResourceImporter(self.indexer, BatchWriteRefusals())
         for resource in ijson.items(parse, '', multiple_values=True, allow_comments=True):
             if resource.get('__action', None) == 'DELETE':
                 continue
@@ -799,10 +811,11 @@ class ImporterSubtask:
                             resource['owner_type'] = self.owner_type
                         if 'owner' not in resource:
                             resource['owner'] = self.owner
-                    result = ResourceImporter(self.indexer).import_resource(
-                        resource, self.username, self.owner_type, self.owner)
+                    result = resource_importer.import_resource(resource, self.username, self.owner_type, self.owner)
                     if isinstance(result, int):
                         results.append(result)
+                    elif isinstance(result, WriteRefused):  # a failure, so the summary lists the policy's body
+                        results.append(f'{error} due to: {json.dumps(result.detail, default=str)}')
                     else:
                         results.append(f'{error} due to: {result}')
                 except Exception as e:
