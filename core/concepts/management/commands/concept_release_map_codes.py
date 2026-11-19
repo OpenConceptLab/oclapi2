@@ -35,7 +35,7 @@ class Command(BaseCommand):
         index = options['index'] or ConceptDocument._index._name  # pylint: disable=protected-access
         sources = [self.get_source(url) for url in options['source']]
         es = connections.get_connection()
-        expected = self.get_expected_mapping()
+        expected = ConceptDocument._doc_type.mapping.to_dict()['properties'][RELEASE_MAP_CODES]  # pylint: disable=protected-access
         if not options['check']:
             try:
                 es.indices.put_mapping(index=index, properties={RELEASE_MAP_CODES: expected})
@@ -51,10 +51,6 @@ class Command(BaseCommand):
         if not options['check']:
             for source in sources:
                 self.stdout.write(f'{source.uri}: {self.backfill(source)} docs updated')
-
-    @staticmethod
-    def get_expected_mapping():
-        return ConceptDocument._doc_type.mapping.to_dict()['properties'][RELEASE_MAP_CODES]  # pylint: disable=protected-access
 
     @staticmethod
     def get_source(url):

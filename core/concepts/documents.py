@@ -70,8 +70,6 @@ class MappedCodes:
         self.releases = defaultdict(list)  # concept id: [source version id]
         self.mappings = defaultdict(dict)  # (source version id, versioned object id): {mapping id: mapping values}
         ids = [concept.id for concept in concepts if concept.id]
-        if not ids:
-            return
         for concept_id, source_id in Concept.sources.through.objects.filter(
                 concept_id__in=ids).exclude(source__version=HEAD).order_by('source_id').values_list(
                     'concept_id', 'source_id'):
@@ -99,10 +97,11 @@ class MappedCodes:
                 mapping_id: values for source_id in releases
                 for mapping_id, values in self.get_release_mappings(concept, source_id).items()}.values())
         entries = {}  # one per distinct set of codes, with every release that has it
+        own_key = get_codes_key(codes)
         for source_id in releases:
             release_codes = to_mapped_codes(self.get_release_mappings(concept, source_id).values())
             key = get_codes_key(release_codes)
-            if key != get_codes_key(codes):
+            if key != own_key:
                 entries.setdefault(repr(key), {'source_version_id': [], **self.to_fields(release_codes)})[
                     'source_version_id'].append(source_id)
         return {**self.to_fields(codes), RELEASE_MAP_CODES: list(entries.values())}

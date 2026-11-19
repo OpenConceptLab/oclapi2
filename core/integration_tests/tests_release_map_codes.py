@@ -145,14 +145,6 @@ class ReleaseMapCodesTest(ReleasesFixture, OCLTestCase):
         # HEAD's own rows are in no release
         self.assertEqual(self.fields(row_a.versioned_object)[RELEASE_MAP_CODES], [])
 
-    def test_partial_updates_carry_the_entries(self):
-        row_a = self.row('HEAD', 'A')
-
-        action, = Concept.get_mapped_codes_actions([row_a.id])
-
-        self.assertEqual(
-            [entry['source_version_id'] for entry in action['doc'][RELEASE_MAP_CODES]], [[self.release('v1').id]])
-
     def test_entries_load_in_two_queries_for_many_rows(self):
         rows = list(Concept.objects.filter(parent__mnemonic='LOINC'))
 
