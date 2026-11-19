@@ -4946,3 +4946,14 @@ class CollectionVersionPrivateHeadAccessTest(PrivateHeadVersionAccessMixin, OCLA
         version.expansion_uri = expansion.uri
         version.save()
         return concept
+
+    def test_expansion_content_counts_are_hidden_when_head_is_private(self):
+        head, version = self.create_org_version()
+        self.add_concept(head, version)
+        expansion = version.expansions.first()
+
+        urls = [f'{expansion.uri}{suffix}{query}' for suffix in ('concepts/', 'mappings/') for query in ('', '?q=c')]
+        for url in urls:
+            self.assertEqual(
+                self.client.head(url, HTTP_AUTHORIZATION=f'Token {self.outsider.get_token()}').status_code, 403, url)
+            self.assertEqual(self.client.head(url).status_code, 401, url)

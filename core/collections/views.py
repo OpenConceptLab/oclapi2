@@ -1008,6 +1008,10 @@ class CollectionVersionExpansionChildrenView(CollectionVersionExpansionBaseView,
         self.get_queryset()
         return self.list(request, *args, **kwargs)
 
+    def head(self, request, **kwargs):
+        self.get_queryset()  # checks the version and expansion before a search counts them
+        return super().head(request, **kwargs)
+
 
 class CollectionVersionExpansionConceptsView(CollectionVersionExpansionChildrenView):
     is_page_size_capped = True
