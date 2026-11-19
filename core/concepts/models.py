@@ -1391,15 +1391,14 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     @classmethod
     def get_mapped_codes_actions(cls, ids):
         """Partial updates of these concepts' mapped codes, the fields their documents build from their mappings."""
-        from core.concepts.documents import ConceptDocument
+        from core.concepts.documents import ConceptDocument, ReleaseMapCodes
         index_name = ConceptDocument()._index._name  # pylint: disable=protected-access
-        for concept in cls.objects.filter(id__in=ids):
-            same_as_codes, other_codes, mapped_codes = ConceptDocument.get_mapped_codes(concept)
+        concepts = list(cls.objects.filter(id__in=ids))
+        release_map_codes = ReleaseMapCodes(concepts)
+        for concept in concepts:
             yield {
                 '_op_type': 'update', '_index': index_name, '_id': concept.id, 'retry_on_conflict': 3,
-                'doc': {
-                    'same_as_map_codes': same_as_codes, 'other_map_codes': other_codes, 'mapped_codes': mapped_codes
-                },
+                'doc': ConceptDocument.get_mapped_codes_fields(concept, release_map_codes),
             }
 
     @classmethod

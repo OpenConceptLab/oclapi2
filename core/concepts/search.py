@@ -1,4 +1,5 @@
-from elasticsearch_dsl import TermsFacet, Q, NestedFacet
+from elasticsearch_dsl import TermsFacet, Q, NestedFacet, A
+from elasticsearch_dsl.faceted_search import Facet
 from pydash import flatten, is_number, compact, get
 
 from core.common.constants import FACET_SIZE, HEAD
@@ -21,6 +22,35 @@ class BooleanTermsFacet(TermsFacet):
     def get_value(self, bucket):
         key = bucket['key']
         return get(bucket, 'key_as_string') or self.BUCKET_KEYS.get(key, key)
+
+
+class ReleaseMappedCodesFacet(Facet):
+    """
+    The targetRepo and targetRepoMapType facets in a release (OpenConceptLab/ocl_online#703): they count the
+    release's own mapped codes, from a doc's release_map_codes entry for it where it has one, else from its own.
+    """
+    agg_type = 'filter'
+
+    def __init__(self, release, field):
+        from core.concepts.documents import RELEASE_MAP_CODES, MAPPED_CODES_PATH
+        in_release = Q('term', **{f'{RELEASE_MAP_CODES}.version': release})
+        release_path = f'{RELEASE_MAP_CODES}.{MAPPED_CODES_PATH}'
+        super().__init__(filter=Q('match_all'), aggs={
+            'own': A('filter', filter=~Q('nested', path=RELEASE_MAP_CODES, query=in_release), aggs={
+                'inner': A('nested', path=MAPPED_CODES_PATH, aggs={
+                    'inner': A('terms', field=f'{MAPPED_CODES_PATH}.{field}', size=FACET_SIZE)})}),
+            'release': A('nested', path=RELEASE_MAP_CODES, aggs={
+                'inner': A('filter', filter=in_release, aggs={
+                    'inner': A('nested', path=release_path, aggs={
+                        'inner': A('terms', field=f'{release_path}.{field}', size=FACET_SIZE)})})}),
+        })
+
+    def get_values(self, data, filter_values):
+        counts = {}
+        for bucket in [*data.own.inner.inner.buckets, *data.release.inner.inner.inner.buckets]:
+            counts[bucket.key] = counts.get(bucket.key, 0) + bucket.doc_count
+        return [(key, count, key in filter_values) for key, count in
+                sorted(counts.items(), key=lambda item: (-item[1], item[0]))]
 
 
 class ConceptFacetedSearch(CustomESFacetedSearch):
@@ -56,13 +86,16 @@ class ConceptFacetedSearch(CustomESFacetedSearch):
         'targetRepoMapType': NestedFacet("mapped_codes", TermsFacet(field="mapped_codes.map_type", size=FACET_SIZE)),
     }
 
-    def __init__(self, parent=None, **kwargs):
+    def __init__(self, parent=None, release=None, **kwargs):
         facets = {**self.base_facets}
         if parent is not None:
             facets = {
                 **facets,
                 **self.build_property_facets_from_source(parent)
             }
+        if release:
+            facets['targetRepo'] = ReleaseMappedCodesFacet(release, 'source')
+            facets['targetRepoMapType'] = ReleaseMappedCodesFacet(release, 'map_type')
         self.facets = facets
         super().__init__(**kwargs)
 
@@ -168,6 +201,7 @@ class ConceptFuzzySearch:  # pragma: no cover
     ):
         from core.concepts.documents import ConceptDocument
         map_config = map_config or []
+        repo_params = repo_params or cls.get_target_repo_params(repo_url)
         filter_query = cls.get_filter_criteria(
             data, include_retired, repo_params, repo_url, additional_filter_criterion)
         or_clauses = []
@@ -285,7 +319,11 @@ class ConceptFuzzySearch:  # pragma: no cover
         for knn_query in knn_queries:
             search = search.knn(**knn_query)
         if wrapped_clauses:
-            search = search.query(Q("bool", should=wrapped_clauses, minimum_should_match=1))
+            query = Q("bool", should=wrapped_clauses, minimum_should_match=1)
+            release = repo_params.get('source_version')
+            if release and release != HEAD:  # a release's own mapped codes (OpenConceptLab/ocl_online#703)
+                query = Q(ConceptDocument.scope_map_codes_to_release(query.to_dict(), release))
+            search = search.query(query)
         else:
             search = search.query(Q("bool", must=[Q(filter_query)]))
 

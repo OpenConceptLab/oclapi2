@@ -2431,10 +2431,12 @@ class BulkImportInlineTest(OCLTestCase):
         }
 
         self.assertEqual(  # just the mapped codes, emptied when there are none
-            actions[unmapped.id]['doc'], {'same_as_map_codes': [], 'other_map_codes': [], 'mapped_codes': []})
+            actions[unmapped.id]['doc'],
+            {'same_as_map_codes': [], 'other_map_codes': [], 'mapped_codes': [], 'release_map_codes': []})
         action = actions[from_concept.versioned_object_id]
         self.assertEqual(action['_op_type'], 'update')
-        self.assertEqual(set(action['doc']), {'same_as_map_codes', 'other_map_codes', 'mapped_codes'})
+        self.assertEqual(
+            set(action['doc']), {'same_as_map_codes', 'other_map_codes', 'mapped_codes', 'release_map_codes'})
         self.assertEqual(sorted(action['doc']['same_as_map_codes']), ['A01', 'To'])
         self.assertEqual(action['doc']['other_map_codes'], ['To'])
         self.assertEqual(

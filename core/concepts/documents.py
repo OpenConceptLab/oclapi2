@@ -1,3 +1,4 @@
+from collections import defaultdict
 from itertools import islice
 
 from django.conf import settings
@@ -5,6 +6,7 @@ from django_elasticsearch_dsl import Document, fields
 from django_elasticsearch_dsl.registries import registry
 from pydash import compact, get
 
+from core.common.constants import HEAD
 from core.common.utils import jsonify_safe, flatten_extras, drop_version
 from core.concepts.embeddings import ConceptVectors, needs_vectors
 from core.concepts.models import Concept
@@ -17,6 +19,82 @@ VECTOR_PROVENANCE_MAPPING = {
     '_synonyms_embeddings': {'type': 'nested', 'properties': {'text': EMBEDDING_TEXT}},
     '_embeddings_model': {'type': 'keyword'},
 }
+# Each release's own mapped codes, where they differ from the doc's (OpenConceptLab/ocl_online#703)
+RELEASE_MAP_CODES = 'release_map_codes'
+MAP_CODE_FIELDS = ('same_as_map_codes', 'other_map_codes')
+MAPPED_CODES_PATH = 'mapped_codes'
+MAPPING_VALUES = ('map_type', 'to_concept_code', 'to_source_url')
+
+
+def to_mapped_codes(mappings):
+    """(same_as_map_codes, other_map_codes, mapped_codes) of mapping values (MAPPING_VALUES dicts)."""
+    same_as_mapped_codes = []
+    other_mapped_codes = []
+    verbose_info = []
+    for value in mappings:
+        to_concept_code = value['to_concept_code']
+        map_type = value['map_type']
+        if to_concept_code and map_type:
+            to_source_url = drop_version(value['to_source_url']) if value['to_source_url'] else None
+            if to_source_url:
+                verbose_info.append(
+                    {'source': to_source_url, 'code': to_concept_code, 'map_type': map_type})
+            if map_type.lower().startswith('same'):
+                same_as_mapped_codes.append(to_concept_code)
+            else:
+                other_mapped_codes.append(to_concept_code)
+    return same_as_mapped_codes, other_mapped_codes, verbose_info
+
+
+def get_codes_key(codes):
+    same_as_mapped_codes, other_mapped_codes, verbose_info = codes
+    return (sorted(same_as_mapped_codes), sorted(other_mapped_codes),
+            sorted((info['source'], info['code'], info['map_type']) for info in verbose_info))
+
+
+class ReleaseMapCodes:
+    """
+    The mapped codes of the releases concept rows are in, loaded in two queries for many rows
+    (OpenConceptLab/ocl_online#703). A row unchanged since a release is one search document for HEAD and that release
+    (or for several releases), and the document's own mapped codes come from Concept.get_indexed_mappings. Each release
+    whose own mappings give other codes gets an entry in release_map_codes, which a search in that release reads
+    instead (ConceptDocument.scope_map_codes_to_release).
+    """
+    def __init__(self, concepts):
+        from core.mappings.models import Mapping
+        self.releases = defaultdict(list)  # concept id: [(source version id, version)]
+        self.mappings = defaultdict(list)  # (source version id, versioned object id): [mapping values]
+        ids = [concept.id for concept in concepts if concept.id]
+        if not ids:
+            return
+        for concept_id, source_id, version in Concept.sources.through.objects.filter(
+                concept_id__in=ids).exclude(source__version=HEAD).values_list(
+                    'concept_id', 'source_id', 'source__version'):
+            self.releases[concept_id].append((source_id, version))
+        if not self.releases:
+            return
+        source_ids = {source_id for releases in self.releases.values() for source_id, _ in releases}
+        versioned_object_ids = {concept.versioned_object_id for concept in concepts if concept.id in self.releases}
+        # as Concept.get_version_mappings reads a release's mappings
+        for source_id, versioned_object_id, *values in Mapping.sources.through.objects.filter(
+                source_id__in=source_ids, mapping__from_concept__versioned_object_id__in=versioned_object_ids,
+                mapping__is_active=True
+        ).values_list('source_id', 'mapping__from_concept__versioned_object_id',
+                      *(f'mapping__{value}' for value in MAPPING_VALUES)):
+            self.mappings[(source_id, versioned_object_id)].append(dict(zip(MAPPING_VALUES, values)))
+
+    def get_entries(self, concept, codes):
+        """The release_map_codes entries of `concept`, whose doc has `codes`: one per release whose codes differ."""
+        entries = []
+        for source_id, version in sorted(self.releases.get(concept.id, []), key=lambda release: release[1]):
+            release_codes = to_mapped_codes(self.mappings.get((source_id, concept.versioned_object_id), []))
+            if get_codes_key(release_codes) != get_codes_key(codes):
+                same_as_mapped_codes, other_mapped_codes, verbose_info = release_codes
+                entries.append({
+                    'version': version, 'same_as_map_codes': same_as_mapped_codes,
+                    'other_map_codes': other_mapped_codes, MAPPED_CODES_PATH: verbose_info
+                })
+        return entries
 
 
 @registry.register_document
@@ -74,6 +152,20 @@ class ConceptDocument(Document):
             'code': fields.KeywordField(),
         }
     )
+    release_map_codes = fields.NestedField(
+        properties={
+            'version': fields.KeywordField(),
+            'same_as_map_codes': fields.KeywordField(),
+            'other_map_codes': fields.KeywordField(),
+            'mapped_codes': fields.NestedField(
+                properties={
+                    'source': fields.KeywordField(),
+                    'map_type': fields.KeywordField(),
+                    'code': fields.KeywordField(),
+                }
+            ),
+        }
+    )
     _embeddings = fields.NestedField(
         properties={
             "vector": {
@@ -103,6 +195,7 @@ class ConceptDocument(Document):
     vectors_reused = 0  # over this document instance's _get_actions calls
     texts_encoded = 0
     _source_versions = None  # (version, match_algorithms) of each repo version the row being prepared belongs to
+    _release_map_codes = None  # the ReleaseMapCodes of the chunk being prepared, see _get_actions
 
     class Django:
         model = Concept
@@ -245,6 +338,7 @@ class ConceptDocument(Document):
         objects = iter(object_list)
         while chunk := list(islice(objects, self.VECTOR_CHUNK_SIZE)):
             self._vectors = ConceptVectors()
+            self._release_map_codes = ReleaseMapCodes(chunk)
             try:
                 # Not self.get_actions, which calls this method. A list, so every doc in the chunk is prepared before
                 # resolve() fills in their vectors.
@@ -254,6 +348,7 @@ class ConceptDocument(Document):
                 self.texts_encoded += self._vectors.encoded
             finally:
                 self._vectors = None
+                self._release_map_codes = None
             yield from actions
 
     def prepare(self, instance):
@@ -263,10 +358,7 @@ class ConceptDocument(Document):
         finally:
             versions_match_algorithms = [match_algorithms for _, match_algorithms in self._source_versions]
             self._source_versions = None
-        same_as_mapped_codes, other_mapped_codes, verbose_info = self.get_mapped_codes(instance)
-        data['same_as_map_codes'] = same_as_mapped_codes
-        data['other_map_codes'] = other_mapped_codes
-        data['mapped_codes'] = verbose_info
+        data.update(self.get_mapped_codes_fields(instance, self._release_map_codes))
 
         preferred_locale = instance.preferred_locale
         name = get(preferred_locale, 'name') or ''
@@ -308,21 +400,66 @@ class ConceptDocument(Document):
             vectors.resolve()
 
     @staticmethod
-    def get_mapped_codes(instance):
-        mappings = instance.get_indexed_mappings()
-        same_as_mapped_codes = []
-        other_mapped_codes = []
-        verbose_info = []
-        for value in mappings.values('map_type', 'to_concept_code', 'to_source_url'):
-            to_concept_code = value['to_concept_code']
-            map_type = value['map_type']
-            if to_concept_code and map_type:
-                to_source_url = drop_version(value['to_source_url']) if value['to_source_url'] else None
-                if to_source_url:
-                    verbose_info.append(
-                        {'source': to_source_url, 'code': to_concept_code, 'map_type': map_type})
-                if map_type.lower().startswith('same'):
-                    same_as_mapped_codes.append(to_concept_code)
-                else:
-                    other_mapped_codes.append(to_concept_code)
-        return same_as_mapped_codes, other_mapped_codes, verbose_info
+    def get_mapped_codes_fields(instance, release_map_codes=None):
+        """
+        The fields built from the row's mappings: its own mapped codes, and those of each release they differ in.
+        release_map_codes: a ReleaseMapCodes loaded with this row (default: loaded for it alone).
+        """
+        codes = to_mapped_codes(instance.get_indexed_mappings().values(*MAPPING_VALUES))
+        same_as_mapped_codes, other_mapped_codes, verbose_info = codes
+        if release_map_codes is None:
+            release_map_codes = ReleaseMapCodes([instance])
+        return {
+            'same_as_map_codes': same_as_mapped_codes,
+            'other_map_codes': other_mapped_codes,
+            MAPPED_CODES_PATH: verbose_info,
+            RELEASE_MAP_CODES: release_map_codes.get_entries(instance, codes),
+        }
+
+    @classmethod
+    def scope_map_codes_to_release(cls, query, version):
+        """
+        `query` (a query dict) with each clause on mapped codes reading release `version`'s own codes
+        (OpenConceptLab/ocl_online#703): from the doc's entry for that release where it has one, else from the doc's
+        fields. A doc without an entry matches and scores as before.
+        """
+        if isinstance(query, list):
+            return [cls.scope_map_codes_to_release(clause, version) for clause in query]
+        if not isinstance(query, dict):
+            return query
+        if cls.is_map_codes_clause(query):
+            in_release = {'term': {f'{RELEASE_MAP_CODES}.version': version}}
+            return {'bool': {'minimum_should_match': 1, 'should': [
+                {'bool': {'must': [query], 'must_not': [{'nested': {'path': RELEASE_MAP_CODES, 'query': in_release}}]}},
+                {'nested': {'path': RELEASE_MAP_CODES, 'query': {
+                    'bool': {'filter': [in_release], 'must': [cls.to_release_map_codes_clause(query)]}}}},
+            ]}}
+        return {key: cls.scope_map_codes_to_release(value, version) for key, value in query.items()}
+
+    @staticmethod
+    def is_map_codes_clause(query):
+        """Whether `query` is a leaf clause on a mapped-code field, or a nested clause on mapped_codes."""
+        if len(query) != 1:
+            return False
+        query_type, body = next(iter(query.items()))
+        if not isinstance(body, dict):
+            return False
+        if query_type == 'nested':
+            return body.get('path') == MAPPED_CODES_PATH
+        return any(field in body for field in MAP_CODE_FIELDS)
+
+    @classmethod
+    def to_release_map_codes_clause(cls, query):
+        """A mapped-codes clause, on the same fields of a release_map_codes entry."""
+        if isinstance(query, list):
+            return [cls.to_release_map_codes_clause(clause) for clause in query]
+        if not isinstance(query, dict):
+            return query
+        clause = {}
+        for key, value in query.items():
+            if key in MAP_CODE_FIELDS or key.startswith(f'{MAPPED_CODES_PATH}.'):
+                key = f'{RELEASE_MAP_CODES}.{key}'
+            elif key == 'path' and value == MAPPED_CODES_PATH:
+                value = f'{RELEASE_MAP_CODES}.{MAPPED_CODES_PATH}'
+            clause[key] = cls.to_release_map_codes_clause(value)
+        return clause
