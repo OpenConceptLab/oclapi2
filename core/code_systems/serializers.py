@@ -425,13 +425,10 @@ class CodeSystemDetailSerializer(FhirRepositorySerializerMixin, serializers.Mode
         source.version = HEAD
         source.released = False  # HEAD must never be released
         source.custom_validation_schema = source_head.custom_validation_schema
-        # a FHIR resource carries no access: the update never makes a private HEAD viewable by copying the resolved
-        # release's (ocl_online#698). A private release's access still goes onto a viewable HEAD, with its other
-        # values, which asks make_private.
-        if not source_head.public_can_view:
-            source.public_access = source_head.public_access
 
-        errors = Source.persist_changes(source, user, None)
+        # a FHIR resource carries no access: the update never makes a private HEAD viewable, but a private release's
+        # access goes onto a viewable HEAD with its other values, which asks make_private (ocl_online#698)
+        errors = Source.persist_changes(source, user, None, keep_private=True)
 
         if errors:
             self._errors.update(errors)

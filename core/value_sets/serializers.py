@@ -214,12 +214,10 @@ class ValueSetDetailSerializer(FhirRepositorySerializerMixin, serializers.ModelS
         collection.version = HEAD
         collection.released = False  # HEAD must never be released
         collection.expansion_uri = head_collection.expansion_uri
-        # a private HEAD stays private, as in CodeSystemDetailSerializer.update
-        if not head_collection.public_can_view:
-            collection.public_access = head_collection.public_access
 
         user = self.context['request'].user
-        errors = Collection.persist_changes(collection, user, None)
+        # a private HEAD stays private, as in CodeSystemDetailSerializer.update
+        errors = Collection.persist_changes(collection, user, None, keep_private=True)
 
         if errors:
             self._errors.update(errors)
