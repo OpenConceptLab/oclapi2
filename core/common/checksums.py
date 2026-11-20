@@ -836,11 +836,10 @@ class VersionCompareMixin:
     def save_changelog_and_comparison(cls, uri1, uri2):
         from core.repos.models import VersionChangelog
         # Queued after a version is seeded, so a version deleted since leaves nothing to compare
-        missing = cls._get_missing_version_uris(uri1, uri2)
-        if missing:
-            logger.info('Skipping changelog: version(s) no longer exist: %s', ', '.join(missing))
+        version1, version2 = cls._get_versions(uri1, uri2, raise_if_missing=False)
+        if not version1:
+            logger.info('Skipping changelog: %s or %s no longer exists', uri1, uri2)
             return None
-        version1, version2 = cls._get_versions(uri1, uri2)
         changelog = VersionChangelog.find_or_build(version1, version2)
         start_time = time.time()
 
@@ -863,6 +862,10 @@ class VersionCompareMixin:
             concepts_diff, mappings_diff, version1, version2)
         changelog.extras = changelog.extras or {}
         changelog.extras['elapsed_seconds'] = time.time() - start_time
+        # A delete while diffing has already removed this pair's changelogs
+        if not cls._versions_exist(version1, version2):
+            logger.info('Skipping changelog: %s or %s was deleted while comparing', version1.uri, version2.uri)
+            return None
         changelog.save()
         return changelog
 
@@ -913,19 +916,20 @@ class VersionCompareMixin:
         return result
 
     @classmethod
-    def _get_missing_version_uris(cls, *uris):
-        existing = set(cls.objects.filter(uri__in=uris).values_list('uri', flat=True))
-        return [uri for uri in uris if uri not in existing]
+    def _versions_exist(cls, *versions):
+        ids = {version.id for version in versions}
+        return cls.objects.filter(id__in=ids).count() == len(ids)
 
     @classmethod
-    def _get_versions(cls, uri1, uri2):
+    def _get_versions(cls, uri1, uri2, raise_if_missing=True):
         version1 = cls.objects.filter(uri=uri1).first()
         version2 = cls.objects.filter(uri=uri2).first()
 
-        if not version1:
-            raise ValueError(f"Version not found: {uri1}")
-        if not version2:
-            raise ValueError(f"Version not found: {uri2}")
+        missing = [uri for uri, version in ((uri1, version1), (uri2, version2)) if not version]
+        if missing:
+            if raise_if_missing:
+                raise ValueError(f"Version not found: {missing[0]}")
+            return None, None
 
         if (version1.created_at and version2.created_at and version1.created_at > version2.created_at) or (
                 version1.is_head and not version2.is_head):
