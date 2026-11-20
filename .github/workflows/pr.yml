@@ -23,7 +23,7 @@ jobs:
     - name: Run linting rules
       uses: actions/setup-python@v4
       with:
-        python-version: '3.12'
+        python-version: '3.13'
         cache: 'pip'
     - run: pip install -r requirements.txt
     - run: pylint -j0 core/
@@ -64,7 +64,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.12"
+          python-version: "3.13"
       - name: Cache pip dependencies
         uses: actions/cache@v3
         with:
@@ -130,7 +130,7 @@ jobs:
           # string hash randomization. Pinning the seed makes that pick land on `value<Type>` deterministically instead
           # of varying by CI run. See OpenConceptLab/ocl_issues#2708.
           PYTHONHASHSEED: "2"
-          # Python 3.12's low-overhead tracer; fine since we measure line coverage only
+          # Python 3.12+ low-overhead tracer; fine since we measure line coverage only
           COVERAGE_CORE: sysmon
         run: |
           . venv/bin/activate

@@ -6,7 +6,7 @@ djangorestframework==3.18.2
 pylint==4.0.9
 pydash==7.0.6
 django-cors-headers==4.9.0
-pyyaml==6.0.1
+pyyaml==6.0.3
 colour_runner==0.1.1
 boto3==1.36.10
 moto==5.0.27
@@ -43,7 +43,7 @@ jsondiff==2.0.0
 django-silk==5.5.0
 azure-storage-blob==12.19.0
 fhir.resources[xml]==8.3.0
-ijson==3.2.3
+ijson==3.4.0
 responses==0.25.0
 pydantic==2.10.6
 minio==7.2.9
