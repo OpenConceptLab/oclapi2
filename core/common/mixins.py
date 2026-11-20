@@ -862,6 +862,34 @@ class SourceChildMixin(ChecksumModel):
     def _cached_latest_source_version(self):
         return self.parent.get_latest_released_version()
 
+    @classmethod
+    def get_latest_flags_actions(cls, ids):
+        """
+        Partial updates of what a new version changes in the documents of the versions it supersedes, as prepare() has
+        it: is_latest_version, and source_version, which loses HEAD. The rest of each document, vectors included, is
+        left as it was indexed.
+        """
+        index_name = cls.get_search_document()()._index._name  # pylint: disable=protected-access
+        field = f'{cls._meta.model_name}_id'
+        versions = {}
+        for row_id, version in cls.sources.through.objects.filter(
+                **{f'{field}__in': ids}).values_list(field, 'source__version'):
+            versions.setdefault(row_id, []).append(version)
+        for row_id, is_latest_version in cls.objects.filter(id__in=ids).values_list('id', 'is_latest_version'):
+            yield {
+                '_op_type': 'update', '_index': index_name, '_id': row_id, 'retry_on_conflict': 3,
+                'doc': {'is_latest_version': is_latest_version, 'source_version': versions.get(row_id, [])},
+            }
+
+    @classmethod
+    def index_latest_flags(cls, queryset):
+        """
+        Updates just is_latest_version and source_version in these rows' documents, instead of reindexing (and
+        re-embedding) them. Documents not in the index yet are fully indexed.
+        """
+        return cls.batch_index_partial_by_ids(
+            queryset, cls.get_search_document(), cls.get_latest_flags_actions, refresh=False)
+
     def belongs_to_non_head_source_version(self):
         versioned_object_id = self.versioned_object_id or self.id
         version_ids = self.__class__.objects.filter(

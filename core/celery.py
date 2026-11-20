@@ -41,6 +41,12 @@ app.conf.CELERYBEAT_SCHEDULE = {
         'task': 'core.common.tasks.rerun_indexing_job',
         'schedule': timedelta(minutes=15),
     },
+    'deferred-import-indexing': {  # does nothing outside IMPORT_INDEX_WINDOW
+        'task': 'core.common.tasks.run_deferred_import_indexing',
+        'schedule': timedelta(minutes=10),
+        # dropped if the indexing workers can't start it before the next one is sent, so they don't pile up
+        'options': {'expire_seconds': 9 * 60},
+    },
     'sync-keycloak-groups': {
         'task': 'core.common.tasks.sync_keycloak_groups',
         'schedule': timedelta(minutes=15),

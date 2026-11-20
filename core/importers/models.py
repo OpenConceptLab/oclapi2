@@ -1,15 +1,19 @@
 import json
 import time
+import uuid
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone as dt_timezone
 
 from celery import group
 from celery.utils.log import get_task_logger
 
 from django.conf import settings
+from django.contrib.postgres.fields import ArrayField
+from django.core.cache import cache as django_cache
 from django.core.exceptions import ValidationError
-from django.db import transaction
-from django.db.models import F, Q
+from django.db import models, transaction
+from django.db.models import F, Q, Exists, OuterRef
+from django.utils import timezone
 from ocldev.oclfleximporter import OclFlexImporter
 from pydash import compact, get
 
@@ -17,10 +21,12 @@ from core.celery import app
 from core.collections.models import Collection
 from core.common import ERRBIT_LOGGER
 from core.common.constants import HEAD, ALL
+from core.common.models import BatchIndexRun
 from core.common.tasks import bulk_import_parts_inline, delete_organization, batch_index_resources, \
-    post_import_update_resource_counts, index_concepts_mapped_codes
+    post_import_update_resource_counts, index_concepts_mapped_codes, get_batch_index_relations
 from core.common.utils import drop_version, is_url_encoded_string, encode_string, to_parent_uri, chunks
 from core.concepts.models import Concept
+from core.importers.constants import DEFERRED_INDEX_LOCK_KEY, DEFERRED_INDEX_LOCK_SECONDS, DEFERRED_INDEX_MAX_ATTEMPTS
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
 from core.sources.constants import ISOLATED_METADATA_FIELDS, ISOLATED_VERSION_CONTENT_FAILED, \
@@ -1159,7 +1165,10 @@ class ReferenceImporter(BaseResourceImporter):
 
 
 def should_index_import(index, lines):
-    """`index` as the request gave it; otherwise whether an import of this many lines is small enough to index."""
+    """
+    `index` as the request gave it; otherwise whether an import of this many lines is small enough to index as each
+    part finishes. An import that doesn't index then leaves it to the off-peak job (DeferredImportIndex).
+    """
     return lines <= settings.IMPORT_INDEX_MAX_LINES if index is None else index
 
 
@@ -1167,28 +1176,32 @@ class ImportIndexer:
     """
     Ends the indexing deferral for the concepts and mappings an import saved with _index=False: the versions it
     created or retired, their versioned objects and the versions they superseded. finish() resets their _index,
-    whether or not they get indexed, so later saves index them again. Unless the import doesn't index, it then queues
-    their batch indexing, without forcing a refresh per batch, and an update of the mapped codes in the documents of
-    the concepts the imported mappings come from.
+    whether or not they get indexed, so later saves index them again. If the import indexes, it then queues their batch
+    indexing, without forcing a refresh per batch, and an update of the mapped codes in the documents of the concepts
+    the imported mappings come from. If it doesn't, it records the same work for the off-peak job (DeferredImportIndex).
     """
     CHUNK_SIZE = 5000
 
-    def __init__(self, index=True):
+    def __init__(self, index=True, task_id=None):
         self.index = index
+        self.task_id = task_id  # the import task (or part) that saved the rows, for the deferred record
         self.ids = {'concept': set(), 'mapping': set()}
+        self.superseded_ids = {'concept': set(), 'mapping': set()}  # the versions the import demoted, of self.ids
         self.mapped_concept_ids = set()
 
     def add(self, instance):
         resource = {Concept: 'concept', Mapping: 'mapping'}.get(type(instance))
         if not resource or not instance.id or instance.should_index:
             return  # nothing saved, or saved with _index=True, which indexes it
+        superseded = compact([
+            get(instance, 'prev_latest_version_id'), *(get(instance, 'stale_latest_version_ids') or [])])
         self.ids[resource].update(compact([
             instance.versioned_object_id,
-            get(instance, 'prev_latest_version_id'),
-            *(get(instance, 'stale_latest_version_ids') or []),
+            *superseded,
             get(instance, 'latest_version_id'),
             instance.id,
         ]))
+        self.superseded_ids[resource].update(superseded)
         if resource == 'mapping' and instance.from_concept_id and instance.from_source_id == instance.parent_id:
             self.mapped_concept_ids.add(instance.from_concept_id)
         if resource == 'mapping' and get(instance, 'replaced_from_concept_id'):
@@ -1199,13 +1212,15 @@ class ImportIndexer:
         for resource, model in (('concept', Concept), ('mapping', Mapping)):
             for chunk in chunks(sorted(self.ids[resource]), self.CHUNK_SIZE):
                 model.objects.filter(id__in=chunk, _index=False).update(_index=True)
-        if self.index:
-            for resource in ('concept', 'mapping'):
-                for chunk in chunks(sorted(self.ids[resource]), self.CHUNK_SIZE):
-                    batch_index_resources.apply_async(
-                        (resource, {'id__in': chunk}, True, False), queue='indexing', permanent=False)
-            for chunk in chunks(sorted(self.get_mapped_concept_ids() - self.ids['concept']), self.CHUNK_SIZE):
-                index_concepts_mapped_codes.apply_async((chunk,), queue='indexing', permanent=False)
+        if not self.index:
+            DeferredImportIndex.record(self)
+            return
+        for resource in ('concept', 'mapping'):
+            for chunk in chunks(sorted(self.ids[resource]), self.CHUNK_SIZE):
+                batch_index_resources.apply_async(
+                    (resource, {'id__in': chunk}, True, False), queue='indexing', permanent=False)
+        for chunk in chunks(sorted(self.get_mapped_concept_ids() - self.ids['concept']), self.CHUNK_SIZE):
+            index_concepts_mapped_codes.apply_async((chunk,), queue='indexing', permanent=False)
 
     def get_mapped_concept_ids(self):
         """
@@ -1222,6 +1237,155 @@ class ImportIndexer:
             ids.update(Concept.objects.filter(
                 versioned_object_id__in=versioned_ids, is_latest_version=True).values_list('id', flat=True))
         return ids
+
+
+class DeferredImportIndex(models.Model):
+    """
+    Search indexing that an import left for the off-peak window (OpenConceptLab/ocl_online#268): what one import part
+    would have indexed as it finished, had it been within IMPORT_INDEX_MAX_LINES or sent with index=true. Each row is
+    one stage of up to ImportIndexer.CHUNK_SIZE ids. run() works through them in order while IMPORT_INDEX_WINDOW is
+    open and deletes each once it's indexed, so this table is exactly what's still waiting.
+
+    A part's stages run in this order:
+    - INDEX: a full index of the versions the import created or retired, their versioned objects and latest versions;
+    - MAPPED_CODES: the mapped codes in the documents of the concepts the imported mappings come from;
+    - LATEST_FLAGS: is_latest_version and source_version in the documents of the versions the import superseded, a
+      partial update that re-embeds nothing. It runs after their new versions are indexed: done any earlier, those
+      concepts and mappings would have no document flagged latest and drop out of HEAD search until then.
+    """
+    class Meta:
+        db_table = 'deferred_import_indexes'
+
+    class Stage(models.IntegerChoices):
+        INDEX = 1, 'index'
+        MAPPED_CODES = 2, 'mapped codes'
+        LATEST_FLAGS = 3, 'latest flags'
+
+    group = models.UUIDField()  # one import part's rows
+    created_at = models.DateTimeField()  # when the part finished; shared by its rows, so parts run in turn
+    stage = models.PositiveSmallIntegerField(choices=Stage.choices)
+    resource = models.CharField(max_length=16)  # 'concept' or 'mapping'
+    ids = ArrayField(models.BigIntegerField())
+    task_id = models.CharField(max_length=255, null=True, blank=True)
+    attempts = models.PositiveSmallIntegerField(default=0)  # failed runs, not counting Elasticsearch refusing writes
+    last_error = models.TextField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @classmethod
+    def record(cls, indexer):
+        """Records what an ImportIndexer that doesn't index would have queued."""
+        concept_ids = indexer.ids['concept'] - indexer.superseded_ids['concept']
+        stages = [
+            (cls.Stage.INDEX, 'concept', concept_ids),
+            (cls.Stage.INDEX, 'mapping', indexer.ids['mapping'] - indexer.superseded_ids['mapping']),
+            (cls.Stage.MAPPED_CODES, 'concept', indexer.get_mapped_concept_ids() - concept_ids),
+            (cls.Stage.LATEST_FLAGS, 'concept', indexer.superseded_ids['concept']),
+            (cls.Stage.LATEST_FLAGS, 'mapping', indexer.superseded_ids['mapping']),
+        ]
+        part = {'group': uuid.uuid4(), 'created_at': timezone.now(), 'task_id': indexer.task_id}
+        rows = [
+            cls(stage=stage, resource=resource, ids=chunk, **part)
+            for stage, resource, ids in stages for chunk in chunks(sorted(ids), ImportIndexer.CHUNK_SIZE)
+        ]
+        cls.objects.bulk_create(rows)
+        if rows:
+            logger.info(
+                'Import %s deferred the indexing of %s concepts and %s mappings to IMPORT_INDEX_WINDOW',
+                indexer.task_id, len(indexer.ids['concept']), len(indexer.ids['mapping']))
+        return rows
+
+    @staticmethod
+    def get_window():
+        """IMPORT_INDEX_WINDOW's (start, end) times in UTC, or None when it's empty or not 'HH:MM-HH:MM'."""
+        value = (settings.IMPORT_INDEX_WINDOW or '').strip()
+        if not value:
+            return None
+        try:
+            start, end = (datetime.strptime(part.strip(), '%H:%M').time() for part in value.split('-'))
+        except ValueError:
+            logger.error('IMPORT_INDEX_WINDOW %r is not HH:MM-HH:MM, so deferred import indexing is paused', value)
+            return None
+        return start, end
+
+    @classmethod
+    def is_window_open(cls, now=None):
+        """Whether `now` (default: the current time) is in IMPORT_INDEX_WINDOW, which can span midnight."""
+        window = cls.get_window()
+        if not window:
+            return False
+        start, end = window
+        current = (now or timezone.now()).astimezone(dt_timezone.utc).time()
+        return start <= current < end if start <= end else (current >= start or current < end)
+
+    @classmethod
+    def get_next(cls):
+        """
+        The next row to index: the oldest part's next stage. A row that failed DEFERRED_INDEX_MAX_ATTEMPTS runs is
+        skipped, and stays in the table with its error until someone resets its attempts. So are its part's later
+        stages: its latest flags could otherwise leave concepts with no document flagged latest.
+        """
+        parked = cls.objects.filter(attempts__gte=DEFERRED_INDEX_MAX_ATTEMPTS)
+        return cls.objects.filter(attempts__lt=DEFERRED_INDEX_MAX_ATTEMPTS).exclude(
+            Exists(parked.filter(group=OuterRef('group'), stage__lt=OuterRef('stage')))
+        ).order_by('created_at', 'group', 'stage', 'id').first()
+
+    @classmethod
+    def run(cls):
+        """
+        Indexes the deferred rows one at a time, in order, while the window is open, and returns how many it did. One
+        runner at a time: the lock is renewed after each row, and expires if its runner dies, so a later run picks up
+        where it stopped. A failed row stops the run, to be tried again by the next one.
+        """
+        if not cls.is_window_open() or not cls.objects.exists():
+            return 0
+        token = uuid.uuid4().hex
+        if not django_cache.add(DEFERRED_INDEX_LOCK_KEY, token, timeout=DEFERRED_INDEX_LOCK_SECONDS):
+            return 0
+        done = 0
+        try:
+            while cls.is_window_open():
+                row = cls.get_next()
+                if not row or not row.process():
+                    break
+                done += 1
+                django_cache.touch(DEFERRED_INDEX_LOCK_KEY, timeout=DEFERRED_INDEX_LOCK_SECONDS)
+        finally:
+            if django_cache.get(DEFERRED_INDEX_LOCK_KEY) == token:
+                django_cache.delete(DEFERRED_INDEX_LOCK_KEY)
+        logger.info('Deferred import indexing: %s row(s) indexed, %s waiting', done, cls.objects.count())
+        return done
+
+    def get_model(self):
+        return {'concept': Concept, 'mapping': Mapping}[self.resource]
+
+    def index(self):
+        """This row's indexing, without forcing a refresh, as the import's own indexing does."""
+        model = self.get_model()
+        queryset = model.objects.filter(id__in=self.ids)
+        if self.stage == self.Stage.INDEX:
+            model.batch_index(queryset, model.get_search_document(), refresh=False, **get_batch_index_relations(model))
+        elif self.stage == self.Stage.MAPPED_CODES:
+            model.index_mapped_codes(queryset)
+        else:
+            model.index_latest_flags(queryset)
+
+    def process(self):
+        """
+        Indexes this row and deletes it, or records the failure and keeps it. Whether it succeeded. A failure counts as
+        an attempt unless Elasticsearch was only refusing writes for now.
+        """
+        try:
+            self.index()
+        except Exception as ex:  # pylint: disable=broad-except
+            if not BatchIndexRun.is_rejected(ex):
+                self.attempts += 1
+            self.last_error = BatchIndexRun.describe(ex)
+            self.save(update_fields=['attempts', 'last_error', 'updated_at'])
+            logger.error('Deferred import indexing of row %s failed (attempt %s): %s', self.id, self.attempts,
+                         self.last_error)
+            return False
+        self.delete()
+        return True
 
 
 class BulkImportInline(BaseImporter):
@@ -1362,7 +1526,7 @@ class BulkImportInline(BaseImporter):
             print("****STARTED SUBPROCESS****")
             print(f"TASK ID: {self.self_task_id}")
             print("***************")
-        indexer = ImportIndexer(self.index)
+        indexer = ImportIndexer(self.index, self.self_task_id)
         try:
             for original_item in self.input_list:
                 self.processed += 1

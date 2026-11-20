@@ -649,6 +649,16 @@ def index_concepts_mapped_codes(concept_ids):
     Concept.index_mapped_codes(Concept.objects.filter(id__in=concept_ids))
 
 
+@app.task(ignore_result=True)
+def run_deferred_import_indexing():
+    """
+    Indexes what large imports left for IMPORT_INDEX_WINDOW, while it's open (DeferredImportIndex.run). Beat sends it
+    every few minutes, routed to the indexing queue.
+    """
+    from core.importers.models import DeferredImportIndex
+    return DeferredImportIndex.run()
+
+
 def batch_index_with_summary(index_func, *args, **kwargs):
     """
     Runs a batch indexing call and records its counts (batches, failed_batches, docs, failed_docs) in the running
