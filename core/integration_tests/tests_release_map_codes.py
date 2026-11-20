@@ -87,12 +87,13 @@ class ReleasesFixture:
             self.concept('A'), self.concept('B'), self.mapping('M2', 'B', 'X02'), self.mapping('M3', 'B', 'X03'),
             self.version('v2')])
 
+    def edited_a(self, name):
+        return {**self.concept('A'), 'names': [{'name': name, 'locale': 'en', 'locale_preferred': True}]}
+
     def edit_a_in_v3(self):
         """v3 edits A, so A's v1/v2 row leaves HEAD: only v1 and v2 hold it."""
-        edited_a = {**self.concept('A'), 'names': [{'name': 'A edited', 'locale': 'en', 'locale_preferred': True}]}
-        self.run_import([
-            edited_a, self.concept('B'), self.mapping('M2', 'B', 'X02'), self.mapping('M3', 'B', 'X03'),
-            self.version('v3')])
+        self.run_import([self.edited_a('A edited'), self.concept('B'), self.mapping('M2', 'B', 'X02'),
+                         self.mapping('M3', 'B', 'X03'), self.version('v3')])
 
     def drop_b_in_v3(self):
         """v3 drops B and its mappings: only v1 and v2 hold B's row."""
@@ -103,12 +104,10 @@ class ReleasesFixture:
         v3 edits A with M7 (SAME-AS X07) and M8 (NARROWER-THAN X08); v4 edits it again, keeping M7 and dropping M8
         (v2 dropped M1 and M5). Returns A's v3 row, taken out of v3, as for a version only a collection holds.
         """
-        def edit_a(version, name, *mappings):
-            edited_a = {**self.concept('A'), 'names': [{'name': name, 'locale': 'en', 'locale_preferred': True}]}
-            self.run_import([edited_a, *mappings, self.version(version)])
-
-        edit_a('v3', 'A edited', self.mapping('M7', 'A', 'X07'), self.mapping('M8', 'A', 'X08', 'NARROWER-THAN'))
-        edit_a('v4', 'A edited again', self.mapping('M7', 'A', 'X07'))
+        self.run_import([
+            self.edited_a('A edited'), self.mapping('M7', 'A', 'X07'), self.mapping('M8', 'A', 'X08', 'NARROWER-THAN'),
+            self.version('v3')])
+        self.run_import([self.edited_a('A edited again'), self.mapping('M7', 'A', 'X07'), self.version('v4')])
         old_a = self.row('v3', 'A')
         self.assertFalse(old_a.is_latest_version)
         old_a.sources.clear()
@@ -280,20 +279,13 @@ class ReleaseMapCodesTest(ReleasesFixture, OCLTestCase):
 
         self.assertFalse(release.concepts.exists())
 
-    def test_an_import_that_changes_heads_mappings_refreshes_a_collection_only_row(self):
+    def test_an_import_that_edits_heads_mappings_refreshes_a_collection_only_row(self):
         old_a = self.make_a_collection_only_row()
 
         self.run_import([self.mapping('M7', 'A', 'X09')], isolated_version=False)  # HEAD only: M7 now maps to X09
+
         queued = {row_id for call in self.mapped_codes_task.apply_async.call_args_list for row_id in call.args[0][0]}
         self.assertIn(old_a.id, queued)
-
-        a_as_in_v4 = {**self.concept('A'), 'names': [
-            {'name': 'A edited again', 'locale': 'en', 'locale_preferred': True}]}
-        with patch.object(Concept, 'index_mapped_codes') as index_mapped_codes:
-            self.run_import([a_as_in_v4, self.version('v5')])  # v5 keeps A and drops M7
-        refreshed = {row_id for call in index_mapped_codes.call_args_list
-                     for row_id in call.args[0].values_list('id', flat=True)}
-        self.assertIn(old_a.id, refreshed)
 
     def test_a_row_no_source_version_holds_reads_heads_active_mappings(self):
         old_a = self.make_a_collection_only_row()
@@ -470,3 +462,15 @@ class ReleaseMapCodesSearchTest(ReleasesFixture, OCLAPITestCase):
 
         doc = es.get(index=index, id=old_a.id)['_source']
         self.assertEqual((doc['same_as_map_codes'], doc['other_map_codes']), (['X07'], []))  # not M8, M1 or M5
+
+        refreshes = []  # the next seed keeps A and drops M7: its mapped-code refreshes, run as its indexing jobs would
+        with patch.object(Concept, 'index_mapped_codes', side_effect=refreshes.append):
+            self.run_import([self.edited_a('A edited again'), self.version('v5')])
+        with override_settings(TEST_MODE=False):  # in this thread: other connections can't see a test's rows
+            for queryset in refreshes:
+                Concept.batch_index_partial_by_ids(
+                    queryset, ConceptDocument, Concept.get_mapped_codes_actions, parallel=False)
+        ConceptDocument._index.refresh()  # pylint: disable=protected-access
+
+        doc = es.get(index=index, id=old_a.id)['_source']
+        self.assertEqual((doc['same_as_map_codes'], doc['other_map_codes']), ([], []))
