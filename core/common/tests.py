@@ -2693,6 +2693,24 @@ class TaskTest(OCLTestCase):
         self.assertFalse(VersionChecksumMap.objects.filter(version_url=source2_url).exists())
         self.assertTrue(VersionChecksumMap.objects.filter(version_url=source1.url).exists())
 
+    def test_run_diff_skips_save_for_version_deleted_while_comparing(self):
+        from core.repos.models import VersionChangelog, VersionChecksumMap
+        source1 = OrganizationSourceFactory(version='v1')
+        source2 = OrganizationSourceFactory(
+            organization=source1.organization, mnemonic=source1.mnemonic, version='v2')
+        source2_url = source2.url
+
+        def delete_source2(*_):
+            Source.objects.filter(id=source2.id).delete()
+            return {'meta': {}}
+
+        with patch.object(VersionCompareMixin, 'get_changelog_result', side_effect=delete_source2):
+            self.assertEqual(Source.run_diff(source1.uri, source2.uri, True, 0), {'meta': {}})
+
+        self.assertFalse(VersionChangelog.objects.filter(version2_url=source2_url).exists())
+        self.assertFalse(VersionChecksumMap.objects.filter(version_url=source2_url).exists())
+        self.assertTrue(VersionChecksumMap.objects.filter(version_url=source1.url).exists())
+
     @patch('core.common.models.ConceptContainerModel.clear_cache', Mock())
     @patch('core.common.models.delete_s3_objects', Mock())
     def test_source_version_compare_save_both_skips_deleted_version(self):

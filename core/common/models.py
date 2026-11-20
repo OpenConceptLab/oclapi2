@@ -1048,11 +1048,6 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         from core.repos.models import VersionChangelog
         VersionChangelog.objects.filter(Q(version1_url__in=urls) | Q(version2_url__in=urls)).delete()
 
-    @staticmethod
-    def delete_version_checksum_maps(urls):
-        from core.repos.models import VersionChecksumMap
-        VersionChecksumMap.objects.filter(version_url__in=urls).delete()
-
     def get_export_key_prefixes(self):
         prefix = self.get_version_export_path(suffix=None)
         prefixes = [(prefix, get_export_key_pattern(prefix))]

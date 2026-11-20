@@ -834,7 +834,7 @@ class VersionCompareMixin:
 
     @classmethod
     def save_changelog_and_comparison(cls, uri1, uri2):
-        from core.repos.models import VersionChangelog, VersionChecksumMap
+        from core.repos.models import VersionChangelog
         # Queued after a version is seeded, so a version deleted since leaves nothing to compare
         version1, version2 = cls._get_versions(uri1, uri2, raise_if_missing=False)
         if not version1:
@@ -862,11 +862,7 @@ class VersionCompareMixin:
             concepts_diff, mappings_diff, version1, version2)
         changelog.extras = changelog.extras or {}
         changelog.extras['elapsed_seconds'] = time.time() - start_time
-        # A delete while diffing has already removed this pair's changelogs and maps; drop the maps built here
-        deleted = cls._get_deleted_versions(version1, version2)
-        if deleted:
-            VersionChecksumMap.objects.filter(version_url__in=[version.url for version in deleted]).delete()
-            logger.info('Skipping changelog: %s or %s was deleted while comparing', version1.uri, version2.uri)
+        if cls._discard_if_deleted(version1, version2):
             return None
         changelog.save()
         return changelog
@@ -912,10 +908,24 @@ class VersionCompareMixin:
                 changelog.comparison = saved
                 computed_new_result = True
             result = saved
-        if computed_new_result:
+        if computed_new_result and not cls._discard_if_deleted(version1, version2):
             changelog.save()
 
         return result
+
+    @staticmethod
+    def delete_version_checksum_maps(urls):
+        from core.repos.models import VersionChecksumMap
+        VersionChecksumMap.objects.filter(version_url__in=urls).delete()
+
+    @classmethod
+    def _discard_if_deleted(cls, version1, version2):
+        # A delete while diffing has already removed this pair's changelogs and maps; drop the maps built since
+        deleted = cls._get_deleted_versions(version1, version2)
+        if deleted:
+            cls.delete_version_checksum_maps([version.url for version in deleted])
+            logger.info('Skipping changelog: %s or %s was deleted while comparing', version1.uri, version2.uri)
+        return bool(deleted)
 
     @classmethod
     def _get_deleted_versions(cls, *versions):
