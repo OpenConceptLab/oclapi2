@@ -2018,9 +2018,11 @@ class CelerySignalProcessor(RealTimeSignalProcessor):
             if get(settings, 'TEST_MODE', False):
                 handle_save(instance.app_name, instance.model_name, instance.id)
             else:
-                # once committed, so the task reads the row as saved: at once outside a transaction
+                # once committed, so the task reads the row as saved (at once outside a transaction); robust, so a
+                # failed enqueue doesn't stop the transaction's other callbacks, such as a version's seed task
                 args = (instance.app_name, instance.model_name, instance.id)
-                transaction.on_commit(lambda: handle_save.apply_async(args, queue='indexing', permanent=False))
+                transaction.on_commit(
+                    lambda: handle_save.apply_async(args, queue='indexing', permanent=False), robust=True)
 
     def handle_m2m_changed(self, sender, instance, action, **kwargs):
         if settings.ES_SYNC and instance.__class__ in registry.get_models() and instance.should_index:

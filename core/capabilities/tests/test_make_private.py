@@ -1,7 +1,7 @@
 import json
 from unittest.mock import Mock, patch
 
-from django.db import connection
+from django.db import connection, transaction
 from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 
@@ -15,6 +15,7 @@ from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.models import CelerySignalProcessor
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
 from core.common.tests import OCLAPITestCase
+from core.concepts.tests.factories import ConceptFactory
 from core.importers.importer import ImportRequest, ResourceImporter
 from core.importers.models import BulkImportInline
 from core.orgs.tests.factories import OrganizationFactory
@@ -280,27 +281,43 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
                 self.assertFalse(repo.versions.get(version=resource['version']).public_can_view)
 
     @staticmethod
-    def made_private_first(model):
-        """persist_changes of `model`, after a write that makes the row private commits: the concurrent write."""
-        persist_changes = model.persist_changes
+    def made_private_first(model, method):
+        """`model`'s `method`, run after a concurrent write that makes its row (the first argument) private commits."""
+        original = getattr(model, method)
 
-        def persist(obj, *args, **kwargs):
-            model.objects.filter(id=obj.id).update(public_access=ACCESS_TYPE_NONE)
-            return persist_changes(obj, *args, **kwargs)
-        return persist
+        def call(row, *args, **kwargs):
+            model.objects.filter(id=row.id).update(public_access=ACCESS_TYPE_NONE)
+            return original(row, *args, **kwargs)
+        return call
 
     def test_a_fhir_update_keeps_a_head_made_private_after_the_update_read_it(self):
         """The update decides HEAD's access from the row it saves over, not from an earlier read."""
         for repo, factory, resource_type, extra in self.fhir_repositories():
             model = type(repo)
             with self.subTest(resource_type=resource_type):
-                with patch.object(model, 'persist_changes', self.made_private_first(model)):
+                with patch.object(model, 'persist_changes', self.made_private_first(model, 'persist_changes')):
                     response, resource = self.fhir_update(repo, factory, resource_type, ACCESS_TYPE_VIEW, **extra)
 
                 self.assertEqual(response.status_code, 200, response.content)
                 repo.refresh_from_db()
                 self.assertEqual(repo.public_access, ACCESS_TYPE_NONE)
                 self.assertFalse(repo.versions.get(version=resource['version']).public_can_view)
+
+    def test_a_value_set_update_s_references_keep_a_head_made_private_after_head_was_saved(self):
+        """Adding the resource's references saves HEAD again, after the lock: only who changed it, not its access."""
+        source = OrganizationSourceFactory(organization=self.org, canonical_url='http://example.org/cs')
+        concept = ConceptFactory(parent=source)
+        compose = {'include': [{'system': source.canonical_url, 'concept': [{'code': concept.mnemonic}]}]}
+
+        with patch.object(Collection, 'add_references', self.made_private_first(Collection, 'add_references')):
+            response, resource = self.fhir_update(
+                self.collection, OrganizationCollectionFactory, 'ValueSet', ACCESS_TYPE_VIEW, compose=compose)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.collection.refresh_from_db()
+        self.assertEqual(self.collection.public_access, ACCESS_TYPE_NONE)
+        self.assertTrue(self.collection.references.exists())
+        self.assertFalse(self.collection.versions.get(version=resource['version']).public_can_view)
 
     def test_a_fhir_update_reads_head_for_update_in_the_transaction_that_saves_it(self):
         """A concurrent write that makes HEAD private waits for the save, so it isn't overwritten."""
@@ -350,6 +367,20 @@ class SearchIndexOnCommitTest(OCLAPITestCase):
 
         handle_save_task.apply_async.assert_called_once_with(
             (source.app_name, source.model_name, source.id), queue='indexing', permanent=False)
+
+    @patch('core.common.models.handle_save')
+    def test_a_failed_index_enqueue_doesn_t_stop_the_transaction_s_other_callbacks(self, handle_save_task):
+        """Such as the seed task of a version created in the same transaction."""
+        handle_save_task.apply_async.side_effect = ConnectionError('broker down')
+        source = OrganizationSourceFactory()
+        after = Mock()
+        with override_settings(TEST_MODE=False, ES_SYNC=True), self.assertLogs('django.test', 'ERROR'):
+            with self.captureOnCommitCallbacks(execute=True):
+                CelerySignalProcessor.handle_save(None, Source, source)
+                transaction.on_commit(after)
+
+        handle_save_task.apply_async.assert_called_once()
+        after.assert_called_once_with()
 
 
 @override_settings(CAPABILITY_POLICY=PRIVATE_GATE_POLICY)

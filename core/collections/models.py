@@ -304,7 +304,8 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         self.__dict__.pop('locked_collection_versions', None)
         if user and user.is_authenticated:
             self.updated_by = user
-        self.save()
+        # only who changed it: its other values were saved by the caller, and a concurrent write's stay (its access)
+        self.save(update_fields=['updated_by', 'updated_at'])
         self.update_children_counts()
         return added_references, errors
 
