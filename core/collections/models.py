@@ -19,7 +19,7 @@ from core.collections.constants import (
     TRANSFORM_TO_RESOURCE_VERSIONS, COLLECTION_REFERENCE_TYPE, TRANSFORM_TO_EXTENSIONAL,
     RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE, UNRESOLVED_RESOURCE_VERSION_TYPE,
     INTENSIONAL_REFERENCE_RESOURCE_VERSIONS_TOGGLE, EXPANSION_LOCKED_REPO_VERSION_TOGGLE, VERSION_EXPANSION_LOCK,
-    VERSION_EXPANSION_LATEST)
+    VERSION_EXPANSION_LATEST, REFERENCE_FOUND_NOTHING, REFERENCE_VERSION_NOT_HELD)
 from core.collections.parsers import CollectionReferenceParser
 from core.collections.translators import CollectionReferenceTranslator
 from core.collections.utils import is_concept, is_mapping
@@ -669,6 +669,8 @@ class CollectionReference(models.Model):
     _concepts = None
     _mappings = None
     _valueset_locks = None
+    # set when an expansion evaluates it as an include: why it added nothing, if so
+    unresolved_reason = None
     original_expression = None
 
     # core
@@ -1494,14 +1496,12 @@ class CollectionReference(models.Model):
             valueset_version_cache[cache_key] = version if version.id else None
         return valueset_version_cache[cache_key]
 
-    def get_evaluated_repo_version_urls(self, expansion=None):
-        """URLs of the repository versions it was evaluated in, else of the repositories it names"""
-        expansion_cache = {self.collection_id: expansion} if expansion else None
+    def get_evaluated_repo_version_urls(self, expansion, system_version_cache=None):
+        """URLs of the repository versions its expansion evaluated it in, else of the repositories it names"""
+        expansion_cache = {self.collection_id: expansion}
         versions = [
-            *self._get_resolved_system_versions(expansion_cache=expansion_cache),
+            *self._get_resolved_system_versions(system_version_cache, expansion_cache),
             *self._get_resolved_valueset_versions(expansion_cache=expansion_cache)]
-        if not versions and self.is_resource_versioned:
-            versions = compact([self.resolve_expression_system_version])
         valuesets = self.valueset if isinstance(self.valueset, list) else []
         return [version.uri for version in versions] or compact([self.system, *valuesets])
 
@@ -2028,6 +2028,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 if resolve_by_resource_version and ref.is_resource_versioned and \
                         not (_mappings if ref.is_mapping else _concepts).exists():
                     unresolved_repo_versions.append(ref.to_unresolved_resource_version())
+                    ref.unresolved_reason = REFERENCE_VERSION_NOT_HELD
                     return ref.concepts.filter(), ref.mappings.filter()
                 if should_write_back and ref.id and (ref_system_versions or ref.system or is_valueset_only):
                     ref.concepts.set(_concepts)
@@ -2047,11 +2048,14 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
 
         try:
             for reference in include_refs:
+                reference.unresolved_reason = None
                 concepts, mappings = get_ref_results(reference)
                 concepts_updated = self.__include_resources(self.concepts, concepts, True)
                 if index and concepts_updated is not False:
                     index_concepts = [*index_concepts, *concepts_updated.values_list('id', flat=True)]
                 mappings_updated = self.__include_resources(self.mappings, mappings, False)
+                if concepts_updated is False and mappings_updated is False and not reference.unresolved_reason:
+                    reference.unresolved_reason = REFERENCE_FOUND_NOTHING
                 if index and mappings_updated is not False:
                     index_mappings = [*index_mappings, *mappings_updated.values_list('id', flat=True)]
 

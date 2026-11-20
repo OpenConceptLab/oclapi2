@@ -196,7 +196,10 @@ def add_references(  # pylint: disable=too-many-arguments,too-many-locals
         logger.info('Errors while adding references....')
         logger.info(errors)
 
-    return [reference.id for reference in added_references], errors
+    unresolved = [
+        [reference.id, reference.unresolved_reason] for reference in added_references
+        if reference.include and reference.unresolved_reason]
+    return [reference.id for reference in added_references], errors, unresolved
 
 
 def __handle_save(instance):

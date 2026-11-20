@@ -12,6 +12,7 @@ from mock import patch, Mock, ANY
 from mock.mock import PropertyMock
 from rest_framework.exceptions import ErrorDetail
 
+from core.collections.constants import REFERENCE_VERSION_NOT_HELD
 from core.collections.models import CollectionReference, Collection
 from core.collections.serializers import CollectionVersionExportSerializer, CollectionReferenceDetailSerializer
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory, ExpansionFactory
@@ -1100,13 +1101,62 @@ class CollectionReferencesViewTest(OCLAPITestCase):
             ]
         )
 
-    def test_evaluated_repo_version_urls_name_the_repository_when_no_version_resolves(self):
+    @patch('core.collections.views.add_references')
+    def test_put_200_pinned_reference_no_version_holds_says_so(self, add_references_mock):
+        add_references_mock.__name__ = 'add_references'
+        source = self.concept.parent
         reference = CollectionReference(
-            expression='/orgs/nobody/sources/nothing/concepts/c1/', collection=self.collection,
-            system='/orgs/nobody/sources/nothing/', code='c1')
+            expression=f'{self.concept.uri}v9/', collection=self.collection, system=source.uri,
+            code=self.concept.mnemonic, resource_version='v9')
+        reference.save()
+        add_references_mock.return_value = ([reference.id], {}, [[reference.id, REFERENCE_VERSION_NOT_HELD]])
 
+        response = self.client.put(
+            self.collection.uri + 'references/',
+            {'data': {'expressions': [reference.expression]}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            reference.get_evaluated_repo_version_urls(self.expansion), ['/orgs/nobody/sources/nothing/'])
+            response.data,
+            [{
+                'added': True,
+                'resolved': False,
+                'expression': reference.expression,
+                'repo_versions': [source.uri],
+                'message': f'The reference is saved in collection {self.collection.name}, but no version of '
+                           f'{source.uri} holds resource version v9'
+            }]
+        )
+
+    @patch('core.collections.views.add_references')
+    def test_put_200_with_a_result_from_an_older_worker(self, add_references_mock):
+        add_references_mock.__name__ = 'add_references'
+        concept2 = ConceptFactory()
+        reference = CollectionReference(
+            expression=concept2.uri, collection=self.collection, system=concept2.parent.uri, code=concept2.mnemonic)
+        reference.save()
+        add_references_mock.return_value = ([reference.id], {})
+
+        response = self.client.put(
+            self.collection.uri + 'references/',
+            {'data': {'concepts': [concept2.uri]}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [{
+                'added': True,
+                'expression': concept2.uri,
+                'message': f'The concept {concept2.mnemonic} is successfully added to '
+                           f'collection {self.collection.name}'
+            }]
+        )
 
     def test_put_expression_with_cascade_to_concepts(self):
         source1 = OrganizationSourceFactory()

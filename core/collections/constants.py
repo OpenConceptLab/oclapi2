@@ -18,6 +18,10 @@ MAPPING_ADDED_TO_COLLECTION_FMT = 'The mapping {} is successfully added to colle
 UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT = 'The reference is successfully added to collection {}'
 REFERENCE_RESOLVED_TO_NOTHING_FMT = 'The reference is saved in collection {}, but it resolved to no concepts ' \
                                     'or mappings in {}'
+REFERENCE_VERSION_NOT_HELD_FMT = 'The reference is saved in collection {}, but no version of {} holds ' \
+                                 'resource version {}'
+REFERENCE_FOUND_NOTHING = 'found_nothing'
+REFERENCE_VERSION_NOT_HELD = 'resource_version_not_held'
 
 DELETE_FAILURE = 'Could not delete Collection.'
 DELETE_SUCCESS = 'Successfully deleted Collection.'
