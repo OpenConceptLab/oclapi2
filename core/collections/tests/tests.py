@@ -11,7 +11,8 @@ from django.core.exceptions import ValidationError
 from django.core.management import call_command, CommandError
 from django.http import QueryDict
 from django.test import override_settings, tag
-from django.db import OperationalError
+from django.test.utils import CaptureQueriesContext
+from django.db import OperationalError, connection, transaction
 from mock import patch, Mock
 from mock.mock import ANY
 from rest_framework import status
@@ -3310,6 +3311,65 @@ class ExpansionTest(OCLTestCase):
         self.assertEqual(
             sorted(rows.values_list('concept_id', flat=True)),
             sorted([concept.get_latest_version().id, duplicated.get_latest_version().id, other.id]))
+
+    def test_replace_head_rows_drops_a_duplicate_only_in_the_reference_holding_it(self):
+        concepts = [ConceptFactory() for _ in range(3)]
+        collection = OrganizationCollectionFactory()
+        holding, other = (
+            CollectionReference(expression=f'/concepts/{index}/', collection=collection) for index in range(2))
+        holding.save()
+        other.save()
+        holding.concepts.add(*concepts, *[concept.get_latest_version() for concept in concepts])
+        other.concepts.add(*concepts)
+        rows = CollectionReference.concepts.through.objects.filter(reference__collection_id=collection.id)
+
+        with CaptureQueriesContext(connection) as queries:
+            Expansion.replace_head_rows(rows, 'reference', 'concept', Concept)
+
+        # a correlated EXISTS over an owner's rows is quadratic in their number
+        self.assertFalse([query['sql'] for query in queries.captured_queries if 'EXISTS' in query['sql']])
+        latest_ids = sorted(concept.get_latest_version().id for concept in concepts)
+        self.assertEqual(sorted(holding.concepts.values_list('id', flat=True)), latest_ids)
+        self.assertEqual(sorted(other.concepts.values_list('id', flat=True)), latest_ids)
+
+    def test_replace_head_rows_drops_a_repeated_head_row_in_one_owner(self):
+        concepts = [ConceptFactory() for _ in range(2)]
+        collection = OrganizationCollectionFactory()
+        reference = CollectionReference(expression='/concepts/', collection=collection)
+        reference.save()
+        through = CollectionReference.concepts.through
+        through.objects.bulk_create(
+            [through(reference=reference, concept=concept) for concept in [*concepts, concepts[0]]])
+        rows = through.objects.filter(reference__collection_id=collection.id)
+
+        for size in (10000, 1):
+            with self.subTest(size=size), transaction.atomic():
+                with patch.object(Expansion, 'REPLACE_HEAD_ROWS_BATCH_SIZE', size):
+                    Expansion.replace_head_rows(rows, 'reference', 'concept', Concept)
+
+                self.assertEqual(
+                    sorted(rows.values_list('concept_id', flat=True)),
+                    sorted(concept.get_latest_version().id for concept in concepts))
+                transaction.set_rollback(True)
+
+    def test_replace_head_rows_of_mappings_in_batches(self):
+        mappings = [MappingFactory() for _ in range(2)]
+        collection = OrganizationCollectionFactory()
+        holding, other = (
+            CollectionReference(expression=f'/mappings/{index}/', collection=collection) for index in range(2))
+        holding.save()
+        other.save()
+        holding.mappings.add(*mappings, mappings[0].get_latest_version())
+        other.mappings.add(*mappings)
+        rows = CollectionReference.mappings.through.objects.filter(reference__collection_id=collection.id)
+
+        with patch.object(Expansion, 'REPLACE_HEAD_ROWS_BATCH_SIZE', 1):
+            Expansion.replace_head_rows(rows, 'reference', 'mapping', Mapping)
+
+        latest_ids = sorted(mapping.get_latest_version().id for mapping in mappings)
+        self.assertEqual(sorted(holding.mappings.values_list('id', flat=True)), latest_ids)
+        self.assertEqual(sorted(other.mappings.values_list('id', flat=True)), latest_ids)
+        self.assertEqual(rows.count(), 4)
 
     def test_is_explicit_valueset(self):
         uri = '/orgs/org/collections/coll/'
