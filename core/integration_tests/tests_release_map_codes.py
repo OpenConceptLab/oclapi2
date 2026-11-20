@@ -12,7 +12,8 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.search import CustomESSearch
 from core.common.tests import OCLAPITestCase, OCLTestCase
-from core.concepts.documents import ConceptDocument, MappedCodes, RELEASE_MAP_CODES, MAPPING_VALUES, to_mapped_codes
+from core.concepts.documents import ConceptDocument, MappedCodes, RELEASE_MAP_CODES, MAPPING_VALUES, \
+    MAPPED_CODES_PATH, to_mapped_codes
 from core.concepts.models import Concept
 from core.concepts.search import ConceptFuzzySearch
 from core.concepts.views import ConceptListView
@@ -243,14 +244,21 @@ class ReleaseMapCodesTest(ReleasesFixture, OCLTestCase):
 
         apply_async.assert_called_once_with(([self.row('v1', 'A').id],), queue='indexing', permanent=False)
 
-    def test_a_row_no_source_version_holds_reads_heads_mappings(self):
-        self.edit_a_in_v3()
-        old_a = self.row('v1', 'A')
+    def test_a_row_no_source_version_holds_reads_heads_active_mappings(self):
+        def edit_a(version, name, *mappings):
+            edited_a = {**self.concept('A'), 'names': [{'name': name, 'locale': 'en', 'locale_preferred': True}]}
+            self.run_import([edited_a, *mappings, self.version(version)])
+
+        edit_a('v3', 'A edited', self.mapping('M7', 'A', 'X07'), self.mapping('M8', 'A', 'X08', 'NARROWER-THAN'))
+        edit_a('v4', 'A edited again', self.mapping('M7', 'A', 'X07'))  # HEAD keeps M7, drops M8 (and M1, M5 in v2)
+        old_a = self.row('v3', 'A')
+        self.assertFalse(old_a.is_latest_version)
         old_a.sources.clear()  # as for a version only a collection holds
 
         fields = self.fields(old_a)
 
-        self.assertEqual((fields['same_as_map_codes'], fields['other_map_codes']), (['X01'], ['X05']))
+        self.assertEqual((fields['same_as_map_codes'], fields['other_map_codes']), (['X07'], []))
+        self.assertEqual(fields[MAPPED_CODES_PATH], [{'source': ICD, 'code': 'X07', 'map_type': 'SAME-AS'}])
         self.assertEqual(fields[RELEASE_MAP_CODES], [])
 
     def test_release_clauses_read_the_entry_for_the_release(self):

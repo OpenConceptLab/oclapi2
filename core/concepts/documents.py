@@ -57,9 +57,9 @@ class MappedCodes:
     The mapped-code fields of concept rows' search documents, loaded for many rows at once
     (OpenConceptLab/ocl_online#703). A row unchanged since a release stays one row, so one document serves HEAD and
     every release that holds it:
-    - its own fields hold HEAD's codes for HEAD's rows (the versioned object and the latest version, which global
-      search reads too) and for a row no release holds (one only a collection holds); otherwise the codes of every
-      public release that holds it, which collection searches read;
+    - its own fields hold HEAD's codes (from its active mappings) for HEAD's rows (the versioned object and the latest
+      version, which global search reads too) and for a row no release holds (one only a collection holds); otherwise
+      the codes of every public release that holds it, which collection searches read;
     - each release whose own mappings (the active ones, as Concept.get_version_mappings reads them) give other codes
       is in an entry of release_map_codes (one per distinct set of codes, naming its releases by id), which a search
       in that release reads instead (ConceptDocument.scope_map_codes_to_release).
@@ -94,7 +94,9 @@ class MappedCodes:
     def get_fields(self, concept):
         releases = self.releases.get(concept.id, [])
         if concept.is_versioned_object or concept.is_latest_version or not releases:
-            codes = to_mapped_codes(concept.get_unidirectional_mappings().values(*MAPPING_VALUES))
+            # HEAD's active mappings: for an older row, get_unidirectional_mappings keeps those HEAD dropped
+            codes = to_mapped_codes(
+                concept.get_unidirectional_mappings().filter(is_active=True).values(*MAPPING_VALUES))
         else:  # every public release's mappings, once each: a private release's are only in its entry
             codes = to_mapped_codes({
                 mapping_id: values for source_id in releases if source_id in self.public_releases
