@@ -428,6 +428,13 @@ class ReleaseMapCodesSearchTest(ReleasesFixture, OCLAPITestCase):
         response = self.client.get(f'{LOINC}concepts/?q=name&fuzzy=true&source_version={LOINC}v1/&target_repo={ICD}')
         self.assertEqual({concept['id'] for concept in response.data}, {'B'})  # with v1 selected too
 
+    def test_a_fuzzy_searchs_facets_read_the_docs_own_codes(self):  # as its hits do
+        response = self.client.get(f'{LOINC}v1/concepts/?q=name&fuzzy=true&facetsOnly=true')
+
+        self.assertEqual(response.status_code, 200)
+        map_types = [bucket[0] for bucket in response.data['facets']['fields']['targetRepoMapType']]
+        self.assertEqual(map_types, ['SAME-AS'])  # B's HEAD codes, not A's NARROWER-THAN X05 in v1
+
     def test_the_command_fills_existing_docs(self):
         self.drop_b_in_v3()
         es = ConceptDocument._get_connection()  # pylint: disable=protected-access
