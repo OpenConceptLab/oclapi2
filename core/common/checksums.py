@@ -1,3 +1,4 @@
+import logging
 import time
 
 from django.conf import settings
@@ -6,6 +7,8 @@ from ocldev.checksum import Checksum as ChecksumBase
 from pydash import get
 
 from core.common.utils import chunks
+
+logger = logging.getLogger('oclapi')
 
 
 # Return only aggregate counts for changed resource groups.
@@ -832,6 +835,11 @@ class VersionCompareMixin:
     @classmethod
     def save_changelog_and_comparison(cls, uri1, uri2):
         from core.repos.models import VersionChangelog
+        # Queued after a version is seeded, so a version deleted since leaves nothing to compare
+        missing = cls._get_missing_version_uris(uri1, uri2)
+        if missing:
+            logger.info('Skipping changelog: version(s) no longer exist: %s', ', '.join(missing))
+            return None
         version1, version2 = cls._get_versions(uri1, uri2)
         changelog = VersionChangelog.find_or_build(version1, version2)
         start_time = time.time()
@@ -903,6 +911,11 @@ class VersionCompareMixin:
             changelog.save()
 
         return result
+
+    @classmethod
+    def _get_missing_version_uris(cls, *uris):
+        existing = set(cls.objects.filter(uri__in=uris).values_list('uri', flat=True))
+        return [uri for uri in uris if uri not in existing]
 
     @classmethod
     def _get_versions(cls, uri1, uri2):

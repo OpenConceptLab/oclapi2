@@ -1245,21 +1245,12 @@ def rerun_indexing_job():
             logger.error('rerun_indexing_job: failed to re-queue %s: %s', task.id, ex)
 
 
-def _save_changelog_and_comparison(klass, version1_uri, version2_uri):
-    # Queued after a version is seeded, so a version deleted since leaves nothing to compare
-    missing = [uri for uri in (version1_uri, version2_uri) if not klass.objects.filter(uri=uri).exists()]
-    if missing:
-        logger.info('Skipping changelog: version(s) no longer exist: %s', ', '.join(missing))
-        return 0
-    klass.save_changelog_and_comparison(version1_uri, version2_uri)
-    return 1
-
-
 @app.task(base=QueueOnceCustomTask)
 def source_version_compare(version1_uri, version2_uri, is_changelog, verbosity, format_type='json', save_both=False):
     from core.sources.models import Source
     if save_both:
-        return _save_changelog_and_comparison(Source, version1_uri, version2_uri)
+        Source.save_changelog_and_comparison(version1_uri, version2_uri)
+        return 1
     return Source.run_diff(version1_uri, version2_uri, is_changelog, verbosity, format_type)
 
 
@@ -1268,7 +1259,8 @@ def collection_version_compare(
         version1_uri, version2_uri, is_changelog, verbosity, format_type='json', save_both=False):
     from core.collections.models import Collection
     if save_both:
-        return _save_changelog_and_comparison(Collection, version1_uri, version2_uri)
+        Collection.save_changelog_and_comparison(version1_uri, version2_uri)
+        return 1
     return Collection.run_diff(version1_uri, version2_uri, is_changelog, verbosity, format_type)
 
 
