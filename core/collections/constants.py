@@ -22,7 +22,10 @@ REFERENCE_VERSION_NOT_HELD_FMT = 'The reference is saved in collection {}, but n
                                  'resource version {}'
 REFERENCE_NAMED_VERSION_NOT_HELD_FMT = 'The reference is saved in collection {}, but {} does not hold ' \
                                        'resource version {}'
+REFERENCE_EXCLUDED_BY_PARAMETERS_FMT = "The reference is saved in collection {}, but the expansion's parameters " \
+                                       "exclude everything it resolved to in {}"
 REFERENCE_FOUND_NOTHING = 'found_nothing'
+REFERENCE_EXCLUDED_BY_PARAMETERS = 'excluded_by_parameters'
 REFERENCE_VERSION_NOT_HELD = 'resource_version_not_held'
 
 DELETE_FAILURE = 'Could not delete Collection.'

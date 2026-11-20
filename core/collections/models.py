@@ -19,7 +19,7 @@ from core.collections.constants import (
     TRANSFORM_TO_RESOURCE_VERSIONS, COLLECTION_REFERENCE_TYPE, TRANSFORM_TO_EXTENSIONAL,
     RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE, UNRESOLVED_RESOURCE_VERSION_TYPE,
     INTENSIONAL_REFERENCE_RESOURCE_VERSIONS_TOGGLE, EXPANSION_LOCKED_REPO_VERSION_TOGGLE, VERSION_EXPANSION_LOCK,
-    VERSION_EXPANSION_LATEST, REFERENCE_FOUND_NOTHING, REFERENCE_VERSION_NOT_HELD)
+    VERSION_EXPANSION_LATEST, REFERENCE_FOUND_NOTHING, REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS)
 from core.collections.parsers import CollectionReferenceParser
 from core.collections.translators import CollectionReferenceTranslator
 from core.collections.utils import is_concept, is_mapping
@@ -2054,11 +2054,10 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 if index and concepts_updated is not False:
                     index_concepts = [*index_concepts, *concepts_updated.values_list('id', flat=True)]
                 mappings_updated = self.__include_resources(self.mappings, mappings, False)
-                # exists() reads the rows rel.add already fetched, after the expansion's parameters filtered them
-                is_added = any(
-                    updated is not False and updated.exists() for updated in (concepts_updated, mappings_updated))
-                if not is_added and not reference.unresolved_reason:
-                    reference.unresolved_reason = REFERENCE_FOUND_NOTHING
+                # False: it found nothing; an empty queryset: the expansion's parameters excluded all it found
+                found = [updated for updated in (concepts_updated, mappings_updated) if updated is not False]
+                if not reference.unresolved_reason and not any(updated.exists() for updated in found):
+                    reference.unresolved_reason = REFERENCE_EXCLUDED_BY_PARAMETERS if found else REFERENCE_FOUND_NOTHING
                 if index and mappings_updated is not False:
                     index_mappings = [*index_mappings, *mappings_updated.values_list('id', flat=True)]
 

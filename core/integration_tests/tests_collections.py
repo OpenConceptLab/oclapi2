@@ -12,7 +12,7 @@ from mock import patch, Mock, ANY
 from mock.mock import PropertyMock
 from rest_framework.exceptions import ErrorDetail
 
-from core.collections.constants import REFERENCE_VERSION_NOT_HELD
+from core.collections.constants import REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS
 from core.collections.models import CollectionReference, Collection
 from core.collections.serializers import CollectionVersionExportSerializer, CollectionReferenceDetailSerializer
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory, ExpansionFactory
@@ -1101,19 +1101,17 @@ class CollectionReferencesViewTest(OCLAPITestCase):
             ]
         )
 
-    def _source_with_concept_version_only_v1_held(self):
-        """A concept version that only v1 held, now removed from it; v2 holds its replacement"""
+    @staticmethod
+    def _source_with_concept_version_no_release_holds():
+        """A concept version no released version holds; v2 holds its replacement"""
         source = OrganizationSourceFactory(organization=OrganizationFactory())
         concept = ConceptFactory(parent=source, mnemonic='c1')
         old = concept.get_latest_version()
         new = ConceptFactory(parent=source, mnemonic='c1', versioned_object=concept, version='new')
         old.sources.remove(source)
-        v1 = OrganizationSourceFactory(
-            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
         v2 = OrganizationSourceFactory(
             mnemonic=source.mnemonic, organization=source.organization, version='v2', released=True)
         new.sources.add(v2)
-        old.sources.remove(v1)
         return source, old, v2
 
     def _put_with_resolution_on(self, expression):
@@ -1126,7 +1124,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
             )
 
     def test_put_200_pinned_reference_no_version_holds_says_so_end_to_end(self):
-        source, old, _ = self._source_with_concept_version_only_v1_held()
+        source, old, _ = self._source_with_concept_version_no_release_holds()
 
         response = self._put_with_resolution_on(old.uri)
 
@@ -1144,7 +1142,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         )
 
     def test_put_200_pinned_reference_naming_a_version_that_does_not_hold_it_names_that_version(self):
-        _, old, v2 = self._source_with_concept_version_only_v1_held()
+        _, old, v2 = self._source_with_concept_version_no_release_holds()
         expression = f'{v2.uri}concepts/c1/{old.version}/'
 
         response = self._put_with_resolution_on(expression)
@@ -1187,6 +1185,33 @@ class CollectionReferencesViewTest(OCLAPITestCase):
                 'message': f'The reference is saved in collection {self.collection.name}, but no version of '
                            f'{source.uri} holds resource version v9'
             }]
+        )
+
+    @patch('core.collections.views.add_references')
+    def test_put_200_reference_the_expansion_parameters_exclude_says_so(self, add_references_mock):
+        add_references_mock.__name__ = 'add_references'
+        source = self.concept.parent
+        reference = CollectionReference(
+            expression=self.concept.uri, collection=self.collection, system=source.uri, code=self.concept.mnemonic)
+        reference.save()
+        add_references_mock.return_value = (
+            [reference.id], {}, [[reference.id, REFERENCE_EXCLUDED_BY_PARAMETERS]])
+
+        response = self.client.put(
+            self.collection.uri + 'references/',
+            {'data': {'concepts': [self.concept.uri]}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['resolved'], False)
+        self.assertEqual(response.data[0]['repo_versions'], [source.uri])
+        self.assertEqual(
+            response.data[0]['message'],
+            f"The reference is saved in collection {self.collection.name}, but the expansion's parameters "
+            f"exclude everything it resolved to in {source.uri}"
         )
 
     @patch('core.collections.views.add_references')

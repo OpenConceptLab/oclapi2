@@ -20,7 +20,7 @@ from rest_framework.response import Response
 
 from core.collections.constants import SOURCE_TO_CONCEPTS, TRANSFORM_TO_RESOURCE_VERSIONS, TRANSFORM_TO_EXTENSIONAL, \
     EXPANSION_LOCKED_REPO_VERSION_TOGGLE, RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE, REFERENCE_FOUND_NOTHING, \
-    REFERENCE_VERSION_NOT_HELD
+    REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS
 from core.collections.dry_runs import ExpansionDryRun
 from core.collections.documents import CollectionDocument
 from core.common.constants import SERIALIZATION_RETRY_ATTEMPTS
@@ -4112,7 +4112,7 @@ class ExpansionTest(OCLTestCase):
         with patch.object(Expansion, 'index_resources'):
             expansion.add_references([reference])
 
-        self.assertEqual(reference.unresolved_reason, REFERENCE_FOUND_NOTHING)
+        self.assertEqual(reference.unresolved_reason, REFERENCE_EXCLUDED_BY_PARAMETERS)
         self.assertEqual(expansion.concepts.count(), 0)
 
     def test_evaluated_repo_version_urls_name_the_repository_when_no_version_resolves(self):

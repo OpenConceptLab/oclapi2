@@ -25,7 +25,7 @@ from core.collections.constants import (
     SOURCE_MAPPINGS,
     UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT, TRANSFORM_TO_RESOURCE_VERSIONS, TRANSFORM_TO_EXTENSIONAL,
     REFERENCE_RESOLVED_TO_NOTHING_FMT, REFERENCE_VERSION_NOT_HELD_FMT, REFERENCE_VERSION_NOT_HELD,
-    REFERENCE_NAMED_VERSION_NOT_HELD_FMT)
+    REFERENCE_NAMED_VERSION_NOT_HELD_FMT, REFERENCE_EXCLUDED_BY_PARAMETERS_FMT, REFERENCE_EXCLUDED_BY_PARAMETERS)
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection, CollectionReference, Expansion, ExpansionParameters
 from core.collections.search import CollectionFacetedSearch
@@ -574,19 +574,20 @@ class CollectionReferencesView(
         system_version_cache = {}
         items = {}
         for reference in unresolved_refs:
+            reason = unresolved_reasons[reference.id]
             item = {'added': True, 'resolved': False, 'expression': reference.expression}
-            named_version = reference.resolve_expression_system_version if reference.names_repo_version else None
-            if unresolved_reasons[reference.id] == REFERENCE_VERSION_NOT_HELD and named_version:
-                item['repo_versions'] = [named_version.uri]
-                item['message'] = REFERENCE_NAMED_VERSION_NOT_HELD_FMT.format(
-                    collection.name, named_version.uri, reference.resource_version)
-            elif unresolved_reasons[reference.id] == REFERENCE_VERSION_NOT_HELD:
-                item['repo_versions'] = [reference.system]
-                item['message'] = REFERENCE_VERSION_NOT_HELD_FMT.format(
-                    collection.name, reference.system, reference.resource_version)
+            if reason == REFERENCE_VERSION_NOT_HELD:
+                named_version = reference.resolve_expression_system_version if reference.names_repo_version else None
+                item['repo_versions'] = [named_version.uri if named_version else reference.system]
+                message_format = REFERENCE_NAMED_VERSION_NOT_HELD_FMT if named_version else \
+                    REFERENCE_VERSION_NOT_HELD_FMT
+                item['message'] = message_format.format(
+                    collection.name, item['repo_versions'][0], reference.resource_version)
             else:
                 item['repo_versions'] = reference.get_evaluated_repo_version_urls(expansion, system_version_cache)
-                item['message'] = REFERENCE_RESOLVED_TO_NOTHING_FMT.format(
+                message_format = REFERENCE_EXCLUDED_BY_PARAMETERS_FMT if reason == REFERENCE_EXCLUDED_BY_PARAMETERS \
+                    else REFERENCE_RESOLVED_TO_NOTHING_FMT
+                item['message'] = message_format.format(
                     collection.name, ', '.join(item['repo_versions']) or 'any repository version')
             items[reference.expression] = item
         return items
