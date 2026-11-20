@@ -2149,7 +2149,7 @@ class TasksTest(OCLTestCase):
         )
         mapping2 = MappingFactory()
 
-        added_references, errors = add_references(
+        added_references, errors, unresolved = add_references(
             collection.created_by.id,
             {
                 'expressions': [obj.get_latest_version().url for obj in [concept1, concept2, mapping2]]
@@ -2160,6 +2160,7 @@ class TasksTest(OCLTestCase):
 
         self.assertEqual(len(added_references), 3)
         self.assertEqual(errors, {})
+        self.assertEqual(unresolved, [])
         self.assertListEqual(
             sorted(list(
                 collection.references.values_list('expression', flat=True)
@@ -2186,7 +2187,7 @@ class TasksTest(OCLTestCase):
             sorted([concept1.parent.uri, concept2.parent.uri, mapping2.parent.uri])
         )
 
-        added_references, errors = add_references(
+        added_references, errors, _ = add_references(
             collection.created_by.id,
             [
                 {'system': 'http://foo-system.com', 'namespace': 'barbar', 'code': 'bar'},

@@ -182,7 +182,7 @@ def add_references(  # pylint: disable=too-many-arguments,too-many-locals
     user = UserProfile.objects.get(id=user_id)
     collection = Collection.objects.filter(id=collection_id).first()
     if not collection:
-        return [], {'error': 'Collection not found'}
+        return [], {'error': 'Collection not found'}, []
     head = collection.get_head()
     head.add_processing(self.request.id)
 

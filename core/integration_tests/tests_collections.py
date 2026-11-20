@@ -1066,8 +1066,9 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
     def test_put_200_reference_resolving_to_nothing_names_the_version_it_looked_in(self):
         source = self.concept.parent
+        # unreleased, so the versionless concept2 reference still resolves to HEAD
         empty_version = OrganizationSourceFactory(
-            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=False)
         concept2 = ConceptFactory(parent=source)
         missing_expression = f'{empty_version.uri}concepts/{concept2.mnemonic}/'
 
