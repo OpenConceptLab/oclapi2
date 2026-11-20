@@ -3,6 +3,7 @@ import json
 from contextlib import ExitStack
 
 from django.core.management import call_command, CommandError
+from django.db import DatabaseError
 from django.test import override_settings, tag
 from elasticsearch_dsl import Q
 from mock import patch, Mock
@@ -11,6 +12,7 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.search import CustomESSearch
+from core.common.tasks import seed_children_to_new_version
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.concepts.documents import ConceptDocument, MappedCodes, RELEASE_MAP_CODES, MAPPING_VALUES, \
     MAPPED_CODES_PATH, to_mapped_codes
@@ -20,6 +22,7 @@ from core.concepts.views import ConceptListView
 from core.importers.models import BulkImportInline
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
+from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.models import UserProfile
 
 LOINC = '/orgs/Regen/sources/LOINC/'
@@ -243,6 +246,22 @@ class ReleaseMapCodesTest(ReleasesFixture, OCLTestCase):
             apply_async.assert_not_called()  # not before the change commits
 
         apply_async.assert_called_once_with(([self.row('v1', 'A').id],), queue='indexing', permanent=False)
+
+    @patch('core.common.tasks.export_source')
+    def test_a_new_release_writes_its_concepts_and_mappings_together(self, _):
+        """
+        A doc rebuilt while a release is seeded sees the release hold both the concept and its mappings, or neither:
+        the concept alone would give the doc an entry with no codes for the release, which its indexing (an append)
+        keeps.
+        """
+        head = Source.objects.get(mnemonic='LOINC', version='HEAD')
+        release = OrganizationSourceFactory(organization=head.organization, mnemonic='LOINC', version='v3')
+
+        with patch.object(Source, 'seed_mappings', side_effect=DatabaseError('seeding mappings failed')):
+            with self.assertRaises(DatabaseError):
+                seed_children_to_new_version('source', release.id, False)  # pylint: disable=no-value-for-parameter
+
+        self.assertFalse(release.concepts.exists())
 
     def test_a_row_no_source_version_holds_reads_heads_active_mappings(self):
         def edit_a(version, name, *mappings):
