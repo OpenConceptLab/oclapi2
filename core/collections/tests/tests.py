@@ -4016,9 +4016,11 @@ class ExpansionTest(OCLTestCase):
         return collection, expansion, reference
 
     @staticmethod
-    def _resolution_off_in_production():
-        """These dry runs compare production with the resolution toggle on, whatever the fixture says"""
-        Toggle.objects.filter(name=RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE).update(production=False)
+    def _toggles_off_in_production():
+        """These dry runs compare production with the toggles under test on, whatever the fixture says"""
+        Toggle.objects.filter(
+            name__in=[RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE, EXPANSION_LOCKED_REPO_VERSION_TOGGLE]
+        ).update(production=False)
 
     @staticmethod
     def _rebuild(collection, expansion):
@@ -4110,7 +4112,7 @@ class ExpansionTest(OCLTestCase):
         source, old, v1, v2 = CollectionReferenceTest.source_with_replaced_concept_version()
         collection, expansion, reference = self._expansion_with_resource_version_reference(source, old)
         self._rebuild(collection, expansion)
-        self._resolution_off_in_production()
+        self._toggles_off_in_production()
 
         with override_settings(ENV='production'):
             report = expansion.dry_run_rebuild()
@@ -4150,7 +4152,7 @@ class ExpansionTest(OCLTestCase):
         source, old, _, _ = CollectionReferenceTest.source_with_replaced_concept_version()
         collection, expansion, reference = self._expansion_with_resource_version_reference(source, old)
         self._rebuild(collection, expansion)
-        self._resolution_off_in_production()
+        self._toggles_off_in_production()
         out = StringIO()
 
         call_command(
@@ -4168,6 +4170,7 @@ class ExpansionTest(OCLTestCase):
             call_command('dry_run_expansions', collection.uri, '--env', 'nowhere', stdout=out)
 
     def test_dry_run_rolls_back_and_queues_no_task(self):
+        self._toggles_off_in_production()
         dry_run = ExpansionDryRun([EXPANSION_LOCKED_REPO_VERSION_TOGGLE])
 
         with dry_run.rolled_back(set()):
@@ -4185,7 +4188,7 @@ class ExpansionTest(OCLTestCase):
         source, old, _, _ = CollectionReferenceTest.source_with_replaced_concept_version()
         collection, expansion, reference = self._expansion_with_resource_version_reference(source, old)
         self._rebuild(collection, expansion)
-        self._resolution_off_in_production()
+        self._toggles_off_in_production()
 
         report = ExpansionDryRun([RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE]).rebuild(expansion)
 
@@ -4202,6 +4205,7 @@ class ExpansionTest(OCLTestCase):
         collection.add_expressions({'expressions': [old.versioned_object.uri]}, collection.created_by)
         reference = collection.references.get()
 
+        self._toggles_off_in_production()
         report = ExpansionDryRun([EXPANSION_LOCKED_REPO_VERSION_TOGGLE]).add(collection, reference)
 
         self.assertEqual(report['key'], f'{collection.uri} {reference.expression}')
@@ -4219,6 +4223,7 @@ class ExpansionTest(OCLTestCase):
         collection.add_expressions({'expressions': [old.versioned_object.uri]}, collection.created_by)
         Concept.objects.filter(id=old.id).update(is_latest_version=False)
 
+        self._toggles_off_in_production()
         report = ExpansionDryRun([EXPANSION_LOCKED_REPO_VERSION_TOGGLE]).create_version(collection)
 
         self.assertEqual(report['key'], collection.uri)
@@ -4241,6 +4246,7 @@ class ExpansionTest(OCLTestCase):
             ExpansionDryRun.get_import_expressions(collection, source_uris, 5, random.Random('1 a')), source_uris)
         expressions = source_uris
 
+        self._toggles_off_in_production()
         report = ExpansionDryRun([EXPANSION_LOCKED_REPO_VERSION_TOGGLE]).import_references(collection, expressions)
 
         self.assertEqual(report['key'], f'{collection.uri} 1')
@@ -4253,7 +4259,7 @@ class ExpansionTest(OCLTestCase):
         source, old, _, _ = CollectionReferenceTest.source_with_replaced_concept_version()
         collection, expansion, _ = self._expansion_with_resource_version_reference(source, old)
         self._rebuild(collection, expansion)
-        self._resolution_off_in_production()
+        self._toggles_off_in_production()
         out = StringIO()
 
         toggle = RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE
