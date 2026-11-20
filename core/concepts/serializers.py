@@ -48,7 +48,7 @@ class ViewableHierarchyUrlsField(ListField):
         return instance.get_viewable_hierarchy_concept_urls(self.relation, user, self.context.get('repo_version'))
 
 
-class LocalesInCreationOrderSerializer(ListSerializer):
+class LocalesInCreationOrderSerializer(ListSerializer):  # pylint: disable=abstract-method
     """Names or descriptions in creation order: the table has no ordering, so a prefetch and .all() can differ."""
     def to_representation(self, data):
         locales = data.all() if isinstance(data, BaseManager) else data
