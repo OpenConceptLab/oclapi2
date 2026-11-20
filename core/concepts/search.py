@@ -144,7 +144,7 @@ class ConceptFuzzySearch:  # pragma: no cover
         ['id', 0.3],
         ['name', 0.3],
         ['synonyms', 0.1],
-        ['same_as_mapped_codes', 0.1],
+        ['same_as_map_codes', 0.1],
         ['other_map_codes', 0.1],
         ['concept_class', 'datatype', 0.1],
         ['description', 0]
@@ -155,7 +155,7 @@ class ConceptFuzzySearch:  # pragma: no cover
         ['_synonyms', 0],
         ['name', 0],
         ['synonyms', 0],
-        ['same_as_mapped_codes', 0.1],
+        ['same_as_map_codes', 0.1],
         ['other_map_codes', 0.1],
         ['concept_class', 'datatype', 0],
     ]
@@ -222,6 +222,8 @@ class ConceptFuzzySearch:  # pragma: no cover
     ):
         from core.concepts.documents import ConceptDocument, RELEASE_MAP_CODES
         map_config = map_config or []
+        if 'same_as_mapped_codes' in data:  # the key $match read before, which names no indexed field
+            data = {'same_as_map_codes': data['same_as_mapped_codes'], **data}
         repo_params = repo_params or cls.get_target_repo_params(repo_url)
         release_id = cls.get_release_id(repo_params)
         inner_hit_names = (f'{RELEASE_MAP_CODES}_{index}' for index in count())

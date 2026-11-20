@@ -349,6 +349,17 @@ class ReleaseMapCodesSearchTest(ReleasesFixture, OCLAPITestCase):
         self.assertEqual(match(f'{LOINC}v1/'), ['A'])
         self.assertEqual(match(f'{LOINC}v2/'), [])
 
+    def test_match_reads_the_releases_same_as_codes(self):
+        def match(repo_url, key, code):  # the concepts found (HEAD holds a versioned object and its latest row)
+            hits = ConceptFuzzySearch.search({key: code}, repo_url).execute()
+            return sorted({hit.id for hit in hits})
+
+        for key in ('same_as_map_codes', 'same_as_mapped_codes'):  # the indexed field, and the key $match read before
+            self.assertEqual(match(f'{LOINC}v1/', key, 'X01'), ['A'], key)
+            self.assertEqual(match(f'{LOINC}v2/', key, 'X01'), [], key)
+            self.assertEqual(match(f'{LOINC}HEAD/', key, 'X01'), [], key)
+            self.assertEqual(match(f'{LOINC}HEAD/', key, 'X03'), ['B'], key)
+
     def test_a_filter_only_match_reads_the_release(self):
         target = Q('nested', path='mapped_codes', query=Q('term', **{'mapped_codes.code': 'X01'}))
 
