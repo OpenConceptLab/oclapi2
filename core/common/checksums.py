@@ -834,7 +834,7 @@ class VersionCompareMixin:
 
     @classmethod
     def save_changelog_and_comparison(cls, uri1, uri2):
-        from core.repos.models import VersionChangelog
+        from core.repos.models import VersionChangelog, VersionChecksumMap
         # Queued after a version is seeded, so a version deleted since leaves nothing to compare
         version1, version2 = cls._get_versions(uri1, uri2, raise_if_missing=False)
         if not version1:
@@ -862,8 +862,10 @@ class VersionCompareMixin:
             concepts_diff, mappings_diff, version1, version2)
         changelog.extras = changelog.extras or {}
         changelog.extras['elapsed_seconds'] = time.time() - start_time
-        # A delete while diffing has already removed this pair's changelogs
-        if not cls._versions_exist(version1, version2):
+        # A delete while diffing has already removed this pair's changelogs and maps; drop the maps built here
+        deleted = cls._get_deleted_versions(version1, version2)
+        if deleted:
+            VersionChecksumMap.objects.filter(version_url__in=[version.url for version in deleted]).delete()
             logger.info('Skipping changelog: %s or %s was deleted while comparing', version1.uri, version2.uri)
             return None
         changelog.save()
@@ -916,9 +918,9 @@ class VersionCompareMixin:
         return result
 
     @classmethod
-    def _versions_exist(cls, *versions):
-        ids = {version.id for version in versions}
-        return cls.objects.filter(id__in=ids).count() == len(ids)
+    def _get_deleted_versions(cls, *versions):
+        existing = set(cls.objects.filter(id__in=[version.id for version in versions]).values_list('id', flat=True))
+        return [version for version in versions if version.id not in existing]
 
     @classmethod
     def _get_versions(cls, uri1, uri2, raise_if_missing=True):

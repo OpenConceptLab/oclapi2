@@ -2676,7 +2676,7 @@ class TaskTest(OCLTestCase):
             Source.run_diff(source1.uri, source2_uri, True, 0)
 
     def test_save_changelog_and_comparison_skips_version_deleted_while_comparing(self):
-        from core.repos.models import VersionChangelog
+        from core.repos.models import VersionChangelog, VersionChecksumMap
         source1 = OrganizationSourceFactory(version='v1')
         source2 = OrganizationSourceFactory(
             organization=source1.organization, mnemonic=source1.mnemonic, version='v2')
@@ -2690,6 +2690,8 @@ class TaskTest(OCLTestCase):
             self.assertIsNone(Source.save_changelog_and_comparison(source1.uri, source2.uri))
 
         self.assertFalse(VersionChangelog.objects.filter(version2_url=source2_url).exists())
+        self.assertFalse(VersionChecksumMap.objects.filter(version_url=source2_url).exists())
+        self.assertTrue(VersionChecksumMap.objects.filter(version_url=source1.url).exists())
 
     @patch('core.common.models.ConceptContainerModel.clear_cache', Mock())
     @patch('core.common.models.delete_s3_objects', Mock())
