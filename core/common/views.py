@@ -93,8 +93,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             return True
         if self.is_collection_members_list():
             return False
-        include_retired = params.get('retired', None) in TRUTHY or params.get(INCLUDE_RETIRED_PARAM, None) in TRUTHY
-        return not include_retired
+        retired = next((value for key, value in params.items() if to_snake_case(key) == 'retired'), None)
+        return not (retired in TRUTHY or params.get(INCLUDE_RETIRED_PARAM, None) in TRUTHY)
 
     def get_retired_criterion(self):
         """
@@ -572,7 +572,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                     version = Collection.find_latest_released_version_by(
                         {**params, 'mnemonic': self.kwargs['collection']})
                     filters['collection_version'] = get(version, 'version')
-            elif is_collection_specified and 'expansion' not in self.kwargs and 'reference' not in self.kwargs:
+            elif is_collection_specified and 'expansion' not in self.kwargs and (
+                    is_version_specified or 'reference' not in self.kwargs):
                 from core.collections.models import Collection
                 version = Collection.objects.filter(  # without a version in the URL: HEAD, as its list
                     **params, mnemonic=self.kwargs['collection'], version=self.kwargs.get('version', HEAD)

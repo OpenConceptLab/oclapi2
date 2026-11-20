@@ -3864,11 +3864,18 @@ class ConceptRetiredFacetCountsTest(OCLAPITestCase):
 
         self.assertIn(
             'OtherA', self.get_ids(self.collection.uri + f'references/{reference.id}/concepts/?conceptClass=classA'))
+        versioned_url = self.collection.uri + f'HEAD/references/{reference.id}/concepts/?conceptClass=classA'
+        self.assertNotIn('OtherA', self.get_ids(versioned_url))  # a version in the URL: its default expansion
 
     def test_retired_filter_key_in_any_case(self):
+        url = self.source.concepts_url
+
         self.assertEqual(
-            self.get_facet_counts(self.source.concepts_url + '?facetsOnly=true&Retired=false'),
+            self.get_facet_counts(url + '?facetsOnly=true&Retired=false'),
             ({'classA': 1, 'classB': 1}, {'false': 2, 'true': 1}))
+        self.assertEqual(
+            self.get_facet_counts(url + '?facetsOnly=true&Retired=true'), ({'classA': 1}, {'false': 2, 'true': 1}))
+        self.assertEqual(self.get_ids(url + '?conceptClass=classA&Retired=true'), ['RetiredA'])
 
 
 class ConceptNameRetrieveUpdateDestroyViewTest(OCLAPITestCase):
