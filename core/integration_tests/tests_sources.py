@@ -3639,6 +3639,19 @@ class SourceReleaseWhileSeedingTest(OCLAPITestCase):
             [args[0][0].id for args in index_children_async.call_args_list if args[1].get('exclude_members_of')],
             [self.version.id])
 
+    def test_release_stops_unflagging_at_a_release_seeded_before_seed_stages(self):
+        Source.objects.filter(id=self.version.id).update(released=True)
+        Task.objects.filter(id=self.seed_task.id).update(state=SUCCESS, summary=None)
+        latest = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v3', released=True)
+
+        with patch.object(Source, 'index_children_async', autospec=True) as index_children_async:
+            latest.index_resources_for_self_as_latest_released()
+
+        self.assertEqual(
+            [args[0][0].id for args in index_children_async.call_args_list if args[1].get('exclude_members_of')],
+            [self.version.id])
+
     @patch.object(Source, 'index_children')
     def test_seed_task_of_a_superseded_release_still_tags_its_members(self, index_children):
         Source.objects.filter(id=self.version.id).update(released=True)
