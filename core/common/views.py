@@ -102,9 +102,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         it, all but the `retired` facet, which counts both values so a client can show how many are retired.
         """
         criterion = Q('term', retired=False) if self._should_exclude_retired_from_search_results() else None
-        query_params = self.request.query_params
+        faceted_filters = self.get_faceted_filters()
         retired_filter = self.get_faceted_criterion(
-            params={'retired': query_params['retired']}) if 'retired' in query_params else None
+            params={'retired': faceted_filters['retired']}) if 'retired' in faceted_filters else None
         if retired_filter is not None:
             criterion = retired_filter if criterion is None else criterion & retired_filter
         return criterion
@@ -572,7 +572,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                     version = Collection.find_latest_released_version_by(
                         {**params, 'mnemonic': self.kwargs['collection']})
                     filters['collection_version'] = get(version, 'version')
-            elif is_collection_specified and 'expansion' not in self.kwargs:
+            elif is_collection_specified and 'expansion' not in self.kwargs and 'reference' not in self.kwargs:
                 from core.collections.models import Collection
                 version = Collection.objects.filter(  # without a version in the URL: HEAD, as its list
                     **params, mnemonic=self.kwargs['collection'], version=self.kwargs.get('version', HEAD)
@@ -874,7 +874,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             results = results.filter(visibility_criteria)
         # with ignore_retired_filter, the facets apply the retired rule and the `retired` filter (get_retired_criterion)
         faceted_criterion = self.get_faceted_criterion(params={
-            key: value for key, value in self.request.query_params.dict().items() if key != 'retired'
+            key: value for key, value in self.request.query_params.dict().items() if to_snake_case(key) != 'retired'
         } if ignore_retired_filter else None)
         if faceted_criterion:
             results = results.filter(faceted_criterion)

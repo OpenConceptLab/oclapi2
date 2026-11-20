@@ -24,6 +24,7 @@ from core.capacity.config import clear_cache, save_config
 from core.capacity.constants import HEADER_DECISION
 from core.capacity.limiter import RedisLanes
 from core.sources.models import CloneLimitExceeded
+from core.collections.models import CollectionReference
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE, OPENMRS_VALIDATION_SCHEMA
 from core.common.tests import OCLAPITestCase, PREVIEW_GROUP_NAME
@@ -3851,6 +3852,23 @@ class ConceptRetiredFacetCountsTest(OCLAPITestCase):
         self.assertEqual(self.get_ids(url + '?conceptClass=classA'), ['ActiveA', 'RetiredA'])
         self.assertEqual(
             self.get_facet_counts(url + '?facetsOnly=true'), ({'classA': 2, 'classB': 1}, {'false': 2, 'true': 1}))
+
+    def test_reference_search_is_not_limited_to_the_default_expansion(self):
+        other_member = ConceptFactory(
+            mnemonic='OtherA', parent=self.source, concept_class='classA').get_latest_version()
+        ExpansionFactory(mnemonic='e2', collection_version=self.collection).concepts.add(other_member)
+        reference = CollectionReference(expression=other_member.uri, collection=self.collection)
+        reference.save()
+        reference.concepts.add(other_member)
+        ConceptDocument().update(self.source.concepts_set.all())
+
+        self.assertIn(
+            'OtherA', self.get_ids(self.collection.uri + f'references/{reference.id}/concepts/?conceptClass=classA'))
+
+    def test_retired_filter_key_in_any_case(self):
+        self.assertEqual(
+            self.get_facet_counts(self.source.concepts_url + '?facetsOnly=true&Retired=false'),
+            ({'classA': 1, 'classB': 1}, {'false': 2, 'true': 1}))
 
 
 class ConceptNameRetrieveUpdateDestroyViewTest(OCLAPITestCase):
