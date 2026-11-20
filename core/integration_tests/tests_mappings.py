@@ -88,6 +88,9 @@ class MappingRetiredFacetCountsTest(OCLAPITestCase):
             ({'same-as': 2, 'narrower-than': 1}, both))
         self.assertEqual(
             self.get_facet_counts(url + '?facetsOnly=true&retired=false'), ({'same-as': 1, 'narrower-than': 1}, both))
+        self.assertEqual(
+            self.get_facet_counts(url + '?facetsOnly=true&includeRetired=false'),
+            ({'same-as': 1, 'narrower-than': 1}, both))
         self.assertEqual(self.get_ids(url + f'?mapType={SAME_AS}'), ['ActiveSameAs'])
         self.assertEqual(
             self.get_ids(url + f'?mapType={SAME_AS}&includeRetired=true'), ['ActiveSameAs', 'RetiredSameAs'])
@@ -109,12 +112,22 @@ class MappingRetiredFacetCountsTest(OCLAPITestCase):
 
     def test_collection(self):
         url = self.collection.mappings_url
+        both = {'false': 2, 'true': 1}
 
         self.assertEqual(self.get_ids(url), ['ActiveNarrower', 'ActiveSameAs', 'RetiredSameAs'])
         self.assertEqual(self.get_ids(url + '?includeRetired=false'), ['ActiveNarrower', 'ActiveSameAs'])
+        self.assertEqual(self.get_ids(url + f'?mapType={SAME_AS}'), ['ActiveSameAs', 'RetiredSameAs'])
+        self.assertEqual(self.get_ids(url + f'?mapType={SAME_AS}&retired=false'), ['ActiveSameAs'])
+        self.assertEqual(
+            self.get_facet_counts(url + '?facetsOnly=true'), ({'same-as': 2, 'narrower-than': 1}, both))
+        self.assertEqual(
+            self.get_facet_counts(url + '?facetsOnly=true&includeRetired=true'),
+            ({'same-as': 2, 'narrower-than': 1}, both))
         self.assertEqual(
             self.get_facet_counts(url + '?facetsOnly=true&includeRetired=false'),
-            ({'same-as': 1, 'narrower-than': 1}, {'false': 2, 'true': 1}))
+            ({'same-as': 1, 'narrower-than': 1}, both))
+        self.assertEqual(
+            self.get_facet_counts(url + '?facetsOnly=true&retired=false'), ({'same-as': 1, 'narrower-than': 1}, both))
 
 
 class MappingListViewTest(OCLAPITestCase):

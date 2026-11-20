@@ -3,10 +3,12 @@ from elasticsearch_dsl import TermsFacet
 from core.collections.models import Collection
 from core.common.constants import FACET_SIZE
 from core.common.search import CustomESFacetedSearch
+from core.repos.documents import REPO_INDEXES
 from core.sources.models import Source
 
 
 class RepoFacetedSearch(CustomESFacetedSearch):
+    index = REPO_INDEXES
     doc_types = [Source, Collection]
     fields = [
         'source_type',
