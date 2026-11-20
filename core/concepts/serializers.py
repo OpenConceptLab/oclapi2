@@ -1,9 +1,10 @@
 from django.db.models import F
+from django.db.models.manager import BaseManager
 from drf_yasg.utils import swagger_serializer_method
 from pydash import get, compact
 from rest_framework.fields import CharField, DateTimeField, BooleanField, URLField, JSONField, SerializerMethodField, \
     UUIDField, ListField, IntegerField, ReadOnlyField, DictField
-from rest_framework.serializers import ModelSerializer
+from rest_framework.serializers import ModelSerializer, ListSerializer
 
 from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPINGS_PARAM, INCLUDE_EXTRAS_PARAM, \
     INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS, INCLUDE_SOURCE_VERSIONS, INCLUDE_COLLECTION_VERSIONS, \
@@ -47,6 +48,13 @@ class ViewableHierarchyUrlsField(ListField):
         return instance.get_viewable_hierarchy_concept_urls(self.relation, user, self.context.get('repo_version'))
 
 
+class LocalesInCreationOrderSerializer(ListSerializer):
+    """Names or descriptions in creation order: the table has no ordering, so a prefetch and .all() can differ."""
+    def to_representation(self, data):
+        locales = data.all() if isinstance(data, BaseManager) else data
+        return super().to_representation(sorted(locales, key=lambda locale: (locale.id is None, locale.id or 0)))
+
+
 class LocalizedNameSerializer(ModelSerializer):
     uuid = CharField(read_only=True, source='id')
     name_type = CharField(source='type', required=False, allow_null=True, allow_blank=True)
@@ -58,6 +66,7 @@ class LocalizedNameSerializer(ModelSerializer):
             'uuid', 'name', 'external_id', 'type', 'locale', 'locale_preferred', 'name_type', 'checksum',
             'retired', 'retire_reason'
         )
+        list_serializer_class = LocalesInCreationOrderSerializer
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
@@ -77,6 +86,7 @@ class LocalizedDescriptionSerializer(ModelSerializer):
             'uuid', 'description', 'external_id', 'type', 'locale', 'locale_preferred', 'description_type', 'checksum',
             'retired', 'retire_reason'
         )
+        list_serializer_class = LocalesInCreationOrderSerializer
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
