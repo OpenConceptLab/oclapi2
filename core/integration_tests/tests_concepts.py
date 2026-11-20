@@ -4840,6 +4840,8 @@ class ConceptListIncludeMappingsTest(OCLAPITestCase):
             organization=self.source.organization, mnemonic=self.source.mnemonic, version='v1')
         for concept in self.concepts:
             version.concepts.add(concept.get_latest_version())
+        for mapping in Mapping.objects.filter(parent=self.source, is_latest_version=True):
+            version.mappings.add(mapping)  # a version's concepts embed its own mappings
         self.assert_same_with_and_without_batching(version.uri + 'concepts/')
         self.assertTrue(any(self.mappings_by_concept(version.uri + 'concepts/').values()))
 

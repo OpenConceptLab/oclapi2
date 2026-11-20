@@ -203,6 +203,11 @@ class MappingMinimalSerializer(AbstractMappingSerializer):
         return obj.to_concept_name or get(obj, 'to_concept.display_name')
 
 
+
+class EmbeddedMappingMinimalSerializer(MappingMinimalSerializer):
+    """A release's mapping embedded in its concept: url names the mapping, as the full form's does, not the revision."""
+    url = CharField(source='versioned_object_url', read_only=True)
+
 class MappingReverseMinimalSerializer(ModelSerializer):
     id = CharField(source='mnemonic', read_only=True)
     type = CharField(source='resource_type', read_only=True)
