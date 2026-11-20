@@ -1252,8 +1252,8 @@ class DeferredImportIndex(models.Model):
     - LATEST_FLAGS: the documents of the versions the part superseded, which still say they're the latest. A partial
       update that re-embeds nothing, so it runs whenever the job does, but only once a version's replacement has a
       document flagged latest: until then, the old document is the only one search finds. The others wait. A version
-      with no document is fully indexed instead, in the window. An INDEX row hands over to this stage the versions
-      that were superseded since, while their replacements aren't searchable.
+      with no document goes to an INDEX row instead, to be fully indexed in the window. An INDEX row hands over to
+      this stage the versions that were superseded since, while their replacements aren't searchable.
     """
     class Meta:
         db_table = 'deferred_import_indexes'
@@ -1416,9 +1416,11 @@ class DeferredImportIndex(models.Model):
                 # superseded since, and rewriting them now would hide their concepts until their replacements are
                 # searchable: they wait in a LATEST_FLAGS row, usually the superseding import's own
                 waiting = model.get_ids_with_unsearchable_replacements(batch)
-                self.hand_over_latest_flags(waiting)
+                self.hand_over(self.Stage.LATEST_FLAGS, waiting)
                 if len(waiting) < len(batch):
-                    self.full_index(model, [_id for _id in batch if _id not in waiting])
+                    model.batch_index(
+                        model.objects.filter(id__in=[_id for _id in batch if _id not in waiting]),
+                        model.get_search_document(), refresh=False, **get_batch_index_relations(model))
             else:
                 model.index_mapped_codes(model.objects.filter(id__in=batch))
             self.ids = self.ids[INDEX_BATCH_SIZE:]
@@ -1428,37 +1430,34 @@ class DeferredImportIndex(models.Model):
 
     def update_flags(self):
         """
-        Updates the documents of the row's superseded versions whose replacements are searchable, fully indexes those
-        with no document if the window is open, and keeps the others. Whether none are left.
+        Updates the documents of the row's superseded versions whose replacements are searchable, hands those with no
+        document to an INDEX row, and keeps the others. Whether none are left.
         """
         model = self.get_model()
         waiting = model.get_ids_with_unsearchable_replacements(self.ids)
         ready = [_id for _id in self.ids if _id not in waiting]
-        missing = model.index_latest_flags(model.objects.filter(id__in=ready)) if ready else set()
-        if missing and self.is_window_open():
-            self.full_index(model, missing)
-            missing = set()
-        waiting |= missing  # those with no document wait for the window
+        if ready:
+            self.hand_over(self.Stage.INDEX, model.index_latest_flags(model.objects.filter(id__in=ready)))
         if waiting and len(waiting) < len(self.ids):
             self.ids = sorted(waiting)
             self.save(update_fields=['ids', 'updated_at'])
         self.renew_lock()
         return not waiting
 
-    def hand_over_latest_flags(self, ids):
-        """Leaves these ids to a LATEST_FLAGS row of this part, unless one is already waiting with them."""
-        flagged = self.__class__.objects.filter(
-            stage=self.Stage.LATEST_FLAGS, resource=self.resource, ids__overlap=list(ids)).values_list('ids', flat=True)
-        ids = set(ids).difference(*flagged)
+    def hand_over(self, stage, ids):
+        """
+        Leaves these ids to a row of this part at `stage`, unless a row of that stage that isn't parked already has
+        them: an INDEX row indexes them a batch at a time in the window, a LATEST_FLAGS row once they can be updated.
+        """
+        if not ids:
+            return
+        others = self.__class__.objects.filter(
+            stage=stage, resource=self.resource, ids__overlap=list(ids), attempts__lt=DEFERRED_INDEX_MAX_ATTEMPTS)
+        ids = set(ids).difference(*others.values_list('ids', flat=True))
         if ids:
             self.__class__.objects.create(
-                group=self.group, created_at=self.created_at, stage=self.Stage.LATEST_FLAGS, resource=self.resource,
-                ids=sorted(ids), task_id=self.task_id)
-
-    @staticmethod
-    def full_index(model, ids):
-        model.batch_index(model.objects.filter(id__in=ids), model.get_search_document(), refresh=False,
-                          **get_batch_index_relations(model))
+                group=self.group, created_at=self.created_at, stage=stage, resource=self.resource, ids=sorted(ids),
+                task_id=self.task_id)
 
 
 class BulkImportInline(BaseImporter):

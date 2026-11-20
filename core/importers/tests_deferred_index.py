@@ -394,15 +394,30 @@ class DeferredImportIndexRunTest(OCLTestCase):
         self.missing = {first.id}  # never indexed
         self.searchable.add(second.id)  # as a release would index it
 
-        self.assertEqual(self.run_rows(window=False), 0)
+        self.assertEqual(self.run_rows(window=False), 1)
 
+        # no document to update: it goes to an index row, for the window
         self.assertEqual(self.indexed, [(LATEST_FLAGS, 'concept', {first.id})])
-        self.assertEqual(deferred()[(LATEST_FLAGS, 'concept')], {first.id})  # no full index outside the window
+        self.assertEqual(deferred(), {(INDEX, 'concept'): {concept.id, first.id, second.id}})
         self.indexed = []
+        self.assertEqual(self.run_rows(window=False), 0)  # and isn't sent again outside it
+        self.assertEqual(self.indexed, [])
         self.assertEqual(self.run_rows(), 2)
-        self.assertEqual(self.indexed, [(LATEST_FLAGS, 'concept', {first.id}), (INDEX, 'concept', {first.id}),
-                                        (INDEX, 'concept', {concept.id, second.id})])
+        self.assertEqual(self.indexed, [(INDEX, 'concept', {concept.id, second.id}), (INDEX, 'concept', {first.id})])
         self.assertFalse(DeferredImportIndex.objects.exists())
+
+    def test_hand_over_skips_ids_another_active_row_has_but_not_a_parked_one(self):
+        self.defer_import(concept_line(self.source, 'C1'))
+        row = DeferredImportIndex.objects.get()
+        concept, (first, ) = versions(self.source, 'C1')
+
+        row.hand_over(INDEX, {concept.id, first.id})  # its own row has them
+        self.assertEqual(DeferredImportIndex.objects.count(), 1)
+        DeferredImportIndex.objects.filter(id=row.id).update(attempts=DEFERRED_INDEX_MAX_ATTEMPTS)
+        row.hand_over(INDEX, {first.id})
+        self.assertEqual(
+            list(DeferredImportIndex.objects.exclude(id=row.id).values_list('stage', 'ids', 'group')),
+            [(INDEX, [first.id], row.group)])
 
     def test_run_in_the_window_updates_the_latest_flags_every_few_minutes_not_after_every_row(self):
         self.concept_updates()
@@ -753,12 +768,12 @@ class DeferredImportSearchTest(OCLAPITestCase):
         with override_settings(TEST_MODE=False):
             batch_index_resources('concept', {'id__in': [concept.id, second.id]})  # as a release would
 
-        self.assertEqual(self.run_job(window=False), 0)
+        self.assertEqual(self.run_job(window=False), 1)
 
-        # outside the window, the flags update doesn't fully index it
+        # outside the window, the flags update doesn't fully index it: it leaves it to its index row
         self.assertEqual((self.get_document(first.id), self.get_document(second.id)), (
             None, (True, ['HEAD'], [])))
-        self.assertEqual(deferred()[(LATEST_FLAGS, 'concept')], {first.id})
-        self.assertEqual(self.run_job(window=True), 3)
+        self.assertEqual(deferred(), {(INDEX, 'concept'): {concept.id, first.id, second.id}})
+        self.assertEqual(self.run_job(window=True), 2)
         self.assertEqual(self.get_document(first.id), (False, [], []))
         self.assertFalse(DeferredImportIndex.objects.exists())
