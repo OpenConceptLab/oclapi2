@@ -1043,16 +1043,6 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 Q(id__in=entry_ids) | Q(url__in=canonical_urls, namespace=self.parent_url), is_active=True):
             entry.lookup_entry()
 
-    @staticmethod
-    def delete_version_changelogs(urls):
-        from core.repos.models import VersionChangelog
-        VersionChangelog.objects.filter(Q(version1_url__in=urls) | Q(version2_url__in=urls)).delete()
-
-    @staticmethod
-    def delete_version_checksum_maps(urls):
-        from core.repos.models import VersionChecksumMap
-        VersionChecksumMap.objects.filter(version_url__in=urls).delete()
-
     def get_export_key_prefixes(self):
         prefix = self.get_version_export_path(suffix=None)
         prefixes = [(prefix, get_export_key_pattern(prefix))]

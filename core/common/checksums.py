@@ -1,11 +1,15 @@
+import logging
 import time
 
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 from ocldev.checksum import Checksum as ChecksumBase
 from pydash import get
 
 from core.common.utils import chunks
+
+logger = logging.getLogger('oclapi')
 
 
 # Return only aggregate counts for changed resource groups.
@@ -832,7 +836,11 @@ class VersionCompareMixin:
     @classmethod
     def save_changelog_and_comparison(cls, uri1, uri2):
         from core.repos.models import VersionChangelog
-        version1, version2 = cls._get_versions(uri1, uri2)
+        # A version deleted since this was asked for leaves nothing to compare
+        version1, version2 = cls._get_versions(uri1, uri2, raise_if_missing=False)
+        if not version1:
+            logger.info('Skipping changelog: %s or %s no longer exists', uri1, uri2)
+            return None
         changelog = VersionChangelog.find_or_build(version1, version2)
         start_time = time.time()
 
@@ -855,6 +863,8 @@ class VersionCompareMixin:
             concepts_diff, mappings_diff, version1, version2)
         changelog.extras = changelog.extras or {}
         changelog.extras['elapsed_seconds'] = time.time() - start_time
+        if cls._discard_if_deleted(version1, version2):
+            return None
         changelog.save()
         return changelog
 
@@ -899,20 +909,45 @@ class VersionCompareMixin:
                 changelog.comparison = saved
                 computed_new_result = True
             result = saved
-        if computed_new_result:
+        if computed_new_result and not cls._discard_if_deleted(version1, version2):
             changelog.save()
 
         return result
 
+    @staticmethod
+    def delete_version_changelogs(urls):
+        from core.repos.models import VersionChangelog
+        VersionChangelog.objects.filter(Q(version1_url__in=urls) | Q(version2_url__in=urls)).delete()
+
+    @staticmethod
+    def delete_version_checksum_maps(urls):
+        from core.repos.models import VersionChecksumMap
+        VersionChecksumMap.objects.filter(version_url__in=urls).delete()
+
     @classmethod
-    def _get_versions(cls, uri1, uri2):
+    def _discard_if_deleted(cls, version1, version2):
+        # A delete while diffing has already removed this pair's changelogs and maps; drop the maps built since
+        deleted = cls._get_deleted_versions(version1, version2)
+        if deleted:
+            cls.delete_version_checksum_maps([version.url for version in deleted])
+            logger.info('Skipping changelog: %s or %s was deleted while comparing', version1.uri, version2.uri)
+        return bool(deleted)
+
+    @classmethod
+    def _get_deleted_versions(cls, *versions):
+        existing = set(cls.objects.filter(id__in=[version.id for version in versions]).values_list('id', flat=True))
+        return [version for version in versions if version.id not in existing]
+
+    @classmethod
+    def _get_versions(cls, uri1, uri2, raise_if_missing=True):
         version1 = cls.objects.filter(uri=uri1).first()
         version2 = cls.objects.filter(uri=uri2).first()
 
-        if not version1:
-            raise ValueError(f"Version not found: {uri1}")
-        if not version2:
-            raise ValueError(f"Version not found: {uri2}")
+        missing = [uri for uri, version in ((uri1, version1), (uri2, version2)) if not version]
+        if missing:
+            if raise_if_missing:
+                raise ValueError(f"Version not found: {missing[0]}")
+            return None, None
 
         if (version1.created_at and version2.created_at and version1.created_at > version2.created_at) or (
                 version1.is_head and not version2.is_head):
