@@ -2656,6 +2656,48 @@ class TaskTest(OCLTestCase):
         changelog = VersionChangelog.objects.get(version1_url=collection2.url, version2_url=collection1.url)
         self.assertEqual(changelog.comparison, result)
 
+    def test_source_version_compare_save_both_skips_deleted_version(self):
+        from core.repos.models import VersionChangelog
+        source1 = OrganizationSourceFactory(version='v1')
+        source2 = OrganizationSourceFactory(
+            organization=source1.organization, mnemonic=source1.mnemonic, version='v2')
+        source2_uri = source2.uri
+        source2.delete(force=True)
+
+        with patch.object(VersionCompareMixin, 'save_changelog_and_comparison') as save_mock:
+            result = source_version_compare(  # pylint: disable=no-value-for-parameter
+                source1.uri, source2_uri, True, 4, 'json', True)
+
+        self.assertEqual(result, 0)
+        save_mock.assert_not_called()
+        self.assertFalse(VersionChangelog.objects.filter(version2_url=source2_uri).exists())
+
+    def test_collection_version_compare_save_both_skips_deleted_version(self):
+        collection1 = OrganizationCollectionFactory(version='v1')
+        collection2 = OrganizationCollectionFactory(
+            organization=collection1.organization, mnemonic=collection1.mnemonic, version='v2')
+        collection2_uri = collection2.uri
+        collection2.delete(force=True)
+
+        with patch.object(VersionCompareMixin, 'save_changelog_and_comparison') as save_mock:
+            result = collection_version_compare(  # pylint: disable=no-value-for-parameter
+                collection1.uri, collection2_uri, True, 4, 'json', True)
+
+        self.assertEqual(result, 0)
+        save_mock.assert_not_called()
+
+    def test_collection_version_compare_save_both_saves_when_versions_exist(self):
+        collection1 = OrganizationCollectionFactory(version='v1')
+        collection2 = OrganizationCollectionFactory(
+            organization=collection1.organization, mnemonic=collection1.mnemonic, version='v2')
+
+        with patch.object(VersionCompareMixin, 'save_changelog_and_comparison') as save_mock:
+            result = collection_version_compare(  # pylint: disable=no-value-for-parameter
+                collection1.uri, collection2.uri, True, 4, 'json', True)
+
+        self.assertEqual(result, 1)
+        save_mock.assert_called_once_with(collection1.uri, collection2.uri)
+
     def test_expansion_compare_does_not_persist(self):
         from core.repos.models import VersionChangelog
         collection = OrganizationCollectionFactory()
