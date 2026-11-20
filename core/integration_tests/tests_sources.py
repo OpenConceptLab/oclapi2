@@ -3784,6 +3784,16 @@ class SourceVersionPrivateHeadAccessTest(PrivateHeadVersionAccessMixin, OCLAPITe
         version.concepts.add(concept)
         return concept
 
+    def test_version_content_count_keeps_its_filters(self):
+        head, version = self.create_org_version()
+        self.add_concept(head, version)
+
+        response = self.client.head(
+            f'{version.uri}concepts/?updatedSince=2100-01-01', HTTP_AUTHORIZATION=f'Token {self.member.get_token()}')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers['num_found'], '0')
+
 
 @mock_aws
 class RepoExportCollidingVersionsViewTest(OCLAPITestCase):

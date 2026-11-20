@@ -935,7 +935,7 @@ class CollectionVersionExpansionBaseView(CollectionBaseView):
     serializer_class = ExpansionSerializer
 
     def get_permissions(self):
-        if self.request.method == 'GET':
+        if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionaryVersion()]
         return [HasAccessToVersionedObject()]
 
@@ -1007,6 +1007,10 @@ class CollectionVersionExpansionChildrenView(CollectionVersionExpansionBaseView,
     def get(self, request, *args, **kwargs):
         self.get_queryset()
         return self.list(request, *args, **kwargs)
+
+    def head(self, request, **kwargs):
+        self.get_queryset()  # checks the version and expansion before a search counts them
+        return super().head(request, **kwargs)
 
 
 class CollectionVersionExpansionConceptsView(CollectionVersionExpansionChildrenView):
@@ -1089,6 +1093,10 @@ class CollectionVersionConceptsView(CollectionBaseView, ListWithHeadersMixin):
     def get(self, request, *args, **kwargs):
         self.get_object()  # to set instance on request for references
         return self.list(request, *args, **kwargs)
+
+    def head(self, request, **kwargs):
+        self.get_object()  # checks the version before a search counts its expansion
+        return super().head(request, **kwargs)
 
 
 class CollectionVersionResourceRetrieveView(CollectionBaseView):
@@ -1193,6 +1201,10 @@ class CollectionVersionMappingsView(CollectionBaseView, ListWithHeadersMixin):
     def get(self, request, *args, **kwargs):
         self.get_object()  # to set instance on request for references
         return self.list(request, *args, **kwargs)
+
+    def head(self, request, **kwargs):
+        self.get_object()  # checks the version before a search counts its expansion
+        return super().head(request, **kwargs)
 
 
 class CollectionVersionMappingRetrieveView(CollectionVersionResourceRetrieveView, RetrieveAPIView):

@@ -47,7 +47,7 @@ from core.common.tasks import delete_concept, make_hierarchy
 from core.common.throttling import ThrottleUtil
 from core.common.utils import (generate_temp_version, get_truthy_values, to_int,
                                drop_version, get_falsy_values, parse_id, get_event_metadata)
-from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
+from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, SourceVersionListHeadMixin, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
 from core.concepts.constants import (
     CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY,
@@ -92,11 +92,7 @@ class ConceptBaseView(SourceChildCommonBaseView):
         source = self.kwargs.pop('source', None) if __pop else self.kwargs.get('source', None)
         collection = self.kwargs.pop('collection', None) if __pop else self.kwargs.get('collection', None)
         container_version = self.kwargs.pop('version', HEAD) if __pop else self.kwargs.get('version', HEAD)
-        if 'org' in self.kwargs:
-            filters = {'organization__mnemonic': self.kwargs['org']}
-        else:
-            username = self.request.user.username if self.user_is_self else self.kwargs.get('user')
-            filters = {'user__username': username}
+        filters = self.get_parent_owner_filters()
         if source:
             from core.sources.models import Source
             parent_resource = Source.get_version(source, container_version or HEAD, filters)
@@ -206,7 +202,9 @@ class ConceptHierarchyMixin:
         return instance.get_hierarchy_related_queryset(relation)
 
 
-class ConceptListView(ConceptHierarchyMixin, ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
+class ConceptListView(
+        SourceVersionListHeadMixin, ConceptHierarchyMixin, ConceptBaseView, ListWithHeadersMixin, CreateModelMixin
+):
     is_page_size_capped = True
     serializer_class = ConceptListSerializer
 
@@ -311,8 +309,7 @@ class ConceptListView(ConceptHierarchyMixin, ConceptBaseView, ListWithHeadersMix
             self._set_source_versions()
             self._extra_filters = None
         self.set_parent_resource(False)
-        if self.parent_resource:
-            self.check_object_permissions(request, self.parent_resource)
+        self.check_parent_permissions(request)
         return self.list(request, *args, **kwargs)
 
     def post(self, request, **_):
