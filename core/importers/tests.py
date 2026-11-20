@@ -42,7 +42,7 @@ from core.importers.models import BulkImport, BulkImportInline, BulkImportParall
     CREATED, UPDATED, DELETED, PERMISSION_DENIED, UNCHANGED, FAILED, NOT_FOUND, \
     BaseImporter, BaseResourceImporter, OrganizationImporter, SourceImporter, SourceVersionImporter, \
     CollectionImporter, CollectionVersionImporter, ConceptImporter, MappingImporter, ReferenceImporter, ImportIndexer, \
-    IsolatedVersionCommit
+    IsolatedVersionCommit, MappingMatcher
 from core.importers.views import csv_file_data_to_input_list, ImportRetrieveDestroyMixin
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
@@ -1416,6 +1416,145 @@ class BulkImportInlineTest(OCLTestCase):
             self.queued_mapped_code_ids(index_concepts_mapped_codes_mock) & {
                 old_from.versioned_object_id, new_from.versioned_object_id},
             {old_from.versioned_object_id, new_from.versioned_object_id})
+
+    @staticmethod
+    def cross_source_mapping(org_mnemonic):
+        """
+        A mapping in Maps from X in S1 to T/Y, where S1 has no concept X, so a line's from URL doesn't resolve. S2
+        exists and has no X either, and S3 doesn't exist.
+        """
+        org = OrganizationFactory(mnemonic=org_mnemonic)
+        maps = OrganizationSourceFactory(organization=org, mnemonic='Maps')
+        OrganizationSourceFactory(organization=org, mnemonic='S1')
+        OrganizationSourceFactory(organization=org, mnemonic='S2')
+        ConceptFactory(parent=OrganizationSourceFactory(organization=org, mnemonic='T'), mnemonic='Y')
+
+        def line(from_source, **extra):
+            return {
+                'type': 'Mapping', 'map_type': 'Same As', 'owner_type': 'Organization', 'owner': org.mnemonic,
+                'source': maps.mnemonic, 'from_concept_url': f'{org.uri}sources/{from_source}/concepts/X/',
+                'to_concept_url': f'{org.uri}sources/T/concepts/Y/', **extra
+            }
+
+        BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[line('S1')]).run()
+        return Mapping.objects.get(parent=maps, id=F('versioned_object_id')), line
+
+    @staticmethod
+    def import_paths():
+        """An ordinary inline import's report, and that of one part of a parallel import, as its worker runs it."""
+        def inline(lines):
+            return BulkImportInline(
+                content=None, username='ocladmin', update_if_exists=True, input_list=lines).run()['report']
+
+        def parallel_part(lines):
+            return bulk_import_parts_inline(lines, 'ocladmin', True)['report']  # pylint: disable=no-value-for-parameter
+
+        return {'inline': inline, 'parallel': parallel_part}
+
+    @staticmethod
+    def register_canonical_url(source, canonical_url):
+        Toggle.objects.filter(name=URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE).update(
+            dev=True, qa=True, demo=True, staging=True, who_staging=True, production=True)
+        Source.objects.filter(id=source.id).update(canonical_url=canonical_url)
+        GlobalURLRegistryFactory(url=canonical_url, namespace=source.organization.uri)
+        return canonical_url
+
+    @patch('core.importers.models.batch_index_resources', Mock())
+    def test_mapping_line_without_id_never_updates_another_sources_mapping_by_code(self):
+        for path, run in self.import_paths().items():
+            for from_source in ('S2', 'S3'):
+                for extra in ({}, {'from_concept_code': 'X'}):
+                    with self.subTest(path, from_source=from_source, **extra):
+                        mapping, line = self.cross_source_mapping(f'CrossUpdate{path}{from_source}{len(extra)}')
+                        versions = Mapping.objects.filter(versioned_object_id=mapping.id).count()
+
+                        report = run([line(from_source, extras={'edited': True}, **extra)])
+
+                        self.assertEqual((report['created'], report['updated'], report['failed']), (1, 0, 0))
+                        mapping.refresh_from_db()
+                        self.assertEqual((mapping.from_source_url, mapping.extras),
+                                         (mapping.parent.organization.uri + 'sources/S1/', {}))
+                        self.assertEqual(Mapping.objects.filter(versioned_object_id=mapping.id).count(), versions)
+
+    @patch('core.importers.models.batch_index_resources', Mock())
+    def test_mapping_delete_line_without_id_never_retires_another_sources_mapping_by_code(self):
+        for path, run in self.import_paths().items():
+            with self.subTest(path):
+                mapping, line = self.cross_source_mapping(f'CrossDelete{path}')
+
+                reports = [run([{**line(from_source, **extra), '__action': 'DELETE'}])
+                           for from_source in ('S2', 'S3') for extra in ({}, {'from_concept_code': 'X'})]
+
+                self.assertEqual([(report['deleted'], report['not_found']) for report in reports], [(0, 1)] * 4)
+                mapping.refresh_from_db()
+                self.assertFalse(mapping.retired)
+
+    @patch('core.importers.models.batch_index_resources', Mock())
+    def test_mapping_line_without_id_still_matches_its_own_sources_mapping_by_code(self):
+        for path, run in self.import_paths().items():
+            with self.subTest(path):
+                mapping, line = self.cross_source_mapping(f'CrossSame{path}')
+
+                reports = [run([line('S1', extras={'edit': 1})]),
+                           run([line('S1', extras={'edit': 2}, from_concept_code='X')]),
+                           run([{**line('S1', from_concept_code='X'), '__action': 'DELETE'}])]
+
+                self.assertEqual([(report['updated'], report['deleted']) for report in reports],
+                                 [(1, 0), (1, 0), (0, 1)])
+                mapping.refresh_from_db()
+                self.assertEqual((mapping.extras, mapping.retired), ({'edit': 2}, True))
+
+    @patch('core.importers.models.batch_index_resources', Mock())
+    def test_mapping_line_without_id_through_a_canonical_url_matches_the_source_it_resolves_to(self):
+        """The mapping is saved linked to S1 under S1's own URL, so a line naming S1's canonical URL still finds it."""
+        for path, run in self.import_paths().items():
+            with self.subTest(path):
+                mapping, line = self.cross_source_mapping(f'CrossCanonical{path}')
+                canonical_url = self.register_canonical_url(
+                    Source.objects.get(organization=mapping.parent.organization, mnemonic='S1', version='HEAD'),
+                    f'https://s1-{path}.example.test/')
+                canonical_line = {**line('S1'), 'from_concept_url': canonical_url + 'concepts/X/'}
+
+                self.assertEqual(MappingMatcher(mapping.parent).kept([canonical_line]), {mapping.id})
+                reports = [run([{**canonical_line, 'extras': {'edit': 1}}]),
+                           run([{**canonical_line, 'extras': {'edit': 2}, 'from_concept_code': 'X'}]),
+                           run([{**canonical_line, '__action': 'DELETE'}])]
+
+                self.assertEqual([(report['updated'], report['deleted'], report['failed']) for report in reports],
+                                 [(1, 0, 0), (1, 0, 0), (0, 1, 0)])
+                mapping.refresh_from_db()
+                self.assertEqual((mapping.extras, mapping.retired), ({'edit': 2}, True))
+
+    @patch('core.importers.models.batch_index_resources', Mock())
+    def test_mapping_delete_line_without_id_never_retires_a_mapping_linked_to_another_source(self):
+        """A mapping linked to S1 that still has a URL now registered to S2 isn't S2's to retire."""
+        for path, run in self.import_paths().items():
+            with self.subTest(path):
+                mapping, line = self.cross_source_mapping(f'CrossLinked{path}')
+                canonical_url = self.register_canonical_url(
+                    Source.objects.get(organization=mapping.parent.organization, mnemonic='S2', version='HEAD'),
+                    f'https://s2-{path}.example.test/')
+                Mapping.objects.filter(versioned_object_id=mapping.id).update(from_source_url=canonical_url)
+                stale_line = {**line('S1'), 'from_concept_url': canonical_url + 'concepts/X/'}
+
+                self.assertEqual(MappingMatcher(mapping.parent).kept([stale_line]), set())
+                report = run([{**stale_line, '__action': 'DELETE'}])
+
+                self.assertEqual((report['deleted'], report['not_found']), (0, 1))
+                mapping.refresh_from_db()
+                self.assertFalse(mapping.retired)
+
+    @patch('core.importers.models.batch_index_resources', Mock())
+    def test_seeding_preflight_matches_a_code_only_within_the_from_urls_source(self):
+        mapping, line = self.cross_source_mapping('CrossMatcher')
+
+        for lines, kept in (
+                ([line(source, **extra) for source in ('S2', 'S3') for extra in ({}, {'from_concept_code': 'X'})],
+                 set()),
+                ([line('S1')], {mapping.id}),
+                ([line('S1', from_concept_code='X')], {mapping.id}),
+        ):
+            self.assertEqual(MappingMatcher(mapping.parent).kept(lines), kept)
 
     def cloned_mapping_in_local_source(self):
         """A mapping cloned into a local source before clones fixed source URLs: linked to local concepts, with its
@@ -6901,14 +7040,21 @@ class IsolatedVersionImportTest(OCLTestCase):
         self.assertIn('filters', importer.failed[0]['errors'])
         self.assertFalse(Source.objects.filter(mnemonic='LOINC', version='v2').exists())
 
-    def test_seeding_line_match_algorithms_reach_head(self):
+    @patch('core.sources.models.Source.sync_concept_vectors_async', autospec=True)
+    def test_seeding_line_match_algorithms_stay_off_head(self, sync_mock):
         self.run_import([self.concept('A'), self.version('v1')])
-        Source.objects.filter(mnemonic='LOINC', version='HEAD').update(match_algorithms=['es', 'llm'])
 
-        self.run_import([self.concept('A'), self.version('v2', match_algorithms=['es'])])
+        for version, head_algorithms, line_algorithms in (('v2', ['es'], ['es', 'llm']), ('v3', ['es', 'llm'], ['es'])):
+            Source.objects.filter(mnemonic='LOINC', version='HEAD').update(match_algorithms=head_algorithms)
 
-        self.assertEqual(Source.objects.get(mnemonic='LOINC', version='HEAD').match_algorithms, ['es'])
-        self.assertEqual(Source.objects.get(mnemonic='LOINC', version='v2').match_algorithms, ['es'])
+            self.run_import([self.concept('A'), self.version(version, match_algorithms=line_algorithms)])
+
+            self.assertEqual(
+                sorted(Source.objects.get(mnemonic='LOINC', version='HEAD').match_algorithms), head_algorithms)
+            self.assertEqual(
+                sorted(Source.objects.get(mnemonic='LOINC', version=version).match_algorithms), line_algorithms)
+        # the semantic version syncs its own vectors; HEAD's aren't touched
+        self.assertNotIn('HEAD', [call_args.args[0].version for call_args in sync_mock.call_args_list])
 
     def test_plural_user_owner_type_is_read_as_the_importers_read_it(self):
         users_line = {'owner_type': 'users', 'owner': 'Regen', 'source': 'LOINC'}
@@ -7110,17 +7256,6 @@ class IsolatedVersionImportTest(OCLTestCase):
         self.assertEqual(set(head.get_concepts_queryset().values_list('mnemonic', flat=True)), {'A'})
         self.assertFalse(head.get_mappings_queryset().exists())
         self.assertGreater(head.last_child_update, last_update)
-
-    @patch('core.sources.models.Source.sync_concept_vectors_async')
-    def test_semantic_change_on_head_syncs_its_vectors(self, sync_mock):
-        self.run_import([self.concept('A'), self.version('v1')])
-        Source.objects.filter(mnemonic='LOINC', version='HEAD').update(match_algorithms=['es', 'llm'])
-
-        self.run_import([self.concept('A'), self.version('v2', match_algorithms=['es'])])
-        sync_mock.assert_called_once()
-        sync_mock.reset_mock()
-        self.run_import([self.concept('A'), self.version('v3', match_algorithms=['es'])])
-        sync_mock.assert_not_called()
 
     def test_hierarchy_repair_links_a_child_version_url(self):
         from core.common.tasks import make_hierarchy
