@@ -97,6 +97,22 @@ class ReleasesFixture:
         """v3 drops B and its mappings: only v1 and v2 hold B's row."""
         self.run_import([self.concept('A'), self.version('v3')])
 
+    def make_a_collection_only_row(self):
+        """
+        v3 edits A with M7 (SAME-AS X07) and M8 (NARROWER-THAN X08); v4 edits it again, keeping M7 and dropping M8
+        (v2 dropped M1 and M5). Returns A's v3 row, taken out of v3, as for a version only a collection holds.
+        """
+        def edit_a(version, name, *mappings):
+            edited_a = {**self.concept('A'), 'names': [{'name': name, 'locale': 'en', 'locale_preferred': True}]}
+            self.run_import([edited_a, *mappings, self.version(version)])
+
+        edit_a('v3', 'A edited', self.mapping('M7', 'A', 'X07'), self.mapping('M8', 'A', 'X08', 'NARROWER-THAN'))
+        edit_a('v4', 'A edited again', self.mapping('M7', 'A', 'X07'))
+        old_a = self.row('v3', 'A')
+        self.assertFalse(old_a.is_latest_version)
+        old_a.sources.clear()
+        return old_a
+
     @staticmethod
     def fields(row):
         return MappedCodes([row]).get_fields(row)
@@ -264,15 +280,7 @@ class ReleaseMapCodesTest(ReleasesFixture, OCLTestCase):
         self.assertFalse(release.concepts.exists())
 
     def test_a_row_no_source_version_holds_reads_heads_active_mappings(self):
-        def edit_a(version, name, *mappings):
-            edited_a = {**self.concept('A'), 'names': [{'name': name, 'locale': 'en', 'locale_preferred': True}]}
-            self.run_import([edited_a, *mappings, self.version(version)])
-
-        edit_a('v3', 'A edited', self.mapping('M7', 'A', 'X07'), self.mapping('M8', 'A', 'X08', 'NARROWER-THAN'))
-        edit_a('v4', 'A edited again', self.mapping('M7', 'A', 'X07'))  # HEAD keeps M7, drops M8 (and M1, M5 in v2)
-        old_a = self.row('v3', 'A')
-        self.assertFalse(old_a.is_latest_version)
-        old_a.sources.clear()  # as for a version only a collection holds
+        old_a = self.make_a_collection_only_row()
 
         fields = self.fields(old_a)
 
@@ -431,3 +439,18 @@ class ReleaseMapCodesSearchTest(ReleasesFixture, OCLAPITestCase):
         self.assertEqual(self.get_ids('v1', '?q=X01'), ['A'])  # an entry
         self.assertEqual(self.get_ids('v2', '?q=X03'), ['B'])  # a dropped concept's entry
         self.assertEqual(self.get_ids(None, '?q=X01'), [])
+
+    def test_the_command_fills_a_collection_only_row(self):
+        old_a = self.make_a_collection_only_row()
+        ConceptDocument().update(Concept.objects.filter(parent__mnemonic='LOINC'))
+        es = ConceptDocument._get_connection()  # pylint: disable=protected-access
+        index = ConceptDocument._index._name  # pylint: disable=protected-access
+        es.update(index=index, id=old_a.id, refresh=True,  # as indexed before: a row no release holds had no codes
+                  doc={**MappedCodes.to_fields(([], [], [])), RELEASE_MAP_CODES: []})
+
+        with override_settings(TEST_MODE=False):
+            call_command('concept_release_map_codes', source=[LOINC], stdout=io.StringIO())
+        ConceptDocument._index.refresh()  # pylint: disable=protected-access
+
+        doc = es.get(index=index, id=old_a.id)['_source']
+        self.assertEqual((doc['same_as_map_codes'], doc['other_map_codes']), (['X07'], []))  # not M8, M1 or M5

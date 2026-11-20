@@ -1,4 +1,5 @@
 from django.core.management import BaseCommand, CommandError
+from django.db.models import F
 from elasticsearch import ApiError
 from elasticsearch_dsl.connections import connections
 
@@ -17,8 +18,9 @@ class Command(BaseCommand):
         'mappings differ from those of the doc it shares) to an existing concepts index, then checks it. Additive: '
         'nothing is reindexed. Run it before deploying the code that writes the field: once a doc carries it, ES has '
         'mapped it dynamically, as an object rather than nested, and this can no longer apply. With --source, it then '
-        "rewrites the mapped codes of that source's release docs in the concepts index: a doc indexed before this "
-        "carries HEAD's codes, and a row HEAD doesn't hold now takes its latest release's."
+        "rewrites the mapped codes of that source's release docs, and of its older rows' docs, in the concepts index: a "
+        "doc indexed before this carries HEAD's codes, a row HEAD doesn't hold now takes its public releases', and one "
+        "no release holds (a version only a collection holds) HEAD's active codes."
     )
 
     def add_arguments(self, parser):
@@ -61,9 +63,16 @@ class Command(BaseCommand):
 
     @staticmethod
     def backfill(source):
-        """Rewrites the mapped codes of the docs of every row `source`'s releases hold. Returns how many."""
-        concept_ids = sorted(set(Concept.sources.through.objects.filter(
-            source_id__in=source.versions.exclude(version=HEAD).values('id')).values_list('concept_id', flat=True)))
+        """
+        Rewrites the mapped codes of the docs of every row `source`'s releases hold, and of each older row of it (not
+        the versioned object or the latest version): one no release holds, such as a version only a collection holds,
+        now takes HEAD's active codes. Returns how many.
+        """
+        release_rows = Concept.sources.through.objects.filter(
+            source_id__in=source.versions.exclude(version=HEAD).values('id')).values_list('concept_id', flat=True)
+        older_rows = Concept.objects.filter(parent_id=source.id, is_latest_version=False).exclude(
+            id=F('versioned_object_id')).values_list('id', flat=True)
+        concept_ids = sorted(set(release_rows) | set(older_rows))
         for ids in chunks(concept_ids, BACKFILL_CHUNK_SIZE):
             Concept.batch_index_partial_by_ids(
                 Concept.objects.filter(id__in=ids), ConceptDocument, Concept.get_mapped_codes_actions,
