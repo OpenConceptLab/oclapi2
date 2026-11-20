@@ -3,6 +3,7 @@ import time
 
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 from ocldev.checksum import Checksum as ChecksumBase
 from pydash import get
 
@@ -835,7 +836,7 @@ class VersionCompareMixin:
     @classmethod
     def save_changelog_and_comparison(cls, uri1, uri2):
         from core.repos.models import VersionChangelog
-        # Queued after a version is seeded, so a version deleted since leaves nothing to compare
+        # A version deleted since this was asked for leaves nothing to compare
         version1, version2 = cls._get_versions(uri1, uri2, raise_if_missing=False)
         if not version1:
             logger.info('Skipping changelog: %s or %s no longer exists', uri1, uri2)
@@ -912,6 +913,11 @@ class VersionCompareMixin:
             changelog.save()
 
         return result
+
+    @staticmethod
+    def delete_version_changelogs(urls):
+        from core.repos.models import VersionChangelog
+        VersionChangelog.objects.filter(Q(version1_url__in=urls) | Q(version2_url__in=urls)).delete()
 
     @staticmethod
     def delete_version_checksum_maps(urls):
