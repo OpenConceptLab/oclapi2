@@ -429,7 +429,8 @@ def es_get(url, **kwargs):
 
 
 def queue_bulk_import(  # pylint: disable=too-many-arguments,too-many-locals
-        to_import, import_queue, username, update_if_exists, threads=None, inline=False, sub_task=False, index=None
+        to_import, import_queue, username, update_if_exists, threads=None, inline=False, sub_task=False, index=None,
+        isolated_version=False
 ):
     """
     Used to queue bulk imports. It assigns a bulk import task to a specified import queue or a random one.
@@ -456,13 +457,9 @@ def queue_bulk_import(  # pylint: disable=too-many-arguments,too-many-locals
             task_func = bulk_import_parallel_inline
             args = (to_import, username, update_if_exists, threads)
         else:
-            # TODO: bulk_import_inline is unreachable from the current view layer —
-            # import_response always passes `parallel_threads = request.data.get('parallel') or 5`
-            # which is always truthy, so the `elif threads` branch above is always taken.
-            # Consider removing bulk_import_inline and this branch once confirmed no external
-            # callers rely on it (check API consumers and the test suite first).
+            # BulkImportInlineView reaches this with threads=None
             task_func = bulk_import_inline
-        args = (*args, index)
+        args = (*args, index, True) if isolated_version else (*args, index)
     else:
         task_func = bulk_import
     task = get_queue_task_names(import_queue, username, name=task_func.__name__)

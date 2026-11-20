@@ -111,6 +111,12 @@ index_param = openapi.Parameter(
                 f"When omitted, imports of up to {settings.IMPORT_INDEX_MAX_LINES:,} lines are indexed and larger "
                 "ones aren't"
 )
+seed_from_import_param = openapi.Parameter(
+    'seed_from_import', openapi.IN_QUERY, type=openapi.TYPE_STRING, default='false',
+    description="true | false. The import is one whole source version: its concepts and mappings, then exactly one "
+                "Source Version line. HEAD keeps only what the import contains, and the version is seeded from the "
+                "import, unless some of the content fails to import"
+)
 file_upload_param = openapi.Parameter(
     'file', openapi.IN_FORM, description="JSON Content File (json, csv or zip)", type=openapi.TYPE_FILE
 )
