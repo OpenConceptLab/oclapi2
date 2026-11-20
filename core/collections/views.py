@@ -23,9 +23,11 @@ from core.collections.constants import (
     MAPPING_VERSION_ADDED_TO_COLLECTION, CONCEPT_ADDED_TO_COLLECTION_FMT, MAPPING_ADDED_TO_COLLECTION_FMT,
     DELETE_FAILURE, DELETE_SUCCESS, NO_MATCH, VERSION_ALREADY_EXISTS,
     SOURCE_MAPPINGS,
-    UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT, TRANSFORM_TO_RESOURCE_VERSIONS, TRANSFORM_TO_EXTENSIONAL)
+    UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT, TRANSFORM_TO_RESOURCE_VERSIONS, TRANSFORM_TO_EXTENSIONAL,
+    REFERENCE_RESOLVED_TO_NOTHING_FMT)
 from core.collections.documents import CollectionDocument
-from core.collections.models import Collection, CollectionReference, Expansion, ExpansionParameters
+from core.collections.models import Collection, CollectionReference, Expansion, ExpansionParameters, \
+    ReferencedConcept, ReferencedMapping
 from core.collections.search import CollectionFacetedSearch
 from core.collections.serializers import (
     CollectionDetailSerializer, CollectionListSerializer,
@@ -545,9 +547,10 @@ class CollectionReferencesView(
                 added_original_expressions.add(expression)
 
         results = []
+        empty_references = self.get_empty_references(collection, added_references)
 
         for expression in added_original_expressions:
-            response_item = self.create_response_item(added_expressions, errors, expression)
+            response_item = self.create_response_item(added_expressions, errors, expression, empty_references)
             if response_item:
                 results.append(response_item)
 
@@ -559,23 +562,49 @@ class CollectionReferencesView(
     def should_cascade_mappings(self):
         return self.request.query_params.get('cascade', '').lower() == SOURCE_MAPPINGS
 
-    def create_response_item(self, added_expressions, errors, expression):
+    @staticmethod
+    def get_empty_references(collection, references):
+        """{expression: repo version URLs} of the added include references whose evaluation found nothing"""
+        expansion = collection.expansion if collection.expansion_uri else None
+        include_refs = [reference for reference in references if reference.include] if expansion else []
+        if not include_refs:
+            return {}
+        ids = [reference.id for reference in include_refs]
+        ids_with_members = {
+            *ReferencedConcept.objects.filter(reference_id__in=ids).values_list('reference_id', flat=True),
+            *ReferencedMapping.objects.filter(reference_id__in=ids).values_list('reference_id', flat=True)}
+        return {
+            reference.expression: reference.get_evaluated_repo_version_urls(expansion)
+            for reference in include_refs
+            if reference.id not in ids_with_members or expansion.is_unresolved_resource_version(reference)
+        }
+
+    def create_response_item(self, added_expressions, errors, expression, empty_references=None):
         adding_expression_failed = len(errors) > 0 and expression in errors
         if adding_expression_failed:
             return self.create_error_message(errors, expression)
-        return self.create_success_message(added_expressions, expression)
+        return self.create_success_message(added_expressions, expression, empty_references)
 
-    def create_success_message(self, added_expressions, expression):
-        message = self.select_update_message(expression)
-
+    def create_success_message(self, added_expressions, expression, empty_references=None):
         references = list(filter(lambda expr: expr.startswith(expression), added_expressions))
         if len(references) < 1:
             return None
 
+        repo_versions = (empty_references or {}).get(references[0])
+        if repo_versions is not None:
+            return {
+                'added': True,
+                'resolved': False,
+                'expression': references[0],
+                'repo_versions': repo_versions,
+                'message': REFERENCE_RESOLVED_TO_NOTHING_FMT.format(
+                    self.parent_resource.name, ', '.join(repo_versions) or 'any repository version')
+            }
+
         return {
             'added': True,
             'expression': references[0],
-            'message': message
+            'message': self.select_update_message(expression)
         }
 
     @staticmethod

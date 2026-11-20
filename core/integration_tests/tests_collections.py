@@ -1063,6 +1063,51 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(self.collection.active_concepts, 3)
         self.assertEqual(self.collection.active_mappings, 2)
 
+    def test_put_200_reference_resolving_to_nothing_names_the_version_it_looked_in(self):
+        source = self.concept.parent
+        empty_version = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+        concept2 = ConceptFactory(parent=source)
+        missing_expression = f'{empty_version.uri}concepts/{concept2.mnemonic}/'
+
+        response = self.client.put(
+            self.collection.uri + 'references/',
+            {'data': {'expressions': [missing_expression, concept2.uri]}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(self.collection.references.filter(expression=missing_expression).exists())
+        self.assertEqual(self.collection.expansion.concepts.count(), 2)
+        self.assertCountEqual(
+            response.data,
+            [
+                {
+                    'added': True,
+                    'resolved': False,
+                    'expression': missing_expression,
+                    'repo_versions': [empty_version.uri],
+                    'message': f'The reference is saved in collection {self.collection.name}, but it resolved to '
+                               f'no concepts or mappings in {empty_version.uri}'
+                },
+                {
+                    'added': True,
+                    'expression': concept2.uri,
+                    'message': f'The concept {concept2.mnemonic} is successfully added to '
+                               f'collection {self.collection.name}'
+                }
+            ]
+        )
+
+    def test_evaluated_repo_version_urls_name_the_repository_when_no_version_resolves(self):
+        reference = CollectionReference(
+            expression='/orgs/nobody/sources/nothing/concepts/c1/', collection=self.collection,
+            system='/orgs/nobody/sources/nothing/', code='c1')
+
+        self.assertEqual(
+            reference.get_evaluated_repo_version_urls(self.expansion), ['/orgs/nobody/sources/nothing/'])
+
     def test_put_expression_with_cascade_to_concepts(self):
         source1 = OrganizationSourceFactory()
         source2 = OrganizationSourceFactory()

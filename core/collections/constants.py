@@ -16,6 +16,8 @@ MAPPING_VERSION_ADDED_TO_COLLECTION = 'Added the mapping version to the collecti
 CONCEPT_ADDED_TO_COLLECTION_FMT = 'The concept {} is successfully added to collection {}'
 MAPPING_ADDED_TO_COLLECTION_FMT = 'The mapping {} is successfully added to collection {}'
 UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT = 'The reference is successfully added to collection {}'
+REFERENCE_RESOLVED_TO_NOTHING_FMT = 'The reference is saved in collection {}, but it resolved to no concepts ' \
+                                    'or mappings in {}'
 
 DELETE_FAILURE = 'Could not delete Collection.'
 DELETE_SUCCESS = 'Successfully deleted Collection.'
