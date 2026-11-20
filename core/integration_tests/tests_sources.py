@@ -6,10 +6,12 @@ import zipfile
 import boto3
 from moto import mock_aws
 
+from celery.states import FAILURE, REVOKED, SUCCESS
 from celery_once import AlreadyQueued
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
+from django.db.models import F
 from django.test import override_settings, tag
 from mock import patch, Mock, ANY, PropertyMock
 from mock.mock import call
@@ -20,7 +22,8 @@ from core.capabilities.constants import CLONE_RESOURCES_PER_CALL_CAPABILITY_ID
 from core.capabilities.models import UserCapabilityOverride
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory, UserCollectionFactory
 from core.common.models import BaseModel
-from core.common.tasks import export_source, index_source_concepts, index_source_mappings
+from core.common.tasks import export_source, index_source_concepts, index_source_mappings, \
+    seed_children_to_new_version
 from core.common.tests import OCLAPITestCase
 from core.integration_tests.tests_access_control import PrivateHeadVersionAccessMixin
 from core.common.utils import get_latest_dir_in_path, get_export_key_pattern
@@ -34,10 +37,12 @@ from core.mappings.models import Mapping
 from core.mappings.serializers import MappingVersionExportSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
+from core.sources.constants import SEED_MEMBERS_WRITTEN, SEED_RELEASE_INDEXED, SEED_STAGE
 from core.sources.models import Source, CloneLimitExceeded
 from core.sources.serializers import SourceDetailSerializer, SourceVersionExportSerializer
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.services.storages.cloud.aws import S3
+from core.tasks.models import Task
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -196,7 +201,8 @@ class SourceListViewTest(OCLAPITestCase):
                 'url', 'owner', 'owner_type', 'owner_url', 'created_on', 'updated_on', 'created_by',
                 'updated_by', 'extras', 'external_id', 'versions_url', 'version', 'concepts_url', 'mappings_url',
                 'canonical_url', 'identifier', 'publisher', 'contact', 'meta',
-                'jurisdiction', 'purpose', 'copyright', 'content_type', 'revision_date', 'logo_url', 'text',
+                'jurisdiction', 'purpose', 'copyright', 'content_type', 'supplements', 'supplement_type',
+                'supplement_global', 'revision_date', 'logo_url', 'text',
                 'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
                 'version_needed', 'hierarchy_root_url', 'autoid_concept_mnemonic', 'autoid_mapping_mnemonic',
                 'autoid_concept_external_id', 'autoid_mapping_external_id',
@@ -318,7 +324,8 @@ class SourceRetrieveUpdateDestroyViewTest(OCLAPITestCase):
                 'url', 'owner', 'owner_type', 'owner_url', 'created_on', 'updated_on', 'created_by',
                 'updated_by', 'extras', 'external_id', 'versions_url', 'version', 'concepts_url', 'mappings_url',
                 'canonical_url', 'identifier', 'publisher', 'contact', 'meta',
-                'jurisdiction', 'purpose', 'copyright', 'content_type', 'revision_date', 'logo_url', 'text',
+                'jurisdiction', 'purpose', 'copyright', 'content_type', 'supplements', 'supplement_type',
+                'supplement_global', 'revision_date', 'logo_url', 'text',
                 'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
                 'version_needed', 'hierarchy_root_url', 'autoid_concept_mnemonic', 'autoid_mapping_mnemonic',
                 'autoid_concept_external_id', 'autoid_mapping_external_id',
@@ -2717,6 +2724,40 @@ class SourceConceptsCloneViewTest(OCLAPITestCase):
             resource_budget=100, **parameters  # no group: the preview per-call budget (ocl_online#230)
         )
 
+    def test_post_retargets_answers_to_equivalents_and_keeps_targets_in_other_code_systems(self):  # pylint: disable=too-many-locals
+        def named_concept(parent):
+            return ConceptFactory(parent=parent, names=[ConceptNameFactory.build(locale_preferred=True)])
+
+        source = OrganizationSourceFactory()
+        external = OrganizationSourceFactory()
+        target = self.clone_to_source
+        question, answer, external_concept = named_concept(source), named_concept(source), named_concept(external)
+        existing_answer, existing_external = named_concept(target), named_concept(target)
+        for existing, original in ((existing_answer, answer), (existing_external, external_concept)):
+            MappingFactory(parent=target, from_concept=existing, to_concept=original, map_type='SAME-AS')
+        MappingFactory(
+            parent=source, from_concept=question, to_concept=answer, map_type='Q-AND-A',
+            from_source=source, to_source=source, from_source_url=source.uri, to_source_url=source.uri)
+        MappingFactory(
+            parent=source, from_concept=question, to_concept=external_concept, map_type='SAME-AS',
+            from_source=source, to_source=external, from_source_url=source.uri, to_source_url=external.uri)
+
+        response = self.post_clone(
+            [question.uri], user=UserProfileFactory(is_staff=True),
+            parameters={'mapTypes': 'Q-AND-A,SAME-AS', 'equivalencyMapType': 'SAME-AS'})
+
+        self.assertEqual(response.data[question.uri]['status'], 200)
+        copies = Mapping.objects.filter(parent=target, from_source_url=target.uri, id=F('versioned_object_id'))
+        answer_copy = copies.get(map_type='Q-AND-A')
+        self.assertEqual(answer_copy.to_concept_id, existing_answer.id)
+        self.assertEqual((answer_copy.to_source_id, answer_copy.to_source_url), (target.id, target.uri))
+        external_copy = copies.get(map_type='SAME-AS', to_source_id=external.id)
+        self.assertEqual(external_copy.to_concept_id, external_concept.id)
+        self.assertEqual(external_copy.to_concept_code, external_concept.mnemonic)
+        self.assertEqual(external_copy.to_source_url, external.uri)
+        self.assertFalse(copies.filter(to_concept=existing_external).exists())
+
+
 class SourceVersionsChangelogOutputViewTest(OCLAPITestCase):
     def _build_changelog_output_fixture(self):  # pylint: disable=too-many-locals
         source = OrganizationSourceFactory()
@@ -3408,8 +3449,10 @@ class SourceReleaseFlagsTest(OCLAPITestCase):
 
         self.assertIsNone(self._concept_ids(self.v2, {'is_in_latest_source_version': True}))
         self.assertIsNone(self._mapping_ids(self.v2, {'is_in_latest_source_version': True}))
-        self.assertIsNone(self._concept_ids(
-            self.v1, {'is_in_latest_source_version': False}, exclude_members_of=self.v2.id))
+        # v1's False write still applies, leaving out the members of the release that's now the latest
+        self.assertEqual(
+            self._concept_ids(self.v1, {'is_in_latest_source_version': False}, exclude_members_of=self.v2.id),
+            {self.shared_concept.id, self.v1_only_concept.id})
         self.assertEqual(
             self._concept_ids(v3, {'is_in_latest_source_version': True}), set())
 
@@ -3438,6 +3481,268 @@ class SourceReleaseFlagsTest(OCLAPITestCase):
         self.assertEqual(actions[0]['doc'], {'public_can_view': True})
         self.assertNotIn('doc_as_upsert', actions[0])
         self.assertNotIn('on_bulk_error', by_ids.call_args[1])  # default handler full-indexes 404s
+
+
+class SourceReleaseWhileSeedingTest(OCLAPITestCase):
+    """
+    A version can be created and then released in two calls, so the release can arrive while the version is still
+    being seeded (ocl_online#684). The previous release's False write leaves out the new release's members, so it has
+    to wait for them, and a release arriving at any moment has to be indexed by the request or by the seed task.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.organization = Organization.objects.first()
+        self.user = UserProfile.objects.filter(is_superuser=True).first()
+        self.token = self.user.get_token()
+        self.source = OrganizationSourceFactory(organization=self.organization)
+        self.previous = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v1', released=True)
+        self.version = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v2', released=False)
+        self.concept = ConceptFactory(parent=self.source, sources=[self.source])
+        self.seed_task = Task.new(
+            user=self.user, name='seed_children_to_new_version', args=['source', self.version.id, False, False])
+        self.version.add_processing(self.seed_task.id)
+
+    def set_released(self, released=True):
+        response = self.client.put(
+            self.version.uri, {'released': released}, HTTP_AUTHORIZATION='Token ' + self.token, format='json')
+        self.assertEqual(response.status_code, 200)
+
+    def run_seed_task(self):
+        seed_children_to_new_version.push_request(id=self.seed_task.id)
+        try:
+            seed_children_to_new_version.run('source', self.version.id, False)
+        finally:
+            seed_children_to_new_version.pop_request()
+
+    @patch.object(Source, 'index_children')
+    @patch.object(Source, 'index_resources_for_self_as_latest_released')
+    def test_release_while_the_seed_task_runs_is_indexed_by_the_task(self, index_release, index_children):
+        with patch.object(Source, 'update_children_counts', side_effect=lambda *_: self.set_released()):
+            self.run_seed_task()
+
+        index_release.assert_called_once_with()
+        index_children.assert_not_called()
+
+    @patch.object(Source, 'index_resources_for_self_as_latest_released')
+    def test_release_after_the_seed_task_read_released_is_indexed_by_the_request(self, index_release):
+        def release_after_the_check(*_, **__):
+            self.assertFalse(Source.objects.get(id=self.version.id).is_awaiting_members)
+            self.set_released()
+
+        with patch.object(Source, 'index_children', side_effect=release_after_the_check) as index_children:
+            self.run_seed_task()
+
+        index_children.assert_called_once()
+        index_release.assert_called_once_with(only_update=True)
+
+    def test_previous_release_is_unflagged_once_the_members_are_written(self):
+        writes = []
+
+        def record(version, _user=None, partial_doc=None, exclude_members_of=None):
+            members = Concept.sources.through.objects.filter(source_id=self.version.id).count()
+            writes.append((version.id, partial_doc, exclude_members_of, members))
+            # recorded first, so a worker that picks up this write can't read the stage from before it
+            self.assertEqual(Task.objects.get(id=self.seed_task.id).summary, {SEED_STAGE: SEED_RELEASE_INDEXED})
+
+        with patch.object(Source, 'index_children_async', autospec=True, side_effect=record):
+            self.set_released()
+            self.run_seed_task()
+
+        self.assertEqual(writes, [
+            (self.previous.id, {'is_in_latest_source_version': False}, self.version.id, 1),
+            (self.version.id, {'_append_source_version': 'v2', 'is_in_latest_source_version': True}, None, 1),
+        ])
+
+    @patch.object(Source, 'index_children', Mock())
+    @patch.object(Source, 'index_resources_for_self_as_latest_released')
+    def test_request_that_loaded_the_version_before_the_members_were_written_still_indexes(self, index_release):
+        loaded_earlier = Source.objects.get(id=self.version.id)
+        self.run_seed_task()
+
+        loaded_earlier.released = True
+        self.assertEqual(Source.persist_changes(loaded_earlier, self.user, None), {})
+
+        index_release.assert_called_once_with(only_update=True)
+
+    @patch.object(Source, 'index_resources_for_self_as_latest_released')
+    def test_clearing_the_processing_flag_does_not_end_the_wait_for_members(self, index_release):
+        self.version.clear_processing()
+
+        self.set_released()
+
+        index_release.assert_not_called()
+
+    def test_release_flag_gone_stale_before_indexing_keeps_the_membership_tag(self):
+        partial_doc = {'_append_source_version': 'v2', 'is_in_latest_source_version': True}
+
+        for task in (index_source_concepts, index_source_mappings):
+            with self.subTest(task=task.__name__):
+                with patch('core.common.tasks.batch_index_with_summary') as batch_index:
+                    task(self.version.id, partial_doc)  # v2 isn't released, so its True flag is out of date
+
+                self.assertEqual(batch_index.call_args[1]['partial_doc'], {'_append_source_version': 'v2'})
+
+    def test_release_unflags_the_releases_superseded_while_they_were_seeding(self):
+        Source.objects.filter(id=self.version.id).update(released=True)
+        latest = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v3', released=True)
+
+        with patch.object(Source, 'index_children_async', autospec=True) as index_children_async:
+            latest.index_resources_for_self_as_latest_released()
+
+        self.assertEqual(
+            [args[0][0].id for args in index_children_async.call_args_list if args[1].get('exclude_members_of')],
+            [self.version.id, self.previous.id])
+
+    def test_release_stops_unflagging_at_a_release_that_was_indexed(self):
+        Source.objects.filter(id=self.version.id).update(released=True)
+        Task.objects.filter(id=self.seed_task.id).update(summary={SEED_STAGE: SEED_RELEASE_INDEXED})
+        latest = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v3', released=True)
+
+        with patch.object(Source, 'index_children_async', autospec=True) as index_children_async:
+            latest.index_resources_for_self_as_latest_released()
+
+        self.assertEqual(
+            [args[0][0].id for args in index_children_async.call_args_list if args[1].get('exclude_members_of')],
+            [self.version.id])
+
+    @patch.object(Source, 'index_children')
+    def test_seed_task_of_a_superseded_release_still_tags_its_members(self, index_children):
+        Source.objects.filter(id=self.version.id).update(released=True)
+        OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v3', released=True)
+
+        with patch.object(Source, 'index_children_async') as index_children_async:
+            self.run_seed_task()
+
+        index_children_async.assert_not_called()
+        index_children.assert_called_once()
+
+    def test_queued_unflag_of_a_superseded_release_leaves_out_the_latest_release(self):
+        only_in_previous = ConceptFactory(parent=self.source)
+        in_latest_too = ConceptFactory(parent=self.source)
+        only_in_previous.sources.add(self.previous)
+        in_latest_too.sources.add(self.previous)
+        Source.objects.filter(id=self.version.id).update(released=True)
+        latest = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v3', released=True)
+        in_latest_too.sources.add(latest)
+
+        with patch('core.common.tasks.batch_index_with_summary') as batch_index:
+            index_source_concepts(
+                self.previous.id, {'is_in_latest_source_version': False}, exclude_members_of=self.version.id)
+
+        self.assertEqual(set(batch_index.call_args[0][1].values_list('id', flat=True)), {only_in_previous.id})
+
+    def test_queued_unflag_is_left_to_a_latest_release_still_awaiting_members(self):
+        Source.objects.filter(id=self.version.id).update(released=True)
+        Task.objects.filter(id=self.seed_task.id).update(summary={SEED_STAGE: SEED_RELEASE_INDEXED})
+        latest = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v3', released=True)
+        Task.new(user=self.user, name='seed_children_to_new_version', args=['source', latest.id, False, False])
+
+        with patch('core.common.tasks.batch_index_with_summary') as batch_index:
+            index_source_concepts(
+                self.previous.id, {'is_in_latest_source_version': False}, exclude_members_of=self.version.id)
+
+        batch_index.assert_not_called()
+        self.assertEqual(
+            [version.id for version in latest.get_released_versions_to_unflag()], [self.version.id, self.previous.id])
+
+    def test_queued_unflag_does_not_record_members_for_an_unfinished_seed(self):
+        Source.objects.filter(id=self.version.id).update(released=True)
+        latest = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v3', released=True)
+        Task.new(user=self.user, name='seed_children_to_new_version', args=['source', latest.id, False, False])
+
+        index_source_concepts(
+            self.previous.id, {'is_in_latest_source_version': False}, exclude_members_of=self.version.id)
+
+        self.assertTrue(Source.objects.get(id=self.version.id).is_awaiting_members)
+
+    def test_queued_unflag_runs_as_queued_when_the_superseded_release_has_no_seed_task(self):
+        only_in_previous = ConceptFactory(parent=self.source)
+        in_superseded_too = ConceptFactory(parent=self.source)
+        only_in_previous.sources.add(self.previous)
+        in_superseded_too.sources.add(self.previous, self.version)
+        Source.objects.filter(id=self.version.id).update(released=True)
+        self.seed_task.delete()  # as for a version seeded inline (FHIR), or a task that expired
+        latest = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.organization, version='v3', released=True)
+        Task.new(user=self.user, name='seed_children_to_new_version', args=['source', latest.id, False, False])
+
+        with patch('core.common.tasks.batch_index_with_summary') as batch_index:
+            index_source_concepts(
+                self.previous.id, {'is_in_latest_source_version': False}, exclude_members_of=self.version.id)
+
+        self.assertEqual(set(batch_index.call_args[0][1].values_list('id', flat=True)), {only_in_previous.id})
+
+    @patch.object(Source, 'index_resources_for_self_as_latest_released')
+    def test_release_of_a_seeded_version_is_indexed_straight_away(self, index_release):
+        Task.objects.filter(id=self.seed_task.id).update(summary={SEED_STAGE: SEED_MEMBERS_WRITTEN})
+
+        self.set_released()
+
+        index_release.assert_called_once_with(only_update=True)
+
+    @patch.object(Source, 'index_resources_for_self_as_latest_released')
+    def test_release_of_a_version_without_a_seed_task_is_indexed_straight_away(self, index_release):
+        self.seed_task.delete()
+
+        self.set_released()
+
+        index_release.assert_called_once_with(only_update=True)
+
+    @patch.object(Source, 'index_resources_for_self_as_latest_released')
+    def test_a_seed_task_that_succeeded_without_recording_a_stage_holds_nothing_back(self, index_release):
+        Task.objects.filter(id=self.seed_task.id).update(state=SUCCESS)
+
+        self.set_released()
+
+        index_release.assert_called_once_with(only_update=True)
+
+    @patch.object(Source, 'index_resources_for_self_as_latest_released')
+    def test_a_failed_or_revoked_seed_task_keeps_the_release_waiting_for_members(self, index_release):
+        for state in (FAILURE, REVOKED):
+            with self.subTest(state=state):
+                Task.objects.filter(id=self.seed_task.id).update(state=state)
+                Source.objects.filter(id=self.version.id).update(released=False)
+
+                self.set_released()
+
+                index_release.assert_not_called()
+
+    @patch.object(Source, 'index_resources_for_self_as_unreleased')
+    def test_unrelease_while_seeding_is_indexed_straight_away(self, index_unreleased):
+        Source.objects.filter(id=self.version.id).update(released=True)
+
+        self.set_released(False)
+
+        index_unreleased.assert_called_once_with()
+
+    @patch.object(Source, 'index_resources_for_self_as_latest_released')
+    def test_failed_seed_task_indexes_nothing_and_stops_processing(self, index_release):
+        self.set_released()
+
+        with patch.object(Source, 'seed_concepts', side_effect=ValueError('seed failed')):
+            with self.assertRaises(ValueError):
+                self.run_seed_task()
+
+        index_release.assert_not_called()
+        self.assertNotIn(
+            self.seed_task.id, Source.objects.values_list('_background_process_ids', flat=True).get(id=self.version.id))
+
+    def test_seed_task_failing_after_the_members_are_written_keeps_the_release_waiting(self):
+        with patch.object(Source, 'update_children_counts', side_effect=lambda *_: self.set_released()), \
+                patch.object(Source, 'index_resources_for_self_as_latest_released', side_effect=ValueError('broker')):
+            with self.assertRaises(ValueError):
+                self.run_seed_task()
+
+        self.assertTrue(Source.objects.get(id=self.version.id).is_awaiting_members)
 
 
 class SourceVersionPrivateHeadAccessTest(PrivateHeadVersionAccessMixin, OCLAPITestCase):

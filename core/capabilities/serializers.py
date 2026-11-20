@@ -11,8 +11,9 @@ class CapabilitySerializer(serializers.Serializer):  # pylint: disable=abstract-
 
     @cached_property
     def policy(self):
-        # one for a whole list (many=True serializes every item with one of these), so it's one snapshot
-        return get_capability_policy()
+        # one for a whole list (many=True serializes every item with one of these), so it's one snapshot; the one
+        # that chose the list, when the caller passes it
+        return self.context.get('policy') or get_capability_policy()
 
     def to_representation(self, instance):
         # every usage field the policy reports, not only `used`

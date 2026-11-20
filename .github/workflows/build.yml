@@ -4,22 +4,14 @@ on:
   push:
     branches: [ "master" ]
 
-# A newer push cancels the older run wherever it is: queued, running, or waiting at an approval gate.
-# The latest run is the only one left to approve, so an approval never deploys an image older than the
-# branch (OpenConceptLab/ocl_online#306).
+# A newer push cancels the older run wherever it is: queued, running, or waiting at the release approval.
+# The latest run is the only one left to approve, so a release is never older than the branch.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  AWS_REGION: "us-east-2"                     # set this to your preferred AWS region, e.g. us-west-1
-  ECR_REPOSITORY: "oclapi2"                   # set this to your Amazon ECR repository name
-  ECS_SERVICE_QA: "qa-api"                      # set this to your Amazon ECS service name
-  ECS_CLUSTER_QA: "ocl-qa-demo"                  # set this to your Amazon ECS cluster name
-  ECS_SERVICE_STAGING: "staging-api"                      # set this to your Amazon ECS service name
-  ECS_CLUSTER_STAGING_PRODUCTION: "ocl-staging-production"                  # set this to your Amazon ECS cluster name
-  ECS_SERVICE_PRODUCTION: "production-api"                      # set this to your Amazon ECS service name
-
+  IMAGE_REPOSITORY: "openconceptlab/oclapi2"
 
 jobs:
   pylint:
@@ -153,6 +145,9 @@ jobs:
     needs: [pylint, tests]
     name: Build and push image
     runs-on: ubuntu-latest
+    outputs:
+      image: ${{ env.IMAGE_REPOSITORY }}:${{ steps.version.outputs.tag }}
+      digest: ${{ steps.push.outputs.digest }}
 
     steps:
     - name: Free Disk Space
@@ -180,14 +175,27 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
     - name: Build and push Docker image
+      id: push
       uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
       with:
         context: .
         push: true
-        tags: openconceptlab/oclapi2:nightly, openconceptlab/oclapi2:${{ steps.version.outputs.tag }}
+        tags: ${{ env.IMAGE_REPOSITORY }}:nightly, ${{ env.IMAGE_REPOSITORY }}:${{ steps.version.outputs.tag }}
         build-args: SOURCE_COMMIT=${{ steps.version.outputs.sha }}
         cache-from: type=gha
         cache-to: type=gha,mode=min
+    - name: Log the pushed image
+      env:
+        IMAGE: ${{ env.IMAGE_REPOSITORY }}:${{ steps.version.outputs.tag }}
+        DIGEST: ${{ steps.push.outputs.digest }}
+      run: |
+        echo "Pushed $IMAGE ($DIGEST)"
+        {
+          echo "### Pushed image"
+          echo ""
+          echo "- Tag: \`$IMAGE\`"
+          echo "- Digest: \`$DIGEST\`"
+        } >> "$GITHUB_STEP_SUMMARY"
 
   release:
     needs: [build]
@@ -213,495 +221,20 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_TOKEN }}
       - name: Publish release and bump version
-        run: bash release_version.sh publish
+        id: publish
+        run: |
+          echo "tag=$(bash release_version.sh current)" >> "$GITHUB_OUTPUT"
+          bash release_version.sh publish
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-
-  deploy-qa:
-    needs: [release]
-    name: Deploy to QA
-    runs-on: ubuntu-latest
-    environment: qa
-
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
-      - name: Checkout repo
-        uses: actions/checkout@v3
-      - name: Compute version and short sha
-        id: version
-        run: echo "tag=$(bash release_version.sh full-version)" >> $GITHUB_OUTPUT
-      - name: Push image to Amazon ECR
-        id: push-image
+      # The tag can be pushed again, so the digest pins the image this release approved.
+      - name: Name the release's image in its notes
         env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ steps.version.outputs.tag }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          RELEASE_TAG: ${{ steps.publish.outputs.tag }}
+          IMAGE: ${{ needs.build.outputs.image }}
+          DIGEST: ${{ needs.build.outputs.digest }}
         run: |
-          # Build a docker container and
-          # push it to ECR so that it can
-          # be deployed to ECS.
-          docker pull openconceptlab/oclapi2:$IMAGE_TAG
-          docker tag openconceptlab/oclapi2:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker tag openconceptlab/oclapi2:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:qa
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:qa
-          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
-      - name: Download task definition
-        run: |
-          aws ecs describe-task-definition --task-definition $ECS_SERVICE_QA --query taskDefinition > task-definition.json
-          aws ecs describe-task-definition --task-definition "qa-celery" --query taskDefinition > task-definition-celery.json
-          aws ecs describe-task-definition --task-definition "qa-celery-concurrent" --query taskDefinition > task-definition-celery-concurrent.json
-          aws ecs describe-task-definition --task-definition "qa-celery-bulk-import-root" --query taskDefinition > task-definition-celery-bulk-import-root.json
-          aws ecs describe-task-definition --task-definition "qa-celery-bulk-import-0-1" --query taskDefinition > task-definition-celery-bulk-import-0-1.json
-          aws ecs describe-task-definition --task-definition "qa-celery-bulk-import-2-3" --query taskDefinition > task-definition-celery-bulk-import-2-3.json
-          aws ecs describe-task-definition --task-definition "qa-celery-indexing" --query taskDefinition > task-definition-celery-indexing.json
-          aws ecs describe-task-definition --task-definition "qa-celery-beat" --query taskDefinition > task-definition-celery-beat.json
-          aws ecs describe-task-definition --task-definition "qa-flower" --query taskDefinition > task-definition-flower.json
-      - name: "[api] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-api
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition.json"
-          container-name: ${{ env.ECS_SERVICE_QA }}
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[celery] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-celery
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition-celery.json"
-          container-name: "qa-celery"
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[celery-concurrent] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-celery-concurrent
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition-celery-concurrent.json"
-          container-name: "qa-celery-concurrent"
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[celery-bulk-import-root] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-celery-bulk-import-root
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition-celery-bulk-import-root.json"
-          container-name: "qa-celery-bulk-import-root"
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[celery-bulk-import-0-1] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-celery-bulk-import-0-1
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition-celery-bulk-import-0-1.json"
-          container-name: "qa-celery-bulk-import-0-1"
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[celery-bulk-import-2-3] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-celery-bulk-import-2-3
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition-celery-bulk-import-2-3.json"
-          container-name: "qa-celery-bulk-import-2-3"
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[celery-indexing] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-celery-indexing
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition-celery-indexing.json"
-          container-name: "qa-celery-indexing"
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[celery-beat] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-celery-beat
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition-celery-beat.json"
-          container-name: "qa-celery-beat"
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[flower] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-flower
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition-flower.json"
-          container-name: "qa-flower"
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[api] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-api.outputs.task-definition }}
-          service: ${{ env.ECS_SERVICE_QA }}
-          cluster: ${{ env.ECS_CLUSTER_QA }}
-      - name: "[celery] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-celery.outputs.task-definition }}
-          service: "qa-celery"
-          cluster: ${{ env.ECS_CLUSTER_QA }}
-      - name: "[celery-concurrent] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-celery-concurrent.outputs.task-definition }}
-          service: "qa-celery-concurrent"
-          cluster: ${{ env.ECS_CLUSTER_QA }}
-      - name: "[celery-bulk-import-root] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-celery-bulk-import-root.outputs.task-definition }}
-          service: "qa-celery-bulk-import-root"
-          cluster: ${{ env.ECS_CLUSTER_QA }}
-      - name: "[celery-bulk-import-0-1] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-celery-bulk-import-0-1.outputs.task-definition }}
-          service: "qa-celery-bulk-import-0-1"
-          cluster: ${{ env.ECS_CLUSTER_QA }}
-      - name: "[celery-bulk-import-2-3] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-celery-bulk-import-2-3.outputs.task-definition }}
-          service: "qa-celery-bulk-import-2-3"
-          cluster: ${{ env.ECS_CLUSTER_QA }}
-      - name: "[celery-indexing] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-celery-indexing.outputs.task-definition }}
-          service: "qa-celery-indexing"
-          cluster: ${{ env.ECS_CLUSTER_QA }}
-      - name: "[celery-beat] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-celery-beat.outputs.task-definition }}
-          service: "qa-celery-beat"
-          cluster: ${{ env.ECS_CLUSTER_QA }}
-      - name: "[flower] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-flower.outputs.task-definition }}
-          service: "qa-flower"
-          cluster: ${{ env.ECS_CLUSTER_QA }}
-  deploy-staging:
-    needs: [deploy-qa]
-    name: Deploy to Staging
-    runs-on: ubuntu-latest
-    environment: staging
-
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
-      - name: Checkout repo
-        uses: actions/checkout@v3
-      - name: Compute version and short sha
-        id: version
-        run: echo "tag=$(bash release_version.sh full-version)" >> $GITHUB_OUTPUT
-      - name: Push image to Amazon ECR
-        id: push-image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ steps.version.outputs.tag }}
-        run: |
-          # Build a docker container and
-          # push it to ECR so that it can
-          # be deployed to ECS.
-          docker pull openconceptlab/oclapi2:$IMAGE_TAG
-          docker tag openconceptlab/oclapi2:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:staging
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:staging
-          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
-      - name: Download task definition
-        run: |
-          aws ecs describe-task-definition --task-definition $ECS_SERVICE_STAGING --query taskDefinition > task-definition.json
-          aws ecs describe-task-definition --task-definition "staging-celery" --query taskDefinition > task-definition-celery.json
-          aws ecs describe-task-definition --task-definition "staging-celery-concurrent" --query taskDefinition > task-definition-celery-concurrent.json
-          aws ecs describe-task-definition --task-definition "staging-celery-bulk-import-root" --query taskDefinition > task-definition-celery-bulk-import-root.json
-          aws ecs describe-task-definition --task-definition "staging-celery-bulk-import-0-1" --query taskDefinition > task-definition-celery-bulk-import-0-1.json
-          aws ecs describe-task-definition --task-definition "staging-celery-bulk-import-2-3" --query taskDefinition > task-definition-celery-bulk-import-2-3.json
-          aws ecs describe-task-definition --task-definition "staging-celery-indexing" --query taskDefinition > task-definition-celery-indexing.json
-          aws ecs describe-task-definition --task-definition "staging-celery-beat" --query taskDefinition > task-definition-celery-beat.json
-          aws ecs describe-task-definition --task-definition "staging-flower" --query taskDefinition > task-definition-flower.json
-      - name: "[api] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-api
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition.json"
-          container-name: ${{ env.ECS_SERVICE_STAGING }}
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[celery] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-celery
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition-celery.json"
-          container-name: "staging-celery"
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[celery-concurrent] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-celery-concurrent
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition-celery-concurrent.json"
-          container-name: "staging-celery-concurrent"
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[celery-bulk-import-root] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-celery-bulk-import-root
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition-celery-bulk-import-root.json"
-          container-name: "staging-celery-bulk-import-root"
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[celery-bulk-import-0-1] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-celery-bulk-import-0-1
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition-celery-bulk-import-0-1.json"
-          container-name: "staging-celery-bulk-import-0-1"
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[celery-bulk-import-2-3] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-celery-bulk-import-2-3
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition-celery-bulk-import-2-3.json"
-          container-name: "staging-celery-bulk-import-2-3"
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[celery-indexing] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-celery-indexing
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition-celery-indexing.json"
-          container-name: "staging-celery-indexing"
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[celery-beat] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-celery-beat
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition-celery-beat.json"
-          container-name: "staging-celery-beat"
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[flower] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-flower
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition-flower.json"
-          container-name: "staging-flower"
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[api] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-api.outputs.task-definition }}
-          service: ${{ env.ECS_SERVICE_STAGING }}
-          cluster: ${{ env.ECS_CLUSTER_STAGING_PRODUCTION }}
-      - name: "[celery] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-celery.outputs.task-definition }}
-          service: "staging-celery"
-          cluster: ${{ env.ECS_CLUSTER_STAGING_PRODUCTION }}
-      - name: "[celery-concurrent] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-celery-concurrent.outputs.task-definition }}
-          service: "staging-celery-concurrent"
-          cluster: ${{ env.ECS_CLUSTER_STAGING_PRODUCTION }}
-      - name: "[celery-bulk-import-root] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-celery-bulk-import-root.outputs.task-definition }}
-          service: "staging-celery-bulk-import-root"
-          cluster: ${{ env.ECS_CLUSTER_STAGING_PRODUCTION }}
-      - name: "[celery-bulk-import-0-1] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-celery-bulk-import-0-1.outputs.task-definition }}
-          service: "staging-celery-bulk-import-0-1"
-          cluster: ${{ env.ECS_CLUSTER_STAGING_PRODUCTION }}
-      - name: "[celery-bulk-import-2-3] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-celery-bulk-import-2-3.outputs.task-definition }}
-          service: "staging-celery-bulk-import-2-3"
-          cluster: ${{ env.ECS_CLUSTER_STAGING_PRODUCTION }}
-      - name: "[celery-indexing] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-celery-indexing.outputs.task-definition }}
-          service: "staging-celery-indexing"
-          cluster: ${{ env.ECS_CLUSTER_STAGING_PRODUCTION }}
-      - name: "[celery-beat] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-celery-beat.outputs.task-definition }}
-          service: "staging-celery-beat"
-          cluster: ${{ env.ECS_CLUSTER_STAGING_PRODUCTION }}
-      - name: "[flower] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-flower.outputs.task-definition }}
-          service: "staging-flower"
-          cluster: ${{ env.ECS_CLUSTER_STAGING_PRODUCTION }}
-  deploy-production:
-    needs: [deploy-staging]
-    name: Deploy to Production
-    runs-on: ubuntu-latest
-    environment: production
-
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
-      - name: Checkout repo
-        uses: actions/checkout@v3
-      - name: Compute version and short sha
-        id: version
-        run: echo "tag=$(bash release_version.sh full-version)" >> $GITHUB_OUTPUT
-      - name: Push image to Amazon ECR
-        id: push-image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ steps.version.outputs.tag }}
-        run: |
-          # Build a docker container and
-          # push it to ECR so that it can
-          # be deployed to ECS.
-          docker pull openconceptlab/oclapi2:$IMAGE_TAG
-          docker tag openconceptlab/oclapi2:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:production
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:production
-          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
-      - name: Download task definition
-        run: |
-          aws ecs describe-task-definition --task-definition $ECS_SERVICE_PRODUCTION --query taskDefinition > task-definition.json
-          aws ecs describe-task-definition --task-definition "production-celery" --query taskDefinition > task-definition-celery.json
-          aws ecs describe-task-definition --task-definition "production-celery-concurrent" --query taskDefinition > task-definition-celery-concurrent.json
-          aws ecs describe-task-definition --task-definition "production-celery-bulk-import-root" --query taskDefinition > task-definition-celery-bulk-import-root.json
-          aws ecs describe-task-definition --task-definition "production-celery-bulk-import-0-1" --query taskDefinition > task-definition-celery-bulk-import-0-1.json
-          aws ecs describe-task-definition --task-definition "production-celery-bulk-import-2-3" --query taskDefinition > task-definition-celery-bulk-import-2-3.json
-          aws ecs describe-task-definition --task-definition "production-celery-indexing" --query taskDefinition > task-definition-celery-indexing.json
-          aws ecs describe-task-definition --task-definition "production-celery-beat" --query taskDefinition > task-definition-celery-beat.json
-          aws ecs describe-task-definition --task-definition "production-flower" --query taskDefinition > task-definition-flower.json
-      - name: "[api] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-api
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition.json"
-          container-name: ${{ env.ECS_SERVICE_PRODUCTION }}
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[celery] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-celery
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition-celery.json"
-          container-name: "production-celery"
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[celery-concurrent] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-celery-concurrent
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition-celery-concurrent.json"
-          container-name: "production-celery-concurrent"
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[celery-bulk-import-root] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-celery-bulk-import-root
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition-celery-bulk-import-root.json"
-          container-name: "production-celery-bulk-import-root"
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[celery-bulk-import-0-1] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-celery-bulk-import-0-1
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition-celery-bulk-import-0-1.json"
-          container-name: "production-celery-bulk-import-0-1"
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[celery-bulk-import-2-3] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-celery-bulk-import-2-3
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition-celery-bulk-import-2-3.json"
-          container-name: "production-celery-bulk-import-2-3"
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[celery-indexing] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-celery-indexing
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition-celery-indexing.json"
-          container-name: "production-celery-indexing"
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[celery-beat] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-celery-beat
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition-celery-beat.json"
-          container-name: "production-celery-beat"
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[flower] Fill in the new image ID in the Amazon ECS task definition"
-        id: task-def-flower
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: "task-definition-flower.json"
-          container-name: "production-flower"
-          image: ${{ steps.push-image.outputs.image }}
-      - name: "[api] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-api.outputs.task-definition }}
-          service: ${{ env.ECS_SERVICE_PRODUCTION }}
-          cluster: ${{ env.ECS_CLUSTER_STAGING_PRODUCTION }}
-      - name: "[celery] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-celery.outputs.task-definition }}
-          service: "production-celery"
-          cluster: ${{ env.ECS_CLUSTER_STAGING_PRODUCTION }}
-      - name: "[celery-concurrent] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-celery-concurrent.outputs.task-definition }}
-          service: "production-celery-concurrent"
-          cluster: ${{ env.ECS_CLUSTER_STAGING_PRODUCTION }}
-      - name: "[celery-bulk-import-root] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-celery-bulk-import-root.outputs.task-definition }}
-          service: "production-celery-bulk-import-root"
-          cluster: ${{ env.ECS_CLUSTER_STAGING_PRODUCTION }}
-      - name: "[celery-bulk-import-0-1] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-celery-bulk-import-0-1.outputs.task-definition }}
-          service: "production-celery-bulk-import-0-1"
-          cluster: ${{ env.ECS_CLUSTER_STAGING_PRODUCTION }}
-      - name: "[celery-bulk-import-2-3] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-celery-bulk-import-2-3.outputs.task-definition }}
-          service: "production-celery-bulk-import-2-3"
-          cluster: ${{ env.ECS_CLUSTER_STAGING_PRODUCTION }}
-      - name: "[celery-indexing] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-celery-indexing.outputs.task-definition }}
-          service: "production-celery-indexing"
-          cluster: ${{ env.ECS_CLUSTER_STAGING_PRODUCTION }}
-      - name: "[celery-beat] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-celery-beat.outputs.task-definition }}
-          service: "production-celery-beat"
-          cluster: ${{ env.ECS_CLUSTER_STAGING_PRODUCTION }}
-      - name: "[flower] Deploy Amazon ECS task definition"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def-flower.outputs.task-definition }}
-          service: "production-flower"
-          cluster: ${{ env.ECS_CLUSTER_STAGING_PRODUCTION }}
+          notes="$(gh release view "$RELEASE_TAG" --json body --jq .body)"
+          gh release edit "$RELEASE_TAG" --notes "$(printf 'Image: `%s`\n\nDigest: `%s`\n\n%s' "$IMAGE" "$DIGEST" "$notes")"
+          echo "Release $RELEASE_TAG: $IMAGE ($DIGEST)"

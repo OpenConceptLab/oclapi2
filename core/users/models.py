@@ -246,11 +246,6 @@ class UserProfile(DirtyFieldsMixin, AbstractUser, BaseModel, CommonLogoModel, So
     def is_core_group(self):
         return self.has_auth_group(CORE_USER_GROUP)
 
-    @property
-    def capabilities(self):
-        from core.capabilities.models import Capability
-        return Capability.objects.all()
-
     # Limits and usage are decided by settings.CAPABILITY_POLICY (core.capabilities.policy)
     def get_capability_limit(self, capability_id, owner=None):
         return get_capability_policy().get_limit(self, capability_id, owner=owner)

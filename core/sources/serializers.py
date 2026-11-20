@@ -11,8 +11,9 @@ from rest_framework.serializers import ModelSerializer, ValidationError
 from core.client_configs.serializers import ClientConfigSerializer
 from core.common.constants import DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, HEAD, \
     INCLUDE_SUMMARY, INCLUDE_CLIENT_CONFIGS, INCLUDE_HIERARCHY_ROOT, INCLUDE_STATES, INCLUDE_TASKS, \
-    INCLUDE_EXTERNAL_EXPORTS, INCLUDE_LATEST_RELEASED_VERSION
-from core.common.serializers import AbstractRepoResourcesSerializer, AbstractResourceSerializer, PublicAccessField
+    INCLUDE_EXTERNAL_EXPORTS, INCLUDE_LATEST_RELEASED_VERSION, VERSION_EXPORT_EXCLUDED_FIELDS
+from core.common.serializers import AbstractRepoResourcesSerializer, AbstractResourceSerializer, PublicAccessField, \
+    RepoVerificationSerializerMixin
 from core.common.utils import get_truthy_values
 from core.orgs.models import Organization
 from core.settings import DEFAULT_LOCALE
@@ -115,7 +116,7 @@ class SourceVersionListSerializer(ModelSerializer):
         fields = (
             'type', 'short_code', 'name', 'url', 'canonical_url', 'owner', 'owner_type', 'owner_url', 'version',
             'created_at', 'id', 'source_type', 'updated_at', 'released', 'retired', 'version_url',
-            'previous_version_url', 'checksums', 'match_algorithms', 'external_exports'
+            'previous_version_url', 'checksums', 'match_algorithms', 'external_exports', 'verification'
         )
 
     def __init__(self, *args, **kwargs):
@@ -147,8 +148,9 @@ class SourceVersionListSerializer(ModelSerializer):
         return RepoExternalExportSerializer(queryset, many=True).data
 
 
-class SourceCreateOrUpdateSerializer(ModelSerializer):
+class SourceCreateOrUpdateSerializer(RepoVerificationSerializerMixin, ModelSerializer):
     canonical_url = CharField(allow_blank=True, allow_null=True, required=False)
+    supplements = CharField(allow_blank=True, allow_null=True, required=False)
     public_access = PublicAccessField(required=False)
 
     class Meta:
@@ -179,8 +181,8 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
                 'retired', 'released', 'organization', 'user', 'organization_id', 'user_id', 'external_id', 'extras',
                 'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
                 'version_needed', 'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose',
-                'copyright', 'content_type', 'revision_date', 'text', 'meta',
-                'autoid_concept_mnemonic', 'autoid_concept_external_id',
+                'copyright', 'content_type', 'supplements', 'supplement_type', 'supplement_global', 'revision_date',
+                'text', 'meta', 'autoid_concept_mnemonic', 'autoid_concept_external_id',
                 'autoid_mapping_mnemonic', 'autoid_mapping_external_id',
                 'autoid_concept_mnemonic_start_from', 'autoid_concept_external_id_start_from',
                 'autoid_mapping_mnemonic_start_from', 'autoid_mapping_external_id_start_from',
@@ -196,6 +198,9 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
                 pass
             setattr(source, attr, value)
 
+        if instance:  # create paths pass the raw payload, so only an update may carry it
+            source.verification = validated_data.get('verification', source.verification)
+
         source.full_name = validated_data.get('full_name', source.full_name) or source.name
 
         if 'hierarchy_root' in validated_data or 'hierarchy_root_url' in validated_data:
@@ -207,6 +212,9 @@ class SourceCreateOrUpdateSerializer(ModelSerializer):
         return source
 
     def update(self, instance, validated_data):
+        if self.persist_verification_only(instance, validated_data):
+            return instance
+
         original_schema = instance.custom_validation_schema
         source = self.prepare_object(validated_data, instance)
         user = self.context['request'].user
@@ -274,7 +282,7 @@ class SourceCreateSerializer(SourceCreateOrUpdateSerializer):
                 self.initial_data['released'] = BooleanField().to_internal_value(released)
             except ValidationError as ex:
                 raise ValidationError({'released': ex.detail}) from ex
-        return attrs
+        return super().validate(attrs)
 
     def create(self, validated_data):
         source = self.prepare_object(validated_data)
@@ -425,7 +433,8 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourc
             'url', 'owner', 'owner_type', 'owner_url', 'created_on', 'updated_on', 'created_by', 'updated_by',
             'extras', 'external_id', 'versions_url', 'version', 'concepts_url', 'mappings_url',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
-            'content_type', 'revision_date', 'logo_url', 'summary', 'text', 'client_configs',
+            'content_type', 'supplements', 'supplement_type', 'supplement_global', 'revision_date', 'logo_url',
+            'summary', 'text', 'client_configs',
             'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
             'version_needed', 'hierarchy_root_url', 'hierarchy_root', 'meta',
             'autoid_concept_mnemonic', 'autoid_concept_external_id',
@@ -520,11 +529,12 @@ class SourceVersionDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepo
             'created_on', 'updated_on', 'created_by', 'updated_by', 'extras', 'external_id',
             'version', 'concepts_url', 'mappings_url', 'is_processing', 'released',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright',
-            'content_type', 'revision_date', 'summary', 'text', 'meta',
-            'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
+            'content_type', 'supplements', 'supplement_type', 'supplement_global', 'revision_date', 'summary', 'text',
+            'meta', 'experimental', 'case_sensitive', 'collection_reference', 'hierarchy_meaning', 'compositional',
             'version_needed', 'hierarchy_root_url', 'checksums', 'states', 'tasks', 'properties', 'filters',
-            'match_algorithms', 'external_exports'
+            'match_algorithms', 'external_exports', 'verification'
         ) + AbstractRepoResourcesSerializer.Meta.fields
+        read_only_fields = ('verification',)
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
@@ -596,5 +606,7 @@ class SourceVersionExportSerializer(SourceVersionDetailSerializer):
     class Meta:
         model = Source
         fields = (
-            *SourceVersionDetailSerializer.Meta.fields, 'source'
+            *(field for field in SourceVersionDetailSerializer.Meta.fields
+              if field not in VERSION_EXPORT_EXCLUDED_FIELDS),
+            'source'
         )

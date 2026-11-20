@@ -51,8 +51,8 @@ SEARCH_PARAMETER = 'http://hl7.org/fhir/SearchParameter/'
 SEARCH_PARAMETER_TYPES = {
     '_id': 'token', '_lastUpdated': 'date', 'url': 'uri', 'version': 'token', 'status': 'token', 'identifier': 'token',
     'name': 'string', 'title': 'string', 'description': 'string', 'publisher': 'string', 'system': 'uri',
-    'code': 'token', 'language': 'token', 'reference': 'uri', 'source-system': 'uri', 'source-uri': 'reference',
-    'target-system': 'uri', 'target-uri': 'reference'}
+    'code': 'token', 'language': 'token', 'supplements': 'reference', 'content-mode': 'token', 'reference': 'uri',
+    'source-system': 'uri', 'source-uri': 'reference', 'target-system': 'uri', 'target-uri': 'reference'}
 # R4 defines these once for every resource, or for every conformance resource; the others per resource type
 SHARED_SEARCH_PARAMETERS = {
     '_id': 'Resource-id', '_lastUpdated': 'Resource-lastUpdated',

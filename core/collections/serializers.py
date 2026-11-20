@@ -13,8 +13,9 @@ from core.collections.constants import VERSION_EXPANSION_CHOICES, VERSION_EXPANS
 from core.collections.models import Collection, CollectionReference, Expansion
 from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, INCLUDE_SUMMARY, \
     INCLUDE_CLIENT_CONFIGS, INVALID_EXPANSION_URL, INCLUDE_STATES, INCLUDE_TASKS, INCLUDE_RESOLVED_REPO_VERSIONS, \
-    INCLUDE_EXTERNAL_EXPORTS, INCLUDE_LATEST_RELEASED_VERSION
-from core.common.serializers import AbstractRepoResourcesSerializer, AbstractResourceSerializer, PublicAccessField
+    INCLUDE_EXTERNAL_EXPORTS, INCLUDE_LATEST_RELEASED_VERSION, VERSION_EXPORT_EXCLUDED_FIELDS
+from core.common.serializers import AbstractRepoResourcesSerializer, AbstractResourceSerializer, PublicAccessField, \
+    RepoVerificationSerializerMixin
 from core.common.utils import get_truthy_values
 from core.orgs.models import Organization
 from core.settings import DEFAULT_LOCALE
@@ -124,7 +125,7 @@ class CollectionVersionListSerializer(ModelSerializer):
         fields = (
             'type', 'short_code', 'name', 'url', 'canonical_url', 'owner', 'owner_type', 'owner_url', 'version',
             'created_at', 'id', 'collection_type', 'updated_at', 'released', 'retired', 'version_url',
-            'previous_version_url', 'autoexpand', 'expansion_url', 'checksums', 'external_exports'
+            'previous_version_url', 'autoexpand', 'expansion_url', 'checksums', 'external_exports', 'verification'
         )
 
     def __init__(self, *args, **kwargs):
@@ -154,7 +155,7 @@ class CollectionVersionListSerializer(ModelSerializer):
         return RepoExternalExportSerializer(queryset, many=True).data
 
 
-class CollectionCreateOrUpdateSerializer(ModelSerializer):
+class CollectionCreateOrUpdateSerializer(RepoVerificationSerializerMixin, ModelSerializer):
     canonical_url = CharField(allow_blank=True, allow_null=True, required=False)
     public_access = PublicAccessField(required=False)
 
@@ -197,6 +198,9 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
                 pass
             setattr(collection, attr, value)
 
+        if instance:  # create paths pass the raw payload, so only an update may carry it
+            collection.verification = validated_data.get('verification', collection.verification)
+
         collection.full_name = validated_data.get('full_name', collection.full_name) or collection.name
         collection.autoexpand_head = validated_data.get('autoexpand_head', collection.autoexpand_head)
         collection.autoexpand = validated_data.get('autoexpand', collection.autoexpand)
@@ -209,6 +213,9 @@ class CollectionCreateOrUpdateSerializer(ModelSerializer):
         return collection
 
     def update(self, instance, validated_data):
+        if self.persist_verification_only(instance, validated_data):
+            return instance
+
         original_schema = instance.custom_validation_schema
         collection = self.prepare_object(validated_data, instance)
         if self._errors:
@@ -277,7 +284,7 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
                 self.initial_data['released'] = BooleanField().to_internal_value(released)
             except ValidationError as ex:
                 raise ValidationError({'released': ex.detail}) from ex
-        return attrs
+        return super().validate(attrs)
 
     def create(self, validated_data):
         collection = self.prepare_object(validated_data)
@@ -509,8 +516,9 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer, Abst
             'version', 'concepts_url', 'mappings_url', 'expansions_url', 'is_processing', 'released', 'retired',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright', 'meta',
             'immutable', 'revision_date', 'summary', 'text', 'experimental', 'locked_date',
-            'autoexpand', 'expansion_url', 'checksums', 'states', 'tasks', 'external_exports'
+            'autoexpand', 'expansion_url', 'checksums', 'states', 'tasks', 'external_exports', 'verification'
         ) + AbstractRepoResourcesSerializer.Meta.fields
+        read_only_fields = ('verification',)
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
@@ -635,7 +643,9 @@ class CollectionVersionExportSerializer(CollectionVersionDetailSerializer):
     class Meta:
         model = Collection
         fields = (
-            *CollectionVersionDetailSerializer.Meta.fields, 'collection'
+            *(field for field in CollectionVersionDetailSerializer.Meta.fields
+              if field not in VERSION_EXPORT_EXCLUDED_FIELDS),
+            'collection'
         )
 
 

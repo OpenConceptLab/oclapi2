@@ -316,8 +316,12 @@ class UserDetailSerializer(
     def get_capabilities(self, obj):
         if not self.should_include_plan(obj):
             return None
+        from core.capabilities.policy import get_capability_policy
         from core.capabilities.serializers import CapabilitySerializer
-        return CapabilitySerializer(obj.capabilities, many=True, context={'user': obj}).data
+        # one policy chooses the list and describes each one
+        policy = get_capability_policy()
+        return CapabilitySerializer(
+            policy.listed_capabilities(obj), many=True, context={'user': obj, 'policy': policy}).data
 
     def get_pins(self, obj):
         request = get(self, 'context.request')

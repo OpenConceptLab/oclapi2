@@ -1413,20 +1413,21 @@ class BulkImportInlineTest(OCLTestCase):
             {old_from.versioned_object_id, new_from.versioned_object_id})
 
     def cloned_mapping_in_local_source(self):
-        """A mapping cloned into a local source: linked to local concepts, with its target URL kept on the origin."""
+        """A mapping cloned into a local source before clones fixed source URLs: linked to local concepts, with its
+        target URL still on the origin."""
         organization = OrganizationFactory(mnemonic='CloneOrg')
         origin = OrganizationSourceFactory(organization=organization, mnemonic='Origin')
         local = OrganizationSourceFactory(organization=organization, mnemonic='Local')
-        for source in (origin, local):
-            ConceptFactory(parent=source, mnemonic='From')
+        ConceptFactory(parent=origin, mnemonic='From')
+        local_from = ConceptFactory(parent=local, mnemonic='From')
         origin_to = ConceptFactory(parent=origin, mnemonic='To')
         local_to = ConceptFactory(parent=local, mnemonic='To')
         user = origin_to.created_by
         mapping = MappingFactory.build(
-            from_concept=ConceptFactory.build(mnemonic='From'), to_concept=ConceptFactory.build(mnemonic='To'),
-            parent=local, mnemonic='cloned-map', map_type='Same As', to_source_url=origin.uri,
-            from_source_url=origin.uri)
+            from_concept=local_from, to_concept=local_to, parent=local, mnemonic='cloned-map', map_type='Same As')
         local.clone_mappings([mapping], user)
+        Mapping.objects.filter(parent=local, from_concept_code='From').update(
+            from_source_url=origin.uri, to_source_url=origin.uri)
         mapping = Mapping.objects.get(parent=local, from_concept_code='From', id=F('versioned_object_id'))
         self.assertEqual((mapping.to_concept_id, mapping.to_source_url), (local_to.id, origin.uri))
         return origin, local, mapping
@@ -2487,6 +2488,24 @@ class ResourceImporterModelsTest(OCLTestCase):
 
         self.assertEqual(Organization.objects.get(mnemonic='EditOrg').public_access, 'View')
         self.assertEqual(Source.objects.get(mnemonic='edit-src').public_access, 'View')
+
+    def test_source_importer_creates_a_supplement(self):
+        admin = UserProfile.objects.get(username='ocladmin')
+        OrganizationFactory(mnemonic='SuppOrg')
+        supplement = {
+            'id': 'icd10-fr', 'name': 'ICD-10 fr', 'owner_type': 'Organization', 'owner': 'SuppOrg',
+            'content_type': 'supplement', 'supplements': 'http://hl7.org/fhir/sid/icd-10|2019',
+            'supplement_type': 'lang-pack', 'supplement_global': False}
+
+        self.assertEqual(SourceImporter(supplement, admin).run(), CREATED)
+        source = Source.objects.get(mnemonic='icd10-fr')
+        self.assertEqual(
+            [source.supplements, source.supplement_type, source.supplement_global],
+            ['http://hl7.org/fhir/sid/icd-10|2019', 'lang-pack', False])
+
+        result = SourceImporter({**supplement, 'id': 'icd10-pt', 'supplements': None}, admin).run()
+        self.assertIn('supplements', result)
+        self.assertFalse(Source.objects.filter(mnemonic='icd10-pt').exists())
 
     def test_source_importer_delete_not_found(self):
         importer = SourceImporter(

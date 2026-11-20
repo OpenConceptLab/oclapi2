@@ -4341,6 +4341,28 @@ class CollectionReferenceMappingsViewTest(OCLAPITestCase):
         self.assertEqual(sorted([data['url'] for data in response.data]), sorted([mapping1.uri, mapping2.uri]))
 
 
+def valueset_release(valueset, version):
+    """A release of the value set whose expansion holds one concept"""
+    release = OrganizationCollectionFactory(
+        organization=valueset.organization, mnemonic=valueset.mnemonic, version=version, released=True)
+    expansion = ExpansionFactory(collection_version=release)
+    release.expansion_uri = expansion.uri
+    release.save()
+    concept = ConceptFactory().get_latest_version()
+    expansion.concepts.add(concept)
+    return release, concept
+
+
+def lock_valueset(collection, expansion, release):
+    """The expansion locks the value set at the release, and the collection references the value set"""
+    expansion.evaluated_collection_versions.add(release)
+    valueset = drop_version(release.uri)
+    reference = CollectionReference(
+        expression=valueset, collection=collection, valueset=[valueset], reference_type='concepts')
+    reference.clean()
+    reference.save()
+
+
 class CollectionVersionExpansionViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
@@ -4405,6 +4427,27 @@ class CollectionVersionExpansionViewTest(OCLAPITestCase):
         self.assertEqual(list(self.expansion_default.concepts.all()), [old])
         self.assertEqual(list(self.expansion_default.explicit_source_versions.all()), [v1])
 
+    @patch('core.common.tasks.export_collection')
+    def test_post_re_evaluate_keeps_valueset_lock_of_a_version_built_with_lock(self, _):
+        valueset = OrganizationCollectionFactory()
+        locked, locked_concept = valueset_release(valueset, 'v1')
+        lock_valueset(self.collection, self.expansion_default, locked)
+        token = self.collection.created_by.get_token()
+        response = self.client.post(
+            self.collection.url + 'versions/', {'id': 'r1', 'description': 'r1', 'expansion': 'lock'},
+            HTTP_AUTHORIZATION='Token ' + token, format='json')
+        self.assertEqual(response.status_code, 201)
+        version = self.collection.versions.get(version='r1')
+        self.assertEqual(list(version.expansion.concepts.all()), [locked_concept])
+        valueset_release(valueset, 'v2')
+
+        response = self.client.post(version.expansion.url + 're-evaluate/', HTTP_AUTHORIZATION='Token ' + token)
+
+        self.assertEqual(response.status_code, 204)
+        expansion = version.expansion
+        self.assertEqual(list(expansion.concepts.all()), [locked_concept])
+        self.assertEqual(list(expansion.evaluated_collection_versions.all()), [locked])
+
 class CollectionVersionExpansionsViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
@@ -4438,6 +4481,24 @@ class CollectionVersionExpansionsViewTest(OCLAPITestCase):
         self.collection.refresh_from_db()
         self.assertEqual(self.collection.expansions.count(), 1)
         self.assertIsNotNone(self.collection.expansion_uri)
+
+    def test_post_resolves_valuesets_under_its_own_lock_not_the_default_expansions(self):
+        valueset = OrganizationCollectionFactory()
+        default_lock, _ = valueset_release(valueset, 'v1')
+        _, latest_concept = valueset_release(valueset, 'v2')
+        default = ExpansionFactory(collection_version=self.collection, mnemonic='autoexpand-HEAD')
+        self.collection.expansion_uri = default.uri
+        self.collection.save()
+        lock_valueset(self.collection, default, default_lock)
+
+        response = self.client.post(
+            self.collection.url + 'HEAD/expansions/', {'mnemonic': 'e1', 'parameters': {'activeOnly': False}},
+            HTTP_AUTHORIZATION='Token ' + self.token, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        manual = self.collection.expansions.get(mnemonic='e1')
+        self.assertEqual(list(manual.concepts.all()), [latest_concept])
+        self.assertEqual(list(default.evaluated_collection_versions.all()), [default_lock])
 
     def test_post_system_version_with_two_versions_of_one_source_400(self):
         source = OrganizationSourceFactory()

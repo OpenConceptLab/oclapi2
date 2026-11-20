@@ -36,7 +36,7 @@ from core.common.tasks import seed_children_to_expansion, batch_index_resources,
     index_expansion_mappings, readd_references_to_expansion_on_references_removal
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
     get_resource_class_from_resource_name, to_snake_case, \
-    es_to_pks, batch_qs, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
+    es_to_pks, id_batches, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
     get_truthy_values, get_falsy_values, get_current_authorized_user, to_camel_case, to_parent_kwargs_from_uri, \
     is_versioned_uri, canonical_url_to_url_and_version
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
@@ -668,6 +668,7 @@ class CollectionReference(models.Model):
 
     _concepts = None
     _mappings = None
+    _valueset_locks = None
     original_expression = None
 
     # core
@@ -956,14 +957,20 @@ class CollectionReference(models.Model):
             # read before get_concepts, whose transform sets version to the resource's latest release
             is_versionless = not self.version
             concepts, mappings = self.get_concepts()
-            system_version = self.resolve_system_version
-            locked_version = system_version if is_versionless and system_version and system_version.id in [
-                locked.id for locked in self.get_locked_system_versions(system_version)] else None
+            locked_version = self.get_locked_transform_version(is_versionless)
             references += self.__generate_references_for_type(concepts, 'concepts', locked_version)
             references += self.__generate_references_for_type(mappings, 'mappings', locked_version)
         else:
             references.append(self)
         return references
+
+    def get_locked_transform_version(self, is_versionless):
+        """The locked source version a cascade-and-transform reference named without a version resolved to"""
+        system_version = self.resolve_system_version
+        if is_versionless and system_version and system_version.id in [
+                locked.id for locked in self.get_locked_system_versions(system_version)]:
+            return system_version
+        return None
 
     def should_generate_multiple_references(self):
         return self.include and self.cascade and self.transform and self.code
@@ -1075,10 +1082,9 @@ class CollectionReference(models.Model):
                     search = search.filter("match", **{filter_def["property"]: filter_def["value"]})
                 else:
                     search = search.filter("match", **{to_snake_case(filter_def["property"]): filter_def["value"]})
-            for _queryset in batch_qs(queryset.order_by('id'), 500):
+            for ids in id_batches(queryset, 500):
                 # iterating on queryset because ES has max_clause limit default to 1024
-                search_within_queryset = es_id_in(search, list(_queryset.values_list('id', flat=True)))
-                pks += es_to_pks(search_within_queryset.params(request_timeout=ES_REQUEST_TIMEOUT_ASYNC))
+                pks += es_to_pks(es_id_in(search, ids).params(request_timeout=ES_REQUEST_TIMEOUT_ASYNC), len(ids))
             if pks:
                 resource_versions = resource_klass.objects.filter(id__in=set(pks))
                 if self.version or self.valueset or self.is_static_transform or \
@@ -1282,14 +1288,22 @@ class CollectionReference(models.Model):
         return bool(version) or is_versioned_uri(url if url.endswith('/') else url + '/')
 
     def resolve_valueset_version(self, valueset):
-        """A value set named without a version resolves to the collection's locked version of it, if any"""
+        """A value set named without a version resolves to its locked version, if any: the locks of the expansion
+        being built when set_valueset_locks gave them, else those of the collection's default expansion"""
         version, _ = Collection.resolve_reference_expression(valueset, self.resolution_namespace)
         if version.id and self.collection_id and not self.is_explicit_valueset(valueset):
+            locked_versions = self.collection.locked_collection_versions if self._valueset_locks is None else \
+                self._valueset_locks
             return next((
-                locked for locked in self.collection.locked_collection_versions
-                if drop_version(locked.uri) == drop_version(version.uri)
+                locked for locked in locked_versions if drop_version(locked.uri) == drop_version(version.uri)
             ), version)
         return version
+
+    def set_valueset_locks(self, locked_versions):
+        """Value set versions locked by the expansion this reference is evaluated for"""
+        self._valueset_locks = locked_versions
+        for attr in ('resolve_valueset_versions', 'resolve_valueset_versions_with_unresolved'):
+            self.__dict__.pop(attr, None)
 
     def clear_resolution_cache(self):
         for attr in ('resolution_namespace', 'resolve_system_version', 'resolve_expression_system_version',
@@ -1458,31 +1472,37 @@ class CollectionReference(models.Model):
                 return recorded
         return compact([self._get_resolved_system_version(system_version_cache)])
 
-    def _get_resolved_valueset_versions(self, valueset_version_cache=None):
-        """Resolve and optionally cache collection versions for this reference."""
-        if valueset_version_cache is None:
-            return self.resolve_valueset_versions
-
+    def _get_resolved_valueset_versions(self, valueset_version_cache=None, expansion_cache=None):
+        """The value set versions its collection version's expansion recorded for it, else resolved now"""
+        expansion = self.get_default_expansion(expansion_cache) if self.collection_id else None
         versions = []
-        if isinstance(self.valueset, list):
-            for valueset in self.valueset:  # pylint: disable=not-an-iterable
-                if valueset:
-                    cache_key = (self.resolution_namespace, valueset, None)
-                    if cache_key not in valueset_version_cache:
-                        version, _ = Collection.resolve_reference_expression(valueset, self.resolution_namespace)
-                        valueset_version_cache[cache_key] = version if version.id else None
-                    if valueset_version_cache[cache_key]:
-                        versions.append(valueset_version_cache[cache_key])
+        for valueset in self.valueset if isinstance(self.valueset, list) else []:
+            version = self._get_valueset_version(valueset, valueset_version_cache) if valueset else None
+            if version:
+                recorded = expansion.get_collection_versions_resolved_by(valueset, version) if expansion else []
+                versions += recorded or [version]
         return versions
+
+    def _get_valueset_version(self, valueset, valueset_version_cache=None):
+        """Resolved now: under the collection's lock without a cache, as before; with one, its latest release"""
+        if valueset_version_cache is None:
+            version = self.resolve_valueset_version(valueset)
+            return version if version.id else None
+        cache_key = (self.resolution_namespace, valueset, None)
+        if cache_key not in valueset_version_cache:
+            version, _ = Collection.resolve_reference_expression(valueset, self.resolution_namespace)
+            valueset_version_cache[cache_key] = version if version.id else None
+        return valueset_version_cache[cache_key]
 
     def get_resolved_repo_versions_serialized(  # pylint: disable=too-many-arguments
             self, system_version_cache=None, valueset_version_cache=None, expansion_cache=None, user=None):
         """Serialize repository versions resolved from this reference's system and valuesets that `user` can view."""
+        expansion_cache = {} if expansion_cache is None else expansion_cache
         system_versions = [
             version for version in self._get_resolved_system_versions(system_version_cache, expansion_cache)
             if version.has_view_access(user)]
         valueset_versions = [
-            version for version in self._get_resolved_valueset_versions(valueset_version_cache)
+            version for version in self._get_resolved_valueset_versions(valueset_version_cache, expansion_cache)
             if version.has_view_access(user)]
         data = []
         if system_versions:
@@ -1856,7 +1876,11 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         index_concepts = index_mappings = []
         previous_concept_ids = previous_mapping_ids = set()
 
+        kept_valueset_locks = None
         if force_reevaluate and is_adding_all:
+            if self.built_with == VERSION_EXPANSION_LOCK:
+                # value set locks have no parameter, so a lock-built expansion keeps those it was created with
+                kept_valueset_locks = list(self.evaluated_collection_versions.filter(is_active=True).order_by('-id'))
             # from scratch: drop members and version locks, keep the expansion id
             previous_concept_ids = set(self.concepts.values_list('id', flat=True))
             previous_mapping_ids = set(self.mappings.values_list('id', flat=True))
@@ -1876,6 +1900,12 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         use_any_lock = CollectionReference.is_expansion_locked_repo_version_on() or bool(self.built_with)
         lock_filters = {} if use_any_lock else {'released': True, 'retired': False}
         should_write_back = use_any_lock and self.is_default
+        valueset_locks = None
+        valueset_locked_refs = []
+        if use_any_lock:
+            # this expansion's own value set locks, not the default expansion's
+            valueset_locks = list(self.evaluated_collection_versions.filter(is_active=True).order_by('-id')) \
+                if kept_valueset_locks is None else kept_valueset_locks
         resolved_ref_ids = []
         unresolved_ref_ids = []
         locked_system_versions = []
@@ -1923,6 +1953,9 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             nonlocal evaluated_system_versions
             nonlocal evaluated_valueset_versions
             nonlocal unresolved_repo_versions
+            if valueset_locks is not None:
+                ref.set_valueset_locks(valueset_locks)
+                valueset_locked_refs.append(ref)
             _explicit_valueset_versions, _evaluated_valueset_versions, _unresolved_valueset_versions = (
                 ref.resolve_valueset_versions_with_unresolved)
             explicit_valueset_versions += _explicit_valueset_versions
@@ -2001,35 +2034,40 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 explicit_system_versions += ref_system_versions
             return _concepts, _mappings
 
-        for reference in include_refs:
-            concepts, mappings = get_ref_results(reference)
-            concepts_updated = self.__include_resources(self.concepts, concepts, True)
-            if index and concepts_updated is not False:
-                index_concepts = [*index_concepts, *concepts_updated.values_list('id', flat=True)]
-            mappings_updated = self.__include_resources(self.mappings, mappings, False)
-            if index and mappings_updated is not False:
-                index_mappings = [*index_mappings, *mappings_updated.values_list('id', flat=True)]
+        try:
+            for reference in include_refs:
+                concepts, mappings = get_ref_results(reference)
+                concepts_updated = self.__include_resources(self.concepts, concepts, True)
+                if index and concepts_updated is not False:
+                    index_concepts = [*index_concepts, *concepts_updated.values_list('id', flat=True)]
+                mappings_updated = self.__include_resources(self.mappings, mappings, False)
+                if index and mappings_updated is not False:
+                    index_mappings = [*index_mappings, *mappings_updated.values_list('id', flat=True)]
 
-        for reference in exclude_refs:
-            concepts, mappings = get_ref_results(reference)
-            concepts_updated = self.__exclude_resources(reference, self.concepts, concepts, Concept)
-            mappings_updated = self.__exclude_resources(reference, self.mappings, mappings, Mapping)
-            if index:
-                if concepts_updated is not False:
-                    filters = {
-                        'id__in': list(concepts_updated.values_list('id', flat=True))}
-                    if get(settings, 'TEST_MODE', False):
-                        batch_index_resources('concept', filters)
-                    else:
-                        batch_index_resources.apply_async(('concept', filters), queue='indexing', permanent=False)
-                if mappings_updated is not False:
-                    filters = {
-                        'id__in': list(mappings_updated.values_list('id', flat=True))}
-                    if get(settings, 'TEST_MODE', False):
-                        batch_index_resources('mapping', filters)
-                    else:
-                        batch_index_resources.apply_async(('mapping', filters), queue='indexing', permanent=False)
+            for reference in exclude_refs:
+                concepts, mappings = get_ref_results(reference)
+                concepts_updated = self.__exclude_resources(reference, self.concepts, concepts, Concept)
+                mappings_updated = self.__exclude_resources(reference, self.mappings, mappings, Mapping)
+                if index:
+                    if concepts_updated is not False:
+                        filters = {
+                            'id__in': list(concepts_updated.values_list('id', flat=True))}
+                        if get(settings, 'TEST_MODE', False):
+                            batch_index_resources('concept', filters)
+                        else:
+                            batch_index_resources.apply_async(('concept', filters), queue='indexing', permanent=False)
+                    if mappings_updated is not False:
+                        filters = {
+                            'id__in': list(mappings_updated.values_list('id', flat=True))}
+                        if get(settings, 'TEST_MODE', False):
+                            batch_index_resources('mapping', filters)
+                        else:
+                            batch_index_resources.apply_async(('mapping', filters), queue='indexing', permanent=False)
 
+        finally:
+            for reference in valueset_locked_refs:
+                # so the caller's references resolve as they did before
+                reference.set_valueset_locks(None)
         CollectionReference.objects.filter(id__in=resolved_ref_ids).update(last_resolved_at=timezone.now())
         CollectionReference.objects.filter(id__in=unresolved_ref_ids).update(last_resolved_at=None)
         self.explicit_collection_versions.add(*compact(explicit_valueset_versions))
@@ -2258,6 +2296,10 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
     def recorded_source_versions(self):
         return [*self.recorded_explicit_source_versions, *self.recorded_evaluated_source_versions]
 
+    @cached_property
+    def recorded_evaluated_collection_versions(self):
+        return list(self.evaluated_collection_versions.all())
+
     @staticmethod
     def get_versions_of_repo(versions, repo_version):
         repo_uri = drop_version(repo_version.uri)
@@ -2277,6 +2319,13 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             locked = self.get_versions_of_repo(self.recorded_evaluated_source_versions, repo_version)
             return compact([CollectionReference.pick_repo_version_with_resource_version(holders, locked)]) or explicit
         return [repo_version]
+
+    def get_collection_versions_resolved_by(self, valueset, repo_version):
+        """The value set versions of repo_version's repository this expansion recorded for a reference's value set;
+        a value set named without a version evaluates into evaluated_collection_versions only, never explicit"""
+        if CollectionReference.is_explicit_valueset(valueset):
+            return [repo_version]
+        return self.get_versions_of_repo(self.recorded_evaluated_collection_versions, repo_version)
 
     def is_unresolved_resource_version(self, reference):
         return reference.is_resource_versioned and reference.to_unresolved_resource_version() in (
@@ -2469,9 +2518,8 @@ class ExpansionTextFilterParameter(ExpansionParameter):
                 CustomESSearch.get_exact_match_criterion(
                     self.value, document.get_match_phrase_attrs(), document.get_exact_match_attrs())
             )
-            for _queryset in batch_qs(queryset.order_by('id'), 500):
-                new_search = es_id_in(search, list(_queryset.values_list('id', flat=True)))
-                pks += es_to_pks(new_search.params(request_timeout=ES_REQUEST_TIMEOUT))
+            for ids in id_batches(queryset, 500):
+                pks += es_to_pks(es_id_in(search, ids).params(request_timeout=ES_REQUEST_TIMEOUT), len(ids))
             queryset = klass.objects.filter(id__in=set(pks)) if pks else klass.objects.none()
 
         return queryset

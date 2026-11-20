@@ -1,14 +1,20 @@
+import re
+
 from django.db.models.manager import BaseManager
+from django.utils.dateparse import parse_datetime
 from pydash import get
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.fields import CharField, JSONField, SerializerMethodField, FloatField, ChoiceField
 from rest_framework.serializers import Serializer, Field, ValidationError, ModelSerializer, ListSerializer
 
 from core import settings
 from core.code_systems.constants import RESOURCE_TYPE as CODE_SYSTEM_RESOURCE_TYPE
 from core.common.constants import INCLUDE_CONCEPTS_PARAM, INCLUDE_MAPPINGS_PARAM, LIMIT_PARAM, OFFSET_PARAM, \
-    INCLUDE_VERBOSE_REFERENCES, INCLUDE_SEARCH_META_PARAM, ACCESS_TYPE_CHOICES, ACCESS_TYPE_VIEW
+    INCLUDE_VERBOSE_REFERENCES, INCLUDE_SEARCH_META_PARAM, ACCESS_TYPE_CHOICES, ACCESS_TYPE_VIEW, \
+    VERIFICATION_FIELDS, VERIFICATION_HASH_REGEX, VERIFICATION_INVALID, VERIFICATION_ONLY_ON_VERSION, \
+    VERIFICATION_PROCESS_REGEX, VERIFICATION_VERIFIED_AT_REGEX
 from core.common.feeds import DEFAULT_LIMIT
-from core.common.fhir_helpers import to_fhir_path, to_ocl_path
+from core.common.fhir_helpers import to_fhir_path, to_ocl_path, bcp47
 from core.common.utils import to_int, get_truthy_values, normalize_public_access, cap_page_size
 from core.concept_maps.constants import RESOURCE_TYPE as CONCEPT_MAP_RESOURCE_TYPE
 from core.orgs.models import Organization
@@ -17,6 +23,54 @@ from core.value_sets.constants import RESOURCE_TYPE as VALUESET_RESOURCE_TYPE
 
 
 TRUTHY = get_truthy_values()
+
+
+class RepoVerificationSerializerMixin:
+    """Every repository write passes here, so only staff can change `verification` on any of them."""
+    saved_verification_only = False
+
+    @staticmethod
+    def is_valid_verification(value):
+        if not isinstance(value, dict) or set(value) != VERIFICATION_FIELDS:
+            return False
+        if not all(isinstance(item, str) for item in value.values()):
+            return False
+        if not re.fullmatch(VERIFICATION_PROCESS_REGEX, value['process']) or \
+                not re.fullmatch(VERIFICATION_HASH_REGEX, value['hash']) or \
+                not re.fullmatch(VERIFICATION_VERIFIED_AT_REGEX, value['verified_at']):
+            return False
+        try:
+            return parse_datetime(value['verified_at']) is not None
+        except ValueError:
+            return False
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if 'verification' not in getattr(self, 'initial_data', {}):  # a nested serializer has no payload of its own
+            return attrs
+        value = self.initial_data['verification']
+        if value == get(self.instance, 'verification'):  # a client sending back what it read changes nothing
+            return attrs
+        if not get(self.context, 'request.user.is_staff'):
+            raise PermissionDenied()
+        if not self.instance or self.instance.is_head:
+            raise ValidationError({'verification': [VERIFICATION_ONLY_ON_VERSION]})
+        if value is not None and not self.is_valid_verification(value):
+            raise ValidationError({'verification': [VERIFICATION_INVALID]})
+        attrs['verification'] = value
+        return attrs
+
+    def persist_verification_only(self, instance, validated_data):
+        """A write of only the record leaves the rest of the version, and so its export, unchanged."""
+        payload = getattr(self, 'initial_data', {})
+        # the repository route adds an empty supported_locales to every payload
+        if {key for key, value in payload.items() if value or key != 'supported_locales'} != {'verification'}:
+            return False
+        if 'verification' in validated_data:
+            instance.verification = validated_data['verification']
+            instance.save(update_fields=['verification'])
+        self.saved_verification_only = True
+        return True
 
 
 class RootSerializer(Serializer):  # pylint: disable=abstract-method
@@ -66,6 +120,13 @@ class StatusField(Field):
         if value.released:
             return 'active'
         return 'draft'
+
+
+class LanguageTagField(CharField):
+    """An OCL locale as a FHIR resource shows it, a BCP-47 language tag (pt_BR as pt-BR); written as it's given."""
+
+    def to_representation(self, value):
+        return bcp47(super().to_representation(value))
 
 
 class IdentifierTypeCodingSerializer(ReadSerializerMixin, Serializer):

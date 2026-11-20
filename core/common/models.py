@@ -740,9 +740,6 @@ class VersionedModel(BaseResourceModel):
             versions = versions.exclude(version=HEAD)
         return versions.order_by('-created_at').first()
 
-    def get_prev_released_version(self):
-        return self.released_versions.exclude(id=self.id).order_by('-created_at').first()
-
     @property
     def is_latest_released(self):
         latest_released = self.get_latest_released_version()
@@ -819,6 +816,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     revision_date = models.DateTimeField(null=True, blank=True)
     text = models.TextField(null=True, blank=True)  # for about description (markup)
     snapshot = models.JSONField(null=True, blank=True, default=dict)
+    verification = models.JSONField(null=True, blank=True, default=None)
     experimental = models.BooleanField(null=True, blank=True, default=None)
     meta = models.JSONField(null=True, blank=True)
     active_concepts = models.IntegerField(null=True, blank=True, default=None)
@@ -1383,10 +1381,10 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 update_validation_schema.apply_async(
                     (obj.app_name, obj.id, target_schema), task_id=task.id, queue='default')
             if should_reindex_resources:
-                if obj.released:
-                    obj.index_resources_for_self_as_latest_released(only_update=True)
-                else:
+                if not obj.released:
                     obj.index_resources_for_self_as_unreleased()
+                elif not obj.is_awaiting_members:  # else the seed task indexes the release, with its members written
+                    obj.index_resources_for_self_as_latest_released(only_update=True)
             if concepts_reindex_filters is not None:
                 obj.index_concepts_async(obj.updated_by, **concepts_reindex_filters)
             if should_sync_vectors:
@@ -1446,6 +1444,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         self.revision_date = head.revision_date
         self.text = head.text
         self.experimental = head.experimental
+        self.verification = None
         self.custom_validation_schema = head.custom_validation_schema
         self.extras = {
             key: value for key, value in (head.extras or {}).items()
@@ -1824,6 +1823,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         if self.released and not self.revision_date:
             self.revision_date = timezone.now()
+
+        if self.is_head:  # a FHIR update saves the latest version's values onto HEAD
+            self.verification = None
 
     @property
     def map_types_count(self):

@@ -160,3 +160,13 @@ CANONICAL_URL_REQUEST_PARAM = 'canonicalUrl'
 SAME_STANDARD_CHECKSUM_ERROR = 'No changes detected. Standard checksum is same as last version.'
 # Docs per bulk request when (re)indexing or syncing a repo's resources (batch_index_full, sync_concept_vectors)
 INDEX_BATCH_SIZE = 500
+
+VERIFICATION_FIELDS = {'verified_at', 'process', 'hash'}
+VERIFICATION_VERIFIED_AT_REGEX = r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?' \
+                                 r'(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])'
+VERIFICATION_PROCESS_REGEX = r'[A-Za-z0-9.-]{1,64}'
+VERIFICATION_HASH_REGEX = r'sha256:[0-9a-f]{64}'
+VERIFICATION_INVALID = 'Must have exactly verified_at (ISO 8601 date-time with seconds and Z or an offset), ' \
+                       'process (1 to 64 letters, digits, . and -) and hash (sha256: and 64 lowercase hex characters).'
+VERIFICATION_ONLY_ON_VERSION = 'Can only be set on an existing repository version, not on HEAD.'
+VERSION_EXPORT_EXCLUDED_FIELDS = {'verification'}

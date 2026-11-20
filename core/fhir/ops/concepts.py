@@ -8,14 +8,16 @@ asked about, finding it in a code system version, and the concept's display and 
 - A code is found among the version's own concepts, retired ones included, as FHIR spells it or percent-encoded, as
   OCL stores a code with reserved characters. One query for the concept (with its repository), one for its names.
 - Display: with a language, the concept's preferred name in that language when it has one; else its own display (OCL's
-  display_name: the preferred name in its code system's default locale).
+  display_name: the preferred name in its code system's default locale). A language matches a locale in either
+  spelling (pt-BR, OCL's pt_BR), ignoring case.
+- Designations: each of the concept's names, its locale as a BCP-47 tag (pt_BR as pt-BR).
 """
 from urllib.parse import quote, unquote
 
 from django.db.models import F, Q
 
 from core.common.constants import HEAD
-from core.common.fhir_helpers import to_ocl_path
+from core.common.fhir_helpers import bcp47, language_key, to_ocl_path
 from core.common.utils import to_parent_uri
 from core.concepts.models import Concept
 from core.fhir import outcomes
@@ -131,11 +133,12 @@ def find_concept(version, code):
 
 def display_of(concept, language=None):
     """
-    The concept's display: with a language, its preferred name in that language, newest first, when it has one; else
-    its own display. None for a concept without names.
+    The concept's display: with a language, its preferred name in that language (either spelling, any case), newest
+    first, when it has one; else its own display. None for a concept without names.
     """
     if language:
-        names = sorted((name for name in concept.names.all() if name.locale == language and not name.retired),
+        key = language_key(language)
+        names = sorted((name for name in concept.names.all() if language_key(name.locale) == key and not name.retired),
                        key=lambda name: (name.locale_preferred, name.created_at), reverse=True)
         if names:
             return names[0].name
@@ -152,6 +155,6 @@ def has_name(concept, display):
 
 
 def designations(concept):
-    """Each of the concept's names as a designation: its language, its OCL name type as `use`, and its text."""
-    return [{'language': name.locale, 'use': {'code': name.type} if name.type else None, 'value': name.name}
+    """Each of the concept's names as a designation: its language tag, its OCL name type as `use`, and its text."""
+    return [{'language': bcp47(name.locale), 'use': {'code': name.type} if name.type else None, 'value': name.name}
             for name in concept.names.all()]

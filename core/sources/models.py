@@ -13,15 +13,18 @@ from pydash import get, compact
 
 from core.common.checksums import VersionCompareMixin
 from core.common.constants import HEAD
+from core.common.fields import URIField
 from core.common.models import ConceptContainerModel
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings, \
     sync_source_concept_vectors, index_source_public_access
-from core.common.utils import to_camel_case
+from core.common.utils import split_canonical, to_camel_case
 from core.common.validators import validate_non_negative
 from core.concepts.models import ConceptName, Concept
 from core.services.storages.postgres import PostgresQL
 from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE, \
-    HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID, LOCALE_EXTERNAL_AUTO_ID_CHOICES
+    HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID, LOCALE_EXTERNAL_AUTO_ID_CHOICES, \
+    CONTENT_TYPE_SUPPLEMENT, SUPPLEMENTS_REQUIRED, SUPPLEMENTS_FORMAT, SEED_MEMBERS_WRITTEN, SEED_RELEASE_INDEXED, \
+    SEED_STAGE
 from core.tasks.models import Task
 
 
@@ -101,6 +104,11 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                                                                     ('example', 'example'), ('fragment', 'fragment'),
                                                                     ('complete', 'complete'),
                                                                     ('supplement', 'supplement')])
+    # A supplement's code system: its canonical URL, optionally |version. The type and global flag are the publisher's
+    # FHIR codesystem-supplement-type and codesystem-supplement-global extensions, kept as they're given.
+    supplements = URIField(null=True, blank=True, max_length=300)
+    supplement_type = models.CharField(null=True, blank=True, max_length=50)
+    supplement_global = models.BooleanField(null=True, blank=True, default=None)
     collection_reference = models.CharField(null=True, blank=True, max_length=100)
     hierarchy_meaning = models.CharField(null=True, blank=True, max_length=50, choices=HIERARCHY_MEANINGS)
     case_sensitive = models.BooleanField(null=True, blank=True, default=None)
@@ -222,6 +230,9 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         super().update_version_data(head)
         self.source_type = head.source_type
         self.content_type = head.content_type
+        self.supplements = head.supplements
+        self.supplement_type = head.supplement_type
+        self.supplement_global = head.supplement_global
         self.collection_reference = head.collection_reference
         self.hierarchy_meaning = head.hierarchy_meaning
         self.hierarchy_root_id = head.hierarchy_root_id
@@ -274,9 +285,14 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             return hierarchy_root.parent_id == self.id
         return hierarchy_root.parent_id == self.head.id
 
+    @property
+    def is_supplement(self):
+        return self.content_type == CONTENT_TYPE_SUPPLEMENT
+
     def clean(self):
         self.hierarchy_meaning = self.hierarchy_meaning or None
 
+        self.clean_supplements()
         self.clean_properties()
         self.clean_filters()
         self.clean_match_algorithms()
@@ -284,6 +300,29 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         super().clean()
         if self.hierarchy_root_id and not self.is_hierarchy_root_belonging_to_self():
             raise ValidationError({'hierarchy_root': [HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE]})
+
+    def clean_supplements(self):
+        """
+        A supplement must name what it supplements (FHIR csd-4); any source may. The row this saves over decides: a
+        supplement stored without one before the rule stays editable, and anything else must name one. The URL itself is
+        checked as a URI (clean_fields); here, at most one |version, which isn't empty.
+        """
+        self.supplements = self.supplements or None
+        if not self.supplements:
+            if self.is_supplement and not self.is_stored_supplement_without_supplements():
+                raise ValidationError({'supplements': [SUPPLEMENTS_REQUIRED]})
+            return
+        _, version = split_canonical(self.supplements)
+        if version is not None and (not version or '|' in version):
+            raise ValidationError({'supplements': [SUPPLEMENTS_FORMAT]})
+
+    def is_stored_supplement_without_supplements(self):
+        """
+        Whether the stored row with this id is a supplement without supplements. That's the row itself, not where this
+        object was loaded from: a FHIR CodeSystem PUT loads the latest release and saves it over HEAD.
+        """
+        return bool(self.id) and Source.objects.filter(
+            id=self.id, content_type=CONTENT_TYPE_SUPPLEMENT, supplements__isnull=True).exists()
 
     def clean_match_algorithms(self):
         self.match_algorithms = self.match_algorithms or []
@@ -464,11 +503,13 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         """
         if self.is_latest_released:
             user = self.created_by
+            versions_to_unflag = self.get_released_versions_to_unflag()
+            # Before the writes, which can read it as soon as they're queued
+            self.record_seed_stage(SEED_RELEASE_INDEXED)
 
-            prev_released_version = self.get_prev_released_version()
-            if prev_released_version:
+            for version in versions_to_unflag:
                 # Members shared with this release keep their True: the False request leaves them out
-                prev_released_version.index_children_async(
+                version.index_children_async(
                     user, {'is_in_latest_source_version': False}, exclude_members_of=self.id)
 
             if only_update:
@@ -477,6 +518,8 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 self.index_children_async(
                     user, {'_append_source_version': self.version, 'is_in_latest_source_version': True}
                 )
+            return True
+        return False
 
     def index_resources_for_self_as_unreleased(self):
         """
@@ -601,6 +644,29 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             return bool(excluding and excluding.is_latest_released)
         return not self.released
 
+    def current_release_write(self, partial_doc=None, exclude_members_of=None):
+        """
+        What a queued write should do now, as (partial_doc, exclude_members_of). A False write whose release has been
+        superseded leaves out the latest release's members instead, or, while those aren't written yet, is left to the
+        latest release to repeat. A superseded release with no seed task can't be reopened for that, so the write runs
+        as queued. Any other release flag that's out of date goes, and the rest of the doc still applies.
+        """
+        if self.flag_write_is_current(partial_doc, exclude_members_of):
+            return partial_doc, exclude_members_of
+        latest = self.get_latest_released_version()
+        is_unflag = exclude_members_of and partial_doc['is_in_latest_source_version'] is False
+        if is_unflag and latest and latest.id != self.id:
+            if not latest.is_awaiting_members:
+                return partial_doc, latest.id
+            superseded = Source.objects.filter(id=exclude_members_of).first()
+            seed_task = superseded.get_seed_new_version_task() if superseded else None
+            if not seed_task:
+                # The latest release's walk stops at it: its True write, queued once seeded, restores shared members
+                return partial_doc, exclude_members_of
+            if get(seed_task, 'summary') == {SEED_STAGE: SEED_RELEASE_INDEXED}:
+                superseded.record_seed_stage(SEED_MEMBERS_WRITTEN)
+        return {key: value for key, value in partial_doc.items() if key != 'is_in_latest_source_version'}, None
+
     def sync_concept_vectors_async(self, user=None, recheck=True, countdown=None):
         """
         Queues this version's vector sync (sync_source_concept_vectors) on the indexing queue, with its arguments
@@ -661,6 +727,31 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
     def get_seed_new_version_task(self):
         return Task.find(name__iendswith='seed_children_to_new_version', args__contains=['source', self.id])
+
+    @property
+    def is_awaiting_members(self):
+        """Whether this version's members are yet to be written. A failed or revoked seed task hasn't written them."""
+        seed_task = self.get_seed_new_version_task()
+        return bool(seed_task and not seed_task.is_success and not get(seed_task.summary, SEED_STAGE))
+
+    def record_seed_stage(self, stage):
+        """Kept on the seed task, which requests saving a copy of this version loaded earlier can't overwrite."""
+        seed_task = self.get_seed_new_version_task()
+        if seed_task:
+            Task.objects.filter(id=seed_task.id).update(summary={SEED_STAGE: stage})
+
+    def get_released_versions_to_unflag(self):
+        """
+        The previous release, and those before it for as long as a release didn't get to unflag its own previous
+        release: one superseded while it was seeding leaves that to the release that superseded it.
+        """
+        versions = []
+        for version in self.released_versions.exclude(id=self.id).order_by('-created_at').iterator():
+            versions.append(version)
+            seed_task = version.get_seed_new_version_task()
+            if not seed_task or get(seed_task.summary, SEED_STAGE) == SEED_RELEASE_INDEXED:
+                break
+        return versions
 
     def get_changelog_task(self):
         return self.get_changelog_task_by_name('source_version_compare')
@@ -845,7 +936,7 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             concept_errors, mapping_errors = [], []
             equivalency_map_types = compact((kwargs.get('equivalency_map_types') or '').split(','))
             _concepts_to_add_mappings_for = []
-            for concept in concepts:
+            for concept in concepts.select_related('parent'):
                 if self.get_equivalent_concept(concept, equivalency_map_types):
                     continue
 
@@ -871,8 +962,13 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
             for concept_pair in _concepts_to_add_mappings_for:
                 concept, cloned_concept = concept_pair
-                for mapping in mappings.filter(from_concept__versioned_object_id=concept.versioned_object_id):
-                    existing_to_concept = self.get_equivalent_concept(mapping.to_concept, equivalency_map_types)
+                for mapping in mappings.filter(
+                        from_concept__versioned_object_id=concept.versioned_object_id
+                ).select_related('from_concept', 'to_concept'):
+                    # only targets in the source being cloned from move to their equivalent; other code systems stay
+                    existing_to_concept = self.get_equivalent_concept(
+                        mapping.to_concept, equivalency_map_types
+                    ) if get(mapping, 'to_concept.parent_id') == concept.parent_id else None
                     cloned_mapping = mapping.clone(user, cloned_concept, existing_to_concept)
                     self.clone_mappings([cloned_mapping], user, False)
                     if cloned_mapping.id:
@@ -924,7 +1020,7 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         return self.mappings_set.filter(
             map_type__in=equivalency_map_type, to_concept__versioned_object_id=concept.versioned_object_id,
             from_concept__parent_id=self.id, retired=False, id=F('versioned_object_id')
-        ).first() if equivalency_map_type and concept else None
+        ).select_related('from_concept__parent').first() if equivalency_map_type and concept else None
 
     def clone_with_cascade(self, concept_to_clone, user, resource_budget=None, **kwargs):
         """
@@ -960,16 +1056,10 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         for mapping in cloned_mappings:
             to_concept = get(mapping, 'to_concept')
             from_concept = get(mapping, 'from_concept')
-            if not get(from_concept, 'id'):
-                from_concept = self.find_concept_by_mnemonic(from_concept.mnemonic)
-            if not get(to_concept, 'id') and get(to_concept, 'mnemonic'):
-                to_concept = self.find_concept_by_mnemonic(to_concept.mnemonic)
             mapping.from_concept_code = get(from_concept, 'mnemonic') or mapping.from_concept_code
-            mapping.from_concept_id = get(from_concept, 'id')
-            mapping.to_concept_id = get(to_concept, 'id')
             mapping.to_concept_code = get(to_concept, 'mnemonic') or mapping.to_concept_code
-            mapping.to_source_id = get(to_concept, 'parent_id') or mapping.to_source_id
-            mapping.from_source_id = get(from_concept, 'parent_id') or mapping.from_source_id
+            mapping.set_from_source_from_concept(from_concept)
+            mapping.set_to_source_from_concept(to_concept)
             self._clone_resource(mapping, user)
             if mapping.id:
                 added.append(mapping)
