@@ -1390,6 +1390,19 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             }
 
     @classmethod
+    def get_unreleased_older_ids(cls, versioned_object_ids):
+        """
+        The ids of these concepts' older rows (not the versioned object or the latest version) that no source release
+        holds, such as a version only a collection holds. Their docs read HEAD's codes (MappedCodes), so a change to
+        HEAD's mappings refreshes them as it does HEAD's rows (OpenConceptLab/ocl_online#703).
+        """
+        older_ids = set(cls.objects.filter(
+            versioned_object_id__in=versioned_object_ids, is_latest_version=False
+        ).exclude(id=F('versioned_object_id')).values_list('id', flat=True))
+        return older_ids - set(cls.sources.through.objects.filter(
+            concept_id__in=older_ids).exclude(source__version=HEAD).values_list('concept_id', flat=True))
+
+    @classmethod
     def index_mapped_codes(cls, queryset):
         """
         Updates just the mapped codes in these concepts' documents after their mappings changed, instead of

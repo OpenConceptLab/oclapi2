@@ -308,10 +308,12 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             for chunk in chunks(ids, DROPPED_CHILDREN_CHUNK_SIZE):
                 self.batch_index(model.objects.filter(id__in=chunk), document)
         for chunk in chunks(mapping_ids, DROPPED_CHILDREN_CHUNK_SIZE):
-            # the rows that serve HEAD no longer map to the dropped; older releases' rows keep their codes
+            # the rows that read HEAD's codes no longer map to the dropped; older releases' rows keep their codes
             from_concept_ids = Mapping.objects.filter(id__in=chunk).values('from_concept__versioned_object_id')
             Concept.index_mapped_codes(Concept.objects.filter(
                 Q(id__in=from_concept_ids) | Q(versioned_object_id__in=from_concept_ids, is_latest_version=True)))
+            if older_ids := Concept.get_unreleased_older_ids(from_concept_ids):
+                Concept.index_mapped_codes(Concept.objects.filter(id__in=older_ids))
         if recount:
             self.update_children_counts(sync=True)
 

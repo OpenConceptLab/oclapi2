@@ -71,7 +71,8 @@ class ReleasesFixture:
             for target in ('core.sources.models.index_source_mappings', 'core.sources.models.index_source_concepts',
                            'core.importers.models.batch_index_resources'):
                 stack.enter_context(patch(target, Mock(__name__=target.rsplit('.', 1)[-1])))
-            stack.enter_context(patch('core.importers.models.index_concepts_mapped_codes', Mock()))
+            self.mapped_codes_task = stack.enter_context(
+                patch('core.importers.models.index_concepts_mapped_codes', Mock()))
             stack.enter_context(override_settings(SEED_FROM_IMPORT_LARGE_DROP_MIN=10))
             stack.enter_context(self.captureOnCommitCallbacks(execute=True))  # pylint: disable=no-member
             importer.run()
@@ -278,6 +279,21 @@ class ReleaseMapCodesTest(ReleasesFixture, OCLTestCase):
                 seed_children_to_new_version('source', release.id, False)  # pylint: disable=no-value-for-parameter
 
         self.assertFalse(release.concepts.exists())
+
+    def test_an_import_that_changes_heads_mappings_refreshes_a_collection_only_row(self):
+        old_a = self.make_a_collection_only_row()
+
+        self.run_import([self.mapping('M7', 'A', 'X09')], isolated_version=False)  # HEAD only: M7 now maps to X09
+        queued = {row_id for call in self.mapped_codes_task.apply_async.call_args_list for row_id in call.args[0][0]}
+        self.assertIn(old_a.id, queued)
+
+        a_as_in_v4 = {**self.concept('A'), 'names': [
+            {'name': 'A edited again', 'locale': 'en', 'locale_preferred': True}]}
+        with patch.object(Concept, 'index_mapped_codes') as index_mapped_codes:
+            self.run_import([a_as_in_v4, self.version('v5')])  # v5 keeps A and drops M7
+        refreshed = {row_id for call in index_mapped_codes.call_args_list
+                     for row_id in call.args[0].values_list('id', flat=True)}
+        self.assertIn(old_a.id, refreshed)
 
     def test_a_row_no_source_version_holds_reads_heads_active_mappings(self):
         old_a = self.make_a_collection_only_row()
