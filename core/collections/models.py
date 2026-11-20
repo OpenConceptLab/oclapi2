@@ -2054,7 +2054,8 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 if index and concepts_updated is not False:
                     index_concepts = [*index_concepts, *concepts_updated.values_list('id', flat=True)]
                 mappings_updated = self.__include_resources(self.mappings, mappings, False)
-                # False: it found nothing; an empty queryset: the expansion's parameters excluded all it found
+                # False: it found nothing; an empty queryset: the expansion's parameters excluded all it found.
+                # exists() runs no query: rel.add in __include_resources already fetched these rows
                 found = [updated for updated in (concepts_updated, mappings_updated) if updated is not False]
                 if not reference.unresolved_reason and not any(updated.exists() for updated in found):
                     reference.unresolved_reason = REFERENCE_EXCLUDED_BY_PARAMETERS if found else REFERENCE_FOUND_NOTHING
