@@ -15,6 +15,7 @@ from django.http import HttpResponseForbidden, Http404
 from django.shortcuts import redirect
 from django.urls import resolve, Resolver404
 from django.utils.functional import cached_property
+from elasticsearch.helpers import BulkIndexError
 from ocldev.checksum import Checksum
 from psycopg2.errorcodes import QUERY_CANCELED
 from pydash import compact, get
@@ -893,10 +894,19 @@ class SourceChildMixin(ChecksumModel):
     def index_latest_flags(cls, queryset):
         """
         Updates the latest-version fields in these rows' documents (get_latest_flags_actions), instead of reindexing
-        (and re-embedding) them. Documents not in the index yet are fully indexed.
+        (and re-embedding) them. A row with no document is left without one: no document says it's the latest, and a
+        release it's in would have indexed it.
         """
         return cls.batch_index_partial_by_ids(
-            queryset, cls.get_search_document(), cls.get_latest_flags_actions, refresh=False)
+            queryset, cls.get_search_document(), cls.get_latest_flags_actions, refresh=False,
+            on_bulk_error=cls.raise_unless_missing)
+
+    @staticmethod
+    def raise_unless_missing(error):
+        """Re-raises a BulkIndexError of partial updates with just the failures of documents that exist, if any."""
+        failures = [item for item in error.errors if get(item, 'update.status') != 404]
+        if failures:
+            raise BulkIndexError(f'{len(failures)} document(s) failed to index.', failures) from error
 
     @classmethod
     def get_ids_with_unsearchable_replacements(cls, ids):
@@ -921,18 +931,17 @@ class SourceChildMixin(ChecksumModel):
 
     @classmethod
     def get_ids_flagged_latest_in_search(cls, ids):
-        """Those of these ids whose documents say they're the latest version, read in real time (all, in TEST_MODE)."""
+        """
+        Those of these ids that a search finds as the latest version: a document written but not refreshed yet doesn't
+        count. All of them in TEST_MODE.
+        """
         if get(settings, 'TEST_MODE', False) or not ids:
             return set(ids)
-        document = cls.get_search_document()
         found = set()
         for batch in chunks(sorted(ids), INDEX_BATCH_SIZE):
-            response = document._get_connection().mget(  # pylint: disable=protected-access
-                index=document()._index._name, ids=[str(_id) for _id in batch],  # pylint: disable=protected-access
-                source_includes=['is_latest_version'])
-            found.update(
-                int(doc['_id']) for doc in response['docs']
-                if doc.get('found') and get(doc, '_source.is_latest_version') in (True, 'true'))
+            search = cls.get_search_document().search().filter('ids', values=[str(_id) for _id in batch]).filter(
+                'term', is_latest_version=True).source(False)
+            found.update(int(hit.meta.id) for hit in search[:len(batch)].execute())
         return found
 
     def belongs_to_non_head_source_version(self):

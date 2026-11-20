@@ -2,7 +2,7 @@ import json
 import time
 import uuid
 from collections import deque
-from datetime import datetime, timezone as dt_timezone
+from datetime import datetime, timedelta, timezone as dt_timezone
 
 from celery import group
 from celery.utils.log import get_task_logger
@@ -26,7 +26,8 @@ from core.common.tasks import bulk_import_parts_inline, delete_organization, bat
     post_import_update_resource_counts, index_concepts_mapped_codes, get_batch_index_relations
 from core.common.utils import drop_version, is_url_encoded_string, encode_string, to_parent_uri, chunks
 from core.concepts.models import Concept
-from core.importers.constants import DEFERRED_INDEX_LOCK_KEY, DEFERRED_INDEX_LOCK_SECONDS, DEFERRED_INDEX_MAX_ATTEMPTS
+from core.importers.constants import DEFERRED_INDEX_LOCK_KEY, DEFERRED_INDEX_LOCK_SECONDS, \
+    DEFERRED_INDEX_MAX_ATTEMPTS, DEFERRED_INDEX_RETRY_SECONDS
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
 from core.sources.constants import ISOLATED_METADATA_FIELDS, ISOLATED_VERSION_CONTENT_FAILED, \
@@ -1268,8 +1269,9 @@ class DeferredImportIndex(models.Model):
     resource = models.CharField(max_length=16)  # 'concept' or 'mapping'
     ids = ArrayField(models.BigIntegerField())  # what's left to do
     task_id = models.CharField(max_length=255, null=True, blank=True)
-    attempts = models.PositiveSmallIntegerField(default=0)  # failed runs while Elasticsearch was up and taking writes
+    attempts = models.PositiveSmallIntegerField(default=0)  # failures, not counting Elasticsearch refusing writes
     last_error = models.TextField(null=True, blank=True)
+    retry_at = models.DateTimeField(null=True, blank=True)  # after a failure, not tried again until then
     updated_at = models.DateTimeField(auto_now=True)
 
     @classmethod
@@ -1320,18 +1322,20 @@ class DeferredImportIndex(models.Model):
 
     @classmethod
     def get_pending(cls):
-        """The rows still to do, oldest part first. A row that failed DEFERRED_INDEX_MAX_ATTEMPTS runs is skipped, and
-        stays in the table with its error until someone resets its attempts."""
-        return cls.objects.filter(attempts__lt=DEFERRED_INDEX_MAX_ATTEMPTS).order_by(
-            'created_at', 'group', 'stage', 'id')
+        """
+        The rows to do now, oldest part first: not those waiting to be retried after a failure, nor those that failed
+        DEFERRED_INDEX_MAX_ATTEMPTS times, which stay in the table with their errors until someone resets attempts.
+        """
+        return cls.objects.filter(attempts__lt=DEFERRED_INDEX_MAX_ATTEMPTS).filter(
+            Q(retry_at__isnull=True) | Q(retry_at__lte=timezone.now())).order_by('created_at', 'group', 'stage', 'id')
 
     @classmethod
     def run(cls):
         """
         Updates the superseded versions whose replacements are searchable now, and while the window is open, indexes
-        the INDEX and MAPPED_CODES rows in order and then updates the superseded versions again. Returns how many rows
-        it finished. One runner at a time: the lock is renewed after each batch and expires if its runner dies, so a
-        later run picks up where it stopped.
+        the INDEX and MAPPED_CODES rows in order, updating them again after each. Returns how many rows it finished. One
+        runner at a time: the lock is renewed after each batch and expires if its runner dies, so a later run picks up
+        where it stopped.
         """
         if not cls.objects.exists():
             return 0
@@ -1343,9 +1347,8 @@ class DeferredImportIndex(models.Model):
             if cls.is_window_open():
                 for row in iter(lambda: cls.get_pending().exclude(stage=cls.Stage.LATEST_FLAGS).first(), None):
                     if row.process() != cls.DONE:
-                        break  # the window closed, or the row failed: the next run retries it
-                    done += 1
-                done += cls.update_latest_flags()
+                        break  # the window closed, or the row failed
+                    done += 1 + cls.update_latest_flags()
         finally:
             if django_cache.get(DEFERRED_INDEX_LOCK_KEY) == token:
                 django_cache.delete(DEFERRED_INDEX_LOCK_KEY)
@@ -1367,30 +1370,23 @@ class DeferredImportIndex(models.Model):
     def renew_lock():
         django_cache.touch(DEFERRED_INDEX_LOCK_KEY, timeout=DEFERRED_INDEX_LOCK_SECONDS)
 
-    @staticmethod
-    def is_search_up():
-        """Whether Elasticsearch answers, so that a failure can be told apart from an outage."""
-        from core.concepts.documents import ConceptDocument
-        try:
-            return bool(ConceptDocument._get_connection().ping())  # pylint: disable=protected-access
-        except Exception:  # pylint: disable=broad-except
-            return False
-
     def get_model(self):
         return {'concept': Concept, 'mapping': Mapping}[self.resource]
 
     def process(self):
         """
-        Works on this row: DONE (and deleted), WAITING (kept, with what's left) or FAILED. A failure counts as an
-        attempt only if Elasticsearch was up and not refusing writes for now, so an outage can't use them up.
+        Works on this row: DONE (and deleted), WAITING (kept, with what's left) or FAILED. Elasticsearch refusing writes
+        for now leaves the row to the next run. Any other failure counts as an attempt and holds the row back for
+        DEFERRED_INDEX_RETRY_SECONDS, so the rows after it go on, and an outage costs each row one attempt a night.
         """
         try:
             finished = self.update_flags() if self.stage == self.Stage.LATEST_FLAGS else self.index()
         except Exception as ex:  # pylint: disable=broad-except
-            if not BatchIndexRun.is_rejected(ex) and self.is_search_up():
+            if not BatchIndexRun.is_rejected(ex):
                 self.attempts += 1
+                self.retry_at = timezone.now() + timedelta(seconds=DEFERRED_INDEX_RETRY_SECONDS)
             self.last_error = BatchIndexRun.describe(ex)
-            self.save(update_fields=['attempts', 'last_error', 'updated_at'])
+            self.save(update_fields=['attempts', 'last_error', 'retry_at', 'updated_at'])
             logger.error('Deferred import indexing of row %s failed (attempt %s): %s', self.id, self.attempts,
                          self.last_error)
             return self.FAILED
