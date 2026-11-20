@@ -2567,8 +2567,17 @@ class TaskTest(OCLTestCase):
 
         index_expansion_mappings(expansion.id)
 
-    def test_vacuum_and_analyze_db(self):
+    @patch('django.db.connections')
+    def test_vacuum_and_analyze_db(self, connections_mock):
+        # A real VACUUM switches the test connection to autocommit and breaks the transaction for the next test
+        conn = connections_mock.__getitem__.return_value.connection
+        conn.isolation_level = 1
+
         vacuum_and_analyze_db()
+
+        connections_mock.__getitem__.assert_called_once_with('default')
+        conn.set_isolation_level.assert_has_calls([call(0), call(1)])
+        conn.cursor.return_value.execute.assert_called_once_with('VACUUM ANALYZE')
 
     def test_resolve_url_registry_entries(self):
         source = OrganizationSourceFactory()
