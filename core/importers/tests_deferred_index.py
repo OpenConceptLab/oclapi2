@@ -20,7 +20,8 @@ from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
-from core.importers.constants import DEFERRED_INDEX_LOCK_KEY, DEFERRED_INDEX_MAX_ATTEMPTS, DEFERRED_INDEX_RETRY_SECONDS
+from core.importers.constants import DEFERRED_INDEX_LOCK_KEY, DEFERRED_INDEX_MAX_ATTEMPTS, \
+    DEFERRED_INDEX_RETRY_SECONDS, DEFERRED_INDEX_REJECTED_RETRY_SECONDS
 from core.importers.importer import ImporterSubtask
 from core.importers.models import BulkImportInline, DeferredImportIndex, ImportIndexer, CREATED
 from core.mappings.documents import MappingDocument
@@ -471,18 +472,28 @@ class DeferredImportIndexRunTest(OCLTestCase):
                                         (LATEST_FLAGS, 'concept', {first.id})])
         self.assertFalse(DeferredImportIndex.objects.exists())
 
-    def test_elasticsearch_refusing_writes_is_retried_by_the_next_run_and_not_counted(self):
+    def test_elasticsearch_refusing_writes_holds_the_row_back_briefly_without_counting_an_attempt(self):
         self.defer_import(concept_line(self.source, 'C1'))
+        self.defer_import(concept_line(self.source, 'C2'))
+        c1, (c1_first, ) = versions(self.source, 'C1')
+        c2, (c2_first, ) = versions(self.source, 'C2')
 
-        def refuse(*_):
-            raise BatchIndexingError('ConceptDocument indexing failed', {'failed_docs': 2}, rejected=True)
+        def refuse_c1(_stage, _resource, ids):
+            if c1.id in ids:
+                raise BatchIndexingError('ConceptDocument indexing failed', {'failed_docs': 2}, rejected=True)
 
-        self.failure = refuse
+        self.failure = refuse_c1
         self.assertEqual(self.run_rows(), 0)
+        refused = DeferredImportIndex.objects.get(ids__contains=[c1.id])
+        self.assertEqual((refused.attempts, refused.last_error),
+                         (0, 'BatchIndexingError: ConceptDocument indexing failed'))
+        self.assertAlmostEqual(
+            (refused.retry_at - refused.updated_at).total_seconds(), DEFERRED_INDEX_REJECTED_RETRY_SECONDS, delta=60)
 
-        row = DeferredImportIndex.objects.get()
-        self.assertEqual((row.attempts, row.retry_at, row.last_error),
-                         (0, None, 'BatchIndexingError: ConceptDocument indexing failed'))
+        self.assertEqual(self.run_rows(), 1)  # the next run goes on with the rows after it
+        self.assertEqual(self.indexed, [(INDEX, 'concept', {c2.id, c2_first.id})])
+        self.assertEqual(
+            list(DeferredImportIndex.objects.values_list('ids', flat=True)), [sorted([c1.id, c1_first.id])])
 
     def test_an_outage_costs_a_row_one_attempt_until_its_retry(self):
         self.defer_import(concept_line(self.source, 'C1'))

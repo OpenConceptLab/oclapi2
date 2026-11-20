@@ -27,7 +27,8 @@ from core.common.tasks import bulk_import_parts_inline, delete_organization, bat
 from core.common.utils import drop_version, is_url_encoded_string, encode_string, to_parent_uri, chunks
 from core.concepts.models import Concept
 from core.importers.constants import DEFERRED_INDEX_LOCK_KEY, DEFERRED_INDEX_LOCK_SECONDS, \
-    DEFERRED_INDEX_MAX_ATTEMPTS, DEFERRED_INDEX_RETRY_SECONDS, DEFERRED_INDEX_FLAGS_SECONDS
+    DEFERRED_INDEX_MAX_ATTEMPTS, DEFERRED_INDEX_RETRY_SECONDS, DEFERRED_INDEX_FLAGS_SECONDS, \
+    DEFERRED_INDEX_REJECTED_RETRY_SECONDS
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
 from core.sources.constants import ISOLATED_METADATA_FIELDS, ISOLATED_VERSION_CONTENT_FAILED, \
@@ -1382,16 +1383,19 @@ class DeferredImportIndex(models.Model):
 
     def process(self):
         """
-        Works on this row: DONE (and deleted), WAITING (kept, with what's left) or FAILED. Elasticsearch refusing writes
-        for now leaves the row to the next run. Any other failure counts as an attempt and holds the row back for
-        DEFERRED_INDEX_RETRY_SECONDS, so the rows after it go on, and an outage costs each row one attempt a night.
+        Works on this row: DONE (and deleted), WAITING (kept, with what's left) or FAILED. A failed row is held back, so
+        the rows after it go on: for DEFERRED_INDEX_REJECTED_RETRY_SECONDS if Elasticsearch was only refusing writes for
+        now, which doesn't count as an attempt; otherwise for DEFERRED_INDEX_RETRY_SECONDS, so an outage costs each row
+        one attempt a night.
         """
         try:
             finished = self.update_flags() if self.stage == self.Stage.LATEST_FLAGS else self.index()
         except Exception as ex:  # pylint: disable=broad-except
+            delay = DEFERRED_INDEX_REJECTED_RETRY_SECONDS
             if not BatchIndexRun.is_rejected(ex):
                 self.attempts += 1
-                self.retry_at = timezone.now() + timedelta(seconds=DEFERRED_INDEX_RETRY_SECONDS)
+                delay = DEFERRED_INDEX_RETRY_SECONDS
+            self.retry_at = timezone.now() + timedelta(seconds=delay)
             self.last_error = BatchIndexRun.describe(ex)
             self.save(update_fields=['attempts', 'last_error', 'retry_at', 'updated_at'])
             logger.error('Deferred import indexing of row %s failed (attempt %s): %s', self.id, self.attempts,

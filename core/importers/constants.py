@@ -10,4 +10,5 @@ DEFERRED_INDEX_LOCK_KEY = 'deferred_import_indexing'
 DEFERRED_INDEX_LOCK_SECONDS = 60 * 60  # renewed after each row, so a runner that dies frees the lock within this
 DEFERRED_INDEX_MAX_ATTEMPTS = 5  # a row that failed this many times is skipped until its attempts are reset
 DEFERRED_INDEX_RETRY_SECONDS = 6 * 60 * 60  # a failed row waits this long, so mostly until the next night's window
+DEFERRED_INDEX_REJECTED_RETRY_SECONDS = 20 * 60  # a row whose writes Elasticsearch refused for now waits this long
 DEFERRED_INDEX_FLAGS_SECONDS = 10 * 60  # how often a run in the window updates the latest flags between rows
