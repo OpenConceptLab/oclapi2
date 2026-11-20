@@ -93,7 +93,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             return True
         if self.is_collection_members_list():
             return False
-        retired = next((value for key, value in params.items() if to_snake_case(key) == 'retired'), None)
+        retired = {to_snake_case(key): value for key, value in params.items()}.get('retired')  # as get_faceted_filters
         return not (retired in TRUTHY or params.get(INCLUDE_RETIRED_PARAM, None) in TRUTHY)
 
     def get_retired_criterion(self):

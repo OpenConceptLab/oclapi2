@@ -3876,6 +3876,7 @@ class ConceptRetiredFacetCountsTest(OCLAPITestCase):
         self.assertEqual(
             self.get_facet_counts(url + '?facetsOnly=true&Retired=true'), ({'classA': 1}, {'false': 2, 'true': 1}))
         self.assertEqual(self.get_ids(url + '?conceptClass=classA&Retired=true'), ['RetiredA'])
+        self.assertEqual(self.get_ids(url + '?conceptClass=classA&Retired=false&retired=true'), ['RetiredA'])
 
 
 class ConceptNameRetrieveUpdateDestroyViewTest(OCLAPITestCase):
