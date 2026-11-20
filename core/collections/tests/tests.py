@@ -11,7 +11,8 @@ from django.core.exceptions import ValidationError
 from django.core.management import call_command, CommandError
 from django.http import QueryDict
 from django.test import override_settings, tag
-from django.db import OperationalError
+from django.test.utils import CaptureQueriesContext
+from django.db import OperationalError, connection, transaction
 from mock import patch, Mock
 from mock.mock import ANY
 from rest_framework import status
@@ -3322,12 +3323,34 @@ class ExpansionTest(OCLTestCase):
         other.concepts.add(*concepts)
         rows = CollectionReference.concepts.through.objects.filter(reference__collection_id=collection.id)
 
-        with self.assertNumQueries(4):
+        with CaptureQueriesContext(connection) as queries:
             Expansion.replace_head_rows(rows, 'reference', 'concept', Concept)
 
+        # a correlated EXISTS over an owner's rows is quadratic in their number
+        self.assertFalse([query['sql'] for query in queries.captured_queries if 'EXISTS' in query['sql']])
         latest_ids = sorted(concept.get_latest_version().id for concept in concepts)
         self.assertEqual(sorted(holding.concepts.values_list('id', flat=True)), latest_ids)
         self.assertEqual(sorted(other.concepts.values_list('id', flat=True)), latest_ids)
+
+    def test_replace_head_rows_drops_a_repeated_head_row_in_one_owner(self):
+        concepts = [ConceptFactory() for _ in range(2)]
+        collection = OrganizationCollectionFactory()
+        reference = CollectionReference(expression='/concepts/', collection=collection)
+        reference.save()
+        through = CollectionReference.concepts.through
+        through.objects.bulk_create(
+            [through(reference=reference, concept=concept) for concept in [*concepts, concepts[0]]])
+        rows = through.objects.filter(reference__collection_id=collection.id)
+
+        for size in (10000, 1):
+            with self.subTest(size=size), transaction.atomic():
+                with patch.object(Expansion, 'REPLACE_HEAD_ROWS_BATCH_SIZE', size):
+                    Expansion.replace_head_rows(rows, 'reference', 'concept', Concept)
+
+                self.assertEqual(
+                    sorted(rows.values_list('concept_id', flat=True)),
+                    sorted(concept.get_latest_version().id for concept in concepts))
+                transaction.set_rollback(True)
 
     def test_replace_head_rows_of_mappings_in_batches(self):
         mappings = [MappingFactory() for _ in range(2)]
