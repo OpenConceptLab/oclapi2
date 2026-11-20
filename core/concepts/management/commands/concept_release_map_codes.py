@@ -28,8 +28,9 @@ class Command(BaseCommand):
         parser.add_argument('--index', help='The index (default: the concepts index).')
         parser.add_argument(
             '--source', action='append', default=[],
-            help="A source's URL, such as /orgs/Regenstrief/sources/LOINC/, whose release docs to rewrite. "
-                 "Repeatable; not with --index.")
+            help="Rewrite mapped codes for release members and older concept rows of this source. "
+                 "Use the source URL, for example /orgs/Regenstrief/sources/LOINC/. "
+                 "Repeatable. Do not combine with --index.")
 
     def handle(self, *args, **options):
         if options['index'] and options['source']:  # the updates go to the concepts index
