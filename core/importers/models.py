@@ -27,7 +27,7 @@ from core.common.tasks import bulk_import_parts_inline, delete_organization, bat
 from core.common.utils import drop_version, is_url_encoded_string, encode_string, to_parent_uri, chunks
 from core.concepts.models import Concept
 from core.importers.constants import DEFERRED_INDEX_LOCK_KEY, DEFERRED_INDEX_LOCK_SECONDS, \
-    DEFERRED_INDEX_MAX_ATTEMPTS, DEFERRED_INDEX_RETRY_SECONDS
+    DEFERRED_INDEX_MAX_ATTEMPTS, DEFERRED_INDEX_RETRY_SECONDS, DEFERRED_INDEX_FLAGS_SECONDS
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
 from core.sources.constants import ISOLATED_METADATA_FIELDS, ISOLATED_VERSION_CONTENT_FAILED, \
@@ -1251,7 +1251,9 @@ class DeferredImportIndex(models.Model):
       These two run only while IMPORT_INDEX_WINDOW is open, oldest part first, INDEX_BATCH_SIZE ids at a time.
     - LATEST_FLAGS: the documents of the versions the part superseded, which still say they're the latest. A partial
       update that re-embeds nothing, so it runs whenever the job does, but only once a version's replacement has a
-      document flagged latest: until then, the old document is the only one search finds. The others wait.
+      document flagged latest: until then, the old document is the only one search finds. The others wait. A version
+      with no document is fully indexed instead, in the window. An INDEX row hands over to this stage the versions
+      that were superseded since, while their replacements aren't searchable.
     """
     class Meta:
         db_table = 'deferred_import_indexes'
@@ -1333,9 +1335,9 @@ class DeferredImportIndex(models.Model):
     def run(cls):
         """
         Updates the superseded versions whose replacements are searchable now, and while the window is open, indexes
-        the INDEX and MAPPED_CODES rows in order, updating them again after each. Returns how many rows it finished. One
-        runner at a time: the lock is renewed after each batch and expires if its runner dies, so a later run picks up
-        where it stopped.
+        the INDEX and MAPPED_CODES rows in order, updating them again every DEFERRED_INDEX_FLAGS_SECONDS and at the end.
+        Returns how many rows it finished. One runner at a time: the lock is renewed after each batch and expires if its
+        runner dies, so a later run picks up where it stopped.
         """
         if not cls.objects.exists():
             return 0
@@ -1345,10 +1347,15 @@ class DeferredImportIndex(models.Model):
         try:
             done = cls.update_latest_flags()
             if cls.is_window_open():
+                flagged_at = time.monotonic()
                 for row in iter(lambda: cls.get_pending().exclude(stage=cls.Stage.LATEST_FLAGS).first(), None):
                     if row.process() != cls.DONE:
                         break  # the window closed, or the row failed
-                    done += 1 + cls.update_latest_flags()
+                    done += 1
+                    if time.monotonic() - flagged_at >= DEFERRED_INDEX_FLAGS_SECONDS:
+                        done += cls.update_latest_flags()
+                        flagged_at = time.monotonic()
+                done += cls.update_latest_flags()
         finally:
             if django_cache.get(DEFERRED_INDEX_LOCK_KEY) == token:
                 django_cache.delete(DEFERRED_INDEX_LOCK_KEY)
@@ -1404,12 +1411,16 @@ class DeferredImportIndex(models.Model):
         while self.ids:
             if not self.is_window_open():
                 return False
-            queryset = model.objects.filter(id__in=self.ids[:INDEX_BATCH_SIZE])
+            batch = self.ids[:INDEX_BATCH_SIZE]
             if self.stage == self.Stage.INDEX:
-                model.batch_index(
-                    queryset, model.get_search_document(), refresh=False, **get_batch_index_relations(model))
+                # superseded since, and rewriting them now would hide their concepts until their replacements are
+                # searchable: they wait in a LATEST_FLAGS row, usually the superseding import's own
+                waiting = model.get_ids_with_unsearchable_replacements(batch)
+                self.hand_over_latest_flags(waiting)
+                if len(waiting) < len(batch):
+                    self.full_index(model, [_id for _id in batch if _id not in waiting])
             else:
-                model.index_mapped_codes(queryset)
+                model.index_mapped_codes(model.objects.filter(id__in=batch))
             self.ids = self.ids[INDEX_BATCH_SIZE:]
             self.save(update_fields=['ids', 'updated_at'])
             self.renew_lock()
@@ -1417,19 +1428,37 @@ class DeferredImportIndex(models.Model):
 
     def update_flags(self):
         """
-        Updates the documents of the row's superseded versions whose replacements are searchable, and keeps the
-        others. Whether none are left.
+        Updates the documents of the row's superseded versions whose replacements are searchable, fully indexes those
+        with no document if the window is open, and keeps the others. Whether none are left.
         """
         model = self.get_model()
         waiting = model.get_ids_with_unsearchable_replacements(self.ids)
         ready = [_id for _id in self.ids if _id not in waiting]
-        if ready:
-            model.index_latest_flags(model.objects.filter(id__in=ready))
+        missing = model.index_latest_flags(model.objects.filter(id__in=ready)) if ready else set()
+        if missing and self.is_window_open():
+            self.full_index(model, missing)
+            missing = set()
+        waiting |= missing  # those with no document wait for the window
         if waiting and len(waiting) < len(self.ids):
             self.ids = sorted(waiting)
             self.save(update_fields=['ids', 'updated_at'])
         self.renew_lock()
         return not waiting
+
+    def hand_over_latest_flags(self, ids):
+        """Leaves these ids to a LATEST_FLAGS row of this part, unless one is already waiting with them."""
+        flagged = self.__class__.objects.filter(
+            stage=self.Stage.LATEST_FLAGS, resource=self.resource, ids__overlap=list(ids)).values_list('ids', flat=True)
+        ids = set(ids).difference(*flagged)
+        if ids:
+            self.__class__.objects.create(
+                group=self.group, created_at=self.created_at, stage=self.Stage.LATEST_FLAGS, resource=self.resource,
+                ids=sorted(ids), task_id=self.task_id)
+
+    @staticmethod
+    def full_index(model, ids):
+        model.batch_index(model.objects.filter(id__in=ids), model.get_search_document(), refresh=False,
+                          **get_batch_index_relations(model))
 
 
 class BulkImportInline(BaseImporter):

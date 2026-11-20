@@ -894,28 +894,34 @@ class SourceChildMixin(ChecksumModel):
     def index_latest_flags(cls, queryset):
         """
         Updates the latest-version fields in these rows' documents (get_latest_flags_actions), instead of reindexing
-        (and re-embedding) them. A row with no document is left without one: no document says it's the latest, and a
-        release it's in would have indexed it.
+        (and re-embedding) them. Returns the ids of the rows with no document, which it leaves to the caller.
         """
-        return cls.batch_index_partial_by_ids(
+        missing = set()
+        cls.batch_index_partial_by_ids(
             queryset, cls.get_search_document(), cls.get_latest_flags_actions, refresh=False,
-            on_bulk_error=cls.raise_unless_missing)
+            on_bulk_error=lambda error: missing.update(cls.get_missing_ids_or_raise(error)))
+        return missing
 
     @staticmethod
-    def raise_unless_missing(error):
-        """Re-raises a BulkIndexError of partial updates with just the failures of documents that exist, if any."""
+    def get_missing_ids_or_raise(error):
+        """
+        The ids of the documents a BulkIndexError of partial updates found missing. Re-raises it with the other
+        failures, if there are any.
+        """
         failures = [item for item in error.errors if get(item, 'update.status') != 404]
         if failures:
             raise BulkIndexError(f'{len(failures)} document(s) failed to index.', failures) from error
+        return {int(get(item, 'update._id')) for item in error.errors}
 
     @classmethod
     def get_ids_with_unsearchable_replacements(cls, ids):
         """
-        Those of these superseded versions whose concept (or mapping) has a latest version with no document flagged
-        latest, as when the import that superseded them hasn't been indexed yet. Un-flagging them now would leave it
-        out of HEAD search; until then, search finds it by the old version.
+        Those of these ids that are superseded versions whose concept (or mapping) has a latest version with no document
+        flagged latest, as when the import that superseded them hasn't been indexed yet. Writing their documents now
+        would leave it out of HEAD search; until then, search finds it by the old version.
         """
-        versioned_ids = dict(cls.objects.filter(id__in=ids).values_list('id', 'versioned_object_id'))
+        versioned_ids = dict(cls.objects.filter(id__in=ids, is_latest_version=False).exclude(
+            id=F('versioned_object_id')).values_list('id', 'versioned_object_id'))
         latest_ids = {}
         for versioned_id, latest_id in cls.objects.filter(
                 versioned_object_id__in=set(versioned_ids.values()), is_latest_version=True
@@ -925,8 +931,7 @@ class SourceChildMixin(ChecksumModel):
             {latest_id for latest in latest_ids.values() for latest_id in latest})
         return {
             _id for _id, versioned_id in versioned_ids.items()
-            if latest_ids.get(versioned_id) and _id not in latest_ids[versioned_id]
-            and not latest_ids[versioned_id] & searchable
+            if latest_ids.get(versioned_id) and not latest_ids[versioned_id] & searchable
         }
 
     @classmethod

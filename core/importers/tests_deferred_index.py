@@ -224,6 +224,7 @@ class DeferredImportIndexRunTest(OCLTestCase):
         self.indexed = []  # (stage, resource, ids) of each indexing call, in order
         self.searchable = set()  # ids with a document flagged latest
         self.failure = None  # called with each indexing call's (stage, resource, ids) first, to raise
+        self.missing = set()  # ids with no document, which the latest-flags update reports
 
     def tearDown(self):
         cache.clear()
@@ -243,10 +244,14 @@ class DeferredImportIndexRunTest(OCLTestCase):
             self.indexed.append((stage, resource, ids))
             if stage == INDEX:
                 self.searchable.update(queryset.filter(is_latest_version=True).values_list('id', flat=True))
+            return ids & self.missing
         return record
 
-    def run_rows(self, window=True):
-        """run() with the window open (False: closed; a number: open for that many checks), recording its calls."""
+    def run_rows(self, window=True, flags_seconds=0):
+        """
+        run() with the window open (False: closed; a number: open for that many checks), recording its calls. By
+        default it updates the latest flags after every row.
+        """
         checks = []
 
         def is_window_open(*_):
@@ -255,6 +260,7 @@ class DeferredImportIndexRunTest(OCLTestCase):
 
         with ExitStack() as stack:
             stack.enter_context(patch.object(DeferredImportIndex, 'is_window_open', side_effect=is_window_open))
+            stack.enter_context(patch('core.importers.models.DEFERRED_INDEX_FLAGS_SECONDS', flags_seconds))
             for model, resource in [(Concept, 'concept'), (Mapping, 'mapping')]:
                 stack.enter_context(patch.object(
                     model, 'get_ids_flagged_latest_in_search', side_effect=lambda ids: set(ids) & self.searchable))
@@ -295,7 +301,7 @@ class DeferredImportIndexRunTest(OCLTestCase):
         self.assertEqual(self.run_rows(), 5)
 
         self.assertEqual(self.indexed, [
-            (INDEX, 'concept', {concept.id, first.id}),
+            (INDEX, 'concept', {concept.id}),  # not the first version, superseded since: it waits for its flags
             (INDEX, 'concept', {concept.id, second.id}),
             (LATEST_FLAGS, 'concept', {first.id}),  # as soon as its replacement is searchable
             (INDEX, 'mapping', {mapping.id, mapping.get_latest_version().id}),
@@ -310,8 +316,7 @@ class DeferredImportIndexRunTest(OCLTestCase):
         # the window closes after the first update's part: its new version is already superseded by the second's
         self.assertEqual(self.run_rows(window=3), 2)  # the run's check, then one before each batch
 
-        self.assertEqual(self.indexed, [(INDEX, 'concept', {concept.id, first.id}),
-                                        (INDEX, 'concept', {concept.id, second.id})])
+        self.assertEqual(self.indexed, [(INDEX, 'concept', {concept.id}), (INDEX, 'concept', {concept.id})])
         self.assertEqual(deferred(), {(INDEX, 'concept'): {concept.id, third.id},
                                       (LATEST_FLAGS, 'concept'): {first.id, second.id}})
         self.indexed = []
@@ -345,6 +350,68 @@ class DeferredImportIndexRunTest(OCLTestCase):
         self.assertEqual(
             DeferredImportIndex.objects.get(stage=LATEST_FLAGS).ids, [c2_first.id])
 
+    def test_index_row_hands_over_a_version_superseded_since_while_its_replacement_is_not_searchable(self):
+        self.defer_import(concept_line(self.source, 'C1'))
+        _, (first, ) = versions(self.source, 'C1')
+        self.searchable.add(first.id)  # as a release would index it
+        self.defer_import(concept_line(self.source, 'C1', datatype='Text'))
+        concept, (first, second) = versions(self.source, 'C1')
+
+        self.assertEqual(self.run_rows(window=2), 1)  # the run's check and the first part's batch
+
+        # rewriting the first version from the database would un-flag the only document search finds
+        self.assertEqual(self.indexed, [(INDEX, 'concept', {concept.id})])
+        self.assertEqual(
+            deferred(), {(INDEX, 'concept'): {concept.id, second.id}, (LATEST_FLAGS, 'concept'): {first.id}})
+        self.indexed = []
+        self.run_rows()
+        self.assertEqual(self.indexed[0], (INDEX, 'concept', {concept.id, second.id}))
+        self.assertEqual(self.indexed[1:], [(LATEST_FLAGS, 'concept', {first.id})])  # the second part's flags row
+        self.assertFalse(DeferredImportIndex.objects.exists())
+
+    def test_index_row_hands_over_to_a_flags_row_of_its_own_when_none_has_the_version(self):
+        self.defer_import(concept_line(self.source, 'C1'))
+        with patch('core.importers.models.batch_index_resources'):  # an import that indexes as it finishes
+            run_import([concept_line(self.source, 'C1', datatype='Text')])
+        concept, (first, second) = versions(self.source, 'C1')
+
+        self.assertEqual(self.run_rows(), 1)
+
+        self.assertEqual(self.indexed, [(INDEX, 'concept', {concept.id})])
+        handed_over = DeferredImportIndex.objects.get()
+        self.assertEqual((handed_over.stage, handed_over.ids), (LATEST_FLAGS, [first.id]))
+        self.searchable.add(second.id)  # once that import's queued indexing ran
+        self.indexed = []
+        self.assertEqual(self.run_rows(window=False), 1)
+        self.assertEqual(self.indexed, [(LATEST_FLAGS, 'concept', {first.id})])
+        self.assertFalse(DeferredImportIndex.objects.exists())
+
+    def test_version_created_and_superseded_in_one_part_is_fully_indexed_in_the_window(self):
+        self.defer_import(concept_line(self.source, 'C1'), concept_line(self.source, 'C1', datatype='Text'))
+        concept, (first, second) = versions(self.source, 'C1')
+        self.assertEqual(
+            deferred(), {(INDEX, 'concept'): {concept.id, second.id}, (LATEST_FLAGS, 'concept'): {first.id}})
+        self.missing = {first.id}  # never indexed
+        self.searchable.add(second.id)  # as a release would index it
+
+        self.assertEqual(self.run_rows(window=False), 0)
+
+        self.assertEqual(self.indexed, [(LATEST_FLAGS, 'concept', {first.id})])
+        self.assertEqual(deferred()[(LATEST_FLAGS, 'concept')], {first.id})  # no full index outside the window
+        self.indexed = []
+        self.assertEqual(self.run_rows(), 2)
+        self.assertEqual(self.indexed, [(LATEST_FLAGS, 'concept', {first.id}), (INDEX, 'concept', {first.id}),
+                                        (INDEX, 'concept', {concept.id, second.id})])
+        self.assertFalse(DeferredImportIndex.objects.exists())
+
+    def test_run_in_the_window_updates_the_latest_flags_every_few_minutes_not_after_every_row(self):
+        self.concept_updates()
+        self.defer_import(concept_line(self.source, 'C2'))
+
+        self.assertEqual(self.run_rows(flags_seconds=600), 4)
+
+        self.assertEqual([stage for stage, _, _ in self.indexed], [INDEX, INDEX, INDEX, LATEST_FLAGS])
+
     @patch('core.importers.models.INDEX_BATCH_SIZE', 1)
     def test_run_stops_within_a_batch_of_the_window_closing_and_the_next_one_resumes(self):
         concept, (first, second) = self.concept_updates()
@@ -358,7 +425,7 @@ class DeferredImportIndexRunTest(OCLTestCase):
         )
         self.indexed = []
         self.assertEqual(self.run_rows(), 3)
-        self.assertEqual([ids for _, _, ids in self.indexed], [{first.id}, {concept.id}, {second.id}, {first.id}])
+        self.assertEqual([ids for _, _, ids in self.indexed], [{concept.id}, {second.id}, {first.id}])
 
     def test_failed_row_waits_while_the_rows_after_it_go_on(self):
         concept, (first, second) = self.concept_updates()
@@ -372,7 +439,7 @@ class DeferredImportIndexRunTest(OCLTestCase):
         self.failure = fail_second_part
         self.assertEqual(self.run_rows(), 1)
 
-        self.assertEqual(self.indexed, [(INDEX, 'concept', {concept.id, first.id})])  # the failure stopped the run
+        self.assertEqual(self.indexed, [(INDEX, 'concept', {concept.id})])  # the failure stopped the run
         failed = DeferredImportIndex.objects.get(stage=INDEX, ids__contains=[second.id])
         self.assertEqual((failed.attempts, failed.last_error), (1, 'RuntimeError: mapping conflict'))
         self.assertAlmostEqual(
@@ -484,7 +551,8 @@ class DeferredImportIndexRunTest(OCLTestCase):
                 rows[(MAPPED_CODES, 'concept')].process()
             self.assertEqual(ids(mapped_codes_mock.call_args[0][0]), row_ids[(MAPPED_CODES, 'concept')])
 
-        with patch.object(Concept, 'index_latest_flags') as latest_flags_mock:  # TEST_MODE: every replacement found
+        # in TEST_MODE, every replacement counts as searchable
+        with patch.object(Concept, 'index_latest_flags', return_value=set()) as latest_flags_mock:
             self.assertEqual(rows[(LATEST_FLAGS, 'concept')].process(), DeferredImportIndex.DONE)
         self.assertEqual(ids(latest_flags_mock.call_args[0][0]), row_ids[(LATEST_FLAGS, 'concept')])
 
@@ -542,21 +610,27 @@ class LatestFlagsTest(OCLTestCase):
         self.assertEqual(actions[second.id]['script']['params'],
                          {'is_latest_version': True, 'in_head': True, 'fields': {}})
 
-    def test_index_latest_flags_updates_documents_without_a_refresh(self, *_):
+    def test_index_latest_flags_updates_documents_without_a_refresh_and_returns_the_missing_ones(self, *_):
         queryset = Concept.objects.none()
-        with patch.object(Concept, 'batch_index_partial_by_ids', return_value={'docs': 0}) as partial_mock:
-            self.assertEqual(Concept.index_latest_flags(queryset), {'docs': 0})
+        missing = {'update': {'_id': '7', 'status': 404, 'error': {'type': 'document_missing_exception'}}}
+
+        def partial(*_, on_bulk_error, **__):
+            on_bulk_error(BulkIndexError('1 document(s) failed', [missing]))
+
+        with patch.object(Concept, 'batch_index_partial_by_ids', side_effect=partial) as partial_mock:
+            self.assertEqual(Concept.index_latest_flags(queryset), {7})
         partial_mock.assert_called_once_with(
-            queryset, ConceptDocument, Concept.get_latest_flags_actions, refresh=False,
-            on_bulk_error=Concept.raise_unless_missing)
+            queryset, ConceptDocument, Concept.get_latest_flags_actions, refresh=False, on_bulk_error=ANY)
+        self.assertEqual(Concept.index_latest_flags(queryset), set())  # TEST_MODE: nothing sent
 
     def test_missing_documents_are_not_failures_of_the_flags_update(self, *_):
         missing = {'update': {'_id': '1', 'status': 404, 'error': {'type': 'document_missing_exception'}}}
         failed = {'update': {'_id': '2', 'status': 400, 'error': {'type': 'mapper_parsing_exception'}}}
 
-        self.assertIsNone(Concept.raise_unless_missing(BulkIndexError('2 document(s) failed', [missing, missing])))
+        self.assertEqual(
+            Concept.get_missing_ids_or_raise(BulkIndexError('2 document(s) failed', [missing, missing])), {1})
         with self.assertRaises(BulkIndexError) as context:
-            Concept.raise_unless_missing(BulkIndexError('2 document(s) failed', [missing, failed]))
+            Concept.get_missing_ids_or_raise(BulkIndexError('2 document(s) failed', [missing, failed]))
         self.assertEqual(context.exception.errors, [failed])
 
     def test_superseded_versions_wait_while_their_replacement_is_not_searchable(self, *_):
@@ -564,14 +638,14 @@ class LatestFlagsTest(OCLTestCase):
         run_import([concept_line(source, 'C1'), concept_line(source, 'C2')])
         run_import([concept_line(source, 'C1', datatype='Text'), concept_line(source, 'C2', datatype='Text')])
         c1, (c1_first, c1_second) = versions(source, 'C1')
-        _, (c2_first, c2_second) = versions(source, 'C2')
+        c2, (c2_first, c2_second) = versions(source, 'C2')
         Concept.objects.filter(id=c1.id).update(is_latest_version=True)  # a stray flag on the versioned object
 
         with patch.object(Concept, 'get_ids_flagged_latest_in_search', return_value={c1_second.id}) as search_mock:
-            waiting = Concept.get_ids_with_unsearchable_replacements([c1_first.id, c2_first.id, c2_second.id])
+            waiting = Concept.get_ids_with_unsearchable_replacements([c1_first.id, c2.id, c2_first.id, c2_second.id])
 
-        self.assertEqual(waiting, {c2_first.id})  # C2's latest version isn't searchable; C2's latest isn't waiting
-        search_mock.assert_called_once_with({c1.id, c1_second.id, c2_second.id})
+        self.assertEqual(waiting, {c2_first.id})  # only a superseded version whose replacement isn't searchable
+        search_mock.assert_called_once_with({c1.id, c1_second.id, c2_second.id})  # the latest of C1 and C2
         self.assertEqual(Concept.get_ids_flagged_latest_in_search({c1_first.id}), {c1_first.id})  # TEST_MODE
 
     def test_no_latest_version_left_lets_the_flags_update(self, *_):
@@ -671,7 +745,7 @@ class DeferredImportSearchTest(OCLAPITestCase):
     @patch('core.common.models.parallel_bulk', streaming_bulk)
     @patch('core.importers.models.index_concepts_mapped_codes')
     @patch('core.importers.models.batch_index_resources')
-    def test_superseded_version_without_a_document_is_left_without_one(self, *_):
+    def test_superseded_version_without_a_document_waits_for_the_window(self, *_):
         source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic=f'NoDoc{uuid.uuid4().hex[:8]}'))
         run_import([concept_line(source, 'Zephyranthes')], index=False)
         run_import([concept_line(source, 'Zephyranthes', datatype='Text')], index=False)
@@ -679,8 +753,12 @@ class DeferredImportSearchTest(OCLAPITestCase):
         with override_settings(TEST_MODE=False):
             batch_index_resources('concept', {'id__in': [concept.id, second.id]})  # as a release would
 
-        self.assertEqual(self.run_job(window=False), 1)  # outside the window: no full index
+        self.assertEqual(self.run_job(window=False), 0)
 
+        # outside the window, the flags update doesn't fully index it
         self.assertEqual((self.get_document(first.id), self.get_document(second.id)), (
             None, (True, ['HEAD'], [])))
-        self.assertEqual(deferred(), {(INDEX, 'concept'): {concept.id, first.id, second.id}})
+        self.assertEqual(deferred()[(LATEST_FLAGS, 'concept')], {first.id})
+        self.assertEqual(self.run_job(window=True), 3)
+        self.assertEqual(self.get_document(first.id), (False, [], []))
+        self.assertFalse(DeferredImportIndex.objects.exists())
