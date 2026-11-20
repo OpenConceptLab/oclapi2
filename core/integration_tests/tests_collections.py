@@ -1101,6 +1101,64 @@ class CollectionReferencesViewTest(OCLAPITestCase):
             ]
         )
 
+    def _source_with_concept_version_only_v1_held(self):
+        """A concept version that only v1 held, now removed from it; v2 holds its replacement"""
+        source = OrganizationSourceFactory(organization=OrganizationFactory())
+        concept = ConceptFactory(parent=source, mnemonic='c1')
+        old = concept.get_latest_version()
+        new = ConceptFactory(parent=source, mnemonic='c1', versioned_object=concept, version='new')
+        old.sources.remove(source)
+        v1 = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+        v2 = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v2', released=True)
+        new.sources.add(v2)
+        old.sources.remove(v1)
+        return source, old, v2
+
+    def _put_with_resolution_on(self, expression):
+        with patch.object(CollectionReference, 'is_resource_version_repo_resolution_on', return_value=True):
+            return self.client.put(
+                self.collection.uri + 'references/',
+                {'data': {'expressions': [expression]}},
+                HTTP_AUTHORIZATION='Token ' + self.token,
+                format='json'
+            )
+
+    def test_put_200_pinned_reference_no_version_holds_says_so_end_to_end(self):
+        source, old, _ = self._source_with_concept_version_only_v1_held()
+
+        response = self._put_with_resolution_on(old.uri)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [{
+                'added': True,
+                'resolved': False,
+                'expression': old.uri,
+                'repo_versions': [source.uri],
+                'message': f'The reference is saved in collection {self.collection.name}, but no version of '
+                           f'{source.uri} holds resource version {old.version}'
+            }]
+        )
+
+    def test_put_200_pinned_reference_naming_a_version_that_does_not_hold_it_names_that_version(self):
+        _, old, v2 = self._source_with_concept_version_only_v1_held()
+        expression = f'{v2.uri}concepts/c1/{old.version}/'
+
+        response = self._put_with_resolution_on(expression)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['resolved'], False)
+        self.assertEqual(response.data[0]['repo_versions'], [v2.uri])
+        self.assertEqual(
+            response.data[0]['message'],
+            f'The reference is saved in collection {self.collection.name}, but {v2.uri} does not hold '
+            f'resource version {old.version}'
+        )
+
     @patch('core.collections.views.add_references')
     def test_put_200_pinned_reference_no_version_holds_says_so(self, add_references_mock):
         add_references_mock.__name__ = 'add_references'

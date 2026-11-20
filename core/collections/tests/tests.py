@@ -4098,6 +4098,23 @@ class ExpansionTest(OCLTestCase):
         self.assertEqual(missing_mapping.unresolved_reason, REFERENCE_FOUND_NOTHING)
         self.assertIsNone(missing_exclude.unresolved_reason)
 
+    def test_add_references_marks_reference_whose_members_the_parameters_filter_out(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source, retired=True)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        expansion.parameters = {**expansion.parameters, 'activeOnly': True}
+        expansion.save()
+        reference = CollectionReference(
+            expression=concept.uri, collection=collection, system=source.uri, code=concept.mnemonic)
+        reference.save()
+
+        with patch.object(Expansion, 'index_resources'):
+            expansion.add_references([reference])
+
+        self.assertEqual(reference.unresolved_reason, REFERENCE_FOUND_NOTHING)
+        self.assertEqual(expansion.concepts.count(), 0)
+
     def test_evaluated_repo_version_urls_name_the_repository_when_no_version_resolves(self):
         collection = OrganizationCollectionFactory()
         expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')

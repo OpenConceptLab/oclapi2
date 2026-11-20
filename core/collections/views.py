@@ -24,7 +24,8 @@ from core.collections.constants import (
     DELETE_FAILURE, DELETE_SUCCESS, NO_MATCH, VERSION_ALREADY_EXISTS,
     SOURCE_MAPPINGS,
     UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT, TRANSFORM_TO_RESOURCE_VERSIONS, TRANSFORM_TO_EXTENSIONAL,
-    REFERENCE_RESOLVED_TO_NOTHING_FMT, REFERENCE_VERSION_NOT_HELD_FMT, REFERENCE_VERSION_NOT_HELD)
+    REFERENCE_RESOLVED_TO_NOTHING_FMT, REFERENCE_VERSION_NOT_HELD_FMT, REFERENCE_VERSION_NOT_HELD,
+    REFERENCE_NAMED_VERSION_NOT_HELD_FMT)
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection, CollectionReference, Expansion, ExpansionParameters
 from core.collections.search import CollectionFacetedSearch
@@ -574,14 +575,19 @@ class CollectionReferencesView(
         items = {}
         for reference in unresolved_refs:
             item = {'added': True, 'resolved': False, 'expression': reference.expression}
-            if unresolved_reasons[reference.id] == REFERENCE_VERSION_NOT_HELD:
+            named_version = reference.resolve_expression_system_version if reference.names_repo_version else None
+            if unresolved_reasons[reference.id] == REFERENCE_VERSION_NOT_HELD and named_version:
+                item['repo_versions'] = [named_version.uri]
+                item['message'] = REFERENCE_NAMED_VERSION_NOT_HELD_FMT.format(
+                    collection.name, named_version.uri, reference.resource_version)
+            elif unresolved_reasons[reference.id] == REFERENCE_VERSION_NOT_HELD:
                 item['repo_versions'] = [reference.system]
                 item['message'] = REFERENCE_VERSION_NOT_HELD_FMT.format(
                     collection.name, reference.system, reference.resource_version)
             else:
                 item['repo_versions'] = reference.get_evaluated_repo_version_urls(expansion, system_version_cache)
                 item['message'] = REFERENCE_RESOLVED_TO_NOTHING_FMT.format(
-                    collection.name, ', '.join(item['repo_versions']))
+                    collection.name, ', '.join(item['repo_versions']) or 'any repository version')
             items[reference.expression] = item
         return items
 

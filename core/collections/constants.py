@@ -20,6 +20,8 @@ REFERENCE_RESOLVED_TO_NOTHING_FMT = 'The reference is saved in collection {}, bu
                                     'or mappings in {}'
 REFERENCE_VERSION_NOT_HELD_FMT = 'The reference is saved in collection {}, but no version of {} holds ' \
                                  'resource version {}'
+REFERENCE_NAMED_VERSION_NOT_HELD_FMT = 'The reference is saved in collection {}, but {} does not hold ' \
+                                       'resource version {}'
 REFERENCE_FOUND_NOTHING = 'found_nothing'
 REFERENCE_VERSION_NOT_HELD = 'resource_version_not_held'
 
