@@ -1298,6 +1298,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             # Serialize version creation with destructive child operations on the HEAD repository.
             head = cls.objects.select_for_update().get(id=head.id)
             obj.update_version_data(head)
+            obj.store_blank_access_as_none()  # a HEAD stored blank before blanks were stored as None
             obj.save(**kwargs)
             # the default is settled while HEAD is locked, so a queued task can't see another HEAD
             expansion = obj.get_expansion_choice(expansion) or expansion

@@ -196,14 +196,17 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
                     self.assertEqual([call[2] for call in self.take_calls()], [action])
 
     def test_a_new_version_takes_its_head_s_access_and_is_not_asked(self):
+        """A blank HEAD's, stored before blanks were stored as None, is stored as None, which the lists read too."""
         for repo in (self.source, self.collection):
-            type(repo).objects.filter(id=repo.id).update(public_access=ACCESS_TYPE_NONE)
-            with self.subTest(repo=repo):
-                response = self.request('post', repo.uri + 'versions/', {'id': 'v2', 'public_access': 'View'})
+            for head_access, version in ((ACCESS_TYPE_NONE, 'v2'), ('', 'v3')):
+                type(repo).objects.filter(id=repo.id).update(public_access=head_access)
+                with self.subTest(repo=repo, head_access=head_access):
+                    response = self.request('post', repo.uri + 'versions/', {'id': version, 'public_access': 'View'})
+                    actions = [call[2] for call in self.take_calls()]
 
-                self.assertEqual(response.status_code, 201, response.data)
-                self.assertEqual(repo.versions.get(version='v2').public_access, ACCESS_TYPE_NONE)
-                self.assertEqual([call[2] for call in self.take_calls()], [WRITE_ACTION_EDIT])
+                    self.assertEqual(response.status_code, 201, response.data)
+                    self.assertEqual(repo.versions.get(version=version).public_access, ACCESS_TYPE_NONE)
+                    self.assertEqual(actions, [WRITE_ACTION_EDIT])
 
     def fhir_update(self, repo, factory, resource_type, release_access, **extra):
         """PUTs a FHIR update of `repo` that resolves to a new release with `release_access`. The new version's id."""
