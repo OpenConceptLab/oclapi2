@@ -15,6 +15,7 @@ from django.http import HttpResponseForbidden, Http404
 from django.shortcuts import redirect
 from django.urls import resolve, Resolver404
 from django.utils.functional import cached_property
+from elasticsearch.helpers import BulkIndexError
 from ocldev.checksum import Checksum
 from psycopg2.errorcodes import QUERY_CANCELED
 from pydash import compact, get
@@ -29,14 +30,15 @@ from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     SEARCH_STATS_ONLY, INCLUDE_SEARCH_STATS, UPDATED_BY_USERNAME_PARAM, CHECKSUM_STANDARD_HEADER, \
     CHECKSUM_SMART_HEADER, SEARCH_LATEST_REPO_VERSION, SAME_STANDARD_CHECKSUM_ERROR, ACCESS_TYPE_VIEW, \
     INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS, INCLUDE_PARENT_CONCEPT_URLS, INCLUDE_CHILD_CONCEPT_URLS, \
-    INCLUDE_HIERARCHY_PATH, INCLUDE_SUMMARY
+    INCLUDE_HIERARCHY_PATH, INCLUDE_SUMMARY, INDEX_BATCH_SIZE
+from core.common.es import ESScript
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion, CanEditConceptDictionary
 from .checksums import ChecksumModel
 from .exceptions import Http403, UnpaginatedListLimitReached
 from .utils import write_csv_to_s3, get_query_params_from_url_string, compact_dict_by_values, \
     to_owner_uri, parse_updated_since_param, get_export_service, to_int, get_truthy_values, generate_temp_version, \
-    canonical_url_to_url_and_version, decode_string, to_parent_kwargs_from_uri
+    canonical_url_to_url_and_version, decode_string, to_parent_kwargs_from_uri, chunks
 from ..concepts.constants import PERSIST_CLONE_ERROR
 from ..toggles.models import Toggle
 
@@ -861,6 +863,91 @@ class SourceChildMixin(ChecksumModel):
     @cached_property
     def _cached_latest_source_version(self):
         return self.parent.get_latest_released_version()
+
+    @classmethod
+    def get_latest_flags_actions(cls, ids):
+        """
+        Scripted updates of what a new version changes in the documents of the versions it supersedes, as prepare() has
+        it: is_latest_version, HEAD's place in source_version, and the fields get_latest_flags_fields() names. The rest
+        of each document, vectors included, is left as it was indexed, and so are the releases in source_version, which
+        another job may be appending to.
+        """
+        index_name = cls.get_search_document()()._index._name  # pylint: disable=protected-access
+        field = f'{cls._meta.model_name}_id'
+        in_head = set(cls.sources.through.objects.filter(
+            **{f'{field}__in': ids, 'source__version': HEAD}).values_list(field, flat=True))
+        for instance in cls.objects.filter(id__in=ids):
+            yield {
+                '_op_type': 'update', '_index': index_name, '_id': instance.id, 'retry_on_conflict': 3,
+                'script': {'source': ESScript.LATEST_FLAGS_SCRIPT, 'params': {
+                    'is_latest_version': instance.is_latest_version, 'in_head': instance.id in in_head,
+                    'fields': cls.get_latest_flags_fields(instance)
+                }},
+            }
+
+    @staticmethod
+    def get_latest_flags_fields(instance):  # pylint: disable=unused-argument
+        """Other document fields that prepare() derives from whether the row is the latest version."""
+        return {}
+
+    @classmethod
+    def index_latest_flags(cls, queryset):
+        """
+        Updates the latest-version fields in these rows' documents (get_latest_flags_actions), instead of reindexing
+        (and re-embedding) them. Returns the ids of the rows with no document, which it leaves to the caller.
+        """
+        missing = set()
+        cls.batch_index_partial_by_ids(
+            queryset, cls.get_search_document(), cls.get_latest_flags_actions, refresh=False,
+            on_bulk_error=lambda error: missing.update(cls.get_missing_ids_or_raise(error)))
+        return missing
+
+    @staticmethod
+    def get_missing_ids_or_raise(error):
+        """
+        The ids of the documents a BulkIndexError of partial updates found missing. Re-raises it with the other
+        failures, if there are any.
+        """
+        failures = [item for item in error.errors if get(item, 'update.status') != 404]
+        if failures:
+            raise BulkIndexError(f'{len(failures)} document(s) failed to index.', failures) from error
+        return {int(get(item, 'update._id')) for item in error.errors}
+
+    @classmethod
+    def get_ids_with_unsearchable_replacements(cls, ids):
+        """
+        Those of these ids that are superseded versions whose concept (or mapping) has a latest version with no document
+        flagged latest, as when the import that superseded them hasn't been indexed yet. Writing their documents now
+        would leave it out of HEAD search; until then, search finds it by the old version.
+        """
+        versioned_ids = dict(cls.objects.filter(id__in=ids, is_latest_version=False).exclude(
+            id=F('versioned_object_id')).values_list('id', 'versioned_object_id'))
+        latest_ids = {}
+        for versioned_id, latest_id in cls.objects.filter(
+                versioned_object_id__in=set(versioned_ids.values()), is_latest_version=True
+        ).values_list('versioned_object_id', 'id'):
+            latest_ids.setdefault(versioned_id, set()).add(latest_id)
+        searchable = cls.get_ids_flagged_latest_in_search(
+            {latest_id for latest in latest_ids.values() for latest_id in latest})
+        return {
+            _id for _id, versioned_id in versioned_ids.items()
+            if latest_ids.get(versioned_id) and not latest_ids[versioned_id] & searchable
+        }
+
+    @classmethod
+    def get_ids_flagged_latest_in_search(cls, ids):
+        """
+        Those of these ids that a search finds as the latest version: a document written but not refreshed yet doesn't
+        count. All of them in TEST_MODE.
+        """
+        if get(settings, 'TEST_MODE', False) or not ids:
+            return set(ids)
+        found = set()
+        for batch in chunks(sorted(ids), INDEX_BATCH_SIZE):
+            search = cls.get_search_document().search().filter('ids', values=[str(_id) for _id in batch]).filter(
+                'term', is_latest_version=True).source(False)
+            found.update(int(hit.meta.id) for hit in search[:len(batch)].execute())
+        return found
 
     def belongs_to_non_head_source_version(self):
         versioned_object_id = self.versioned_object_id or self.id
