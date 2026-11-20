@@ -10,6 +10,7 @@ from cid.locals import get_cid
 from django.conf import settings
 from django.db.models import Case, When, IntegerField
 from elasticsearch_dsl import FacetedSearch, Q
+from elasticsearch_dsl.query import Query
 from pydash import compact, get, has, set_
 from sentence_transformers import CrossEncoder
 import torch
@@ -42,6 +43,16 @@ class CustomESFacetedSearch(FacetedSearch):
     def __init__(self, query=None, filters=None, sort=(), _search=None):  # pylint: disable=dangerous-default-value
         self._search = _search
         super().__init__(query=query, filters=filters or {}, sort=sort)
+
+    def add_filter(self, name, filter_values):
+        """
+        A filter can also be an ES criterion: every facet but `name` counts within it, while the `name` facet
+        counts all its values (none of them shown as selected).
+        """
+        if isinstance(filter_values, Query):
+            self._filters[name] = filter_values
+            return
+        super().add_filter(name, filter_values)
 
     @staticmethod
     def format_search_str(search_str):

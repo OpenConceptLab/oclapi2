@@ -40,6 +40,7 @@ from core.orgs.constants import ORG_OBJECT_TYPE
 from core.users.constants import USER_OBJECT_TYPE, LIST_UNPAGINATED_PERMISSION
 
 TRUTHY = get_truthy_values()
+FALSY = get_falsy_values()
 
 
 class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
@@ -79,13 +80,34 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def has_parent_scope(self):
         return self.has_owner_scope() and self.has_concept_container_scope()
 
+    def is_collection_members_list(self):
+        """A collection's (or expansion's) concepts or mappings, which include retired ones by default."""
+        return 'expansion' in self.kwargs or ('collection' in self.kwargs and self.is_source_child_document_model())
+
     def _should_exclude_retired_from_search_results(self):
-        if self.is_owner_document_model() or 'expansion' in self.kwargs or self.is_url_registry_document():
+        if self.is_owner_document_model() or self.is_url_registry_document():
             return False
 
         params = get(self, 'params') or self.request.query_params.dict()
-        include_retired = params.get('retired', None) in TRUTHY or params.get(INCLUDE_RETIRED_PARAM, None) in TRUTHY
-        return not include_retired
+        if params.get(INCLUDE_RETIRED_PARAM, None) in FALSY:
+            return True
+        if self.is_collection_members_list():
+            return False
+        retired = {to_snake_case(key): value for key, value in params.items()}.get('retired')  # as get_faceted_filters
+        return not (retired in TRUTHY or params.get(INCLUDE_RETIRED_PARAM, None) in TRUTHY)
+
+    def get_retired_criterion(self):
+        """
+        What the results ask of `retired`: the retired rule above and any `retired` filter. The facets count within
+        it, all but the `retired` facet, which counts both values so a client can show how many are retired.
+        """
+        criterion = Q('term', retired=False) if self._should_exclude_retired_from_search_results() else None
+        faceted_filters = self.get_faceted_filters()
+        retired_filter = self.get_faceted_criterion(
+            params={'retired': faceted_filters['retired']}) if 'retired' in faceted_filters else None
+        if retired_filter is not None:
+            criterion = retired_filter if criterion is None else criterion & retired_filter
+        return criterion
 
     def should_include_inactive(self):
         return self.request.query_params.get(INCLUDE_INACTIVE) in TRUTHY
@@ -407,7 +429,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
                 return Q('term', **{f"properties.{property_code}.keyword": clean_val})
 
-            return Q('term', **{attr: val.strip('\"').strip('\'')})
+            clean_val = val.strip('\"').strip('\'')
+            if attr == 'retired':  # indexed as 'true'/'false'; other spellings read as the retired rule reads them
+                clean_val = 'true' if clean_val in TRUTHY else 'false' if clean_val in FALSY else clean_val
+            return Q('term', **{attr: clean_val})
 
         def get_query(attr, val):
             """
@@ -535,26 +560,24 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         if is_source_child_document_model:
             version = None
-            if is_version_specified:
-                container_version = self.kwargs['version']
-                is_latest_released = container_version == LATEST
-                params = {'user__username': self.kwargs.get('user'), 'organization__mnemonic': self.kwargs.get('org')}
-                if is_latest_released:
-                    if is_source_specified:
-                        from core.sources.models import Source
-                        version = Source.find_latest_released_version_by(
-                            {**params, 'mnemonic': self.kwargs['source']})
-                        filters['source_version'] = get(version, 'version')
-                    elif is_collection_specified:
-                        from core.collections.models import Collection
-                        version = Collection.find_latest_released_version_by(
-                            {**params, 'mnemonic': self.kwargs['collection']})
-                        filters['collection_version'] = get(version, 'version')
-                elif is_collection_specified and 'expansion' not in self.kwargs:
+            params = {'user__username': self.kwargs.get('user'), 'organization__mnemonic': self.kwargs.get('org')}
+            if self.kwargs.get('version') == LATEST:
+                if is_source_specified:
+                    from core.sources.models import Source
+                    version = Source.find_latest_released_version_by(
+                        {**params, 'mnemonic': self.kwargs['source']})
+                    filters['source_version'] = get(version, 'version')
+                elif is_collection_specified:
                     from core.collections.models import Collection
-                    version = Collection.objects.filter(
-                        **params, mnemonic=self.kwargs['collection'], version=self.kwargs['version']
-                    ).first()
+                    version = Collection.find_latest_released_version_by(
+                        {**params, 'mnemonic': self.kwargs['collection']})
+                    filters['collection_version'] = get(version, 'version')
+            elif is_collection_specified and 'expansion' not in self.kwargs and (
+                    is_version_specified or 'reference' not in self.kwargs):
+                from core.collections.models import Collection
+                version = Collection.objects.filter(  # without a version in the URL: HEAD, as its list
+                    **params, mnemonic=self.kwargs['collection'], version=self.kwargs.get('version', HEAD)
+                ).first()
 
             if is_collection_specified:
                 owner_type = filters.pop('ownerType', None)
@@ -595,7 +618,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             params = {
                 'query': self.get_search_string(lower=False),
                 '_search': self.__get_search_results(
-                    ignore_retired_filter=True, sort=False, highlight=False, force=True)
+                    ignore_retired_filter=True, sort=False, highlight=False, force=True),
+                'filters': {'retired': self.get_retired_criterion()}
             }
             if 'source' in self.kwargs and self.is_concept_document():
                 parent_repo = params['parent'] = get(self, 'parent_resource')
@@ -849,7 +873,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             self.get_scope_owner_criteria() if self._should_include_private() else self.get_public_criteria())
         if visibility_criteria is not None:
             results = results.filter(visibility_criteria)
-        faceted_criterion = self.get_faceted_criterion()
+        # with ignore_retired_filter, the facets apply the retired rule and the `retired` filter (get_retired_criterion)
+        faceted_criterion = self.get_faceted_criterion(params={
+            key: value for key, value in self.request.query_params.dict().items() if to_snake_case(key) != 'retired'
+        } if ignore_retired_filter else None)
         if faceted_criterion:
             results = results.filter(faceted_criterion)
         return results

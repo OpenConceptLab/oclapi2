@@ -1620,11 +1620,19 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
 
     @property
     def active_concepts(self):
-        return self.concepts.count()
+        return self.concepts.filter(retired=False, is_active=True).count()
 
     @property
     def active_mappings(self):
-        return self.mappings.count()
+        return self.mappings.filter(retired=False, is_active=True).count()
+
+    @property
+    def retired_concepts(self):
+        return self.concepts.filter(retired=True).count()
+
+    @property
+    def retired_mappings(self):
+        return self.mappings.filter(retired=True).count()
 
     @property
     def owner_url(self):
