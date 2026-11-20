@@ -2,10 +2,13 @@ import base64
 import mimetypes
 import re
 import time
+from datetime import timedelta
 
-from azure.storage.blob import BlobServiceClient, ContentSettings, BlobPrefix
+from azure.storage.blob import BlobServiceClient, ContentSettings, BlobPrefix, BlobSasPermissions, generate_blob_sas
 from django.conf import settings
 from django.core.files.base import ContentFile
+from django.utils import timezone
+from django.utils.http import content_disposition_header
 from pydash import get
 
 from core.services.storages.cloud.core import CloudStorageServiceInterface
@@ -14,6 +17,7 @@ from core.services.storages.cloud.core import CloudStorageServiceInterface
 class BlobStorage(CloudStorageServiceInterface):
     COPY_TIMEOUT_SECONDS = 300
     COPY_POLL_SECONDS = 1
+    SAS_EXPIRY = timedelta(days=7)  # same lifetime as the presigned URLs of S3 and MinIO
     def __init__(self):
         super().__init__()
         self.account_name = settings.AZURE_STORAGE_ACCOUNT_NAME
@@ -24,9 +28,24 @@ class BlobStorage(CloudStorageServiceInterface):
     def public_url_for(self, file_path):
         return f"https://{self.account_name}.blob.core.windows.net/{self.container_name}/{file_path}"
 
-    def url_for(self, file_path, filename=None):  # pylint: disable=unused-argument
-        # an unsigned blob URL can't carry a download name, so filename is ignored
-        return self.public_url_for(file_path)
+    def url_for(self, file_path, filename=None):
+        """
+        Read-only SAS URL, so a private container (the Azure default) can still be fetched over plain HTTP,
+        as the importer does with cached inputs. A connection without an account key cannot sign:
+        it keeps the unsigned URL, which needs a container that allows anonymous reads.
+        """
+        credential = get(self.client, 'credential')
+        account_key = get(credential, 'account_key')
+        if not account_key:
+            return self.public_url_for(file_path)
+
+        sas_token = generate_blob_sas(
+            account_name=credential.account_name, container_name=self.container_name, blob_name=file_path,
+            account_key=account_key, permission=BlobSasPermissions(read=True),
+            expiry=timezone.now() + self.SAS_EXPIRY,
+            content_disposition=content_disposition_header(True, filename) if filename else None
+        )
+        return f"{self.__get_blob_client(file_path).url}?{sas_token}"
 
     def exists(self, key):
         try:
