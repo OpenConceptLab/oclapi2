@@ -175,7 +175,8 @@ class ConceptMapDetailSerializer(FhirRepositorySerializerMixin, serializers.Mode
         source.released = False  # HEAD must never be released
         source.custom_validation_schema = source_head.custom_validation_schema
 
-        errors = Source.persist_changes(source, user, None)
+        # a private HEAD stays private, as in CodeSystemDetailSerializer.update
+        errors = Source.persist_changes(source, user, None, keep_private=True)
 
         if errors:
             self._errors.update(errors)

@@ -1,6 +1,7 @@
 import logging
 import re
 import time
+from contextlib import nullcontext
 from urllib.parse import quote
 
 from celery.result import AsyncResult
@@ -24,6 +25,7 @@ from elasticsearch import ApiError, TransportError
 from elasticsearch.helpers import BulkIndexError, parallel_bulk, streaming_bulk
 from pydash import get
 
+from core.capabilities.writes import check_make_private
 from core.celery import app as celery_app
 from core.common.tasks import update_collection_active_concepts_count, update_collection_active_mappings_count, \
     delete_s3_objects
@@ -38,7 +40,7 @@ from . import ERRBIT_LOGGER
 from .checksums import ChecksumModel
 from .constants import (
     ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX,
-    ACCESS_TYPE_VIEW, SUPER_ADMIN_USER_ID,
+    ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE, SUPER_ADMIN_USER_ID,
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
     CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, OPENMRS_VALIDATION_SCHEMA, VALIDATION_SCHEMAS,
     DEFAULT_VALIDATION_SCHEMA, ES_REQUEST_TIMEOUT, UPDATED_BY_USERNAME_PARAM, ES_RETRYABLE_ERROR_TYPES,
@@ -1235,6 +1237,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         persisted = False
         obj.version = HEAD
+        obj.store_blank_access_as_none()
+        check_make_private(user, obj, None)  # a new private repository: the capability policy may refuse it
         try:
             obj.save(**kwargs)
             if obj.id:
@@ -1294,6 +1298,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             # Serialize version creation with destructive child operations on the HEAD repository.
             head = cls.objects.select_for_update().get(id=head.id)
             obj.update_version_data(head)
+            obj.store_blank_access_as_none()  # a HEAD stored blank before blanks were stored as None
             obj.save(**kwargs)
             # the default is settled while HEAD is locked, so a queued task can't see another HEAD
             expansion = obj.get_expansion_choice(expansion) or expansion
@@ -1339,41 +1344,61 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     def get_expansion_choice(self, expansion=None):  # pylint: disable=unused-argument
         return None
 
+    def store_blank_access_as_none(self):
+        """A blank access is private (public_can_view): it's stored as None, the value the lists read as private"""
+        if self.public_access == '':
+            self.public_access = ACCESS_TYPE_NONE
+
     @classmethod
     def persist_changes(cls, obj, updated_by, original_schema, **kwargs):  # pylint: disable=too-many-locals,too-many-branches
+        """
+        Saves `obj` over its stored row. With keep_private=True the save never makes a private row viewable: it reads
+        the stored row under a row lock held through the save, and keeps that row's access when it's private, so a
+        concurrent write that makes it private isn't overwritten (a FHIR update, whose resource carries no access).
+        The tasks the save queues go once its transaction ends.
+        """
+        keep_private = kwargs.pop('keep_private', False)
         errors = {}
         parent_resource = kwargs.pop('parent_resource', obj.parent)
         if not parent_resource:
             errors['parent'] = SOURCE_PARENT_CANNOT_BE_NONE
 
         queue_schema_update_task = obj.is_validation_necessary()
-        original_repo = cls.objects.filter(id=obj.id).first()
-
-        is_source = cls.__name__ == 'Source'
-        should_reindex_resources = is_source and obj.released != original_repo.released
-        concepts_reindex_filters = obj.get_concepts_reindex_filters(original_repo) if is_source else None
-        should_sync_vectors = is_source and (
-            bool(obj.has_semantic_match_algorithm) != bool(original_repo.has_semantic_match_algorithm))
-
-        obj._should_update_public_access = is_source and obj.public_access != original_repo.public_access  # pylint: disable=protected-access
-        obj._should_update_is_active = is_source and obj.is_active != original_repo.is_active  # pylint: disable=protected-access
-
         try:
-            obj.full_clean()
-        except ValidationError as ex:
-            errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
+            with transaction.atomic() if keep_private else nullcontext():
+                stored_rows = cls.objects.filter(id=obj.id)
+                # no key update, so a concurrent child write's foreign-key check on the row isn't blocked
+                original_repo = (stored_rows.select_for_update(no_key=True) if keep_private else stored_rows).first()
+                if keep_private and not original_repo.public_can_view:
+                    obj.public_access = original_repo.public_access
+                obj.store_blank_access_as_none()
 
-        if errors:
-            return errors
+                is_source = cls.__name__ == 'Source'
+                should_reindex_resources = is_source and obj.released != original_repo.released
+                concepts_reindex_filters = obj.get_concepts_reindex_filters(original_repo) if is_source else None
+                should_sync_vectors = is_source and (
+                    bool(obj.has_semantic_match_algorithm) != bool(original_repo.has_semantic_match_algorithm))
 
-        if updated_by:
-            obj.updated_by = updated_by
-        try:
-            if queue_schema_update_task:
-                target_schema = obj.custom_validation_schema
-                obj.custom_validation_schema = original_schema
+                obj._should_update_public_access = is_source and obj.public_access != original_repo.public_access  # pylint: disable=protected-access
+                obj._should_update_is_active = is_source and obj.is_active != original_repo.is_active  # pylint: disable=protected-access
 
-            obj.save(**kwargs)
+                try:
+                    obj.full_clean()
+                except ValidationError as ex:
+                    errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
+
+                if errors:
+                    return errors
+
+                if updated_by:
+                    obj.updated_by = updated_by
+                # a row made private, or moved while private: the capability policy may refuse it
+                check_make_private(obj.updated_by, obj, original_repo)
+                if queue_schema_update_task:
+                    target_schema = obj.custom_validation_schema
+                    obj.custom_validation_schema = original_schema
+
+                obj.save(**kwargs)
 
             if queue_schema_update_task:
                 from core.tasks.models import Task
@@ -2002,8 +2027,15 @@ class CelerySignalProcessor(RealTimeSignalProcessor):
             if get(settings, 'TEST_MODE', False):
                 handle_save(instance.app_name, instance.model_name, instance.id)
             else:
-                handle_save.apply_async(
-                    (instance.app_name, instance.model_name, instance.id), queue='indexing', permanent=False)
+                # once committed, so the task reads the row as saved. Deferred in a transaction, it's robust, so a
+                # failed enqueue doesn't stop the transaction's other callbacks (a version's seed task); at once under
+                # autocommit, its error reaches the write, as before
+                args = (instance.app_name, instance.model_name, instance.id)
+                connection = transaction.get_connection(using=instance._state.db)  # pylint: disable=protected-access
+                connection.on_commit(
+                    lambda: handle_save.apply_async(args, queue='indexing', permanent=False),
+                    robust=connection.in_atomic_block,
+                )
 
     def handle_m2m_changed(self, sender, instance, action, **kwargs):
         if settings.ES_SYNC and instance.__class__ in registry.get_models() and instance.should_index:
