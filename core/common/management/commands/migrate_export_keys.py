@@ -1,7 +1,7 @@
 from django.core.management import BaseCommand
 
 from core.collections.models import Collection
-from core.common.utils import get_export_key_pattern, get_export_service
+from core.common.utils import get_export_key_pattern, get_export_service, id_batches
 from core.sources.models import Source
 
 
@@ -22,15 +22,17 @@ class Command(BaseCommand):
         shared = {}
         moved = 0
         for model in (Source, Collection):
-            for version in model.objects.exclude(organization=None, user=None).iterator():
-                legacy_prefix = version.get_legacy_version_export_path(suffix=None)
-                keys = self.service.get_keys(legacy_prefix, get_export_key_pattern(legacy_prefix))
-                if not keys:
-                    continue
-                if version.owns_legacy_export_path():
-                    moved += self.move(version, legacy_prefix, keys)
-                else:
-                    shared.setdefault(legacy_prefix, []).append((version, keys))
+            # Batches by id, not .iterator(): a server-side cursor doesn't survive PgBouncer's transaction pooling
+            for ids in id_batches(model.objects.exclude(organization=None, user=None), 500):
+                for version in model.objects.filter(id__in=ids).order_by('id'):
+                    legacy_prefix = version.get_legacy_version_export_path(suffix=None)
+                    keys = self.service.get_keys(legacy_prefix, get_export_key_pattern(legacy_prefix))
+                    if not keys:
+                        continue
+                    if version.owns_legacy_export_path():
+                        moved += self.move(version, legacy_prefix, keys)
+                    else:
+                        shared.setdefault(legacy_prefix, []).append((version, keys))
 
         for legacy_prefix, candidates in shared.items():
             owner = next((version for version, _ in candidates if version.uri == assigned.get(legacy_prefix)), None)

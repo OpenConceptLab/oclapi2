@@ -882,10 +882,15 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         release: one superseded while it was seeding leaves that to the release that superseded it.
         """
         versions = []
-        for version in self.released_versions.exclude(id=self.id).order_by('-created_at').iterator():
+        # Not .iterator(): a server-side cursor doesn't survive PgBouncer's transaction pooling
+        for version in self.released_versions.exclude(id=self.id).order_by('-created_at'):
             versions.append(version)
             seed_task = version.get_seed_new_version_task()
-            if not seed_task or get(seed_task.summary, SEED_STAGE) == SEED_RELEASE_INDEXED:
+            if not seed_task:
+                break
+            stage = get(seed_task.summary, SEED_STAGE)
+            # A seed that succeeded with no stage predates seed stages, and indexed its own release
+            if stage == SEED_RELEASE_INDEXED or (not stage and seed_task.is_success):
                 break
         return versions
 
