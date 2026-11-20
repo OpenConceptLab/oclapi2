@@ -14,7 +14,7 @@ from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.models import CelerySignalProcessor
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
-from core.common.tests import OCLAPITestCase
+from core.common.tests import OCLAPITestCase, OCLAPITransactionTestCase
 from core.concepts.tests.factories import ConceptFactory
 from core.importers.importer import ImportRequest, ResourceImporter
 from core.importers.models import BulkImportInline
@@ -58,6 +58,12 @@ class MakePrivateTestMixin:
     def request(self, method, url, data=None):
         return getattr(self.client, method)(
             url, data, HTTP_AUTHORIZATION='Token ' + self.user.get_token(), format='json')
+
+    def anonymous_list_ids(self, kind):
+        """The ids of the org's `kind` (sources, collections) an anonymous list returns: read from the database."""
+        response = self.client.get(f'{self.org.uri}{kind}/')
+        self.assertEqual(response.status_code, 200, response.content)
+        return [item['id'] for item in response.json()]
 
     @staticmethod
     def take_calls():
@@ -267,9 +273,13 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
                 self.assertEqual(self.source.public_access, ACCESS_TYPE_VIEW)
 
     def test_a_blank_release_the_policy_allows_leaves_head_and_the_new_version_private(self):
+        """Stored as None, which the anonymous lists read as private too."""
         PrivateGatePolicy.refuse = False
         for repo, factory, resource_type, extra in self.fhir_repositories():
+            kind = f'{type(repo).__name__.lower()}s'
             with self.subTest(resource_type=resource_type):
+                self.assertIn(repo.mnemonic, self.anonymous_list_ids(kind))
+
                 response, resource = self.fhir_update(repo, factory, resource_type, '', **extra)
 
                 self.assertEqual(response.status_code, 200, response.content)
@@ -277,8 +287,9 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
                 self.assertEqual(
                     [call[2] for call in self.take_calls()], [WRITE_ACTION_EDIT, WRITE_ACTION_MAKE_PRIVATE])
                 repo.refresh_from_db()
-                self.assertFalse(repo.public_can_view)
+                self.assertEqual(repo.public_access, ACCESS_TYPE_NONE)
                 self.assertFalse(repo.versions.get(version=resource['version']).public_can_view)
+                self.assertNotIn(repo.mnemonic, self.anonymous_list_ids(kind))
 
     @staticmethod
     def made_private_first(model, method):
@@ -320,7 +331,10 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
         self.assertFalse(self.collection.versions.get(version=resource['version']).public_can_view)
 
     def test_a_fhir_update_reads_head_for_update_in_the_transaction_that_saves_it(self):
-        """A concurrent write that makes HEAD private waits for the save, so it isn't overwritten."""
+        """
+        A concurrent write that makes HEAD private waits for the save, so it isn't overwritten. No key update, so a
+        concurrent child write's foreign-key check on HEAD doesn't wait, and can't deadlock with the update's own.
+        """
         for repo, factory, resource_type, extra in self.fhir_repositories():
             table = type(repo)._meta.db_table  # pylint: disable=protected-access
             row = f'"{table}"."id" = {repo.id}'
@@ -333,14 +347,14 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
                 save = next(index for index, sql in enumerate(sqls) if sql.startswith(f'UPDATE "{table}" SET') and
                             '"public_access" = ' in sql and sql.endswith(row))
                 lock = next((index for index, sql in enumerate(sqls[:save]) if sql.startswith('SELECT') and
-                             f'WHERE {row}' in sql and sql.endswith('FOR UPDATE')), None)
+                             f'WHERE {row}' in sql and sql.endswith('FOR NO KEY UPDATE')), None)
                 self.assertIsNotNone(lock, 'HEAD is not read FOR UPDATE before it is saved')
                 savepoint = sqls[lock - 1]
                 self.assertTrue(savepoint.startswith('SAVEPOINT '), savepoint)
                 self.assertGreater(sqls.index(f'RELEASE {savepoint}'), save)
 
     def test_an_edit_that_sends_no_access_keeps_a_blank_row_private(self):
-        """A blank access is private (public_can_view), so an edit that sends no access doesn't publish the row."""
+        """A blank access is private (public_can_view): an edit that sends none stores it as None, not View."""
         repos = ((self.source, OrganizationSourceFactory), (self.collection, OrganizationCollectionFactory))
         for repo, factory in repos:
             version = factory(organization=self.org, mnemonic=repo.mnemonic, version='v1', released=True)
@@ -352,8 +366,9 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
 
                         self.assertEqual(response.status_code, 200, response.data)
                         row.refresh_from_db()
-                        self.assertEqual(row.public_access, '')
+                        self.assertEqual(row.public_access, ACCESS_TYPE_NONE)
                         self.assertEqual([call[2] for call in self.take_calls()], [WRITE_ACTION_EDIT])
+                        type(row).objects.filter(id=row.id).update(public_access='')
 
 
 class SearchIndexOnCommitTest(OCLAPITestCase):
@@ -381,6 +396,20 @@ class SearchIndexOnCommitTest(OCLAPITestCase):
 
         handle_save_task.apply_async.assert_called_once()
         after.assert_called_once_with()
+
+
+class IndexEnqueueUnderAutocommitTest(OCLAPITransactionTestCase):
+    @patch('core.common.models.handle_save')
+    def test_a_failed_index_enqueue_under_autocommit_reaches_the_write(self, handle_save_task):
+        """With no transaction the enqueue runs at once, and isn't robust: the write gets the broker's error."""
+        handle_save_task.apply_async.side_effect = ConnectionError('broker down')
+        source = OrganizationSourceFactory()
+        self.assertFalse(transaction.get_connection().in_atomic_block)
+
+        with override_settings(TEST_MODE=False, ES_SYNC=True), self.assertRaises(ConnectionError):
+            CelerySignalProcessor.handle_save(None, Source, source)
+
+        handle_save_task.apply_async.assert_called_once()
 
 
 @override_settings(CAPABILITY_POLICY=PRIVATE_GATE_POLICY)
@@ -416,6 +445,19 @@ class ImportPrivateRepositoryTest(MakePrivateTestMixin, OCLAPITestCase):
         self.assertEqual(
             [(call[1].mnemonic, call[2]) for call in self.take_calls()],
             [('private-source', WRITE_ACTION_MAKE_PRIVATE), ('private-collection', WRITE_ACTION_MAKE_PRIVATE)])
+
+    def test_a_blank_access_line_is_stored_as_private(self):
+        """An import passes public_access to the model, which allows a blank: it's stored as None, and asked."""
+        PrivateGatePolicy.refuse = False
+        self.assertNotIn('blank-source', self.anonymous_list_ids('sources'))
+        importer = BulkImportInline(
+            json.dumps(self.line('Source', 'blank-source', public_access='')), self.user.username, True)
+        importer.run()
+
+        self.assertEqual([item['id'] for item in importer.created], ['blank-source'])
+        self.assertEqual(Source.objects.get(mnemonic='blank-source', version='HEAD').public_access, ACCESS_TYPE_NONE)
+        self.assertEqual([call[2] for call in self.take_calls()], [WRITE_ACTION_MAKE_PRIVATE])
+        self.assertNotIn('blank-source', self.anonymous_list_ids('sources'))
 
     def test_a_private_repository_in_a_package_is_refused_with_the_body(self):
         result = ResourceImporter().import_resource(

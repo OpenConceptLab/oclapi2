@@ -40,7 +40,7 @@ from . import ERRBIT_LOGGER
 from .checksums import ChecksumModel
 from .constants import (
     ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX,
-    ACCESS_TYPE_VIEW, SUPER_ADMIN_USER_ID,
+    ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE, SUPER_ADMIN_USER_ID,
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
     CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, OPENMRS_VALIDATION_SCHEMA, VALIDATION_SCHEMAS,
     DEFAULT_VALIDATION_SCHEMA, ES_REQUEST_TIMEOUT, UPDATED_BY_USERNAME_PARAM, ES_RETRYABLE_ERROR_TYPES,
@@ -1237,6 +1237,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         persisted = False
         obj.version = HEAD
+        obj.store_blank_access_as_none()
         check_make_private(user, obj, None)  # a new private repository: the capability policy may refuse it
         try:
             obj.save(**kwargs)
@@ -1342,6 +1343,11 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     def get_expansion_choice(self, expansion=None):  # pylint: disable=unused-argument
         return None
 
+    def store_blank_access_as_none(self):
+        """A blank access is private (public_can_view): it's stored as None, the value the lists read as private"""
+        if self.public_access == '':
+            self.public_access = ACCESS_TYPE_NONE
+
     @classmethod
     def persist_changes(cls, obj, updated_by, original_schema, **kwargs):  # pylint: disable=too-many-locals,too-many-branches
         """
@@ -1360,9 +1366,11 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         try:
             with transaction.atomic() if keep_private else nullcontext():
                 stored_rows = cls.objects.filter(id=obj.id)
-                original_repo = (stored_rows.select_for_update() if keep_private else stored_rows).first()
+                # no key update, so a concurrent child write's foreign-key check on the row isn't blocked
+                original_repo = (stored_rows.select_for_update(no_key=True) if keep_private else stored_rows).first()
                 if keep_private and not original_repo.public_can_view:
                     obj.public_access = original_repo.public_access
+                obj.store_blank_access_as_none()
 
                 is_source = cls.__name__ == 'Source'
                 should_reindex_resources = is_source and obj.released != original_repo.released
@@ -2018,11 +2026,15 @@ class CelerySignalProcessor(RealTimeSignalProcessor):
             if get(settings, 'TEST_MODE', False):
                 handle_save(instance.app_name, instance.model_name, instance.id)
             else:
-                # once committed, so the task reads the row as saved (at once outside a transaction); robust, so a
-                # failed enqueue doesn't stop the transaction's other callbacks, such as a version's seed task
+                # once committed, so the task reads the row as saved. Deferred in a transaction, it's robust, so a
+                # failed enqueue doesn't stop the transaction's other callbacks (a version's seed task); at once under
+                # autocommit, its error reaches the write, as before
                 args = (instance.app_name, instance.model_name, instance.id)
-                transaction.on_commit(
-                    lambda: handle_save.apply_async(args, queue='indexing', permanent=False), robust=True)
+                connection = transaction.get_connection(using=instance._state.db)  # pylint: disable=protected-access
+                connection.on_commit(
+                    lambda: handle_save.apply_async(args, queue='indexing', permanent=False),
+                    robust=connection.in_atomic_block,
+                )
 
     def handle_m2m_changed(self, sender, instance, action, **kwargs):
         if settings.ES_SYNC and instance.__class__ in registry.get_models() and instance.should_index:
