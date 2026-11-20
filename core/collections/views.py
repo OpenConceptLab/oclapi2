@@ -98,6 +98,10 @@ class CollectionBaseView(BaseAPIView):
     def set_parent_resource(self):
         self.kwargs['parent_resource'] = self.parent_resource = self.get_owner_from_kwargs()
 
+    def filter_retired_members(self, queryset):
+        """A list of the collection's concepts or mappings: retired ones are left out only for includeRetired=false"""
+        return queryset.filter(retired=False) if self._should_exclude_retired_from_search_results() else queryset
+
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context.update({'request': self.request, INCLUDE_REFERENCES_PARAM: self.should_include_references()})
@@ -1026,7 +1030,7 @@ class CollectionVersionExpansionConceptsView(CollectionVersionExpansionChildrenV
         return ConceptDetailSerializer if self.is_verbose() else ConceptListSerializer
 
     def get_queryset(self):
-        return super().get_queryset().concepts.filter()
+        return self.filter_retired_members(super().get_queryset().concepts.filter())
 
 
 class CollectionVersionExpansionMappingsView(CollectionVersionExpansionChildrenView):
@@ -1042,7 +1046,7 @@ class CollectionVersionExpansionMappingsView(CollectionVersionExpansionChildrenV
         return MappingDetailSerializer if self.is_verbose() else MappingListSerializer
 
     def get_queryset(self):
-        return super().get_queryset().mappings.filter()
+        return self.filter_retired_members(super().get_queryset().mappings.filter())
 
 
 class ExpansionResourcesIndexView(CollectionVersionExpansionBaseView, IndexingTaskMixin):
@@ -1086,7 +1090,7 @@ class CollectionVersionConceptsView(CollectionBaseView, ListWithHeadersMixin):
         expansion = self.get_object()
         queryset = Concept.objects.none()
         if expansion:
-            queryset = expansion.concepts.filter()
+            queryset = self.filter_retired_members(expansion.concepts.filter())
 
         return queryset
 
@@ -1194,7 +1198,7 @@ class CollectionVersionMappingsView(CollectionBaseView, ListWithHeadersMixin):
         queryset = Mapping.objects.none()
 
         if expansion:
-            queryset = expansion.mappings.filter()
+            queryset = self.filter_retired_members(expansion.mappings.filter())
 
         return queryset
 

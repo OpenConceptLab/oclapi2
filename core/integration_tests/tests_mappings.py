@@ -39,6 +39,84 @@ class MappingListPageSizeTest(OCLAPITestCase):
         self.assertNotIn('next', response)
 
 
+@tag('es')
+class MappingRetiredFacetCountsTest(OCLAPITestCase):
+    """
+    Facet counts follow the retired rule the results follow, and the retired facet counts both values.
+    See OpenConceptLab/ocl_issues#3057.
+    """
+    def setUp(self):
+        super().setUp()
+        org = OrganizationFactory()
+        self.source = OrganizationSourceFactory(organization=org, mnemonic='RetiredFacetsSource')
+        mappings = [
+            MappingFactory(mnemonic='ActiveSameAs', parent=self.source, map_type=SAME_AS),
+            MappingFactory(mnemonic='ActiveNarrower', parent=self.source, map_type='NARROWER-THAN'),
+            MappingFactory(mnemonic='RetiredSameAs', parent=self.source, map_type=SAME_AS, retired=True),
+        ]
+        versions = [mapping.get_latest_version() for mapping in mappings]
+        self.source.mappings.add(*versions)
+        self.collection = OrganizationCollectionFactory(organization=org, mnemonic='RetiredFacetsCollection')
+        self.expansion = ExpansionFactory(mnemonic='e1', collection_version=self.collection)
+        self.collection.expansion_uri = self.expansion.uri
+        self.collection.save()
+        self.expansion.mappings.add(*versions)
+        MappingDocument().update(self.source.mappings_set.all())
+
+    def get_facet_counts(self, url):
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        facets = response.data['facets']['fields']
+        return (
+            {value: count for value, count, _ in facets['mapType']},
+            {value: count for value, count, _ in facets['retired']}
+        )
+
+    def get_ids(self, url):
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        return sorted(mapping['id'] for mapping in response.data)
+
+    def test_source(self):
+        url = self.source.mappings_url
+        both = {'false': 2, 'true': 1}
+
+        self.assertEqual(
+            self.get_facet_counts(url + '?facetsOnly=true'), ({'same-as': 1, 'narrower-than': 1}, both))
+        self.assertEqual(
+            self.get_facet_counts(url + '?facetsOnly=true&includeRetired=true'),
+            ({'same-as': 2, 'narrower-than': 1}, both))
+        self.assertEqual(
+            self.get_facet_counts(url + '?facetsOnly=true&retired=false'), ({'same-as': 1, 'narrower-than': 1}, both))
+        self.assertEqual(self.get_ids(url + f'?mapType={SAME_AS}'), ['ActiveSameAs'])
+        self.assertEqual(
+            self.get_ids(url + f'?mapType={SAME_AS}&includeRetired=true'), ['ActiveSameAs', 'RetiredSameAs'])
+
+    def test_expansion(self):
+        url = self.expansion.url + 'mappings/'
+        both = {'false': 2, 'true': 1}
+
+        self.assertEqual(
+            self.get_facet_counts(url + '?facetsOnly=true'), ({'same-as': 2, 'narrower-than': 1}, both))
+        self.assertEqual(
+            self.get_facet_counts(url + '?facetsOnly=true&includeRetired=false'),
+            ({'same-as': 1, 'narrower-than': 1}, both))
+        self.assertEqual(
+            self.get_facet_counts(url + '?facetsOnly=true&retired=false'), ({'same-as': 1, 'narrower-than': 1}, both))
+        self.assertEqual(self.get_ids(url), ['ActiveNarrower', 'ActiveSameAs', 'RetiredSameAs'])
+        self.assertEqual(self.get_ids(url + '?includeRetired=false'), ['ActiveNarrower', 'ActiveSameAs'])
+        self.assertEqual(self.get_ids(url + f'?mapType={SAME_AS}&includeRetired=false'), ['ActiveSameAs'])
+
+    def test_collection(self):
+        url = self.collection.mappings_url
+
+        self.assertEqual(self.get_ids(url), ['ActiveNarrower', 'ActiveSameAs', 'RetiredSameAs'])
+        self.assertEqual(self.get_ids(url + '?includeRetired=false'), ['ActiveNarrower', 'ActiveSameAs'])
+        self.assertEqual(
+            self.get_facet_counts(url + '?facetsOnly=true&includeRetired=false'),
+            ({'same-as': 1, 'narrower-than': 1}, {'false': 2, 'true': 1}))
+
+
 class MappingListViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()

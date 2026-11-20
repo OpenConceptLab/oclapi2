@@ -309,7 +309,7 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
 class ExpansionSummarySerializer(ModelSerializer):
     class Meta:
         model = Expansion
-        fields = ('active_concepts', 'active_mappings')
+        fields = ('active_concepts', 'active_mappings', 'retired_concepts', 'retired_mappings')
 
 
 class CollectionSummarySerializer(ModelSerializer):

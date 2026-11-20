@@ -40,6 +40,7 @@ from core.orgs.constants import ORG_OBJECT_TYPE
 from core.users.constants import USER_OBJECT_TYPE, LIST_UNPAGINATED_PERMISSION
 
 TRUTHY = get_truthy_values()
+FALSY = get_falsy_values()
 
 
 class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
@@ -79,13 +80,32 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def has_parent_scope(self):
         return self.has_owner_scope() and self.has_concept_container_scope()
 
+    def is_collection_members_list(self):
+        """A collection's (or expansion's) concepts or mappings, which include retired ones by default."""
+        return 'expansion' in self.kwargs or ('collection' in self.kwargs and self.is_source_child_document_model())
+
     def _should_exclude_retired_from_search_results(self):
-        if self.is_owner_document_model() or 'expansion' in self.kwargs or self.is_url_registry_document():
+        if self.is_owner_document_model() or self.is_url_registry_document():
             return False
 
         params = get(self, 'params') or self.request.query_params.dict()
+        if self.is_collection_members_list():
+            return params.get(INCLUDE_RETIRED_PARAM, None) in FALSY
         include_retired = params.get('retired', None) in TRUTHY or params.get(INCLUDE_RETIRED_PARAM, None) in TRUTHY
         return not include_retired
+
+    def get_retired_criterion(self):
+        """
+        What the results ask of `retired`: the retired rule above and any `retired` filter. The facets count within
+        it, all but the `retired` facet, which counts both values so a client can show how many are retired.
+        """
+        criterion = Q('term', retired=False) if self._should_exclude_retired_from_search_results() else None
+        query_params = self.request.query_params
+        retired_filter = self.get_faceted_criterion(
+            params={'retired': query_params['retired']}) if 'retired' in query_params else None
+        if retired_filter is not None:
+            criterion = retired_filter if criterion is None else criterion & retired_filter
+        return criterion
 
     def should_include_inactive(self):
         return self.request.query_params.get(INCLUDE_INACTIVE) in TRUTHY
@@ -595,7 +615,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             params = {
                 'query': self.get_search_string(lower=False),
                 '_search': self.__get_search_results(
-                    ignore_retired_filter=True, sort=False, highlight=False, force=True)
+                    ignore_retired_filter=True, sort=False, highlight=False, force=True),
+                'filters': {'retired': self.get_retired_criterion()}
             }
             if 'source' in self.kwargs and self.is_concept_document():
                 parent_repo = params['parent'] = get(self, 'parent_resource')
@@ -849,7 +870,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             self.get_scope_owner_criteria() if self._should_include_private() else self.get_public_criteria())
         if visibility_criteria is not None:
             results = results.filter(visibility_criteria)
-        faceted_criterion = self.get_faceted_criterion()
+        params = None
+        if ignore_retired_filter:  # the facets apply the retired rule and the `retired` filter (get_retired_criterion)
+            params = self.request.query_params.dict()
+            params.pop('retired', None)
+        faceted_criterion = self.get_faceted_criterion(params=params)
         if faceted_criterion:
             results = results.filter(faceted_criterion)
         return results

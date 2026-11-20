@@ -650,6 +650,32 @@ class OrganizationRepoListViewDbFirstTest(OCLAPITestCase):
 
 
 @tag('es')
+class ReposListRetiredFacetCountsTest(OCLAPITestCase):
+    def test_facets_follow_the_retired_rule(self):  # OpenConceptLab/ocl_issues#3057
+        org = OrganizationFactory(mnemonic='retired-facets-org')
+        OrganizationSourceFactory(organization=org, mnemonic='active-source')
+        OrganizationSourceFactory(organization=org, mnemonic='retired-source', retired=True)
+        OrganizationCollectionFactory(organization=org, mnemonic='active-collection')
+        SourceDocument().update(Source.objects.filter(organization=org))
+        CollectionDocument().update(Collection.objects.filter(organization=org))
+
+        def get_facet_counts(params):
+            response = self.client.get(org.uri + 'repos/?facetsOnly=true' + params)
+            self.assertEqual(response.status_code, 200)
+            facets = response.data['facets']['fields']
+            return (
+                {value: count for value, count, _ in facets['repoType']},
+                {value: count for value, count, _ in facets['retired']}
+            )
+
+        both = {'false': 2, 'true': 1}
+        self.assertEqual(len(self.client.get(org.uri + 'repos/').data), 2)
+        self.assertEqual(get_facet_counts(''), ({'Source': 1, 'Collection': 1}, both))
+        self.assertEqual(get_facet_counts('&includeRetired=true'), ({'Source': 2, 'Collection': 1}, both))
+        self.assertEqual(get_facet_counts('&retired=false'), ({'Source': 1, 'Collection': 1}, both))
+
+
+@tag('es')
 class OtherUserOrganizationListsTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
