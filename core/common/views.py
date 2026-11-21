@@ -899,7 +899,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         for key, value in kwargs_filters.items():
             attr = to_snake_case(key)
-            if isinstance(value, list):
+            if value is None:  # a version that doesn't resolve, such as `latest` with no release: nothing matches
+                results = results.filter(Q('match_none'))
+            elif isinstance(value, list):
                 criteria = Q('term', **{attr: get(value, '0')})
                 for val in value[1:]:
                     criteria |= Q('term', **{attr: val})

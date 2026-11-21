@@ -879,14 +879,17 @@ class CollectionReference(models.Model):
         return Concept.objects.filter(id__in=concept_ids), Mapping.objects.filter(id__in=mapping_ids)
 
     def _can_view_cascade_version(self, concept, repo_version, viewable_by_source):
-        """A source version the cascade names by label is walked only if the reference's creator can view it; one they
-        can't is walked as if it didn't exist, as for an unknown label. The system version is checked on its own."""
-        if not isinstance(repo_version, str):
+        """The repo version a cascade walks (named by label, or the reference's system or value set version) must be
+        one the reference's creator can view; one they can't is walked as if it didn't exist, as for an unknown label.
+        """
+        if not repo_version:
             return True
-        if concept.parent_id not in viewable_by_source:
-            version = concept.parent.versions.filter(version=decode_string(repo_version)).first()
-            viewable_by_source[concept.parent_id] = not version or version.can_view_all_content(self.created_by)
-        return viewable_by_source[concept.parent_id]
+        key = concept.parent_id if isinstance(repo_version, str) else None
+        if key not in viewable_by_source:
+            version = concept.parent.versions.filter(
+                version=decode_string(repo_version)).first() if key else repo_version
+            viewable_by_source[key] = not version or version.can_view_all_content(self.created_by)
+        return viewable_by_source[key]
 
     def get_mappings(self, system_version=None):
         queryset = self.get_resource_queryset_from_system_and_valueset('mappings', system_version)

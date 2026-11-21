@@ -590,6 +590,11 @@ class FuzzySearchScopeTest(PrivateReleaseOfPublicHeadMixin, CrossRepoAccessBaseT
                 self.search(self.head.uri, user, 'zebrastripe'), (200, [self.head_revision.version]), user)
             self.assertEqual(self.search(public_release_url, user, 'zebrastripe'), (200, []), user)
 
+        no_release = OrganizationSourceFactory(public_access=ACCESS_TYPE_VIEW)
+        self.assertEqual(self.search(no_release.uri + 'latest/'), (200, []))
+        response = self.client.get(no_release.uri + 'latest/concepts/?q=zebrafinch')
+        self.assertEqual((response.status_code, response.data), (200, []))
+
         self.assertEqual(self.search(self.head.uri + 'v1/')[0], 401)
         self.assertEqual(self.search(self.head.uri + 'v1/', self.outsider)[0], 403)
         self.assertEqual(
@@ -609,17 +614,23 @@ class CascadeSourceVersionAccessTest(PrivateReleaseOfPublicHeadMixin, CrossRepoA
         self.released_target, _ = self.move_head_on(target, concept_class='Misc')
         self.released_mapping, _ = self.move_head_on(mapping, map_type='NARROWER-THAN')
 
-    def add_reference(self, user, method):
+    @staticmethod
+    def new_collection(user, concepts=()):
         collection = UserCollectionFactory(user=user)
         expansion = ExpansionFactory(collection_version=collection)
         collection.expansion_uri = expansion.uri
         collection.save()
+        expansion.concepts.add(*concepts)
+        return collection, expansion
+
+    def add_reference(self, user, method, **expression):
+        collection, expansion = self.new_collection(user)
         root = self.root.get_latest_version()
+        expression = {'system': self.head.uri, 'version': 'HEAD',
+                      'cascade': {'method': method, 'cascade_levels': '*', 'source_version': 'v1'}, **expression}
         response = self.client.put(
             collection.uri + 'references/',
-            {'data': [{'system': self.head.uri, 'version': 'HEAD',
-                       'cascade': {'method': method, 'cascade_levels': '*', 'source_version': 'v1'},
-                       'concept': [{'code': 'root', 'resource_version': root.version}]}]},
+            {'data': [{**expression, 'concept': [{'code': 'root', 'resource_version': root.version}]}]},
             HTTP_AUTHORIZATION='Token ' + user.get_token(), format='json')
         self.assertEqual(response.status_code, 200, response.data)
         expansion.refresh_from_db()
@@ -636,3 +647,13 @@ class CascadeSourceVersionAccessTest(PrivateReleaseOfPublicHeadMixin, CrossRepoA
             (sorted([root.id, self.released_target.id]), [self.released_mapping.id]))
         self.assertEqual(
             self.add_reference(self.admin, 'sourcemappings'), ([root.id], [self.released_mapping.id]))
+
+    def test_cascade_over_a_system_version_its_creator_cannot_view_adds_only_the_concept(self):
+        root = self.root.get_latest_version()
+        value_set, _ = self.new_collection(self.admin, [root])
+        expression = {'version': 'v1', 'valueset': [value_set.uri], 'cascade': 'sourcetoconcepts'}
+
+        self.assertEqual(self.add_reference(self.outsider, None, **expression), ([root.id], []))
+        self.assertEqual(
+            self.add_reference(self.member, None, **expression),
+            (sorted([root.id, self.released_target.id]), [self.released_mapping.id]))
