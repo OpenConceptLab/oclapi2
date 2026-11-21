@@ -332,8 +332,7 @@ class CollectionReferenceAbstractResourcesView(CollectionBaseView, ListWithHeade
 
         self.check_object_permissions(self.request, collection)
 
-        reference_id = to_int(self.kwargs.get('reference'), None)
-        reference = collection.references.filter(id=reference_id).first() if reference_id else None
+        reference = collection.references.filter(id=to_int(self.kwargs.get('reference'), None)).first()
         if not reference:
             raise Http404()
 
