@@ -1230,18 +1230,19 @@ class RepoAccessMixin(AccessTestMixin):
             self.assertEqual(self.request(method, url).status_code, 401, method)
         self.assert_versions_listed(url, self.member, [version, newer_version])
 
-    def test_released_versions_list_answers_as_the_repos_it_lists(self):
+    def test_versions_list_check_covers_every_repo_named_whatever_the_filters(self):
         private_repo = self.org_repo_factory(  # pylint: disable=not-callable
-            organization=self.org, public_access=ACCESS_TYPE_NONE)
+            organization=self.org, public_access=ACCESS_TYPE_NONE)  # no release
         public_versions = self.create_released_repo(OrganizationFactory(), ACCESS_TYPE_VIEW)
-        url = self.get_versions_url(private_repo, public_versions[0])
+        urls = [private_repo.uri + 'versions/', self.get_versions_url(private_repo, public_versions[0])]
 
-        for user in [None, self.outsider]:
-            response = self.request('get', url + '?released=true', user)
-            self.assertEqual(response.status_code, 200, user)
-            self.assertEqual([item['version_url'] for item in response.data], [public_versions[1].uri], user)
-        self.assertEqual(self.request('get', url, self.outsider).status_code, 403)
-        self.assertEqual(self.request('get', url + '?released=false', self.outsider).status_code, 403)
+        for url in urls:
+            for query in ['?released=true', '?released=false', '?processing=true']:
+                for method in ('get', 'head'):
+                    self.assertEqual(self.request(method, url + query, self.outsider).status_code, 403, url + query)
+                    self.assertEqual(self.request(method, url + query).status_code, 401, url + query)
+        response = self.request('get', urls[1] + '?released=true', self.member)
+        self.assertEqual([item['version_url'] for item in response.data], [public_versions[1].uri])
 
     def test_version_create(self):
         repo = self.create_repo()

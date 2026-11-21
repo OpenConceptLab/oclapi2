@@ -743,9 +743,9 @@ class CollectionVersionListView(
         return CollectionVersionListSerializer
 
     def get(self, request, *args, **kwargs):
+        self.check_repos_permissions()  # before `released`, so it answers for every repository the URL names
         self.released_filter = parse_boolean_query_param(request, RELEASED_PARAM, self.released_filter)
         self.processing_filter = parse_boolean_query_param(request, PROCESSING_PARAM, self.processing_filter)
-        self.check_repos_permissions()  # on the versions listed, after the filters
         return self.list(request, *args, **kwargs)
 
     def create(self, request, *args, **kwargs):
