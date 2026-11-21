@@ -1291,10 +1291,12 @@ class SourceChildCommonBaseView(BaseAPIView):
     def check_query_source_version_access(self, request):
         """
         The query string can name the source, its owner and its version over the URL's, and the reads then answer
-        from those. When it names a version other than HEAD this way, 401 or 403 unless the requester can view that
-        version of each source it names (commas separate several), of the owner it names or, when it names none,
-        of every owner with that version, along with each one's HEAD, as check_source_version_access does for the
-        URL's. HEAD's own content carries its access, so reads of it are checked where they're made.
+        from those. When it names a version other than HEAD this way, each source it names (commas separate
+        several) answers as check_source_version_access does for the URL's: 404 unless the source and that version
+        exist under the owner it names, then 401 or 403 unless the requester can view both. `latest` is the newest
+        released version, as the reads resolve it. With no owner (none in the URL, or an empty `org`), no owner
+        names the version, so 404. On a collection's route, the URL's version is the collection's, left to its own
+        checks. HEAD's own content carries its access, so reads of it are checked where they're made.
         """
         from core.sources.models import Source
         params = self.params or {}
@@ -1302,15 +1304,21 @@ class SourceChildCommonBaseView(BaseAPIView):
         if not params.get('source') or version in [None, HEAD]:
             return
         owner_filters = self.get_parent_owner_filters(params)
-        if (params['source'], version) == (self.kwargs.get('source'), self.kwargs.get('version')) and (
-                owner_filters == self.get_parent_owner_filters()):
-            return  # the URL's own, checked already
-        heads = Source.objects.filter(
-            mnemonic__in=compact(params['source'].split(',')), version=HEAD, **owner_filters)
-        for head in heads:
-            for repo_version in Source.get_url_versions(
-                    head.mnemonic, version, {'organization_id': head.organization_id, 'user_id': head.user_id}) or []:
-                self.check_view_access(request, repo_version)
+        url_repo = 'source' if 'source' in self.kwargs else 'collection'
+        if (version, params.get(url_repo), owner_filters) == (
+                self.kwargs.get('version'), self.kwargs.get(url_repo), self.get_parent_owner_filters()):
+            return  # the URL's own version, checked already
+        if not owner_filters:
+            raise Http404()
+        for mnemonic in compact(params['source'].split(',')):
+            head = Source.get_version(mnemonic, HEAD, owner_filters)
+            repo_version = Source.find_latest_released_version_by(
+                {**owner_filters, 'mnemonic': mnemonic}) if version == LATEST else Source.get_version(
+                mnemonic, version, owner_filters)
+            if not head or not (repo_version or version == LATEST):
+                raise Http404()
+            for viewed in compact([head, repo_version]):
+                self.check_view_access(request, viewed)
 
 
 class SourceChildExtrasBaseView:
