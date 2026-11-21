@@ -1,5 +1,6 @@
 from core.common.constants import (
-    LAST_LOGIN_BEFORE_PARAM, LAST_LOGIN_SINCE_PARAM, DATE_JOINED_BEFORE_PARAM, DATE_JOINED_SINCE_PARAM, UPDATED_SINCE_PARAM)
+    LAST_LOGIN_BEFORE_PARAM, LAST_LOGIN_SINCE_PARAM, DATE_JOINED_BEFORE_PARAM, DATE_JOINED_SINCE_PARAM,
+    UPDATED_SINCE_PARAM)
 from core.common.tests import OCLAPITestCase
 from core.concepts.tests.factories import ConceptFactory
 from core.sources.tests.factories import OrganizationSourceFactory
