@@ -35,8 +35,12 @@ class ConceptFeed(Feed, FeedFilterMixin):
         if 'version' not in kwargs:
             return True
         from core.sources.models import Source
-        owner_filters = {'organization__mnemonic': kwargs['org']} if 'org' in kwargs else {
-            'user__username': kwargs['user']}
+        if 'org' in kwargs:
+            owner_filters = {'organization__mnemonic': kwargs['org']}
+        elif 'user' in kwargs:
+            owner_filters = {'user__username': kwargs['user']}
+        else:  # /sources/<source>/<version>/: no owner names the version
+            return False
         versions = Source.get_url_versions(kwargs['source'], kwargs['version'], owner_filters)
         return bool(versions) and all(version.is_publicly_viewable for version in versions)
 

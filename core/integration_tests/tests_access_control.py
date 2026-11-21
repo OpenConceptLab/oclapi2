@@ -1503,6 +1503,8 @@ class SourceVersionReadAccessTest(SourceVersionReadAccessMixin, OCLAPITestCase):
             self.assertEqual(self.request('get', url).status_code, 404, url)
         for url in [self.source.uri + feed, public_version.uri + feed]:
             self.assertEqual(self.request('get', url).status_code, 200, url)
+        # /sources/<source>/<version>/ names no owner, so no version
+        self.assertEqual(self.request('get', f'/sources/{self.source.mnemonic}/v0/{feed}').status_code, 404)
 
     def test_concept_feeds_under_the_current_user_route_need_a_signed_in_user(self):
         # feeds are read signed out, so /user/ names no source of anyone's
