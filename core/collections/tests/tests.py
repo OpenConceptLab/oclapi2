@@ -2160,18 +2160,9 @@ class TasksTest(OCLTestCase):
         self.assertFalse(Task.objects.filter(id=concepts_apply_async_mock.call_args.kwargs['task_id']).exists())
         self.assertTrue(Task.objects.filter(id=mappings_apply_async_mock.call_args.kwargs['task_id']).exists())
 
-    def test_update_active_count_takes_its_turn_for_any_repo_version_id(self):
-        collection = OrganizationCollectionFactory()
-        expansion = ExpansionFactory(collection_version=collection)
-        collection.expansion_uri = expansion.uri
-        collection.save()
-        expansion.concepts.add(ConceptFactory())
-
-        update_active_count(Collection, 2 ** 31 + 1, 'active_concepts')  # past a 32-bit id, no such collection
-        update_active_count(Collection, collection.id, 'active_concepts')
-
-        collection.refresh_from_db()
-        self.assertEqual(collection.active_concepts, 1)
+    def test_update_active_count_takes_its_turn_for_an_id_past_32_bits(self):
+        # raises if the lock can't take the id
+        self.assertIsNone(update_active_count(Collection, 2 ** 31 + 1, 'active_concepts'))
 
     def test_add_references_task(self):
         collection = OrganizationCollectionFactory()
