@@ -600,6 +600,24 @@ class FuzzySearchScopeTest(PrivateReleaseOfPublicHeadMixin, CrossRepoAccessBaseT
         self.assertEqual(
             self.search(self.head.uri + 'v1/', self.member), (200, [self.released_revision.version]))
 
+    def test_search_on_the_user_shortcut_scopes_to_the_requesters_repositories(self):
+        source = UserSourceFactory(user=self.outsider, mnemonic='Mine', public_access=ACCESS_TYPE_NONE)
+        release = UserSourceFactory(
+            user=self.outsider, mnemonic='Mine', version='r1', released=True, public_access=ACCESS_TYPE_NONE)
+        concept = ConceptFactory(parent=source, mnemonic='mine', names=[ConceptNameFactory.build(name='kestrel')])
+        revision = concept.get_latest_version()
+        revision.sources.add(release)
+        collection = UserCollectionFactory(user=self.outsider, mnemonic='MyColl')
+        ConceptDocument().update(Concept.objects.all(), refresh=True)
+
+        self.assertEqual(self.search('/user/sources/Mine/latest/', self.outsider, 'kestrel'), (200, [revision.version]))
+        response = self.client.get('/user/sources/Mine/latest/concepts/?q=kestrel',
+                                   HTTP_AUTHORIZATION='Token ' + self.outsider_token)
+        self.assertEqual([row['version'] for row in response.data], [revision.version])
+        response = self.client.get(f'/user/collections/{collection.mnemonic}/concepts/?q=kestrel',
+                                   HTTP_AUTHORIZATION='Token ' + self.outsider_token)
+        self.assertEqual((response.status_code, response.data), (200, []))
+
 
 class CascadeSourceVersionAccessTest(PrivateReleaseOfPublicHeadMixin, CrossRepoAccessBaseTest):
     def setUp(self):
@@ -639,6 +657,12 @@ class CascadeSourceVersionAccessTest(PrivateReleaseOfPublicHeadMixin, CrossRepoA
 
     def test_cascade_over_a_release_its_creator_cannot_view_adds_only_the_concept(self):
         root = self.root.get_latest_version()
+        collection, expansion = self.new_collection(self.outsider)
+        response = self.client.put(
+            collection.uri + 'references/', {'data': [{'system': self.head.uri, 'concept': ['root']}]}, format='json')
+        self.assertEqual(response.status_code, 401)
+        self.assertFalse(expansion.concepts.exists())
+
         for method in ['sourcetoconcepts', 'sourcemappings']:
             self.assertEqual(self.add_reference(self.outsider, method), ([root.id], []), method)
 

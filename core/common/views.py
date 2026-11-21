@@ -496,6 +496,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             ) or field for field, config in es_fields.items() if config.get('facet', False)
         ]
 
+    @property
+    def url_username(self):
+        """The user the URL names, the requester on the /user/ shortcut."""
+        return self.kwargs.get('user') or (self.request.user.username if self.user_is_self else None)
+
     def get_facet_filters_from_kwargs(self):
         kwargs = self.kwargs
         filters = {}
@@ -504,7 +509,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if is_collection_specified:
             version = kwargs.get('version') or HEAD
             filters['collection'] = kwargs['collection']
-            collection_owner_url = f'/users/{kwargs["user"]}/' if is_user_specified else f'/orgs/{kwargs["org"]}/'
+            collection_owner_url = f'/orgs/{kwargs["org"]}/' if 'org' in kwargs else f'/users/{self.url_username}/'
             filters['collection_owner_url'] = collection_owner_url
             if 'expansion' in self.kwargs:
                 filters['expansion_url'] = (f"{collection_owner_url}collections/{filters['collection']}/{version}/"
@@ -538,7 +543,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             if is_version_specified:
                 container_version = self.kwargs['version']
                 is_latest_released = container_version == LATEST
-                params = {'user__username': self.kwargs.get('user'), 'organization__mnemonic': self.kwargs.get('org')}
+                params = {'user__username': self.url_username, 'organization__mnemonic': self.kwargs.get('org')}
                 if is_latest_released:
                     if is_source_specified:
                         from core.sources.models import Source
