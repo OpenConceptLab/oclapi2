@@ -1,5 +1,6 @@
 import csv
 import io
+import itertools
 import zipfile
 
 from mock import patch, Mock
@@ -1436,9 +1437,9 @@ class CollectionReferenceResourcesAccessTest(CollectionReferenceResourcesAccessM
                         self.assertEqual(self.request(method, url + query, self.member).status_code, 404, url + query)
                         self.assertEqual(self.request(method, url + query).status_code, 401, url + query)
 
-    def test_reference_lists_with_an_id_that_is_not_a_number_answer_404(self):
-        for resources in ['concepts', 'mappings']:
-            url = f'{self.version.uri}references/abc/{resources}/'
+    def test_reference_lists_with_an_invalid_id_answer_404(self):
+        for resources, reference_id in itertools.product(['concepts', 'mappings'], ['abc', '9' * 30, '9' * 5000]):
+            url = f'{self.version.uri}references/{reference_id}/{resources}/'
             for query in self.reference_list_queries:
                 for method in ('get', 'head'):
                     self.assertEqual(self.request(method, url + query, self.member).status_code, 404, url + query)

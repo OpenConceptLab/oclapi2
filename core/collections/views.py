@@ -56,7 +56,7 @@ from core.common.swagger_parameters import q_param, compress_header, page_param,
 from core.common.tasks import add_references, export_collection, delete_collection, index_expansion_concepts, \
     index_expansion_mappings, seed_children_to_expansion, collection_version_compare, expansion_compare
 from core.common.throttling import ThrottleUtil
-from core.common.utils import compact_dict_by_values, parse_boolean_query_param
+from core.common.utils import compact_dict_by_values, parse_boolean_query_param, to_int
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
@@ -323,7 +323,7 @@ class CollectionReferenceAbstractResourcesView(CollectionBaseView, ListWithHeade
     def get_reference(self):
         """
         The reference in the URL. Its collection version answers 404 when it doesn't exist and 401 or 403 to those who
-        can't view it, and a reference that version doesn't hold, or an ID that isn't a number, answers 404.
+        can't view it, and a reference that version doesn't hold, or an ID no reference can have, answers 404.
         """
         collection = super().get_queryset().filter(is_active=True).order_by('-created_at').first()
 
@@ -332,8 +332,8 @@ class CollectionReferenceAbstractResourcesView(CollectionBaseView, ListWithHeade
 
         self.check_object_permissions(self.request, collection)
 
-        reference_id = str(self.kwargs.get('reference'))
-        reference = collection.references.filter(id=reference_id).first() if reference_id.isdecimal() else None
+        reference_id = to_int(self.kwargs.get('reference'), None)
+        reference = collection.references.filter(id=reference_id).first() if reference_id else None
         if not reference:
             raise Http404()
 
