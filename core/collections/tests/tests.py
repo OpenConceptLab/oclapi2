@@ -40,7 +40,8 @@ from core.common.constants import OPENMRS_VALIDATION_SCHEMA, ACCESS_TYPE_NONE, A
 from core.common.tasks import add_references, seed_children_to_new_version, seed_children_to_expansion
 from core.common.tasks import update_collection_active_concepts_count
 from core.common.tasks import update_collection_active_mappings_count
-from core.common.tasks import update_source_active_concepts_count, update_source_active_mappings_count
+from core.common.tasks import update_source_active_concepts_count, update_source_active_mappings_count, \
+    update_active_count
 from core.common.tests import OCLTestCase, OCLAPITestCase, OCLAPITransactionTestCase
 from core.common.utils import to_owner_uri, get_falsy_values, drop_version
 from core.concepts.documents import ConceptDocument
@@ -2155,6 +2156,22 @@ class TasksTest(OCLTestCase):
 
         concepts_apply_async_mock.assert_called_once_with((collection.id,), task_id=ANY, queue='concurrent')
         mappings_apply_async_mock.assert_called_once_with((collection.id,), task_id=ANY, queue='concurrent')
+        # the one that wasn't queued leaves no task behind
+        self.assertFalse(Task.objects.filter(id=concepts_apply_async_mock.call_args.kwargs['task_id']).exists())
+        self.assertTrue(Task.objects.filter(id=mappings_apply_async_mock.call_args.kwargs['task_id']).exists())
+
+    def test_update_active_count_takes_its_turn_for_any_repo_version_id(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.concepts.add(ConceptFactory())
+
+        update_active_count(Collection, 2 ** 31 + 1, 'active_concepts')  # past a 32-bit id, no such collection
+        update_active_count(Collection, collection.id, 'active_concepts')
+
+        collection.refresh_from_db()
+        self.assertEqual(collection.active_concepts, 1)
 
     def test_add_references_task(self):
         collection = OrganizationCollectionFactory()

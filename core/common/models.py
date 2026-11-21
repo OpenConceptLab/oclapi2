@@ -889,10 +889,15 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         def queue():
             from core.tasks.models import Task
             task = Task.new(name=job.__name__, queue='concurrent', user=user)
+            queued = False
             try:
                 job.apply_async((self.id,), task_id=task.id, queue='concurrent')
+                queued = True
             except AlreadyQueued:
-                task.delete()
+                pass
+            finally:
+                if not queued:  # no task to show
+                    task.delete()
 
         transaction.on_commit(queue, robust=True)
 

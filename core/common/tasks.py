@@ -991,25 +991,22 @@ def index_source_public_access(self, source_id):
 # committed meanwhile (one queued before it starts is dropped, as that one reads it anyway). Counts of one repo version
 # and field then take turns on an advisory lock, so the last to run is the last to save.
 COUNT_TASK_ONCE = {'unlock_before_run': True}
-COUNT_LOCK_CLASSES = {
-    'source.active_concepts': 30581, 'source.active_mappings': 30582,
-    'collection.active_concepts': 30583, 'collection.active_mappings': 30584,
-}
 
 
 def update_active_count(model, instance_id, field):
     with transaction.atomic():
         with connection.cursor() as cursor:
             cursor.execute(
-                'SELECT pg_advisory_xact_lock(%s, %s)',
-                [COUNT_LOCK_CLASSES[f'{model.__name__.lower()}.{field}'], instance_id]
+                'SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))',
+                [f'{model.__name__}.{field}.{instance_id}']
             )
         instance = model.objects.filter(id=instance_id).first()
         if instance:
             before = getattr(instance, field)
             getattr(instance, f'set_{field}')()
             if before != getattr(instance, field):
-                instance.save(update_fields=[field])
+                # an update, not a save: search documents hold no counts, so there's nothing to index
+                model.objects.filter(id=instance_id).update(**{field: getattr(instance, field)})
 
 
 @app.task(base=QueueOnceCustomTask, once=COUNT_TASK_ONCE)
