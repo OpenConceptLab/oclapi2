@@ -1497,6 +1497,17 @@ class CollectionReferenceResourcesAccessTest(CollectionReferenceResourcesAccessM
                     self.assertEqual(self.request(method, url + query, self.member).status_code, 404, url + query)
                     self.assertEqual(self.request(method, url + query, self.outsider).status_code, 403, url + query)
 
+    def test_reference_lists_with_another_spelling_of_an_id_answer_404(self):
+        reference_id = str(self.version.references.get().id)
+        full_width = ''.join(chr(ord(digit) + 0xFEE0) for digit in reference_id)
+        spellings = [f'0_{reference_id}', f'+{reference_id}', full_width]
+        for resources, spelling in itertools.product(['concepts', 'mappings'], spellings):
+            url = f'{self.version.uri}references/{spelling}/{resources}/'
+            for method in ('get', 'head'):
+                self.assertEqual(self.request(method, url, self.member).status_code, 404, (method, url))
+        self.assertEqual(
+            self.request('get', f'{self.version.uri}references/{reference_id}/concepts/', self.member).status_code, 200)
+
     def test_version_reference_count_answers_as_the_list(self):
         url = self.version.uri + 'references/'
 

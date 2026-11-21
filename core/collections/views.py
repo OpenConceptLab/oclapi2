@@ -332,7 +332,9 @@ class CollectionReferenceAbstractResourcesView(CollectionBaseView, ListWithHeade
 
         self.check_object_permissions(self.request, collection)
 
-        reference = collection.references.filter(id=to_int(self.kwargs.get('reference'), None)).first()
+        reference_id = str(self.kwargs.get('reference'))  # versioned routes take any string; IDs are ASCII digits only
+        reference = collection.references.filter(id=to_int(reference_id, None)).first() if (
+            reference_id.isascii() and reference_id.isdigit()) else None
         if not reference:
             raise Http404()
 
