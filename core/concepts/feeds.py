@@ -15,9 +15,13 @@ class ConceptFeed(Feed, FeedFilterMixin):
     limit = 0
 
     def get_object(self, request, *args, **kwargs):
+        if kwargs.pop('user_is_self', False):  # /user/ routes: the signed-in user's own source
+            if not request.user.is_authenticated:
+                raise Http404()
+            kwargs['user'] = request.user.username
         concept = Concept.get_base_queryset(kwargs).first()
         # feeds are served without authentication, so only concepts of public sources, under public versions, have one
-        if not concept or not concept.parent.public_can_view or not self.is_public_url_version(request, kwargs):
+        if not concept or not concept.parent.public_can_view or not self.is_public_url_version(kwargs):
             raise Http404()
 
         self.source = concept.parent
@@ -26,13 +30,13 @@ class ConceptFeed(Feed, FeedFilterMixin):
         return concept
 
     @staticmethod
-    def is_public_url_version(request, kwargs):
+    def is_public_url_version(kwargs):
         """Whether the source version a versioned URL names exists and is public (for `latest`, each it reads)."""
         if 'version' not in kwargs:
             return True
         from core.sources.models import Source
         owner_filters = {'organization__mnemonic': kwargs['org']} if 'org' in kwargs else {
-            'user__username': kwargs.get('user') or request.user.username}
+            'user__username': kwargs['user']}
         versions = Source.get_url_versions(kwargs['source'], kwargs['version'], owner_filters)
         return bool(versions) and all(version.is_publicly_viewable for version in versions)
 

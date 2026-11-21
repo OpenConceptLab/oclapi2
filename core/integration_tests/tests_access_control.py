@@ -1509,6 +1509,12 @@ class SourceVersionReadAccessTest(SourceVersionReadAccessMixin, OCLAPITestCase):
         for url in [self.source.uri + feed, public_version.uri + feed]:
             self.assertEqual(self.request('get', url).status_code, 200, url)
 
+    def test_concept_feeds_under_the_current_user_route_need_a_signed_in_user(self):
+        # feeds are read signed out, so /user/ names no source of anyone's
+        for version in ['', 'v1/', 'latest/']:
+            url = f'/user/sources/{self.source.mnemonic}/{version}concepts/{self.concept.mnemonic}/atom/'
+            self.assertEqual(self.client.get(url).status_code, 404, url)
+
 
 @tag('es')
 class SourceVersionSearchAccessTest(SourceVersionReadAccessMixin, OCLAPITestCase):
