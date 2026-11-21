@@ -1497,6 +1497,18 @@ class SourceVersionReadAccessTest(SourceVersionReadAccessMixin, OCLAPITestCase):
         self.assertEqual(self.request('get', own_url, self.outsider).status_code, 404)
         self.assertEqual(self.request('get', concept.uri, self.outsider).status_code, 200)
 
+    def test_concept_feeds_answer_only_under_public_versions(self):
+        feed = f'concepts/{self.concept.mnemonic}/atom/'
+        public_version = OrganizationSourceFactory(
+            organization=self.org, mnemonic=self.source.mnemonic, version='v0', public_access=ACCESS_TYPE_VIEW)
+        self.add_to_version(self.concept, public_version)
+
+        for url in [*(version_url + feed for version_url in self.version_urls()), self.source.uri + 'v9/' + feed,
+                    self.source.uri[:-1] + ',/v1/' + feed]:
+            self.assertEqual(self.request('get', url).status_code, 404, url)
+        for url in [self.source.uri + feed, public_version.uri + feed]:
+            self.assertEqual(self.request('get', url).status_code, 200, url)
+
 
 @tag('es')
 class SourceVersionSearchAccessTest(SourceVersionReadAccessMixin, OCLAPITestCase):
@@ -1566,6 +1578,26 @@ class SourceVersionSearchAccessTest(SourceVersionReadAccessMixin, OCLAPITestCase
             for user in [self.member, self.staff]:
                 self.assertIn(mnemonic, self.hits_from(self.source, url, user, **latest), (url, user))
                 self.assertIn(source, self.facet_values(self.search(url + '&facetsOnly=true', user, **latest)))
+
+    def test_latest_release_search_keeps_to_the_latest_release_while_the_index_catches_up(self):
+        url = f'/concepts/?q={self.name}'
+        other_concept = ConceptFactory(parent=self.source, names=[ConceptNameFactory.build(name=self.name + 'b')])
+        self.add_to_version(other_concept, self.release)
+        self.index()
+        public_release = OrganizationSourceFactory(
+            organization=self.org, mnemonic=self.source.mnemonic, version='v2', released=True,
+            public_access=ACCESS_TYPE_VIEW)
+        self.add_to_version(other_concept, public_release)
+
+        # the index still marks v1's members as the latest release's, and doesn't know v2's yet
+        for user in [None, self.outsider]:
+            self.assertEqual(self.hits_from(self.source, url, user, HTTP_INCLUDESEARCHLATEST='true'), [], user)
+
+        self.index()
+        for user in [None, self.outsider, self.member]:
+            self.assertEqual(
+                set(self.hits_from(self.source, url, user, HTTP_INCLUDESEARCHLATEST='true')),
+                {other_concept.mnemonic}, user)
 
     def test_latest_release_search_keeps_public_releases(self):
         source = OrganizationSourceFactory(public_access=ACCESS_TYPE_VIEW)

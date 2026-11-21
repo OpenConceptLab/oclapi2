@@ -587,17 +587,20 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
     def exclude_hidden_latest_releases(self, results, latest_attr):
         """
-        A search of latest releases leaves out the concepts and mappings of sources whose latest release the
-        requester can't view, hits and facets alike. Other searches are returned as they are.
+        A search of latest releases shows a source's concepts and mappings only from a latest release the requester
+        can view: of a source whose latest release they can't view, nothing; of one with a release they can't view,
+        only the members of its latest release. Hits and facets alike. Other searches are returned as they are.
         """
         if latest_attr != 'is_in_latest_source_version':
             return results
         from core.sources.models import Source
         criterion = None
-        for mnemonic, org, username in Source.get_latest_releases_hidden_from(self.request.user):
+        for mnemonic, org, username, latest_version in Source.get_latest_release_scopes_for(self.request.user):
             owner_type = ORG_OBJECT_TYPE if org else USER_OBJECT_TYPE
             criteria = Q('term', source=mnemonic) & Q('term', owner=org or username) & Q(
                 'term', owner_type=owner_type)
+            if latest_version:
+                criteria &= ~Q('term', source_version=latest_version)
             criterion = criteria if criterion is None else criterion | criteria
         return results if criterion is None else results.exclude(criterion)
 
@@ -1268,21 +1271,10 @@ class SourceChildCommonBaseView(BaseAPIView):
         version has only its HEAD to check. Item-level checks still follow.
         """
         from core.sources.models import Source
-        source, version = self.kwargs['source'], self.kwargs.get('version') or HEAD
-        filters = self.get_parent_owner_filters()
-        head = Source.get_version(source, HEAD, filters)
-        if not head:
+        repo_versions = Source.get_url_versions(
+            self.kwargs['source'], self.kwargs.get('version'), self.get_parent_owner_filters())
+        if repo_versions is None:
             raise Http404()
-        repo_versions = [head]
-        if version == LATEST:
-            repo_versions += compact([
-                Source.find_latest_released_version_by({**filters, 'mnemonic': source}),
-                Source.get_version(source, LATEST, filters)])
-        elif version != HEAD:
-            named_version = Source.get_version(source, version, filters)
-            if not named_version:
-                raise Http404()
-            repo_versions.append(named_version)
         for repo_version in repo_versions:
             self.check_view_access(request, repo_version)
 
