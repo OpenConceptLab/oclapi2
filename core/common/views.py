@@ -1245,21 +1245,28 @@ class SourceChildCommonBaseView(BaseAPIView):
     def check_source_version_access(self, request):
         """
         Every read under a source (lists, items, their versions, mappings and hierarchy, searched or not) answers as
-        the source version the URL names: 401 or 403 unless the requester can view the source and that version. For
-        `latest`, that's the newest released version, which the reads answer from, as well as any version named
-        `latest`; a source with no released version has only its HEAD to check. Item-level checks still follow.
+        the source version the URL names: 404 when the source or the named version doesn't exist, then 401 or 403
+        unless the requester can view the source and that version. For `latest`, that's the newest released
+        version, which the reads answer from, as well as any version named `latest`; a source with no released
+        version has only its HEAD to check. Item-level checks still follow.
         """
         from core.sources.models import Source
         source, version = self.kwargs['source'], self.kwargs.get('version') or HEAD
         filters = self.get_parent_owner_filters()
-        repo_versions = [Source.get_version(source, HEAD, filters)]
+        head = Source.get_version(source, HEAD, filters)
+        if not head:
+            raise Http404()
+        repo_versions = [head]
         if version == LATEST:
-            repo_versions += [
+            repo_versions += compact([
                 Source.find_latest_released_version_by({**filters, 'mnemonic': source}),
-                Source.get_version(source, LATEST, filters)]
+                Source.get_version(source, LATEST, filters)])
         elif version != HEAD:
-            repo_versions.append(Source.get_version(source, version, filters))
-        for repo_version in compact(repo_versions):
+            named_version = Source.get_version(source, version, filters)
+            if not named_version:
+                raise Http404()
+            repo_versions.append(named_version)
+        for repo_version in repo_versions:
             self.check_view_access(request, repo_version)
 
 

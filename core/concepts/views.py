@@ -287,11 +287,13 @@ class ConceptListView(ConceptHierarchyMixin, ConceptBaseView, ListWithHeadersMix
         return queryset
 
     def _set_source_versions(self):
+        """The versions a fuzzy search's `source_version` names: each one the requester can view, or 401/403."""
         from core.sources.models import Source
         source_versions = []
         for version_url in compact((self.request.query_params.dict().get('source_version', '')).split(',')):
             source_version, _ = Source.resolve_expression_to_version(version_url)
             if source_version.id:
+                self.check_view_access(self.request, source_version)
                 source_versions.append(source_version)
         self._source_versions = source_versions
 

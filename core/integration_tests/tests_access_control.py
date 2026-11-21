@@ -1455,6 +1455,22 @@ class SourceVersionReadAccessTest(SourceVersionReadAccessMixin, OCLAPITestCase):
             for suffix in ['', 'versions/', 'mappings/']:
                 self.assert_answers(f'{version_url}concepts/{self.private_concept.mnemonic}/{suffix}', 401, 403, 200)
 
+    def test_a_missing_source_or_version_is_not_found(self):
+        concept, mapping = self.concept.mnemonic, self.mapping.mnemonic
+        missing_version, with_comma = self.source.uri + 'v9/', self.source.uri[:-1] + ',/'
+        urls = [
+            missing_version + 'concepts/', missing_version + 'mappings/', f'{missing_version}concepts/{concept}/',
+            f'{missing_version}mappings/{mapping}/versions/', self.private_source.uri + 'v9/concepts/',
+            with_comma + 'concepts/', with_comma + 'v1/concepts/', with_comma + 'v1/mappings/',
+            f'{with_comma}v1/concepts/{concept}/', f'{with_comma}latest/mappings/{mapping}/',
+            f'{self.org.uri}sources/NoSuchSource/concepts/', f'{self.org.uri}sources/NoSuchSource/latest/concepts/',
+        ]
+
+        for url in urls:
+            self.assert_answers(url, 404, 404, 404)
+            self.assert_answers(url, 404, 404, 404, method='head')
+            self.assertEqual(self.request('get', url, self.staff).status_code, 404, url)
+
     def test_latest_of_a_source_without_a_release_answers_as_its_head(self):
         source = OrganizationSourceFactory(organization=self.org, public_access=ACCESS_TYPE_VIEW)
         for user in [None, self.outsider]:
@@ -1493,6 +1509,17 @@ class SourceVersionSearchAccessTest(SourceVersionReadAccessMixin, OCLAPITestCase
         ConceptDocument().update(Concept.objects.filter(parent__organization=self.org), refresh=True)
         MappingDocument().update(Mapping.objects.filter(parent__organization=self.org), refresh=True)
 
+    def search(self, url, user=None, **headers):
+        if user:
+            headers['HTTP_AUTHORIZATION'] = 'Token ' + user.get_token()
+        response = self.client.get(url, **headers)
+        self.assertEqual(response.status_code, 200, url)
+        return response.data
+
+    def hits_from(self, source, url, user=None, **headers):
+        return [hit['id'] for hit in self.search(url, user, **headers)
+                if hit['source'] == source.mnemonic and hit['owner'] == source.parent.mnemonic]
+
     def test_searched_version_histories_answer_as_their_version(self):
         histories = [
             (version_url, f'concepts/{self.concept.mnemonic}/versions/') for version_url in self.version_urls()] + [
@@ -1505,6 +1532,21 @@ class SourceVersionSearchAccessTest(SourceVersionReadAccessMixin, OCLAPITestCase
             for query in [f'?q={self.name}', '?facetsOnly=true', '?sortAsc=id']:
                 self.assert_answers(url + query, 401, 403, 200)
             self.assert_answers(f'{url}?q={self.name}', 401, 403, 200, method='head')
+
+    def test_fuzzy_search_checks_the_source_versions_it_names(self):
+        public_source = OrganizationSourceFactory(public_access=ACCESS_TYPE_VIEW)
+        public_release = OrganizationSourceFactory(
+            organization=public_source.organization, mnemonic=public_source.mnemonic, version='v1', released=True,
+            public_access=ACCESS_TYPE_VIEW)
+        concept = ConceptFactory(parent=public_source, names=[ConceptNameFactory.build(name=self.name)])
+        self.add_to_version(concept, public_release)
+        ConceptDocument().update(Concept.objects.filter(parent=public_source), refresh=True)
+        url = f'{public_source.uri}concepts/?fuzzy=true&q={self.name}&source_version='
+
+        for version in [self.release, self.private_release]:
+            self.assert_answers(url + version.uri, 401, 403, 200)
+        self.assert_answers(f'{url}{self.release.uri},{public_release.uri}', 401, 403, 200)
+        self.assertEqual(self.hits_from(public_source, url + public_release.uri, self.outsider), [concept.mnemonic])
 
 
 class CanViewAllContentTest(OCLTestCase):
