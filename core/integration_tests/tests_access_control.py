@@ -12,9 +12,13 @@ from core.collections.tests.factories import OrganizationCollectionFactory, User
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT, ROLE_ADMIN
 from core.common.permissions import HasOwnership
 from core.common.tests import OCLAPITestCase, OCLTestCase
+from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory, ConceptDescriptionFactory
 from core.map_projects.tests.factories import MapProjectFactory, AutomatchRunFactory
+from core.mappings.documents import MappingDocument
+from core.mappings.models import Mapping
+from core.mappings.tests.factories import MappingFactory
 from core.orgs.documents import OrganizationDocument
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
@@ -46,8 +50,8 @@ class AccessTestMixin:
 
     def request(self, method, url, user=None, data=None):
         kwargs = {'HTTP_AUTHORIZATION': 'Token ' + user.get_token()} if user else {}
-        if method == 'get':
-            return self.client.get(url, **kwargs)
+        if method in ('get', 'head'):
+            return getattr(self.client, method)(url, **kwargs)
         return getattr(self.client, method)(url, data, format='json', **kwargs)
 
 
@@ -1148,6 +1152,81 @@ class RepoAccessMixin(AccessTestMixin):
         self.assertEqual(self.request('get', repo.uri + 'extras/').status_code, 200)
         self.assertEqual(self.request('get', repo.uri + 'versions/').status_code, 200)
 
+    def create_released_repo(self, org, public_access):
+        head = self.org_repo_factory(organization=org, public_access=public_access)  # pylint: disable=not-callable
+        version = self.org_repo_factory(  # pylint: disable=not-callable
+            mnemonic=head.mnemonic, organization=org, version='v1', released=True, public_access=public_access)
+        return head, version
+
+    def get_versions_url(self, *repos):
+        """One versions list for all `repos`, its owner and repository segments separated by commas."""
+        owners = ','.join(repo.organization.mnemonic for repo in repos)
+        names = ','.join(repo.mnemonic for repo in repos)
+        return f'/orgs/{owners}/{self.model.get_resource_url_kwarg()}s/{names}/versions/'
+
+    def assert_versions_listed(self, url, user, versions):
+        response = self.request('get', url, user)
+        self.assertEqual(response.status_code, 200, url)
+        self.assertEqual(sorted(item['version_url'] for item in response.data), sorted(v.uri for v in versions), url)
+        response = self.request('head', url, user)
+        self.assertEqual(response.status_code, 200, url)
+        self.assertEqual(response['num_found'], str(len(versions)), url)
+
+    def test_versions_list_of_several_repos_is_hidden_unless_each_is_viewable(self):
+        private_repo, _ = self.create_released_repo(self.org, ACCESS_TYPE_NONE)
+        other_org = OrganizationFactory()
+        other_member = UserProfileFactory(organizations=[other_org])
+        other_repo, _ = self.create_released_repo(other_org, ACCESS_TYPE_NONE)  # the newest versions listed
+        public_repo, _ = self.create_released_repo(OrganizationFactory(), ACCESS_TYPE_VIEW)
+        with_other_repo = self.get_versions_url(private_repo, other_repo)
+        with_public_repo = self.get_versions_url(private_repo, public_repo)
+
+        for url, user, status_code in [
+                (with_other_repo, other_member, 403), (with_other_repo, None, 401),
+                (with_public_repo, self.outsider, 403), (with_public_repo, other_member, 403),
+                (with_public_repo, None, 401), (f'{with_public_repo}?verbose=true', None, 401)
+        ]:
+            for method in ('get', 'head'):
+                self.assertEqual(self.request(method, url, user).status_code, status_code, (method, url, user))
+
+    def test_versions_list_of_several_viewable_repos_lists_them_all(self):
+        private_versions = self.create_released_repo(self.org, ACCESS_TYPE_NONE)
+        other_org = OrganizationFactory()
+        other_versions = self.create_released_repo(other_org, ACCESS_TYPE_NONE)
+        public_versions = self.create_released_repo(OrganizationFactory(), ACCESS_TYPE_VIEW)
+        public_versions2 = self.create_released_repo(OrganizationFactory(), ACCESS_TYPE_VIEW)
+        member_of_both = UserProfileFactory(organizations=[self.org, other_org])
+
+        self.assert_versions_listed(
+            self.get_versions_url(private_versions[0], other_versions[0]), member_of_both,
+            [*private_versions, *other_versions])
+        self.assert_versions_listed(
+            self.get_versions_url(private_versions[0], public_versions[0]), self.member,
+            [*private_versions, *public_versions])
+        self.assert_versions_listed(
+            self.get_versions_url(public_versions[0], public_versions2[0]), None, [*public_versions, *public_versions2])
+
+    def test_versions_list_count_answers_as_the_list(self):
+        private_versions = self.create_released_repo(self.org, ACCESS_TYPE_NONE)
+        public_versions = self.create_released_repo(self.org, ACCESS_TYPE_VIEW)
+        url = private_versions[0].uri + 'versions/'
+
+        self.assertEqual(self.request('head', url, self.outsider).status_code, 403)
+        self.assertEqual(self.request('head', url).status_code, 401)
+        self.assert_versions_listed(url, self.member, private_versions)
+        self.assert_versions_listed(url, self.staff, private_versions)
+        self.assert_versions_listed(public_versions[0].uri + 'versions/', None, public_versions)
+
+    def test_versions_list_of_repo_without_head_answers_as_its_versions(self):
+        head, version = self.create_released_repo(self.org, ACCESS_TYPE_NONE)
+        self.model.objects.filter(id=head.id).update(is_active=False)
+        url = head.uri + 'versions/'
+
+        for method in ('get', 'head'):
+            self.assertEqual(self.request(method, url, self.outsider).status_code, 403, method)
+            self.assertEqual(self.request(method, url).status_code, 401, method)
+        self.assert_versions_listed(url, self.member, [version])
+
     def test_version_create(self):
         repo = self.create_repo()
         url = repo.uri + 'versions/'
@@ -1276,6 +1355,107 @@ class CollectionReferenceAccessTest(AccessTestMixin, OCLAPITestCase):
             self.assertEqual(get_resolved_urls(user), [public_source.uri], user)
         for user in [self.owner, self.staff]:
             self.assertEqual(get_resolved_urls(user), sorted([private_source.uri, public_source.uri]), user)
+
+
+class CollectionReferenceResourcesAccessMixin(AccessTestMixin):
+    """
+    A private collection's HEAD and released v1, each with a reference and an expansion holding two concepts and a
+    mapping of a public source.
+    """
+    reference_list_queries = ('', '?q=refc', '?facetsOnly=true', '?sortAsc=id')
+
+    def setUp(self):
+        super().setUp()
+        self.source = OrganizationSourceFactory(public_access=ACCESS_TYPE_VIEW)
+        self.concepts = [ConceptFactory(parent=self.source, mnemonic=f'refc{i}') for i in (1, 2)]
+        self.mapping = MappingFactory(parent=self.source, from_concept=self.concepts[0], to_concept=self.concepts[1])
+        self.collection = OrganizationCollectionFactory(organization=self.org, public_access=ACCESS_TYPE_NONE)
+        self.version = OrganizationCollectionFactory(
+            organization=self.org, mnemonic=self.collection.mnemonic, version='v1', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        self.reference_list_urls = []
+        for collection_version in [self.collection, self.version]:
+            reference = CollectionReference(expression=self.source.uri + 'concepts/', collection=collection_version)
+            reference.save()
+            reference.concepts.set(self.concepts)
+            reference.mappings.set([self.mapping])
+            expansion = ExpansionFactory(collection_version=collection_version)
+            expansion.concepts.set(self.concepts)
+            expansion.mappings.set([self.mapping])
+            collection_version.expansion_uri = expansion.uri
+            collection_version.save()
+            self.reference_list_urls += [
+                f'{collection_version.uri}references/{reference.id}/{resources}/'
+                for resources in ['concepts', 'mappings']
+            ]
+
+
+class CollectionReferenceResourcesAccessTest(CollectionReferenceResourcesAccessMixin, OCLAPITestCase):
+    """A reference's concept and mapping lists, searched, sorted, faceted or counted, answer as the plain list."""
+    def test_reference_lists_are_hidden_from_non_members(self):
+        for url in self.reference_list_urls:
+            for query in self.reference_list_queries:
+                for method in ('get', 'head'):
+                    self.assertEqual(self.request(method, url + query, self.outsider).status_code, 403, url + query)
+                    self.assertEqual(self.request(method, url + query).status_code, 401, url + query)
+
+    def test_reference_lists_are_visible_to_members(self):
+        for url in self.reference_list_urls:
+            count = 2 if url.endswith('/concepts/') else 1
+            for user in [self.member, self.staff]:
+                response = self.request('get', url, user)
+                self.assertEqual(response.status_code, 200, url)
+                self.assertEqual(len(response.data), count, url)
+                response = self.request('head', url, user)
+                self.assertEqual(response.status_code, 200, url)
+                self.assertEqual(response['num_found'], str(count), url)
+
+    def test_missing_reference_lists_answer_404(self):
+        for collection_version in [self.collection, self.version]:
+            for resources in ['concepts', 'mappings']:
+                url = f'{collection_version.uri}references/0/{resources}/'
+                for query in self.reference_list_queries:
+                    for method in ('get', 'head'):
+                        self.assertEqual(self.request(method, url + query, self.member).status_code, 404, url + query)
+                        self.assertEqual(self.request(method, url + query).status_code, 401, url + query)
+
+    def test_version_reference_count_answers_as_the_list(self):
+        url = self.version.uri + 'references/'
+
+        for method in ('get', 'head'):
+            self.assertEqual(self.request(method, url, self.outsider).status_code, 403, method)
+            self.assertEqual(self.request(method, url).status_code, 401, method)
+        for query in ['', '?q=concepts', '?q=nothing-matches']:
+            response = self.request('get', url + query, self.member)
+            head_response = self.request('head', url + query, self.member)
+            self.assertEqual(head_response.status_code, 200, query)
+            self.assertEqual(head_response['num_found'], response['num_found'], query)
+            self.assertEqual(head_response['num_found'], str(len(response.data)), query)
+
+    def test_missing_version_references_answer_404(self):
+        url = self.collection.uri + 'v9/references/'
+
+        for user in [None, self.outsider, self.member]:
+            for method in ('get', 'head'):
+                self.assertEqual(self.request(method, url, user).status_code, 404, (method, user))
+
+
+@tag('es')
+class CollectionReferenceResourcesSearchAccessTest(CollectionReferenceResourcesAccessMixin, OCLAPITestCase):
+    """A reference's concept and mapping lists, searched, sorted or faceted, stay open to members."""
+    def test_reference_list_searches_are_visible_to_members(self):
+        ConceptDocument().update(Concept.objects.filter(parent=self.source), refresh=True)
+        MappingDocument().update(Mapping.objects.filter(parent=self.source), refresh=True)
+
+        for url in self.reference_list_urls:
+            for query in self.reference_list_queries[1:]:
+                self.assertEqual(self.request('get', url + query, self.member).status_code, 200, url + query)
+            self.assertEqual(self.request('head', url + '?q=refc', self.member).status_code, 200, url)
+            if url.endswith('/concepts/'):
+                response = self.request('get', url + '?q=refc1', self.member)
+                self.assertIn('refc1', [item['id'] for item in response.data], url)
+                response = self.request('get', url + '?facetsOnly=true', self.member)
+                self.assertIn('facets', response.data, url)
 
 
 class SourceContentAccessTest(AccessTestMixin, OCLAPITestCase):

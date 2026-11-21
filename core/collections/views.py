@@ -44,7 +44,7 @@ from core.common.exceptions import Http409, Http405, Http400
 from core.common.mixins import (
     ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin,
     ConceptContainerExportMixin,
-    ConceptContainerProcessingMixin)
+    ConceptContainerProcessingMixin, RepoVersionListMixin)
 from core.common.permissions import (
     CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject,
     CanViewConceptDictionaryVersion
@@ -320,7 +320,11 @@ class CollectionReferenceView(CollectionBaseView, RetrieveAPIView, DestroyAPIVie
 
 
 class CollectionReferenceAbstractResourcesView(CollectionBaseView, ListWithHeadersMixin):
-    def get_queryset(self):
+    def get_reference(self):
+        """
+        The reference in the URL. Its collection version answers 404 when it doesn't exist and 401 or 403 to those who
+        can't view it, and a reference that version doesn't hold answers 404.
+        """
         collection = super().get_queryset().filter(is_active=True).order_by('-created_at').first()
 
         if not collection:
@@ -334,8 +338,16 @@ class CollectionReferenceAbstractResourcesView(CollectionBaseView, ListWithHeade
 
         return reference
 
+    def get_queryset(self):
+        return self.get_reference()
+
     def get(self, request, *args, **kwargs):
+        self.get_reference()  # checks the version and reference before a search, its facets or a sort lists from them
         return self.list(request, *args, **kwargs)
+
+    def head(self, request, **kwargs):
+        self.get_reference()  # checks the version and reference before a search counts
+        return super().head(request, **kwargs)
 
 
 # Right now only for testing/debugging
@@ -675,21 +687,33 @@ class CollectionVersionReferencesView(CollectionVersionBaseView, ListWithHeaders
             return CollectionReferenceDetailSerializer
         return CollectionReferenceSerializer
 
-    def get(self, request, *args, **kwargs):
-        query_params = self.request.query_params
-        search_query = query_params.get('q', '')
-        sort = query_params.get('search_sort', 'ASC')
+    def get_references(self):
+        """
+        The references GET lists: the collection version's, matching `q` and the filters. The version answers 404 when
+        it doesn't exist and 401 or 403 to those who can't view it.
+        """
         object_version = self.get_queryset().first()
         if not object_version:
             raise Http404()
-        self.check_object_permissions(request, object_version)
-        references = object_version.references.filter(expression__icontains=search_query)
-        references = self.apply_filters(references)
+        self.check_object_permissions(self.request, object_version)
+        references = object_version.references.filter(expression__icontains=self.request.query_params.get('q', ''))
+        return self.apply_filters(references)
+
+    def get(self, request, *args, **kwargs):
+        references = self.get_references()
+        sort = self.request.query_params.get('search_sort', 'ASC')
         self.object_list = references if sort == 'ASC' else list(reversed(references))
         return self.list(request, *args, **kwargs)
 
+    def head(self, request, **kwargs):  # pylint: disable=unused-argument
+        response = Response()
+        response['num_found'] = self.get_references().count()
+        return response
 
-class CollectionVersionListView(CollectionVersionBaseView, CreateAPIView, ListWithHeadersMixin):
+
+class CollectionVersionListView(
+        RepoVersionListMixin, CollectionVersionBaseView, CreateAPIView, ListWithHeadersMixin
+):
     released_filter = None
     processing_filter = None
     default_qs_sort_attr = '-created_at'
@@ -718,7 +742,7 @@ class CollectionVersionListView(CollectionVersionBaseView, CreateAPIView, ListWi
         return CollectionVersionListSerializer
 
     def get(self, request, *args, **kwargs):
-        self.get_head()
+        self.check_repos_permissions()
         self.released_filter = parse_boolean_query_param(request, RELEASED_PARAM, self.released_filter)
         self.processing_filter = parse_boolean_query_param(request, PROCESSING_PARAM, self.processing_filter)
         return self.list(request, *args, **kwargs)
