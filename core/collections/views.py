@@ -323,7 +323,7 @@ class CollectionReferenceAbstractResourcesView(CollectionBaseView, ListWithHeade
     def get_reference(self):
         """
         The reference in the URL. Its collection version answers 404 when it doesn't exist and 401 or 403 to those who
-        can't view it, and a reference that version doesn't hold answers 404.
+        can't view it, and a reference that version doesn't hold, or an ID that isn't a number, answers 404.
         """
         collection = super().get_queryset().filter(is_active=True).order_by('-created_at').first()
 
@@ -332,7 +332,8 @@ class CollectionReferenceAbstractResourcesView(CollectionBaseView, ListWithHeade
 
         self.check_object_permissions(self.request, collection)
 
-        reference = collection.references.filter(id=self.kwargs.get('reference')).first()
+        reference_id = str(self.kwargs.get('reference'))
+        reference = collection.references.filter(id=reference_id).first() if reference_id.isdecimal() else None
         if not reference:
             raise Http404()
 
@@ -742,9 +743,9 @@ class CollectionVersionListView(
         return CollectionVersionListSerializer
 
     def get(self, request, *args, **kwargs):
-        self.check_repos_permissions()
         self.released_filter = parse_boolean_query_param(request, RELEASED_PARAM, self.released_filter)
         self.processing_filter = parse_boolean_query_param(request, PROCESSING_PARAM, self.processing_filter)
+        self.check_repos_permissions()  # on the versions listed, after the filters
         return self.list(request, *args, **kwargs)
 
     def create(self, request, *args, **kwargs):

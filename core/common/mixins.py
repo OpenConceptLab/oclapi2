@@ -1428,12 +1428,15 @@ class RepoVersionListMixin:
         """
         The list answers only to those who can view every repository among its versions, as the owner and repository
         segments of the URL can each name several, separated by commas. A repository is checked through its HEAD, or
-        through its newest listed version when it has no HEAD.
+        version by version when it has no HEAD.
         """
+        queryset = self.get_queryset()
         repo_fields = ('organization_id', 'user_id', 'mnemonic')
-        newest_per_repo = self.get_queryset().order_by(*repo_fields, '-created_at').distinct(*repo_fields)
-        for version in newest_per_repo:
-            self.check_object_permissions(self.request, version.head or version)
+        for version in queryset.order_by(*repo_fields).distinct(*repo_fields):
+            head = version.head
+            repo_versions = queryset.filter(**{field: getattr(version, field) for field in repo_fields})
+            for obj in [head] if head else repo_versions:
+                self.check_object_permissions(self.request, obj)
 
     def head(self, request, **kwargs):
         self.check_repos_permissions()

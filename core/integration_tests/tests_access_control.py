@@ -1218,14 +1218,30 @@ class RepoAccessMixin(AccessTestMixin):
         self.assert_versions_listed(public_versions[0].uri + 'versions/', None, public_versions)
 
     def test_versions_list_of_repo_without_head_answers_as_its_versions(self):
-        head, version = self.create_released_repo(self.org, ACCESS_TYPE_NONE)
+        head, version = self.create_released_repo(self.org, ACCESS_TYPE_VIEW)
+        self.model.objects.filter(id=version.id).update(public_access=ACCESS_TYPE_NONE)
+        newer_version = self.org_repo_factory(  # pylint: disable=not-callable
+            mnemonic=head.mnemonic, organization=self.org, version='v2', public_access=ACCESS_TYPE_VIEW)
         self.model.objects.filter(id=head.id).update(is_active=False)
         url = head.uri + 'versions/'
 
         for method in ('get', 'head'):
             self.assertEqual(self.request(method, url, self.outsider).status_code, 403, method)
             self.assertEqual(self.request(method, url).status_code, 401, method)
-        self.assert_versions_listed(url, self.member, [version])
+        self.assert_versions_listed(url, self.member, [version, newer_version])
+
+    def test_released_versions_list_answers_as_the_repos_it_lists(self):
+        private_repo = self.org_repo_factory(  # pylint: disable=not-callable
+            organization=self.org, public_access=ACCESS_TYPE_NONE)
+        public_versions = self.create_released_repo(OrganizationFactory(), ACCESS_TYPE_VIEW)
+        url = self.get_versions_url(private_repo, public_versions[0])
+
+        for user in [None, self.outsider]:
+            response = self.request('get', url + '?released=true', user)
+            self.assertEqual(response.status_code, 200, user)
+            self.assertEqual([item['version_url'] for item in response.data], [public_versions[1].uri], user)
+        self.assertEqual(self.request('get', url, self.outsider).status_code, 403)
+        self.assertEqual(self.request('get', url + '?released=false', self.outsider).status_code, 403)
 
     def test_version_create(self):
         repo = self.create_repo()
@@ -1418,6 +1434,14 @@ class CollectionReferenceResourcesAccessTest(CollectionReferenceResourcesAccessM
                     for method in ('get', 'head'):
                         self.assertEqual(self.request(method, url + query, self.member).status_code, 404, url + query)
                         self.assertEqual(self.request(method, url + query).status_code, 401, url + query)
+
+    def test_reference_lists_with_an_id_that_is_not_a_number_answer_404(self):
+        for resources in ['concepts', 'mappings']:
+            url = f'{self.version.uri}references/abc/{resources}/'
+            for query in self.reference_list_queries:
+                for method in ('get', 'head'):
+                    self.assertEqual(self.request(method, url + query, self.member).status_code, 404, url + query)
+                    self.assertEqual(self.request(method, url + query, self.outsider).status_code, 403, url + query)
 
     def test_version_reference_count_answers_as_the_list(self):
         url = self.version.uri + 'references/'
