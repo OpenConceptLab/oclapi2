@@ -1564,6 +1564,20 @@ class SourceVersionSearchAccessTest(SourceVersionReadAccessMixin, OCLAPITestCase
             self.assert_answers(url + version.uri, 401, 403, 200, method='head')
         self.assert_answers(f'{url}{self.release.uri},{public_release.uri}', 401, 403, 200)
         self.assertEqual(self.hits_from(public_source, url + public_release.uri, self.outsider), [concept.mnemonic])
+
+        # expressions that don't name a source version are skipped: a collection's version, or one that can't be read
+        release_member = ConceptFactory(parent=self.source, names=[ConceptNameFactory.build(name=self.name + 'c')])
+        self.add_to_version(release_member, self.release)
+        self.index()
+        OrganizationCollectionFactory(
+            organization=self.org, mnemonic=self.source.mnemonic, public_access=ACCESS_TYPE_VIEW)
+        collection_version = OrganizationCollectionFactory(
+            organization=self.org, mnemonic=self.source.mnemonic, version='v1', public_access=ACCESS_TYPE_VIEW)
+        for target in [collection_version.uri, 'http://example.org/cs|v1|v2']:
+            self.assertEqual(self.hits_from(self.source, f'{url}{target},{public_release.uri}', self.outsider), [])
+            self.assertEqual(
+                self.hits_from(public_source, f'{url}{target},{public_release.uri}', self.outsider), [concept.mnemonic])
+            self.assert_answers(url + target, 200, 200, 200, method='head')
         response = self.client.head(
             url + public_release.uri, HTTP_AUTHORIZATION='Token ' + self.outsider.get_token())
         self.assertEqual(response.status_code, 200)
