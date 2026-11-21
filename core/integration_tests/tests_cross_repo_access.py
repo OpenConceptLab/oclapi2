@@ -595,6 +595,11 @@ class FuzzySearchScopeTest(PrivateReleaseOfPublicHeadMixin, CrossRepoAccessBaseT
         response = self.client.get(no_release.uri + 'latest/concepts/?q=zebrafinch')
         self.assertEqual((response.status_code, response.data), (200, []))
 
+        for fuzzy in ['true', 'false']:
+            response = self.client.get(
+                f'{public_release_url}concepts/?fuzzy={fuzzy}&q=zebrafinch&searchStatsOnly=true')
+            self.assertEqual((response.status_code, response.data), (200, []), fuzzy)
+
         self.assertEqual(self.search(self.head.uri + 'v1/')[0], 401)
         self.assertEqual(self.search(self.head.uri + 'v1/', self.outsider)[0], 403)
         self.assertEqual(
@@ -608,15 +613,23 @@ class FuzzySearchScopeTest(PrivateReleaseOfPublicHeadMixin, CrossRepoAccessBaseT
         revision = concept.get_latest_version()
         revision.sources.add(release)
         collection = UserCollectionFactory(user=self.outsider, mnemonic='MyColl')
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        shared = ConceptFactory(
+            parent=self.public_source, mnemonic='shared', names=[ConceptNameFactory.build(name='kestrel')])
+        expansion.concepts.add(shared.get_latest_version())
         ConceptDocument().update(Concept.objects.all(), refresh=True)
 
         self.assertEqual(self.search('/user/sources/Mine/latest/', self.outsider, 'kestrel'), (200, [revision.version]))
         response = self.client.get('/user/sources/Mine/latest/concepts/?q=kestrel',
                                    HTTP_AUTHORIZATION='Token ' + self.outsider_token)
         self.assertEqual([row['version'] for row in response.data], [revision.version])
-        response = self.client.get(f'/user/collections/{collection.mnemonic}/concepts/?q=kestrel',
-                                   HTTP_AUTHORIZATION='Token ' + self.outsider_token)
-        self.assertEqual((response.status_code, response.data), (200, []))
+        for url in [f'/user/collections/{collection.mnemonic}/', collection.uri]:
+            response = self.client.get(url + 'concepts/?q=kestrel', HTTP_AUTHORIZATION='Token ' + self.outsider_token)
+            self.assertEqual(
+                (response.status_code, [row['version'] for row in response.data]),
+                (200, [shared.get_latest_version().version]), url)
 
 
 class CascadeSourceVersionAccessTest(PrivateReleaseOfPublicHeadMixin, CrossRepoAccessBaseTest):
@@ -641,14 +654,16 @@ class CascadeSourceVersionAccessTest(PrivateReleaseOfPublicHeadMixin, CrossRepoA
         expansion.concepts.add(*concepts)
         return collection, expansion
 
+    def reference(self, method, **expression):
+        root = self.root.get_latest_version()
+        return {'system': self.head.uri, 'version': 'HEAD',
+                'cascade': {'method': method, 'cascade_levels': '*', 'source_version': 'v1'}, **expression,
+                'concept': [{'code': 'root', 'resource_version': root.version}]}
+
     def add_reference(self, user, method, **expression):
         collection, expansion = self.new_collection(user)
-        root = self.root.get_latest_version()
-        expression = {'system': self.head.uri, 'version': 'HEAD',
-                      'cascade': {'method': method, 'cascade_levels': '*', 'source_version': 'v1'}, **expression}
         response = self.client.put(
-            collection.uri + 'references/',
-            {'data': [{**expression, 'concept': [{'code': 'root', 'resource_version': root.version}]}]},
+            collection.uri + 'references/', {'data': [self.reference(method, **expression)]},
             HTTP_AUTHORIZATION='Token ' + user.get_token(), format='json')
         self.assertEqual(response.status_code, 200, response.data)
         expansion.refresh_from_db()
@@ -659,9 +674,9 @@ class CascadeSourceVersionAccessTest(PrivateReleaseOfPublicHeadMixin, CrossRepoA
         root = self.root.get_latest_version()
         collection, expansion = self.new_collection(self.outsider)
         response = self.client.put(
-            collection.uri + 'references/', {'data': [{'system': self.head.uri, 'concept': ['root']}]}, format='json')
+            collection.uri + 'references/', {'data': [self.reference('sourcetoconcepts')]}, format='json')
         self.assertEqual(response.status_code, 401)
-        self.assertFalse(expansion.concepts.exists())
+        self.assertFalse(expansion.concepts.exists() or expansion.mappings.exists())
 
         for method in ['sourcetoconcepts', 'sourcemappings']:
             self.assertEqual(self.add_reference(self.outsider, method), ([root.id], []), method)

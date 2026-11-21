@@ -882,7 +882,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             if is_members_view:
                 kwargs_filters['ownerType'] = 'Organization'
                 kwargs_filters['owner'] = self.get_members_view_org_mnemonics() or ['UNKNOWN-ORG-DUMMY']
-            elif self.user_is_self and is_authenticated:
+            elif self.user_is_self and is_authenticated and 'collection' not in self.kwargs:  # members have any owner
                 kwargs_filters['ownerType'] = 'User'
                 kwargs_filters['owner'] = username
 
