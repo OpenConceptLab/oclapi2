@@ -1587,7 +1587,7 @@ class SourceVersionSearchAccessTest(SourceVersionReadAccessMixin, OCLAPITestCase
         response = self.client.head(
             url + public_release.uri, HTTP_AUTHORIZATION='Token ' + self.outsider.get_token())
         self.assertEqual(response.status_code, 200)
-        self.assertGreaterEqual(int(response['num_found']), 1)
+        self.assertGreaterEqual(int(response.headers['num_found']), 1)
 
     def test_latest_release_search_leaves_out_releases_the_requester_cannot_view(self):
         latest = {'HTTP_INCLUDESEARCHLATEST': 'true'}
