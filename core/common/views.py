@@ -585,6 +585,22 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             return 'is_latest_version'
         return None
 
+    def exclude_hidden_latest_releases(self, results, latest_attr):
+        """
+        A search of latest releases leaves out the concepts and mappings of sources whose latest release the
+        requester can't view, hits and facets alike. Other searches are returned as they are.
+        """
+        if latest_attr != 'is_in_latest_source_version':
+            return results
+        from core.sources.models import Source
+        criterion = None
+        for mnemonic, org, username in Source.get_latest_releases_hidden_from(self.request.user):
+            owner_type = ORG_OBJECT_TYPE if org else USER_OBJECT_TYPE
+            criteria = Q('term', source=mnemonic) & Q('term', owner=org or username) & Q(
+                'term', owner_type=owner_type)
+            criterion = criteria if criterion is None else criterion | criteria
+        return results if criterion is None else results.exclude(criterion)
+
     def get_facets(self):  # pylint: disable=too-many-branches
         facets = {}
         parent_repo = None
@@ -835,6 +851,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             latest_attr = self.get_latest_version_filter_field_for_source_child()
             if latest_attr:
                 default_filters[latest_attr] = True
+            results = self.exclude_hidden_latest_releases(results, latest_attr)
 
         for field, value in default_filters.items():
             results = results.filter("term", **{field: value})

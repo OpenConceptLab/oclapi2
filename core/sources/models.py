@@ -8,7 +8,7 @@ from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from django.db.models import UniqueConstraint, F, Max, Count, Q
+from django.db.models import UniqueConstraint, F, Max, Count, Q, OuterRef, Subquery, Exists
 from django.db.models.functions import Cast
 from django.utils import timezone
 from pydash import get, compact
@@ -220,6 +220,29 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     @staticmethod
     def get_resource_url_kwarg():
         return 'source'
+
+    @classmethod
+    def get_latest_releases_hidden_from(cls, user):
+        """
+        The sources with a public HEAD whose latest release `user` can't view, as (mnemonic, organization mnemonic,
+        username) of each. The latest release is the newest released version that isn't retired, as
+        get_latest_released_version picks it. A private HEAD's content is already private itself, and staff can
+        view every version.
+        """
+        if get(user, 'is_staff'):
+            return []
+        # A version shares its mnemonic and owner with its HEAD. One of organization_id and user_id is NULL, and
+        # NULL never equals, so the OR matches on the owner that is set.
+        same_repo = Q(mnemonic=OuterRef('mnemonic')) & (
+            Q(organization_id=OuterRef('organization_id')) | Q(user_id=OuterRef('user_id')))
+        latest_release = cls.objects.filter(
+            same_repo, is_active=True, released=True, retired=False).order_by('-created_at').values('id')[:1]
+        public_head = cls.objects.filter(same_repo, version=HEAD, public_access__in=cls.PUBLIC_ACCESS_VALUES)
+        releases = cls.objects.filter(is_active=True, released=True, retired=False).exclude(version=HEAD).exclude(
+            public_access__in=cls.PUBLIC_ACCESS_VALUES).filter(Exists(public_head), id=Subquery(latest_release))
+        if get(user, 'is_authenticated'):
+            releases = releases.exclude(user_id=user.id).exclude(organization_id__in=user.organizations.values('id'))
+        return list(releases.values_list('mnemonic', 'organization__mnemonic', 'user__username'))
 
     @property
     def source(self):

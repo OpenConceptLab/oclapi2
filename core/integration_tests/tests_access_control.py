@@ -1520,6 +1520,10 @@ class SourceVersionSearchAccessTest(SourceVersionReadAccessMixin, OCLAPITestCase
         return [hit['id'] for hit in self.search(url, user, **headers)
                 if hit['source'] == source.mnemonic and hit['owner'] == source.parent.mnemonic]
 
+    @staticmethod
+    def facet_values(data, field='source'):
+        return [str(value[0]).lower() for value in data['facets']['fields'].get(field, [])]
+
     def test_searched_version_histories_answer_as_their_version(self):
         histories = [
             (version_url, f'concepts/{self.concept.mnemonic}/versions/') for version_url in self.version_urls()] + [
@@ -1547,6 +1551,35 @@ class SourceVersionSearchAccessTest(SourceVersionReadAccessMixin, OCLAPITestCase
             self.assert_answers(url + version.uri, 401, 403, 200)
         self.assert_answers(f'{url}{self.release.uri},{public_release.uri}', 401, 403, 200)
         self.assertEqual(self.hits_from(public_source, url + public_release.uri, self.outsider), [concept.mnemonic])
+
+    def test_latest_release_search_leaves_out_releases_the_requester_cannot_view(self):
+        latest = {'HTTP_INCLUDESEARCHLATEST': 'true'}
+        source = self.source.mnemonic.lower()
+        searches = [(f'/concepts/?q={self.name}', self.concept.mnemonic),
+                    (f'/mappings/?q={self.mapping.mnemonic}', self.mapping.mnemonic)]
+
+        for url, mnemonic in searches:
+            for user in [None, self.outsider]:
+                self.assertEqual(self.hits_from(self.source, url, user, **latest), [], (url, user))
+                self.assertNotIn(source, self.facet_values(self.search(url + '&facetsOnly=true', user, **latest)))
+                self.assertIn(mnemonic, self.hits_from(self.source, url, user), (url, user))  # HEAD's, as before
+            for user in [self.member, self.staff]:
+                self.assertIn(mnemonic, self.hits_from(self.source, url, user, **latest), (url, user))
+                self.assertIn(source, self.facet_values(self.search(url + '&facetsOnly=true', user, **latest)))
+
+    def test_latest_release_search_keeps_public_releases(self):
+        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_VIEW)
+        release = OrganizationSourceFactory(
+            organization=source.organization, mnemonic=source.mnemonic, version='v1', released=True,
+            public_access=ACCESS_TYPE_VIEW)
+        concept = ConceptFactory(parent=source, names=[ConceptNameFactory.build(name=self.name)])
+        self.add_to_version(concept, release)
+        ConceptDocument().update(Concept.objects.filter(parent=source), refresh=True)
+
+        for user in [None, self.outsider]:
+            hits = self.hits_from(source, f'/concepts/?q={self.name}', user, HTTP_INCLUDESEARCHLATEST='true')
+            self.assertTrue(hits, user)
+            self.assertEqual(set(hits), {concept.mnemonic}, user)
 
 
 class CanViewAllContentTest(OCLTestCase):
