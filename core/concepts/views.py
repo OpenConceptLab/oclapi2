@@ -47,7 +47,7 @@ from core.common.tasks import delete_concept, make_hierarchy
 from core.common.throttling import ThrottleUtil
 from core.common.utils import (generate_temp_version, get_truthy_values, to_int,
                                drop_version, get_falsy_values, parse_id, get_event_metadata)
-from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, SourceVersionListHeadMixin, \
+from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
 from core.concepts.constants import (
     CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY,
@@ -202,9 +202,7 @@ class ConceptHierarchyMixin:
         return instance.get_hierarchy_related_queryset(relation)
 
 
-class ConceptListView(
-        SourceVersionListHeadMixin, ConceptHierarchyMixin, ConceptBaseView, ListWithHeadersMixin, CreateModelMixin
-):
+class ConceptListView(ConceptHierarchyMixin, ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
     is_page_size_capped = True
     serializer_class = ConceptListSerializer
 
@@ -309,7 +307,6 @@ class ConceptListView(
             self._set_source_versions()
             self._extra_filters = None
         self.set_parent_resource(False)
-        self.check_parent_permissions(request)
         return self.list(request, *args, **kwargs)
 
     def post(self, request, **_):

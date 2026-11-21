@@ -29,6 +29,7 @@ from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_
     CANONICAL_URL_REQUEST_PARAM, CHECKSUMS_PARAM, ACCESS_TYPE_NONE, HTTP_COMPRESS_HEADER
 from core.common.exceptions import Http400
 from core.common.mixins import PathWalkerMixin
+from core.common.permissions import CanViewConceptDictionary
 from core.common.search import CustomESSearch, EXACT_OWNER_FIELD
 from core.common.serializers import RootSerializer
 from core.common.swagger_parameters import all_resource_query_param
@@ -1200,6 +1201,8 @@ class SourceChildCommonBaseView(BaseAPIView):
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
         self.__set_params()
+        if request.method in ['GET', 'HEAD'] and 'source' in self.kwargs:
+            self.check_source_version_access(request)
 
     def verify_scope(self):
         has_parent_scope = self.has_parent_scope()
@@ -1234,30 +1237,31 @@ class SourceChildCommonBaseView(BaseAPIView):
         username = self.request.user.username if self.user_is_self else self.kwargs.get('user')
         return {'user__username': username}
 
-    def check_parent_permissions(self, request):
-        """
-        A list of a source version's concepts or mappings answers only to those who can view that version. For
-        `latest`, that's the newest released version, which the list and its search answer from, as well as any
-        version named `latest`.
-        """
-        parents = [self.parent_resource]
-        if self.kwargs.get('version') == LATEST and 'source' in self.kwargs:
-            from core.sources.models import Source
-            parents.append(Source.find_latest_released_version_by(
-                {**self.get_parent_owner_filters(), 'mnemonic': self.kwargs['source']}))
-        for parent in compact(parents):
-            self.check_object_permissions(request, parent)
+    def check_view_access(self, request, repo_version):
+        """401 or 403 unless the requester can view this repository version, as its own lists answer."""
+        if not CanViewConceptDictionary().has_object_permission(request, self, repo_version):
+            self.permission_denied(request)
 
+    def check_source_version_access(self, request):
+        """
+        Every read under a source (lists, items, their versions, mappings and hierarchy, searched or not) answers as
+        the source version the URL names: 401 or 403 unless the requester can view the source and that version. For
+        `latest`, that's the newest released version, which the reads answer from, as well as any version named
+        `latest`; a source with no released version has only its HEAD to check. Item-level checks still follow.
+        """
+        from core.sources.models import Source
+        source, version = self.kwargs['source'], self.kwargs.get('version') or HEAD
+        filters = self.get_parent_owner_filters()
+        repo_versions = [Source.get_version(source, HEAD, filters)]
+        if version == LATEST:
+            repo_versions += [
+                Source.find_latest_released_version_by({**filters, 'mnemonic': source}),
+                Source.get_version(source, LATEST, filters)]
+        elif version != HEAD:
+            repo_versions.append(Source.get_version(source, version, filters))
+        for repo_version in compact(repo_versions):
+            self.check_view_access(request, repo_version)
 
-class SourceVersionListHeadMixin:
-    """HEAD on a source version's concept or mapping list: GET's access check, then the filtered count as before."""
-    def head(self, request, **kwargs):
-        self.set_parent_resource(False)
-        self.check_parent_permissions(request)
-        # the count reads the filtered queryset, not the parent version's page
-        self.kwargs.pop('parent_resource', None)
-        self.parent_resource = None
-        return super().head(request, **kwargs)
 
 class SourceChildExtrasBaseView:
     default_qs_sort_attr = '-created_at'
