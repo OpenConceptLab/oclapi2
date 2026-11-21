@@ -3,6 +3,7 @@ import json
 import os
 import random
 import tempfile
+import threading
 from io import StringIO
 
 from celery_once import AlreadyQueued
@@ -40,7 +41,7 @@ from core.common.tasks import add_references, seed_children_to_new_version, seed
 from core.common.tasks import update_collection_active_concepts_count
 from core.common.tasks import update_collection_active_mappings_count
 from core.common.tasks import update_source_active_concepts_count, update_source_active_mappings_count
-from core.common.tests import OCLTestCase, OCLAPITestCase
+from core.common.tests import OCLTestCase, OCLAPITestCase, OCLAPITransactionTestCase
 from core.common.utils import to_owner_uri, get_falsy_values, drop_version
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept, HierarchicalConcepts
@@ -3196,6 +3197,49 @@ class TasksTest(OCLTestCase):
 
         collection.refresh_from_db()
         self.assertEqual(collection.active_concepts, 1)
+
+
+class ActiveCountConcurrencyTest(OCLAPITransactionTestCase):
+    """Two counts of one collection at once, on separate connections. One test per class, as a transaction test's
+    flush removes the fixtures."""
+
+    def test_a_count_that_starts_after_a_write_saves_after_one_that_started_before(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.concepts.add(ConceptFactory())
+        concept2 = ConceptFactory()
+        set_active_concepts = Collection.set_active_concepts
+        first_counted, first_may_save = threading.Event(), threading.Event()
+
+        def paused_set_active_concepts(instance):
+            set_active_concepts(instance)
+            if threading.current_thread().name == 'first':
+                first_counted.set()
+                first_may_save.wait(30)
+
+        def count():
+            try:
+                update_collection_active_concepts_count.run(collection.id)
+            finally:
+                connection.close()
+
+        with patch.object(Collection, 'set_active_concepts', paused_set_active_concepts):
+            first = threading.Thread(target=count, name='first', daemon=True)
+            first.start()
+            self.assertTrue(first_counted.wait(30))
+            expansion.concepts.add(concept2)
+            second = threading.Thread(target=count, name='second', daemon=True)
+            second.start()
+            second.join(timeout=1)  # waits for the first count's turn, else it saves 2 here and the first then 1
+            first_may_save.set()
+            for thread in (first, second):
+                thread.join(timeout=30)
+            self.assertFalse(first.is_alive() or second.is_alive())
+
+        collection.refresh_from_db()
+        self.assertEqual(collection.active_concepts, 2)
 
 
 @tag('es')
