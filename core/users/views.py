@@ -281,12 +281,6 @@ class UserListView(UserBaseView,
         user = self.request.user
         return organization.public_can_view or user.is_staff or organization.is_member(user)
 
-    @swagger_auto_schema(
-        manual_parameters=[
-            last_login_before_param, last_login_since_param, date_joined_before_param, date_joined_since_param,
-            updated_since_param
-        ]
-    )
     def set_organization_members(self):
         """
         Under /orgs/<org>/, the list is the org's members. Returns the answer when it can't be listed: 404 when the
@@ -308,6 +302,12 @@ class UserListView(UserBaseView,
         self.queryset = queryset.all()
         return None
 
+    @swagger_auto_schema(
+        manual_parameters=[
+            last_login_before_param, last_login_since_param, date_joined_before_param, date_joined_since_param,
+            updated_since_param
+        ]
+    )
     def get(self, request, *args, **kwargs):
         kwargs.pop('org', None)
         refused = self.set_organization_members()

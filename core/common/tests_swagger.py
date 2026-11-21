@@ -1,3 +1,5 @@
+from core.common.constants import (
+    LAST_LOGIN_BEFORE_PARAM, LAST_LOGIN_SINCE_PARAM, DATE_JOINED_BEFORE_PARAM, DATE_JOINED_SINCE_PARAM, UPDATED_SINCE_PARAM)
 from core.common.tests import OCLAPITestCase
 from core.concepts.tests.factories import ConceptFactory
 from core.sources.tests.factories import OrganizationSourceFactory
@@ -31,6 +33,15 @@ class SwaggerSchemaTest(OCLAPITestCase):
         names = [parameter['name'] for parameter in parameters]
         self.assertIn('page', names)
         self.assertIn('limit', names)
+
+    def test_user_lists_document_date_filters(self):
+        paths = self.get_schema()['paths']
+
+        for path in ('/users/', '/orgs/{org}/members/', '/orgs/{org}/users/'):
+            names = [parameter['name'] for parameter in paths[path]['get']['parameters']]
+            for name in (LAST_LOGIN_BEFORE_PARAM, LAST_LOGIN_SINCE_PARAM, DATE_JOINED_BEFORE_PARAM,
+                         DATE_JOINED_SINCE_PARAM, UPDATED_SINCE_PARAM):
+                self.assertIn(name, names, path)
 
     def test_source_detail_logo_url_is_nullable(self):
         logo_url = self.get_schema()['definitions']['SourceDetail']['properties']['logo_url']
