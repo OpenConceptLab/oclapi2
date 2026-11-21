@@ -1561,8 +1561,13 @@ class SourceVersionSearchAccessTest(SourceVersionReadAccessMixin, OCLAPITestCase
 
         for version in [self.release, self.private_release]:
             self.assert_answers(url + version.uri, 401, 403, 200)
+            self.assert_answers(url + version.uri, 401, 403, 200, method='head')
         self.assert_answers(f'{url}{self.release.uri},{public_release.uri}', 401, 403, 200)
         self.assertEqual(self.hits_from(public_source, url + public_release.uri, self.outsider), [concept.mnemonic])
+        response = self.client.head(
+            url + public_release.uri, HTTP_AUTHORIZATION='Token ' + self.outsider.get_token())
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(int(response['num_found']), 1)
 
     def test_latest_release_search_leaves_out_releases_the_requester_cannot_view(self):
         latest = {'HTTP_INCLUDESEARCHLATEST': 'true'}

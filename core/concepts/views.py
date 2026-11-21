@@ -305,11 +305,18 @@ class ConceptListView(ConceptHierarchyMixin, ConceptBaseView, ListWithHeadersMix
         ]
     )
     def get(self, request, *args, **kwargs):
+        self.set_fuzzy_search_targets()
+        self.set_parent_resource(False)
+        return self.list(request, *args, **kwargs)
+
+    def head(self, request, **kwargs):
+        self.set_fuzzy_search_targets()
+        return super().head(request, **kwargs)
+
+    def set_fuzzy_search_targets(self):
         if self.is_fuzzy_search:
             self._set_source_versions()
             self._extra_filters = None
-        self.set_parent_resource(False)
-        return self.list(request, *args, **kwargs)
 
     def post(self, request, **_):
         self.set_parent_resource()
