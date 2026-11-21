@@ -1433,13 +1433,8 @@ class SourceVersionReadAccessTest(SourceVersionReadAccessMixin, OCLAPITestCase):
         for version_url in self.version_urls():
             for suffix in ['concepts/', 'mappings/', *self.read_suffixes()]:
                 self.assert_answers(version_url + suffix, 401, 403, 200)
-                self.assertEqual(self.request('get', version_url + suffix, self.staff).status_code, 200)
-
-    def test_head_requests_under_a_private_release_answer_as_its_lists(self):
-        for version_url in self.version_urls():
-            for suffix in [f'concepts/{self.concept.mnemonic}/versions/', f'concepts/{self.concept.mnemonic}/mappings/',
-                           f'mappings/{self.mapping.mnemonic}/versions/']:
                 self.assert_answers(version_url + suffix, 401, 403, 200, method='head')
+                self.assertEqual(self.request('get', version_url + suffix, self.staff).status_code, 200)
 
     def test_reads_under_a_public_head_stay_visible(self):
         for suffix in ['concepts/', 'mappings/', *self.read_suffixes()]:
