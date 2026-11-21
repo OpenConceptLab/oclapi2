@@ -687,6 +687,15 @@ class CascadeSourceVersionAccessTest(PrivateReleaseOfPublicHeadMixin, CrossRepoA
         self.assertEqual(
             self.add_reference(self.admin, 'sourcemappings'), ([root.id], [self.released_mapping.id]))
 
+    def test_cascade_checks_the_release_it_walks_after_the_source_is_renamed(self):
+        Source.objects.filter(id=self.head.id).update(mnemonic='Renamed')  # its releases and URIs keep the old name
+        root = self.root.get_latest_version()
+
+        self.assertEqual(self.add_reference(self.outsider, 'sourcetoconcepts'), ([root.id], []))
+        self.assertEqual(
+            self.add_reference(self.member, 'sourcetoconcepts'),
+            (sorted([root.id, self.released_target.id]), [self.released_mapping.id]))
+
     def test_cascade_over_a_system_version_its_creator_cannot_view_adds_only_the_concept(self):
         root = self.root.get_latest_version()
         value_set, _ = self.new_collection(self.admin, [root])

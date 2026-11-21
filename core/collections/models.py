@@ -859,7 +859,7 @@ class CollectionReference(models.Model):
         concept_ids = set()
         mapping_ids = set()
         traversed = []
-        viewable_by_source = {}
+        viewable_by_version = {}
 
         for concept in concept_queryset:
             concept_uri = drop_version(concept.uri)
@@ -867,7 +867,7 @@ class CollectionReference(models.Model):
                 continue
             traversed.append(concept_uri)
             params = cascade_params
-            if not self._can_view_cascade_version(concept, cascade_params['repo_version'], viewable_by_source):
+            if not self._can_view_cascade_version(concept, cascade_params['repo_version'], viewable_by_version):
                 params = {**cascade_params, 'repo_version': None}
             result = concept.cascade(**params)
             concept_ids.update(set(result['concepts'].values_list('id', flat=True)))
@@ -878,18 +878,22 @@ class CollectionReference(models.Model):
 
         return Concept.objects.filter(id__in=concept_ids), Mapping.objects.filter(id__in=mapping_ids)
 
-    def _can_view_cascade_version(self, concept, repo_version, viewable_by_source):
+    def _can_view_cascade_version(self, concept, repo_version, viewable_by_version):
         """The repo version a cascade walks (named by label, or the reference's system or value set version) must be
         one the reference's creator can view; one they can't is walked as if it didn't exist, as for an unknown label.
+        A label resolves as the walk resolves it: among the source versions that hold the concept.
         """
         if not repo_version:
             return True
-        key = concept.parent_id if isinstance(repo_version, str) else None
-        if key not in viewable_by_source:
-            version = concept.parent.versions.filter(
-                version=decode_string(repo_version)).first() if key else repo_version
-            viewable_by_source[key] = not version or version.can_view_all_content(self.created_by)
-        return viewable_by_source[key]
+        versions = concept.sources.filter(
+            version=decode_string(repo_version)) if isinstance(repo_version, str) else [repo_version]
+        for version in versions:
+            key = (version.__class__.__name__, version.id)
+            if key not in viewable_by_version:
+                viewable_by_version[key] = version.can_view_all_content(self.created_by)
+            if not viewable_by_version[key]:
+                return False
+        return True
 
     def get_mappings(self, system_version=None):
         queryset = self.get_resource_queryset_from_system_and_valueset('mappings', system_version)
