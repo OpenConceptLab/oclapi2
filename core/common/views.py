@@ -1221,8 +1221,10 @@ class SourceChildCommonBaseView(BaseAPIView):
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
         self.__set_params()
-        if request.method in ['GET', 'HEAD'] and 'source' in self.kwargs:
-            self.check_source_version_access(request)
+        if request.method in ['GET', 'HEAD']:
+            if 'source' in self.kwargs:
+                self.check_source_version_access(request)
+            self.check_query_source_version_access(request)
 
     def verify_scope(self):
         has_parent_scope = self.has_parent_scope()
@@ -1250,8 +1252,16 @@ class SourceChildCommonBaseView(BaseAPIView):
             limit = self.limit if self.params.get(LIMIT_PARAM) else self.cap_limit(LIST_DEFAULT_LIMIT)
             self.limit = to_int(CSV_DEFAULT_LIMIT if self.params.get('csv') else limit, LIST_DEFAULT_LIMIT)
 
-    def get_parent_owner_filters(self):
-        """The owner of the repository in the URL, as filters on Source or Collection."""
+    def get_parent_owner_filters(self, params=None):
+        """
+        The owner of the repository in the URL, as filters on Source or Collection. Given `params` (the URL's, with
+        the query string's over them), the owner they name; none when they name no owner, as the reads under them
+        then match every owner's.
+        """
+        if params is not None:
+            if params.get('org'):
+                return {'organization__mnemonic': params['org']}
+            return {'user__username': params['user']} if params.get('user') else {}
         if 'org' in self.kwargs:
             return {'organization__mnemonic': self.kwargs['org']}
         username = self.request.user.username if self.user_is_self else self.kwargs.get('user')
@@ -1277,6 +1287,30 @@ class SourceChildCommonBaseView(BaseAPIView):
             raise Http404()
         for repo_version in repo_versions:
             self.check_view_access(request, repo_version)
+
+    def check_query_source_version_access(self, request):
+        """
+        The query string can name the source, its owner and its version over the URL's, and the reads then answer
+        from those. When it names a version other than HEAD this way, 401 or 403 unless the requester can view that
+        version of each source it names (commas separate several), of the owner it names or, when it names none,
+        of every owner with that version, along with each one's HEAD, as check_source_version_access does for the
+        URL's. HEAD's own content carries its access, so reads of it are checked where they're made.
+        """
+        from core.sources.models import Source
+        params = self.params or {}
+        version = params.get('version')
+        if not params.get('source') or version in [None, HEAD]:
+            return
+        owner_filters = self.get_parent_owner_filters(params)
+        if (params['source'], version) == (self.kwargs.get('source'), self.kwargs.get('version')) and (
+                owner_filters == self.get_parent_owner_filters()):
+            return  # the URL's own, checked already
+        heads = Source.objects.filter(
+            mnemonic__in=compact(params['source'].split(',')), version=HEAD, **owner_filters)
+        for head in heads:
+            for repo_version in Source.get_url_versions(
+                    head.mnemonic, version, {'organization_id': head.organization_id, 'user_id': head.user_id}) or []:
+                self.check_view_access(request, repo_version)
 
 
 class SourceChildExtrasBaseView:
