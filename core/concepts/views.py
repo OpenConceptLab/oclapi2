@@ -87,6 +87,16 @@ class ConceptBaseView(SourceChildCommonBaseView):
     def get_queryset(self):
         return Concept.get_base_queryset(self.params)
 
+    def filter_to_container_version(self, queryset):
+        """
+        In a repo version other than HEAD, keeps only the hierarchy concepts that are members of that version.
+        An unchanged concept version is shared by later repo versions, so its links also reach concepts added after.
+        """
+        if self.kwargs.get('version', HEAD) == HEAD:
+            return queryset
+        members = Concept.get_base_queryset({**self.params, 'concept': None, 'concept_version': None})
+        return queryset.filter(versioned_object_id__in=members.values('versioned_object_id'))
+
     def set_parent_resource(self, __pop=True):
         parent_resource = None
         source = self.kwargs.pop('source', None) if __pop else self.kwargs.get('source', None)
@@ -617,7 +627,7 @@ class ConceptChildrenView(ConceptBaseView, ListWithHeadersMixin):
             raise Http404()
 
         self.check_object_permissions(self.request, instance)
-        return get_viewable_concepts(instance.child_concept_queryset(), self.request)
+        return get_viewable_concepts(self.filter_to_container_version(instance.child_concept_queryset()), self.request)
 
     def filter_queryset(self, queryset=None):  # annotated here, not in get_queryset, to keep it out of CSV exports
         return Concept.annotate_has_children(super().filter_queryset(queryset))
@@ -641,7 +651,7 @@ class ConceptParentsView(ConceptBaseView, ListWithHeadersMixin):
             raise Http404()
 
         self.check_object_permissions(self.request, instance)
-        return get_viewable_concepts(instance.parent_concept_queryset(), self.request)
+        return get_viewable_concepts(self.filter_to_container_version(instance.parent_concept_queryset()), self.request)
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
