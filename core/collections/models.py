@@ -859,13 +859,17 @@ class CollectionReference(models.Model):
         concept_ids = set()
         mapping_ids = set()
         traversed = []
+        viewable_by_source = {}
 
         for concept in concept_queryset:
             concept_uri = drop_version(concept.uri)
             if concept_uri in traversed:
                 continue
             traversed.append(concept_uri)
-            result = concept.cascade(**cascade_params)
+            params = cascade_params
+            if not self._can_view_cascade_version(concept, cascade_params['repo_version'], viewable_by_source):
+                params = {**cascade_params, 'repo_version': None}
+            result = concept.cascade(**params)
             concept_ids.update(set(result['concepts'].values_list('id', flat=True)))
             mapping_ids.update(set(result['mappings'].values_list('id', flat=True)))
 
@@ -873,6 +877,16 @@ class CollectionReference(models.Model):
         mapping_ids.update(set(mapping_queryset.values_list('id', flat=True)))
 
         return Concept.objects.filter(id__in=concept_ids), Mapping.objects.filter(id__in=mapping_ids)
+
+    def _can_view_cascade_version(self, concept, repo_version, viewable_by_source):
+        """A source version the cascade names by label is walked only if the reference's creator can view it; one they
+        can't is walked as if it didn't exist, as for an unknown label. The system version is checked on its own."""
+        if not isinstance(repo_version, str):
+            return True
+        if concept.parent_id not in viewable_by_source:
+            version = concept.parent.versions.filter(version=decode_string(repo_version)).first()
+            viewable_by_source[concept.parent_id] = not version or version.can_view_all_content(self.created_by)
+        return viewable_by_source[concept.parent_id]
 
     def get_mappings(self, system_version=None):
         queryset = self.get_resource_queryset_from_system_and_valueset('mappings', system_version)

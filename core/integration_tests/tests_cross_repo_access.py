@@ -594,3 +594,45 @@ class FuzzySearchScopeTest(PrivateReleaseOfPublicHeadMixin, CrossRepoAccessBaseT
         self.assertEqual(self.search(self.head.uri + 'v1/', self.outsider)[0], 403)
         self.assertEqual(
             self.search(self.head.uri + 'v1/', self.member), (200, [self.released_revision.version]))
+
+
+class CascadeSourceVersionAccessTest(PrivateReleaseOfPublicHeadMixin, CrossRepoAccessBaseTest):
+    def setUp(self):
+        super().setUp()
+        self.build_release()
+        self.root = ConceptFactory(parent=self.head, mnemonic='root')
+        target = ConceptFactory(parent=self.head, mnemonic='target')
+        mapping = MappingFactory(
+            parent=self.head, from_concept=self.root, to_concept=target, mnemonic='link', map_type='SAME-AS')
+        for resource in [self.root, target, mapping]:
+            self.add_to_release(resource)
+        self.released_target, _ = self.move_head_on(target, concept_class='Misc')
+        self.released_mapping, _ = self.move_head_on(mapping, map_type='NARROWER-THAN')
+
+    def add_reference(self, user, method):
+        collection = UserCollectionFactory(user=user)
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        root = self.root.get_latest_version()
+        response = self.client.put(
+            collection.uri + 'references/',
+            {'data': [{'system': self.head.uri, 'version': 'HEAD',
+                       'cascade': {'method': method, 'cascade_levels': '*', 'source_version': 'v1'},
+                       'concept': [{'code': 'root', 'resource_version': root.version}]}]},
+            HTTP_AUTHORIZATION='Token ' + user.get_token(), format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        expansion.refresh_from_db()
+        return (sorted(expansion.concepts.values_list('id', flat=True)),
+                sorted(expansion.mappings.values_list('id', flat=True)))
+
+    def test_cascade_over_a_release_its_creator_cannot_view_adds_only_the_concept(self):
+        root = self.root.get_latest_version()
+        for method in ['sourcetoconcepts', 'sourcemappings']:
+            self.assertEqual(self.add_reference(self.outsider, method), ([root.id], []), method)
+
+        self.assertEqual(
+            self.add_reference(self.member, 'sourcetoconcepts'),
+            (sorted([root.id, self.released_target.id]), [self.released_mapping.id]))
+        self.assertEqual(
+            self.add_reference(self.admin, 'sourcemappings'), ([root.id], [self.released_mapping.id]))
