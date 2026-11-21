@@ -16,7 +16,8 @@ from core.collections.models import CollectionReference, Collection
 from core.collections.serializers import CollectionVersionExportSerializer, CollectionReferenceDetailSerializer
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory, ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
-from core.common.tasks import export_collection, delete_s3_objects
+from core.common.tasks import export_collection, delete_s3_objects, add_references, \
+    update_collection_active_concepts_count, update_collection_active_mappings_count
 from core.common.tests import OCLAPITestCase
 from core.integration_tests.tests_access_control import PrivateHeadVersionAccessMixin
 from core.common.utils import get_latest_dir_in_path, drop_version, get_export_key_pattern
@@ -29,7 +30,7 @@ from core.orgs.tests.factories import OrganizationFactory
 from core.services.storages.cloud.aws import S3
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
-from core.tasks.models import Task
+from core.tasks.models import Task, AsyncTask, QueueOnceCustomTask
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -892,6 +893,48 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(
             len(add_references_mock.apply_async.call_args[1]['task_id']), 36 + 1 + 7 + 1 + 6
         )
+
+    def test_put_async_counts_what_the_references_added_once_they_commit(self):
+        concept = ConceptFactory()
+        retired_concept = ConceptFactory(retired=True)
+        mapping = MappingFactory()
+        published = []
+
+        def record(task, *args, **kwargs):
+            published.append((task, args[0] if args else kwargs.get('args')))
+
+        def published_counts():
+            return sorted((task.name, args) for task, args in published if task.name.endswith('_count'))
+
+        # the tasks the request and then the worker queue are recorded, and run here as the worker would
+        with override_settings(TEST_MODE=False), \
+                patch.object(AsyncTask, 'apply_async', autospec=True, side_effect=record), \
+                patch.object(QueueOnceCustomTask, 'apply_async', autospec=True, side_effect=record):
+            response = self.client.put(
+                self.collection.uri + 'references/?async=true',
+                {'data': {'expressions': [
+                    obj.get_latest_version().url for obj in [concept, retired_concept, mapping]]}},
+                HTTP_AUTHORIZATION='Token ' + self.token,
+                format='json'
+            )
+            self.assertEqual(response.status_code, 202)
+            [(job, job_args)] = [(task, args) for task, args in published if task.name == add_references.name]
+            with self.captureOnCommitCallbacks(execute=True):
+                job(*job_args)
+                counts_queued_before_commit = published_counts()
+
+        self.assertEqual(counts_queued_before_commit, [])
+        self.assertEqual(
+            published_counts(),
+            sorted([(update_collection_active_concepts_count.name, (self.collection.id,)),
+                    (update_collection_active_mappings_count.name, (self.collection.id,))])
+        )
+        for task, args in published:
+            if task.name.endswith('_count'):
+                task.run(*args)
+        self.collection.refresh_from_db()
+        self.assertEqual(self.collection.expansion.concepts.count(), 3)
+        self.assertEqual((self.collection.active_concepts, self.collection.active_mappings), (2, 1))
 
     def test_put_200_specific_expression(self):  # pylint: disable=too-many-statements
         response = self.client.put(

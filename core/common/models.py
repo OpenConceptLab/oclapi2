@@ -882,7 +882,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     def queue_count_task(self, job):
         # Queued once the caller's transaction commits: a worker counting before then reads the members
-        # as they were, e.g. none after a collection's first references are added
+        # as they were, e.g. none after a collection's first references are added. A failure to queue is
+        # logged: it fails neither the committed write nor the other count.
         user = get_current_authorized_user() or self.updated_by
 
         def queue():
@@ -893,7 +894,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             except AlreadyQueued:
                 task.delete()
 
-        transaction.on_commit(queue)
+        transaction.on_commit(queue, robust=True)
 
     @property
     def last_child_update(self):

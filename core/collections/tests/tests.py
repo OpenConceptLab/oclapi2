@@ -39,6 +39,7 @@ from core.common.constants import OPENMRS_VALIDATION_SCHEMA, ACCESS_TYPE_NONE, A
 from core.common.tasks import add_references, seed_children_to_new_version, seed_children_to_expansion
 from core.common.tasks import update_collection_active_concepts_count
 from core.common.tasks import update_collection_active_mappings_count
+from core.common.tasks import update_source_active_concepts_count, update_source_active_mappings_count
 from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.common.utils import to_owner_uri, get_falsy_values, drop_version
 from core.concepts.documents import ConceptDocument
@@ -50,7 +51,7 @@ from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
-from core.tasks.models import Task, AsyncTask, QueueOnceCustomTask
+from core.tasks.models import Task
 from core.toggles.models import Toggle
 from core.url_registry.constants import URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE
 from core.url_registry.factories import GlobalURLRegistryFactory, OrganizationURLRegistryFactory
@@ -2134,48 +2135,25 @@ class CollectionSerializersTest(OCLTestCase):
 
 
 class TasksTest(OCLTestCase):
-    def test_add_references_task_queues_counts_once_references_commit(self):
+    def test_count_tasks_release_their_lock_as_they_start(self):
+        for task in [update_collection_active_concepts_count, update_collection_active_mappings_count,
+                     update_source_active_concepts_count, update_source_active_mappings_count]:
+            self.assertTrue(task.unlock_before_run(), task.name)
+
+    # not a user an earlier test's request left behind
+    @patch('core.common.models.get_current_authorized_user', Mock(return_value=None))
+    @patch('core.common.tasks.update_collection_active_mappings_count.apply_async')
+    @patch('core.common.tasks.update_collection_active_concepts_count.apply_async',
+           side_effect=ConnectionError('broker unreachable'))
+    def test_update_children_counts_a_failed_publish_stops_neither_the_caller_nor_the_other_count(
+            self, concepts_apply_async_mock, mappings_apply_async_mock):
         collection = OrganizationCollectionFactory()
-        expansion = ExpansionFactory(collection_version=collection)
-        collection.expansion_uri = expansion.uri
-        collection.save()
-        concept = ConceptFactory()
-        retired_concept = ConceptFactory(retired=True)
-        mapping = MappingFactory()
-        queued = []
 
-        def record(task, *_args, **_kwargs):
-            queued.append(task.name)
+        with override_settings(TEST_MODE=False), self.captureOnCommitCallbacks(execute=True):
+            collection.update_children_counts()
 
-        def queued_counts():
-            return sorted(name for name in queued if name.endswith('_count'))
-
-        # as on a worker (?async=true or not): the tasks it queues are recorded, not run
-        with override_settings(TEST_MODE=False), \
-                patch.object(AsyncTask, 'apply_async', autospec=True, side_effect=record), \
-                patch.object(QueueOnceCustomTask, 'apply_async', autospec=True, side_effect=record):
-            with self.captureOnCommitCallbacks(execute=True):
-                added_references, errors = add_references(
-                    collection.created_by.id,
-                    {'expressions': [
-                        obj.get_latest_version().url for obj in [concept, retired_concept, mapping]]},
-                    collection.id
-                )
-                counts_queued_before_commit = queued_counts()
-
-        self.assertEqual((len(added_references), errors), (3, {}))
-        self.assertEqual(expansion.concepts.count(), 2)
-        self.assertEqual(counts_queued_before_commit, [])
-        self.assertEqual(
-            queued_counts(),
-            sorted([update_collection_active_concepts_count.name, update_collection_active_mappings_count.name])
-        )
-
-        # what the worker then counts: the members the references added
-        update_collection_active_concepts_count(collection.id)
-        update_collection_active_mappings_count(collection.id)
-        collection.refresh_from_db()
-        self.assertEqual((collection.active_concepts, collection.active_mappings), (1, 1))
+        concepts_apply_async_mock.assert_called_once_with((collection.id,), task_id=ANY, queue='concurrent')
+        mappings_apply_async_mock.assert_called_once_with((collection.id,), task_id=ANY, queue='concurrent')
 
     def test_add_references_task(self):
         collection = OrganizationCollectionFactory()
@@ -3197,7 +3175,7 @@ class TasksTest(OCLTestCase):
 
         self.assertEqual(collection.active_mappings, None)
 
-        update_collection_active_mappings_count(collection.id)
+        update_collection_active_mappings_count.run(collection.id)
 
         collection.refresh_from_db()
         self.assertEqual(collection.active_mappings, 1)
@@ -3214,7 +3192,7 @@ class TasksTest(OCLTestCase):
 
         self.assertEqual(collection.active_concepts, None)
 
-        update_collection_active_concepts_count(collection.id)
+        update_collection_active_concepts_count.run(collection.id)
 
         collection.refresh_from_db()
         self.assertEqual(collection.active_concepts, 1)

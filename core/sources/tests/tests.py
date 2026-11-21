@@ -2938,7 +2938,7 @@ class TasksTest(OCLTestCase):
 
         self.assertEqual(source.active_mappings, None)
 
-        update_source_active_mappings_count(source.id)
+        update_source_active_mappings_count.run(source.id)
 
         source.refresh_from_db()
         self.assertEqual(source.active_mappings, 1)
@@ -2950,7 +2950,7 @@ class TasksTest(OCLTestCase):
 
         self.assertEqual(source.active_concepts, None)
 
-        update_source_active_concepts_count(source.id)
+        update_source_active_concepts_count.run(source.id)
 
         source.refresh_from_db()
         self.assertEqual(source.active_concepts, 1)

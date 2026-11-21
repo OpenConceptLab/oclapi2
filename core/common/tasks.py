@@ -987,7 +987,12 @@ def index_source_public_access(self, source_id):
     source.remove_processing(task_id)
 
 
-@app.task(base=QueueOnceCustomTask)
+# A count task releases its lock as it starts, so a count queued while it runs is kept and reads what was
+# committed meanwhile; one queued before it starts is still dropped, as the queued one reads that anyway
+COUNT_TASK_ONCE = {'unlock_before_run': True}
+
+
+@app.task(base=QueueOnceCustomTask, once=COUNT_TASK_ONCE)
 def update_source_active_concepts_count(source_id):
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
@@ -998,7 +1003,7 @@ def update_source_active_concepts_count(source_id):
             source.save(update_fields=['active_concepts'])
 
 
-@app.task(base=QueueOnceCustomTask)
+@app.task(base=QueueOnceCustomTask, once=COUNT_TASK_ONCE)
 def update_source_active_mappings_count(source_id):
     from core.sources.models import Source
     source = Source.objects.filter(id=source_id).first()
@@ -1009,7 +1014,7 @@ def update_source_active_mappings_count(source_id):
             source.save(update_fields=['active_mappings'])
 
 
-@app.task(base=QueueOnceCustomTask)
+@app.task(base=QueueOnceCustomTask, once=COUNT_TASK_ONCE)
 def update_collection_active_concepts_count(collection_id):
     from core.collections.models import Collection
     collection = Collection.objects.filter(id=collection_id).first()
@@ -1020,7 +1025,7 @@ def update_collection_active_concepts_count(collection_id):
             collection.save(update_fields=['active_concepts'])
 
 
-@app.task(base=QueueOnceCustomTask)
+@app.task(base=QueueOnceCustomTask, once=COUNT_TASK_ONCE)
 def update_collection_active_mappings_count(collection_id):
     from core.collections.models import Collection
     collection = Collection.objects.filter(id=collection_id).first()
