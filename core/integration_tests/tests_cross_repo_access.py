@@ -1,12 +1,14 @@
 import factory
 from django.db.models import F
+from django.test import tag
 from mock import patch
 
 from core.bundles.models import Bundle
 from core.collections.models import CollectionReference
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory, UserCollectionFactory
-from core.common.constants import ACCESS_TYPE_NONE
+from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
 from core.common.tests import OCLAPITestCase
+from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.serializers import ConceptVersionExportSerializer
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
@@ -524,3 +526,71 @@ class CollectionConceptMappingsTest(CrossRepoAccessBaseTest):
 
                 self.assertEqual(response.status_code, 200, (url, param))
                 self.assertEqual({data['url'] for data in response.data['mappings']}, {mapping.url}, (url, param))
+
+
+class PrivateReleaseOfPublicHeadMixin:
+    """A public HEAD in the private org with a private release v1, whose released revisions HEAD has moved past."""
+
+    def build_release(self):
+        self.head = OrganizationSourceFactory(
+            organization=self.private_org, mnemonic='PubHead', public_access=ACCESS_TYPE_VIEW)
+        self.release = OrganizationSourceFactory(
+            organization=self.private_org, mnemonic='PubHead', version='v1', released=True,
+            public_access=ACCESS_TYPE_NONE)
+
+    def add_to_release(self, resource):
+        resource.get_latest_version().sources.add(self.release)  # as a release is seeded: latest revisions only
+
+    def move_head_on(self, resource, **changes):
+        """A new latest revision in HEAD; the released one is left only in the release."""
+        released = resource.get_latest_version()
+        revision = resource.clone()
+        for attr, value in changes.items():
+            setattr(revision, attr, value)
+        revision.save()
+        revision.version = str(revision.id)
+        revision.is_latest_version = True
+        revision.save()
+        revision.sources.add(self.head)
+        released.is_latest_version = False
+        released.save()
+        released.sources.remove(self.head)
+        return released, revision
+
+
+@tag('es')
+class FuzzySearchScopeTest(PrivateReleaseOfPublicHeadMixin, CrossRepoAccessBaseTest):
+    def setUp(self):
+        super().setUp()
+        self.build_release()
+        concept = ConceptFactory(
+            parent=self.head, mnemonic='bird', names=[ConceptNameFactory.build(name='zebrafinch')])
+        self.add_to_release(concept)
+        self.released_revision, self.head_revision = self.move_head_on(concept, concept_class='Misc')
+        ConceptNameFactory(concept=self.head_revision, name='zebrastripe')
+        OrganizationSourceFactory(
+            organization=self.public_source.organization, mnemonic=self.public_source.mnemonic, version='p1',
+            released=True, public_access=ACCESS_TYPE_VIEW)
+        ConceptDocument().update(Concept.objects.all(), refresh=True)
+
+    def search(self, url, user=None, query='zebrafinch'):
+        headers = {'HTTP_AUTHORIZATION': 'Token ' + user.get_token()} if user else {}
+        response = self.client.get(url + 'concepts/?fuzzy=true&q=' + query, **headers)
+        return response.status_code, sorted(row['version'] for row in response.data) if (
+            response.status_code == 200) else None
+
+    def test_fuzzy_search_stays_within_the_urls_repository_version(self):
+        public_release_url = self.public_source.uri + 'p1/'
+        for user in [None, self.outsider, self.member]:
+            self.assertEqual(self.search(public_release_url, user), (200, []), user)
+            self.assertEqual(self.search(self.public_source.uri + 'latest/', user), (200, []), user)
+            self.assertEqual(self.search('/users/outsider/sources/NoSuchSource/v9/', user), (200, []), user)
+            self.assertEqual(self.search(self.head.uri, user), (200, []), user)
+            self.assertEqual(
+                self.search(self.head.uri, user, 'zebrastripe'), (200, [self.head_revision.version]), user)
+            self.assertEqual(self.search(public_release_url, user, 'zebrastripe'), (200, []), user)
+
+        self.assertEqual(self.search(self.head.uri + 'v1/')[0], 401)
+        self.assertEqual(self.search(self.head.uri + 'v1/', self.outsider)[0], 403)
+        self.assertEqual(
+            self.search(self.head.uri + 'v1/', self.member), (200, [self.released_revision.version]))
