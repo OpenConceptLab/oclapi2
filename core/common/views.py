@@ -1293,10 +1293,11 @@ class SourceChildCommonBaseView(BaseAPIView):
         The query string can name the source, its owner and its version over the URL's, and the reads then answer
         from those. When it names a version other than HEAD this way, each source it names (commas separate
         several) answers as check_source_version_access does for the URL's: 404 unless the source and that version
-        exist under the owner it names, then 401 or 403 unless the requester can view both. `latest` is the newest
-        released version, as the reads resolve it. With no owner (none in the URL, or an empty `org`), no owner
-        names the version, so 404. On a collection's route, the URL's version is the collection's, left to its own
-        checks. HEAD's own content carries its access, so reads of it are checked where they're made.
+        exist under the owner it names, then 401 or 403 unless the requester can view both. A source that doesn't
+        exist there has nothing to read (a search reads the name as a facet), so it's skipped. `latest` is the
+        newest released version, as the reads resolve it. With no owner (none in the URL, or an empty `org`), no
+        owner names the version, so 404. On a collection's route, the URL's version is the collection's, left to its
+        own checks. HEAD's own content carries its access, so reads of it are checked where they're made.
         """
         from core.sources.models import Source
         params = self.params or {}
@@ -1312,10 +1313,12 @@ class SourceChildCommonBaseView(BaseAPIView):
             raise Http404()
         for mnemonic in compact(params['source'].split(',')):
             head = Source.get_version(mnemonic, HEAD, owner_filters)
+            if not head:
+                continue
             repo_version = Source.find_latest_released_version_by(
                 {**owner_filters, 'mnemonic': mnemonic}) if version == LATEST else Source.get_version(
                 mnemonic, version, owner_filters)
-            if not head or not (repo_version or version == LATEST):
+            if not repo_version and version != LATEST:
                 raise Http404()
             for viewed in compact([head, repo_version]):
                 self.check_view_access(request, viewed)

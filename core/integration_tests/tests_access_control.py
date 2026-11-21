@@ -1637,6 +1637,17 @@ class SourceVersionSearchAccessTest(SourceVersionReadAccessMixin, OCLAPITestCase
             self.assert_answers(url, 200, 200, 200)
             self.assert_answers(url, 200, 200, 200, method='head')
 
+    def test_a_source_facet_under_a_public_release_stays_a_search(self):
+        public_release = OrganizationSourceFactory(
+            organization=self.org, mnemonic=self.source.mnemonic, version='v0', released=True,
+            public_access=ACCESS_TYPE_VIEW)
+        self.add_to_version(self.concept, public_release)
+        self.index()
+
+        for facet in [f'{self.source.mnemonic[:3]}*', 'NoSuchSource']:
+            self.assert_answers(f'{public_release.uri}concepts/?source={facet}', 200, 200, 200)
+            self.assert_answers(f'{public_release.uri}concepts/?source={facet}', 200, 200, 200, method='head')
+
     def test_fuzzy_search_checks_the_source_versions_it_names(self):
         public_source = OrganizationSourceFactory(public_access=ACCESS_TYPE_VIEW)
         public_release = OrganizationSourceFactory(
