@@ -30,6 +30,7 @@ from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFa
 from core.tasks.models import Task
 from core.url_registry.factories import GlobalURLRegistryFactory, OrganizationURLRegistryFactory, UserURLRegistryFactory
 from core.url_registry.models import URLRegistry
+from core.users.documents import UserProfileDocument
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -752,6 +753,57 @@ class UserOrganizationListAccessTest(AccessTestMixin, OCLAPITestCase):
         self.assertEqual(self.list_orgs(self.member.uri + 'orgs/', self.staff), all_orgs)
         self.assertEqual(
             self.list_orgs(self.member.uri + 'orgs/', self.other_member), all_orgs)
+
+
+class OrganizationMemberListAccessMixin(AccessTestMixin):
+    """A private org's members list, at /orgs/<org>/members/ and /orgs/<org>/users/."""
+    def setUp(self):
+        super().setUp()
+        self.private_org = OrganizationFactory(public_access=ACCESS_TYPE_NONE)
+        self.member.organizations.add(self.private_org)
+        self.urls = [f'/orgs/{self.private_org.mnemonic}/members/', f'/orgs/{self.private_org.mnemonic}/users/']
+
+
+class OrganizationMemberListAccessTest(OrganizationMemberListAccessMixin, OCLAPITestCase):
+    """A private org's members list and its count answer the same."""
+    def test_members_list_and_count_are_hidden_from_non_members(self):
+        for url, method, user in itertools.product(self.urls, ('get', 'head'), (None, self.outsider)):
+            self.assertEqual(self.request(method, url, user).status_code, 403, (url, method, user))
+
+    def test_members_count_answers_as_the_list(self):
+        for url, user in itertools.product(self.urls, (self.member, self.staff)):
+            response = self.request('get', url, user)
+            head_response = self.request('head', url, user)
+            self.assertEqual(head_response.status_code, 200, (url, user))
+            self.assertEqual(head_response['num_found'], response['num_found'], (url, user))
+            self.assertEqual(head_response['num_found'], str(len(response.data)), (url, user))
+
+    def test_missing_org_members_answer_404(self):
+        for method in ('get', 'head'):
+            self.assertEqual(self.request(method, '/orgs/NoSuchOrg/members/').status_code, 404, method)
+
+
+@tag('es')
+class OrganizationMemberSearchAccessTest(OrganizationMemberListAccessMixin, OCLAPITestCase):
+    """A private org's members list, searched or sorted, and its count, answer the same."""
+    def setUp(self):
+        super().setUp()
+        UserProfileDocument().update(UserProfile.objects.all(), refresh=True)
+        self.queries = ['?sortAsc=username', f'?q={self.member.username}']
+
+    def test_member_searches_and_counts_are_hidden_from_non_members(self):
+        for url, query, method in itertools.product(self.urls, self.queries, ('get', 'head')):
+            for user in (None, self.outsider):
+                self.assertEqual(self.request(method, url + query, user).status_code, 403, (url + query, method, user))
+
+    def test_member_searches_and_counts_answer_members(self):
+        for url, query in itertools.product(self.urls, self.queries):
+            response = self.request('get', url + query, self.member)
+            self.assertEqual(response.status_code, 200, url + query)
+            self.assertIn(self.member.username, [user['username'] for user in response.data], url + query)
+            head_response = self.request('head', url + query, self.member)
+            self.assertEqual(head_response.status_code, 200, url + query)
+            self.assertEqual(head_response['num_found'], response['num_found'], url + query)
 
 
 class CsvExportAccessTest(AccessTestMixin, OCLAPITestCase):

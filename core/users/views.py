@@ -287,21 +287,35 @@ class UserListView(UserBaseView,
             updated_since_param
         ]
     )
-    def get(self, request, *args, **kwargs):
-        org = kwargs.pop('org', None)
-        if org:
-            organization = Organization.objects.filter(mnemonic=org).first()
-            if not organization:
-                return Response(status=status.HTTP_404_NOT_FOUND)
+    def set_organization_members(self):
+        """
+        Under /orgs/<org>/, the list is the org's members. Returns the answer when it can't be listed: 404 when the
+        org doesn't exist, 403 to those who can't view it. Else None.
+        """
+        org = self.kwargs.get('org')
+        if not org:
+            return None
+        organization = Organization.objects.filter(mnemonic=org).first()
+        if not organization:
+            return Response(status=status.HTTP_404_NOT_FOUND)
 
-            if not self.can_view(organization):
-                return Response(status=status.HTTP_403_FORBIDDEN)
-            self.organization = organization
-            queryset = organization.members
-            if not self.should_include_inactive():
-                queryset = queryset.filter(is_active=True)
-            self.queryset = queryset.all()
-        return self.list(request, *args, **kwargs)
+        if not self.can_view(organization):
+            return Response(status=status.HTTP_403_FORBIDDEN)
+        self.organization = organization
+        queryset = organization.members
+        if not self.should_include_inactive():
+            queryset = queryset.filter(is_active=True)
+        self.queryset = queryset.all()
+        return None
+
+    def get(self, request, *args, **kwargs):
+        kwargs.pop('org', None)
+        refused = self.set_organization_members()
+        return self.list(request, *args, **kwargs) if refused is None else refused
+
+    def head(self, request, **kwargs):
+        refused = self.set_organization_members()  # before a search counts the org's members
+        return super().head(request, **kwargs) if refused is None else refused
 
     def post(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         serializer = self.get_serializer(data=request.data)
