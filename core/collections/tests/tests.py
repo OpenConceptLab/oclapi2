@@ -50,7 +50,7 @@ from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
-from core.tasks.models import Task
+from core.tasks.models import Task, AsyncTask, QueueOnceCustomTask
 from core.toggles.models import Toggle
 from core.url_registry.constants import URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE
 from core.url_registry.factories import GlobalURLRegistryFactory, OrganizationURLRegistryFactory
@@ -2134,6 +2134,49 @@ class CollectionSerializersTest(OCLTestCase):
 
 
 class TasksTest(OCLTestCase):
+    def test_add_references_task_queues_counts_once_references_commit(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        concept = ConceptFactory()
+        retired_concept = ConceptFactory(retired=True)
+        mapping = MappingFactory()
+        queued = []
+
+        def record(task, *_args, **_kwargs):
+            queued.append(task.name)
+
+        def queued_counts():
+            return sorted(name for name in queued if name.endswith('_count'))
+
+        # as on a worker (?async=true or not): the tasks it queues are recorded, not run
+        with override_settings(TEST_MODE=False), \
+                patch.object(AsyncTask, 'apply_async', autospec=True, side_effect=record), \
+                patch.object(QueueOnceCustomTask, 'apply_async', autospec=True, side_effect=record):
+            with self.captureOnCommitCallbacks(execute=True):
+                added_references, errors = add_references(
+                    collection.created_by.id,
+                    {'expressions': [
+                        obj.get_latest_version().url for obj in [concept, retired_concept, mapping]]},
+                    collection.id
+                )
+                counts_queued_before_commit = queued_counts()
+
+        self.assertEqual((len(added_references), errors), (3, {}))
+        self.assertEqual(expansion.concepts.count(), 2)
+        self.assertEqual(counts_queued_before_commit, [])
+        self.assertEqual(
+            queued_counts(),
+            sorted([update_collection_active_concepts_count.name, update_collection_active_mappings_count.name])
+        )
+
+        # what the worker then counts: the members the references added
+        update_collection_active_concepts_count(collection.id)
+        update_collection_active_mappings_count(collection.id)
+        collection.refresh_from_db()
+        self.assertEqual((collection.active_concepts, collection.active_mappings), (1, 1))
+
     def test_add_references_task(self):
         collection = OrganizationCollectionFactory()
         expansion = ExpansionFactory(collection_version=collection)
@@ -6328,7 +6371,7 @@ class CollectionViewsAPITest(OCLAPITestCase):
     def test_get_object_updates_active_counts_when_not_test_mode(
             self, update_concepts_apply_async_mock, update_mappings_apply_async_mock):
         collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
-        with override_settings(TEST_MODE=False):
+        with override_settings(TEST_MODE=False), self.captureOnCommitCallbacks(execute=True):
             response = self.client.get(
                 collection.uri, HTTP_AUTHORIZATION=f"Token {self.admin_token}"
             )
@@ -6479,7 +6522,7 @@ class CollectionViewsAPITest(OCLAPITestCase):
             mnemonic=collection.mnemonic, organization=collection.organization, version='v1',
             created_by=self.admin, updated_by=self.admin
         )
-        with override_settings(TEST_MODE=False):
+        with override_settings(TEST_MODE=False), self.captureOnCommitCallbacks(execute=True):
             response = self.client.get(
                 version.uri, HTTP_AUTHORIZATION=f"Token {self.admin_token}"
             )

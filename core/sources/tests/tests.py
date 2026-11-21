@@ -107,7 +107,7 @@ class SourceViewsAPITest(OCLAPITestCase):
     def test_get_object_updates_active_counts_when_not_test_mode(
             self, update_concepts_apply_async_mock, update_mappings_apply_async_mock):
         source = OrganizationSourceFactory(created_by=self.admin, updated_by=self.admin)
-        with override_settings(TEST_MODE=False):
+        with override_settings(TEST_MODE=False), self.captureOnCommitCallbacks(execute=True):
             response = self.client.get(source.uri, HTTP_AUTHORIZATION=f"Token {self.admin_token}")
         self.assertEqual(response.status_code, 200)
         update_concepts_apply_async_mock.assert_called()
@@ -150,7 +150,7 @@ class SourceViewsAPITest(OCLAPITestCase):
             mnemonic=source.mnemonic, organization=source.organization, version='v1',
             created_by=self.admin, updated_by=self.admin
         )
-        with override_settings(TEST_MODE=False):
+        with override_settings(TEST_MODE=False), self.captureOnCommitCallbacks(execute=True):
             response = self.client.get(version.uri, HTTP_AUTHORIZATION=f"Token {self.admin_token}")
         self.assertEqual(response.status_code, 200)
         update_concepts_apply_async_mock.assert_called()

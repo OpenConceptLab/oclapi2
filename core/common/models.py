@@ -863,46 +863,37 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         self.update_mappings_count(sync)
 
     def update_mappings_count(self, sync=False):
-        task = None
-        job = None
-        try:
-            if sync or get(settings, 'TEST_MODE'):
-                self.set_active_mappings()
-                self.save(update_fields=['active_mappings'])
-            elif self.__class__.__name__ == 'Source':
-                job = update_source_active_mappings_count
-            elif self.__class__.__name__ == 'Collection':
-                job = update_collection_active_mappings_count
-            if job:
-                from core.tasks.models import Task
-                task = Task.new(
-                    name=job.__name__, queue='concurrent', user=(get_current_authorized_user() or self.updated_by)
-                )
-                job.apply_async((self.id,), task_id=task.id, queue='concurrent')
-        except AlreadyQueued:
-            if task:
-                task.delete()
+        if sync or get(settings, 'TEST_MODE'):
+            self.set_active_mappings()
+            self.save(update_fields=['active_mappings'])
+        elif self.__class__.__name__ == 'Source':
+            self.queue_count_task(update_source_active_mappings_count)
+        elif self.__class__.__name__ == 'Collection':
+            self.queue_count_task(update_collection_active_mappings_count)
 
     def update_concepts_count(self, sync=False):
-        task = None
-        job = None
-        try:
-            if sync or get(settings, 'TEST_MODE'):
-                self.set_active_concepts()
-                self.save(update_fields=['active_concepts'])
-            elif self.__class__.__name__ == 'Source':
-                job = update_source_active_concepts_count
-            elif self.__class__.__name__ == 'Collection':
-                job = update_collection_active_concepts_count
-            if job:
-                from core.tasks.models import Task
-                task = Task.new(
-                    name=job.__name__, queue='concurrent', user=(get_current_authorized_user() or self.updated_by)
-                )
+        if sync or get(settings, 'TEST_MODE'):
+            self.set_active_concepts()
+            self.save(update_fields=['active_concepts'])
+        elif self.__class__.__name__ == 'Source':
+            self.queue_count_task(update_source_active_concepts_count)
+        elif self.__class__.__name__ == 'Collection':
+            self.queue_count_task(update_collection_active_concepts_count)
+
+    def queue_count_task(self, job):
+        # Queued once the caller's transaction commits: a worker counting before then reads the members
+        # as they were, e.g. none after a collection's first references are added
+        user = get_current_authorized_user() or self.updated_by
+
+        def queue():
+            from core.tasks.models import Task
+            task = Task.new(name=job.__name__, queue='concurrent', user=user)
+            try:
                 job.apply_async((self.id,), task_id=task.id, queue='concurrent')
-        except AlreadyQueued:
-            if task:
+            except AlreadyQueued:
                 task.delete()
+
+        transaction.on_commit(queue)
 
     @property
     def last_child_update(self):
