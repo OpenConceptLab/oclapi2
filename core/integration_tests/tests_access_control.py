@@ -2203,6 +2203,8 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
                           f'collection=!{prefix}P', f'collection={prefix}P*']:
                 self.assert_answers(f'/{resource}/?org={org}&{query}', 200, 200, 200)
             self.assert_answers(f'/{resource}/?org={org}&collection={prefix}Q&version=v9', 404, 404, 404)
+            # quoted, as a search reads it
+            self.assert_answers(f'/{resource}/?org={org}&collection=%22{prefix}P%22', 401, 403, 200)
             # an empty source, which leaves the source check out, leaves this one in
             self.assert_answers(f'/{resource}/?source=&org={org}&collection={prefix}P&version=v1', 401, 403, 200)
             # the owner the URL names; the version in a repository's URL is that repository's
@@ -2255,6 +2257,15 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
             for resource, user in itertools.product(['concepts', 'mappings'], [None, self.outsider, self.member]):
                 self.assertEqual(self.listed(f'/{resource}/?{query}', user, resource), [], (query, user))
 
+    def test_inactive_versions_match_nothing(self):
+        """A version keeps its access when its HEAD is made private; deactivating its owner leaves both inactive."""
+        Collection.objects.filter(id=self.p_v1.id).update(public_access=ACCESS_TYPE_VIEW)
+        self.assert_lists(f'collection={self.tag}P', [], ['inP'])
+        Collection.objects.filter(id__in=[self.p_v1.id, self.p_head.id]).update(is_active=False)
+        for query in [f'collection={self.tag}P', f'collection_url={self.p_v1.uri}']:
+            for resource, user in itertools.product(['concepts', 'mappings'], [None, self.outsider, self.member]):
+                self.assertEqual(self.listed(f'/{resource}/?{query}', user, resource), [], (query, user))
+
     @override_settings(CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}})
     def test_collection_facets_on_a_cached_source_version_list_answer_each_requester(self):
         release = OrganizationSourceFactory(
@@ -2275,6 +2286,8 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
             self.assert_answers(url, 400, 400, 200)
             self.assertEqual(self.request('get', url, self.staff).status_code, 200)
             self.assert_answers(f'/concepts/?collection={self.tag}R*', 200, 200, 200)
+            # a prefix longer than any owner URL matches no owner
+            self.assert_answers(f'/concepts/?collection_owner_url={self.org.uri}collections/*', 200, 200, 200)
 
 
 class CanViewAllContentTest(OCLTestCase):

@@ -1177,8 +1177,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     @classmethod
     def get_viewable_versions_criteria(cls, user):
         """
-        has_view_access as a query on the repository versions `user` can view: public ones whose HEAD is public too,
-        and their own or their orgs' otherwise. None for staff, who can view every version.
+        has_view_access as a query on the active repository versions `user` can view: public ones whose HEAD is
+        public too, and their own or their orgs' otherwise. None for staff, who can view every version. An inactive
+        version (deleted, or its owner's deactivated) is left out, as its own lists answer 404.
         """
         if get(user, 'is_staff'):
             return None
@@ -1191,7 +1192,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         criteria = Q(public_access__in=cls.PUBLIC_ACCESS_VALUES) & ~Exists(private_head)
         if get(user, 'is_authenticated'):
             criteria |= Q(user_id=user.id) | Q(organization_id__in=user.organizations.values('id'))
-        return criteria
+        return Q(is_active=True) & criteria
 
     @staticmethod
     def get_version_url_kwarg():

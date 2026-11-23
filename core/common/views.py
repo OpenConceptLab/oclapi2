@@ -505,8 +505,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         those whose URL starts with it)."""
         if field == 'collection':
             return models.Q(**{'mnemonic__startswith' if prefix else 'mnemonic': value})
-        if field == 'collection_url' or prefix:
+        if field == 'collection_url':
             return models.Q(**{'uri__startswith' if prefix else 'uri': value})
+        if prefix:  # an owner URL is /orgs/<org>/ or /users/<user>/, which a longer prefix can't start
+            return models.Q(uri__startswith=value) if value.count('/') < 3 or (
+                value.count('/') == 3 and value.endswith('/')) else models.Q(pk__in=[])
         owner = re.fullmatch(r'/(orgs|users)/([^/]+)/', value)
         if not owner:
             return models.Q(pk__in=[])
@@ -1461,7 +1464,7 @@ class SourceChildCommonBaseView(BaseAPIView):
             return
         version = None if self.has_concept_container_scope() else params.get('version')
         url_collection = (self.kwargs.get('collection'), self.get_parent_owner_filters())
-        for mnemonic in compact(value.split(',')):
+        for mnemonic in compact(name.strip('\"').strip('\'') for name in value.split(',')):  # as a search reads them
             if (mnemonic, owner_filters) == url_collection:
                 continue
             head = Collection.get_version(mnemonic, HEAD, owner_filters)
@@ -1480,8 +1483,8 @@ class SourceChildCommonBaseView(BaseAPIView):
     def get_viewable_query_collection_versions(self):
         """
         The reads (get_base_queryset) keep to the members of the collections the query string names, any version's
-        unless it names one, and any owner's unless it names one. When those include versions the requester can't
-        view, the versions they can view, for the reads to keep to; None otherwise.
+        unless it names one, and any owner's unless it names one: the versions of those the requester can view, for
+        the reads to keep to. None for staff, and when the query string names no collection.
         """
         from core.collections.models import Collection
         value = self.request.query_params.get('collection')
@@ -1491,8 +1494,7 @@ class SourceChildCommonBaseView(BaseAPIView):
         params = self.params or {}
         owner_filters = compact_dict_by_values(
             {'organization__mnemonic': params.get('org'), 'user__username': params.get('user')})
-        versions = Collection.objects.filter(mnemonic__in=compact(value.split(',')), **owner_filters)
-        return versions.filter(viewable) if versions.exclude(viewable).exists() else None
+        return Collection.objects.filter(viewable, mnemonic__in=compact(value.split(',')), **owner_filters)
 
 
 class SourceChildExtrasBaseView:
