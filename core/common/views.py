@@ -1304,10 +1304,9 @@ class SourceChildCommonBaseView(BaseAPIView):
     def get_url_source_version(self, mnemonic, version, owner_filters):
         """Source.get_version, from the versions check_source_version_access read when it's one of them."""
         from core.sources.models import Source
-        for repo_version in self.url_versions:
-            if (repo_version.mnemonic, repo_version.version) == (mnemonic, version):
-                return repo_version
-        return Source.get_version(mnemonic, version, owner_filters)
+        return next((repo_version for repo_version in self.url_versions if (
+            repo_version.mnemonic, repo_version.version) == (mnemonic, version)), None) or Source.get_version(
+            mnemonic, version, owner_filters)
 
     def check_query_source_version_access(self, request):
         """
@@ -1358,11 +1357,11 @@ class SourceChildCommonBaseView(BaseAPIView):
         from core.sources.models import Source
         hidden = []
         for mnemonic in mnemonics:
-            repo_versions = Source.objects.filter(mnemonic=mnemonic, version=version)
-            viewable = [repo_version for repo_version in repo_versions if repo_version.has_view_access(request.user)]
+            viewable = []
+            for repo_version in Source.objects.filter(mnemonic=mnemonic, version=version):
+                (viewable if repo_version.has_view_access(request.user) else hidden).append(repo_version)
             if not viewable:
                 raise Http404()
-            hidden += [repo_version for repo_version in repo_versions if repo_version not in viewable]
         self.hidden_query_versions = hidden
 
     def leave_out_hidden_query_versions(self, queryset):
