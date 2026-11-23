@@ -6881,7 +6881,9 @@ class IsolatedVersionImportTest(OCLTestCase):
             batch_index_resources_mock.assert_not_called()
 
             a_in_rejected = Concept.objects.get(mnemonic='A', is_latest_version=True)
-            self.run_import([self.concept('A', extras={'x': 2}), self.concept('B'), self.version('v2')])
+            with patch.object(Source, 'queue_reindex', autospec=True, side_effect=Source.queue_reindex) as reindex_mock:
+                self.run_import([self.concept('A', extras={'x': 2}), self.concept('B'), self.version('v2')])
+            self.assertEqual(reindex_mock.call_args[1]['user'].username, 'ocladmin')  # the importer, who can cancel
 
         self.assertNotEqual(a_in_rejected.id, a_in_v1.id)
         # Source.queue_reindex, which calls the task rather than queue it in TEST_MODE

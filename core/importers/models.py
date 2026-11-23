@@ -706,7 +706,7 @@ class IsolatedVersionCommit:
             return get(ex, 'message_dict') or {'__all__': ex.messages}
         # once the version is created: a rejected seed leaves them to the import's deferral, as their replacements
         transaction.on_commit(lambda: head.queue_reindex(
-            self.superseded_ids['concept'], self.superseded_ids['mapping']))
+            self.superseded_ids['concept'], self.superseded_ids['mapping'], user=self.user))
         return CREATED
 
 
