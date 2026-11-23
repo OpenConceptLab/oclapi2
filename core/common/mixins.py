@@ -10,7 +10,7 @@ from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction, models, connection, OperationalError
-from django.db.models import Q, F, QuerySet, prefetch_related_objects
+from django.db.models import Q, F, QuerySet, prefetch_related_objects, Exists, OuterRef
 from django.http import HttpResponseForbidden, Http404
 from django.shortcuts import redirect
 from django.urls import resolve, Resolver404
@@ -947,14 +947,14 @@ class SourceChildMixin(ChecksumModel):
 
     @staticmethod
     def filter_by_viewable_collection_version(expansions, user, prefix=''):
-        """Expansions of collection versions the user can view: public ones, their own and their orgs' (staff: all)."""
-        if get(user, 'is_staff'):
+        """Expansions of collection versions the user can view, by has_view_access's rule: the version and its HEAD
+        both viewable, and the version active (staff: all). One pk lookup per expansion row"""
+        from core.collections.models import Collection
+        viewable = Collection.get_viewable_versions_criteria(user)
+        if viewable is None:
             return expansions
-        criteria = ~Q(**{f'{prefix}collection_version__public_access': ACCESS_TYPE_NONE})
-        if get(user, 'is_authenticated'):
-            criteria |= Q(**{f'{prefix}collection_version__user_id': user.id}) | Q(
-                **{f'{prefix}collection_version__organization__members__id': user.id})
-        return expansions.filter(criteria)
+        return expansions.filter(Exists(
+            Collection.objects.filter(viewable, id=OuterRef(f'{prefix}collection_version_id'))))
 
     @property
     def versions(self):
