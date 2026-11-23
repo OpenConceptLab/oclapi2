@@ -2094,14 +2094,20 @@ class ImportHierarchy:
 
     @classmethod
     def from_uri_map(cls, hierarchy_map, user=None):
-        """hierarchy_map: child uri -> parent uris. With a user, only children it can edit and parents it can view."""
+        """
+        hierarchy_map: child uri -> parent uris. With a user, only children it can edit, in sources the capability
+        policy doesn't refuse it edits to, and parents it can view.
+        """
         from core.sources.models import Source
         # children's URLs are versionless, so one lookup resolves them with their parents
         resolved = cls.resolve_parents({*hierarchy_map, *(uri for uris in hierarchy_map.values() for uri in uris)})
         editable = viewable = None
         if user:
             sources = Source.objects.filter(id__in={source_id for _, source_id in resolved.values()})
-            editable = {source.id for source in sources if source.has_edit_access(user)}
+            policy = get_capability_policy()
+            editable = {
+                source.id for source in sources if source.has_edit_access(user) and get_write_refusal(
+                    user, get_write_target(source), WRITE_ACTION_EDIT, policy) is None}
             viewable = {source.id for source in sources if source.has_view_access(user)}
         links = {}
         for child_uri, parent_uris in hierarchy_map.items():

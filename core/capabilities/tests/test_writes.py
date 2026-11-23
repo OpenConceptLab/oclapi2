@@ -19,6 +19,7 @@ from core.common.tasks import add_references
 from core.common.tests import OCLAPITestCase
 from core.concept_maps.serializers import ConceptMapDetailSerializer
 from core.concept_maps.views import ConceptMapRetrieveUpdateView
+from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from core.importers.importer import ImportRequest, ResourceImporter
 from core.importers.models import BulkImportInline
@@ -706,3 +707,16 @@ class HierarchyWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
         self.assertEqual(
             [new_version in child.get_latest_version().parent_concepts.all() for child in children], [True, True])
         self.assertEqual(ReadOnlyPolicy.calls, [(self.user, parent_source, WRITE_ACTION_EDIT)])
+
+    def test_an_import_s_hierarchy_leaves_children_in_read_only_repositories_as_they_are(self):
+        read_only_source = OrganizationSourceFactory(organization=self.org)
+        parent = new_concept(self.source)
+        children = [new_concept(source) for source in (self.source, read_only_source)]
+        ReadOnlyPolicy.read_only = [read_only_source]
+
+        Concept.reconcile_import_hierarchy({child.uri: [parent.uri] for child in children}, self.user)
+
+        parent_version = parent.get_latest_version()
+        self.assertEqual(
+            [child.parent_concepts.filter(id=parent_version.id).exists() for child in children], [True, False])
+        self.assertEqual({call[1] for call in ReadOnlyPolicy.calls}, {self.source, read_only_source})
