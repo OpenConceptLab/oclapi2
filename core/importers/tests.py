@@ -6734,6 +6734,21 @@ class IsolatedVersionImportTest(OCLTestCase):
         self.assertEqual(
             sorted(child.parent_concept_urls), ['/orgs/Regen/sources/LOINC/concepts/Q/'])
 
+    def test_isolated_import_keeps_the_version_a_url_names_outside_the_import(self):
+        other = ConceptFactory(
+            parent=OrganizationSourceFactory(organization=self.org, mnemonic='B'), mnemonic='X',
+            concept_class='LOINC', datatype='N/A')
+        duplicate = ConceptFactory(
+            parent=other.parent, mnemonic='X', version='duplicate', concept_class='LOINC', datatype='N/A')
+        Concept.objects.filter(id=duplicate.id).update(version=str(duplicate.id), uri=other.uri)
+        duplicate_version = duplicate.get_latest_version()
+
+        self.run_import([self.concept('C', parent_concept_urls=[duplicate_version.uri]), self.version('v1')])
+
+        child = Concept.objects.get(mnemonic='C', id=F('versioned_object_id'))
+        self.assertEqual(
+            set(child.parent_concepts.values_list('versioned_object_id', flat=True)), {duplicate.id})
+
     def test_hierarchy_repair_keeps_the_version_a_url_names(self):
         from core.common.tasks import make_hierarchy
         self.run_import([self.concept('Q'), self.concept('C'), self.version('v1')])

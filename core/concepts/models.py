@@ -2112,7 +2112,8 @@ class ImportHierarchy:
         from core.sources.models import Source
         # children's URLs are versionless, so one lookup resolves them with their parents
         resolved = cls.resolve_parents(
-            {*hierarchy_map, *(uri for uris in hierarchy_map.values() for uri in uris)}, seed)
+            {*hierarchy_map, *(uri for uris in hierarchy_map.values() for uri in uris)},
+            set(hierarchy_map) if seed else None)
         editable = viewable = None
         if user:
             sources = Source.objects.filter(id__in={source_id for _, source_id in resolved.values()})
@@ -2133,12 +2134,12 @@ class ImportHierarchy:
         return cls(links)
 
     @classmethod
-    def resolve_parents(cls, uris, seed=False):
+    def resolve_parents(cls, uris, seeded_uris=None):
         """
         uri -> (concept id, source id) of each parent URL: the concept a URL names, or the concept of the exact version
-        it names. In a seed, a version of a code that several concepts share a URL with resolves to the one
-        get_versioned_objects_by_uri resolves the code's URL to: the one the seed writes, which keeps the code. A
-        version that doesn't exist resolves to nothing.
+        it names. seeded_uris: a seed's concept URLs. A version of one of them that several concepts share a URL with
+        resolves to the one get_versioned_objects_by_uri resolves the URL to: the one the seed writes, which keeps the
+        code. A version that doesn't exist resolves to nothing.
         """
         versioned_uris = {uri for uri in uris if drop_version(uri) != uri}
         versionless_uris = set(uris) - versioned_uris
@@ -2148,8 +2149,8 @@ class ImportHierarchy:
             for uri, versioned_object_id, source_id in Concept.objects.filter(uri__in=batch).values_list(
                     'uri', 'versioned_object_id', 'parent_id'):
                 named_versions[uri] = (versioned_object_id, source_id)
-        heads = Concept.get_versioned_objects_by_uri(
-            {drop_version(uri) for uri in named_versions}) if seed and named_versions else {}
+        seeded = {drop_version(uri) for uri in named_versions} & (seeded_uris or set())
+        heads = Concept.get_versioned_objects_by_uri(seeded) if seeded else {}
         for uri, row in named_versions.items():
             resolved[uri] = heads.get(drop_version(uri), row)
         return resolved
