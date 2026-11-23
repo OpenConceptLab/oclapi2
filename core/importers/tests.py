@@ -4697,27 +4697,36 @@ class TasksTest(OCLTestCase):
         self.assertEqual(sum(1 for m in (mapping1, mapping2) if m._counted), 1)  # pylint: disable=protected-access
 
     @patch('core.common.tasks.logger')
-    def test_post_import_update_resource_counts_skips_a_source_deleted_after_the_pass_read_it(self, logger_mock):
+    @patch('core.sources.models.Source.update_mappings_count')
+    def test_post_import_update_resource_counts_skips_a_source_deleted_after_the_pass_read_it(
+            self, update_mappings_count_mock, logger_mock):
         deleted, kept = OrganizationSourceFactory(), OrganizationSourceFactory()
-        ConceptFactory(_counted=None, parent=deleted)
+        MappingFactory(_counted=None, parent=deleted)
         kept_concept = ConceptFactory(_counted=None, parent=kept)
-        set_active_concepts = Source.set_active_concepts
 
-        def delete_then_count(source):
-            if source.id == deleted.id:  # deleted by another task after the pass read its sources
-                with connection.cursor() as cursor:
-                    cursor.execute('DELETE FROM sources WHERE id = %s', [source.id])
-            set_active_concepts(source)
+        def count_and_delete(source):  # another task deletes a source the pass has read
+            Source.objects.filter(id=deleted.id).delete()
+            source.active_concepts = 1
 
-        with patch.object(Source, 'set_active_concepts', autospec=True, side_effect=delete_then_count):
+        with patch.object(Source, 'set_active_concepts', autospec=True, side_effect=count_and_delete):
             post_import_update_resource_counts.run()
 
         kept_concept.refresh_from_db()
         self.assertTrue(kept_concept._counted)  # pylint: disable=protected-access
-        logger_mock.warning.assert_called_once_with(
-            'Skipping %s count for source %s: %s', 'concepts', deleted.id, ANY)
-        self.assertEqual(
-            str(logger_mock.warning.call_args[0][3]), 'Save with update_fields did not affect any rows.')
+        update_mappings_count_mock.assert_not_called()
+        logger_mock.warning.assert_not_called()
+
+    def test_post_import_update_resource_counts_locks_the_source_before_its_rows(self):
+        # the order hard deletes and version creation lock them in, so neither can deadlock with the count
+        ConceptFactory(_counted=None)
+
+        with CaptureQueriesContext(connection) as queries:
+            post_import_update_resource_counts.run()
+
+        statements = [query['sql'] for query in queries.captured_queries]
+        lock = next(i for i, sql in enumerate(statements) if 'FROM "sources"' in sql and 'FOR NO KEY UPDATE' in sql)
+        mark = next(i for i, sql in enumerate(statements) if sql.startswith('UPDATE "concepts" SET "_counted"'))
+        self.assertLess(lock, mark)
 
     @patch('core.sources.models.Source.update_mappings_count')
     @patch('core.sources.models.Source.update_concepts_count')

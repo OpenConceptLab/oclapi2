@@ -16,7 +16,7 @@ from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage
 from django.core.management import call_command
 from django.core.paginator import Paginator
-from django.db import DEFAULT_DB_ALIAS, connection, connections, transaction
+from django.db import DEFAULT_DB_ALIAS, connection, transaction
 from django.db.models import Exists, OuterRef
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -1083,6 +1083,7 @@ def resources_report(start_date=None, end_date=None, email=None):  # pragma: no 
 
 @app.task(ignore_result=True)
 def vacuum_and_analyze_db():
+    from django.db import connections
     conn_proxy = connections['default']
     conn_proxy.cursor()  # init connection field
     conn = conn_proxy.connection
@@ -1096,8 +1097,9 @@ def vacuum_and_analyze_db():
 # (OpenConceptLab/ocl_online#635). As with the count tasks below, a copy releases its QueueOnce lock as it starts, so a
 # copy asked for while one runs is queued, and only one copy waits in the queue. A copy that starts while another runs
 # doesn't wait on a worker: it queues itself again, so the job holds at most one worker, and each import is followed by
-# a pass that starts after it ended.
-POST_IMPORT_COUNTS_ONCE = {'unlock_before_run': True, 'graceful': True}
+# a pass that starts after it ended. The queue lock expires after 10 minutes, so a copy lost after taking it (a failed
+# publish) blocks later requests no longer than that; an extra copy queued after a longer wait is harmless.
+POST_IMPORT_COUNTS_ONCE = {'unlock_before_run': True, 'graceful': True, 'timeout': 600}
 POST_IMPORT_COUNTS_LOCK = 'post_import_update_resource_counts'
 POST_IMPORT_COUNTS_REQUEUE_SECONDS = 60
 
@@ -1109,6 +1111,7 @@ def try_job_lock(name):
     in a transaction on a connection of its own: pgbouncer's transaction pooling keeps a session lock on no one server
     connection, and the open transaction pins it there. It's released when the connection closes, a dead worker's too.
     """
+    from django.db import connections
     lock_connection = connections.create_connection(DEFAULT_DB_ALIAS)
     try:
         lock_connection.set_autocommit(False)
@@ -1148,19 +1151,21 @@ def count_uncounted_resources():
 
 
 def count_source_resources(source, model):
-    # The rows are marked in the count's transaction, before it: a row added after the mark is left for the next pass,
-    # and an error rolls the mark back. One source's error doesn't stop the pass.
+    # The source's row is locked first, as hard deletes and version creation lock it before its children; no_key, so
+    # children can still be added meanwhile. A source deleted since the pass read it is skipped. Its rows are marked in
+    # the count's transaction, before the count: a row added after the mark is left for the next pass, and an error
+    # rolls the mark back. One source's error doesn't stop the pass.
     is_concept = model.__name__ == 'Concept'
     try:
         with transaction.atomic():
+            if not list(source.__class__.objects.select_for_update(no_key=True).filter(id=source.id).only('id')):
+                return
             model.objects.filter(parent_id=source.id, _counted__isnull=True).update(_counted=True)
             if is_concept:
                 source.update_concepts_count(sync=True)
             else:
                 source.update_mappings_count(sync=True)
     except Exception as ex:  # pylint: disable=broad-except
-        # e.g. DatabaseError "Save with update_fields did not affect any rows": the source was deleted since the pass
-        # read it
         logger.warning(
             'Skipping %s count for source %s: %s', 'concepts' if is_concept else 'mappings', source.id, ex)
 
