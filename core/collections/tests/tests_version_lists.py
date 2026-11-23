@@ -4,6 +4,9 @@ import tempfile
 from io import StringIO
 
 from django.core.management import call_command, CommandError
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
+from mock import patch
 
 from core.collections.models import CollectionReference, Expansion
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
@@ -11,6 +14,7 @@ from core.collections.version_lists import ExpansionVersionLists
 from core.common.tests import OCLTestCase
 from core.common.utils import drop_version
 from core.concepts.tests.factories import ConceptFactory
+from core.mappings.tests.factories import MappingFactory
 from core.sources.tests.factories import OrganizationSourceFactory
 
 
@@ -91,21 +95,38 @@ class ExpansionVersionListsTest(OCLTestCase):
         self.assertEqual(self.ids(lists, 'evaluated_source_versions'), {self.source.id})
         self.assertEqual(lists.notes[0]['chosen_by'], 'HEAD')
 
-    def test_reference_no_one_version_holds_keeps_what_is_recorded(self):
+    def members_split_across_v1_and_v2(self):
         other = ConceptFactory(parent=self.source, mnemonic='c2').get_latest_version()
         self.member.sources.remove(self.v2)
         other.sources.remove(self.source)
         other.sources.add(self.v2)
         self.expansion.concepts.add(other)
+        return other
+
+    def test_reference_no_one_version_holds_records_each_recorded_version_holding_some_of_its_members(self):
+        other = self.members_split_across_v1_and_v2()
         self.reference([self.member, other])
-        self.expansion.explicit_source_versions.set([self.v1, self.v2])
+        third = self.release('v3')
+        self.expansion.explicit_source_versions.set([self.v1, self.v2, third])
 
         lists = self.rebuild()
 
-        self.assertEqual(self.ids(lists, 'explicit_source_versions'), {self.v1.id, self.v2.id})
-        self.assertEqual(self.ids(lists, 'evaluated_source_versions'), set())
+        self.assertEqual(self.ids(lists, 'evaluated_source_versions'), {self.v1.id, self.v2.id})
+        self.assertEqual(self.ids(lists, 'explicit_source_versions'), set())
         self.assertEqual(lists.notes[0]['reason'], 'no one version holds all its members')
-        self.assertEqual(lists.to_report()['changed'], False)
+        self.assertEqual(lists.notes[0]['partial_holders'], [self.v2.uri, self.v1.uri])
+
+    def test_reference_no_recorded_version_holds_keeps_what_is_recorded(self):
+        other = self.members_split_across_v1_and_v2()
+        self.reference([self.member, other])
+        third = self.release('v3')
+        self.expansion.explicit_source_versions.set([third])
+
+        lists = self.rebuild()
+
+        self.assertEqual(self.ids(lists, 'explicit_source_versions'), {third.id})
+        self.assertEqual(lists.notes[0]['kept'], [third.uri])
+        self.assertFalse(lists.to_report()['changed'])
 
     def test_reference_without_members_keeps_what_is_recorded(self):
         self.reference([])
@@ -117,6 +138,60 @@ class ExpansionVersionListsTest(OCLTestCase):
         self.assertEqual(self.ids(lists, 'explicit_source_versions'), {self.v1.id})
         self.assertEqual(self.ids(lists, 'evaluated_source_versions'), {self.v2.id})
         self.assertEqual(lists.notes[0]['reason'], 'it has no members')
+
+    def test_reference_without_members_keeps_nothing_when_another_reference_records_its_repo(self):
+        self.reference([self.member])
+        self.reference([])
+        self.expansion.explicit_source_versions.set([self.v1, self.v2])
+
+        lists = self.rebuild()
+        report = lists.to_report()
+
+        self.assertEqual(self.ids(lists, 'evaluated_source_versions'), {self.v2.id})
+        self.assertEqual(self.ids(lists, 'explicit_source_versions'), set())
+        self.assertEqual(report['in_both'], [])
+        self.assertEqual(lists.notes[-1]['kept'], [])
+        self.assertEqual(lists.notes[-1]['reason'], 'it has no members; other references record its repo')
+
+    def test_mapping_members_are_judged_like_concepts(self):
+        mapping = MappingFactory(parent=self.source).get_latest_version()
+        mapping.sources.add(self.v1)
+        self.expansion.mappings.add(mapping)
+        reference = CollectionReference.objects.create(
+            expression=mapping.uri, collection=self.collection, system=self.source.uri, reference_type='mappings')
+        reference.mappings.set([mapping])
+        self.expansion.explicit_source_versions.set([self.v1])
+
+        lists = self.rebuild()
+
+        self.assertEqual(self.ids(lists, 'evaluated_source_versions'), {self.v1.id})
+
+    def test_system_version_parameter_names_the_version_recorded(self):
+        self.reference([self.member])
+        Expansion.objects.filter(id=self.expansion.id).update(parameters={'system-version': self.v1.uri})
+
+        lists = self.rebuild()
+
+        self.assertEqual(self.ids(lists, 'evaluated_source_versions'), {self.v1.id})
+
+    def test_query_count_does_not_grow_with_references(self):
+        self.reference([self.member])
+        self.reference([self.member])
+        self.expansion.explicit_source_versions.set([self.v1])
+
+        def count():
+            with CaptureQueriesContext(connection) as context:
+                self.rebuild().to_report()
+            return len(context.captured_queries)
+
+        two = count()
+        for index in range(4):
+            member = ConceptFactory(parent=self.source, mnemonic=f'more{index}').get_latest_version()
+            member.sources.add(self.v1)
+            self.expansion.concepts.add(member)
+            self.reference([member])
+
+        self.assertEqual(count(), two)
 
     def test_reference_naming_a_version_records_it_as_explicit(self):
         self.reference([self.member], version='v1')
@@ -197,6 +272,53 @@ class ExpansionVersionListsTest(OCLTestCase):
         self.assertEqual(self.ids(lists, 'evaluated_collection_versions'), {release.id})
         self.assertEqual(self.ids(lists, 'explicit_collection_versions'), set())
 
+    def test_apply_writes_nothing_when_the_lists_changed_since_the_build(self):
+        self.reference([self.member])
+        self.expansion.explicit_source_versions.set([self.v1])
+        lists = self.rebuild()
+        self.expansion.evaluated_source_versions.add(self.v2)
+
+        with self.assertRaises(RuntimeError):
+            lists.apply()
+
+        self.assertEqual(list(self.expansion.explicit_source_versions.all()), [self.v1])
+        self.assertEqual(list(self.expansion.evaluated_source_versions.all()), [self.v2])
+
+    def value_set_release(self):
+        value_set = OrganizationCollectionFactory()
+        release = OrganizationCollectionFactory(
+            mnemonic=value_set.mnemonic, organization=value_set.organization, version='v1', released=True)
+        release_expansion = ExpansionFactory(collection_version=release)
+        release.expansion_uri = release_expansion.uri
+        release.save()
+        release_expansion.concepts.add(self.member)
+        return value_set, release
+
+    def value_set_reference(self, value_set, members):
+        reference = CollectionReference.objects.create(
+            expression=value_set.uri, collection=self.collection, valueset=[value_set.uri], reference_type='concepts')
+        reference.concepts.set(members)
+        return reference
+
+    def test_versionless_value_set_with_nothing_recorded_takes_the_release_holding_its_members(self):
+        value_set, release = self.value_set_release()
+        self.value_set_reference(value_set, [self.member])
+
+        lists = self.rebuild()
+
+        self.assertEqual(self.ids(lists, 'evaluated_collection_versions'), {release.id})
+        self.assertEqual(lists.notes[0]['chosen_by'], 'release')
+
+    def test_versionless_value_set_without_members_notes_the_version_it_resolves_to(self):
+        value_set, _ = self.value_set_release()
+        self.value_set_reference(value_set, [])
+
+        lists = self.rebuild()
+
+        self.assertEqual(len(lists.after['evaluated_collection_versions']), 1)
+        self.assertEqual(lists.notes[0]['chosen_by'], 'resolved')
+        self.assertEqual(lists.notes[0]['reason'], 'it has no members')
+
     def test_apply_writes_the_lists_and_leaves_members_as_they_are(self):
         self.reference([self.member])
         self.expansion.explicit_source_versions.set([self.v1])
@@ -251,6 +373,14 @@ class ExpansionVersionListsTest(OCLTestCase):
         call_command('rebuild_expansion_version_lists', all=True, start_after_id=self.expansion.id, stdout=out)
 
         self.assertNotIn(self.expansion.uri, out.getvalue())
+
+    def test_command_reports_a_failure_and_goes_on(self):
+        out = StringIO()
+        with patch.object(ExpansionVersionLists, 'build', side_effect=ValueError('boom')):
+            call_command('rebuild_expansion_version_lists', self.expansion.uri, stdout=out)
+
+        self.assertIn(f'FAILED {self.expansion.id}: ValueError: boom', out.getvalue())
+        self.assertIn('"failed": 1', out.getvalue())
 
     def test_command_needs_uris_or_all(self):
         with self.assertRaises(CommandError):

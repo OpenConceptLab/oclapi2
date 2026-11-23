@@ -78,9 +78,13 @@ class Command(BaseCommand):
         for key in ('gains_lock', 'loses_lock', 'in_both'):
             if report[key]:
                 self.totals[f'with_{key}'] += 1
-        kept = [note for note in report['references'] if 'reason' in note]
-        if kept:
+        notes = report['references']
+        if any(note.get('kept') for note in notes):
             self.totals['with_references_kept_as_recorded'] += 1
+        if any(note.get('partial_holders') for note in notes):
+            self.totals['with_references_from_several_versions'] += 1
+        if any('does not resolve' in note.get('reason', '') for note in notes):
+            self.totals['with_unresolved_references'] += 1
         if any(len(note.get('holders', [])) > 1 for note in report['references']):
             self.totals['with_members_in_several_versions'] += 1
 

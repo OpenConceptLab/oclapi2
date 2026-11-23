@@ -19,9 +19,10 @@ RULE = (
     'the version holding its resource version: one the expansion already records, else the one adding it picks. '
     'A version-less reference records as evaluated the version its members came from: when members sit in several '
     'versions of the repo, a version the expansion already records that holds all of them (newest first), else the '
-    'newest live release holding all of them, else HEAD. A reference that no version holds entirely, or that has no '
-    'members, keeps the versions the expansion records for its repo. A version both kinds of reference use is in '
-    'both lists. Members are never changed.')
+    'newest live release holding all of them, else HEAD. When no one version holds them all, it records each '
+    'recorded version holding any of them. A reference with no members, or none held by a recorded version, keeps '
+    'what the expansion records for its repo, unless other references record that repo. A version both kinds of '
+    'reference use is in both lists. Members are never changed.')
 
 
 class ExpansionVersionLists:
@@ -33,7 +34,10 @@ class ExpansionVersionLists:
         self.before = {relation: list(getattr(expansion, relation).all()) for relation in self.RELATIONS}
         self.after = {relation: {} for relation in self.RELATIONS}
         self.notes = []
+        self.fallbacks = []
         self._resolved = {}
+        self._heads = {}
+        self.built_from = None
 
     @staticmethod
     def newest_first(versions):
@@ -46,11 +50,15 @@ class ExpansionVersionLists:
         }
         return self.newest_first(versions.values())
 
-    @staticmethod
-    def releases_then_head(repo_version):
+    def get_head(self, version):
+        if version.id not in self._heads:
+            self._heads[version.id] = version.get_head()
+        return self._heads[version.id]
+
+    def releases_then_head(self, repo_version):
         versions = list(repo_version.active_versions.filter(released=True, retired=False).exclude(version=HEAD))
-        head = repo_version.get_head()
-        return [*ExpansionVersionLists.newest_first(versions), *([head] if head else [])]
+        head = self.get_head(repo_version)
+        return [*self.newest_first(versions), *([head] if head else [])]
 
     def resolve(self, klass, expression, namespace, version=None):
         key = (klass.__name__, expression, namespace, version)
@@ -66,14 +74,28 @@ class ExpansionVersionLists:
         self.notes.append({'reference': reference.id, 'expression': reference.expression, **kwargs})
 
     def keep(self, reference, relations, repo_uri, reason):
-        """Keeps what the expansion records for the reference's repo"""
-        kept = []
-        for relation in relations:
-            for version in self.before[relation]:
-                if drop_version(version.uri) == repo_uri:
-                    self.record(relation, version)
-                    kept.append(version.uri)
-        self.note(reference, kept=sorted(set(kept)), reason=reason)
+        """Keeps what the expansion records for the reference's repo, once the others are done and only if none of
+        them recorded a version of it"""
+        self.fallbacks.append((reference, relations, repo_uri, reason))
+
+    def keep_fallbacks(self):
+        recorded_repos = {
+            (relation.split('_')[1], drop_version(version.uri))
+            for relation, versions in self.after.items() for version in versions.values()}
+        kept_repos = set()
+        for reference, relations, repo_uri, reason in self.fallbacks:
+            key = (relations[0].split('_')[1], repo_uri)
+            if key in recorded_repos and key not in kept_repos:
+                self.note(reference, kept=[], reason=f'{reason}; other references record its repo')
+                continue
+            kept_repos.add(key)
+            kept = []
+            for relation in relations:
+                for version in self.before[relation]:
+                    if drop_version(version.uri) == repo_uri:
+                        self.record(relation, version)
+                        kept.append(version.uri)
+            self.note(reference, kept=sorted(set(kept)), reason=reason)
 
     @cached_property
     def parameter_system_versions(self):
@@ -83,28 +105,56 @@ class ExpansionVersionLists:
         namespace = Expansion.get_system_version_namespace(self.expansion.collection_version.parent_url)
         return [version for _, version in Expansion.resolve_system_version_entries(value, namespace) if version.id]
 
+    @cached_property
+    def references(self):
+        collection_version = self.expansion.collection_version
+        namespace = Expansion.get_system_version_namespace(collection_version.parent_url)
+        references = list(collection_version.references.order_by('id'))
+        for reference in references:
+            # one collection and one toggle read for all of them, not one per reference
+            reference.collection = collection_version
+            if not reference.namespace:
+                reference.__dict__['resolution_namespace'] = namespace
+        return references
+
+    def get_state(self):
+        """What the rebuild is computed from, so apply can tell when it changed"""
+        return {
+            'lists': {
+                relation: set(getattr(self.expansion, relation).values_list('id', flat=True))
+                for relation in self.RELATIONS},
+            'references': set(self.expansion.collection_version.references.values_list('id', flat=True)),
+            'members': self.get_member_summary(),
+        }
+
     def build(self):
+        self.built_from = {**self.get_state(), 'lists': {
+            relation: {version.id for version in versions} for relation, versions in self.before.items()}}
         versionless = {}
-        for reference in self.expansion.collection_version.references.order_by('id'):
+        for reference in self.references:
             self.add_system_versions(reference, versionless)
             self.add_valueset_versions(reference)
         for (_, include), (repo_version, references) in versionless.items():
             self.add_versionless_system_versions(repo_version, references, include)
+        self.keep_fallbacks()
         return self
 
     def add_system_versions(self, reference, versionless):
         if not reference.system:
             return
-        relation = EXPLICIT_SOURCES if self.is_explicit(reference) else EVALUATED_SOURCES
-        parameter_versions = [
-            version for version in self.parameter_system_versions
-            if reference.can_compute_against_system_version(version)]
-        if parameter_versions:
-            for version in parameter_versions:
-                self.record(EVALUATED_SOURCES if reference.is_versionless_expression else EXPLICIT_SOURCES, version)
-            return
         from core.sources.models import Source
+        relation = EXPLICIT_SOURCES if self.is_explicit(reference) else EVALUATED_SOURCES
         version = self.resolve(Source, reference.system, reference.resolution_namespace, reference.version)
+        parameter_versions = [
+            parameter_version for parameter_version in self.parameter_system_versions
+            if version and reference.can_compute_against_other_system_version and
+            drop_version(parameter_version.uri) == drop_version(version.uri)
+        ]
+        if parameter_versions:
+            for parameter_version in parameter_versions:
+                self.record(
+                    EVALUATED_SOURCES if reference.is_versionless_expression else EXPLICIT_SOURCES, parameter_version)
+            return
         if not version:
             self.note(reference, kept=[], reason='its system does not resolve')
         elif reference.can_resolve_to_repo_version_with_resource_version:
@@ -112,7 +162,7 @@ class ExpansionVersionLists:
         elif relation == EXPLICIT_SOURCES:
             self.record(relation, version)
         else:
-            head = version.get_head()
+            head = self.get_head(version)
             key = (head.id if head else version.id, reference.include)
             versionless.setdefault(key, (version, []))[1].append(reference)
 
@@ -161,7 +211,7 @@ class ExpansionVersionLists:
 
     def add_versionless_system_versions(self, repo_version, references, include):
         repo_uri = drop_version(repo_version.uri)
-        head = repo_version.get_head()
+        head = self.get_head(repo_version)
         parent_id = head.id if head else repo_version.id
         reference_ids = [reference.id for reference in references]
         totals = self.count_members(reference_ids, include, parent_id)
@@ -172,13 +222,29 @@ class ExpansionVersionLists:
             else:
                 pending.append(reference)
         recorded = self.recorded_versions_of((EVALUATED_SOURCES, EXPLICIT_SOURCES), repo_uri)
+        held_by_recorded = self.count_members(
+            [reference.id for reference in pending], include, parent_id, [version.id for version in recorded]
+        ) if pending and recorded else Counter()
         for candidates, chosen_by in ((recorded, 'recorded'), (self.releases_then_head(repo_version), 'release')):
             if not pending:
                 break
             pending = self.pick_holders(pending, include, parent_id, totals, candidates, chosen_by)
         for reference in pending:
-            self.keep(
-                reference, (EVALUATED_SOURCES, EXPLICIT_SOURCES), repo_uri, 'no one version holds all its members')
+            self.record_partial_holders(
+                reference, [version for version in recorded if held_by_recorded[(reference.id, version.id)]],
+                (EVALUATED_SOURCES, EXPLICIT_SOURCES), repo_uri)
+
+    def record_partial_holders(self, reference, partial, relations, repo_uri):
+        """Members from several versions: the recorded ones holding some of them go in the list it reads, else it
+        keeps what is recorded"""
+        for version in partial:
+            self.record(relations[0], version)
+        if partial:
+            self.note(
+                reference, partial_holders=[version.uri for version in partial],
+                reason='no one version holds all its members')
+        else:
+            self.keep(reference, relations, repo_uri, 'no one version holds all its members')
 
     def pick_holders(self, references, include, parent_id, totals, candidates, chosen_by):  # pylint: disable=too-many-arguments
         """Records for each reference the first candidate holding all its members; returns those none holds"""
@@ -221,6 +287,7 @@ class ExpansionVersionLists:
                 self.keep(reference, relations, repo_uri, 'it has no members')
             else:
                 self.record(EVALUATED_COLLECTIONS, version)
+                self.note(reference, recorded=version.uri, chosen_by='resolved', reason='it has no members')
             return
         for candidates, chosen_by in ((recorded, 'recorded'), (self.releases_then_head(version), 'release')):
             holder = next((
@@ -230,19 +297,24 @@ class ExpansionVersionLists:
                 if chosen_by != 'recorded':
                     self.note(reference, recorded=holder.uri, chosen_by='HEAD' if holder.is_head else chosen_by)
                 return
-        self.keep(reference, relations, repo_uri, 'no one version holds all its members')
+        self.record_partial_holders(
+            reference, [holder for holder in recorded if self.count_held_by_valueset(holder, reference)], relations,
+            repo_uri)
 
     def valueset_holds(self, valueset_version, reference, total):
+        return self.count_held_by_valueset(valueset_version, reference) == total
+
+    def count_held_by_valueset(self, valueset_version, reference):
         expansion = valueset_version.expansion
         if not expansion:
-            return False
+            return 0
         held = 0
         for through, field in ((ReferencedConcept, 'concept'), (ReferencedMapping, 'mapping')):
             member_through = getattr(Expansion, f'{field}s').through
             held += self.member_rows(through, field, [reference.id], reference.include).filter(Exists(
                 member_through.objects.filter(expansion_id=expansion.id, **{f'{field}_id': OuterRef(f'{field}_id')})
             )).values(f'{field}_id').distinct().count()
-        return held == total
+        return held
 
     def get_uris(self, lists):
         return {relation: sorted({version.uri for version in versions}) for relation, versions in lists.items()}
@@ -289,10 +361,11 @@ class ExpansionVersionLists:
         }
 
     def apply(self):
-        """Writes the rebuilt lists, rolled back if the expansion's members changed meanwhile"""
+        """Writes the rebuilt lists; nothing, if its lists, references or members changed since build"""
         with transaction.atomic():
-            members = self.get_member_summary()
+            if self.get_state() != self.built_from:
+                raise RuntimeError(f'{self.expansion.uri} changed since it was rebuilt; nothing was written')
             for relation in self.RELATIONS:
                 getattr(self.expansion, relation).set(list(self.after[relation]))
-            if self.get_member_summary() != members:
+            if self.get_member_summary() != self.built_from['members']:
                 raise RuntimeError(f'Members of {self.expansion.uri} changed; nothing was written')
