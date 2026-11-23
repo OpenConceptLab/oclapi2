@@ -15,7 +15,7 @@ from rest_framework.exceptions import ErrorDetail
 from core.collections.models import CollectionReference, Collection
 from core.collections.serializers import CollectionVersionExportSerializer, CollectionReferenceDetailSerializer
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory, ExpansionFactory
-from core.common.constants import ACCESS_TYPE_NONE
+from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
 from core.common.tasks import export_collection, delete_s3_objects
 from core.common.tests import OCLAPITestCase
 from core.integration_tests.tests_access_control import PrivateHeadVersionAccessMixin
@@ -4946,3 +4946,26 @@ class CollectionVersionPrivateHeadAccessTest(PrivateHeadVersionAccessMixin, OCLA
         version.expansion_uri = expansion.uri
         version.save()
         return concept
+
+    def test_expansion_content_counts_are_hidden_when_head_is_private(self):
+        head, version = self.create_org_version()
+        self.add_concept(head, version)
+        expansion = version.expansions.first()
+
+        urls = [f'{expansion.uri}{suffix}{query}' for suffix in ('concepts/', 'mappings/') for query in ('', '?q=c')]
+        for url in urls:
+            self.assertEqual(
+                self.client.head(url, HTTP_AUTHORIZATION=f'Token {self.outsider.get_token()}').status_code, 403, url)
+            self.assertEqual(self.client.head(url).status_code, 401, url)
+
+    def test_expansion_content_counts_of_public_collection_stay_visible(self):
+        head = self.org_repo_factory(organization=self.org, public_access=ACCESS_TYPE_VIEW)
+        version = self.org_repo_factory(
+            mnemonic=head.mnemonic, organization=self.org, version='v1', public_access=ACCESS_TYPE_VIEW)
+        self.add_concept(head, version)
+        expansion = version.expansions.first()
+
+        for suffix in ('concepts/', 'mappings/'):
+            response = self.client.head(
+                expansion.uri + suffix, HTTP_AUTHORIZATION=f'Token {self.outsider.get_token()}')
+            self.assertEqual(response.status_code, 200, suffix)
