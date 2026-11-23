@@ -7,6 +7,9 @@ from django.db.models import F, Q, Exists, OuterRef, Subquery
 from django.db.models.functions import MD5, Upper
 from pydash import get, compact, has
 
+from core.capabilities.constants import WRITE_ACTION_EDIT
+from core.capabilities.policy import get_capability_policy
+from core.capabilities.writes import get_write_refusal, get_write_target
 from core.common.checksums import ChecksumModel
 from core.common.constants import ISO_639_1, LATEST, HEAD, ALL, ACCESS_TYPE_NONE
 from core.common.db_functions import ImmutableUnaccent
@@ -715,11 +718,24 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             viewable_uris |= set(linked_uris())
         return [uri for uri in uris if uri in viewable_uris]
 
+    def can_write_hierarchy_of(self, concept, policy):
+        """
+        Whether this concept's hierarchy change may save a new version of `concept`: `created_by` has edit access to its
+        repository and, when that's another repository, the capability policy doesn't refuse the edit. Linking a
+        parent's new version to the children it already has isn't asked about: the system keeps those links current.
+        """
+        repository = concept.parent
+        if not repository.has_edit_access(self.created_by):
+            return False
+        return repository.id == self.parent_id or get_write_refusal(
+            self.created_by, get_write_target(repository), WRITE_ACTION_EDIT, policy) is None
+
     def set_parent_concepts_from_uris(self, create_parent_version=True):
         parent_concepts = get(self, '_parent_concepts', [])
         if create_parent_version:
+            policy = get_capability_policy()
             for parent in parent_concepts:
-                if not parent.parent.has_edit_access(self.created_by):
+                if not self.can_write_hierarchy_of(parent, policy):
                     continue
                 current_latest_version = parent.get_latest_version()
                 parent_clone = parent.clone()
@@ -748,8 +764,9 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         if uris:
             concepts = Concept.objects.filter(uri__in=uris).select_related('parent')
             child_versioned_object_uri = drop_version(self.uri)
+            policy = get_capability_policy()
             for concept in concepts:
-                if not concept.parent.has_edit_access(self.created_by):
+                if not self.can_write_hierarchy_of(concept, policy):
                     continue
                 current_latest_version = concept.get_latest_version()
                 Concept.create_new_version_for(
@@ -2077,14 +2094,21 @@ class ImportHierarchy:
 
     @classmethod
     def from_uri_map(cls, hierarchy_map, user=None):
-        """hierarchy_map: child uri -> parent uris. With a user, only children it can edit and parents it can view."""
+        """
+        hierarchy_map: child uri -> parent uris. With a user, only children it can edit, in sources the capability
+        policy doesn't refuse it edits to (the only sources it's asked about), and parents it can view.
+        """
         from core.sources.models import Source
         # children's URLs are versionless, so one lookup resolves them with their parents
         resolved = cls.resolve_parents({*hierarchy_map, *(uri for uris in hierarchy_map.values() for uri in uris)})
         editable = viewable = None
         if user:
             sources = Source.objects.filter(id__in={source_id for _, source_id in resolved.values()})
-            editable = {source.id for source in sources if source.has_edit_access(user)}
+            child_source_ids = {resolved[uri][1] for uri in hierarchy_map if uri in resolved}
+            policy = get_capability_policy()
+            editable = {
+                source.id for source in sources if source.id in child_source_ids and source.has_edit_access(user) and
+                get_write_refusal(user, get_write_target(source), WRITE_ACTION_EDIT, policy) is None}
             viewable = {source.id for source in sources if source.has_view_access(user)}
         links = {}
         for child_uri, parent_uris in hierarchy_map.items():

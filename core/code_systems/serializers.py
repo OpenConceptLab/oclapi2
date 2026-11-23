@@ -400,6 +400,8 @@ class CodeSystemDetailSerializer(FhirRepositorySerializerMixin, serializers.Mode
         return source
 
     def update(self, instance, validated_data):
+        if self.refuses_another_id(instance, validated_data):
+            return instance
         concepts = validated_data.pop('concepts', [])
         new_version = validated_data.get('version')
 

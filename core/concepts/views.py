@@ -27,9 +27,10 @@ from core.common.constants import (
     HEAD, LATEST, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE, LIST_DEFAULT_LIMIT)
 from core.common.exceptions import Http400, Http403, Http409
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
-from core.capabilities.constants import MAPPER_MATCH_OPERATIONS_CAPABILITY_ID
+from core.capabilities.constants import MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, WRITE_ACTION_EDIT
 from core.capabilities.exceptions import UsageRefused
 from core.capabilities.policy import get_capability_policy
+from core.capabilities.writes import check_write, get_write_target
 from core.capacity.constants import ENDPOINT_MATCH, ENDPOINT_RERANK
 from core.capacity.limiter import CapacityLimitMixin
 from core.common.permissions import CanUseMapper
@@ -628,6 +629,7 @@ class ConceptCloneView(ConceptCascadeView):
             raise Http404()
         if not source.has_edit_access(self.request.user):
             raise Http403()
+        check_write(self.request.user, get_write_target(source), WRITE_ACTION_EDIT)
         return source
 
 
