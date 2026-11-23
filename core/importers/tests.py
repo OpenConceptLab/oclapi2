@@ -4757,6 +4757,16 @@ class TasksTest(OCLTestCase):
             resource.refresh_from_db()
             self.assertTrue(resource._counted)  # pylint: disable=protected-access
 
+    @patch('core.sources.models.update_active_count')
+    def test_dropped_children_are_recounted_with_the_count_lock(self, update_active_count_mock):
+        source = OrganizationSourceFactory()
+
+        source.index_dropped_children([], [])
+
+        self.assertEqual(
+            update_active_count_mock.call_args_list,
+            [call(Source, source.id, 'active_concepts'), call(Source, source.id, 'active_mappings')])
+
     @patch('core.common.tasks.post_import_update_resource_counts.apply_async')
     def test_post_import_update_resource_counts_runs_one_copy_at_a_time(self, apply_async_mock):
         concept = ConceptFactory(_counted=None)
