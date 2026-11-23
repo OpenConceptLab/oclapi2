@@ -1420,11 +1420,11 @@ class DeferredImportIndex(models.Model):
         """
         Updates the superseded versions whose replacements are searchable now. While the window is open, it also
         indexes the INDEX and MAPPED_CODES rows in order, updating the superseded versions again every
-        DEFERRED_INDEX_FLAGS_SECONDS and at the end, and stops after about DEFERRED_INDEX_RUN_SECONDS: the opening pass
-        over the latest flags gets a third of that, the indexing the rest (a third at least), and the closing pass
-        another third. If work is left, it queues the next run behind the indexing tasks queued meanwhile, so they
-        share the worker. Outside the window there's only the latest flags to do, and the pass goes through all of
-        them. Returns how many rows it finished.
+        DEFERRED_INDEX_FLAGS_SECONDS and at the end, all within about DEFERRED_INDEX_RUN_SECONDS: a third for the
+        opening pass over the latest flags, a third for the indexing (or more, up to two thirds, when that pass was
+        quick), and the rest for the closing pass. If indexing is left, it queues the next run behind the indexing
+        tasks queued meanwhile, so they share the worker. Outside the window there's only the latest flags to do, and
+        the pass goes through all of them. Returns how many rows it finished.
 
         One runner at a time: a run holds a lock it renews before each batch, and stops if the lock is no longer its
         own. The lock expires if its runner dies, so a later run picks up where it stopped.
@@ -1435,8 +1435,8 @@ class DeferredImportIndex(models.Model):
         if not django_cache.add(DEFERRED_INDEX_LOCK_KEY, token, timeout=DEFERRED_INDEX_LOCK_SECONDS):
             return 0
         started_at = time.monotonic()
-        deadline = started_at + DEFERRED_INDEX_RUN_SECONDS
-        slice_seconds = DEFERRED_INDEX_RUN_SECONDS / 3
+        third = DEFERRED_INDEX_RUN_SECONDS / 3
+        deadline = None  # the indexing's
 
         def keep_going(indexing=True):
             """Whether to start another batch: the lock is still this run's, and for indexing, time is left."""
@@ -1447,23 +1447,20 @@ class DeferredImportIndex(models.Model):
 
         resume = False
         try:
-            window_open = cls.is_window_open()
-            done, cut = cls.update_latest_flags(keep_going, started_at + slice_seconds if window_open else None)
-            if window_open:
+            done = cls.update_latest_flags(keep_going, started_at + third if cls.is_window_open() else None)
+            if cls.is_window_open():  # again: the pass may have taken it into the window
                 flagged_at = time.monotonic()
-                deadline = max(deadline, flagged_at + slice_seconds)  # a third at least, if that pass ran over
+                deadline = max(started_at + 2 * third, flagged_at + third)
                 for row in iter(lambda: cls.get_pending().exclude(stage=cls.Stage.LATEST_FLAGS).first(), None):
                     if row.process(keep_going) != cls.DONE:
                         break  # out of time, the window closed, the lock was lost, or the row failed
                     done += 1
                     if time.monotonic() - flagged_at >= DEFERRED_INDEX_FLAGS_SECONDS:
-                        done += cls.update_latest_flags(keep_going, deadline)[0]
+                        done += cls.update_latest_flags(keep_going, deadline)
                         flagged_at = time.monotonic()
-                flags_done, cut = cls.update_latest_flags(keep_going, max(deadline, time.monotonic()) + slice_seconds)
-                done += flags_done
-                resume = keep_going(indexing=False) and cls.is_window_open() and (
-                    cut or (time.monotonic() >= deadline and cls.get_pending().exclude(
-                        stage=cls.Stage.LATEST_FLAGS).exists()))
+                done += cls.update_latest_flags(keep_going, deadline + third)
+                resume = time.monotonic() >= deadline and keep_going(indexing=False) and cls.is_window_open() and \
+                    cls.get_pending().exclude(stage=cls.Stage.LATEST_FLAGS).exists()
         finally:
             if django_cache.get(DEFERRED_INDEX_LOCK_KEY) == token:
                 django_cache.delete(DEFERRED_INDEX_LOCK_KEY)
@@ -1476,20 +1473,17 @@ class DeferredImportIndex(models.Model):
     def update_latest_flags(cls, keep_going, until=None):
         """
         Processes the LATEST_FLAGS rows, the ones checked longest ago first, until `until` (a time.monotonic() value;
-        None: no limit). Stops at a failure, or once keep_going says to. Returns how many rows it finished, and whether
-        it ran out of time before the last.
+        None: no limit). Stops at a failure, or once keep_going says to. Returns how many rows it finished.
         """
         done = 0
         for row in cls.get_pending().filter(stage=cls.Stage.LATEST_FLAGS).order_by('updated_at', 'id'):
-            if until is not None and time.monotonic() >= until:
-                return done, True
-            if not keep_going(indexing=False):
+            if (until is not None and time.monotonic() >= until) or not keep_going(indexing=False):
                 break
             result = row.process(keep_going)
             if result == cls.FAILED:
                 break
             done += result == cls.DONE
-        return done, False
+        return done
 
     def get_model(self):
         return {'concept': Concept, 'mapping': Mapping}[self.resource]

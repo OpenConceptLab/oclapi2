@@ -261,13 +261,15 @@ class DeferredImportIndexRunTest(OCLTestCase):
 
     def run_rows(self, window=True, flags_seconds=0):
         """
-        run() with the window open (False: closed; a number: open for that many checks), recording its calls. By
-        default it updates the latest flags after every row.
+        run() with the window open (False: closed; a number: open for that many checks; a function: whether it's open
+        at the nth check), recording its calls. By default it updates the latest flags after every row.
         """
         checks = []
 
         def is_window_open(*_):
             checks.append(1)
+            if callable(window):
+                return window(len(checks))
             return window is True or (not isinstance(window, bool) and len(checks) <= window)
 
         with ExitStack() as stack:
@@ -326,7 +328,7 @@ class DeferredImportIndexRunTest(OCLTestCase):
         concept, (first, second, third) = self.concept_updates(2)
 
         # the window closes after the first update's part: its new version is already superseded by the second's
-        self.assertEqual(self.run_rows(window=3), 2)  # the run's check, then one before each batch
+        self.assertEqual(self.run_rows(window=4), 2)  # the run's two checks, then one before each batch
 
         self.assertEqual(self.indexed, [(INDEX, 'concept', {concept.id}), (INDEX, 'concept', {concept.id})])
         self.assertEqual(deferred(), {(INDEX, 'concept'): {concept.id, third.id},
@@ -369,7 +371,7 @@ class DeferredImportIndexRunTest(OCLTestCase):
         self.defer_import(concept_line(self.source, 'C1', datatype='Text'))
         concept, (first, second) = versions(self.source, 'C1')
 
-        self.assertEqual(self.run_rows(window=2), 1)  # the run's check and the first part's batch
+        self.assertEqual(self.run_rows(window=3), 1)  # the run's two checks and the first part's batch
 
         # rewriting the first version from the database would un-flag the only document search finds
         self.assertEqual(self.indexed, [(INDEX, 'concept', {concept.id})])
@@ -443,7 +445,7 @@ class DeferredImportIndexRunTest(OCLTestCase):
     def test_run_stops_within_a_batch_of_the_window_closing_and_the_next_one_resumes(self):
         concept, (first, second) = self.concept_updates()
 
-        self.assertEqual(self.run_rows(window=2), 0)  # the run's check, then one batch
+        self.assertEqual(self.run_rows(window=3), 0)  # the run's two checks, then one batch
 
         self.assertEqual(self.indexed, [(INDEX, 'concept', {concept.id})])
         self.assertEqual(
@@ -652,6 +654,14 @@ class DeferredImportIndexRunTest(OCLTestCase):
         self.assertEqual(
             self.indexed, [(LATEST_FLAGS, 'concept', {c1_first.id}), (LATEST_FLAGS, 'concept', {c2_first.id})])
         task_mock.apply_async.assert_not_called()
+
+    def test_run_indexes_if_its_opening_flags_pass_took_it_into_the_window(self):
+        self.defer_import(concept_line(self.source, 'C1'))
+        concept, (first, ) = versions(self.source, 'C1')
+
+        self.assertEqual(self.run_rows(window=lambda check: check > 1), 1)  # closed only at the first check
+
+        self.assertEqual(self.indexed, [(INDEX, 'concept', {concept.id, first.id})])
 
     def test_run_stops_once_its_lock_is_another_runners(self):
         concept, (first, second) = self.concept_updates()
