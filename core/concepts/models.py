@@ -1531,7 +1531,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     @classmethod
     def reconcile_import_hierarchy(cls, hierarchy_map, user, replace_head=False):
-        ImportHierarchy.from_uri_map(hierarchy_map, user).apply(replace_head)
+        ImportHierarchy.from_uri_map(hierarchy_map, user, seed=replace_head).apply(replace_head)
 
     @classmethod
     def get_versioned_objects_by_uri(cls, uris):
@@ -2103,14 +2103,16 @@ class ImportHierarchy:
             {*links, *(parent_id for parent_ids in links.values() for parent_id in parent_ids)})
 
     @classmethod
-    def from_uri_map(cls, hierarchy_map, user=None):
+    def from_uri_map(cls, hierarchy_map, user=None, seed=False):  # pylint: disable=too-many-locals
         """
         hierarchy_map: child uri -> parent uris. With a user, only children it can edit, in sources the capability
-        policy doesn't refuse it edits to (the only sources it's asked about), and parents it can view.
+        policy doesn't refuse it edits to (the only sources it's asked about), and parents it can view. seed: a
+        seeding import's hierarchy (resolve_parents).
         """
         from core.sources.models import Source
         # children's URLs are versionless, so one lookup resolves them with their parents
-        resolved = cls.resolve_parents({*hierarchy_map, *(uri for uris in hierarchy_map.values() for uri in uris)})
+        resolved = cls.resolve_parents(
+            {*hierarchy_map, *(uri for uris in hierarchy_map.values() for uri in uris)}, seed)
         editable = viewable = None
         if user:
             sources = Source.objects.filter(id__in={source_id for _, source_id in resolved.values()})
@@ -2131,11 +2133,12 @@ class ImportHierarchy:
         return cls(links)
 
     @classmethod
-    def resolve_parents(cls, uris):
+    def resolve_parents(cls, uris, seed=False):
         """
         uri -> (concept id, source id) of each parent URL: the concept a URL names, or the concept of the exact version
-        it names (where several concepts share a URL, the one get_versioned_objects_by_uri resolves it to). A version
-        that doesn't exist resolves to nothing.
+        it names. In a seed, a version of a code that several concepts share a URL with resolves to the one
+        get_versioned_objects_by_uri resolves the code's URL to: the one the seed writes, which keeps the code. A
+        version that doesn't exist resolves to nothing.
         """
         versioned_uris = {uri for uri in uris if drop_version(uri) != uri}
         versionless_uris = set(uris) - versioned_uris
@@ -2145,9 +2148,8 @@ class ImportHierarchy:
             for uri, versioned_object_id, source_id in Concept.objects.filter(uri__in=batch).values_list(
                     'uri', 'versioned_object_id', 'parent_id'):
                 named_versions[uri] = (versioned_object_id, source_id)
-        # a version of a code with two versioned objects resolves to the one its URL resolves to, as an import writes
         heads = Concept.get_versioned_objects_by_uri(
-            {drop_version(uri) for uri in named_versions}) if named_versions else {}
+            {drop_version(uri) for uri in named_versions}) if seed and named_versions else {}
         for uri, row in named_versions.items():
             resolved[uri] = heads.get(drop_version(uri), row)
         return resolved

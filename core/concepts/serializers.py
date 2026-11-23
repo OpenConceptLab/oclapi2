@@ -669,20 +669,21 @@ class ConceptVersionExportSerializer(ModelSerializer):
     @staticmethod
     def get_version_hierarchy(version, concepts):
         """
-        A source version's hierarchy among its own rows, for these rows of it, by the rules of
-        Concept.get_version_hierarchy_queryset: each row's own parent links (prefetched) as the version's rows of those
-        concepts, and the version's rows that link to any row of each of these concepts.
-        Returns {'parents': {versioned object id -> uri}, 'children': {versioned object id -> child uris}}.
+        A source version's hierarchy among the rows its export holds (its active rows), for these rows of it, by the
+        rules of Concept.get_version_hierarchy_queryset: each row's own parent links (prefetched) as the version's rows
+        of those concepts, and the version's rows that link to any row of each of these concepts.
+        Returns {'parents': {...}, 'children': {...}}, each versioned object id -> uris.
         """
         parent_ids = {linked.versioned_object_id for concept in concepts for linked in concept.parent_concepts.all()}
         parents, children = {}, {}
         for batch in chunks(sorted(parent_ids), 5000):
-            parents.update(version.concepts.filter(versioned_object_id__in=batch).order_by('id').values_list(
-                'versioned_object_id', 'uri'))
+            for parent_id, uri in version.concepts.filter(
+                    versioned_object_id__in=batch, is_active=True).values_list('versioned_object_id', 'uri'):
+                parents.setdefault(parent_id, set()).add(uri)
         members = Concept.sources.through.objects.filter(source_id=version.id).values('concept_id')
         for batch in chunks(sorted({concept.versioned_object_id for concept in concepts}), 5000):
             for parent_id, child_uri in HierarchicalConcepts.objects.filter(
-                    parent__versioned_object_id__in=batch, child_id__in=members
+                    parent__versioned_object_id__in=batch, child_id__in=members, child__is_active=True
             ).values_list('parent__versioned_object_id', 'child__uri'):
                 children.setdefault(parent_id, set()).add(child_uri)
         return {'parents': parents, 'children': children}
@@ -699,8 +700,8 @@ class ConceptVersionExportSerializer(ModelSerializer):
             if relation == 'child_concepts':
                 return list(version_hierarchy['children'].get(obj.versioned_object_id, []))
             return list({
-                version_hierarchy['parents'][parent.versioned_object_id] for parent in obj.parent_concepts.all()
-                if parent.versioned_object_id in version_hierarchy['parents']})
+                uri for parent in obj.parent_concepts.all()
+                for uri in version_hierarchy['parents'].get(parent.versioned_object_id, [])})
         concepts = list(getattr(obj, relation).all())
         versioned = getattr(obj, 'versioned_object', None)
         if versioned:

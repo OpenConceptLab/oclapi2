@@ -6734,16 +6734,32 @@ class IsolatedVersionImportTest(OCLTestCase):
         self.assertEqual(
             sorted(child.parent_concept_urls), ['/orgs/Regen/sources/LOINC/concepts/Q/'])
 
-    def export_hierarchy(self, version):
-        """Each concept's parent and child codes in the version's export; a URL that isn't the version's row says so."""
+    def test_hierarchy_repair_keeps_the_version_a_url_names(self):
+        from core.common.tasks import make_hierarchy
+        self.run_import([self.concept('Q'), self.concept('C'), self.version('v1')])
+        _, duplicate_version = self.add_duplicate_head('Q')
+
+        make_hierarchy({duplicate_version.uri: ['/orgs/Regen/sources/LOINC/concepts/C/']})
+
+        child = Concept.objects.get(mnemonic='C', id=F('versioned_object_id'))
+        self.assertEqual(
+            set(child.parent_concepts.values_list('versioned_object_id', flat=True)),
+            {duplicate_version.versioned_object_id})
+
+    @staticmethod
+    def export_concepts(version):
         source = Source.objects.get(mnemonic='LOINC', version=version)
         export_service = Mock(upload_file=Mock(return_value=200), url_for=Mock(return_value='http://export.url'))
         with patch('core.common.utils.get_export_service', return_value=export_service):
             write_export_file(
                 source, 'source', 'core.sources.serializers.SourceVersionExportSerializer', Mock(), time.time())
         with ZipFile(export_service.upload_file.call_args.kwargs['file_path']) as export:
-            concepts = json.loads(export.read('export.json'))['concepts']
-        rows = dict(source.concepts.values_list('uri', 'mnemonic'))
+            return json.loads(export.read('export.json'))['concepts']
+
+    def export_hierarchy(self, version):
+        """Each concept's parent and child codes in the version's export; a URL that isn't the version's row says so."""
+        concepts = self.export_concepts(version)
+        rows = dict(Source.objects.get(mnemonic='LOINC', version=version).concepts.values_list('uri', 'mnemonic'))
 
         def codes(urls):
             return sorted(rows.get(url, f'not in {version}: {url}') for url in urls)
@@ -6778,6 +6794,29 @@ class IsolatedVersionImportTest(OCLTestCase):
         self.assertEqual(self.version_hierarchy(parent, 'child_concepts', 'v2'), {'C'})
         self.assertEqual(self.export_hierarchy('v2'), {
             'P': {'parents': [], 'children': ['C']}, 'C': {'parents': ['P'], 'children': []}})
+
+    def test_version_export_links_every_row_it_holds_and_no_other(self):
+        self.run_import([
+            self.concept('P'), self.concept('C', parents=['P']), self.concept('D', parents=['P']), self.version('v1')])
+        v1 = Source.objects.get(mnemonic='LOINC', version='v1')
+        parent_row = v1.concepts.get(mnemonic='P')
+        second_parent_row = ConceptFactory(
+            parent=parent_row.parent, mnemonic='P', version='second', versioned_object=parent_row.versioned_object,
+            concept_class='LOINC', datatype='N/A')
+        Concept.objects.filter(id=second_parent_row.id).update(
+            version=str(second_parent_row.id), uri=f'/orgs/Regen/sources/LOINC/concepts/P/{second_parent_row.id}/')
+        second_parent_row.refresh_from_db()
+        v1.concepts.add(second_parent_row)
+        Concept.objects.filter(id=v1.concepts.get(mnemonic='D').id).update(is_active=False)
+
+        concepts = self.export_concepts('v1')
+
+        exported = {concept['version_url'] for concept in concepts}
+        self.assertEqual(exported, set(v1.concepts.filter(is_active=True).values_list('uri', flat=True)))
+        child = next(concept for concept in concepts if concept['id'] == 'C')
+        self.assertEqual(set(child['parent_concept_urls']), {parent_row.uri, second_parent_row.uri})
+        for concept in concepts:
+            self.assertTrue(set(concept['parent_concept_urls'] + concept['child_concept_urls']) <= exported)
 
     def test_isolated_import_fails_when_hierarchy_root_is_dropped(self):
         self.run_import([self.concept('ROOT'), self.concept('A', parents=['ROOT']), self.version('v1')])
