@@ -531,7 +531,12 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         return unsaved_names
 
     @classmethod
-    def get_base_queryset(cls, params):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
+    def get_base_queryset(  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
+            cls, params, collection_versions=None):
+        """
+        The active concepts that `params` (a URL's kwargs, with the query string's over them) name.
+        `collection_versions`, when given, keeps a collection's members to those of these versions.
+        """
         queryset = cls.objects.filter(is_active=True)
         user = params.get('user', None)
         org = params.get('org', None)
@@ -557,12 +562,13 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 return cls.objects.none()
 
         if collection:
-            queryset = queryset.filter(
-                cls.get_filter_by_container_criterion(
-                    'expansion_set__collection_version', collection, org, user, container_version,
-                    is_latest_released, latest_released_version,
-                )
+            criterion = cls.get_filter_by_container_criterion(
+                'expansion_set__collection_version', collection, org, user, container_version,
+                is_latest_released, latest_released_version,
             )
+            if collection_versions is not None:  # in the same filter, so the same expansion matches both
+                criterion &= Q(expansion_set__collection_version__in=collection_versions)
+            queryset = queryset.filter(criterion)
         if source:
             queryset = queryset.filter(
                 cls.get_filter_by_container_criterion(

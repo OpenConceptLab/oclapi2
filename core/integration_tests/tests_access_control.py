@@ -14,6 +14,7 @@ from core.collections.tests.factories import OrganizationCollectionFactory, User
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT, ROLE_ADMIN
 from core.common.permissions import HasOwnership
 from core.common.tests import OCLAPITestCase, OCLTestCase
+from core.common.views import BaseAPIView
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory, ConceptDescriptionFactory
@@ -2080,6 +2081,141 @@ class SourceVersionSearchAccessTest(SourceVersionReadAccessMixin, OCLAPITestCase
             hits = self.hits_from(source, f'/concepts/?q={self.name}', user, HTTP_INCLUDESEARCHLATEST='true')
             self.assertTrue(hits, user)
             self.assertEqual(set(hits), {concept.mnemonic}, user)
+
+
+@tag('es')
+class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
+    """
+    The org's public source holds the concepts and mappings. Its private collection P holds `inP` in HEAD and in v1;
+    its public collection Q holds `inQhead` in HEAD and `inQv1` in a private v1; its public collection R holds
+    `inRv1` in a public v1. A collection named in the query string counts only through versions the requester can
+    view.
+    """
+    def setUp(self):
+        super().setUp()
+        self.patch_concept_es_mapping_for_ci()
+        self.tag = f'qc{uuid.uuid4().hex[:6]}'
+        self.source = OrganizationSourceFactory(organization=self.org, public_access=ACCESS_TYPE_VIEW)
+        nowhere = ConceptFactory(parent=self.source, mnemonic=f'nowhere{self.tag}')
+        self.concepts, self.mappings = {}, {}
+        for key in ['inP', 'inQhead', 'inQv1', 'inRv1']:
+            self.concepts[key] = ConceptFactory(
+                parent=self.source, mnemonic=f'{key}{self.tag}', names=[ConceptNameFactory.build(name=self.tag)])
+            self.mappings[key] = MappingFactory(
+                parent=self.source, from_concept=self.concepts[key], to_concept=nowhere, mnemonic=f'm{key}{self.tag}')
+        self.p_head, self.p_v1 = self.collection('P', ACCESS_TYPE_NONE, ACCESS_TYPE_NONE, ['inP'], ['inP'])
+        self.q_head, self.q_v1 = self.collection('Q', ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE, ['inQhead'], ['inQv1'])
+        self.r_head, self.r_v1 = self.collection('R', ACCESS_TYPE_VIEW, ACCESS_TYPE_VIEW, [], ['inRv1'])
+        ConceptDocument().update(Concept.objects.filter(parent=self.source), refresh=True)
+        MappingDocument().update(Mapping.objects.filter(parent=self.source), refresh=True)
+
+    def collection(self, name, head_access, version_access, head_keys, version_keys):
+        """A collection's HEAD holding head_keys' resources by reference, and its released v1 holding version_keys'."""
+        head = OrganizationCollectionFactory(
+            organization=self.org, mnemonic=f'{self.tag}{name}', public_access=head_access)
+        head.expansion_uri = ExpansionFactory(collection_version=head).uri
+        head.save()
+        if head_keys:
+            head.add_expressions({'expressions': [self.concepts[key].uri for key in head_keys] + [
+                self.mappings[key].uri for key in head_keys]}, self.member)
+        version = OrganizationCollectionFactory(
+            organization=self.org, mnemonic=head.mnemonic, version='v1', released=True, public_access=version_access)
+        expansion = ExpansionFactory(collection_version=version)
+        version.expansion_uri = expansion.uri
+        version.save()
+        for key in version_keys:
+            expansion.concepts.add(self.concepts[key], self.concepts[key].get_latest_version())
+            expansion.mappings.add(self.mappings[key], self.mappings[key].get_latest_version())
+        return head, version
+
+    def assert_answers(self, url, anonymous, outsider, member):
+        for user, status_code in [(None, anonymous), (self.outsider, outsider), (self.member, member)]:
+            self.assertEqual(self.request('get', url, user).status_code, status_code, (url, user))
+
+    def keys(self, rows, resource):
+        """The keys of this test's rows, as setUp names them."""
+        prefix = 'm' if resource == 'mappings' else ''
+        return sorted({row[0].removeprefix(prefix).removesuffix(self.tag) for row in rows if (
+            row[0].endswith(self.tag) and row[0].startswith(prefix) and 'nowhere' not in row[0])})
+
+    def listed(self, url, user, resource):
+        response = self.request('get', url, user)
+        self.assertEqual(response.status_code, 200, (url, user))
+        return self.keys([(row['id'],) for row in response.data], resource)
+
+    def assert_lists(self, query, outsiders, members, resources=('concepts', 'mappings')):
+        """Signed out and an outsider list `outsiders`; a member and staff list `members`."""
+        for resource in resources:
+            url = f'/{resource}/?{query}'
+            for user, expected in [(None, outsiders), (self.outsider, outsiders), (self.member, members),
+                                   (self.staff, members)]:
+                self.assertEqual(self.listed(url, user, resource), sorted(expected), (url, user))
+
+    def test_collection_facets_count_only_versions_the_requester_can_view(self):
+        prefix, owner_url = self.tag, self.org.uri
+        self.assert_lists(f'collection={prefix}P', [], ['inP'])
+        self.assert_lists(f'collection={prefix}Q', ['inQhead'], ['inQhead', 'inQv1'])
+        self.assert_lists(f'collection={prefix}R', ['inRv1'], ['inRv1'])
+        self.assert_lists(f'collection={prefix}P,{prefix}R', ['inRv1'], ['inP', 'inRv1'])
+        self.assert_lists(f'q={prefix}&collection={prefix}Q', ['inQhead'], ['inQhead', 'inQv1'], ['concepts'])
+        self.assert_lists(f'collection={prefix}*', ['inQhead', 'inRv1'], ['inP', 'inQhead', 'inQv1', 'inRv1'])
+        self.assert_lists(f'collection_url={self.q_v1.uri}', [], ['inQv1'])
+        self.assert_lists(f'collection_url={self.r_v1.uri}', ['inRv1'], ['inRv1'])
+        self.assert_lists(f'collection_url={owner_url}collections/{prefix}*&collection={prefix}*',
+                          ['inQhead', 'inRv1'], ['inP', 'inQhead', 'inQv1', 'inRv1'])
+        self.assert_lists(f'collection_owner_url={owner_url}&collection={prefix}*',
+                          ['inQhead', 'inRv1'], ['inP', 'inQhead', 'inQv1', 'inRv1'])
+        source = f'source={self.source.mnemonic}'
+        self.assert_lists(f'{source}&collection=!{prefix}P', ['inP', 'inQhead', 'inQv1', 'inRv1'],
+                          ['inQhead', 'inQv1', 'inRv1'])
+        # HEAD holds the concepts' first versions, so a search of latest versions finds inQhead in no collection
+        self.assert_lists(f'{source}&collection=!{prefix}Q', ['inP', 'inQhead', 'inQv1', 'inRv1'],
+                          ['inP', 'inQhead', 'inRv1'])
+
+    @patch('core.common.mixins.write_csv_to_s3', Mock(return_value='https://exports.test/export.csv'))
+    def test_a_collection_named_with_its_owner_answers_as_its_lists(self):
+        org, prefix = self.org.mnemonic, self.tag
+        for resource in ['concepts', 'mappings']:
+            for query in [f'collection={prefix}P', f'collection={prefix}P&version=v1',
+                          f'collection={prefix}Q&version=v1', f'collection={prefix}Q&version=latest',
+                          f'collection={prefix}R,{prefix}P']:
+                for url in [f'/{resource}/?org={org}&{query}', f'/{resource}/?org={org}&csv=true&{query}']:
+                    self.assert_answers(url, 401, 403, 200)
+            for query in [f'collection={prefix}Q', f'collection={prefix}R&version=v1', 'collection=NoSuchCollection',
+                          f'collection=!{prefix}P', f'collection={prefix}P*']:
+                self.assert_answers(f'/{resource}/?org={org}&{query}', 200, 200, 200)
+            self.assert_answers(f'/{resource}/?org={org}&collection={prefix}Q&version=v9', 404, 404, 404)
+            # the owner the URL names; the version in a repository's URL is that repository's
+            self.assert_answers(f'{self.source.uri}{resource}/?collection={prefix}P', 401, 403, 200)
+            item = f'{resource}/{"m" if resource == "mappings" else ""}inP{prefix}/'
+            self.assert_answers(f'{self.source.uri}{item}?collection={prefix}P', 401, 403, 200)
+            self.assert_answers(f'{self.r_v1.uri}{resource}/?collection={prefix}R', 200, 200, 200)
+
+    def test_csv_exports_count_only_versions_the_requester_can_view(self):
+        exports = []
+
+        def export(data, *_args, **_kwargs):
+            exports.append([(row['mnemonic'],) for row in data])
+            return 'https://exports.test/export.csv'
+
+        prefix = self.tag
+        cases = [(f'collection={prefix}P', [], ['inP']), (f'collection={prefix}Q', ['inQhead'], ['inQhead', 'inQv1']),
+                 (f'collection={prefix}Q&version=v1', [], ['inQv1']), (f'collection={prefix}R', ['inRv1'], ['inRv1'])]
+        with patch('core.common.mixins.write_csv_to_s3', side_effect=export):
+            for resource, (query, outsiders, members) in itertools.product(['concepts', 'mappings'], cases):
+                for user, expected in [(None, outsiders), (self.outsider, outsiders), (self.member, members),
+                                       (self.staff, members)]:
+                    exports.clear()
+                    response = self.request('get', f'/{resource}/?csv=true&{query}', user)
+                    self.assertEqual(response.status_code, 200)
+                    self.assertEqual(self.keys(exports[0], resource), sorted(expected), (resource, query, user))
+
+    def test_a_prefix_matching_too_many_versions_answers_400(self):
+        url = f'/concepts/?collection={self.tag}*'
+        with patch.object(BaseAPIView, 'max_viewable_collection_urls', 2):
+            self.assert_answers(url, 400, 400, 200)
+            self.assertEqual(self.request('get', url, self.staff).status_code, 200)
+            self.assert_answers(f'/concepts/?collection={self.tag}R*', 200, 200, 200)
 
 
 class CanViewAllContentTest(OCLTestCase):

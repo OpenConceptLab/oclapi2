@@ -40,7 +40,8 @@ class MappingBaseView(SourceChildCommonBaseView):
         return MappingDetailSerializer(obj, data, files, partial)
 
     def get_queryset(self):
-        return self.leave_out_hidden_query_versions(Mapping.get_base_queryset(self.params))
+        return self.leave_out_hidden_query_versions(Mapping.get_base_queryset(
+            self.params, self.get_viewable_query_collection_versions()))
 
 
 class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
@@ -256,7 +257,8 @@ class MappingCollectionMembershipView(MappingBaseView, ListWithHeadersMixin):
         return CollectionVersionListSerializer
 
     def get_object(self, queryset=None):
-        queryset = self.leave_out_hidden_query_versions(Mapping.get_base_queryset(self.params))
+        queryset = self.leave_out_hidden_query_versions(Mapping.get_base_queryset(
+            self.params, self.get_viewable_query_collection_versions()))
         if 'mapping_version' not in self.kwargs:
             queryset = queryset.filter(id=F('versioned_object_id'))
         instance = queryset.first()

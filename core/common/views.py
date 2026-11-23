@@ -35,7 +35,7 @@ from core.common.serializers import RootSerializer
 from core.common.swagger_parameters import all_resource_query_param
 from core.common.throttling import ThrottleUtil
 from core.common.utils import compact_dict_by_values, to_snake_case, parse_updated_since_param, \
-    to_int, get_falsy_values, get_truthy_values, format_url_for_search, cap_page_size
+    to_int, get_falsy_values, get_truthy_values, format_url_for_search, cap_page_size, to_owner_uri
 from core.concepts.permissions import CanViewParentDictionary, CanEditParentDictionary
 from core.orgs.constants import ORG_OBJECT_TYPE
 from core.users.constants import USER_OBJECT_TYPE, LIST_UNPAGINATED_PERMISSION
@@ -63,6 +63,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     facet_class = None
     total_count = 0
     _latest_release_scopes = None  # exclude_hidden_latest_releases's, read once per request
+    # the facets that keep a search of concepts or mappings to collection members (get_viewable_collection_urls)
+    collection_facets = ('collection', 'collection_url', 'collection_owner_url')
+    max_viewable_collection_urls = 1000
+    _viewable_collection_urls = None  # get_viewable_collection_urls's, read once per request and facet value
 
     def get_throttles(self):
         return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
@@ -432,6 +436,13 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 queries = [
                     get_query_criteria(attr, _val) for _val in vals
                 ]
+            if attr in self.collection_facets and self.is_source_child_document_model():
+                for index, _val in enumerate(vals):
+                    clean_val = _val.strip('\"').strip('\'')
+                    criterion = self.get_collection_facet_criterion(
+                        attr, clean_val.rstrip('*') if prefix_query else clean_val, prefix_query)
+                    if criterion is not None:
+                        queries[index] = criterion
 
             return Q('bool', must=[~q for q in queries]) if not_query else Q('bool', should=queries, **kwargs)
 
@@ -443,6 +454,49 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             return criterion
 
         return None
+
+    def get_collection_facet_criterion(self, field, value, prefix):
+        """
+        A collection facet keeps a search to the members of collection versions, any owner's: by name (`collection`),
+        by a version's URL (`collection_url`) or by owner URL (`collection_owner_url`); with `prefix`, those starting
+        with `value`. The index lists every version a concept or mapping is in, those the requester can't view too,
+        so when `value` matches any of those, the facet matches through the URLs of the versions they can view only.
+        None when it matches none hidden from them, and the facet stays as it is.
+        """
+        urls = self.get_viewable_collection_urls(field, value, prefix)
+        return None if urls is None else Q('terms', collection_url=urls)
+
+    def get_viewable_collection_urls(self, field, value, prefix):
+        """
+        See get_collection_facet_criterion: the URLs of the collection versions the facet matches that the requester
+        can view, or None when it matches none they can't. 400 past max_viewable_collection_urls, which only a prefix
+        is likely to reach.
+        """
+        from core.collections.models import Collection
+        viewable = Collection.get_viewable_versions_criteria(self.request.user)
+        if viewable is None or not value:
+            return None
+        if self._viewable_collection_urls is None:
+            self._viewable_collection_urls = {}
+        cache, key = self._viewable_collection_urls, (field, value, prefix)
+        if key not in cache:
+            # a version's URL is its uri, which starts with its owner's
+            lookup = 'mnemonic' if field == 'collection' else 'uri'
+            if prefix or field == 'collection_owner_url':
+                lookup += '__startswith'
+            versions = Collection.objects.filter(**{lookup: value})
+            urls = None
+            if versions.exclude(viewable).exists():
+                limit = self.max_viewable_collection_urls
+                urls = list(versions.filter(viewable).values_list('uri', flat=True)[:limit + 1])
+                if len(urls) > limit:
+                    raise Http400(detail=f'{field}: more than {limit} collection versions match {value}. '
+                                         'Please narrow the filter.')
+                if field == 'collection_owner_url':
+                    urls = [url for url in urls if (
+                        to_owner_uri(url).startswith(value) if prefix else to_owner_uri(url) == value)]
+            cache[key] = urls
+        return cache[key]
 
     @staticmethod
     def merge_filters(filter1, filter2):
@@ -1230,6 +1284,7 @@ class SourceChildCommonBaseView(BaseAPIView):
             if 'source' in self.kwargs:
                 self.check_source_version_access(request)
             self.check_query_source_version_access(request)
+            self.check_query_collection_version_access(request)
 
     def verify_scope(self):
         has_parent_scope = self.has_parent_scope()
@@ -1367,6 +1422,58 @@ class SourceChildCommonBaseView(BaseAPIView):
     def leave_out_hidden_query_versions(self, queryset):
         """The reads' concepts or mappings, without the members of the versions set_hidden_query_versions hides."""
         return queryset.exclude(sources__in=self.hidden_query_versions) if self.hidden_query_versions else queryset
+
+    def check_query_collection_version_access(self, request):
+        """
+        The query string can name collections (commas separate several) to keep the reads to their members. With an
+        owner (the query string's over the URL's), each that exists under it answers as a source the query string
+        names does (check_query_source_version_access): 404 unless the version it names exists, then 401 or 403
+        unless the requester can view the collection and that version. Unlike a source's, a collection's HEAD is
+        checked too, as it holds other repositories' content. The version is the collection's only where the URL
+        names no repository. A collection the URL names keeps its own checks. A value with `!` or `*` names no
+        collection, and names with no owner name none in particular: the reads keep to the versions the requester
+        can view (get_viewable_query_collection_versions, get_collection_facet_criterion).
+        """
+        from core.collections.models import Collection
+        value = request.query_params.get('collection')
+        params = self.params or {}
+        owner_filters = self.get_parent_owner_filters(params)
+        if not value or value.startswith('!') or value.endswith('*') or not owner_filters:
+            return
+        version = None if self.has_concept_container_scope() else params.get('version')
+        url_collection = (self.kwargs.get('collection'), self.get_parent_owner_filters())
+        for mnemonic in compact(value.split(',')):
+            if (mnemonic, owner_filters) == url_collection:
+                continue
+            head = Collection.get_version(mnemonic, HEAD, owner_filters)
+            if not head:
+                continue  # nothing to read; a search reads the name as a facet
+            repo_version = None
+            if version not in [None, HEAD]:
+                repo_version = Collection.find_latest_released_version_by(
+                    {**owner_filters, 'mnemonic': mnemonic}) if version == LATEST else Collection.get_version(
+                    mnemonic, version, owner_filters)
+                if not repo_version and version != LATEST:
+                    raise Http404()
+            for viewed in compact([head, repo_version]):
+                self.check_view_access(request, viewed)
+
+    def get_viewable_query_collection_versions(self):
+        """
+        The reads (get_base_queryset) keep to the members of the collections the query string names, any version's
+        unless it names one, and any owner's unless it names one. When those include versions the requester can't
+        view, the versions they can view, for the reads to keep to; None otherwise.
+        """
+        from core.collections.models import Collection
+        value = self.request.query_params.get('collection')
+        viewable = Collection.get_viewable_versions_criteria(self.request.user)
+        if not value or viewable is None:
+            return None
+        params = self.params or {}
+        owner_filters = compact_dict_by_values(
+            {'organization__mnemonic': params.get('org'), 'user__username': params.get('user')})
+        versions = Collection.objects.filter(mnemonic__in=compact(value.split(',')), **owner_filters)
+        return versions.filter(viewable) if versions.exclude(viewable).exists() else None
 
 
 class SourceChildExtrasBaseView:
