@@ -302,7 +302,7 @@ class OrganizationMemberView(generics.GenericAPIView):
 class OrganizationResourceAbstractListView:
     """
     Resources owned by the orgs of the user in the URL, limited to those the requester can view. List only: a
-    repository is created under its owner's own route, not here
+    source, collection or map project is created under its owner's own route, not here
     """
     version = None
     permission_classes = (IsAuthenticated,)

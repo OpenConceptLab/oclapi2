@@ -1208,7 +1208,12 @@ class OrganizationResourceListRoutesTest(OCLAPITestCase):
             response = self.client.post(
                 url, {'id': 'side-door', 'name': 'side door'}, HTTP_AUTHORIZATION=token, format='json')
             self.assertEqual(response.status_code, 405, url)
+            self.assertEqual(response['Allow'], 'GET, HEAD, OPTIONS', url)
             self.assertEqual(self.client.get(url, HTTP_AUTHORIZATION=token).status_code, 200, url)
+        for url in urls[::2]:
+            # the method is refused before sign-in is checked
+            self.assertEqual(
+                self.client.post(url, {'id': 'side-door', 'name': 'side door'}, format='json').status_code, 405, url)
 
         self.assertEqual((Source.objects.count(), Collection.objects.count(), MapProject.objects.count()), counts)
 
