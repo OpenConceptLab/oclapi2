@@ -499,6 +499,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             ) or field for field, config in es_fields.items() if config.get('facet', False)
         ]
 
+    @property
+    def url_username(self):
+        """The user the URL names, the requester on the /user/ shortcut."""
+        return self.kwargs.get('user') or (self.request.user.username if self.user_is_self else None)
+
     def get_facet_filters_from_kwargs(self):
         kwargs = self.kwargs
         filters = {}
@@ -507,7 +512,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if is_collection_specified:
             version = kwargs.get('version') or HEAD
             filters['collection'] = kwargs['collection']
-            collection_owner_url = f'/users/{kwargs["user"]}/' if is_user_specified else f'/orgs/{kwargs["org"]}/'
+            collection_owner_url = f'/orgs/{kwargs["org"]}/' if 'org' in kwargs else f'/users/{self.url_username}/'
             filters['collection_owner_url'] = collection_owner_url
             if 'expansion' in self.kwargs:
                 filters['expansion_url'] = (f"{collection_owner_url}collections/{filters['collection']}/{version}/"
@@ -541,7 +546,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             if is_version_specified:
                 container_version = self.kwargs['version']
                 is_latest_released = container_version == LATEST
-                params = {'user__username': self.kwargs.get('user'), 'organization__mnemonic': self.kwargs.get('org')}
+                params = {'user__username': self.url_username, 'organization__mnemonic': self.kwargs.get('org')}
                 if is_latest_released:
                     if is_source_specified:
                         from core.sources.models import Source
@@ -915,6 +920,58 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                        self.is_concept_container_document_model() or self.is_repo_document_model()
                ) and self.request.query_params.get(CANONICAL_URL_REQUEST_PARAM, None)
 
+    def __apply_scope_filters(self, results):  # pylint: disable=too-many-branches
+        """Limits a search to what the URL names: its owner, repository and version (or the requester's orgs, on a
+        members view)."""
+        user = self.request.user
+        is_authenticated = user.is_authenticated
+        username = user.username
+
+        is_members_view = self.is_members_view()
+        if self.is_owner_document_model():
+            kwargs_filters = self.kwargs.copy()
+            if self.user_is_self and is_authenticated:
+                kwargs_filters.pop('user_is_self', None)
+                kwargs_filters['user'] = username
+        else:
+            kwargs_filters = self.get_kwargs_filters()
+            if is_members_view:
+                kwargs_filters['ownerType'] = 'Organization'
+                kwargs_filters['owner'] = self.get_members_view_org_mnemonics() or ['UNKNOWN-ORG-DUMMY']
+            elif self.user_is_self and is_authenticated and 'collection' not in self.kwargs:
+                # a collection's concepts can come from any owner's source, so only other routes filter by owner
+                kwargs_filters['ownerType'] = 'User'
+                kwargs_filters['owner'] = username
+
+        if self.is_url_registry_document() and not is_members_view:
+            kwargs_filters = self.kwargs.copy()
+            if self.user_is_self and is_authenticated:
+                kwargs_filters.pop('user_is_self', None)
+                kwargs_filters['ownerType'] = 'User'
+                kwargs_filters['owner'] = username
+            elif not kwargs_filters:
+                kwargs_filters['ownerUrl'] = '/'
+            else:
+                if 'org' in kwargs_filters:
+                    kwargs_filters['ownerType'] = 'Organization'
+                    kwargs_filters['owner'] = kwargs_filters.pop('org')
+                elif 'user' in kwargs_filters:
+                    kwargs_filters['ownerType'] = 'User'
+                    kwargs_filters['owner'] = kwargs_filters.pop('user')
+
+        for key, value in kwargs_filters.items():
+            attr = to_snake_case(key)
+            if value is None:  # a version that doesn't resolve, such as `latest` with no release: nothing matches
+                results = results.filter(Q('match_none'))
+            elif isinstance(value, list):
+                criteria = Q('term', **{attr: get(value, '0')})
+                for val in value[1:]:
+                    criteria |= Q('term', **{attr: val})
+                results = results.filter(criteria)
+            else:
+                results = results.filter('term', **{attr: value})
+        return results
+
     def __get_fuzzy_search_results(
             self, source_versions=None, other_filters=None, sort=True
     ):
@@ -929,6 +986,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             results = results.query(
                 self.__get_source_versions_es_criterion(source_versions)
             )
+        else:
+            results = self.__apply_scope_filters(results)
         results = results.query(self.get_fuzzy_search_criterion())
 
         min_score = self.request.query_params.get('min_score') or None
@@ -1018,50 +1077,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             for field, value in extras_fields_exact.items():
                 results = results.query("match", **{field: value}, _expand__to_dot=False)
 
-        user = self.request.user
-        is_authenticated = user.is_authenticated
-        username = user.username
-
-        is_members_view = self.is_members_view()
-        if self.is_owner_document_model():
-            kwargs_filters = self.kwargs.copy()
-            if self.user_is_self and is_authenticated:
-                kwargs_filters.pop('user_is_self', None)
-                kwargs_filters['user'] = username
-        else:
-            kwargs_filters = self.get_kwargs_filters()
-            if is_members_view:
-                kwargs_filters['ownerType'] = 'Organization'
-                kwargs_filters['owner'] = self.get_members_view_org_mnemonics() or ['UNKNOWN-ORG-DUMMY']
-            elif self.user_is_self and is_authenticated:
-                kwargs_filters['ownerType'] = 'User'
-                kwargs_filters['owner'] = username
-
-        if self.is_url_registry_document() and not is_members_view:
-            kwargs_filters = self.kwargs.copy()
-            if self.user_is_self and is_authenticated:
-                kwargs_filters.pop('user_is_self', None)
-                kwargs_filters['ownerType'] = 'User'
-                kwargs_filters['owner'] = username
-            elif not kwargs_filters:
-                kwargs_filters['ownerUrl'] = '/'
-            else:
-                if 'org' in kwargs_filters:
-                    kwargs_filters['ownerType'] = 'Organization'
-                    kwargs_filters['owner'] = kwargs_filters.pop('org')
-                elif 'user' in kwargs_filters:
-                    kwargs_filters['ownerType'] = 'User'
-                    kwargs_filters['owner'] = kwargs_filters.pop('user')
-
-        for key, value in kwargs_filters.items():
-            attr = to_snake_case(key)
-            if isinstance(value, list):
-                criteria = Q('term', **{attr: get(value, '0')})
-                for val in value[1:]:
-                    criteria |= Q('term', **{attr: val})
-                results = results.filter(criteria)
-            else:
-                results = results.filter('term', **{attr: value})
+        results = self.__apply_scope_filters(results)
 
         sort_attrs = self._get_sort_attribute()
         if has_search_string and self.is_concept_document() and (

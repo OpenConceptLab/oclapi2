@@ -342,6 +342,8 @@ class CustomESSearch:
             return result
         self.max_score = result['score']['max']
         self.total = total or 0
+        if not self.max_score:  # no hits: no scores to bucket
+            return []
         return self._get_score_buckets(
             self.max_score, result['distribution']['buckets'], verbose)
 
