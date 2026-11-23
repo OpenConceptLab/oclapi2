@@ -702,6 +702,8 @@ class ImportWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
         denied = [{**version_line, 'errors': ReadOnlyPolicy.body}]
         self.assertEqual((inline.json_result['permission_denied'], inline.created), (denied, []))
         self.assertEqual(parallel.json_result['permission_denied'], denied)
+        for result in (inline.json_result, parallel.json_result):  # the version line is the one line processed
+            self.assertEqual((result['total'], result['processed']), (2, 1))
         self.assertFalse(any(parallel.parts))  # no line left to import
         self.assertEqual(ReadOnlyPolicy.calls, [(self.user, self.source, WRITE_ACTION_EDIT)] * 3)
         self.assertFalse(self.source.concepts_set.filter(mnemonic='refused').exists())
@@ -717,6 +719,7 @@ class ImportWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
             'task-id', path, self.user.username, 'Organization', self.org.mnemonic, isolated_version=True).run()
 
         self.assertEqual((result['summary']['failed'], result['import_task'], result['subtask_ids']), (1, (), []))
+        self.assertEqual((result['summary']['total'], result['summary']['processed']), (2, 1))
         self.assertTrue(result['summary']['failures'][0].endswith(f'due to: {json.dumps(ReadOnlyPolicy.body)}'))
         self.assertFalse(self.source.concepts_set.filter(mnemonic='refused').exists())
 

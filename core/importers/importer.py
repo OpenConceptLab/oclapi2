@@ -259,6 +259,20 @@ class Importer:
             raise ValidationError(ex.message_dict if hasattr(ex, 'error_dict') else ex.messages) from ex
         return self.get_isolated_version_resource_types(resource_types)
 
+    def get_refused_result(self, refusal, resources, time_started, dependencies):
+        """
+        Nothing imports: the version line, the one line processed, fails with the capability policy's body, as a
+        refused line does in a subtask.
+        """
+        import_task = ImportTask(time_started=time_started, dependencies=dependencies)
+        import_task.initial_summary.total = sum(sum(files.values()) for files in resources.values())
+        import_task.initial_summary.processed = import_task.initial_summary.failed = 1
+        import_task.initial_summary.failures = [
+            f"Failed to import resource with id {get(self.version_lines, '0.id')} from {self.path} to "
+            f"{self.owner_type}/{self.owner} by {self.username} due to: {json.dumps(refusal.detail, default=str)}"]
+        import_task.time_finished = timezone.now()
+        return import_task.model_dump()
+
     @staticmethod
     def get_isolated_version_resource_types(resource_types):
         resource_types = [_type for _type in resource_types if _type != 'Source Version']
@@ -310,14 +324,8 @@ class Importer:
         self.prepare_resources(self.path, resource_types, dependencies, [], resources)
         try:
             resource_types = self.validate_versioning(resources, resource_types)
-        except WriteRefused as ex:  # nothing imports: the version line fails with the capability policy's body
-            import_task = ImportTask(time_started=time_started, dependencies=dependencies)
-            import_task.initial_summary.failed = 1
-            import_task.initial_summary.failures = [
-                f"Failed to import resource with id {get(self.version_lines, '0.id')} from {self.path} to "
-                f"{self.owner_type}/{self.owner} by {self.username} due to: {json.dumps(ex.detail, default=str)}"]
-            import_task.time_finished = timezone.now()
-            return import_task.model_dump()
+        except WriteRefused as ex:
+            return self.get_refused_result(ex, resources, time_started, dependencies)
         self.index = should_index_import(self.index, sum(sum(files.values()) for files in resources.values()))
         tasks = self.prepare_tasks(resource_types, dependencies, resources)
         if tasks:

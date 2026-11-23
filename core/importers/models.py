@@ -1345,6 +1345,7 @@ class BulkImportInline(BaseImporter):
                     Source.get_import_content_lines(self.input_list))
             except WriteRefused as ex:  # nothing imports: the version line is denied with the capability policy's body
                 self.permission_denied.append({**version_line, 'errors': ex.detail})
+                self.processed = 1  # of self.total, the lines submitted
                 self.input_list = []
 
     def set_task(self):
@@ -1917,6 +1918,8 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         for key, items in self.isolated_version_results.items():
             total_result[key] += items
             total_result['processed'] += len(items)
+        if self.isolated_version_results:  # the lines submitted: the parts hold all but the version line, or none
+            total_result['total'] = max(total_result['total'], self.total)
         total_result['start_time'] = self.start_time_formatted
         total_result['elapsed_seconds'] = self.elapsed_seconds
         total_result['child_resource_time_distribution'] = self.resource_wise_time
