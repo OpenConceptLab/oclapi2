@@ -19,7 +19,7 @@ from core.client_configs.views import ResourceClientConfigsView
 from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM
 from core.common.exceptions import Http405, Http400
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin, \
-    ConceptContainerExportMixin, ConceptContainerProcessingMixin
+    ConceptContainerExportMixin, ConceptContainerProcessingMixin, RepoVersionListMixin
 from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
     CanViewConceptDictionaryVersion
 from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, \
@@ -223,7 +223,9 @@ class SourceRetrieveUpdateDestroyView(
         return Response({'detail': get(result, 'messages', [DELETE_FAILURE])}, status=status.HTTP_400_BAD_REQUEST)
 
 
-class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeadersMixin):
+class SourceVersionListView(
+        RepoVersionListMixin, SourceVersionBaseView, CreateAPIView, ListWithHeadersMixin
+):
     released_filter = None
     processing_filter = None
     default_qs_sort_attr = '-created_at'
@@ -252,7 +254,7 @@ class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeader
         return SourceVersionListSerializer
 
     def get(self, request, *args, **kwargs):
-        self.get_head()
+        self.check_repos_permissions()  # before `released`, so it answers for every repository the URL names
         self.released_filter = parse_boolean_query_param(request, RELEASED_PARAM, self.released_filter)
         self.processing_filter = parse_boolean_query_param(request, PROCESSING_PARAM, self.processing_filter)
         return self.list(request, *args, **kwargs)

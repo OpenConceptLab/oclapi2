@@ -2354,12 +2354,13 @@ class TaskTest(OCLTestCase):
     def test_add_references_collection_not_found(self):
         user = UserProfileFactory()
 
-        added_references, errors = add_references(  # pylint: disable=no-value-for-parameter
+        added_references, errors, unresolved = add_references(  # pylint: disable=no-value-for-parameter
             user.id, {'expressions': []}, 999999999, False, False
         )
 
         self.assertEqual(added_references, [])
         self.assertEqual(errors, {'error': 'Collection not found'})
+        self.assertEqual(unresolved, [])
 
     def test_handle_pre_delete_task(self):
         concept = ConceptFactory()
