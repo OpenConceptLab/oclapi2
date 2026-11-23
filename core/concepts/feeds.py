@@ -31,16 +31,19 @@ class ConceptFeed(Feed, FeedFilterMixin):
 
     @staticmethod
     def is_public_url_version(kwargs):
-        """Whether the source version a versioned URL names exists and is public (for `latest`, each it reads)."""
-        if 'version' not in kwargs:
-            return True
+        """
+        Whether the URL names the source's owner and, when it names a version, that version exists and is public
+        (for `latest`, each it reads).
+        """
         from core.sources.models import Source
         if 'org' in kwargs:
             owner_filters = {'organization__mnemonic': kwargs['org']}
         elif 'user' in kwargs:
             owner_filters = {'user__username': kwargs['user']}
-        else:  # /sources/<source>/<version>/: no owner names the version
+        else:  # /sources/<source>/: no owner names the source
             return False
+        if 'version' not in kwargs:
+            return True
         versions = Source.get_url_versions(kwargs['source'], kwargs['version'], owner_filters)
         return bool(versions) and all(version.is_publicly_viewable for version in versions)
 

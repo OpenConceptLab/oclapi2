@@ -40,7 +40,7 @@ class MappingBaseView(SourceChildCommonBaseView):
         return MappingDetailSerializer(obj, data, files, partial)
 
     def get_queryset(self):
-        return Mapping.get_base_queryset(self.params)
+        return self.leave_out_hidden_query_versions(Mapping.get_base_queryset(self.params))
 
 
 class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
@@ -139,14 +139,13 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
         return self.list(request, *args, **kwargs)
 
     def set_parent_resource(self, __pop=True):
-        from core.sources.models import Source
         source = self.kwargs.pop('source', None) if __pop else self.kwargs.get('source', None)
         collection = self.kwargs.pop('collection', None) if __pop else self.kwargs.get('collection', None)
         container_version = self.kwargs.pop('version', HEAD) if __pop else self.kwargs.get('version', HEAD)
         parent_resource = None
         filters = self.get_parent_owner_filters()
         if source:
-            parent_resource = Source.get_version(source, container_version or HEAD, filters)
+            parent_resource = self.get_url_source_version(source, container_version or HEAD, filters)
         if collection:
             from core.collections.models import Collection
             parent_resource = Collection.get_version(source, container_version or HEAD, filters)
@@ -257,7 +256,7 @@ class MappingCollectionMembershipView(MappingBaseView, ListWithHeadersMixin):
         return CollectionVersionListSerializer
 
     def get_object(self, queryset=None):
-        queryset = Mapping.get_base_queryset(self.params)
+        queryset = self.leave_out_hidden_query_versions(Mapping.get_base_queryset(self.params))
         if 'mapping_version' not in self.kwargs:
             queryset = queryset.filter(id=F('versioned_object_id'))
         instance = queryset.first()

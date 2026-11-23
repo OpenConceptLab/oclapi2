@@ -62,6 +62,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     default_qs_sort_attr = '-updated_at'
     facet_class = None
     total_count = 0
+    _latest_release_scopes = None  # exclude_hidden_latest_releases's, read once per request
 
     def get_throttles(self):
         return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
@@ -594,8 +595,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if latest_attr != 'is_in_latest_source_version':
             return results
         from core.sources.models import Source
+        if self._latest_release_scopes is None:  # hits and facets each build a search
+            self._latest_release_scopes = Source.get_latest_release_scopes_for(self.request.user)
         criterion = None
-        for mnemonic, org, username, latest_version in Source.get_latest_release_scopes_for(self.request.user):
+        for mnemonic, org, username, latest_version in self._latest_release_scopes:
             owner_type = ORG_OBJECT_TYPE if org else USER_OBJECT_TYPE
             criteria = Q('term', source=mnemonic) & Q('term', owner=org or username) & Q(
                 'term', owner_type=owner_type)
@@ -1217,6 +1220,8 @@ class SourceChildCommonBaseView(BaseAPIView):
     permission_classes = (CanViewParentDictionary, )
     is_searchable = True
     default_filters = {}
+    hidden_query_versions = ()  # see set_hidden_query_versions
+    url_versions = ()  # the source versions check_source_version_access read
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
@@ -1278,15 +1283,31 @@ class SourceChildCommonBaseView(BaseAPIView):
         the source version the URL names: 404 when the source or the named version doesn't exist, then 401 or 403
         unless the requester can view the source and that version. For `latest`, that's the newest released
         version, which the reads answer from, as well as any version named `latest`; a source with no released
-        version has only its HEAD to check. Item-level checks still follow.
+        version has only its HEAD to check. The URL can name several sources, separated by commas, as the reads
+        match each: 404 unless each exists, then 401 or 403 unless the requester can view each. Item-level checks
+        still follow.
         """
         from core.sources.models import Source
-        repo_versions = Source.get_url_versions(
-            self.kwargs['source'], self.kwargs.get('version'), self.get_parent_owner_filters())
-        if repo_versions is None:
+        mnemonics = compact(self.kwargs['source'].split(','))
+        if not mnemonics:
             raise Http404()
-        for repo_version in repo_versions:
+        self.url_versions = []
+        for mnemonic in mnemonics:
+            repo_versions = Source.get_url_versions(
+                mnemonic, self.kwargs.get('version'), self.get_parent_owner_filters())
+            if repo_versions is None:
+                raise Http404()
+            self.url_versions += repo_versions
+        for repo_version in self.url_versions:
             self.check_view_access(request, repo_version)
+
+    def get_url_source_version(self, mnemonic, version, owner_filters):
+        """Source.get_version, from the versions check_source_version_access read when it's one of them."""
+        from core.sources.models import Source
+        for repo_version in self.url_versions:
+            if (repo_version.mnemonic, repo_version.version) == (mnemonic, version):
+                return repo_version
+        return Source.get_version(mnemonic, version, owner_filters)
 
     def check_query_source_version_access(self, request):
         """
@@ -1295,8 +1316,8 @@ class SourceChildCommonBaseView(BaseAPIView):
         several) answers as check_source_version_access does for the URL's: 404 unless the source and that version
         exist under the owner it names, then 401 or 403 unless the requester can view both. A source that doesn't
         exist there has nothing to read (a search reads the name as a facet), so it's skipped. `latest` is the
-        newest released version, as the reads resolve it. With no owner (none in the URL, or an empty `org`), no
-        owner names the version, so 404. On a collection's route, the URL's version is the collection's, left to its
+        newest released version, as the reads resolve it. With no owner (none in the URL, or an empty `org`), see
+        set_hidden_query_versions. On a collection's route, the URL's version is the collection's, left to its
         own checks. HEAD's own content carries its access, so reads of it are checked where they're made.
         """
         from core.sources.models import Source
@@ -1309,9 +1330,11 @@ class SourceChildCommonBaseView(BaseAPIView):
         if (version, params.get(url_repo), owner_filters) == (
                 self.kwargs.get('version'), self.kwargs.get(url_repo), self.get_parent_owner_filters()):
             return  # the URL's own version, checked already
+        mnemonics = compact(params['source'].split(','))
         if not owner_filters:
-            raise Http404()
-        for mnemonic in compact(params['source'].split(',')):
+            self.set_hidden_query_versions(request, mnemonics, version)
+            return
+        for mnemonic in mnemonics:
             head = Source.get_version(mnemonic, HEAD, owner_filters)
             if not head:
                 continue
@@ -1322,6 +1345,29 @@ class SourceChildCommonBaseView(BaseAPIView):
                 raise Http404()
             for viewed in compact([head, repo_version]):
                 self.check_view_access(request, viewed)
+
+    def set_hidden_query_versions(self, request, mnemonics, version):
+        """
+        With no owner named, the reads answer from the version the query string names under every owner's source of
+        that name. Those the requester can't view are left out of the reads (not refused, which would show that they
+        exist), and a source answers 404 unless one owner's is left. `latest` resolves to no release without an
+        owner, so those reads find nothing.
+        """
+        if version == LATEST:
+            return
+        from core.sources.models import Source
+        hidden = []
+        for mnemonic in mnemonics:
+            repo_versions = Source.objects.filter(mnemonic=mnemonic, version=version)
+            viewable = [repo_version for repo_version in repo_versions if repo_version.has_view_access(request.user)]
+            if not viewable:
+                raise Http404()
+            hidden += [repo_version for repo_version in repo_versions if repo_version not in viewable]
+        self.hidden_query_versions = hidden
+
+    def leave_out_hidden_query_versions(self, queryset):
+        """The reads' concepts or mappings, without the members of the versions set_hidden_query_versions hides."""
+        return queryset.exclude(sources__in=self.hidden_query_versions) if self.hidden_query_versions else queryset
 
 
 class SourceChildExtrasBaseView:

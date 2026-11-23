@@ -247,8 +247,8 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     def get_latest_release_scopes_for(cls, user):
         """
         The sources whose latest-release search `user` must see only part of, as (mnemonic, organization mnemonic,
-        username, latest release) of each: sources with a public HEAD and a released version that isn't public,
-        owned by someone else. The latest release is the newest released version that isn't retired, as
+        username, latest release) of each: sources with a public HEAD and a released version that isn't public (active
+        ones only), owned by someone else. The latest release is the newest released version that isn't retired, as
         get_latest_released_version picks it, and is None unless it's public, as then nothing of the source shows.
         A search keeps to that exact release, because the index marks a release's members as latest only some time
         after it becomes the latest. A private HEAD's content is already private itself, and staff can view every
@@ -262,8 +262,9 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             Q(organization_id=OuterRef('organization_id')) | Q(user_id=OuterRef('user_id')))
         latest_release = cls.objects.filter(
             same_repo, is_active=True, released=True, retired=False).order_by('-created_at')
-        public_head = cls.objects.filter(same_repo, version=HEAD, public_access__in=cls.PUBLIC_ACCESS_VALUES)
-        releases = cls.objects.filter(released=True).exclude(version=HEAD).exclude(
+        public_head = cls.objects.filter(
+            same_repo, is_active=True, version=HEAD, public_access__in=cls.PUBLIC_ACCESS_VALUES)
+        releases = cls.objects.filter(is_active=True, released=True).exclude(version=HEAD).exclude(
             public_access__in=cls.PUBLIC_ACCESS_VALUES).filter(Exists(public_head)).annotate(
             latest_version=Subquery(latest_release.values('version')[:1]),
             latest_access=Subquery(latest_release.values('public_access')[:1]))

@@ -85,7 +85,7 @@ class ConceptBaseView(SourceChildCommonBaseView):
         return ConceptDetailSerializer(obj, data, files, partial, context={'request': self.request})
 
     def get_queryset(self):
-        return Concept.get_base_queryset(self.params)
+        return self.leave_out_hidden_query_versions(Concept.get_base_queryset(self.params))
 
     def set_parent_resource(self, __pop=True):
         parent_resource = None
@@ -94,8 +94,7 @@ class ConceptBaseView(SourceChildCommonBaseView):
         container_version = self.kwargs.pop('version', HEAD) if __pop else self.kwargs.get('version', HEAD)
         filters = self.get_parent_owner_filters()
         if source:
-            from core.sources.models import Source
-            parent_resource = Source.get_version(source, container_version or HEAD, filters)
+            parent_resource = self.get_url_source_version(source, container_version or HEAD, filters)
         if collection:
             from core.collections.models import Collection
             parent_resource = Collection.get_version(collection, container_version or HEAD, filters)
@@ -371,7 +370,7 @@ class ConceptCollectionMembershipView(ConceptBaseView, ListWithHeadersMixin):
         return CollectionVersionListSerializer
 
     def get_object(self, queryset=None):
-        queryset = Concept.get_base_queryset(self.params)
+        queryset = self.leave_out_hidden_query_versions(Concept.get_base_queryset(self.params))
         if 'concept_version' not in self.kwargs:
             queryset = queryset.filter(id=F('versioned_object_id'))
         instance = queryset.first()
