@@ -2171,7 +2171,11 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
         self.assert_lists(f'collection={prefix}P,{prefix}R', ['inRv1'], ['inP', 'inRv1'])
         self.assert_lists(f'q={prefix}&collection={prefix}Q', ['inQhead'], ['inQhead', 'inQv1'], ['concepts'])
         self.assert_lists(f'collection={prefix}*', ['inQhead', 'inRv1'], ['inP', 'inQhead', 'inQv1', 'inRv1'])
-        self.assert_lists('collection=*', ['inQhead', 'inRv1'], ['inP', 'inQhead', 'inQv1', 'inRv1'])
+        # `*` alone: rewritten for outsiders; a member's matches every index entry, so narrowed to this test's
+        for user in [None, self.outsider]:
+            self.assertEqual(self.listed('/concepts/?collection=*', user, 'concepts'), ['inQhead', 'inRv1'], user)
+        self.assert_lists(f'collection=*&collection_url={owner_url}collections/{prefix}*',
+                          ['inQhead', 'inRv1'], ['inP', 'inQhead', 'inQv1', 'inRv1'])
         self.assert_lists(f'collection={prefix}@*', [], [])  # a literal prefix: `@` isn't a wildcard
         self.assert_lists(f'collection_url={self.q_v1.uri}', [], ['inQv1'])
         self.assert_lists(f'collection_url={self.r_v1.uri}', ['inRv1'], ['inRv1'])
@@ -2199,6 +2203,8 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
                           f'collection=!{prefix}P', f'collection={prefix}P*']:
                 self.assert_answers(f'/{resource}/?org={org}&{query}', 200, 200, 200)
             self.assert_answers(f'/{resource}/?org={org}&collection={prefix}Q&version=v9', 404, 404, 404)
+            # an empty source, which leaves the source check out, leaves this one in
+            self.assert_answers(f'/{resource}/?source=&org={org}&collection={prefix}P&version=v1', 401, 403, 200)
             # the owner the URL names; the version in a repository's URL is that repository's
             self.assert_answers(f'{self.source.uri}{resource}/?collection={prefix}P', 401, 403, 200)
             item = f'{resource}/{"m" if resource == "mappings" else ""}inP{prefix}/'
