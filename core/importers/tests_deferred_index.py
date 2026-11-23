@@ -630,6 +630,29 @@ class DeferredImportIndexRunTest(OCLTestCase):
         self.assertEqual(
             deferred(), {(INDEX, 'concept'): {concept.id, second.id}, (LATEST_FLAGS, 'concept'): {first.id}})
 
+    def test_outside_the_window_the_flags_pass_goes_through_every_row(self):
+        self.defer_import(concept_line(self.source, 'C1'), concept_line(self.source, 'C2'))
+        self.defer_import(concept_line(self.source, 'C1', datatype='Text'))
+        self.defer_import(concept_line(self.source, 'C2', datatype='Text'))
+        _, (c1_first, c1_second) = versions(self.source, 'C1')
+        _, (c2_first, c2_second) = versions(self.source, 'C2')
+        self.searchable.update({c1_second.id, c2_second.id})  # as a release would index them
+        clock = [0]
+        check = Concept.get_ids_with_unsearchable_replacements
+
+        def slow_check(ids):
+            clock[0] += DEFERRED_INDEX_RUN_SECONDS + 1
+            return check(ids)
+
+        with patch('core.importers.models.time.monotonic', side_effect=lambda: clock[0]), \
+                patch.object(Concept, 'get_ids_with_unsearchable_replacements', side_effect=slow_check), \
+                patch('core.importers.models.run_deferred_import_indexing') as task_mock:
+            self.assertEqual(self.run_rows(window=False), 2)
+
+        self.assertEqual(
+            self.indexed, [(LATEST_FLAGS, 'concept', {c1_first.id}), (LATEST_FLAGS, 'concept', {c2_first.id})])
+        task_mock.apply_async.assert_not_called()
+
     def test_run_stops_once_its_lock_is_another_runners(self):
         concept, (first, second) = self.concept_updates()
 
