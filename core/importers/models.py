@@ -1798,7 +1798,8 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         return self.total + int(self.has_hierarchy_reconciliation_step())
 
     def get_completed_progress(self):
-        return self.get_overall_tasks_progress() + int(
+        # the seeding version line is processed here, never in a part
+        return self.get_overall_tasks_progress() + sum(map(len, self.isolated_version_results.values())) + int(
             self.has_hierarchy_reconciliation_step() and self.hierarchy_reconciliation_done
         )
 

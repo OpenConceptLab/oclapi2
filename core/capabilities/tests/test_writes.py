@@ -33,6 +33,7 @@ from core.sources.models import Source
 from core.sources.serializers import SourceDetailSerializer, SourceVersionDetailSerializer
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.sources.views import SourceRetrieveUpdateDestroyView
+from core.tasks.models import Task
 from core.users.tests.factories import UserProfileFactory
 from core.value_sets.views import ValueSetRetrieveUpdateView
 
@@ -697,14 +698,19 @@ class ImportWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
 
         inline = BulkImportInline(content, self.user.username, True, isolated_version=True)
         inline.run()
-        parallel = BulkImportParallelRunner(content, self.user.username, True, isolated_version=True)
+        task = Task.new(user=self.user, name='bulk_import_parallel_inline')
+        parallel = BulkImportParallelRunner(
+            content, self.user.username, True, self_task_id=task.id, isolated_version=True)
+        with patch('core.importers.models.post_import_update_resource_counts.apply_async', Mock()):
+            parallel.run()
 
         denied = [{**version_line, 'errors': ReadOnlyPolicy.body}]
         self.assertEqual((inline.json_result['permission_denied'], inline.created), (denied, []))
         self.assertEqual(parallel.json_result['permission_denied'], denied)
         for result in (inline.json_result, parallel.json_result):  # the version line is the one line processed
             self.assertEqual((result['total'], result['processed']), (2, 1))
-        self.assertFalse(any(parallel.parts))  # no line left to import
+        task.refresh_from_db()
+        self.assertEqual(task.summary, {'processed': 1, 'total': 2})  # the progress the task saves says the same
         self.assertEqual(ReadOnlyPolicy.calls, [(self.user, self.source, WRITE_ACTION_EDIT)] * 3)
         self.assertFalse(self.source.concepts_set.filter(mnemonic='refused').exists())
 
