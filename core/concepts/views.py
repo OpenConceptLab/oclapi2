@@ -86,7 +86,8 @@ class ConceptBaseView(SourceChildCommonBaseView):
         return ConceptDetailSerializer(obj, data, files, partial, context={'request': self.request})
 
     def get_queryset(self):
-        return self.keep_to_viewable_query_versions(Concept.get_base_queryset(self.params))
+        return self.keep_to_viewable_query_versions(Concept.get_base_queryset(
+            self.params, self.get_viewable_query_collection_versions()))
 
     def set_parent_resource(self, __pop=True):
         parent_resource = None
@@ -371,7 +372,8 @@ class ConceptCollectionMembershipView(ConceptBaseView, ListWithHeadersMixin):
         return CollectionVersionListSerializer
 
     def get_object(self, queryset=None):
-        queryset = self.keep_to_viewable_query_versions(Concept.get_base_queryset(self.params))
+        queryset = self.keep_to_viewable_query_versions(Concept.get_base_queryset(
+            self.params, self.get_viewable_query_collection_versions()))
         if 'concept_version' not in self.kwargs:
             queryset = queryset.filter(id=F('versioned_object_id'))
         instance = queryset.first()
@@ -1034,6 +1036,7 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
     score_threshold_semantic_very_high = 0.9
     serializer_class = ConceptListSerializer
     permission_classes = (IsAuthenticated, CanUseMapper)
+    document_model = ConceptDocument  # the filters' collection facets count only versions the requester can view
     es_fields = Concept.es_fields
     # Semantic kNN. Above ~1000 candidates ES compares far more vectors per clause for no gain in hits
     # (OpenConceptLab/ocl_online#255).

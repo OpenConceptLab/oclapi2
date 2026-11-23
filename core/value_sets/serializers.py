@@ -216,7 +216,8 @@ class ValueSetDetailSerializer(FhirRepositorySerializerMixin, serializers.ModelS
         collection.expansion_uri = head_collection.expansion_uri
 
         user = self.context['request'].user
-        errors = Collection.persist_changes(collection, user, None)
+        # a private HEAD stays private, as in CodeSystemDetailSerializer.update
+        errors = Collection.persist_changes(collection, user, None, keep_private=True)
 
         if errors:
             self._errors.update(errors)

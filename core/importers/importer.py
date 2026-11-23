@@ -655,7 +655,8 @@ class ResourceImporter:
     def save_fhir_resource(serializer_class, existing, owner, resource, request):
         """
         Updates need edit access on the existing repo, and no refusal from the capability policy (the WriteRefused
-        then is the resource's result), creates need edit access on the owner.
+        then is the resource's result, as it is when the policy refuses a write that makes a repository private),
+        creates need edit access on the owner.
         """
         if existing:
             if not existing.has_edit_access(request.user):
@@ -672,7 +673,10 @@ class ResourceImporter:
             serializer = serializer_class(data=resource, context={'request': request, 'owner': owner})
             result = CREATED
         if serializer.is_valid():
-            serializer.save()
+            try:
+                serializer.save()
+            except WriteRefused as ex:  # the capability policy refused making a repository private
+                return ex
         return serializer.errors if serializer.errors else result
 
     # pylint: disable=too-many-arguments

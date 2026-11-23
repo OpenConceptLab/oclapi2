@@ -175,7 +175,9 @@ class CollectionCreateOrUpdateSerializer(RepoVerificationSerializerMixin, ModelS
         # never moves to another repository
         if instance is None or (was_head and collection.is_head):
             collection.mnemonic = validated_data.get(self.Meta.lookup_field, collection.mnemonic)
-        collection.public_access = validated_data.get('public_access', collection.public_access or DEFAULT_ACCESS_TYPE)
+        # a stored row keeps its own access when the write sends none, a blank (private) one included
+        collection.public_access = validated_data.get(
+            'public_access', collection.public_access if instance else DEFAULT_ACCESS_TYPE)
         collection.default_locale = validated_data.get('default_locale', collection.default_locale or DEFAULT_LOCALE)
         supported_locales = validated_data.get('supported_locales')
         if not supported_locales:

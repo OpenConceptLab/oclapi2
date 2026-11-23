@@ -112,7 +112,12 @@ class CollectionBaseView(BaseAPIView):
     def get_filter_params(self, default_version_to_head=True):
         query_params = self.request.query_params.dict()
 
-        version = query_params.get('version', None) or self.kwargs.get('version', None)
+        # a route that names a version reads it (as its search does, and as its writes act on it), so a different
+        # version in the query string is refused rather than read; routes that name none read the query string's
+        url_version, query_version = self.kwargs.get('version', None), query_params.get('version', None)
+        if url_version and query_version and query_version != url_version:
+            raise Http400(detail=f'The URL names version {url_version}; the query string names {query_version}.')
+        version = url_version or query_version
         if not version and default_version_to_head:
             version = HEAD
         if version == LATEST:
@@ -567,7 +572,8 @@ class CollectionReferencesView(
                 added_original_expressions.add(expression)
 
         results = []
-        unresolved_items = self.get_unresolved_items(collection, added_references, unresolved_reasons)
+        unresolved_items = self.get_unresolved_items(
+            collection, added_references, unresolved_reasons, self.request.user)
 
         for expression in added_original_expressions:
             response_item = self.create_response_item(added_expressions, errors, expression, unresolved_items)
@@ -583,8 +589,9 @@ class CollectionReferencesView(
         return self.request.query_params.get('cascade', '').lower() == SOURCE_MAPPINGS
 
     @staticmethod
-    def get_unresolved_items(collection, references, unresolved_reasons):
-        """{expression: response item} of the added include references its expansion found nothing for"""
+    def get_unresolved_items(collection, references, unresolved_reasons, user):
+        """{expression: response item} of the added include references its expansion found nothing for.
+        A repository version `user` can't view is left out, so it answers as one that doesn't exist."""
         unresolved_refs = [reference for reference in references if reference.id in unresolved_reasons]
         expansion = collection.expansion if unresolved_refs else None
         if not expansion:
@@ -596,13 +603,15 @@ class CollectionReferencesView(
             item = {'added': True, 'resolved': False, 'expression': reference.expression}
             if reason == REFERENCE_VERSION_NOT_HELD:
                 named_version = reference.resolve_expression_system_version if reference.names_repo_version else None
+                named_version = named_version if named_version and named_version.has_view_access(user) else None
                 item['repo_versions'] = [named_version.uri if named_version else reference.system]
                 message_format = REFERENCE_NAMED_VERSION_NOT_HELD_FMT if named_version else \
                     REFERENCE_VERSION_NOT_HELD_FMT
                 item['message'] = message_format.format(
                     collection.name, item['repo_versions'][0], reference.resource_version)
             else:
-                item['repo_versions'] = reference.get_evaluated_repo_version_urls(expansion, system_version_cache)
+                item['repo_versions'] = reference.get_evaluated_repo_version_urls(
+                    expansion, user, system_version_cache)
                 message_format = REFERENCE_EXCLUDED_BY_PARAMETERS_FMT if reason == REFERENCE_EXCLUDED_BY_PARAMETERS \
                     else REFERENCE_RESOLVED_TO_NOTHING_FMT
                 item['message'] = message_format.format(
