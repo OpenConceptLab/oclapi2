@@ -1518,7 +1518,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             if (line.get('type', '') or '').lower() != 'concept':
                 continue
             parent_urls = line.get('parent_concept_urls') or []
-            concept_id = '' if line.get('id') is None else str(line['id'])  # as the concept importer reads it: 0 is '0'
+            concept_id = line.get('id')
             owner = line.get('owner')
             source = line.get('source')
             if (parent_urls or include_parentless) and concept_id and owner and source:

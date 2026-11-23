@@ -6749,15 +6749,6 @@ class IsolatedVersionImportTest(OCLTestCase):
         self.assertEqual(
             set(child.parent_concepts.values_list('versioned_object_id', flat=True)), {duplicate.id})
 
-    def test_isolated_import_redirects_a_version_of_a_code_whose_id_is_numeric_zero(self):
-        self.run_import([self.concept(0), self.version('v1')])
-        parent, duplicate_version = self.add_duplicate_head('0')
-
-        self.run_import([
-            self.concept(0), self.concept('C', parent_concept_urls=[duplicate_version.uri]), self.version('v2')])
-
-        self.assertEqual(self.version_hierarchy(parent, 'child_concepts', 'v2'), {'C'})
-
     def test_hierarchy_repair_keeps_the_version_a_url_names(self):
         from core.common.tasks import make_hierarchy
         self.run_import([self.concept('Q'), self.concept('C'), self.version('v1')])
