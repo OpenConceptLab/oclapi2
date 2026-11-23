@@ -1496,14 +1496,16 @@ class CollectionReference(models.Model):
             valueset_version_cache[cache_key] = version if version.id else None
         return valueset_version_cache[cache_key]
 
-    def get_evaluated_repo_version_urls(self, expansion, system_version_cache=None):
-        """URLs of the repository versions its expansion evaluated it in, else of the repositories it names"""
+    def get_evaluated_repo_version_urls(self, expansion, user, system_version_cache=None):
+        """URLs of the repository versions its expansion evaluated it in that `user` can view,
+        else of the repositories it names"""
         expansion_cache = {self.collection_id: expansion}
         versions = [
             *self._get_resolved_system_versions(system_version_cache, expansion_cache),
             *self._get_resolved_valueset_versions(expansion_cache=expansion_cache)]
         valuesets = self.valueset if isinstance(self.valueset, list) else []
-        return [version.uri for version in versions] or compact([self.system, *valuesets])
+        return [version.uri for version in versions if version.has_view_access(user)] or compact(
+            [self.system, *valuesets])
 
     def get_resolved_repo_versions_serialized(  # pylint: disable=too-many-arguments
             self, system_version_cache=None, valueset_version_cache=None, expansion_cache=None, user=None):
