@@ -11,6 +11,7 @@ from mock import patch
 from core.collections.models import CollectionReference, Expansion
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.collections.version_lists import ExpansionVersionLists
+from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLTestCase
 from core.common.utils import drop_version
 from core.concepts.tests.factories import ConceptFactory
@@ -445,6 +446,91 @@ class ExpansionVersionListsTest(OCLTestCase):
 
         self.assertIn(f'FAILED {self.expansion.id}: ValueError: boom', out.getvalue())
         self.assertIn('"failed": 1', out.getvalue())
+
+    def private_repo_reference(self, organization=None):
+        """A version-less reference to a private source whose only holders are a private release and HEAD"""
+        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE, **(
+            {'organization': organization} if organization else {}))
+        member = ConceptFactory(parent=source, mnemonic='p1').get_latest_version()
+        release = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        member.sources.add(release)
+        self.expansion.concepts.add(member)
+        reference = CollectionReference.objects.create(
+            expression=source.uri + 'concepts/p1/', collection=self.collection, system=source.uri, code='p1',
+            reference_type='concepts')
+        reference.concepts.set([member])
+        return release
+
+    def test_another_owners_private_release_is_not_a_candidate(self):
+        self.private_repo_reference()
+
+        lists = self.rebuild()
+
+        self.assertEqual(lists.after['evaluated_source_versions'], {})
+        self.assertEqual(lists.notes[0]['kept'], [])
+
+    def test_the_collection_owners_own_private_release_is_a_candidate(self):
+        release = self.private_repo_reference(self.collection.organization)
+
+        self.assertEqual(self.ids(self.rebuild(), 'evaluated_source_versions'), {release.id})
+
+    def test_report_counts_members_whose_reported_release_changes(self):
+        self.reference([self.member])
+        self.expansion.explicit_source_versions.set([self.v2])
+        self.expansion.evaluated_source_versions.set([self.v1])
+
+        report = self.rebuild().to_report()
+
+        # FHIR reported v2 (explicit pin first); the rebuild keeps the v1 lock and drops the unused v2
+        self.assertEqual(report['after']['evaluated_source_versions'], [self.v1.uri])
+        self.assertEqual(report['reported_release_changes'], 1)
+
+    def test_report_counts_no_reported_release_change_when_the_pick_stays(self):
+        self.reference([self.member])
+        self.expansion.explicit_source_versions.set([self.v1])
+
+        report = self.rebuild().to_report()
+
+        self.assertTrue(report['changed'])
+        self.assertEqual(report['reported_release_changes'], 0)
+
+    def released_expansion(self):
+        released = OrganizationCollectionFactory(
+            mnemonic=self.collection.mnemonic, organization=self.collection.organization, version='v1', released=True)
+        expansion = ExpansionFactory(collection_version=released)
+        released.expansion_uri = expansion.uri
+        released.save()
+        expansion.explicit_source_versions.set([self.v1])
+        return expansion
+
+    def test_command_skip_released_leaves_released_versions_out(self):
+        self.reference([self.member])
+        self.expansion.explicit_source_versions.set([self.v1])
+        released = self.released_expansion()
+
+        out = StringIO()
+        call_command('rebuild_expansion_version_lists', all=True, skip_released=True, stdout=out)
+        call_command('rebuild_expansion_version_lists', released.uri, skip_released=True, stdout=out)
+
+        self.assertIn(f'{self.expansion.uri}:', out.getvalue())
+        self.assertNotIn(f'{released.uri}:', out.getvalue())
+
+    def test_command_counts_released_and_unreleased_apart(self):
+        self.reference([self.member])
+        self.expansion.explicit_source_versions.set([self.v1])
+        released = self.released_expansion()
+        out = StringIO()
+
+        call_command('rebuild_expansion_version_lists', self.expansion.uri, released.uri, stdout=out)
+
+        totals = json.loads(out.getvalue().split('DRY RUN done: ')[1].splitlines()[0])
+        self.assertEqual(
+            {key: totals.get(key) for key in ('expansions_released', 'expansions_unreleased', 'changed_unreleased')},
+            {'expansions_released': 1, 'expansions_unreleased': 1, 'changed_unreleased': 1})
+        self.assertIn(f'{released.uri}: ', out.getvalue())
+        self.assertIn('released', out.getvalue().split(f'{released.uri}: ')[1].splitlines()[0])
 
     def test_command_needs_uris_or_all(self):
         with self.assertRaises(CommandError):

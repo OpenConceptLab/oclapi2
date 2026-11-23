@@ -1,7 +1,7 @@
 from collections import Counter
 
 from django.db import transaction
-from django.db.models import Count, Exists, OuterRef, Sum
+from django.db.models import Count, Exists, Max, OuterRef, Q, Sum
 from django.utils.functional import cached_property
 
 from core.collections.models import (
@@ -60,12 +60,33 @@ class ExpansionVersionLists:
             self._heads[version.id] = version.get_head()
         return self._heads[version.id]
 
+    @cached_property
+    def visible_filter(self):
+        """Repo versions the collection's owner can view: public ones and the owner's own. The lists are shown to
+        anyone who can view the expansion, so a rebuild must not name another owner's private version"""
+        from core.common.models import BaseModel
+        version = self.expansion.collection_version
+        owner = Q(organization_id=version.organization_id) if version.organization_id else Q(user_id=version.user_id)
+        return Q(public_access__in=BaseModel.PUBLIC_ACCESS_VALUES) | owner
+
+    def is_visible(self, repo_version):
+        from core.common.models import BaseModel
+        version = self.expansion.collection_version
+        if repo_version.public_access in BaseModel.PUBLIC_ACCESS_VALUES:
+            return True
+        if version.organization_id:
+            return repo_version.organization_id == version.organization_id
+        return repo_version.user_id == version.user_id
+
     def releases_then_head(self, repo_version):
+        """Candidates beyond what the expansion records: its releases, then HEAD, that the owner can view"""
         key = (type(repo_version).__name__, drop_version(repo_version.uri))
         if key not in self._releases:
-            versions = list(repo_version.active_versions.filter(released=True, retired=False).exclude(version=HEAD))
+            versions = list(repo_version.active_versions.filter(
+                self.visible_filter, released=True, retired=False).exclude(version=HEAD))
             head = self.get_head(repo_version)
-            self._releases[key] = [*self.newest_first(versions), *([head] if head else [])]
+            self._releases[key] = [
+                *self.newest_first(versions), *([head] if head and self.is_visible(head) else [])]
         return self._releases[key]
 
     def get_expansion_id(self, collection_version):
@@ -406,9 +427,66 @@ class ExpansionVersionLists:
                 (set(after[EXPLICIT_COLLECTIONS]) & set(after[EVALUATED_COLLECTIONS]))),
             'references': self.notes,
             'members': self.get_member_summary(),
+            'collection_version_released': bool(collection_version.released),
+            'reported_release_changes': self.count_reported_release_changes() if changes else 0,
             'before': before,
             'after': after,
         }
+
+    def count_reported_release_changes(self):
+        """How many concept members FHIR $expand and validate-code would report from another release after the
+        rebuild. They report the live release holding the member: explicit pin first, then evaluated, then the newest
+        (by id). Judged as the collection's owner is shown, as a viewer's view can only narrow it"""
+        before = {relation: {version.id for version in self.before[relation]} for relation in self.RELATIONS}
+        after = {relation: set(self.after[relation]) for relation in self.RELATIONS}
+        changed, unpinned = 0, {}
+        for concept_id, source_ids in self.get_pinned_holders(before, after).items():
+            was, will = self.pick_reported(source_ids, before), self.pick_reported(source_ids, after)
+            if was == will:
+                continue
+            if was and will:
+                changed += 1
+            else:
+                # pinned on one side only: the other reports the newest live release holding it
+                unpinned[concept_id] = was or will
+        return changed + self.count_unpinned_changes(unpinned)
+
+    @cached_property
+    def live_releases(self):
+        from core.sources.models import Source
+        return Source.objects.filter(self.visible_filter, is_active=True, released=True, retired=False).exclude(
+            version=HEAD)
+
+    def get_pinned_holders(self, before, after):
+        """Per concept member, the live releases holding it that either set of lists pins"""
+        from core.concepts.models import Concept
+        pinned = set().union(*(
+            lists[relation] for lists in (before, after) for relation in (EXPLICIT_SOURCES, EVALUATED_SOURCES)))
+        member_ids = self.expansion.concepts.through.objects.filter(expansion_id=self.expansion.id).values('concept_id')
+        holders = {}
+        for concept_id, source_id in Concept.sources.through.objects.filter(
+                concept_id__in=member_ids, source_id__in=self.live_releases.filter(id__in=pinned).values('id')
+        ).values_list('concept_id', 'source_id'):
+            holders.setdefault(concept_id, set()).add(source_id)
+        return holders
+
+    @staticmethod
+    def pick_reported(source_ids, lists):
+        for relation in (EXPLICIT_SOURCES, EVALUATED_SOURCES):
+            held = source_ids & lists[relation]
+            if held:
+                return max(held)
+        return None
+
+    def count_unpinned_changes(self, unpinned):
+        """Of the members pinned on one side only, those whose newest live release isn't the pinned one"""
+        from core.concepts.models import Concept
+        if not unpinned:
+            return 0
+        newest = dict(Concept.sources.through.objects.filter(
+            concept_id__in=list(unpinned), source_id__in=self.live_releases.values('id')
+        ).values('concept_id').annotate(newest=Max('source_id')).values_list('concept_id', 'newest'))
+        return sum(1 for concept_id, source_id in unpinned.items() if newest.get(concept_id) != source_id)
 
     def apply(self):
         """Writes the rebuilt lists; nothing, if its lists, references or members changed since build"""

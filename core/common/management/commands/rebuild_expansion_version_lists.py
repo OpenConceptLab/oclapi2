@@ -18,6 +18,9 @@ class Command(BaseCommand):
             'uris', nargs='*', help='Expansion URIs, or collection version URIs for their default expansion')
         parser.add_argument('--all', action='store_true', help='Every active expansion, by id')
         parser.add_argument('--apply', action='store_true', help='Write the rebuilt lists; without it, a dry run')
+        parser.add_argument(
+            '--skip-released', action='store_true',
+            help='Leave out expansions of released collection versions, whose lists FHIR reports releases from')
         parser.add_argument('--start-after-id', type=int, default=0, help='--all: resume after this expansion id')
         parser.add_argument('--limit', type=int, help='--all: stop after this many expansions')
         parser.add_argument('--output', help='Append each changed expansion\'s report, and each failure, as JSON lines')
@@ -38,11 +41,16 @@ class Command(BaseCommand):
 
     def get_expansion_ids(self):
         if self.options['all']:
-            ids = Expansion.objects.filter(
-                is_active=True, collection_version__is_active=True, id__gt=self.options['start_after_id']
-            ).order_by('id').values_list('id', flat=True)
+            expansions = Expansion.objects.filter(
+                is_active=True, collection_version__is_active=True, id__gt=self.options['start_after_id'])
+            if self.options['skip_released']:
+                expansions = expansions.exclude(collection_version__released=True)
+            ids = expansions.order_by('id').values_list('id', flat=True)
             return list(ids[:self.options['limit']] if self.options['limit'] else ids)
-        return [self.get_expansion(uri).id for uri in self.options['uris']]
+        expansions = [self.get_expansion(uri) for uri in self.options['uris']]
+        return [
+            expansion.id for expansion in expansions
+            if not (self.options['skip_released'] and expansion.collection_version.released)]
 
     @staticmethod
     def get_expansion(uri):
@@ -73,8 +81,16 @@ class Command(BaseCommand):
             self.write(report)
 
     def count(self, report):
+        kind = 'released' if report['collection_version_released'] else 'unreleased'
         self.totals['expansions'] += 1
+        self.totals[f'expansions_{kind}'] += 1
         self.totals['changed' if report['changed'] else 'unchanged'] += 1
+        if report['changed']:
+            self.totals[f'changed_{kind}'] += 1
+        if report['reported_release_changes']:
+            # FHIR $expand and validate-code would report another release for these members
+            self.totals[f'with_reported_release_changes_{kind}'] += 1
+            self.totals[f'members_with_reported_release_change_{kind}'] += report['reported_release_changes']
         for key in ('gains_lock', 'loses_lock', 'changes_lock', 'in_both'):
             if report[key]:
                 self.totals[f'with_{key}'] += 1
@@ -95,6 +111,10 @@ class Command(BaseCommand):
             summary = {relation: f'+{len(change["added"])} -{len(change["removed"])}'
                        for relation, change in report['changes'].items()}
             flags = [key for key in ('gains_lock', 'loses_lock', 'changes_lock', 'in_both') if report[key]]
+            if report['collection_version_released']:
+                flags.append('released')
+            if report['reported_release_changes']:
+                flags.append(f'reported_release_changes={report["reported_release_changes"]}')
             self.stdout.write(f'{report["expansion"]}: {json.dumps(summary)} {" ".join(flags)}'.rstrip())
         if self.options['output']:
             with open(self.options['output'], 'a', encoding='utf-8') as file:
