@@ -112,7 +112,12 @@ class CollectionBaseView(BaseAPIView):
     def get_filter_params(self, default_version_to_head=True):
         query_params = self.request.query_params.dict()
 
-        version = query_params.get('version', None) or self.kwargs.get('version', None)
+        # a route that names a version reads it (as its search does, and as its writes act on it), so a different
+        # version in the query string is refused rather than read; routes that name none read the query string's
+        url_version, query_version = self.kwargs.get('version', None), query_params.get('version', None)
+        if url_version and query_version and query_version != url_version:
+            raise Http400(detail=f'The URL names version {url_version}; the query string names {query_version}.')
+        version = url_version or query_version
         if not version and default_version_to_head:
             version = HEAD
         if version == LATEST:

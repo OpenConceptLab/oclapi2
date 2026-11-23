@@ -14,7 +14,7 @@ from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError, OperationalError, transaction
-from django.db.models import Value, Q, Count, Func
+from django.db.models import Value, Q, Count, Func, Exists, OuterRef
 from django.db.models.expressions import CombinedExpression, F
 from django.utils import timezone
 from django.utils.functional import cached_property
@@ -1175,6 +1175,30 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         if self.organization_id:
             return criteria | Q(**{f'{user_field}__organizations__id': self.organization_id})
         return criteria | Q(**{f'{user_field}_id': self.user_id})
+
+    @classmethod
+    def get_viewable_versions_criteria(cls, user):
+        """
+        has_view_access as a query on the active repository versions `user` can view: public ones whose HEAD is
+        public too, and their own or their orgs' otherwise. None for staff, who can view every version. An inactive
+        version (deleted, or its owner's deactivated) is left out, as its own lists answer 404.
+        """
+        if get(user, 'is_staff'):
+            return None
+        # A version shares its mnemonic and owner with its HEAD (its active one, as `head` reads it). One of
+        # organization_id and user_id is NULL, and NULL never equals, so the OR matches on the owner that is set.
+        private_head = cls.objects.filter(
+            Q(organization_id=OuterRef('organization_id')) | Q(user_id=OuterRef('user_id')),
+            mnemonic=OuterRef('mnemonic'), version=HEAD, is_active=True).exclude(
+            public_access__in=cls.PUBLIC_ACCESS_VALUES)
+        criteria = Q(public_access__in=cls.PUBLIC_ACCESS_VALUES)
+        if get(user, 'is_authenticated'):
+            own = Q(user_id=user.id) | Q(organization_id__in=user.organizations.values('id'))
+            criteria |= own
+            # Their own and their orgs' versions have their own or their orgs' HEADs, which the check leaves out.
+            # That keeps the check outside the OR, where the database can run it once for all versions.
+            private_head = private_head.exclude(own)
+        return Q(is_active=True) & criteria & ~Exists(private_head)
 
     @staticmethod
     def get_version_url_kwarg():
