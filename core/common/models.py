@@ -1189,10 +1189,14 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             Q(organization_id=OuterRef('organization_id')) | Q(user_id=OuterRef('user_id')),
             mnemonic=OuterRef('mnemonic'), version=HEAD, is_active=True).exclude(
             public_access__in=cls.PUBLIC_ACCESS_VALUES)
-        criteria = Q(public_access__in=cls.PUBLIC_ACCESS_VALUES) & ~Exists(private_head)
+        criteria = Q(public_access__in=cls.PUBLIC_ACCESS_VALUES)
         if get(user, 'is_authenticated'):
-            criteria |= Q(user_id=user.id) | Q(organization_id__in=user.organizations.values('id'))
-        return Q(is_active=True) & criteria
+            own = Q(user_id=user.id) | Q(organization_id__in=user.organizations.values('id'))
+            criteria |= own
+            # Their own and their orgs' versions have their own or their orgs' HEADs, which the check leaves out.
+            # That keeps the check outside the OR, where the database can run it once for all versions.
+            private_head = private_head.exclude(own)
+        return Q(is_active=True) & criteria & ~Exists(private_head)
 
     @staticmethod
     def get_version_url_kwarg():

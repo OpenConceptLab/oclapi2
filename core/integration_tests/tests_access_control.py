@@ -6,7 +6,7 @@ import zipfile
 
 from mock import patch, Mock
 
-from django.contrib.auth.models import Group
+from django.contrib.auth.models import Group, AnonymousUser
 from django.core.cache import cache
 from django.test import tag, override_settings
 from core.client_configs.models import ClientConfig
@@ -2310,6 +2310,48 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
             self.assertEqual(response.status_code, 200, user)
             self.assertEqual(
                 self.keys([(row['id'],) for row in response.data[0]['results']], 'concepts'), expected, user)
+
+
+class ViewableVersionsCriteriaTest(AccessTestMixin, OCLTestCase):
+    """Collection.get_viewable_versions_criteria matches has_view_access on every active version, for each requester."""
+    def setUp(self):
+        super().setUp()
+        self.other_org = OrganizationFactory()
+        self.versions = {}
+        for key, factory, owner, head_access, version_access in [
+                ('own', UserCollectionFactory, {'user': self.owner}, ACCESS_TYPE_NONE, ACCESS_TYPE_NONE),
+                ('ownPublic', UserCollectionFactory, {'user': self.owner}, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW),
+                ('org', OrganizationCollectionFactory, {'organization': self.org}, ACCESS_TYPE_NONE, ACCESS_TYPE_NONE),
+                ('orgPublic', OrganizationCollectionFactory, {'organization': self.org}, ACCESS_TYPE_NONE,
+                 ACCESS_TYPE_VIEW),
+                ('public', OrganizationCollectionFactory, {'organization': self.org}, ACCESS_TYPE_VIEW,
+                 ACCESS_TYPE_VIEW),
+                ('publicPrivate', OrganizationCollectionFactory, {'organization': self.org}, ACCESS_TYPE_VIEW,
+                 ACCESS_TYPE_NONE),
+                ('otherPublic', OrganizationCollectionFactory, {'organization': self.other_org}, ACCESS_TYPE_NONE,
+                 ACCESS_TYPE_VIEW)]:
+            mnemonic = f'vvc{key}'
+            self.versions[f'{key}.HEAD'] = factory(**owner, mnemonic=mnemonic, public_access=head_access)
+            self.versions[f'{key}.v1'] = factory(**owner, mnemonic=mnemonic, version='v1', public_access=version_access)
+
+    def viewable(self, user):
+        criteria = Collection.get_viewable_versions_criteria(user)
+        ids = [version.id for version in self.versions.values()]
+        return sorted(Collection.objects.filter(criteria, id__in=ids).values_list('mnemonic', 'version'))
+
+    def test_matches_has_view_access(self):
+        public = [('vvcpublic', 'HEAD'), ('vvcpublic', 'v1'), ('vvcpublicPrivate', 'HEAD')]
+        own = [('vvcown', 'HEAD'), ('vvcown', 'v1'), ('vvcownPublic', 'HEAD'), ('vvcownPublic', 'v1')]
+        org = [('vvcorg', 'HEAD'), ('vvcorg', 'v1'), ('vvcorgPublic', 'HEAD'), ('vvcorgPublic', 'v1'),
+               ('vvcpublicPrivate', 'v1')]
+        for user, expected in [(AnonymousUser(), public), (self.outsider, public), (self.owner, public + own),
+                               (self.member, public + org), (self.admin, public + org)]:
+            self.assertEqual(self.viewable(user), sorted(expected), user)
+            self.assertEqual(self.viewable(user), sorted(
+                (version.mnemonic, version.version) for version in self.versions.values()
+                if version.has_view_access(user)), user)
+        self.assertIsNone(Collection.get_viewable_versions_criteria(self.staff))
+        self.assertTrue(all(version.has_view_access(self.staff) for version in self.versions.values()))
 
 
 class CanViewAllContentTest(OCLTestCase):
