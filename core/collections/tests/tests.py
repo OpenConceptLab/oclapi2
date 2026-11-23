@@ -4156,11 +4156,13 @@ class ExpansionTest(OCLTestCase):
 
         def evaluated_urls(system):
             reference = CollectionReference(
-                expression=f'{system}concepts/c1/', collection=collection, system=system, code='c1')
+                expression=f"{system.rstrip('/')}/concepts/c1/", collection=collection, system=system, code='c1')
             return reference.get_evaluated_repo_version_urls(expansion, user)
 
         self.assertEqual(evaluated_urls(f'{source.uri}v3/'), [f'{source.uri}v3/'])
         self.assertEqual(evaluated_urls(private.uri), [private.uri])
+        self.assertEqual(evaluated_urls(f'{source.uri}v3'), [f'{source.uri}v3'])
+        self.assertEqual(evaluated_urls(private.uri.rstrip('/')), [private.uri.rstrip('/')])
 
     def test_rebuild_with_filter_reference_under_release_adds_its_resource_versions(self):
         source, release, _, concept_version = CollectionReferenceTest.released_source_with_concepts()
