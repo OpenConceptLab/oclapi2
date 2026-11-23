@@ -661,6 +661,17 @@ class ExpansionHealthAPITest(OCLAPITestCase):
         self.assertIn('class', response.data[0]['health'])
         self.assertEqual(len(response.data[0]['health']['references']), 1)
 
+    def test_member_list_gives_each_row_its_own_class(self):
+        second = ConceptFactory()
+        self.collection.add_expressions({'expressions': [second.uri]}, self.collection.created_by)
+        classes = ExpansionHealth(self.expansion).classify('concepts')
+
+        response = self.client.get(self.expansion.uri + 'concepts/?includeHealth=true')
+
+        self.assertEqual(len(response.data), 2)
+        for item in response.data:
+            self.assertEqual(item['health']['class'], classes[int(item['uuid'])][0])
+
     def test_member_list_ignores_include_health_with_the_toggle_off(self):
         with patch.object(Expansion, 'is_health_on', return_value=False):
             response = self.client.get(self.expansion.uri + 'concepts/?includeHealth=true')

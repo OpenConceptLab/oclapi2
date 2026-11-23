@@ -1081,7 +1081,9 @@ class CollectionVersionExpansionChildrenView(CollectionVersionExpansionBaseView,
         classes = ExpansionHealth(self.expansion).classify(self.health_resource_type, [member.id for member in members])
         references_uri = f'{self.expansion.collection_version.uri}references/'
         for member, item in zip(members, items):
-            member_class, reference_ids, _ = classes.get(member.id, (None, [], False))
+            # by the row's own id where it has one; the serializer keeps the page's order, so position matches too
+            member_id = int(item['uuid']) if item.get('uuid') else member.id
+            member_class, reference_ids, _ = classes.get(member_id, (None, [], False))
             item['health'] = {
                 'class': member_class,
                 'references': [f'{references_uri}{reference_id}/' for reference_id in reference_ids]
