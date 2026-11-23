@@ -992,7 +992,7 @@ class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, 
 
 
 class CollectionExpansionsView(CollectionBaseView, ListWithHeadersMixin):
-    """List all expansions across all versions of a collection."""
+    """List the expansions across the versions of a collection the requester can view."""
 
     def get_serializer_class(self):
         if self.is_verbose():
