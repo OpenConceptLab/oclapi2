@@ -1505,6 +1505,13 @@ class CollectionReference(models.Model):
         valuesets = self.valueset if isinstance(self.valueset, list) else []
         return [version.uri for version in versions] or compact([self.system, *valuesets])
 
+    def get_evaluated_repo_versions(self, expansion, system_version_cache=None, valueset_version_cache=None):
+        """The repository versions its expansion evaluated it in: its system's, else its value sets'"""
+        expansion_cache = {self.collection_id: expansion}
+        if self.system:
+            return self._get_resolved_system_versions(system_version_cache, expansion_cache)
+        return self._get_resolved_valueset_versions(valueset_version_cache, expansion_cache)
+
     def get_resolved_repo_versions_serialized(  # pylint: disable=too-many-arguments
             self, system_version_cache=None, valueset_version_cache=None, expansion_cache=None, user=None):
         """Serialize repository versions resolved from this reference's system and valuesets that `user` can view."""
