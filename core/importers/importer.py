@@ -769,7 +769,7 @@ class ImporterSubtask:
         self.owner = owner
         self.resource_type = resource_type
         self.files = files
-        self.indexer = ImportIndexer(index)
+        self.indexer = ImportIndexer(index, index_superseded=isolated)
         self.isolated = isolated
         self.isolated_version = isolated_version
         self.previous_subtask_ids = previous_subtask_ids or []

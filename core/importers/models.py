@@ -1241,22 +1241,31 @@ class ImportIndexer:
     whether or not they get indexed, so later saves index them again. Unless the import doesn't index, it then queues
     their batch indexing, without forcing a refresh per batch, and an update of the mapped codes in the documents of
     the concepts the imported mappings come from.
+
+    index_superseded: an import that seeds a version indexes the versions it superseded even when it doesn't index
+    the rest. Their documents would still say they're HEAD's latest versions, and keep the names of versions that
+    held them, so searches of HEAD, and of a later version of the same name, would find them next to the versions
+    that replaced them (OpenConceptLab/ocl_online#744). The new version indexes the rest.
     """
     CHUNK_SIZE = 5000
 
-    def __init__(self, index=True):
+    def __init__(self, index=True, index_superseded=False):
         self.index = index
+        self.index_superseded = index_superseded
         self.ids = {'concept': set(), 'mapping': set()}
+        self.superseded_ids = {'concept': set(), 'mapping': set()}
         self.mapped_concept_ids = set()
 
     def add(self, instance):
         resource = {Concept: 'concept', Mapping: 'mapping'}.get(type(instance))
         if not resource or not instance.id or instance.should_index:
             return  # nothing saved, or saved with _index=True, which indexes it
+        superseded_ids = compact([
+            get(instance, 'prev_latest_version_id'), *(get(instance, 'stale_latest_version_ids') or [])])
+        self.superseded_ids[resource].update(superseded_ids)
         self.ids[resource].update(compact([
             instance.versioned_object_id,
-            get(instance, 'prev_latest_version_id'),
-            *(get(instance, 'stale_latest_version_ids') or []),
+            *superseded_ids,
             get(instance, 'latest_version_id'),
             instance.id,
         ]))
@@ -1271,12 +1280,17 @@ class ImportIndexer:
             for chunk in chunks(sorted(self.ids[resource]), self.CHUNK_SIZE):
                 model.objects.filter(id__in=chunk, _index=False).update(_index=True)
         if self.index:
-            for resource in ('concept', 'mapping'):
-                for chunk in chunks(sorted(self.ids[resource]), self.CHUNK_SIZE):
-                    batch_index_resources.apply_async(
-                        (resource, {'id__in': chunk}, True, False), queue='indexing', permanent=False)
+            self.queue_indexing(self.ids)
             for chunk in chunks(sorted(self.get_mapped_concept_ids() - self.ids['concept']), self.CHUNK_SIZE):
                 index_concepts_mapped_codes.apply_async((chunk,), queue='indexing', permanent=False)
+        elif self.index_superseded:
+            self.queue_indexing(self.superseded_ids)
+
+    def queue_indexing(self, ids):
+        for resource in ('concept', 'mapping'):
+            for chunk in chunks(sorted(ids[resource]), self.CHUNK_SIZE):
+                batch_index_resources.apply_async(
+                    (resource, {'id__in': chunk}, True, False), queue='indexing', permanent=False)
 
     def get_mapped_concept_ids(self):
         """
@@ -1446,7 +1460,7 @@ class BulkImportInline(BaseImporter):
             print("****STARTED SUBPROCESS****")
             print(f"TASK ID: {self.self_task_id}")
             print("***************")
-        indexer = ImportIndexer(self.index)
+        indexer = ImportIndexer(self.index, index_superseded=self.isolated)
         try:
             for original_item in self.input_list:
                 self.processed += 1

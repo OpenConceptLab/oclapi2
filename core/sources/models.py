@@ -18,7 +18,7 @@ from core.common.constants import HEAD, LATEST, VERSION_UNCOPYABLE_EXTRAS
 from core.common.fields import URIField
 from core.common.models import ConceptContainerModel
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings, \
-    sync_source_concept_vectors, index_source_public_access, index_dropped_source_children
+    sync_source_concept_vectors, index_source_public_access, index_dropped_source_children, batch_index_resources
 from core.common.utils import split_canonical, to_camel_case, chunks
 from core.common.validators import validate_non_negative
 from core.concepts.models import ConceptName, Concept, HierarchicalConcepts
@@ -1073,6 +1073,37 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             PostgresQL.create_seq(
                 self.mappings_external_id_seq_name, 'sources.uri', 0, self.autoid_mapping_external_id_start_from
             )
+
+    def delete(self, using=None, keep_parents=False, force=False, sync=False):
+        """
+        A version's concepts and mappings keep its name in their search documents until they're indexed again, so a
+        later version of the same name would find them (OpenConceptLab/ocl_online#744). Once the delete commits, they
+        are indexed again, and if it was the latest release, the new latest release's members are flagged as such.
+        """
+        if self.is_head:
+            return super().delete(using=using, keep_parents=keep_parents, force=force, sync=sync)
+        head = self.head
+        was_latest_released = self.is_latest_released
+        concept_ids = list(self.concepts.values_list('id', flat=True))
+        mapping_ids = list(self.mappings.values_list('id', flat=True))
+        super().delete(using=using, keep_parents=keep_parents, force=force, sync=sync)
+        transaction.on_commit(lambda: head.index_former_members(concept_ids, mapping_ids, was_latest_released))
+        return None
+
+    def index_former_members(self, concept_ids, mapping_ids, was_latest_released=False):
+        """
+        Indexes again the concepts and mappings of a deleted version of this repository (its HEAD), from what they
+        belong to now, DROPPED_CHILDREN_CHUNK_SIZE a task. was_latest_released: flags the new latest release's members.
+        """
+        for resource, ids in (('concept', concept_ids), ('mapping', mapping_ids)):
+            for chunk in chunks(sorted(ids), DROPPED_CHILDREN_CHUNK_SIZE):
+                if get(settings, 'TEST_MODE', False):
+                    batch_index_resources(resource, {'id__in': chunk})
+                else:
+                    batch_index_resources.apply_async((resource, {'id__in': chunk}), queue='indexing', permanent=False)
+        latest_released = self.get_latest_released_version() if was_latest_released else None
+        if latest_released:
+            latest_released.index_children_async(self.updated_by, {'is_in_latest_source_version': True})
 
     def post_delete_actions(self):
         if self.is_head:
