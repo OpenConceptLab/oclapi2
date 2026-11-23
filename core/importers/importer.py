@@ -308,7 +308,16 @@ class Importer:
         dependencies = []
 
         self.prepare_resources(self.path, resource_types, dependencies, [], resources)
-        resource_types = self.validate_versioning(resources, resource_types)
+        try:
+            resource_types = self.validate_versioning(resources, resource_types)
+        except WriteRefused as ex:  # nothing imports: the version line fails with the capability policy's body
+            import_task = ImportTask(time_started=time_started, dependencies=dependencies)
+            import_task.initial_summary.failed = 1
+            import_task.initial_summary.failures = [
+                f"Failed to import resource with id {get(self.version_lines, '0.id')} from {self.path} to "
+                f"{self.owner_type}/{self.owner} by {self.username} due to: {json.dumps(ex.detail, default=str)}"]
+            import_task.time_finished = timezone.now()
+            return import_task.model_dump()
         self.index = should_index_import(self.index, sum(sum(files.values()) for files in resources.values()))
         tasks = self.prepare_tasks(resource_types, dependencies, resources)
         if tasks:

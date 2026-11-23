@@ -1340,8 +1340,12 @@ class BulkImportInline(BaseImporter):
 
     def preflight_isolated_version(self, version_line):
         if version_line:
-            IsolatedVersionCommit(version_line, self.user, self.update_if_exists).preflight(
-                Source.get_import_content_lines(self.input_list))
+            try:
+                IsolatedVersionCommit(version_line, self.user, self.update_if_exists).preflight(
+                    Source.get_import_content_lines(self.input_list))
+            except WriteRefused as ex:  # nothing imports: the version line is denied with the capability policy's body
+                self.permission_denied.append({**version_line, 'errors': ex.detail})
+                self.input_list = []
 
     def set_task(self):
         self.task = Task.objects.filter(id=self.self_task_id).first()
@@ -1600,8 +1604,12 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self.index = should_index_import(index, self.total)
         version_line = Source.get_import_version_line(self.input_list, self.isolated_version)
         if version_line:
-            IsolatedVersionCommit(version_line, self.user, self.update_if_exists).preflight(
-                Source.get_import_content_lines(self.input_list))
+            try:
+                IsolatedVersionCommit(version_line, self.user, self.update_if_exists).preflight(
+                    Source.get_import_content_lines(self.input_list))
+            except WriteRefused as ex:  # nothing imports: the version line is denied with the capability policy's body
+                self.isolated_version_results['permission_denied'] = [{**version_line, 'errors': ex.detail}]
+                self.input_list = []
         self.make_resource_distribution()
         self.make_parts()
         self.collect_concept_hierarchy_map()

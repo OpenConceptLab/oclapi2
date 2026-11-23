@@ -1,5 +1,8 @@
 import json
+import os
+import tempfile
 from types import SimpleNamespace
+from zipfile import ZipFile
 from unittest.mock import Mock, patch
 
 from django.test import override_settings
@@ -22,7 +25,7 @@ from core.concept_maps.views import ConceptMapRetrieveUpdateView
 from core.concepts.models import Concept
 from core.concepts.permissions import CanAdministerParentDictionary
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
-from core.importers.importer import ImportRequest, ResourceImporter
+from core.importers.importer import Importer, ImportRequest, ResourceImporter
 from core.importers.models import BulkImportInline, BulkImportParallelRunner, IsolatedVersionCommit
 from core.map_projects.tests.factories import AutomatchRunFactory, MapProjectFactory
 from core.orgs.tests.factories import OrganizationFactory
@@ -685,14 +688,36 @@ class ImportWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
         }
 
     def test_a_seeded_version_of_a_read_only_source_is_refused_before_any_line_imports(self):
-        lines = [self.concept_line(self.source, 'refused'), self.version_line(self.source)]
+        version_line = self.version_line(self.source)
+        content = '\n'.join(json.dumps(line) for line in [self.concept_line(self.source, 'refused'), version_line])
 
         with self.assertRaises(WriteRefused) as context:
-            BulkImportInline('\n'.join(json.dumps(line) for line in lines), self.user.username, True,
-                             isolated_version=True)
-
+            IsolatedVersionCommit(version_line, self.user, True).preflight()
         self.assertEqual(context.exception.detail, ReadOnlyPolicy.body)
-        self.assertEqual(ReadOnlyPolicy.calls, [(self.user, self.source, WRITE_ACTION_EDIT)])
+
+        inline = BulkImportInline(content, self.user.username, True, isolated_version=True)
+        inline.run()
+        parallel = BulkImportParallelRunner(content, self.user.username, True, isolated_version=True)
+
+        denied = [{**version_line, 'errors': ReadOnlyPolicy.body}]
+        self.assertEqual((inline.json_result['permission_denied'], inline.created), (denied, []))
+        self.assertEqual(parallel.json_result['permission_denied'], denied)
+        self.assertFalse(any(parallel.parts))  # no line left to import
+        self.assertEqual(ReadOnlyPolicy.calls, [(self.user, self.source, WRITE_ACTION_EDIT)] * 3)
+        self.assertFalse(self.source.concepts_set.filter(mnemonic='refused').exists())
+
+    def test_a_seeded_version_archive_of_a_read_only_source_reports_the_refusal(self):
+        version_line = self.version_line(self.source)
+        path = os.path.join(tempfile.mkdtemp(), 'import.zip')
+        with ZipFile(path, 'w') as package:
+            package.writestr('concepts.json', json.dumps(self.concept_line(self.source, 'refused')))
+            package.writestr('version.json', json.dumps(version_line))
+
+        result = Importer(
+            'task-id', path, self.user.username, 'Organization', self.org.mnemonic, isolated_version=True).run()
+
+        self.assertEqual((result['summary']['failed'], result['import_task'], result['subtask_ids']), (1, (), []))
+        self.assertTrue(result['summary']['failures'][0].endswith(f'due to: {json.dumps(ReadOnlyPolicy.body)}'))
         self.assertFalse(self.source.concepts_set.filter(mnemonic='refused').exists())
 
     def test_a_seeded_version_commit_is_refused_before_it_changes_head(self):
