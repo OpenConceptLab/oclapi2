@@ -52,6 +52,16 @@ class ListCoveringIndexTest(TestCase):
                 cursor.execute('select indexdef from pg_indexes where indexname = %s', [index])
                 self.assertTrue(cursor.fetchone()[0].endswith(f'USING btree {columns}'))
 
+    def test_mapped_sources_indexes_cover_the_target_source(self):
+        with connection.cursor() as cursor:
+            for index, columns in (
+                    ('mappings_head_parent_to_source',
+                     '(parent_id, to_source_id) WHERE (is_active AND (id = versioned_object_id))'),
+                    ('mappings_id_incl_to_source', '(id) INCLUDE (to_source_id)'),
+            ):
+                cursor.execute('select indexdef from pg_indexes where indexname = %s', [index])
+                self.assertTrue(cursor.fetchone()[0].endswith(f'USING btree {columns}'))
+
 
 class ListCoveringIndexMigrationTest(SimpleTestCase):
     """The migrations never build on a production-sized table, and never accept an invalid index."""
