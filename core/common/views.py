@@ -1,6 +1,7 @@
 import base64
 import re
 from email.mime.image import MIMEImage
+from functools import cached_property
 
 import markdown
 import requests
@@ -570,6 +571,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             ) or field for field, config in es_fields.items() if config.get('facet', False)
         ]
 
+    @property
+    def url_username(self):
+        """The user the URL names, the requester on the /user/ shortcut."""
+        return self.kwargs.get('user') or (self.request.user.username if self.user_is_self else None)
+
     def get_facet_filters_from_kwargs(self):
         kwargs = self.kwargs
         filters = {}
@@ -578,7 +584,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if is_collection_specified:
             version = kwargs.get('version') or HEAD
             filters['collection'] = kwargs['collection']
-            collection_owner_url = f'/users/{kwargs["user"]}/' if is_user_specified else f'/orgs/{kwargs["org"]}/'
+            collection_owner_url = f'/orgs/{kwargs["org"]}/' if 'org' in kwargs else f'/users/{self.url_username}/'
             filters['collection_owner_url'] = collection_owner_url
             if 'expansion' in self.kwargs:
                 filters['expansion_url'] = (f"{collection_owner_url}collections/{filters['collection']}/{version}/"
@@ -612,7 +618,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             if is_version_specified:
                 container_version = self.kwargs['version']
                 is_latest_released = container_version == LATEST
-                params = {'user__username': self.kwargs.get('user'), 'organization__mnemonic': self.kwargs.get('org')}
+                params = {'user__username': self.url_username, 'organization__mnemonic': self.kwargs.get('org')}
                 if is_latest_released:
                     if is_source_specified:
                         from core.sources.models import Source
@@ -647,6 +653,35 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             if is_source_specified and not is_version_specified and not self.should_search_latest_repo():
                 filters['source_version'] = HEAD
         return filters
+
+    @cached_property
+    def map_codes_release(self):
+        """
+        The id of the release (a source version, not HEAD) a concept search runs in, whose own mapped codes it
+        matches (OpenConceptLab/ocl_online#703); None if the user can't view it, or for a fuzzy search, whose hits and
+        facets read each doc's own codes.
+        """
+        if not self.is_concept_document() or 'source' not in self.kwargs or 'collection' in self.kwargs or \
+                self.is_fuzzy_search:
+            return None
+        version = self.get_kwargs_filters().get('source_version')
+        if version in (None, HEAD):
+            return None
+        from core.sources.models import Source
+        owner = {'organization__mnemonic': self.kwargs['org']} if 'org' in self.kwargs else {
+            'user__username': self.kwargs['user'] if 'user' in self.kwargs else self.request.user.username}
+        release = Source.objects.filter(**owner, mnemonic=self.kwargs['source'], version=version).first()
+        return release.id if release and release.has_view_access(self.request.user) else None
+
+    @staticmethod
+    def scope_map_codes(results, release_id):
+        """With a release's id, `results` with its mapped-code clauses reading that release's own codes."""
+        query = results.to_dict().get('query') if release_id else None
+        if query:
+            from core.concepts.documents import ConceptDocument
+            results = results.update_from_dict(
+                {'query': ConceptDocument.scope_map_codes_to_release(query, release_id)})
+        return results
 
     def get_latest_version_filter_field_for_source_child(self):
         query_latest = self.__should_query_latest_version()
@@ -694,6 +729,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             }
             if 'source' in self.kwargs and self.is_concept_document():
                 parent_repo = params['parent'] = get(self, 'parent_resource')
+            if self.map_codes_release:
+                params['release'] = self.map_codes_release
 
             faceted_search = self.facet_class(**params) # pylint: disable=not-callable
             faceted_search.params(request_timeout=ES_REQUEST_TIMEOUT)
@@ -955,6 +992,58 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                        self.is_concept_container_document_model() or self.is_repo_document_model()
                ) and self.request.query_params.get(CANONICAL_URL_REQUEST_PARAM, None)
 
+    def __apply_scope_filters(self, results):  # pylint: disable=too-many-branches
+        """Limits a search to what the URL names: its owner, repository and version (or the requester's orgs, on a
+        members view)."""
+        user = self.request.user
+        is_authenticated = user.is_authenticated
+        username = user.username
+
+        is_members_view = self.is_members_view()
+        if self.is_owner_document_model():
+            kwargs_filters = self.kwargs.copy()
+            if self.user_is_self and is_authenticated:
+                kwargs_filters.pop('user_is_self', None)
+                kwargs_filters['user'] = username
+        else:
+            kwargs_filters = self.get_kwargs_filters()
+            if is_members_view:
+                kwargs_filters['ownerType'] = 'Organization'
+                kwargs_filters['owner'] = self.get_members_view_org_mnemonics() or ['UNKNOWN-ORG-DUMMY']
+            elif self.user_is_self and is_authenticated and 'collection' not in self.kwargs:
+                # a collection's concepts can come from any owner's source, so only other routes filter by owner
+                kwargs_filters['ownerType'] = 'User'
+                kwargs_filters['owner'] = username
+
+        if self.is_url_registry_document() and not is_members_view:
+            kwargs_filters = self.kwargs.copy()
+            if self.user_is_self and is_authenticated:
+                kwargs_filters.pop('user_is_self', None)
+                kwargs_filters['ownerType'] = 'User'
+                kwargs_filters['owner'] = username
+            elif not kwargs_filters:
+                kwargs_filters['ownerUrl'] = '/'
+            else:
+                if 'org' in kwargs_filters:
+                    kwargs_filters['ownerType'] = 'Organization'
+                    kwargs_filters['owner'] = kwargs_filters.pop('org')
+                elif 'user' in kwargs_filters:
+                    kwargs_filters['ownerType'] = 'User'
+                    kwargs_filters['owner'] = kwargs_filters.pop('user')
+
+        for key, value in kwargs_filters.items():
+            attr = to_snake_case(key)
+            if value is None:  # a version that doesn't resolve, such as `latest` with no release: nothing matches
+                results = results.filter(Q('match_none'))
+            elif isinstance(value, list):
+                criteria = Q('term', **{attr: get(value, '0')})
+                for val in value[1:]:
+                    criteria |= Q('term', **{attr: val})
+                results = results.filter(criteria)
+            else:
+                results = results.filter('term', **{attr: value})
+        return results
+
     def __get_fuzzy_search_results(
             self, source_versions=None, other_filters=None, sort=True
     ):
@@ -969,6 +1058,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             results = results.query(
                 self.__get_source_versions_es_criterion(source_versions)
             )
+        else:
+            results = self.__apply_scope_filters(results)
         results = results.query(self.get_fuzzy_search_criterion())
 
         min_score = self.request.query_params.get('min_score') or None
@@ -1058,50 +1149,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             for field, value in extras_fields_exact.items():
                 results = results.query("match", **{field: value}, _expand__to_dot=False)
 
-        user = self.request.user
-        is_authenticated = user.is_authenticated
-        username = user.username
-
-        is_members_view = self.is_members_view()
-        if self.is_owner_document_model():
-            kwargs_filters = self.kwargs.copy()
-            if self.user_is_self and is_authenticated:
-                kwargs_filters.pop('user_is_self', None)
-                kwargs_filters['user'] = username
-        else:
-            kwargs_filters = self.get_kwargs_filters()
-            if is_members_view:
-                kwargs_filters['ownerType'] = 'Organization'
-                kwargs_filters['owner'] = self.get_members_view_org_mnemonics() or ['UNKNOWN-ORG-DUMMY']
-            elif self.user_is_self and is_authenticated:
-                kwargs_filters['ownerType'] = 'User'
-                kwargs_filters['owner'] = username
-
-        if self.is_url_registry_document() and not is_members_view:
-            kwargs_filters = self.kwargs.copy()
-            if self.user_is_self and is_authenticated:
-                kwargs_filters.pop('user_is_self', None)
-                kwargs_filters['ownerType'] = 'User'
-                kwargs_filters['owner'] = username
-            elif not kwargs_filters:
-                kwargs_filters['ownerUrl'] = '/'
-            else:
-                if 'org' in kwargs_filters:
-                    kwargs_filters['ownerType'] = 'Organization'
-                    kwargs_filters['owner'] = kwargs_filters.pop('org')
-                elif 'user' in kwargs_filters:
-                    kwargs_filters['ownerType'] = 'User'
-                    kwargs_filters['owner'] = kwargs_filters.pop('user')
-
-        for key, value in kwargs_filters.items():
-            attr = to_snake_case(key)
-            if isinstance(value, list):
-                criteria = Q('term', **{attr: get(value, '0')})
-                for val in value[1:]:
-                    criteria |= Q('term', **{attr: val})
-                results = results.filter(criteria)
-            else:
-                results = results.filter('term', **{attr: value})
+        results = self.__apply_scope_filters(results)
 
         sort_attrs = self._get_sort_attribute()
         if has_search_string and self.is_concept_document() and (
@@ -1142,7 +1190,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             )
         if fields and highlight and self.request.query_params.get(INCLUDE_SEARCH_META_PARAM) in get_truthy_values():
             results = results.highlight(*self.clean_fields_for_highlight(fields))
-        results = results.source(excludes=['_synonyms_embeddings', '_embeddings'])
+        results = self.scope_map_codes(
+            results.source(excludes=['_synonyms_embeddings', '_embeddings']), self.map_codes_release)
         return results.sort(*sort_attrs) if sort else results
 
     def get_mandatory_words_criteria(self):

@@ -57,3 +57,14 @@ class FhirRepositorySerializerMixin:
                 tags.append(SUBSETTED)
             rep['meta'] = {**meta, 'tag': tags}
         return rep
+
+    def refuses_another_id(self, instance, validated_data):
+        """
+        Whether an update of `instance` is refused because the resource's id names another repository: the update
+        finds the HEAD it writes by that id, so it would write that repository instead. The refusal is an `id` error.
+        """
+        mnemonic = validated_data.get('mnemonic', instance.mnemonic)
+        if mnemonic == instance.mnemonic:
+            return False
+        self._errors.update({'id': [f'The id must be {instance.mnemonic}, the id of the resource being updated.']})
+        return True

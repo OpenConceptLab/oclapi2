@@ -1,4 +1,8 @@
-from elasticsearch_dsl import TermsFacet, Q, NestedFacet
+from itertools import count
+
+from django.db.models import Q as DBQ
+from elasticsearch_dsl import TermsFacet, Q, NestedFacet, A
+from elasticsearch_dsl.faceted_search import Facet
 from pydash import flatten, is_number, compact, get
 
 from core.common.constants import FACET_SIZE, HEAD
@@ -21,6 +25,35 @@ class BooleanTermsFacet(TermsFacet):
     def get_value(self, bucket):
         key = bucket['key']
         return get(bucket, 'key_as_string') or self.BUCKET_KEYS.get(key, key)
+
+
+class ReleaseMappedCodesFacet(Facet):
+    """
+    The targetRepo and targetRepoMapType facets in a release (OpenConceptLab/ocl_online#703): they count the
+    release's own mapped codes, from a doc's release_map_codes entry for it where it has one, else from its own.
+    """
+    agg_type = 'filter'
+
+    def __init__(self, release_id, field):
+        from core.concepts.documents import RELEASE_MAP_CODES, MAPPED_CODES_PATH
+        in_release = Q('term', **{f'{RELEASE_MAP_CODES}.source_version_id': release_id})
+        release_path = f'{RELEASE_MAP_CODES}.{MAPPED_CODES_PATH}'
+        super().__init__(filter=Q('match_all'), aggs={
+            'own': A('filter', filter=~Q('nested', path=RELEASE_MAP_CODES, query=in_release), aggs={
+                'inner': A('nested', path=MAPPED_CODES_PATH, aggs={
+                    'inner': A('terms', field=f'{MAPPED_CODES_PATH}.{field}', size=FACET_SIZE)})}),
+            'release': A('nested', path=RELEASE_MAP_CODES, aggs={
+                'inner': A('filter', filter=in_release, aggs={
+                    'inner': A('nested', path=release_path, aggs={
+                        'inner': A('terms', field=f'{release_path}.{field}', size=FACET_SIZE)})})}),
+        })
+
+    def get_values(self, data, filter_values):
+        counts = {}
+        for bucket in [*data.own.inner.inner.buckets, *data.release.inner.inner.inner.buckets]:
+            counts[bucket.key] = counts.get(bucket.key, 0) + bucket.doc_count
+        return [(key, count, key in filter_values) for key, count in
+                sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:FACET_SIZE]]
 
 
 class ConceptFacetedSearch(CustomESFacetedSearch):
@@ -56,13 +89,16 @@ class ConceptFacetedSearch(CustomESFacetedSearch):
         'targetRepoMapType': NestedFacet("mapped_codes", TermsFacet(field="mapped_codes.map_type", size=FACET_SIZE)),
     }
 
-    def __init__(self, parent=None, **kwargs):
+    def __init__(self, parent=None, release=None, **kwargs):
         facets = {**self.base_facets}
         if parent is not None:
             facets = {
                 **facets,
                 **self.build_property_facets_from_source(parent)
             }
+        if release:
+            facets['targetRepo'] = ReleaseMappedCodesFacet(release, 'source')
+            facets['targetRepoMapType'] = ReleaseMappedCodesFacet(release, 'map_type')
         self.facets = facets
         super().__init__(**kwargs)
 
@@ -108,7 +144,7 @@ class ConceptFuzzySearch:  # pragma: no cover
         ['id', 0.3],
         ['name', 0.3],
         ['synonyms', 0.1],
-        ['same_as_mapped_codes', 0.1],
+        ['same_as_map_codes', 0.1],
         ['other_map_codes', 0.1],
         ['concept_class', 'datatype', 0.1],
         ['description', 0]
@@ -119,7 +155,7 @@ class ConceptFuzzySearch:  # pragma: no cover
         ['_synonyms', 0],
         ['name', 0],
         ['synonyms', 0],
-        ['same_as_mapped_codes', 0.1],
+        ['same_as_map_codes', 0.1],
         ['other_map_codes', 0.1],
         ['concept_class', 'datatype', 0],
     ]
@@ -151,6 +187,24 @@ class ConceptFuzzySearch:  # pragma: no cover
         return {}
 
     @staticmethod
+    def get_release_id(repo_params):
+        """
+        The id of the source version, not HEAD, that repo_params (as get_repo_params gives them) name, if exactly one
+        (OpenConceptLab/ocl_online#703).
+        """
+        version = repo_params.get('source_version')
+        if not version or version == HEAD:
+            return None
+        from core.sources.models import Source
+        owner = repo_params.get('owner')
+        owner_criteria = {
+            'Organization': DBQ(organization__mnemonic=owner), 'User': DBQ(user__username=owner)
+        }.get(repo_params.get('owner_type'), DBQ(organization__mnemonic=owner) | DBQ(user__username=owner))
+        ids = list(Source.objects.filter(
+            owner_criteria, mnemonic=repo_params.get('source'), version=version).values_list('id', flat=True)[:2])
+        return ids[0] if len(ids) == 1 else None
+
+    @staticmethod
     def get_exact_and_contains_criteria(field, value, boost=0, add_boost=True):
         return (CustomESSearch.get_match_criteria(field, value, boost) |
                 Q('match_phrase', **{
@@ -166,10 +220,22 @@ class ConceptFuzzySearch:  # pragma: no cover
             is_semantic=False, num_candidates=2000, k_nearest=50, map_config=None, additional_filter_criterion=None,
             locale_filter=None, variants_repo=None
     ):
-        from core.concepts.documents import ConceptDocument
+        from core.concepts.documents import ConceptDocument, RELEASE_MAP_CODES
         map_config = map_config or []
-        filter_query = cls.get_filter_criteria(
-            data, include_retired, repo_params, repo_url, additional_filter_criterion)
+        if 'same_as_mapped_codes' in data:  # the key $match read before, which names no indexed field
+            data = {'same_as_map_codes': data['same_as_mapped_codes'], **data}
+        repo_params = repo_params or cls.get_target_repo_params(repo_url)
+        release_id = cls.get_release_id(repo_params)
+        inner_hit_names = (f'{RELEASE_MAP_CODES}_{index}' for index in count())
+
+        def scoped(query, highlight=False):  # in a release, its own mapped codes (OpenConceptLab/ocl_online#703)
+            if not release_id:
+                return query
+            return Q(ConceptDocument.scope_map_codes_to_release(
+                query.to_dict(), release_id, inner_hit_names if highlight else None))
+
+        filter_query = scoped(cls.get_filter_criteria(
+            data, include_retired, repo_params, repo_url, additional_filter_criterion))
         or_clauses = []
 
         priority_criteria = []
@@ -277,7 +343,7 @@ class ConceptFuzzySearch:  # pragma: no cover
             or_clauses.append(Q("bool", should=nested_mapped_codes_queries, minimum_should_match=1, boost=0.1))
 
         wrapped_clauses = [
-            Q("bool", must=[Q(filter_query), clause])
+            Q("bool", must=[Q(filter_query), scoped(clause, highlight=True)])
             for clause in or_clauses
         ]
 

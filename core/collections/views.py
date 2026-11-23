@@ -17,6 +17,7 @@ from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.capabilities.exceptions import WriteRefused
 from core.client_configs.views import ResourceClientConfigsView
 from core.collections.constants import (
     INCLUDE_REFERENCES_PARAM, CONCEPT_VERSION_ADDED_TO_COLLECTION,
@@ -49,7 +50,7 @@ from core.common.mixins import (
     ConceptContainerProcessingMixin, RepoVersionListMixin)
 from core.common.permissions import (
     CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject,
-    CanViewConceptDictionaryVersion
+    CanViewConceptDictionaryVersion, CanEditConceptDictionaryVersion
 )
 from core.common.serializers import TaskSerializer
 from core.common.swagger_parameters import q_param, compress_header, page_param, verbose_param, \
@@ -244,6 +245,7 @@ class CollectionRetrieveUpdateDestroyView(
     CollectionBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, UpdateAPIView, TaskMixin
 ):
     serializer_class = CollectionDetailSerializer
+    writes_own_object = True  # its DELETE deletes the repository, and its PUT/PATCH can publish it
 
     def get_object(self, queryset=None):
         instance = self.get_queryset().filter(is_active=True).order_by('-created_at').first()
@@ -542,6 +544,8 @@ class CollectionReferencesView(
         unresolved_reasons = dict(result[2]) if len(result) > 2 else {}
         if get(errors, 'error') == 'Collection not found':  # async task, collection may be deleted
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+        if len(result) > 3 and result[3] is not None:  # the capability policy's refusal, kept apart from the errors
+            raise WriteRefused(result[3])
 
         added_references = CollectionReference.objects.filter(
             id__in=added_references_ids) if added_references_ids else []
@@ -663,6 +667,8 @@ class CollectionReferencesView(
 
 
 class CollectionReferencesPreview(CollectionBaseView):
+    writes_content = False  # evaluates references without adding them
+
     def get_permissions(self):
         # evaluating arbitrary expressions (with cascade) is expensive: collection editors only (ocl_online#230)
         return [CanEditConceptDictionary()]
@@ -759,7 +765,7 @@ class CollectionVersionListView(
         if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionary(), ]
 
-        return [IsAuthenticated(), HasAccessToVersionedObject()]
+        return [IsAuthenticated(), CanEditConceptDictionaryVersion()]
 
     def get_head(self):
         head = get(self.get_queryset().first(), 'head')
@@ -789,7 +795,9 @@ class CollectionVersionListView(
             raise Http404()
         version = request.data.pop('id', None)
         payload = {
-            "mnemonic": head_object.mnemonic, "id": head_object.mnemonic, "name": head_object.name, **request.data,
+            "name": head_object.name, **request.data,
+            # the version is the URL's repository's, whatever the body says
+            "mnemonic": head_object.mnemonic, "id": head_object.mnemonic,
             "organization_id": head_object.organization_id, "user_id": head_object.user_id,
             'version': version
         }
@@ -820,12 +828,13 @@ class CollectionVersionListView(
 
 class CollectionLatestVersionRetrieveUpdateView(CollectionVersionBaseView, RetrieveAPIView, UpdateAPIView):
     serializer_class = CollectionVersionDetailSerializer
+    writes_own_object = True  # its PUT/PATCH can publish the version it resolves to
 
     def get_permissions(self):
         if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionaryVersion(), ]
 
-        return [IsAuthenticated(), HasAccessToVersionedObject()]
+        return [IsAuthenticated(), CanEditConceptDictionaryVersion()]
 
     def get_object(self, queryset=None):
         obj = self.get_queryset().first()
@@ -857,11 +866,12 @@ class CollectionLatestVersionRetrieveUpdateView(CollectionVersionBaseView, Retri
 
 class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPIView, UpdateAPIView, TaskMixin):
     serializer_class = CollectionVersionDetailSerializer
+    writes_own_object = True  # its PUT/PATCH can publish the version, and on HEAD/ its DELETE deletes the repository
 
     def get_permissions(self):
         if self.request.method == 'GET':
             return [CanViewConceptDictionaryVersion()]
-        return [HasAccessToVersionedObject()]
+        return [CanEditConceptDictionaryVersion()]
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
@@ -918,7 +928,8 @@ class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, 
     def get_permissions(self):
         if self.request.method == 'GET':
             return [CanViewConceptDictionaryVersion()]
-        return [HasAccessToVersionedObject()]
+        # a new expansion changes what the version resolves to: an edit of it
+        return [CanEditConceptDictionaryVersion()]
 
     def get_queryset(self):
         instance = get_object_or_404(super().get_queryset())
@@ -997,7 +1008,8 @@ class CollectionVersionExpansionBaseView(CollectionBaseView):
     def get_permissions(self):
         if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionaryVersion()]
-        return [HasAccessToVersionedObject()]
+        # deleting or re-evaluating an expansion changes what the version resolves to: an edit of it
+        return [CanEditConceptDictionaryVersion()]
 
     def get_object(self, queryset=None):
         expansion = self.get_queryset().first()
@@ -1470,6 +1482,8 @@ class ReferenceExpressionResolveView(APIView):
 
 
 class CollectionVersionExpansionProcessingView(CollectionVersionExpansionBaseView):
+    writes_content = False  # its POST only clears a processing flag
+
     def get_permissions(self):
         """Checked against the collection version. Clearing the flag needs staff or edit access to it."""
         if self.request.method == 'POST':

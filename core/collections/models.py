@@ -861,13 +861,16 @@ class CollectionReference(models.Model):
         concept_ids = set()
         mapping_ids = set()
         traversed = []
+        viewable_by_version = {}
 
         for concept in concept_queryset:
             concept_uri = drop_version(concept.uri)
             if concept_uri in traversed:
                 continue
             traversed.append(concept_uri)
-            result = concept.cascade(**cascade_params)
+            repo_version = self._get_viewable_cascade_version(
+                concept, cascade_params['repo_version'], viewable_by_version)
+            result = concept.cascade(**{**cascade_params, 'repo_version': repo_version})
             concept_ids.update(set(result['concepts'].values_list('id', flat=True)))
             mapping_ids.update(set(result['mappings'].values_list('id', flat=True)))
 
@@ -875,6 +878,21 @@ class CollectionReference(models.Model):
         mapping_ids.update(set(mapping_queryset.values_list('id', flat=True)))
 
         return Concept.objects.filter(id__in=concept_ids), Mapping.objects.filter(id__in=mapping_ids)
+
+    def _get_viewable_cascade_version(self, concept, repo_version, viewable_by_version):
+        """The repo version a cascade walks (named by label, or the reference's system or value set version), if the
+        reference's creator can view it. A label resolves as the walk would, among the source versions that hold the
+        concept, and must name exactly one. Otherwise None: the walk adds only the concept, as for an unknown label.
+        """
+        if isinstance(repo_version, str):
+            versions = list(concept.sources.filter(version=decode_string(repo_version))[:2])
+            repo_version = versions[0] if len(versions) == 1 else None
+        if not repo_version:
+            return None
+        key = (repo_version.__class__.__name__, repo_version.id)
+        if key not in viewable_by_version:
+            viewable_by_version[key] = repo_version.can_view_all_content(self.created_by)
+        return repo_version if viewable_by_version[key] else None
 
     def get_mappings(self, system_version=None):
         queryset = self.get_resource_queryset_from_system_and_valueset('mappings', system_version)
