@@ -8,13 +8,13 @@ from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from django.db.models import UniqueConstraint, F, Max, Count, Q
+from django.db.models import UniqueConstraint, F, Max, Count, Q, OuterRef, Subquery, Exists
 from django.db.models.functions import Cast
 from django.utils import timezone
 from pydash import get, compact
 
 from core.common.checksums import VersionCompareMixin
-from core.common.constants import HEAD, VERSION_UNCOPYABLE_EXTRAS
+from core.common.constants import HEAD, LATEST, VERSION_UNCOPYABLE_EXTRAS
 from core.common.fields import URIField
 from core.common.models import ConceptContainerModel
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings, \
@@ -220,6 +220,60 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     @staticmethod
     def get_resource_url_kwarg():
         return 'source'
+
+    @classmethod
+    def get_url_versions(cls, mnemonic, version, owner_filters):
+        """
+        The versions a URL under a source answers from: the source's HEAD, and the version the URL names or, for
+        `latest`, the newest released version as well as any version named `latest` (a source with no released
+        version has only its HEAD). None when the source, or the version the URL names, doesn't exist.
+        """
+        head = cls.get_version(mnemonic, HEAD, owner_filters)
+        if not head:
+            return None
+        versions = [head]
+        if version == LATEST:
+            versions += compact([
+                cls.find_latest_released_version_by({**owner_filters, 'mnemonic': mnemonic}),
+                cls.get_version(mnemonic, LATEST, owner_filters)])
+        elif version and version != HEAD:
+            named_version = cls.get_version(mnemonic, version, owner_filters)
+            if not named_version:
+                return None
+            versions.append(named_version)
+        return versions
+
+    @classmethod
+    def get_latest_release_scopes_for(cls, user):
+        """
+        The sources whose latest-release search `user` must see only part of, as (mnemonic, organization mnemonic,
+        username, latest release) of each: sources with a public HEAD and a released version that isn't public (active
+        ones only), owned by someone else. The latest release is the newest released version that isn't retired, as
+        get_latest_released_version picks it, and is None unless it's public, as then nothing of the source shows.
+        A search keeps to that exact release, because the index marks a release's members as latest only some time
+        after it becomes the latest. A private HEAD's content is already private itself, and staff can view every
+        version.
+        """
+        if get(user, 'is_staff'):
+            return []
+        # A version shares its mnemonic and owner with its HEAD. One of organization_id and user_id is NULL, and
+        # NULL never equals, so the OR matches on the owner that is set.
+        same_repo = Q(mnemonic=OuterRef('mnemonic')) & (
+            Q(organization_id=OuterRef('organization_id')) | Q(user_id=OuterRef('user_id')))
+        latest_release = cls.objects.filter(
+            same_repo, is_active=True, released=True, retired=False).order_by('-created_at')
+        public_head = cls.objects.filter(
+            same_repo, is_active=True, version=HEAD, public_access__in=cls.PUBLIC_ACCESS_VALUES)
+        releases = cls.objects.filter(is_active=True, released=True).exclude(version=HEAD).exclude(
+            public_access__in=cls.PUBLIC_ACCESS_VALUES).filter(Exists(public_head)).annotate(
+            latest_version=Subquery(latest_release.values('version')[:1]),
+            latest_access=Subquery(latest_release.values('public_access')[:1]))
+        if get(user, 'is_authenticated'):
+            releases = releases.exclude(user_id=user.id).exclude(organization_id__in=user.organizations.values('id'))
+        rows = releases.values_list(
+            'mnemonic', 'organization__mnemonic', 'user__username', 'latest_version', 'latest_access').distinct()
+        return [(mnemonic, org, username, latest_version if access in cls.PUBLIC_ACCESS_VALUES else None)
+                for mnemonic, org, username, latest_version, access in rows]
 
     @property
     def source(self):

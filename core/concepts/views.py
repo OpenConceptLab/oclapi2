@@ -48,7 +48,7 @@ from core.common.tasks import delete_concept, make_hierarchy
 from core.common.throttling import ThrottleUtil
 from core.common.utils import (generate_temp_version, get_truthy_values, to_int,
                                drop_version, get_falsy_values, parse_id, get_event_metadata)
-from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, SourceVersionListHeadMixin, \
+from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
 from core.concepts.constants import (
     CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY,
@@ -86,7 +86,7 @@ class ConceptBaseView(SourceChildCommonBaseView):
         return ConceptDetailSerializer(obj, data, files, partial, context={'request': self.request})
 
     def get_queryset(self):
-        return Concept.get_base_queryset(self.params)
+        return self.keep_to_viewable_query_versions(Concept.get_base_queryset(self.params))
 
     def set_parent_resource(self, __pop=True):
         parent_resource = None
@@ -95,8 +95,7 @@ class ConceptBaseView(SourceChildCommonBaseView):
         container_version = self.kwargs.pop('version', HEAD) if __pop else self.kwargs.get('version', HEAD)
         filters = self.get_parent_owner_filters()
         if source:
-            from core.sources.models import Source
-            parent_resource = Source.get_version(source, container_version or HEAD, filters)
+            parent_resource = self.get_url_source_version(source, container_version or HEAD, filters)
         if collection:
             from core.collections.models import Collection
             parent_resource = Collection.get_version(collection, container_version or HEAD, filters)
@@ -203,9 +202,7 @@ class ConceptHierarchyMixin:
         return instance.get_hierarchy_related_queryset(relation)
 
 
-class ConceptListView(
-        SourceVersionListHeadMixin, ConceptHierarchyMixin, ConceptBaseView, ListWithHeadersMixin, CreateModelMixin
-):
+class ConceptListView(ConceptHierarchyMixin, ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
     is_page_size_capped = True
     serializer_class = ConceptListSerializer
 
@@ -290,11 +287,19 @@ class ConceptListView(
         return queryset
 
     def _set_source_versions(self):
+        """
+        The source versions a fuzzy search's `source_version` names: each one the requester can view, or 401/403.
+        Expressions that don't resolve to a source version are skipped.
+        """
         from core.sources.models import Source
         source_versions = []
         for version_url in compact((self.request.query_params.dict().get('source_version', '')).split(',')):
-            source_version, _ = Source.resolve_expression_to_version(version_url)
-            if source_version.id:
+            try:
+                source_version, _ = Source.resolve_expression_to_version(version_url)
+            except ValueError:  # an expression that can't be parsed
+                continue
+            if source_version.id and isinstance(source_version, Source):
+                self.check_view_access(self.request, source_version)
                 source_versions.append(source_version)
         self._source_versions = source_versions
 
@@ -306,12 +311,18 @@ class ConceptListView(
         ]
     )
     def get(self, request, *args, **kwargs):
+        self.set_fuzzy_search_targets()
+        self.set_parent_resource(False)
+        return self.list(request, *args, **kwargs)
+
+    def head(self, request, **kwargs):
+        self.set_fuzzy_search_targets()
+        return super().head(request, **kwargs)
+
+    def set_fuzzy_search_targets(self):
         if self.is_fuzzy_search:
             self._set_source_versions()
             self._extra_filters = None
-        self.set_parent_resource(False)
-        self.check_parent_permissions(request)
-        return self.list(request, *args, **kwargs)
 
     def post(self, request, **_):
         self.set_parent_resource()
@@ -360,7 +371,7 @@ class ConceptCollectionMembershipView(ConceptBaseView, ListWithHeadersMixin):
         return CollectionVersionListSerializer
 
     def get_object(self, queryset=None):
-        queryset = Concept.get_base_queryset(self.params)
+        queryset = self.keep_to_viewable_query_versions(Concept.get_base_queryset(self.params))
         if 'concept_version' not in self.kwargs:
             queryset = queryset.filter(id=F('versioned_object_id'))
         instance = queryset.first()

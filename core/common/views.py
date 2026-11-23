@@ -30,6 +30,7 @@ from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_
     CANONICAL_URL_REQUEST_PARAM, CHECKSUMS_PARAM, ACCESS_TYPE_NONE, HTTP_COMPRESS_HEADER
 from core.common.exceptions import Http400
 from core.common.mixins import PathWalkerMixin
+from core.common.permissions import CanViewConceptDictionary
 from core.common.search import CustomESSearch, EXACT_OWNER_FIELD
 from core.common.serializers import RootSerializer
 from core.common.swagger_parameters import all_resource_query_param
@@ -62,6 +63,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     default_qs_sort_attr = '-updated_at'
     facet_class = None
     total_count = 0
+    _latest_release_scopes = None  # exclude_hidden_latest_releases's, read once per request
 
     def get_throttles(self):
         return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
@@ -614,6 +616,27 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             return 'is_latest_version'
         return None
 
+    def exclude_hidden_latest_releases(self, results, latest_attr):
+        """
+        A search of latest releases shows a source's concepts and mappings only from a latest release the requester
+        can view: of a source whose latest release they can't view, nothing; of one with a release they can't view,
+        only the members of its latest release. Hits and facets alike. Other searches are returned as they are.
+        """
+        if latest_attr != 'is_in_latest_source_version':
+            return results
+        from core.sources.models import Source
+        if self._latest_release_scopes is None:  # hits and facets each build a search
+            self._latest_release_scopes = Source.get_latest_release_scopes_for(self.request.user)
+        criterion = None
+        for mnemonic, org, username, latest_version in self._latest_release_scopes:
+            owner_type = ORG_OBJECT_TYPE if org else USER_OBJECT_TYPE
+            criteria = Q('term', source=mnemonic) & Q('term', owner=org or username) & Q(
+                'term', owner_type=owner_type)
+            if latest_version:
+                criteria &= ~Q('term', source_version=latest_version)
+            criterion = criteria if criterion is None else criterion | criteria
+        return results if criterion is None else results.exclude(criterion)
+
     def get_facets(self):  # pylint: disable=too-many-branches
         facets = {}
         parent_repo = None
@@ -866,6 +889,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             latest_attr = self.get_latest_version_filter_field_for_source_child()
             if latest_attr:
                 default_filters[latest_attr] = True
+            results = self.exclude_hidden_latest_releases(results, latest_attr)
 
         for field, value in default_filters.items():
             results = results.filter("term", **{field: value})
@@ -1229,10 +1253,16 @@ class SourceChildCommonBaseView(BaseAPIView):
     permission_classes = (CanViewParentDictionary, )
     is_searchable = True
     default_filters = {}
+    viewable_query_versions = None  # see set_viewable_query_versions
+    url_versions = ()  # the source versions check_source_version_access read
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
         self.__set_params()
+        if request.method in ['GET', 'HEAD']:
+            if 'source' in self.kwargs:
+                self.check_source_version_access(request)
+            self.check_query_source_version_access(request)
 
     def verify_scope(self):
         has_parent_scope = self.has_parent_scope()
@@ -1260,37 +1290,121 @@ class SourceChildCommonBaseView(BaseAPIView):
             limit = self.limit if self.params.get(LIMIT_PARAM) else self.cap_limit(LIST_DEFAULT_LIMIT)
             self.limit = to_int(CSV_DEFAULT_LIMIT if self.params.get('csv') else limit, LIST_DEFAULT_LIMIT)
 
-    def get_parent_owner_filters(self):
-        """The owner of the repository in the URL, as filters on Source or Collection."""
+    def get_parent_owner_filters(self, params=None):
+        """
+        The owner of the repository in the URL, as filters on Source or Collection. Given `params` (the URL's, with
+        the query string's over them), the owner they name; none when they name no owner, as the reads under them
+        then match every owner's.
+        """
+        if params is not None:
+            if params.get('org'):
+                return {'organization__mnemonic': params['org']}
+            return {'user__username': params['user']} if params.get('user') else {}
         if 'org' in self.kwargs:
             return {'organization__mnemonic': self.kwargs['org']}
         username = self.request.user.username if self.user_is_self else self.kwargs.get('user')
         return {'user__username': username}
 
-    def check_parent_permissions(self, request):
-        """
-        A list of a source version's concepts or mappings answers only to those who can view that version. For
-        `latest`, that's the newest released version, which the list and its search answer from, as well as any
-        version named `latest`.
-        """
-        parents = [self.parent_resource]
-        if self.kwargs.get('version') == LATEST and 'source' in self.kwargs:
-            from core.sources.models import Source
-            parents.append(Source.find_latest_released_version_by(
-                {**self.get_parent_owner_filters(), 'mnemonic': self.kwargs['source']}))
-        for parent in compact(parents):
-            self.check_object_permissions(request, parent)
+    def check_view_access(self, request, repo_version):
+        """401 or 403 unless the requester can view this repository version, as its own lists answer."""
+        if not CanViewConceptDictionary().has_object_permission(request, self, repo_version):
+            self.permission_denied(request)
 
+    def check_source_version_access(self, request):
+        """
+        Every read under a source (lists, items, their versions, mappings and hierarchy, searched or not) answers as
+        the source version the URL names: 404 when the source or the named version doesn't exist, then 401 or 403
+        unless the requester can view the source and that version. For `latest`, that's the newest released
+        version, which the reads answer from, as well as any version named `latest`; a source with no released
+        version has only its HEAD to check. The URL can name several sources, separated by commas, as the reads
+        match each: 404 unless each exists, then 401 or 403 unless the requester can view each. Item-level checks
+        still follow.
+        """
+        from core.sources.models import Source
+        mnemonics = list(dict.fromkeys(compact(self.kwargs['source'].split(','))))  # each once
+        if not mnemonics:
+            raise Http404()
+        self.url_versions = []
+        for mnemonic in mnemonics:
+            repo_versions = Source.get_url_versions(
+                mnemonic, self.kwargs.get('version'), self.get_parent_owner_filters())
+            if repo_versions is None:
+                raise Http404()
+            self.url_versions += repo_versions
+        for repo_version in self.url_versions:
+            self.check_view_access(request, repo_version)
 
-class SourceVersionListHeadMixin:
-    """HEAD on a source version's concept or mapping list: GET's access check, then the filtered count as before."""
-    def head(self, request, **kwargs):
-        self.set_parent_resource(False)
-        self.check_parent_permissions(request)
-        # the count reads the filtered queryset, not the parent version's page
-        self.kwargs.pop('parent_resource', None)
-        self.parent_resource = None
-        return super().head(request, **kwargs)
+    def get_url_source_version(self, mnemonic, version, owner_filters):
+        """Source.get_version, from the versions check_source_version_access read when it's one of them."""
+        from core.sources.models import Source
+        return next((repo_version for repo_version in self.url_versions if (
+            repo_version.mnemonic, repo_version.version) == (mnemonic, version)), None) or Source.get_version(
+            mnemonic, version, owner_filters)
+
+    def check_query_source_version_access(self, request):
+        """
+        The query string can name the source, its owner and its version over the URL's, and the reads then answer
+        from those. When it names a version other than HEAD this way, each source it names (commas separate
+        several) answers as check_source_version_access does for the URL's: 404 unless the source and that version
+        exist under the owner it names, then 401 or 403 unless the requester can view both. A source that doesn't
+        exist there has nothing to read (a search reads the name as a facet), so it's skipped. `latest` is the
+        newest released version, as the reads resolve it. With no owner (none in the URL, or an empty `org`), see
+        set_viewable_query_versions. On a collection's route, the URL's version is the collection's, left to its
+        own checks. HEAD's own content carries its access, so reads of it are checked where they're made.
+        """
+        from core.sources.models import Source
+        params = self.params or {}
+        version = params.get('version')
+        if not params.get('source') or version in [None, HEAD]:
+            return
+        owner_filters = self.get_parent_owner_filters(params)
+        url_repo = 'source' if 'source' in self.kwargs else 'collection'
+        if (version, params.get(url_repo), owner_filters) == (
+                self.kwargs.get('version'), self.kwargs.get(url_repo), self.get_parent_owner_filters()):
+            return  # the URL's own version, checked already
+        mnemonics = list(dict.fromkeys(compact(params['source'].split(','))))  # each once
+        if not owner_filters:
+            self.set_viewable_query_versions(request, mnemonics, version)
+            return
+        for mnemonic in mnemonics:
+            head = Source.get_version(mnemonic, HEAD, owner_filters)
+            if not head:
+                continue
+            repo_version = Source.find_latest_released_version_by(
+                {**owner_filters, 'mnemonic': mnemonic}) if version == LATEST else Source.get_version(
+                mnemonic, version, owner_filters)
+            if not repo_version and version != LATEST:
+                raise Http404()
+            for viewed in compact([head, repo_version]):
+                self.check_view_access(request, viewed)
+
+    def set_viewable_query_versions(self, request, mnemonics, version):
+        """
+        With no owner named, the reads answer from the version the query string names under every owner's source of
+        that name. They keep to the ones the requester can view, leaving out the others (not refusing them, which
+        would show that they exist), and a source answers 404 unless one owner's is left. A renamed source's versions
+        keep their old name, so they're left out too. `latest` resolves to no release without an owner, so those
+        reads find nothing.
+        """
+        if version == LATEST:
+            return
+        from core.sources.models import Source
+        viewable_versions = []
+        for mnemonic in mnemonics:
+            viewable = [repo_version for repo_version in Source.objects.filter(mnemonic=mnemonic, version=version)
+                        if repo_version.has_view_access(request.user)]
+            if not viewable:
+                raise Http404()
+            viewable_versions += viewable
+        self.viewable_query_versions = viewable_versions
+
+    def keep_to_viewable_query_versions(self, queryset):
+        """The reads' concepts or mappings, kept to the members of the versions set_viewable_query_versions found."""
+        if self.viewable_query_versions is None:
+            return queryset
+        return queryset.filter(
+            id__in=queryset.model.objects.filter(sources__in=self.viewable_query_versions).values('id'))
+
 
 class SourceChildExtrasBaseView:
     default_qs_sort_attr = '-created_at'
