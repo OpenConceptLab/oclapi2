@@ -7,6 +7,7 @@ from core.collections.health import (
     UNATTRIBUTED, EMPTY, UNHEALTHY, HEAD_RESOLVED, HEALTHY)
 from core.collections.models import CollectionReference, Expansion
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
+from core.common.tasks import seed_children_to_new_version
 from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory
 from core.mappings.tests.factories import MappingFactory
@@ -338,3 +339,93 @@ class ExpansionHealthTest(OCLTestCase):
             return len(context.captured_queries)
 
         self.assertEqual(count_queries(2), count_queries(6))
+
+
+class ExpansionHealthStorageTest(OCLTestCase):
+    def setUp(self):
+        super().setUp()
+        self.collection = OrganizationCollectionFactory()
+        self.expansion = Expansion.persist(index=False, collection_version=self.collection, mnemonic='autoexpand-HEAD')
+        self.collection.expansion_uri = self.expansion.uri
+        self.collection.save()
+
+    def add(self, *concepts):
+        self.collection.add_expressions(
+            {'expressions': [concept.uri for concept in concepts]}, self.collection.created_by)
+
+    def stored(self):
+        return Expansion.objects.values_list('health', 'health_is_current').get(id=self.expansion.id)
+
+    def test_build_stores_health(self):
+        health, is_current = self.stored()
+        self.assertTrue(is_current)
+        self.assertEqual(health['state'], EMPTY)
+        self.assertEqual(health['rules_version'], 1)
+
+    def test_adding_references_recomputes_health(self):
+        self.add(ConceptFactory())
+
+        health, is_current = self.stored()
+        self.assertTrue(is_current)
+        self.assertNotEqual(health['state'], EMPTY)
+
+    def test_removing_references_recomputes_health(self):
+        concept = ConceptFactory()
+        self.add(concept)
+
+        self.collection.delete_references([concept.uri])
+
+        health, is_current = self.stored()
+        self.assertTrue(is_current)
+        self.assertEqual(health['state'], EMPTY)
+
+    def test_one_add_of_many_references_recomputes_once(self):
+        with patch.object(ExpansionHealth, 'compute', return_value={'state': HEALTHY}) as compute:
+            self.add(ConceptFactory(), ConceptFactory(), ConceptFactory())
+
+        compute.assert_called_once()
+
+    def test_an_expansion_already_out_of_date_queues_no_second_recompute(self):
+        Expansion.objects.filter(id=self.expansion.id).update(health_is_current=False)
+
+        with patch.object(ExpansionHealth, 'compute') as compute:
+            self.add(ConceptFactory())
+
+        compute.assert_not_called()
+        self.assertFalse(self.stored()[1])
+
+    def test_toggle_off_writes_no_health(self):
+        with patch.object(Expansion, 'is_health_on', return_value=False):
+            expansion = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+            self.add(ConceptFactory())
+
+        self.assertEqual(
+            Expansion.objects.values_list('health', 'health_is_current').get(id=expansion.id), (None, None))
+
+    def test_a_failure_leaves_health_out_of_date_and_the_build_done(self):
+        with patch.object(ExpansionHealth, 'compute', side_effect=ValueError('boom')):
+            expansion = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+
+        expansion.refresh_from_db()
+        self.assertFalse(expansion.is_processing)
+        self.assertEqual((expansion.health, expansion.health_is_current), (None, False))
+
+    def test_a_save_from_an_older_copy_keeps_the_health(self):
+        older = Expansion.objects.get(id=self.expansion.id)
+        Expansion.objects.filter(id=self.expansion.id).update(health={'state': HEALTHY}, health_is_current=True)
+
+        older.save()
+
+        self.assertEqual(self.stored(), ({'state': HEALTHY}, True))
+
+    @patch('core.common.tasks.export_collection')
+    def test_version_created_from_head_stores_health(self, _):
+        self.add(ConceptFactory())
+        version = OrganizationCollectionFactory(
+            organization=self.collection.organization, version='v1', mnemonic=self.collection.mnemonic)
+
+        seed_children_to_new_version('collection', version.id, False)  # pylint: disable=no-value-for-parameter
+
+        version.refresh_from_db()
+        self.assertTrue(version.expansion.health_is_current)
+        self.assertIsNotNone(version.expansion.health['state'])

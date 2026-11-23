@@ -493,6 +493,15 @@ def seed_children_to_expansion(expansion_id, index=True, force_reevaluate=False)
     if expansion:
         expansion.seed_children(index=index, force_reevaluate=force_reevaluate)
         expansion.clear_processing(True)
+        expansion.update_health()
+
+
+@app.task(ignore_result=True)
+def compute_expansion_health(expansion_id):
+    from core.collections.models import Expansion
+    expansion = Expansion.objects.filter(id=expansion_id).first()
+    if expansion:
+        expansion.update_health()
 
 
 @app.task
@@ -1171,6 +1180,8 @@ def readd_references_to_expansion_on_references_removal(expansion_id, removed_re
     if expansion and removed_reference_ids:
         reference_to_readd = expansion.collection_version.references.exclude(id__in=removed_reference_ids)
         expansion.add_references(reference_to_readd, True, True, False)
+        # re-adding changes members after the removal marked them, so its own recompute may have read them early
+        expansion.mark_health_out_of_date()
         current = Task.objects.filter(id=get(current_task, 'request.id')).first()
         if current:
             current.clear_superseded_readd_references_tasks()

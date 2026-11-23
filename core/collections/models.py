@@ -1,3 +1,4 @@
+import logging
 import time
 from contextlib import nullcontext
 
@@ -19,7 +20,8 @@ from core.collections.constants import (
     TRANSFORM_TO_RESOURCE_VERSIONS, COLLECTION_REFERENCE_TYPE, TRANSFORM_TO_EXTENSIONAL,
     RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE, UNRESOLVED_RESOURCE_VERSION_TYPE,
     INTENSIONAL_REFERENCE_RESOURCE_VERSIONS_TOGGLE, EXPANSION_LOCKED_REPO_VERSION_TOGGLE, VERSION_EXPANSION_LOCK,
-    VERSION_EXPANSION_LATEST, REFERENCE_FOUND_NOTHING, REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS)
+    VERSION_EXPANSION_LATEST, REFERENCE_FOUND_NOTHING, REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS,
+    EXPANSION_HEALTH_TOGGLE, EXPANSION_HEALTH_DEBOUNCE_SECONDS)
 from core.collections.parsers import CollectionReferenceParser
 from core.collections.translators import CollectionReferenceTranslator
 from core.collections.utils import is_concept, is_mapping
@@ -33,7 +35,7 @@ from core.common.es import ESScript
 from core.common.models import ConceptContainerModel, BaseResourceModel
 from core.common.search import CustomESSearch
 from core.common.tasks import seed_children_to_expansion, batch_index_resources, index_expansion_concepts, \
-    index_expansion_mappings, readd_references_to_expansion_on_references_removal
+    index_expansion_mappings, readd_references_to_expansion_on_references_removal, compute_expansion_health
 from core.common.utils import drop_version, to_owner_uri, generate_temp_version, es_id_in, \
     get_resource_class_from_resource_name, to_snake_case, \
     es_to_pks, id_batches, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
@@ -48,6 +50,7 @@ from core.url_registry.constants import URL_REGISTRY_IN_RESOLVE_REFERENCE_TOGGLE
 
 TRUTHY = get_truthy_values()
 FALSEY = get_falsy_values()
+logger = logging.getLogger('oclapi')
 
 
 class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
@@ -299,7 +302,10 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 added_references.append(reference)
 
         if self.expansion_uri:
-            self.expansion.add_references(added_references)
+            expansion = self.expansion
+            expansion.add_references(added_references)
+            if added_references:
+                expansion.mark_health_out_of_date()
         self.__dict__.pop('locked_source_versions', None)
         self.__dict__.pop('locked_collection_versions', None)
         if user and user.is_authenticated:
@@ -329,9 +335,12 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         if expressions == ALL:  # Deprecated: Old way
             # one transaction, so no one sees the expansion emptied while the references remain
             with CollectionReference.atomic_when_locked():
-                if self.expansion_uri:
-                    self.expansion.delete_expressions(expressions)
+                expansion = self.expansion if self.expansion_uri else None
+                if expansion:
+                    expansion.delete_expressions(expressions)
                 self.references.all().delete()
+                if expansion:
+                    expansion.mark_health_out_of_date()
             return
 
         self.remove_references(self.references.filter(expression__in=expressions))
@@ -339,9 +348,12 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     def remove_references(self, references):
         """Members and references go in one transaction, so no one sees one gone without the other"""
         with CollectionReference.atomic_when_locked():
-            if self.expansion_uri:
-                self.expansion.delete_references(references)
+            expansion = self.expansion if self.expansion_uri else None
+            if expansion:
+                expansion.delete_references(references)
             references.delete()
+            if expansion:
+                expansion.mark_health_out_of_date()
 
     def get_cascaded_mapping_uris_from_concept_expressions(self, expressions):
         mapping_uris = []
@@ -425,6 +437,7 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 self.refresh_from_db()
                 self.__dict__.pop('locked_source_versions', None)
                 self.__dict__.pop('locked_collection_versions', None)
+        expansion.update_health()
         if index:
             expansion.index_resources(
                 list(expansion.concepts.values_list('id', flat=True)),
@@ -1587,6 +1600,10 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
     built_with = models.CharField(
         max_length=10, null=True, blank=True,
         choices=[(choice, choice) for choice in (VERSION_EXPANSION_LOCK, VERSION_EXPANSION_LATEST)])
+    # the summary core.collections.health computes (null: never computed), and whether it matches the members now
+    health = models.JSONField(null=True, blank=True)
+    health_is_current = models.BooleanField(null=True, blank=True)
+    HEALTH_FIELDS = ('health', 'health_is_current')
 
     @property
     def is_head(self):
@@ -2474,6 +2491,51 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             'collection_url': [self.collection_version_url],
             'collection_owner_url': [self.owner_url],
         }
+
+    def save(self, *args, force_insert=False, force_update=False, using=None, update_fields=None):
+        if update_fields is None and not force_insert and not self._state.adding:
+            # health is written only by its own updates, so a save from an older copy can't undo them
+            update_fields = [
+                field.name for field in self._meta.concrete_fields
+                if not field.primary_key and field.name not in self.HEALTH_FIELDS]
+        super().save(*args, force_insert=force_insert, force_update=force_update, using=using,
+                     update_fields=update_fields)
+
+    @staticmethod
+    def is_health_on():
+        return bool(Toggle.get(EXPANSION_HEALTH_TOGGLE))
+
+    def update_health(self):
+        """Computes and saves the health summary. A failure is logged and leaves it out of date; it never fails
+        the build that called it"""
+        if not self.is_health_on():
+            return None
+        from core.collections.health import ExpansionHealth
+        # current from here: a change while it computes marks it out of date again and queues another run
+        Expansion.objects.filter(id=self.id).update(health_is_current=True)
+        try:
+            health = ExpansionHealth(self).compute()
+        except Exception:  # pylint: disable=broad-except
+            logger.exception('Expansion health failed for %s', self.uri)
+            Expansion.objects.filter(id=self.id).update(health_is_current=False)
+            return None
+        Expansion.objects.filter(id=self.id).update(health=health)
+        self.health = health
+        return health
+
+    def mark_health_out_of_date(self):
+        """Marks the health out of date and queues one recompute, however many changes follow before it runs"""
+        if not self.is_health_on():
+            return
+        self.health_is_current = False
+        if not Expansion.objects.filter(id=self.id).exclude(health_is_current=False).update(health_is_current=False):
+            return  # already out of date, so a recompute is queued
+        if get(settings, 'TEST_MODE', False):
+            compute_expansion_health(self.id)
+        else:
+            expansion_id = self.id
+            transaction.on_commit(lambda: compute_expansion_health.apply_async(
+                (expansion_id,), queue='default', countdown=EXPANSION_HEALTH_DEBOUNCE_SECONDS))
 
     def clear_processing(self, full_save=False):
         if self.is_processing:
