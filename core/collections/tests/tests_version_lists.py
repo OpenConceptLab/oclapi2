@@ -179,6 +179,32 @@ class ExpansionVersionListsTest(OCLTestCase):
         self.assertEqual(report['loses_lock'], [])
         self.assertFalse(report['changed'])
 
+    def test_versionless_reference_keeps_its_lock_over_a_newer_version_another_reference_names(self):
+        self.reference([self.member])
+        self.reference([self.member], version='v2')
+        self.expansion.evaluated_source_versions.set([self.v1])
+        self.expansion.explicit_source_versions.set([self.v2])
+
+        lists = self.rebuild()
+        report = lists.to_report()
+
+        self.assertEqual(self.ids(lists, 'evaluated_source_versions'), {self.v1.id})
+        self.assertEqual(self.ids(lists, 'explicit_source_versions'), {self.v2.id})
+        self.assertEqual(report['changes_lock'], [])
+        self.assertFalse(report['changed'])
+
+    def test_a_lock_moving_to_another_version_is_reported(self):
+        self.member.sources.remove(self.v1)
+        self.reference([self.member])
+        self.expansion.evaluated_source_versions.set([self.v1])
+        self.expansion.explicit_source_versions.set([self.v2])
+
+        report = self.rebuild().to_report()
+
+        self.assertEqual(report['after']['evaluated_source_versions'], [self.v2.uri])
+        self.assertEqual(report['changes_lock'], [drop_version(self.v1.uri)])
+        self.assertEqual((report['gains_lock'], report['loses_lock']), ([], []))
+
     def test_mapping_members_are_judged_like_concepts(self):
         mapping = MappingFactory(parent=self.source).get_latest_version()
         mapping.sources.add(self.v1)

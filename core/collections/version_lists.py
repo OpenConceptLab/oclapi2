@@ -18,7 +18,8 @@ RULE = (
     'A reference naming a repo version records it as explicit. A resource-versioned reference records as explicit '
     'the version holding its resource version: one the expansion already records, else the one adding it picks. '
     'A version-less reference records as evaluated the version its members came from: when members sit in several '
-    'versions of the repo, a version the expansion already records that holds all of them (newest first), else the '
+    'versions of the repo, a version the expansion already records that holds all of them (those in the list the '
+    'reference reads first, then the others, each newest first), else the '
     'newest live release holding all of them, else HEAD. When no one version holds them all, it records the '
     'recorded versions that between them hold the most, newest first, each adding members the newer ones lack. A '
     'reference with no members, or none held by a recorded version, keeps what the expansion records for its repo, '
@@ -47,11 +48,13 @@ class ExpansionVersionLists:
         return sorted(versions, key=lambda version: (version.created_at, version.id), reverse=True)
 
     def recorded_versions_of(self, relations, repo_uri):
-        versions = {
-            version.id: version for relation in relations for version in self.before[relation]
-            if drop_version(version.uri) == repo_uri
-        }
-        return self.newest_first(versions.values())
+        """The repo's recorded versions, list by list in the order given, each newest first"""
+        versions = {}
+        for relation in relations:
+            for version in self.newest_first(
+                    [version for version in self.before[relation] if drop_version(version.uri) == repo_uri]):
+                versions.setdefault(version.id, version)
+        return list(versions.values())
 
     def get_head(self, version):
         if version.id not in self._heads:
@@ -335,28 +338,38 @@ class ExpansionVersionLists:
                 holder.id: self.get_held_by_valueset(holder, reference) for holder in recorded}), relations, repo_uri)
 
     def valueset_holds(self, valueset_version, reference, total):
-        return len(self.get_held_by_valueset(valueset_version, reference)) == total
+        return sum(
+            rows.values(f'{field}_id').distinct().count()
+            for field, rows in self.get_rows_held_by_valueset(valueset_version, reference)) == total
 
     def get_held_by_valueset(self, valueset_version, reference):
         """The reference's members the value set version's default expansion holds"""
+        return {
+            (field, member_id) for field, rows in self.get_rows_held_by_valueset(valueset_version, reference)
+            for member_id in rows.values_list(f'{field}_id', flat=True)}
+
+    def get_rows_held_by_valueset(self, valueset_version, reference):
         expansion_id = self.get_expansion_id(valueset_version)
         if not expansion_id:
-            return set()
-        held = set()
+            return []
+        rows = []
         for through, field in ((ReferencedConcept, 'concept'), (ReferencedMapping, 'mapping')):
             member_through = getattr(Expansion, f'{field}s').through
-            held |= {(field, member_id) for member_id in self.member_rows(
-                through, field, [reference.id], reference.include).filter(Exists(member_through.objects.filter(
-                    expansion_id=expansion_id, **{f'{field}_id': OuterRef(f'{field}_id')}))
-            ).values_list(f'{field}_id', flat=True)}
-        return held
+            rows.append((field, self.member_rows(through, field, [reference.id], reference.include).filter(Exists(
+                member_through.objects.filter(expansion_id=expansion_id, **{f'{field}_id': OuterRef(f'{field}_id')})
+            ))))
+        return rows
 
     def get_uris(self, lists):
         return {relation: sorted({version.uri for version in versions}) for relation, versions in lists.items()}
 
     @staticmethod
-    def get_repo_uris(uris):
-        return {drop_version(uri) for uri in uris}
+    def get_locks(uris):
+        """Per locked repo, its evaluated versions"""
+        locks = {}
+        for uri in uris:
+            locks.setdefault(drop_version(uri), set()).add(uri)
+        return locks
 
     def get_member_summary(self):
         summary = {}
@@ -373,8 +386,9 @@ class ExpansionVersionLists:
             removed = sorted(set(before[relation]) - set(after[relation]))
             if added or removed:
                 changes[relation] = {'added': added, 'removed': removed}
-        locked_before = self.get_repo_uris([*before[EVALUATED_SOURCES], *before[EVALUATED_COLLECTIONS]])
-        locked_after = self.get_repo_uris([*after[EVALUATED_SOURCES], *after[EVALUATED_COLLECTIONS]])
+        locks_before = self.get_locks([*before[EVALUATED_SOURCES], *before[EVALUATED_COLLECTIONS]])
+        locks_after = self.get_locks([*after[EVALUATED_SOURCES], *after[EVALUATED_COLLECTIONS]])
+        locked_before, locked_after = set(locks_before), set(locks_after)
         collection_version = self.expansion.collection_version
         return {
             'expansion': self.expansion.uri,
@@ -386,6 +400,8 @@ class ExpansionVersionLists:
             'changes': changes,
             'gains_lock': sorted(locked_after - locked_before),
             'loses_lock': sorted(locked_before - locked_after),
+            'changes_lock': sorted(
+                repo for repo in locked_before & locked_after if locks_before[repo] != locks_after[repo]),
             'in_both': sorted(
                 (set(after[EXPLICIT_SOURCES]) & set(after[EVALUATED_SOURCES])) |
                 (set(after[EXPLICIT_COLLECTIONS]) & set(after[EVALUATED_COLLECTIONS]))),

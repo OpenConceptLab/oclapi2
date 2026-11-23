@@ -75,7 +75,7 @@ class Command(BaseCommand):
     def count(self, report):
         self.totals['expansions'] += 1
         self.totals['changed' if report['changed'] else 'unchanged'] += 1
-        for key in ('gains_lock', 'loses_lock', 'in_both'):
+        for key in ('gains_lock', 'loses_lock', 'changes_lock', 'in_both'):
             if report[key]:
                 self.totals[f'with_{key}'] += 1
         notes = report['references']
@@ -94,7 +94,7 @@ class Command(BaseCommand):
         else:
             summary = {relation: f'+{len(change["added"])} -{len(change["removed"])}'
                        for relation, change in report['changes'].items()}
-            flags = [key for key in ('gains_lock', 'loses_lock', 'in_both') if report[key]]
+            flags = [key for key in ('gains_lock', 'loses_lock', 'changes_lock', 'in_both') if report[key]]
             self.stdout.write(f'{report["expansion"]}: {json.dumps(summary)} {" ".join(flags)}'.rstrip())
         if self.options['output']:
             with open(self.options['output'], 'a', encoding='utf-8') as file:
