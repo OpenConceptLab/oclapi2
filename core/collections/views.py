@@ -777,7 +777,7 @@ class CollectionReferenceConversionsPreviewView(CollectionReferenceConversionsBa
             return Response(
                 {'ids': [f'a list of at most {MAX_REFERENCES} reference ids, or "*"']},
                 status=status.HTTP_400_BAD_REQUEST)
-        data = ReferenceConversions(collection).preview(references)
+        data = ReferenceConversions(collection, request.user).preview(references)
         following = offset + len(references)
         data['summary'].update(total=total, offset=offset, next_offset=following if following < total else None)
         return Response(data)

@@ -3,6 +3,7 @@ from mock import patch
 from core.collections.models import Collection, CollectionReference, Expansion
 from core.collections.reference_conversions import ReferenceConversions
 from core.collections.tests.factories import OrganizationCollectionFactory
+from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLAPITestCase
 from core.concepts.tests.factories import ConceptFactory
 from core.mappings.tests.factories import MappingFactory
@@ -73,6 +74,11 @@ class ReferenceConversionsTest(OCLAPITestCase):
         self.assertEqual(item['unversioned']['repo_version'], self.v2.uri)
         self.assertEqual(item['unversioned']['members'], [self.new.uri])
         self.assertFalse(item['unversioned']['keeps_members'])
+        self.assertEqual(
+            {key: item['unversioned'][key] for key in ('added', 'removed', 'added_count', 'removed_count')},
+            {'added': [self.new.uri], 'removed': [self.old.uri], 'added_count': 1, 'removed_count': 1})
+        self.assertTrue(item['unversioned']['creates_lock'])
+        self.assertNotIn('creates_lock', item['repo_versioned'])
         self.assertEqual(data['summary']['repo_versioned_keeps_all'], True)
         self.assertEqual(data['summary']['unversioned_keeps_all'], False)
 
@@ -84,6 +90,36 @@ class ReferenceConversionsTest(OCLAPITestCase):
         self.assertEqual(item['unversioned']['repo_version'], self.v1.uri)
         self.assertEqual(item['unversioned']['chosen_by'], 'lock')
         self.assertTrue(item['unversioned']['keeps_members'])
+        self.assertFalse(item['unversioned']['creates_lock'])
+
+    def test_preview_lists_at_most_a_few_members_and_counts_them_all(self):
+        with patch('core.collections.reference_conversions.MAX_MEMBERS_LISTED', 0):
+            item = self.preview([self.reference.id])['results'][0]
+
+        self.assertEqual((item['members'], item['members_count']), ([], 1))
+        self.assertEqual((item['unversioned']['added'], item['unversioned']['added_count']), ([], 1))
+
+    def test_preview_evaluates_as_the_requester(self):
+        private = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        concept = ConceptFactory(parent=private, mnemonic='p1').get_latest_version()
+        release = OrganizationSourceFactory(
+            mnemonic=private.mnemonic, organization=private.organization, version='v1', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        concept.sources.add(release)
+        reference = self.add(concept.uri)
+        editor = UserProfileFactory()
+        self.collection.organization.members.add(editor)
+
+        response = self.client.post(
+            self.url('preview/'), {'ids': [reference.id]}, HTTP_AUTHORIZATION=f'Token {editor.get_token()}',
+            format='json')
+
+        self.assertEqual(response.status_code, 200)
+        item = response.data['results'][0]
+        self.assertEqual(item['repo_versioned']['members'], [])
+        self.assertFalse(item['repo_versioned']['keeps_members'])
+        # what's brought in is judged as the editor: nothing from a source they can't view
+        self.assertEqual((item['unversioned']['members'], item['unversioned']['added']), ([], []))
 
     def test_repo_versioned_conversion_prefers_a_version_the_expansion_records(self):
         self.old.sources.add(self.v2)

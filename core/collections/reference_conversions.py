@@ -7,6 +7,7 @@ REPO_VERSIONED = 'repo_versioned'
 UNVERSIONED = 'unversioned'
 CONVERSIONS = (REPO_VERSIONED, UNVERSIONED)
 MAX_REFERENCES = 500
+MAX_MEMBERS_LISTED = 25
 
 
 class ConversionFailed(Exception):
@@ -19,8 +20,10 @@ class ReferenceConversions:
     """What converting a HEAD collection's resource-versioned references to repo-versioned or unversioned ones would
     bring in, and the conversion itself. Only HEAD is changed; released collection versions stay as they are"""
 
-    def __init__(self, collection):
+    def __init__(self, collection, user):
         self.collection = collection
+        # converted references are evaluated as the requester, as the conversion adds them
+        self.user = user
         self.expansion = collection.expansion
         self.namespace = Expansion.get_system_version_namespace(collection.parent_url)
         self._holders = {}
@@ -124,7 +127,7 @@ class ReferenceConversions:
     def build(self, reference, version=None):
         """The reference a conversion makes: the same options, naming version or none, and no resource version"""
         converted = CollectionReference(
-            reference_type=reference.reference_type, created_by=reference.created_by, filter=reference.filter,
+            reference_type=reference.reference_type, created_by=self.user, filter=reference.filter,
             display=reference.display, namespace=reference.namespace, code=reference.code,
             system=self.get_unversioned_system(reference.system), version=version.version if version else None,
             valueset=reference.valueset, cascade=reference.cascade, include=reference.include,
@@ -180,7 +183,7 @@ class ReferenceConversions:
         reason = self.get_unsupported_reason(reference)
         if reason:
             return {**item, 'supported': False, 'reason': reason}
-        item.update({'supported': True, 'members': now})
+        item.update({'supported': True, 'members_count': len(now), 'members': now})
         for conversion in CONVERSIONS:
             result = self.get_conversion(reference, conversion, references)
             if not result:
@@ -190,12 +193,18 @@ class ReferenceConversions:
             would = self.evaluate(converted, version)
             item[conversion] = {
                 'expression': converted.expression, 'repo_version': version.uri, 'chosen_by': chosen_by,
-                'members': would, 'keeps_members': would == now}
+                'keeps_members': would == now, 'members_count': len(would), 'members': would,
+                'added_count': len(would - now), 'added': would - now,
+                'removed_count': len(now - would), 'removed': now - would}
+            if conversion == UNVERSIONED:
+                # adding a version-less reference records the version it resolved to as the collection's lock
+                item[conversion]['creates_lock'] = chosen_by != 'lock'
         return item
 
     @staticmethod
     def to_urls(results):
-        """Replaces the member ids in results with their URLs, two queries for all of them"""
+        """Replaces the member ids in results with their URLs, two queries for all of them. Each list names at most
+        MAX_MEMBERS_LISTED; its count says how many there are"""
         from core.concepts.models import Concept
         from core.mappings.models import Mapping
         member_sets = []
@@ -203,10 +212,14 @@ class ReferenceConversions:
             if item['supported']:
                 member_sets.append(item)
                 member_sets += [item[conversion] for conversion in CONVERSIONS if item[conversion]]
+        keys = ('members', 'added', 'removed')
         ids = {'concept': set(), 'mapping': set()}
         for holder in member_sets:
-            for field, member_id in holder['members']:
-                ids[field].add(member_id)
+            for key in keys:
+                if key in holder:
+                    holder[key] = sorted(holder[key])[:MAX_MEMBERS_LISTED]
+                    for field, member_id in holder[key]:
+                        ids[field].add(member_id)
         urls = {}
         for field, klass in (('concept', Concept), ('mapping', Mapping)):
             if ids[field]:
@@ -214,19 +227,22 @@ class ReferenceConversions:
                     (field, member_id): uri
                     for member_id, uri in klass.objects.filter(id__in=ids[field]).values_list('id', 'uri')})
         for holder in member_sets:
-            holder['members'] = sorted(urls[member] for member in holder['members'] if member in urls)
+            for key in keys:
+                if key in holder:
+                    holder[key] = sorted(urls[member] for member in holder[key] if member in urls)
 
     def plan(self, conversions):
         """Per conversion its result so far, the references that go, and the new ones by expression"""
         ids = [item['id'] for item in conversions]
         references = {
             reference.id: self.prime(reference) for reference in self.collection.references.filter(id__in=ids)}
+        all_references = list(references.values())
         results, old_ids, new_references = [], [], {}
         for item in conversions:
             reference = references.get(item['id'])
             result = {'id': item['id'], 'to': item['to']}
             reason = self.get_unsupported_reason(reference) if reference else 'not in this collection'
-            conversion = None if reason else self.get_conversion(reference, item['to'], list(references.values()))
+            conversion = None if reason else self.get_conversion(reference, item['to'], all_references)
             if not reason and not conversion:
                 reason = 'no version holds its resource version' if item['to'] == REPO_VERSIONED else \
                     'its system does not resolve'

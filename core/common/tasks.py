@@ -224,7 +224,7 @@ def convert_references(self, user_id, collection_id, conversions):
         return {'refusal': refusal}
     collection.add_processing(self.request.id)
     try:
-        return {'results': ReferenceConversions(collection).convert(conversions, user)}
+        return {'results': ReferenceConversions(collection, user).convert(conversions, user)}
     finally:
         collection.remove_processing(self.request.id)
 
