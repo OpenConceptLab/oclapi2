@@ -4158,12 +4158,11 @@ class ExpansionTest(OCLTestCase):
                 expression=f"{system.rstrip('/')}/concepts/c1/", collection=collection, system=system, code='c1')
             return reference.get_evaluated_repo_version_urls(expansion, user)
 
-        self.assertEqual(evaluated_urls(f'{source.uri}v3/'), [f'{source.uri}v3/'])
-        self.assertEqual(evaluated_urls(private.uri), [private.uri])
-        self.assertEqual(evaluated_urls(f'{source.uri}v3'), [f'{source.uri}v3'])
-        self.assertEqual(evaluated_urls(private.uri.rstrip('/')), [private.uri.rstrip('/')])
-        # versionless, it names the release the expansion recorded, whatever newer release it can't view exists
-        self.assertEqual(evaluated_urls(source.uri), [recorded.uri])
+        for suffix in ('', '?q=a/b/'):  # the resolver drops the query string
+            for system in (f'{source.uri}v3', f'{source.uri}v3/', private.uri.rstrip('/'), private.uri):
+                self.assertEqual(evaluated_urls(system + suffix), [system + suffix])
+            # versionless, it names the release the expansion recorded, whatever newer release it can't view exists
+            self.assertEqual(evaluated_urls(source.uri + suffix), [recorded.uri])
 
     def test_rebuild_with_filter_reference_under_release_adds_its_resource_versions(self):
         source, release, _, concept_version = CollectionReferenceTest.released_source_with_concepts()

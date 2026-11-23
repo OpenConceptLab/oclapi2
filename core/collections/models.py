@@ -38,7 +38,7 @@ from core.common.utils import drop_version, to_owner_uri, generate_temp_version,
     get_resource_class_from_resource_name, to_snake_case, \
     es_to_pks, id_batches, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
     get_truthy_values, get_falsy_values, get_current_authorized_user, to_camel_case, to_parent_kwargs_from_uri, \
-    is_versioned_uri, canonical_url_to_url_and_version
+    is_versioned_uri, canonical_url_to_url_and_version, split_canonical
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -1498,10 +1498,11 @@ class CollectionReference(models.Model):
 
     def get_evaluated_repo_version_urls(self, expansion, user, system_version_cache=None):
         """URLs of the repository versions its expansion evaluated it in that `user` can view,
-        else of the repositories it names. A version its system names (with or without the URL's trailing slash)
-        that `user` can't view counts as missing."""
+        else of the repositories it names. A version its system names that `user` can't view counts as missing."""
         expansion_cache = {self.collection_id: expansion}
-        names_version = self.names_repo_version or self.is_explicit_valueset(self.system or '')
+        # read as the resolver reads the system: a version after '|', or in its path without the query string
+        url, url_version = split_canonical(self.system or '')
+        names_version = bool(self.version or url_version) or self.is_explicit_valueset(url.split('?')[0])
         named_version = self._get_expression_system_version(system_version_cache) if names_version else None
         system_versions = [] if named_version and not named_version.has_view_access(user) else \
             self._get_resolved_system_versions(system_version_cache, expansion_cache)
