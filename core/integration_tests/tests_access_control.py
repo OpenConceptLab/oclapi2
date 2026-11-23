@@ -6,7 +6,8 @@ import zipfile
 
 from mock import patch, Mock
 
-from django.test import tag
+from django.core.cache import cache
+from django.test import tag, override_settings
 from core.client_configs.models import ClientConfig
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection, CollectionReference
@@ -2159,6 +2160,8 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
         self.assert_lists(f'collection={prefix}P,{prefix}R', ['inRv1'], ['inP', 'inRv1'])
         self.assert_lists(f'q={prefix}&collection={prefix}Q', ['inQhead'], ['inQhead', 'inQv1'], ['concepts'])
         self.assert_lists(f'collection={prefix}*', ['inQhead', 'inRv1'], ['inP', 'inQhead', 'inQv1', 'inRv1'])
+        self.assert_lists('collection=*', ['inQhead', 'inRv1'], ['inP', 'inQhead', 'inQv1', 'inRv1'])
+        self.assert_lists(f'collection={prefix}@*', [], [])  # a literal prefix: `@` isn't a wildcard
         self.assert_lists(f'collection_url={self.q_v1.uri}', [], ['inQv1'])
         self.assert_lists(f'collection_url={self.r_v1.uri}', ['inRv1'], ['inRv1'])
         self.assert_lists(f'collection_url={owner_url}collections/{prefix}*&collection={prefix}*',
@@ -2209,6 +2212,45 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
                     response = self.request('get', f'/{resource}/?csv=true&{query}', user)
                     self.assertEqual(response.status_code, 200)
                     self.assertEqual(self.keys(exports[0], resource), sorted(expected), (resource, query, user))
+
+    def test_csv_exports_match_the_version_and_its_access_in_one_expansion(self):
+        both = ConceptFactory(parent=self.source, mnemonic=f'inQboth{self.tag}')
+        self.q_head.expansion.concepts.add(both)
+        self.q_v1.expansion.concepts.add(both)
+        exports = []
+
+        def export(data, *_args, **_kwargs):
+            exports.append([(row['mnemonic'],) for row in data])
+            return 'https://exports.test/export.csv'
+
+        with patch('core.common.mixins.write_csv_to_s3', side_effect=export):
+            for user, expected in [(None, []), (self.outsider, []), (self.member, ['inQboth', 'inQv1'])]:
+                exports.clear()
+                response = self.request('get', f'/concepts/?csv=true&collection={self.tag}Q&version=v1', user)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(self.keys(exports[0], 'concepts'), expected, user)
+
+    def test_deleted_versions_match_nothing(self):
+        """The index keeps a deleted version's members until they're indexed again."""
+        p_v1_uri = self.p_v1.uri
+        Collection.objects.filter(id__in=[self.p_v1.id, self.p_head.id]).delete()
+        for query in [f'collection_url={p_v1_uri}', f'collection={self.tag}P']:
+            for resource, user in itertools.product(['concepts', 'mappings'], [None, self.outsider, self.member]):
+                self.assertEqual(self.listed(f'/{resource}/?{query}', user, resource), [], (query, user))
+
+    @override_settings(CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}})
+    def test_collection_facets_on_a_cached_source_version_list_answer_each_requester(self):
+        release = OrganizationSourceFactory(
+            organization=self.org, mnemonic=self.source.mnemonic, version='v1', released=True,
+            public_access=ACCESS_TYPE_VIEW)
+        release.concepts.add(*[concept.get_latest_version() for concept in self.concepts.values()])
+        ConceptDocument().update(Concept.objects.filter(parent=self.source), refresh=True)
+        cache.clear()
+        for query in [f'collection_url={self.p_v1.uri}', f'collectionUrl={self.p_v1.uri}']:
+            url = f'{release.uri}concepts/?{query}'
+            self.assertEqual(self.listed(url, self.member, 'concepts'), ['inP'], url)
+            self.assertEqual(self.listed(url, self.outsider, 'concepts'), [], url)
+            self.assertEqual(self.listed(url, None, 'concepts'), [], url)
 
     def test_a_prefix_matching_too_many_versions_answers_400(self):
         url = f'/concepts/?collection={self.tag}*'

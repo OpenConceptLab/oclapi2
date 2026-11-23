@@ -459,44 +459,57 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         """
         A collection facet keeps a search to the members of collection versions, any owner's: by name (`collection`),
         by a version's URL (`collection_url`) or by owner URL (`collection_owner_url`); with `prefix`, those starting
-        with `value`. The index lists every version a concept or mapping is in, those the requester can't view too,
-        so when `value` matches any of those, the facet matches through the URLs of the versions they can view only.
-        None when it matches none hidden from them, and the facet stays as it is.
+        with `value`, as a literal prefix. The index lists every version a concept or mapping is in, those the
+        requester can't view too, and those since deleted, so the facet matches through the URLs of the versions they
+        can view only (get_viewable_collection_urls). None for staff's exact values: the facet stays as it is.
         """
         urls = self.get_viewable_collection_urls(field, value, prefix)
-        return None if urls is None else Q('terms', collection_url=urls)
+        if urls is not None:
+            return Q('terms', collection_url=urls)
+        return Q('prefix', **{field: value}) if prefix else None
 
     def get_viewable_collection_urls(self, field, value, prefix):
         """
-        See get_collection_facet_criterion: the URLs of the collection versions the facet matches that the requester
-        can view, or None when it matches none they can't. 400 past max_viewable_collection_urls, which only a prefix
-        is likely to reach.
+        The URLs of the collection versions a collection facet value matches that the requester can view. None for
+        staff, who can view every version, and for a prefix that matches no version hidden from them, which then
+        stays a prefix. A prefix that matches more than max_viewable_collection_urls they can view answers 400.
         """
         from core.collections.models import Collection
         viewable = Collection.get_viewable_versions_criteria(self.request.user)
-        if viewable is None or not value:
+        if viewable is None:
             return None
         if self._viewable_collection_urls is None:
             self._viewable_collection_urls = {}
         cache, key = self._viewable_collection_urls, (field, value, prefix)
         if key not in cache:
-            # a version's URL is its uri, which starts with its owner's
-            lookup = 'mnemonic' if field == 'collection' else 'uri'
-            if prefix or field == 'collection_owner_url':
-                lookup += '__startswith'
-            versions = Collection.objects.filter(**{lookup: value})
+            versions = Collection.objects.filter(self.get_collection_facet_versions_criteria(field, value, prefix))
             urls = None
-            if versions.exclude(viewable).exists():
+            if not prefix:
+                urls = list(versions.filter(viewable).values_list('uri', flat=True))
+            elif versions.exclude(viewable).exists():
                 limit = self.max_viewable_collection_urls
                 urls = list(versions.filter(viewable).values_list('uri', flat=True)[:limit + 1])
                 if len(urls) > limit:
                     raise Http400(detail=f'{field}: more than {limit} collection versions match {value}. '
                                          'Please narrow the filter.')
                 if field == 'collection_owner_url':
-                    urls = [url for url in urls if (
-                        to_owner_uri(url).startswith(value) if prefix else to_owner_uri(url) == value)]
+                    urls = [url for url in urls if to_owner_uri(url).startswith(value)]
             cache[key] = urls
         return cache[key]
+
+    @staticmethod
+    def get_collection_facet_versions_criteria(field, value, prefix):
+        """The collection versions a collection facet value matches, as a query (for an owner URL prefix, a superset:
+        those whose URL starts with it)."""
+        if field == 'collection':
+            return models.Q(**{'mnemonic__startswith' if prefix else 'mnemonic': value})
+        if field == 'collection_url' or prefix:
+            return models.Q(**{'uri__startswith' if prefix else 'uri': value})
+        owner = re.fullmatch(r'/(orgs|users)/([^/]+)/', value)
+        if not owner:
+            return models.Q(pk__in=[])
+        return models.Q(organization__mnemonic=owner[2]) if owner[1] == 'orgs' else models.Q(
+            user__username=owner[2])
 
     @staticmethod
     def merge_filters(filter1, filter2):
