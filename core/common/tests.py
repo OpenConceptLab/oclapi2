@@ -2354,12 +2354,13 @@ class TaskTest(OCLTestCase):
     def test_add_references_collection_not_found(self):
         user = UserProfileFactory()
 
-        added_references, errors = add_references(  # pylint: disable=no-value-for-parameter
+        added_references, errors, unresolved = add_references(  # pylint: disable=no-value-for-parameter
             user.id, {'expressions': []}, 999999999, False, False
         )
 
         self.assertEqual(added_references, [])
         self.assertEqual(errors, {'error': 'Collection not found'})
+        self.assertEqual(unresolved, [])
 
     def test_handle_pre_delete_task(self):
         concept = ConceptFactory()
@@ -2442,14 +2443,15 @@ class TaskTest(OCLTestCase):
             'some/path', 'ocladmin', 'Organization', 'org1', 'npm', False
         )
 
-        importer_mock.assert_called_once_with(ANY, 'some/path', 'ocladmin', 'Organization', 'org1', 'npm', False)
+        importer_mock.assert_called_once_with(
+            ANY, 'some/path', 'ocladmin', 'Organization', 'org1', 'npm', False, False)
 
     @patch('core.importers.importer.ImporterSubtask')
     def test_bulk_import_subtask_passes_index(self, subtask_mock):
         bulk_import_subtask('some/path', 'ocladmin', 'Organization', 'org1', 'Concept', ['f1.json'], False)
 
         subtask_mock.assert_called_once_with(
-            'some/path', 'ocladmin', 'Organization', 'org1', 'Concept', ['f1.json'], False)
+            'some/path', 'ocladmin', 'Organization', 'org1', 'Concept', ['f1.json'], False, False, False, None, None)
 
     @patch('core.common.tasks.chord')
     def test_bulk_import_queue(self, chord_mock):
@@ -2566,8 +2568,17 @@ class TaskTest(OCLTestCase):
 
         index_expansion_mappings(expansion.id)
 
-    def test_vacuum_and_analyze_db(self):
+    @patch('django.db.connections')
+    def test_vacuum_and_analyze_db(self, connections_mock):
+        # A real VACUUM switches the test connection to autocommit and breaks the transaction for the next test
+        conn = connections_mock.__getitem__.return_value.connection
+        conn.isolation_level = 1
+
         vacuum_and_analyze_db()
+
+        connections_mock.__getitem__.assert_called_once_with('default')
+        conn.set_isolation_level.assert_has_calls([call(0), call(1)])
+        conn.cursor.return_value.execute.assert_called_once_with('VACUUM ANALYZE')
 
     def test_resolve_url_registry_entries(self):
         source = OrganizationSourceFactory()
@@ -2654,6 +2665,106 @@ class TaskTest(OCLTestCase):
         self.assertIsNotNone(result)
         changelog = VersionChangelog.objects.get(version1_url=collection2.url, version2_url=collection1.url)
         self.assertEqual(changelog.comparison, result)
+
+    @patch('core.common.models.ConceptContainerModel.clear_cache', Mock())
+    @patch('core.common.models.delete_s3_objects', Mock())
+    def test_save_changelog_and_comparison_skips_deleted_version(self):
+        from core.repos.models import VersionChangelog
+        source1 = OrganizationSourceFactory(version='v1')
+        source2 = OrganizationSourceFactory(
+            organization=source1.organization, mnemonic=source1.mnemonic, version='v2')
+        source2_uri = source2.uri
+        source2.delete(force=True)
+
+        with patch.object(VersionCompareMixin, 'get_checksum_map') as checksum_map_mock:
+            self.assertIsNone(Source.save_changelog_and_comparison(source1.uri, source2_uri))
+            self.assertIsNone(Source.save_changelog_and_comparison(source2_uri, source1.uri))
+
+        checksum_map_mock.assert_not_called()
+        self.assertFalse(VersionChangelog.objects.filter(version2_url=source2_uri).exists())
+        with self.assertRaisesMessage(ValueError, f'Version not found: {source2_uri}'):
+            Source.run_diff(source1.uri, source2_uri, True, 0)
+
+    def test_save_changelog_and_comparison_skips_version_deleted_while_comparing(self):
+        from core.repos.models import VersionChangelog, VersionChecksumMap
+        source1 = OrganizationSourceFactory(version='v1')
+        source2 = OrganizationSourceFactory(
+            organization=source1.organization, mnemonic=source1.mnemonic, version='v2')
+        source2_url = source2.url
+
+        def delete_source2(*_):
+            Source.objects.filter(id=source2.id).delete()
+            return {}
+
+        with patch.object(VersionCompareMixin, 'get_compare_result', side_effect=delete_source2):
+            self.assertIsNone(Source.save_changelog_and_comparison(source1.uri, source2.uri))
+
+        self.assertFalse(VersionChangelog.objects.filter(version2_url=source2_url).exists())
+        self.assertFalse(VersionChecksumMap.objects.filter(version_url=source2_url).exists())
+        self.assertTrue(VersionChecksumMap.objects.filter(version_url=source1.url).exists())
+
+    def test_run_diff_skips_save_for_version_deleted_while_comparing(self):
+        from core.repos.models import VersionChangelog, VersionChecksumMap
+        source1 = OrganizationSourceFactory(version='v1')
+        source2 = OrganizationSourceFactory(
+            organization=source1.organization, mnemonic=source1.mnemonic, version='v2')
+        source2_url = source2.url
+
+        def delete_source2(*_):
+            Source.objects.filter(id=source2.id).delete()
+            return {'meta': {}}
+
+        with patch.object(VersionCompareMixin, 'get_changelog_result', side_effect=delete_source2):
+            self.assertEqual(Source.run_diff(source1.uri, source2.uri, True, 0), {'meta': {}})
+
+        self.assertFalse(VersionChangelog.objects.filter(version2_url=source2_url).exists())
+        self.assertFalse(VersionChecksumMap.objects.filter(version_url=source2_url).exists())
+        self.assertTrue(VersionChecksumMap.objects.filter(version_url=source1.url).exists())
+
+    @patch('core.common.models.ConceptContainerModel.clear_cache', Mock())
+    @patch('core.common.models.delete_s3_objects', Mock())
+    def test_source_version_compare_save_both_skips_deleted_version(self):
+        source1 = OrganizationSourceFactory(version='v1')
+        source2 = OrganizationSourceFactory(
+            organization=source1.organization, mnemonic=source1.mnemonic, version='v2')
+        source1_uri = source1.uri
+        source1.delete(force=True)
+
+        with patch.object(VersionCompareMixin, 'get_checksum_map') as checksum_map_mock:
+            result = source_version_compare(  # pylint: disable=no-value-for-parameter
+                source1_uri, source2.uri, True, 4, 'json', True)
+
+        self.assertEqual(result, 0)
+        checksum_map_mock.assert_not_called()
+
+    @patch('core.common.models.ConceptContainerModel.clear_cache', Mock())
+    @patch('core.common.models.delete_s3_objects', Mock())
+    def test_collection_version_compare_save_both_skips_deleted_version(self):
+        collection1 = OrganizationCollectionFactory(version='v1')
+        collection2 = OrganizationCollectionFactory(
+            organization=collection1.organization, mnemonic=collection1.mnemonic, version='v2')
+        collection1_uri = collection1.uri
+        collection2_uri = collection2.uri
+        collection2.delete(force=True)
+
+        with patch.object(VersionCompareMixin, 'get_checksum_map') as checksum_map_mock:
+            self.assertEqual(collection_version_compare(  # pylint: disable=no-value-for-parameter
+                collection1_uri, collection2_uri, True, 4, 'json', True), 0)
+            collection1.delete(force=True)
+            self.assertEqual(collection_version_compare(  # pylint: disable=no-value-for-parameter
+                collection1_uri, collection2_uri, True, 4, 'json', True), 0)
+
+        checksum_map_mock.assert_not_called()
+
+    def test_version_compare_save_both_returns_1_when_saved(self):
+        source1 = OrganizationSourceFactory(version='v1')
+        source2 = OrganizationSourceFactory(
+            organization=source1.organization, mnemonic=source1.mnemonic, version='v2')
+
+        result = source_version_compare(  # pylint: disable=no-value-for-parameter
+            source1.uri, source2.uri, True, 4, 'json', True)
+
+        self.assertEqual(result, 1)
 
     def test_expansion_compare_does_not_persist(self):
         from core.repos.models import VersionChangelog

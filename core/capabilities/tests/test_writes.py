@@ -452,7 +452,7 @@ class RepositoryWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
         ReadOnlyPolicy.read_only = [self.collection]
         self.assertEqual(
             add_references(self.user.id, data, self.collection.id),  # pylint: disable=no-value-for-parameter
-            ([], {'write_refused': ReadOnlyPolicy.body}))
+            ([], {'write_refused': ReadOnlyPolicy.body}, []))
         self.assertFalse(self.collection.references.exists())
 
     def test_external_export_uploads_and_removals_are_edits_of_the_version(self):

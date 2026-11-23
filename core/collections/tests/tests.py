@@ -11,14 +11,16 @@ from django.core.exceptions import ValidationError
 from django.core.management import call_command, CommandError
 from django.http import QueryDict
 from django.test import override_settings, tag
-from django.db import OperationalError
+from django.test.utils import CaptureQueriesContext
+from django.db import OperationalError, connection, transaction
 from mock import patch, Mock
 from mock.mock import ANY
 from rest_framework import status
 from rest_framework.response import Response
 
 from core.collections.constants import SOURCE_TO_CONCEPTS, TRANSFORM_TO_RESOURCE_VERSIONS, TRANSFORM_TO_EXTENSIONAL, \
-    EXPANSION_LOCKED_REPO_VERSION_TOGGLE, RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE
+    EXPANSION_LOCKED_REPO_VERSION_TOGGLE, RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE, REFERENCE_FOUND_NOTHING, \
+    REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS
 from core.collections.dry_runs import ExpansionDryRun
 from core.collections.documents import CollectionDocument
 from core.common.constants import SERIALIZATION_RETRY_ATTEMPTS
@@ -2147,7 +2149,7 @@ class TasksTest(OCLTestCase):
         )
         mapping2 = MappingFactory()
 
-        added_references, errors = add_references(
+        added_references, errors, unresolved = add_references(
             collection.created_by.id,
             {
                 'expressions': [obj.get_latest_version().url for obj in [concept1, concept2, mapping2]]
@@ -2158,6 +2160,7 @@ class TasksTest(OCLTestCase):
 
         self.assertEqual(len(added_references), 3)
         self.assertEqual(errors, {})
+        self.assertEqual(unresolved, [])
         self.assertListEqual(
             sorted(list(
                 collection.references.values_list('expression', flat=True)
@@ -2184,7 +2187,7 @@ class TasksTest(OCLTestCase):
             sorted([concept1.parent.uri, concept2.parent.uri, mapping2.parent.uri])
         )
 
-        added_references, errors = add_references(
+        added_references, errors, _ = add_references(
             collection.created_by.id,
             [
                 {'system': 'http://foo-system.com', 'namespace': 'barbar', 'code': 'bar'},
@@ -3311,6 +3314,65 @@ class ExpansionTest(OCLTestCase):
             sorted(rows.values_list('concept_id', flat=True)),
             sorted([concept.get_latest_version().id, duplicated.get_latest_version().id, other.id]))
 
+    def test_replace_head_rows_drops_a_duplicate_only_in_the_reference_holding_it(self):
+        concepts = [ConceptFactory() for _ in range(3)]
+        collection = OrganizationCollectionFactory()
+        holding, other = (
+            CollectionReference(expression=f'/concepts/{index}/', collection=collection) for index in range(2))
+        holding.save()
+        other.save()
+        holding.concepts.add(*concepts, *[concept.get_latest_version() for concept in concepts])
+        other.concepts.add(*concepts)
+        rows = CollectionReference.concepts.through.objects.filter(reference__collection_id=collection.id)
+
+        with CaptureQueriesContext(connection) as queries:
+            Expansion.replace_head_rows(rows, 'reference', 'concept', Concept)
+
+        # a correlated EXISTS over an owner's rows is quadratic in their number
+        self.assertFalse([query['sql'] for query in queries.captured_queries if 'EXISTS' in query['sql']])
+        latest_ids = sorted(concept.get_latest_version().id for concept in concepts)
+        self.assertEqual(sorted(holding.concepts.values_list('id', flat=True)), latest_ids)
+        self.assertEqual(sorted(other.concepts.values_list('id', flat=True)), latest_ids)
+
+    def test_replace_head_rows_drops_a_repeated_head_row_in_one_owner(self):
+        concepts = [ConceptFactory() for _ in range(2)]
+        collection = OrganizationCollectionFactory()
+        reference = CollectionReference(expression='/concepts/', collection=collection)
+        reference.save()
+        through = CollectionReference.concepts.through
+        through.objects.bulk_create(
+            [through(reference=reference, concept=concept) for concept in [*concepts, concepts[0]]])
+        rows = through.objects.filter(reference__collection_id=collection.id)
+
+        for size in (10000, 1):
+            with self.subTest(size=size), transaction.atomic():
+                with patch.object(Expansion, 'REPLACE_HEAD_ROWS_BATCH_SIZE', size):
+                    Expansion.replace_head_rows(rows, 'reference', 'concept', Concept)
+
+                self.assertEqual(
+                    sorted(rows.values_list('concept_id', flat=True)),
+                    sorted(concept.get_latest_version().id for concept in concepts))
+                transaction.set_rollback(True)
+
+    def test_replace_head_rows_of_mappings_in_batches(self):
+        mappings = [MappingFactory() for _ in range(2)]
+        collection = OrganizationCollectionFactory()
+        holding, other = (
+            CollectionReference(expression=f'/mappings/{index}/', collection=collection) for index in range(2))
+        holding.save()
+        other.save()
+        holding.mappings.add(*mappings, mappings[0].get_latest_version())
+        other.mappings.add(*mappings)
+        rows = CollectionReference.mappings.through.objects.filter(reference__collection_id=collection.id)
+
+        with patch.object(Expansion, 'REPLACE_HEAD_ROWS_BATCH_SIZE', 1):
+            Expansion.replace_head_rows(rows, 'reference', 'mapping', Mapping)
+
+        latest_ids = sorted(mapping.get_latest_version().id for mapping in mappings)
+        self.assertEqual(sorted(holding.mappings.values_list('id', flat=True)), latest_ids)
+        self.assertEqual(sorted(other.mappings.values_list('id', flat=True)), latest_ids)
+        self.assertEqual(rows.count(), 4)
+
     def test_is_explicit_valueset(self):
         uri = '/orgs/org/collections/coll/'
         for valueset in (f'{uri}|r2', f'{uri}r2/', f'{uri}r2', 'http://x.org/vs|r2'):
@@ -3956,9 +4018,11 @@ class ExpansionTest(OCLTestCase):
         return collection, expansion, reference
 
     @staticmethod
-    def _resolution_off_in_production():
-        """These dry runs compare production with the resolution toggle on, whatever the fixture says"""
-        Toggle.objects.filter(name=RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE).update(production=False)
+    def _toggles_off_in_production():
+        """These dry runs compare production with the toggles under test on, whatever the fixture says"""
+        Toggle.objects.filter(
+            name__in=[RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE, EXPANSION_LOCKED_REPO_VERSION_TOGGLE]
+        ).update(production=False)
 
     @staticmethod
     def _rebuild(collection, expansion):
@@ -3999,6 +4063,67 @@ class ExpansionTest(OCLTestCase):
             'url': reference.expression, 'namespace': None, 'version': old.version,
             'type': 'reference.resource_version'
         }])
+
+    def test_add_references_marks_pinned_reference_no_version_holds(self):
+        source, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        _, expansion, reference = self._expansion_with_resource_version_reference(source, old)
+        old.sources.remove(v1)
+
+        with patch.object(CollectionReference, 'is_resource_version_repo_resolution_on', return_value=True), \
+                patch.object(Expansion, 'index_resources'):
+            expansion.add_references([reference])
+
+        self.assertEqual(reference.unresolved_reason, REFERENCE_VERSION_NOT_HELD)
+        self.assertEqual(list(expansion.concepts.all()), [old])
+
+    def test_add_references_marks_include_references_that_add_nothing(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        found = CollectionReference(
+            expression=concept.uri, collection=collection, system=source.uri, code=concept.mnemonic)
+        missing_mapping = CollectionReference(
+            expression=f'{source.uri}mappings/nothing/', collection=collection, system=source.uri, code='nothing',
+            reference_type='mappings')
+        missing_exclude = CollectionReference(
+            expression=f'{source.uri}concepts/nothing/', collection=collection, system=source.uri, code='nothing',
+            include=False)
+        for reference in (found, missing_mapping, missing_exclude):
+            reference.save()
+
+        with patch.object(Expansion, 'index_resources'):
+            expansion.add_references([found, missing_mapping, missing_exclude])
+
+        self.assertIsNone(found.unresolved_reason)
+        self.assertEqual(missing_mapping.unresolved_reason, REFERENCE_FOUND_NOTHING)
+        self.assertIsNone(missing_exclude.unresolved_reason)
+
+    def test_add_references_marks_reference_whose_members_the_parameters_filter_out(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source, retired=True)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        expansion.parameters = {**expansion.parameters, 'activeOnly': True}
+        expansion.save()
+        reference = CollectionReference(
+            expression=concept.uri, collection=collection, system=source.uri, code=concept.mnemonic)
+        reference.save()
+
+        with patch.object(Expansion, 'index_resources'):
+            expansion.add_references([reference])
+
+        self.assertEqual(reference.unresolved_reason, REFERENCE_EXCLUDED_BY_PARAMETERS)
+        self.assertEqual(expansion.concepts.count(), 0)
+
+    def test_evaluated_repo_version_urls_name_the_repository_when_no_version_resolves(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        reference = CollectionReference(
+            expression='/orgs/nobody/sources/nothing/concepts/c1/', collection=collection,
+            system='/orgs/nobody/sources/nothing/', code='c1')
+
+        self.assertEqual(reference.get_evaluated_repo_version_urls(expansion), ['/orgs/nobody/sources/nothing/'])
 
     def test_rebuild_with_filter_reference_under_release_adds_its_resource_versions(self):
         source, release, _, concept_version = CollectionReferenceTest.released_source_with_concepts()
@@ -4050,7 +4175,7 @@ class ExpansionTest(OCLTestCase):
         source, old, v1, v2 = CollectionReferenceTest.source_with_replaced_concept_version()
         collection, expansion, reference = self._expansion_with_resource_version_reference(source, old)
         self._rebuild(collection, expansion)
-        self._resolution_off_in_production()
+        self._toggles_off_in_production()
 
         with override_settings(ENV='production'):
             report = expansion.dry_run_rebuild()
@@ -4090,7 +4215,7 @@ class ExpansionTest(OCLTestCase):
         source, old, _, _ = CollectionReferenceTest.source_with_replaced_concept_version()
         collection, expansion, reference = self._expansion_with_resource_version_reference(source, old)
         self._rebuild(collection, expansion)
-        self._resolution_off_in_production()
+        self._toggles_off_in_production()
         out = StringIO()
 
         call_command(
@@ -4108,6 +4233,7 @@ class ExpansionTest(OCLTestCase):
             call_command('dry_run_expansions', collection.uri, '--env', 'nowhere', stdout=out)
 
     def test_dry_run_rolls_back_and_queues_no_task(self):
+        self._toggles_off_in_production()
         dry_run = ExpansionDryRun([EXPANSION_LOCKED_REPO_VERSION_TOGGLE])
 
         with dry_run.rolled_back(set()):
@@ -4125,7 +4251,7 @@ class ExpansionTest(OCLTestCase):
         source, old, _, _ = CollectionReferenceTest.source_with_replaced_concept_version()
         collection, expansion, reference = self._expansion_with_resource_version_reference(source, old)
         self._rebuild(collection, expansion)
-        self._resolution_off_in_production()
+        self._toggles_off_in_production()
 
         report = ExpansionDryRun([RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE]).rebuild(expansion)
 
@@ -4142,6 +4268,7 @@ class ExpansionTest(OCLTestCase):
         collection.add_expressions({'expressions': [old.versioned_object.uri]}, collection.created_by)
         reference = collection.references.get()
 
+        self._toggles_off_in_production()
         report = ExpansionDryRun([EXPANSION_LOCKED_REPO_VERSION_TOGGLE]).add(collection, reference)
 
         self.assertEqual(report['key'], f'{collection.uri} {reference.expression}')
@@ -4159,6 +4286,7 @@ class ExpansionTest(OCLTestCase):
         collection.add_expressions({'expressions': [old.versioned_object.uri]}, collection.created_by)
         Concept.objects.filter(id=old.id).update(is_latest_version=False)
 
+        self._toggles_off_in_production()
         report = ExpansionDryRun([EXPANSION_LOCKED_REPO_VERSION_TOGGLE]).create_version(collection)
 
         self.assertEqual(report['key'], collection.uri)
@@ -4181,6 +4309,7 @@ class ExpansionTest(OCLTestCase):
             ExpansionDryRun.get_import_expressions(collection, source_uris, 5, random.Random('1 a')), source_uris)
         expressions = source_uris
 
+        self._toggles_off_in_production()
         report = ExpansionDryRun([EXPANSION_LOCKED_REPO_VERSION_TOGGLE]).import_references(collection, expressions)
 
         self.assertEqual(report['key'], f'{collection.uri} 1')
@@ -4193,7 +4322,7 @@ class ExpansionTest(OCLTestCase):
         source, old, _, _ = CollectionReferenceTest.source_with_replaced_concept_version()
         collection, expansion, _ = self._expansion_with_resource_version_reference(source, old)
         self._rebuild(collection, expansion)
-        self._resolution_off_in_production()
+        self._toggles_off_in_production()
         out = StringIO()
 
         toggle = RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE
