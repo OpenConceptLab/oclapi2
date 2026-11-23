@@ -115,8 +115,6 @@ class CollectionBaseView(BaseAPIView):
         # a route that names a version reads it (as its search does, and as its writes act on it), so a different
         # version in the query string is refused rather than read; routes that name none read the query string's
         url_version, query_version = self.kwargs.get('version', None), query_params.get('version', None)
-        if url_version and query_version and query_version != url_version:
-            raise Http400(detail=f'The URL names version {url_version}; the query string names {query_version}.')
         version = url_version or query_version
         if not version and default_version_to_head:
             version = HEAD
@@ -127,6 +125,8 @@ class CollectionBaseView(BaseAPIView):
                     'mnemonic': self.kwargs['collection']
                 })
             version = get(version, 'version')
+        if url_version and query_version and query_version not in [url_version, version]:  # `latest` as resolved
+            raise Http400(detail=f'The URL names version {url_version}; the query string names {query_version}.')
 
         kwargs = self.kwargs.copy()
         if self.user_is_self and self.request.user.is_authenticated:
