@@ -594,8 +594,7 @@ class CollectionReferencesView(
             item = {'added': True, 'resolved': False, 'expression': reference.expression}
             if reason == REFERENCE_VERSION_NOT_HELD:
                 named_version = reference.resolve_expression_system_version if reference.names_repo_version else None
-                if named_version and not named_version.has_view_access(user):
-                    named_version = None
+                named_version = named_version if named_version and named_version.has_view_access(user) else None
                 item['repo_versions'] = [named_version.uri if named_version else reference.system]
                 message_format = REFERENCE_NAMED_VERSION_NOT_HELD_FMT if named_version else \
                     REFERENCE_VERSION_NOT_HELD_FMT

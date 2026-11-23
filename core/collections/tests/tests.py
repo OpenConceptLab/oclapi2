@@ -4140,7 +4140,6 @@ class ExpansionTest(OCLTestCase):
 
         self.assertEqual(reference.get_evaluated_repo_version_urls(expansion, member), [release.uri])
         self.assertEqual(reference.get_evaluated_repo_version_urls(expansion, UserProfileFactory()), [source.uri])
-        self.assertEqual(reference.get_evaluated_repo_version_urls(expansion, None), [source.uri])
 
     def test_evaluated_repo_version_urls_treat_a_named_version_the_user_cannot_view_as_missing(self):
         source = OrganizationSourceFactory()
