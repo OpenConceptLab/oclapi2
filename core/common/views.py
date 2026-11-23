@@ -882,7 +882,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             if is_members_view:
                 kwargs_filters['ownerType'] = 'Organization'
                 kwargs_filters['owner'] = self.get_members_view_org_mnemonics() or ['UNKNOWN-ORG-DUMMY']
-            elif self.user_is_self and is_authenticated and 'collection' not in self.kwargs:  # members have any owner
+            elif self.user_is_self and is_authenticated and 'collection' not in self.kwargs:
+                # a collection's concepts can come from any owner's source, so only other routes filter by owner
                 kwargs_filters['ownerType'] = 'User'
                 kwargs_filters['owner'] = username
 

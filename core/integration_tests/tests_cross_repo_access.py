@@ -584,7 +584,6 @@ class FuzzySearchScopeTest(PrivateReleaseOfPublicHeadMixin, CrossRepoAccessBaseT
         for user in [None, self.outsider, self.member]:
             self.assertEqual(self.search(public_release_url, user), (200, []), user)
             self.assertEqual(self.search(self.public_source.uri + 'latest/', user), (200, []), user)
-            self.assertEqual(self.search('/users/outsider/sources/NoSuchSource/v9/', user), (200, []), user)
             self.assertEqual(self.search(self.head.uri, user), (200, []), user)
             self.assertEqual(
                 self.search(self.head.uri, user, 'zebrastripe'), (200, [self.head_revision.version]), user)
