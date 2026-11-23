@@ -2281,13 +2281,22 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
             # a prefix longer than any owner URL matches no owner
             self.assert_answers(f'/concepts/?collection_owner_url={self.org.uri}collections/*', 200, 200, 200)
 
-    def test_a_version_the_url_names_wins_over_the_query_strings(self):
+    def test_a_route_naming_a_version_refuses_another_in_the_query_string(self):
         for resource in ['concepts', 'mappings']:
-            for query in ['', '?version=HEAD', '?version=HEAD&retired=false', f'?version=HEAD&q={self.tag}']:
+            for query in ['', '?version=v1', f'?version=v1&q={self.tag}']:
                 url = f'{self.q_v1.uri}{resource}/{query}'
                 self.assert_answers(url, 401, 403, 200)
                 self.assertEqual(self.request('head', url).status_code, 401, url)
-            self.assertEqual(self.listed(f'{self.q_v1.uri}{resource}/?version=HEAD', self.member, resource), ['inQv1'])
+            for query in ['?version=HEAD', '?version=HEAD&retired=false', f'?version=HEAD&q={self.tag}']:
+                url = f'{self.q_v1.uri}{resource}/{query}'
+                self.assert_answers(url, 400, 400, 400)
+                self.assertEqual(self.request('head', url).status_code, 400, url)
+            latest = f'{self.q_head.uri}latest/{resource}/?version=v1'
+            self.assertEqual(self.request('get', latest, self.member).status_code, 400, latest)
+        # a write acts on the version the URL names, never on the query string's
+        response = self.request('delete', f'{self.q_head.uri}HEAD/?version=v1', self.staff)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Collection.objects.filter(id__in=[self.q_head.id, self.q_v1.id], is_active=True).count(), 2)
 
     def test_match_filters_count_only_versions_the_requester_can_view(self):
         preview = Group.objects.get(name=PREVIEW_GROUP_NAME)
