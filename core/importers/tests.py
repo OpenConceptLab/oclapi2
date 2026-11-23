@@ -6875,19 +6875,17 @@ class IsolatedVersionImportTest(OCLTestCase):
         a_in_v1 = Concept.objects.get(mnemonic='A', is_latest_version=True)
         invalid = self.concept('C')
         invalid.pop('concept_class')
-        # in the test, as the class's own patch of it would replace a method decorator's
-        with patch('core.importers.models.batch_index_resources') as batch_index_resources_mock:
+        with patch('core.sources.models.batch_index_resources') as batch_index_resources_mock:
             self.run_import([self.concept('A', extras={'x': 1}), self.concept('B'), invalid, self.version('v2')])
             self.assertFalse(Source.objects.filter(mnemonic='LOINC', version='v2').exists())
-            batch_index_resources_mock.apply_async.assert_not_called()
+            batch_index_resources_mock.assert_not_called()
 
             a_in_rejected = Concept.objects.get(mnemonic='A', is_latest_version=True)
             self.run_import([self.concept('A', extras={'x': 2}), self.concept('B'), self.version('v2')])
 
         self.assertNotEqual(a_in_rejected.id, a_in_v1.id)
-        self.assertEqual(
-            [call_args[0][0] for call_args in batch_index_resources_mock.apply_async.call_args_list],
-            [('concept', {'id__in': [a_in_rejected.id]}, True, False)])
+        # Source.queue_reindex, which calls the task rather than queue it in TEST_MODE
+        batch_index_resources_mock.assert_called_once_with('concept', {'id__in': [a_in_rejected.id]})
 
     def test_isolated_import_skips_version_when_content_fails(self):
         self.run_import([self.concept('A'), self.concept('B'), self.version('v1')])

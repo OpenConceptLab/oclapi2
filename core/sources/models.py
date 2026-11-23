@@ -1087,15 +1087,15 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         concept_ids = list(self.concepts.values_list('id', flat=True))
         mapping_ids = list(self.mappings.values_list('id', flat=True))
         super().delete(using=using, keep_parents=keep_parents, force=force, sync=sync)
-        transaction.on_commit(lambda: head.index_former_members(concept_ids, mapping_ids, was_latest_released))
+        transaction.on_commit(lambda: head.queue_reindex(concept_ids, mapping_ids, was_latest_released))
         return None
 
-    def index_former_members(self, concept_ids, mapping_ids, was_latest_released=False):
+    def queue_reindex(self, concept_ids, mapping_ids, was_latest_released=False):
         """
-        Indexes again the concepts and mappings of a deleted version of this repository (its HEAD), from what they
-        belong to now: DROPPED_CHILDREN_CHUNK_SIZE a Task, with its arguments saved so it can be rerun, as the version
-        and its links are gone. A chunk that can't be queued is left as a failed Task. was_latest_released: flags the
-        new latest release's members.
+        Indexes again these concepts and mappings of this repository (its HEAD), from what they belong to now: the rows
+        of a deleted version, whose links are gone, or the ones a seed superseded. DROPPED_CHILDREN_CHUNK_SIZE a Task,
+        with its arguments saved so it can be rerun; a chunk that can't be queued is left as a failed Task.
+        was_latest_released: a deleted version was the latest release, so the new one's members are flagged.
         """
         for resource, ids in (('concept', concept_ids), ('mapping', mapping_ids)):
             for chunk in chunks(sorted(ids), DROPPED_CHILDREN_CHUNK_SIZE):

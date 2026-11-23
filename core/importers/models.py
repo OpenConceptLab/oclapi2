@@ -705,7 +705,8 @@ class IsolatedVersionCommit:
             self.dropped = None
             return get(ex, 'message_dict') or {'__all__': ex.messages}
         # once the version is created: a rejected seed leaves them to the import's deferral, as their replacements
-        transaction.on_commit(lambda: ImportIndexer.queue_indexing(self.superseded_ids))
+        transaction.on_commit(lambda: head.queue_reindex(
+            self.superseded_ids['concept'], self.superseded_ids['mapping']))
         return CREATED
 
 
@@ -1248,10 +1249,10 @@ class ImportIndexer:
     the concepts the imported mappings come from.
 
     deferred_superseded_ids: the versions an import that doesn't index superseded. When it seeds a version, the seed's
-    commit indexes them once the version is created (IsolatedVersionCommit): their documents would still say they're
-    HEAD's latest versions, and keep the names of versions that held them, so searches of HEAD, and of a later version
-    of the same name, would find them next to the versions that replaced them (OpenConceptLab/ocl_online#744). The new
-    version indexes those.
+    commit indexes them once the version is created (IsolatedVersionCommit, Source.queue_reindex): their documents
+    would still say they're HEAD's latest versions, and keep the names of versions that held them, so searches of HEAD,
+    and of a later version of the same name, would find them next to the versions that replaced them
+    (OpenConceptLab/ocl_online#744). The new version indexes those.
     """
     CHUNK_SIZE = 5000
 
@@ -1289,10 +1290,9 @@ class ImportIndexer:
     def deferred_superseded_ids(self):
         return {} if self.index else {resource: sorted(ids) for resource, ids in self.superseded_ids.items() if ids}
 
-    @classmethod
-    def queue_indexing(cls, ids):
+    def queue_indexing(self, ids):
         for resource in ('concept', 'mapping'):
-            for chunk in chunks(sorted(ids.get(resource) or []), cls.CHUNK_SIZE):
+            for chunk in chunks(sorted(ids[resource]), self.CHUNK_SIZE):
                 batch_index_resources.apply_async(
                     (resource, {'id__in': chunk}, True, False), queue='indexing', permanent=False)
 
