@@ -1142,22 +1142,20 @@ def count_uncounted_resources():
     from core.mappings.models import Mapping
 
     to_count = [
-        (model, list(Source.objects.filter(id__in=model.objects.filter(_counted__isnull=True).values('parent_id'))))
-        for model in (Concept, Mapping)
+        (model, field, list(Source.objects.filter(
+            id__in=model.objects.filter(_counted__isnull=True).values('parent_id'))))
+        for model, field in ((Concept, 'active_concepts'), (Mapping, 'active_mappings'))
     ]
-    for model, sources in to_count:
+    for model, field, sources in to_count:
         for source in sources:
-            count_source_resources(source, model)
+            count_source_resources(source, model, field)
 
 
-def count_source_resources(source, model):
-    # The source's uncounted rows are marked, then it's counted as its count tasks count it, taking turns with them: the
-    # total saved includes every row marked, and neither saves a total read before the other's. A row added after the
-    # mark is left for the next pass. Neither step holds a row's lock while it waits for another, so neither can
-    # deadlock with a delete, whichever order that locks a source and its rows in. A source deleted since the pass read
-    # it has nothing to count. If the count fails, one of the source's rows is left uncounted again, so the next pass
-    # counts it. One source's error doesn't stop the pass.
-    field = 'active_concepts' if model.__name__ == 'Concept' else 'active_mappings'
+def count_source_resources(source, model, field):
+    # The rows are marked, then counted with the count tasks' lock (update_active_count), so the total includes every
+    # marked row; a row added after the mark waits for the next pass. Marking and counting are separate steps, so no
+    # row lock is held while another is awaited: one transaction would deadlock with hard deletes (source, then rows)
+    # or organization deletes (rows, then source). If the count fails, a row is set uncounted again for the next pass.
     try:
         model.objects.filter(parent_id=source.id, _counted__isnull=True).update(_counted=True)
         update_active_count(source.__class__, source.id, field)
