@@ -1,6 +1,7 @@
 import base64
 import re
 from email.mime.image import MIMEImage
+from functools import cached_property
 
 import markdown
 import requests
@@ -579,6 +580,35 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 filters['source_version'] = HEAD
         return filters
 
+    @cached_property
+    def map_codes_release(self):
+        """
+        The id of the release (a source version, not HEAD) a concept search runs in, whose own mapped codes it
+        matches (OpenConceptLab/ocl_online#703); None if the user can't view it, or for a fuzzy search, whose hits and
+        facets read each doc's own codes.
+        """
+        if not self.is_concept_document() or 'source' not in self.kwargs or 'collection' in self.kwargs or \
+                self.is_fuzzy_search:
+            return None
+        version = self.get_kwargs_filters().get('source_version')
+        if version in (None, HEAD):
+            return None
+        from core.sources.models import Source
+        owner = {'organization__mnemonic': self.kwargs['org']} if 'org' in self.kwargs else {
+            'user__username': self.kwargs['user'] if 'user' in self.kwargs else self.request.user.username}
+        release = Source.objects.filter(**owner, mnemonic=self.kwargs['source'], version=version).first()
+        return release.id if release and release.has_view_access(self.request.user) else None
+
+    @staticmethod
+    def scope_map_codes(results, release_id):
+        """With a release's id, `results` with its mapped-code clauses reading that release's own codes."""
+        query = results.to_dict().get('query') if release_id else None
+        if query:
+            from core.concepts.documents import ConceptDocument
+            results = results.update_from_dict(
+                {'query': ConceptDocument.scope_map_codes_to_release(query, release_id)})
+        return results
+
     def get_latest_version_filter_field_for_source_child(self):
         query_latest = self.__should_query_latest_version()
         if query_latest:
@@ -604,6 +634,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             }
             if 'source' in self.kwargs and self.is_concept_document():
                 parent_repo = params['parent'] = get(self, 'parent_resource')
+            if self.map_codes_release:
+                params['release'] = self.map_codes_release
 
             faceted_search = self.facet_class(**params) # pylint: disable=not-callable
             faceted_search.params(request_timeout=ES_REQUEST_TIMEOUT)
@@ -1062,7 +1094,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             )
         if fields and highlight and self.request.query_params.get(INCLUDE_SEARCH_META_PARAM) in get_truthy_values():
             results = results.highlight(*self.clean_fields_for_highlight(fields))
-        results = results.source(excludes=['_synonyms_embeddings', '_embeddings'])
+        results = self.scope_map_codes(
+            results.source(excludes=['_synonyms_embeddings', '_embeddings']), self.map_codes_release)
         return results.sort(*sort_attrs) if sort else results
 
     def get_mandatory_words_criteria(self):

@@ -308,10 +308,12 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             for chunk in chunks(ids, DROPPED_CHILDREN_CHUNK_SIZE):
                 self.batch_index(model.objects.filter(id__in=chunk), document)
         for chunk in chunks(mapping_ids, DROPPED_CHILDREN_CHUNK_SIZE):
-            # the rows that serve HEAD no longer map to the dropped; older releases' rows keep their codes
+            # the rows that read HEAD's codes no longer map to the dropped; older releases' rows keep their codes
             from_concept_ids = Mapping.objects.filter(id__in=chunk).values('from_concept__versioned_object_id')
             Concept.index_mapped_codes(Concept.objects.filter(
                 Q(id__in=from_concept_ids) | Q(versioned_object_id__in=from_concept_ids, is_latest_version=True)))
+            if older_ids := Concept.get_unreleased_older_ids(from_concept_ids):
+                Concept.index_mapped_codes(Concept.objects.filter(id__in=older_ids))
         if recount:
             self.update_children_counts(sync=True)
 
@@ -747,6 +749,20 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             )
         except AlreadyQueued:
             pass
+
+    def index_release_rows_mapped_codes_async(self):
+        """
+        After this release's public_access changed, rebuilds the mapped codes of the rows only releases hold: their own
+        fields take the public releases' codes (MappedCodes, OpenConceptLab/ocl_online#703).
+        """
+        from core.common.tasks import index_concepts_mapped_codes
+        concept_ids = sorted(self.concepts.exclude(id=F('versioned_object_id')).exclude(
+            is_latest_version=True).values_list('id', flat=True))
+
+        def queue():  # once the access change is committed, which the tasks read
+            for chunk in chunks(concept_ids, DROPPED_CHILDREN_CHUNK_SIZE):
+                index_concepts_mapped_codes.apply_async((chunk,), queue='indexing', permanent=False)
+        transaction.on_commit(queue)
 
     def index_public_access_async(self, user=None):
         """
