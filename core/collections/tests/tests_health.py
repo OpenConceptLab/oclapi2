@@ -2,12 +2,13 @@ from django.db import connection
 from django.test.utils import CaptureQueriesContext
 
 from core.collections.health import (
-    ExpansionHealth, RELEASE, HEAD_MEMBER, RESOURCE_VERSIONED, INTERIM, MISMATCH, AMBIGUOUS, UNATTRIBUTED,
-    EMPTY, UNHEALTHY, HEAD_RESOLVED, HEALTHY)
+    ExpansionHealth, RELEASE, UNRELEASED, HEAD_MEMBER, RESOURCE_VERSIONED, INTERIM, MISMATCH, AMBIGUOUS,
+    UNATTRIBUTED, EMPTY, UNHEALTHY, HEAD_RESOLVED, HEALTHY)
 from core.collections.models import CollectionReference, Expansion
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory
+from core.mappings.tests.factories import MappingFactory
 from core.sources.tests.factories import OrganizationSourceFactory
 
 
@@ -170,7 +171,7 @@ class ExpansionHealthTest(OCLTestCase):
         other_expansion.concepts.remove(version)
         self.assertEqual(self.classify(), {version.id: MISMATCH})
 
-    def test_unversioned_references_resolving_to_two_versions_are_inconsistent_and_duplicate(self):
+    def test_repository_recorded_at_two_versions_by_unversioned_references_is_a_duplicate(self):
         concept = ConceptFactory(parent=self.source)
         version = concept.get_latest_version()
         self.expansion.evaluated_source_versions.add(self.release('v1', version), self.release('v2', version))
@@ -178,9 +179,62 @@ class ExpansionHealthTest(OCLTestCase):
 
         health = self.health()
         reasons = {reason['code']: reason for reason in health['reasons']}
+        self.assertEqual(reasons['duplicate_repo_versions']['repositories'], [self.source.uri])
+        self.assertNotIn('inconsistent_resolution', reasons)
+        self.assertEqual(health['multiple_named_versions'], [])
+
+    def test_unversioned_references_taking_members_from_different_versions_are_inconsistent(self):
+        first, second = ConceptFactory(parent=self.source), ConceptFactory(parent=self.source)
+        first_version, second_version = first.get_latest_version(), second.get_latest_version()
+        self.expansion.evaluated_source_versions.add(
+            self.release('v1', first_version), self.release('v2', second_version))
+        self.reference(first, first_version)
+        self.reference(second, second_version)
+
+        reasons = {reason['code']: reason for reason in self.health()['reasons']}
         self.assertEqual(reasons['inconsistent_resolution']['repositories'], [self.source.uri])
         self.assertEqual(reasons['duplicate_repo_versions']['repositories'], [self.source.uri])
-        self.assertEqual(health['multiple_named_versions'], [])
+
+    def test_member_of_an_unreleased_named_version(self):
+        concept = ConceptFactory(parent=self.source)
+        version = concept.get_latest_version()
+        draft = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.source.organization, version='draft', released=False)
+        version.sources.add(draft)
+        self.expansion.explicit_source_versions.add(draft)
+        self.reference(concept, version, version='draft')
+
+        self.assertEqual(self.classify(), {version.id: UNRELEASED})
+        self.assertEqual(self.health()['state'], HEALTHY)
+
+    def mapping_reference(self, mapping, *members):
+        reference = CollectionReference(
+            expression=f'{self.source.uri}mappings/{mapping.mnemonic}/', collection=self.collection,
+            system=self.source.uri, code=mapping.mnemonic, reference_type='mappings')
+        reference.save()
+        reference.mappings.add(*members)
+        self.expansion.mappings.add(*members)
+        return reference
+
+    def test_mappings_follow_the_same_rules_and_head_mappings_count_apart(self):
+        from_concept, to_concept = ConceptFactory(parent=self.source), ConceptFactory(parent=self.source)
+        mapping = MappingFactory(parent=self.source, from_concept=from_concept, to_concept=to_concept)
+        version = MappingFactory(
+            parent=self.source, versioned_object=mapping, mnemonic=mapping.mnemonic, version='1',
+            from_concept=from_concept, to_concept=to_concept)
+        self.expansion.evaluated_source_versions.add(self.release('v1', version))
+        self.mapping_reference(mapping, version)
+        head_mapping = MappingFactory(parent=self.source, from_concept=from_concept, to_concept=to_concept)
+        self.mapping_reference(head_mapping, head_mapping)
+
+        classes = ExpansionHealth(self.expansion).classify('mappings')
+        self.assertEqual(
+            {member_id: member_class for member_id, (member_class, _, _) in classes.items()},
+            {version.id: RELEASE, head_mapping.id: MISMATCH})
+        health = self.health()
+        self.assertEqual(health['members']['mappings'][RELEASE], 1)
+        mismatch = next(reason for reason in health['reasons'] if reason['code'] == 'version_mismatches')
+        self.assertEqual((mismatch['head_concept'], mismatch['head_mapping']), (0, 1))
 
     def test_two_versions_named_by_versioned_references_are_information_only(self):
         concept = ConceptFactory(parent=self.source)

@@ -15,12 +15,13 @@ RULES_VERSION = 1
 # member classes
 RELEASE = 'release'
 HEAD_MEMBER = 'head'
+UNRELEASED = 'unreleased'
 RESOURCE_VERSIONED = 'resource_versioned'
 INTERIM = 'interim'
 MISMATCH = 'mismatch'
 AMBIGUOUS = 'ambiguous'
 UNATTRIBUTED = 'unattributed'
-MEMBER_CLASSES = (RELEASE, HEAD_MEMBER, RESOURCE_VERSIONED, INTERIM, MISMATCH, AMBIGUOUS, UNATTRIBUTED)
+MEMBER_CLASSES = (RELEASE, UNRELEASED, HEAD_MEMBER, RESOURCE_VERSIONED, INTERIM, MISMATCH, AMBIGUOUS, UNATTRIBUTED)
 
 # expansion states, in the order they are checked
 EMPTY = 'empty'
@@ -44,6 +45,8 @@ class ExpansionHealth:
     def __init__(self, expansion):
         self.expansion = expansion
         self.collection_version = expansion.collection_version
+        # {include reference id: keys of the resolved repo versions its classified members came from}
+        self.versions_used_by_reference = {}
 
     @cached_property
     def references(self):
@@ -144,20 +147,23 @@ class ExpansionHealth:
         ).values_list(f'{resource}_id', flat=True).distinct())
 
     def judge(self, member, reference_id, containments, released_or_head_ids):  # pylint: disable=too-many-arguments
-        """The class one reference gives a member"""
+        """The class one reference gives a member, and the keys of its resolved repo versions that hold it"""
         member_id, versioned_object_id = member
         if self.include_references[reference_id].is_resource_versioned:
-            return RESOURCE_VERSIONED
-        if member_id == versioned_object_id:
-            # a HEAD concept or mapping is never a valid member
-            return MISMATCH
+            return RESOURCE_VERSIONED, set()
         holders = [
             version for version in self.resolved_versions.get(reference_id, [])
             if self.version_key(version) in containments.get(member_id, set())
         ]
+        holder_keys = {self.version_key(version) for version in holders}
+        if member_id == versioned_object_id:
+            # a HEAD concept or mapping is never a valid member
+            return MISMATCH, holder_keys
+        if any(version.released for version in holders):
+            return RELEASE, holder_keys
         if holders:
-            return HEAD_MEMBER if all(version.version == HEAD for version in holders) else RELEASE
-        return MISMATCH if member_id in released_or_head_ids else INTERIM
+            return HEAD_MEMBER if all(version.version == HEAD for version in holders) else UNRELEASED, holder_keys
+        return (MISMATCH if member_id in released_or_head_ids else INTERIM), holder_keys
 
     def classify(self, resource_type, member_ids=None):
         """{member id: (class, ids of the references that judged it, is a HEAD object)}, all members or those given"""
@@ -168,8 +174,11 @@ class ExpansionHealth:
         classes = {}
         for member in members.values_list('id', 'versioned_object_id'):
             reference_ids = sorted(attributions.get(member[1], set()))
-            judgements = {
-                self.judge(member, reference_id, containments, released_or_head_ids) for reference_id in reference_ids}
+            judgements = set()
+            for reference_id in reference_ids:
+                member_class, holder_keys = self.judge(member, reference_id, containments, released_or_head_ids)
+                judgements.add(member_class)
+                self.versions_used_by_reference.setdefault(reference_id, set()).update(holder_keys)
             if not judgements:
                 member_class = UNATTRIBUTED
             elif len(judgements) > 1:
@@ -191,13 +200,22 @@ class ExpansionHealth:
         return repositories
 
     def get_inconsistent_repositories(self):
-        """Repositories that unversioned references resolved to more than one version of"""
-        repositories = {}
+        """Repositories whose unversioned references took their members from versions no one version is common to;
+        read from the members classified, so it follows classify"""
+        used_by_repository = {}
         for reference_id, versions in self.resolved_versions.items():
-            if self.include_references[reference_id].is_versionless_expression:
-                for version in versions:
-                    repositories.setdefault(drop_version(version.uri), set()).add(self.version_key(version))
-        return sorted(repository for repository, keys in repositories.items() if len(keys) > 1)
+            if not self.include_references[reference_id].is_versionless_expression:
+                continue
+            used = self.versions_used_by_reference.get(reference_id, set())
+            keys_by_repository = {}
+            for version in versions:
+                if self.version_key(version) in used:
+                    keys_by_repository.setdefault(drop_version(version.uri), set()).add(self.version_key(version))
+            for repository, keys in keys_by_repository.items():
+                used_by_repository.setdefault(repository, []).append(keys)
+        return sorted(
+            repository for repository, used_keys in used_by_repository.items()
+            if len(used_keys) > 1 and not set.intersection(*used_keys))
 
     def get_head_resolved_repositories(self):
         return sorted({
