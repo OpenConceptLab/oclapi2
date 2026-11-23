@@ -1535,11 +1535,15 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     @classmethod
     def get_versioned_objects_by_uri(cls, uris):
+        """
+        uri -> (versioned object id, source id). A URL more than one versioned object has resolves to the lowest id,
+        the row the importers' `.first()` lookups write to, so an import's hierarchy links the concepts it wrote.
+        """
         resolved = {}
         for batch in chunks(sorted(uris), 5000):
             for uri, concept_id, source_id in cls.objects.filter(
-                    uri__in=batch, id=F('versioned_object_id')).values_list('uri', 'id', 'parent_id'):
-                resolved[uri] = (concept_id, source_id)
+                    uri__in=batch, id=F('versioned_object_id')).order_by('id').values_list('uri', 'id', 'parent_id'):
+                resolved.setdefault(uri, (concept_id, source_id))
         return resolved
 
     @classmethod

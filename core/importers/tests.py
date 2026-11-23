@@ -32,7 +32,8 @@ from core.common.tasks import post_import_update_resource_counts, bulk_import_pa
     bulk_import, batch_index_resources, bulk_import_parallel_inline, bulk_import_new, index_concepts_mapped_codes, \
     index_dropped_source_children
 from core.common.tests import OCLAPITestCase, OCLTestCase
-from core.common.utils import decode_string, startswith_temp_version, get_bulk_import_celery_once_lock_key
+from core.common.utils import decode_string, startswith_temp_version, get_bulk_import_celery_once_lock_key, \
+    write_export_file
 from core.concepts.documents import ConceptDocument, MappedCodes
 from core.concepts.models import Concept, HierarchicalConcepts
 from core.concepts.tests.factories import ConceptFactory
@@ -6699,6 +6700,73 @@ class IsolatedVersionImportTest(OCLTestCase):
             set(parent_one.get_version_hierarchy_queryset('child_concepts', v1).values_list('mnemonic', flat=True)),
             {'C'})
         self.assertEqual(concept.parent_concept_urls, ['/orgs/Regen/sources/LOINC/concepts/P2/'])
+
+    @staticmethod
+    def add_duplicate_head(mnemonic):
+        """A second versioned object at the same URL, with a retired latest version, as an old load left some codes."""
+        concept = Concept.objects.get(mnemonic=mnemonic, id=F('versioned_object_id'))
+        duplicate = ConceptFactory(
+            parent=concept.parent, mnemonic=mnemonic, version='duplicate', retired=True, concept_class='LOINC',
+            datatype='N/A')
+        Concept.objects.filter(id=duplicate.id).update(version=str(duplicate.id), uri=concept.uri)
+        return concept
+
+    @staticmethod
+    def version_hierarchy(concept, relation, version):
+        return set(concept.get_version_hierarchy_queryset(
+            relation, Source.objects.get(mnemonic='LOINC', version=version)).values_list('mnemonic', flat=True))
+
+    def test_isolated_import_links_codes_that_have_two_head_rows(self):
+        self.run_import([
+            self.concept('P'), self.concept('Q'), self.concept('C', parents=['P']), self.version('v1')])
+        child = self.add_duplicate_head('C')
+        parent = self.add_duplicate_head('Q')
+
+        self.run_import([
+            self.concept('P'), self.concept('Q'), self.concept('C', parents=['Q']), self.concept('D', parents=['Q']),
+            self.version('v2')])
+
+        new_child = Concept.objects.get(mnemonic='D', id=F('versioned_object_id'))
+        self.assertEqual(self.version_hierarchy(child, 'parent_concepts', 'v2'), {'Q'})
+        self.assertEqual(self.version_hierarchy(new_child, 'parent_concepts', 'v2'), {'Q'})
+        self.assertEqual(self.version_hierarchy(parent, 'child_concepts', 'v2'), {'C', 'D'})
+        self.assertEqual(self.version_hierarchy(child, 'parent_concepts', 'v1'), {'P'})
+        self.assertEqual(
+            sorted(child.parent_concept_urls), ['/orgs/Regen/sources/LOINC/concepts/Q/'])
+
+    def export_hierarchy(self, version):
+        """Each concept's parent and child URLs in the version's export, as (code, row of the version) pairs."""
+        source = Source.objects.get(mnemonic='LOINC', version=version)
+        export_service = Mock(upload_file=Mock(return_value=200), url_for=Mock(return_value='http://export.url'))
+        with patch('core.common.utils.get_export_service', return_value=export_service):
+            write_export_file(
+                source, 'source', 'core.sources.serializers.SourceVersionExportSerializer', Mock(), time.time())
+        with ZipFile(export_service.upload_file.call_args.kwargs['file_path']) as export:
+            concepts = json.loads(export.read('export.json'))['concepts']
+        rows = dict(source.concepts.values_list('uri', 'mnemonic'))
+
+        def codes(urls):
+            return sorted(rows.get(url, f'not in {version}: {url}') for url in urls)
+
+        return {
+            concept['id']: {'parents': codes(concept['parent_concept_urls']),
+                            'children': codes(concept['child_concept_urls'])}
+            for concept in concepts}
+
+    def test_version_export_lists_only_its_own_hierarchy(self):
+        concepts = [self.concept('P1'), self.concept('P2')]
+        self.run_import([*concepts, self.concept('C', parents=['P1']), self.version('v1')])
+        v1_before = self.export_hierarchy('v1')
+
+        self.run_import([*concepts, self.concept('C', parents=['P2']), self.version('v2')])
+
+        self.assertEqual(self.export_hierarchy('v1'), v1_before)
+        self.assertEqual(v1_before, {
+            'P1': {'parents': [], 'children': ['C']}, 'P2': {'parents': [], 'children': []},
+            'C': {'parents': ['P1'], 'children': []}})
+        self.assertEqual(self.export_hierarchy('v2'), {
+            'P1': {'parents': [], 'children': []}, 'P2': {'parents': [], 'children': ['C']},
+            'C': {'parents': ['P2'], 'children': []}})
 
     def test_isolated_import_fails_when_hierarchy_root_is_dropped(self):
         self.run_import([self.concept('ROOT'), self.concept('A', parents=['ROOT']), self.version('v1')])

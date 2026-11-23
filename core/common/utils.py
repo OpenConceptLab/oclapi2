@@ -250,6 +250,9 @@ def _write_export_file(
         out.write(f'{resource_string[:-1]}, "concepts": [')
 
         concept_serializer_class = get_class('core.concepts.serializers.ConceptVersionExportSerializer')
+        is_source_version = not is_collection and not version.is_head  # lists only its rows' own hierarchy links
+        head_hierarchy = [] if is_source_version else [
+            'versioned_object__parent_concepts', 'versioned_object__child_concepts']
         if version.is_head and not is_collection:
             all_versioned_object_ids = list(
                 Concept.objects.filter(
@@ -281,16 +284,17 @@ def _write_export_file(
                 id__in=batch_ids).filter(**filters).select_related(
                 'parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by', 'versioned_object'
             ).prefetch_related(
-                'names', 'descriptions', 'parent_concepts', 'child_concepts',
-                'versioned_object__parent_concepts', 'versioned_object__child_concepts'
+                'names', 'descriptions', 'parent_concepts', 'child_concepts', *head_hierarchy
             ).order_by('-id')
             concept_versions = list(queryset)
             if concept_versions:
                 if written_concepts:
                     out.write(', ')
-                data = concept_serializer_class(
-                    concept_versions, many=True, context={'prev_version_uris': all_prev_version_uris}
-                ).data
+                context = {'prev_version_uris': all_prev_version_uris}
+                if is_source_version:
+                    context['version_hierarchy'] = concept_serializer_class.get_version_hierarchy(
+                        version, concept_versions)
+                data = concept_serializer_class(concept_versions, many=True, context=context).data
                 concept_string = json.dumps(data, cls=encoders.JSONEncoder)
                 out.write(concept_string[1:-1])
                 written_concepts = True
