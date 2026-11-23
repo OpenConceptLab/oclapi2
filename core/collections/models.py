@@ -1500,9 +1500,11 @@ class CollectionReference(models.Model):
         """URLs of the repository versions its expansion evaluated it in that `user` can view,
         else of the repositories it names. A version its system names that `user` can't view counts as missing."""
         expansion_cache = {self.collection_id: expansion}
-        # read as the resolver reads the system: a version after '|', or in its path without the query string
+        # read as the resolver reads the system: a version after '|', or the fifth segment of a relative URL's path
+        # without its query string (/orgs|users/<owner>/<repo type>/<repo>/<version>/)
         url, url_version = split_canonical(self.system or '')
-        names_version = bool(self.version or url_version) or self.is_explicit_valueset(url.split('?')[0])
+        path_version = None if is_canonical_uri(url) else to_parent_kwargs_from_uri(url.split('?')[0]).get('version')
+        names_version = bool(self.version or url_version) or path_version not in (None, HEAD)
         named_version = self._get_expression_system_version(system_version_cache) if names_version else None
         system_versions = [] if named_version and not named_version.has_view_access(user) else \
             self._get_resolved_system_versions(system_version_cache, expansion_cache)

@@ -4142,7 +4142,8 @@ class ExpansionTest(OCLTestCase):
         self.assertEqual(reference.get_evaluated_repo_version_urls(expansion, UserProfileFactory()), [source.uri])
 
     def test_evaluated_repo_version_urls_treat_a_named_version_the_user_cannot_view_as_missing(self):
-        source = OrganizationSourceFactory()
+        # an org named like a repository type, so only the segment's position tells a version
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='sources'))
         recorded = OrganizationSourceFactory(
             mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
         private = OrganizationSourceFactory(
