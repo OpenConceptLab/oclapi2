@@ -2291,10 +2291,7 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
                 url = f'{self.q_v1.uri}{resource}/{query}'
                 self.assert_answers(url, 400, 400, 400)
                 self.assertEqual(self.request('head', url).status_code, 400, url)
-            # `latest` is the newest release: v1 here
-            self.assertEqual(self.listed(f'{self.q_head.uri}latest/{resource}/?version=v1', self.member, resource),
-                             ['inQv1'])
-            latest = f'{self.q_head.uri}latest/{resource}/?version=HEAD'
+            latest = f'{self.q_head.uri}latest/{resource}/?version=v1'
             self.assertEqual(self.request('get', latest, self.member).status_code, 400, latest)
         # a write acts on the version the URL names, never on the query string's
         response = self.request('delete', f'{self.q_head.uri}HEAD/?version=v1', self.staff)
