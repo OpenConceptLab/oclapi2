@@ -544,8 +544,8 @@ class CollectionReferencesView(
         unresolved_reasons = dict(result[2]) if len(result) > 2 else {}
         if get(errors, 'error') == 'Collection not found':  # async task, collection may be deleted
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
-        if isinstance(errors, dict) and 'write_refused' in errors:
-            raise WriteRefused(errors['write_refused'])
+        if len(result) > 3 and result[3] is not None:  # the capability policy's refusal, kept apart from the errors
+            raise WriteRefused(result[3])
 
         added_references = CollectionReference.objects.filter(
             id__in=added_references_ids) if added_references_ids else []

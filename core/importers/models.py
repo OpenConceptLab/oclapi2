@@ -609,13 +609,19 @@ class IsolatedVersionCommit:
         return Source.objects.filter(**{owner_filter: owner}, mnemonic=source, version=HEAD).first()
 
     def get_rejection(self, importer, needs_head=True):
-        """(True, result) when this version would be rejected. A HEAD the import itself creates isn't there yet."""
+        """
+        (True, result) when this version would be rejected: a WriteRefused when the capability policy refuses an edit
+        of HEAD, before anything changes it. A HEAD the import itself creates isn't there yet.
+        """
         is_clean = importer.clean()
         if not is_clean:
             return True, is_clean
         head = self.get_head()
         if (needs_head and not head) or (head and not head.has_edit_access(self.user)):
             return True, PERMISSION_DENIED
+        refusal = importer.get_write_refusal(head) if head else None
+        if refusal is not None:
+            return True, refusal
         return False, None
 
     def preflight(self, content_lines=()):
@@ -627,6 +633,8 @@ class IsolatedVersionCommit:
             raise ValidationError({'__all__': [SEED_FROM_IMPORT_NEEDS_UPDATE]})
         importer = SourceVersionImporter({**self.version_line}, self.user, self.update_if_exists, isolated_version=True)
         rejected, result = self.get_rejection(importer, needs_head=False)
+        if isinstance(result, WriteRefused):
+            raise result
         if rejected:
             raise ValidationError(result if isinstance(result, dict) else {'__all__': [{
                 False: ISOLATED_VERSION_LINE_INVALID, None: ISOLATED_VERSION_EXISTS,
@@ -685,8 +693,10 @@ class IsolatedVersionCommit:
                 if result != CREATED:
                     raise IsolatedVersionRollback(result)
         except IsolatedVersionRollback as ex:
+            self.dropped = None  # rolled back: HEAD kept everything
             return ex.result
         except ValidationError as ex:
+            self.dropped = None
             return get(ex, 'message_dict') or {'__all__': ex.messages}
         return CREATED
 
@@ -1761,12 +1771,15 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self.dropped = commit.dropped
         # the commit owns the hierarchy, so a rejected version leaves it untouched
         self.hierarchy_reconciliation_done = True
+        errors = result.detail if isinstance(result, WriteRefused) else result if isinstance(result, dict) else None
         self.isolated_version_results.setdefault(self.get_result_key(result), []).append(
-            {**version_line, 'errors': result} if isinstance(result, dict) else version_line)
+            version_line if errors is None else {**version_line, 'errors': errors})
         self.notify_progress()
 
     @staticmethod
     def get_result_key(result):
+        if isinstance(result, WriteRefused):  # as BulkImportInline reports it, with the capability policy's body
+            return 'permission_denied'
         if isinstance(result, dict):
             return 'failed'
         return {None: 'exists', False: 'invalid', CREATED: 'created', PERMISSION_DENIED: 'permission_denied'}.get(

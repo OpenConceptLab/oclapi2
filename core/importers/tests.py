@@ -6764,6 +6764,8 @@ class IsolatedVersionImportTest(OCLTestCase):
                 self.concept('P1'), self.concept('P2'), self.concept('C', parents=['P2']), self.version('v2')])
 
         self.assertEqual(importer.failed[0]['errors'], {'version': ['Not saved']})
+        self.assertIsNone(importer.dropped)  # nothing was dropped: the rollback kept A in HEAD
+        self.assertNotIn('dropped', importer.json_result)
         self.assertFalse(Source.objects.filter(mnemonic='LOINC', version='v2').exists())
         self.assertEqual(self.head_concepts(), {'P1', 'P2', 'C', 'A'})
         batch_index_mock.assert_not_called()

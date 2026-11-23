@@ -186,8 +186,8 @@ def add_references(  # pylint: disable=too-many-arguments,too-many-locals
     if not collection:
         return [], {'error': 'Collection not found'}, []
     refusal = get_write_refusal(user, get_write_target(collection), WRITE_ACTION_EDIT)
-    if refusal is not None:  # writable when queued, the collection may be read-only by now
-        return [], {'write_refused': refusal}, []
+    if refusal is not None:  # writable when queued, the collection may be read-only by now: the body, as a 4th item
+        return [], {}, [], refusal
     head = collection.get_head()
     head.add_processing(self.request.id)
 
