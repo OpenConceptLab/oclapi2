@@ -15,16 +15,15 @@ EXPLICIT_COLLECTIONS = 'explicit_collection_versions'
 EVALUATED_COLLECTIONS = 'evaluated_collection_versions'
 
 RULE = (
-    'A reference naming a repo version records it as explicit. A resource-versioned reference records as explicit '
-    'the version holding its resource version: one the expansion already records, else the one adding it picks. '
-    'A version-less reference records as evaluated the version its members came from: when members sit in several '
+    'A reference naming a repo version records it as explicit. A resource-versioned reference records as explicit the '
+    'version holding its resource version: one the expansion already records, else the one adding it picks. A '
+    'version-less reference records as evaluated the version its members came from: when members sit in several '
     'versions of the repo, a version the expansion already records that holds all of them (those in the list the '
-    'reference reads first, then the others, each newest first), else the '
-    'newest live release holding all of them, else HEAD. When no one version holds them all, it records the '
-    'recorded versions that between them hold the most, newest first, each adding members the newer ones lack. A '
-    'reference with no members, or none held by a recorded version, keeps what the expansion records for its repo, '
-    'unless the list it reads already holds that repo. A version both kinds of reference use is in both lists. '
-    'Members are never changed.')
+    'reference reads first, then the others, each newest first), else the newest live release holding all of them, '
+    'else HEAD. When no one version holds them all, it records the recorded versions that between them hold the most, '
+    'its own list first, each adding members the earlier ones lack. A reference with no members, or none held by a '
+    'recorded version, keeps what the expansion records for its repo, unless the list it reads already holds that '
+    'repo. A version both kinds of reference use is in both lists. Members are never changed.')
 
 
 class ExpansionVersionLists:
@@ -78,7 +77,7 @@ class ExpansionVersionLists:
 
     @staticmethod
     def get_covering_versions(versions, held):
-        """Newest first, each version holding a member none before it holds"""
+        """In the order given, each version holding a member none before it holds"""
         covered = set()
         covering = []
         for version in versions:
