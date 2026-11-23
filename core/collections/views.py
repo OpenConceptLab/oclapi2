@@ -992,7 +992,7 @@ class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, 
 
 
 class CollectionExpansionsView(CollectionBaseView, ListWithHeadersMixin):
-    """List all expansions across all versions of a collection."""
+    """List the expansions across the versions of a collection the requester can view."""
 
     def get_serializer_class(self):
         if self.is_verbose():
@@ -1002,7 +1002,12 @@ class CollectionExpansionsView(CollectionBaseView, ListWithHeadersMixin):
     def get_queryset(self):
         instance = get_object_or_404(super().get_queryset())
         self.check_object_permissions(self.request, instance)
-        return Expansion.objects.filter(collection_version_id__in=instance.versions.values_list('id', flat=True))
+        # viewing HEAD doesn't make a private release's expansions visible: only versions the requester can view
+        versions = instance.versions
+        viewable = Collection.get_viewable_versions_criteria(self.request.user)
+        if viewable is not None:
+            versions = versions.filter(viewable)
+        return Expansion.objects.filter(collection_version_id__in=versions.values('id'))
 
     @swagger_auto_schema(
         manual_parameters=[verbose_param, include_summary_param, page_param, limit_param]

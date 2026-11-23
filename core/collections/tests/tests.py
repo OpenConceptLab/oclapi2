@@ -6698,6 +6698,28 @@ class CollectionViewsAPITest(OCLAPITestCase):
         )
         self.assertEqual(response.status_code, 200)
 
+    def test_expansions_list_leaves_out_private_versions_the_requester_cannot_view(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        head_expansion = ExpansionFactory(collection_version=collection, mnemonic='autoexpand-HEAD')
+        private = OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v1',
+            public_access=ACCESS_TYPE_NONE, created_by=self.admin, updated_by=self.admin)
+        private_expansion = ExpansionFactory(collection_version=private, mnemonic='autoexpand-v1')
+        member = UserProfileFactory()
+        collection.organization.members.add(member)
+        url = f'{collection.uri}expansions/'
+
+        def listed(token=None):
+            response = self.client.get(url, **({'HTTP_AUTHORIZATION': f'Token {token}'} if token else {}))
+            self.assertEqual(response.status_code, 200)
+            return sorted(item['url'] for item in response.data)
+
+        both = sorted([head_expansion.uri, private_expansion.uri])
+        self.assertEqual(listed(), [head_expansion.uri])
+        self.assertEqual(listed(UserProfileFactory().get_token()), [head_expansion.uri])
+        self.assertEqual(listed(member.get_token()), both)
+        self.assertEqual(listed(self.admin_token), both)
+
     def test_version_expansion_not_found(self):
         collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
         response = self.client.get(
