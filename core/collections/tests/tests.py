@@ -20,7 +20,8 @@ from rest_framework import status
 from rest_framework.response import Response
 
 from core.collections.constants import SOURCE_TO_CONCEPTS, TRANSFORM_TO_RESOURCE_VERSIONS, TRANSFORM_TO_EXTENSIONAL, \
-    EXPANSION_LOCKED_REPO_VERSION_TOGGLE, RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE
+    EXPANSION_LOCKED_REPO_VERSION_TOGGLE, RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE, REFERENCE_FOUND_NOTHING, \
+    REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS
 from core.collections.dry_runs import ExpansionDryRun
 from core.collections.documents import CollectionDocument
 from core.common.constants import SERIALIZATION_RETRY_ATTEMPTS
@@ -2178,7 +2179,7 @@ class TasksTest(OCLTestCase):
         )
         mapping2 = MappingFactory()
 
-        added_references, errors = add_references(
+        added_references, errors, unresolved = add_references(
             collection.created_by.id,
             {
                 'expressions': [obj.get_latest_version().url for obj in [concept1, concept2, mapping2]]
@@ -2189,6 +2190,7 @@ class TasksTest(OCLTestCase):
 
         self.assertEqual(len(added_references), 3)
         self.assertEqual(errors, {})
+        self.assertEqual(unresolved, [])
         self.assertListEqual(
             sorted(list(
                 collection.references.values_list('expression', flat=True)
@@ -2215,7 +2217,7 @@ class TasksTest(OCLTestCase):
             sorted([concept1.parent.uri, concept2.parent.uri, mapping2.parent.uri])
         )
 
-        added_references, errors = add_references(
+        added_references, errors, _ = add_references(
             collection.created_by.id,
             [
                 {'system': 'http://foo-system.com', 'namespace': 'barbar', 'code': 'bar'},
@@ -4134,6 +4136,108 @@ class ExpansionTest(OCLTestCase):
             'url': reference.expression, 'namespace': None, 'version': old.version,
             'type': 'reference.resource_version'
         }])
+
+    def test_add_references_marks_pinned_reference_no_version_holds(self):
+        source, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        _, expansion, reference = self._expansion_with_resource_version_reference(source, old)
+        old.sources.remove(v1)
+
+        with patch.object(CollectionReference, 'is_resource_version_repo_resolution_on', return_value=True), \
+                patch.object(Expansion, 'index_resources'):
+            expansion.add_references([reference])
+
+        self.assertEqual(reference.unresolved_reason, REFERENCE_VERSION_NOT_HELD)
+        self.assertEqual(list(expansion.concepts.all()), [old])
+
+    def test_add_references_marks_include_references_that_add_nothing(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        found = CollectionReference(
+            expression=concept.uri, collection=collection, system=source.uri, code=concept.mnemonic)
+        missing_mapping = CollectionReference(
+            expression=f'{source.uri}mappings/nothing/', collection=collection, system=source.uri, code='nothing',
+            reference_type='mappings')
+        missing_exclude = CollectionReference(
+            expression=f'{source.uri}concepts/nothing/', collection=collection, system=source.uri, code='nothing',
+            include=False)
+        for reference in (found, missing_mapping, missing_exclude):
+            reference.save()
+
+        with patch.object(Expansion, 'index_resources'):
+            expansion.add_references([found, missing_mapping, missing_exclude])
+
+        self.assertIsNone(found.unresolved_reason)
+        self.assertEqual(missing_mapping.unresolved_reason, REFERENCE_FOUND_NOTHING)
+        self.assertIsNone(missing_exclude.unresolved_reason)
+
+    def test_add_references_marks_reference_whose_members_the_parameters_filter_out(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source, retired=True)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        expansion.parameters = {**expansion.parameters, 'activeOnly': True}
+        expansion.save()
+        reference = CollectionReference(
+            expression=concept.uri, collection=collection, system=source.uri, code=concept.mnemonic)
+        reference.save()
+
+        with patch.object(Expansion, 'index_resources'):
+            expansion.add_references([reference])
+
+        self.assertEqual(reference.unresolved_reason, REFERENCE_EXCLUDED_BY_PARAMETERS)
+        self.assertEqual(expansion.concepts.count(), 0)
+
+    def test_evaluated_repo_version_urls_name_the_repository_when_no_version_resolves(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        reference = CollectionReference(
+            expression='/orgs/nobody/sources/nothing/concepts/c1/', collection=collection,
+            system='/orgs/nobody/sources/nothing/', code='c1')
+
+        self.assertEqual(
+            reference.get_evaluated_repo_version_urls(expansion, None), ['/orgs/nobody/sources/nothing/'])
+
+    def test_evaluated_repo_version_urls_name_only_versions_the_user_can_view(self):
+        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        release = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        member = UserProfileFactory()
+        source.organization.members.add(member)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        reference = CollectionReference(
+            expression=f'{source.uri}concepts/c1/', collection=collection, system=source.uri, code='c1')
+
+        self.assertEqual(reference.get_evaluated_repo_version_urls(expansion, member), [release.uri])
+        self.assertEqual(reference.get_evaluated_repo_version_urls(expansion, UserProfileFactory()), [source.uri])
+
+    def test_evaluated_repo_version_urls_treat_a_named_version_the_user_cannot_view_as_missing(self):
+        # an org named like a repository type, so only the segment's position tells a version
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='sources'))
+        recorded = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+        private = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v2', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        expansion.evaluated_source_versions.add(recorded)
+        user = UserProfileFactory()
+
+        def evaluated_urls(system):
+            reference = CollectionReference(
+                expression=f"{system.rstrip('/')}/concepts/c1/", collection=collection, system=system, code='c1')
+            return reference.get_evaluated_repo_version_urls(expansion, user)
+
+        for suffix in ('', '?q=a/b/'):  # the resolver drops the query string
+            for system in (f'{source.uri}v3', f'{source.uri}v3/', private.uri.rstrip('/'), private.uri):
+                self.assertEqual(evaluated_urls(system + suffix), [system + suffix])
+            # versionless, it names the release the expansion recorded, whatever newer release it can't view exists
+            self.assertEqual(evaluated_urls(source.uri + suffix), [recorded.uri])
+        self.assertEqual(evaluated_urls('/orgs/acme//catalog/'), ['/orgs/acme//catalog/'])
 
     def test_rebuild_with_filter_reference_under_release_adds_its_resource_versions(self):
         source, release, _, concept_version = CollectionReferenceTest.released_source_with_concepts()

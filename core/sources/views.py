@@ -19,9 +19,9 @@ from core.client_configs.views import ResourceClientConfigsView
 from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM
 from core.common.exceptions import Http405, Http400
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin, \
-    ConceptContainerExportMixin, ConceptContainerProcessingMixin
-from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
-    CanViewConceptDictionaryVersion
+    ConceptContainerExportMixin, ConceptContainerProcessingMixin, RepoVersionListMixin
+from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, \
+    CanEditConceptDictionaryVersion, CanViewConceptDictionaryVersion
 from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, \
     page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header, \
     canonical_url_param, all_versions_param
@@ -180,6 +180,7 @@ class SourceRetrieveUpdateDestroyView(
     SourceBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, UpdateAPIView, TaskMixin
 ):
     serializer_class = SourceDetailSerializer
+    writes_own_object = True  # its DELETE deletes the repository, and its PUT/PATCH can publish it
 
     def get_object(self, queryset=None):
         instance = self.get_queryset().filter(is_active=True).order_by('-created_at').first()
@@ -223,7 +224,9 @@ class SourceRetrieveUpdateDestroyView(
         return Response({'detail': get(result, 'messages', [DELETE_FAILURE])}, status=status.HTTP_400_BAD_REQUEST)
 
 
-class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeadersMixin):
+class SourceVersionListView(
+        RepoVersionListMixin, SourceVersionBaseView, CreateAPIView, ListWithHeadersMixin
+):
     released_filter = None
     processing_filter = None
     default_qs_sort_attr = '-created_at'
@@ -233,7 +236,7 @@ class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeader
         if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionary(), ]
 
-        return [IsAuthenticated(), HasAccessToVersionedObject()]
+        return [IsAuthenticated(), CanEditConceptDictionaryVersion()]
 
     def get_head(self):
         head = get(self.get_queryset().first(), 'head')
@@ -252,7 +255,7 @@ class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeader
         return SourceVersionListSerializer
 
     def get(self, request, *args, **kwargs):
-        self.get_head()
+        self.check_repos_permissions()  # before `released`, so it answers for every repository the URL names
         self.released_filter = parse_boolean_query_param(request, RELEASED_PARAM, self.released_filter)
         self.processing_filter = parse_boolean_query_param(request, PROCESSING_PARAM, self.processing_filter)
         return self.list(request, *args, **kwargs)
@@ -263,9 +266,9 @@ class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeader
             raise Http404()
         version = request.data.pop('id', None)
         payload = {
-            "mnemonic": head_object.mnemonic,
-            "id": head_object.mnemonic,
             "name": head_object.name, **request.data,
+            "mnemonic": head_object.mnemonic,  # the version is the URL's repository's, whatever the body says
+            "id": head_object.mnemonic,
             "organization_id": head_object.organization_id,
             "user_id": head_object.user_id,
             'version': version,
@@ -302,12 +305,13 @@ class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeader
 
 class SourceLatestVersionRetrieveUpdateView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):
     serializer_class = SourceVersionDetailSerializer
+    writes_own_object = True  # its PUT/PATCH can publish the version it resolves to
 
     def get_permissions(self):
         if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionaryVersion(), ]
 
-        return [IsAuthenticated(), HasAccessToVersionedObject()]
+        return [IsAuthenticated(), CanEditConceptDictionaryVersion()]
 
     def get_object(self, queryset=None):
         obj = self.get_queryset().first()
@@ -475,11 +479,12 @@ class SourceConceptsCloneView(SourceBaseView):
 
 class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):
     serializer_class = SourceVersionDetailSerializer
+    writes_own_object = True  # its PUT/PATCH can publish the version, and on HEAD/ its DELETE deletes the repository
 
     def get_permissions(self):
         if self.request.method == 'GET':
             return [CanViewConceptDictionaryVersion()]
-        return [HasAccessToVersionedObject()]
+        return [CanEditConceptDictionaryVersion()]
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())

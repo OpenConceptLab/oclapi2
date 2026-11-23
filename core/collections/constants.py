@@ -16,6 +16,17 @@ MAPPING_VERSION_ADDED_TO_COLLECTION = 'Added the mapping version to the collecti
 CONCEPT_ADDED_TO_COLLECTION_FMT = 'The concept {} is successfully added to collection {}'
 MAPPING_ADDED_TO_COLLECTION_FMT = 'The mapping {} is successfully added to collection {}'
 UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT = 'The reference is successfully added to collection {}'
+REFERENCE_RESOLVED_TO_NOTHING_FMT = 'The reference is saved in collection {}, but it resolved to no concepts ' \
+                                    'or mappings in {}'
+REFERENCE_VERSION_NOT_HELD_FMT = 'The reference is saved in collection {}, but no version of {} holds ' \
+                                 'resource version {}'
+REFERENCE_NAMED_VERSION_NOT_HELD_FMT = 'The reference is saved in collection {}, but {} does not hold ' \
+                                       'resource version {}'
+REFERENCE_EXCLUDED_BY_PARAMETERS_FMT = "The reference is saved in collection {}, but the expansion's parameters " \
+                                       "exclude everything it resolved to in {}"
+REFERENCE_FOUND_NOTHING = 'found_nothing'
+REFERENCE_EXCLUDED_BY_PARAMETERS = 'excluded_by_parameters'
+REFERENCE_VERSION_NOT_HELD = 'resource_version_not_held'
 
 DELETE_FAILURE = 'Could not delete Collection.'
 DELETE_SUCCESS = 'Successfully deleted Collection.'

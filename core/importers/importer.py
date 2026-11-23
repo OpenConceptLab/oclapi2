@@ -25,6 +25,9 @@ from pydash import get
 from rest_framework.exceptions import ValidationError
 
 from core import settings
+from core.capabilities.constants import WRITE_ACTION_EDIT
+from core.capabilities.exceptions import WriteRefused
+from core.capabilities.writes import BatchWriteRefusals, get_write_refusal, get_write_target
 from core.common.serializers import IdentifierSerializer
 from core.common.tasks import bulk_import_subtask, bulk_import_subtask_empty, bulk_import_queue
 from core.concepts.models import Concept
@@ -256,6 +259,20 @@ class Importer:
             raise ValidationError(ex.message_dict if hasattr(ex, 'error_dict') else ex.messages) from ex
         return self.get_isolated_version_resource_types(resource_types)
 
+    def get_refused_result(self, refusal, resources, time_started, dependencies):
+        """
+        Nothing imports: the version line, the one line processed, fails with the capability policy's body, as a
+        refused line does in a subtask.
+        """
+        import_task = ImportTask(time_started=time_started, dependencies=dependencies)
+        import_task.initial_summary.total = sum(sum(files.values()) for files in resources.values())
+        import_task.initial_summary.processed = import_task.initial_summary.failed = 1
+        import_task.initial_summary.failures = [
+            f"Failed to import resource with id {get(self.version_lines, '0.id')} from {self.path} to "
+            f"{self.owner_type}/{self.owner} by {self.username} due to: {json.dumps(refusal.detail, default=str)}"]
+        import_task.time_finished = timezone.now()
+        return import_task.model_dump()
+
     @staticmethod
     def get_isolated_version_resource_types(resource_types):
         resource_types = [_type for _type in resource_types if _type != 'Source Version']
@@ -305,7 +322,10 @@ class Importer:
         dependencies = []
 
         self.prepare_resources(self.path, resource_types, dependencies, [], resources)
-        resource_types = self.validate_versioning(resources, resource_types)
+        try:
+            resource_types = self.validate_versioning(resources, resource_types)
+        except WriteRefused as ex:
+            return self.get_refused_result(ex, resources, time_started, dependencies)
         self.index = should_index_import(self.index, sum(sum(files.values()) for files in resources.values()))
         tasks = self.prepare_tasks(resource_types, dependencies, resources)
         if tasks:
@@ -572,9 +592,10 @@ class ResourceImporter:
     converters = [CodeSystemConverter]
     result_type = [CREATED, UPDATED, FAILED, DELETED, NOT_FOUND, PERMISSION_DENIED, UNCHANGED]
 
-    def __init__(self, indexer=None, isolated=False):
+    def __init__(self, indexer=None, isolated=False, write_refusals=None):
         self.indexer = indexer  # collects the concepts and mappings imported with _index=False
         self.isolated = isolated
+        self.write_refusals = write_refusals  # the write checks the rows of one file share (BatchWriteRefusals)
         self.importer = None
 
     @staticmethod
@@ -605,7 +626,8 @@ class ResourceImporter:
                     user_profile = UserProfile.objects.get(username=username)
                     is_content = resource_importer in (ConceptImporter, MappingImporter)
                     importer = resource_importer(
-                        resource, user_profile, True, **({'isolated': self.isolated} if is_content else {}))
+                        resource, user_profile, True, write_refusals=self.write_refusals,
+                        **({'isolated': self.isolated} if is_content else {}))
                     self.importer = importer
                     result = importer.run()
                     if self.indexer:
@@ -631,10 +653,18 @@ class ResourceImporter:
     # pylint: disable=too-many-arguments
     @staticmethod
     def save_fhir_resource(serializer_class, existing, owner, resource, request):
-        """Updates need edit access on the existing repo, creates need edit access on the owner."""
+        """
+        Updates need edit access on the existing repo, and no refusal from the capability policy (the WriteRefused
+        then is the resource's result, as it is when the policy refuses a write that makes a repository private),
+        creates need edit access on the owner.
+        """
         if existing:
             if not existing.has_edit_access(request.user):
                 return PERMISSION_DENIED
+            # the update saves onto the HEAD, whichever row has the canonical URL
+            refusal = get_write_refusal(request.user, get_write_target(existing.head), WRITE_ACTION_EDIT)
+            if refusal is not None:
+                return WriteRefused(refusal)
             serializer = serializer_class(existing, data=resource, context={'request': request})
             result = UPDATED
         else:
@@ -643,7 +673,10 @@ class ResourceImporter:
             serializer = serializer_class(data=resource, context={'request': request, 'owner': owner})
             result = CREATED
         if serializer.is_valid():
-            serializer.save()
+            try:
+                serializer.save()
+            except WriteRefused as ex:  # the capability policy refused making a repository private
+                return ex
         return serializer.errors if serializer.errors else result
 
     # pylint: disable=too-many-arguments
@@ -908,6 +941,7 @@ class ImporterSubtask:
             count = None
 
         results = []
+        write_refusals = BatchWriteRefusals()
         for resource in ijson.items(parse, '', multiple_values=True, allow_comments=True, use_float=True):
             if resource.get('__action', None) == 'DELETE':
                 continue
@@ -927,7 +961,7 @@ class ImporterSubtask:
                         resource_importer = None
                         result = self.commit_isolated_version(resource)
                     else:
-                        resource_importer = ResourceImporter(self.indexer, self.isolated)
+                        resource_importer = ResourceImporter(self.indexer, self.isolated, write_refusals)
                         result = resource_importer.import_resource(
                             resource, self.username, self.owner_type, self.owner)
                     if isinstance(result, int):
@@ -935,6 +969,8 @@ class ImporterSubtask:
                         self.add_seen(get(resource_importer, 'importer'), result)
                         if self.dropped is not None:
                             results.append({'dropped': self.dropped})
+                    elif isinstance(result, WriteRefused):  # a failure, so the summary lists the policy's body
+                        results.append(f'{error} due to: {json.dumps(result.detail, default=str)}')
                     else:
                         results.append(f'{error} due to: {result}')
                 except Exception as e:

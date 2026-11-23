@@ -27,9 +27,10 @@ from core.common.constants import (
     HEAD, LATEST, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE, LIST_DEFAULT_LIMIT)
 from core.common.exceptions import Http400, Http403, Http409
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryMixin
-from core.capabilities.constants import MAPPER_MATCH_OPERATIONS_CAPABILITY_ID
+from core.capabilities.constants import MAPPER_MATCH_OPERATIONS_CAPABILITY_ID, WRITE_ACTION_EDIT
 from core.capabilities.exceptions import UsageRefused
 from core.capabilities.policy import get_capability_policy
+from core.capabilities.writes import check_write, get_write_target
 from core.capacity.constants import ENDPOINT_MATCH, ENDPOINT_RERANK
 from core.capacity.limiter import CapacityLimitMixin
 from core.common.permissions import CanUseMapper
@@ -47,7 +48,7 @@ from core.common.tasks import delete_concept, make_hierarchy
 from core.common.throttling import ThrottleUtil
 from core.common.utils import (generate_temp_version, get_truthy_values, to_int,
                                drop_version, get_falsy_values, parse_id, get_event_metadata)
-from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, SourceVersionListHeadMixin, \
+from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
 from core.concepts.constants import (
     CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY,
@@ -85,7 +86,8 @@ class ConceptBaseView(SourceChildCommonBaseView):
         return ConceptDetailSerializer(obj, data, files, partial, context={'request': self.request})
 
     def get_queryset(self):
-        return Concept.get_base_queryset(self.params)
+        return self.keep_to_viewable_query_versions(Concept.get_base_queryset(
+            self.params, self.get_viewable_query_collection_versions()))
 
     def set_parent_resource(self, __pop=True):
         parent_resource = None
@@ -94,8 +96,7 @@ class ConceptBaseView(SourceChildCommonBaseView):
         container_version = self.kwargs.pop('version', HEAD) if __pop else self.kwargs.get('version', HEAD)
         filters = self.get_parent_owner_filters()
         if source:
-            from core.sources.models import Source
-            parent_resource = Source.get_version(source, container_version or HEAD, filters)
+            parent_resource = self.get_url_source_version(source, container_version or HEAD, filters)
         if collection:
             from core.collections.models import Collection
             parent_resource = Collection.get_version(collection, container_version or HEAD, filters)
@@ -202,9 +203,7 @@ class ConceptHierarchyMixin:
         return instance.get_hierarchy_related_queryset(relation)
 
 
-class ConceptListView(
-        SourceVersionListHeadMixin, ConceptHierarchyMixin, ConceptBaseView, ListWithHeadersMixin, CreateModelMixin
-):
+class ConceptListView(ConceptHierarchyMixin, ConceptBaseView, ListWithHeadersMixin, CreateModelMixin):
     is_page_size_capped = True
     serializer_class = ConceptListSerializer
 
@@ -289,11 +288,19 @@ class ConceptListView(
         return queryset
 
     def _set_source_versions(self):
+        """
+        The source versions a fuzzy search's `source_version` names: each one the requester can view, or 401/403.
+        Expressions that don't resolve to a source version are skipped.
+        """
         from core.sources.models import Source
         source_versions = []
         for version_url in compact((self.request.query_params.dict().get('source_version', '')).split(',')):
-            source_version, _ = Source.resolve_expression_to_version(version_url)
-            if source_version.id:
+            try:
+                source_version, _ = Source.resolve_expression_to_version(version_url)
+            except ValueError:  # an expression that can't be parsed
+                continue
+            if source_version.id and isinstance(source_version, Source):
+                self.check_view_access(self.request, source_version)
                 source_versions.append(source_version)
         self._source_versions = source_versions
 
@@ -305,12 +312,18 @@ class ConceptListView(
         ]
     )
     def get(self, request, *args, **kwargs):
+        self.set_fuzzy_search_targets()
+        self.set_parent_resource(False)
+        return self.list(request, *args, **kwargs)
+
+    def head(self, request, **kwargs):
+        self.set_fuzzy_search_targets()
+        return super().head(request, **kwargs)
+
+    def set_fuzzy_search_targets(self):
         if self.is_fuzzy_search:
             self._set_source_versions()
             self._extra_filters = None
-        self.set_parent_resource(False)
-        self.check_parent_permissions(request)
-        return self.list(request, *args, **kwargs)
 
     def post(self, request, **_):
         self.set_parent_resource()
@@ -359,7 +372,8 @@ class ConceptCollectionMembershipView(ConceptBaseView, ListWithHeadersMixin):
         return CollectionVersionListSerializer
 
     def get_object(self, queryset=None):
-        queryset = Concept.get_base_queryset(self.params)
+        queryset = self.keep_to_viewable_query_versions(Concept.get_base_queryset(
+            self.params, self.get_viewable_query_collection_versions()))
         if 'concept_version' not in self.kwargs:
             queryset = queryset.filter(id=F('versioned_object_id'))
         instance = queryset.first()
@@ -628,6 +642,7 @@ class ConceptCloneView(ConceptCascadeView):
             raise Http404()
         if not source.has_edit_access(self.request.user):
             raise Http403()
+        check_write(self.request.user, get_write_target(source), WRITE_ACTION_EDIT)
         return source
 
 
@@ -1021,6 +1036,7 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
     score_threshold_semantic_very_high = 0.9
     serializer_class = ConceptListSerializer
     permission_classes = (IsAuthenticated, CanUseMapper)
+    document_model = ConceptDocument  # the filters' collection facets count only versions the requester can view
     es_fields = Concept.es_fields
     # Semantic kNN. Above ~1000 candidates ES compares far more vectors per clause for no gain in hits
     # (OpenConceptLab/ocl_online#255).

@@ -256,6 +256,21 @@ class CustomESSearch:
             return False
         return False
 
+    @staticmethod
+    def get_highlight(hit):
+        """
+        The hit's highlight, with what its inner hits highlighted under their own field names: a concept matched by a
+        release's own mapped codes (OpenConceptLab/ocl_online#703) is highlighted in its release_map_codes entry.
+        """
+        highlight = get(hit, 'highlight')
+        highlight = highlight.to_dict() if highlight else {}
+        inner_hits = get(hit, 'inner_hits')
+        for inner in (inner_hits.to_dict() if inner_hits else {}).values():
+            for inner_hit in get(inner, 'hits.hits') or []:
+                for field, fragments in (get(inner_hit, 'highlight') or {}).items():
+                    highlight.setdefault(field.split('.')[-1], fragments)
+        return highlight
+
     def to_queryset(  # pylint:disable=too-many-locals,too-many-arguments
             self, keep_order=True, normalized_score=False, exact_count=True, txt=None,
             encoder_model=None, address_duplicates=False, brief=False
@@ -286,9 +301,9 @@ class CustomESSearch:
                 'rerank': rerank_score,
                 'normalized': rerank_score if encoder else (raw_score / max_score)
             } if normalized_score else raw_score
-            highlight = get(result, 'highlight')
+            highlight = self.get_highlight(result)
             if highlight:
-                self.highlights[int(_id)] = highlight.to_dict()
+                self.highlights[int(_id)] = highlight
         if self.document and self.document.__name__ == 'RepoDocument':
             from core.sources.models import Source
             from core.collections.models import Collection
@@ -327,6 +342,8 @@ class CustomESSearch:
             return result
         self.max_score = result['score']['max']
         self.total = total or 0
+        if not self.max_score:  # no hits: no scores to bucket
+            return []
         return self._get_score_buckets(
             self.max_score, result['distribution']['buckets'], verbose)
 
