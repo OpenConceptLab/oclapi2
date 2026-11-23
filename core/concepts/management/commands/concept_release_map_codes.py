@@ -121,14 +121,15 @@ class Command(BaseCommand):
         release_ids = list(source.versions.exclude(version=HEAD).values_list('id', flat=True))
 
         def get_rows(queryset):  # {versioned object id: [the ids of its rows that the backfill rewrites]}
-            rows = list(queryset.values_list('versioned_object_id', 'id', 'parent_id', 'is_latest_version'))
+            rows = sorted(queryset.values_list('versioned_object_id', 'id', 'parent_id', 'is_latest_version'),
+                          key=lambda row: row[1])
             older = {id_ for versioned_object_id, id_, parent_id, is_latest_version in rows
                      if parent_id == source.id and not is_latest_version and id_ != versioned_object_id}
             held = set(Concept.sources.through.objects.filter(
                 source_id__in=release_ids, concept_id__in=[row[1] for row in rows if row[1] not in older]
-            ).values_list('concept_id', flat=True)) if release_ids else set()
+            ).values_list('concept_id', flat=True))
             ids = defaultdict(list)
-            for versioned_object_id, id_, *_ in sorted(rows, key=lambda row: row[1]):
+            for versioned_object_id, id_, *_ in rows:
                 if id_ in older or id_ in held:
                     ids[versioned_object_id].append(id_)
             return ids
