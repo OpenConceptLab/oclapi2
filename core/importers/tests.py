@@ -9,6 +9,7 @@ from json import JSONDecodeError
 from unittest.mock import mock_open
 from zipfile import ZipFile
 
+import fakeredis
 import responses
 from celery_once import AlreadyQueued
 from django.contrib.auth.models import Group
@@ -25,12 +26,14 @@ from mock import patch, Mock, ANY, PropertyMock, call
 from ocldev.oclcsvtojsonconverter import OclStandardCsvToJsonConverter
 from rest_framework.exceptions import ValidationError
 
+from core.celery import app
 from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.constants import OPENMRS_VALIDATION_SCHEMA, DEPRECATED_API_HEADER, ACCESS_TYPE_NONE
 from core.common.tasks import post_import_update_resource_counts, bulk_import_parts_inline, bulk_import_inline, \
     bulk_import, batch_index_resources, bulk_import_parallel_inline, bulk_import_new, index_concepts_mapped_codes, \
-    index_dropped_source_children
+    index_dropped_source_children, try_job_lock, POST_IMPORT_COUNTS_LOCK, POST_IMPORT_COUNTS_REQUEUE_SECONDS
+from core.common.backends import QueueOnceRedisBackend
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.common.utils import decode_string, startswith_temp_version, get_bulk_import_celery_once_lock_key
 from core.concepts.documents import ConceptDocument, MappedCodes
@@ -4655,7 +4658,7 @@ class TasksTest(OCLTestCase):
         mapping1 = MappingFactory(_counted=None, parent=source)
         mapping2 = MappingFactory(_counted=True, parent=source)
 
-        post_import_update_resource_counts()
+        post_import_update_resource_counts.run()
         concept1.refresh_from_db()
         mapping1.refresh_from_db()
         concept2.refresh_from_db()
@@ -4681,17 +4684,119 @@ class TasksTest(OCLTestCase):
         mapping2 = MappingFactory(_counted=None, parent=source2)
 
         update_concepts_count_mock.side_effect = [DatabaseError('gone'), None]
-        update_mappings_count_mock.side_effect = [DatabaseError('gone'), None]
+        update_mappings_count_mock.side_effect = [ValueError('any other error'), None]
 
-        post_import_update_resource_counts()
+        post_import_update_resource_counts.run()
 
         self.assertEqual(update_concepts_count_mock.call_count, 2)
         self.assertEqual(update_mappings_count_mock.call_count, 2)
         for resource in (concept1, concept2, mapping1, mapping2):
             resource.refresh_from_db()
-        # first source (in query order) fails and is skipped, the other is still counted
+        # first source (in query order) fails and is skipped, its rows left to count again; the other is counted
         self.assertEqual(sum(1 for c in (concept1, concept2) if c._counted), 1)  # pylint: disable=protected-access
         self.assertEqual(sum(1 for m in (mapping1, mapping2) if m._counted), 1)  # pylint: disable=protected-access
+
+    @patch('core.common.tasks.logger')
+    def test_post_import_update_resource_counts_skips_a_source_deleted_after_the_pass_read_it(self, logger_mock):
+        deleted, kept = OrganizationSourceFactory(), OrganizationSourceFactory()
+        ConceptFactory(_counted=None, parent=deleted)
+        kept_concept = ConceptFactory(_counted=None, parent=kept)
+        set_active_concepts = Source.set_active_concepts
+
+        def delete_then_count(source):
+            if source.id == deleted.id:  # deleted by another task after the pass read its sources
+                with connection.cursor() as cursor:
+                    cursor.execute('DELETE FROM sources WHERE id = %s', [source.id])
+            set_active_concepts(source)
+
+        with patch.object(Source, 'set_active_concepts', autospec=True, side_effect=delete_then_count):
+            post_import_update_resource_counts.run()
+
+        kept_concept.refresh_from_db()
+        self.assertTrue(kept_concept._counted)  # pylint: disable=protected-access
+        logger_mock.warning.assert_called_once_with(
+            'Skipping %s count for source %s: %s', 'concepts', deleted.id, ANY)
+        self.assertEqual(
+            str(logger_mock.warning.call_args[0][3]), 'Save with update_fields did not affect any rows.')
+
+    @patch('core.sources.models.Source.update_mappings_count')
+    @patch('core.sources.models.Source.update_concepts_count')
+    def test_post_import_update_resource_counts_leaves_rows_added_during_a_pass_to_the_next(
+            self, update_concepts_count_mock, update_mappings_count_mock):
+        source = OrganizationSourceFactory()
+        ConceptFactory(_counted=None, parent=source)
+        added = []
+        update_concepts_count_mock.side_effect = lambda sync: added.extend([
+            ConceptFactory(_counted=None, parent=source), MappingFactory(_counted=None, parent=source)])
+
+        post_import_update_resource_counts.run()
+
+        # rows added once the pass started are counted by the next one, mappings included: each list is read as
+        # the pass starts
+        update_mappings_count_mock.assert_not_called()
+        for resource in added:
+            resource.refresh_from_db()
+            self.assertIsNone(resource._counted)  # pylint: disable=protected-access
+
+        update_concepts_count_mock.side_effect = None
+        post_import_update_resource_counts.run()
+
+        self.assertEqual(update_concepts_count_mock.call_count, 2)
+        update_mappings_count_mock.assert_called_once_with(sync=True)
+        for resource in added:
+            resource.refresh_from_db()
+            self.assertTrue(resource._counted)  # pylint: disable=protected-access
+
+    @patch('core.common.tasks.post_import_update_resource_counts.apply_async')
+    def test_post_import_update_resource_counts_runs_one_copy_at_a_time(self, apply_async_mock):
+        concept = ConceptFactory(_counted=None)
+
+        with try_job_lock(POST_IMPORT_COUNTS_LOCK) as acquired:  # another copy is counting
+            self.assertTrue(acquired)
+            post_import_update_resource_counts.run()
+
+        concept.refresh_from_db()
+        self.assertIsNone(concept._counted)  # pylint: disable=protected-access
+        # it doesn't wait on a worker, and doesn't drop its import's rows either: it's queued again
+        apply_async_mock.assert_called_once_with(queue='default', countdown=POST_IMPORT_COUNTS_REQUEUE_SECONDS)
+
+        post_import_update_resource_counts.run()
+
+        concept.refresh_from_db()
+        self.assertTrue(concept._counted)  # pylint: disable=protected-access
+        apply_async_mock.assert_called_once()
+
+    def test_post_import_update_resource_counts_holds_its_lock_while_it_counts(self):
+        def lock_is_free():
+            with try_job_lock(POST_IMPORT_COUNTS_LOCK) as acquired:
+                return acquired
+
+        free_while_counting = []
+        with patch('core.common.tasks.count_uncounted_resources',
+                   side_effect=lambda: free_while_counting.append(lock_is_free())):
+            post_import_update_resource_counts.run()
+        self.assertEqual(free_while_counting, [False])
+        self.assertTrue(lock_is_free())
+
+        with patch('core.common.tasks.count_uncounted_resources', side_effect=DatabaseError('lookup failed')):
+            with self.assertRaises(DatabaseError):
+                post_import_update_resource_counts.run()
+        self.assertTrue(lock_is_free())
+
+    @patch('core.common.tasks.count_uncounted_resources')
+    def test_post_import_update_resource_counts_keeps_one_copy_in_the_queue(self, count_mock):
+        with patch.object(QueueOnceRedisBackend, 'redis', new_callable=PropertyMock,
+                          return_value=fakeredis.FakeRedis(server=fakeredis.FakeServer())), \
+                patch.object(app, 'send_task') as send_task_mock:
+            post_import_update_resource_counts.apply_async(queue='default')
+            post_import_update_resource_counts.apply_async(queue='default')  # the queued copy will read its rows
+            self.assertEqual(send_task_mock.call_count, 1)
+
+            post_import_update_resource_counts()  # a copy releases its queue lock as it starts
+            count_mock.assert_called_once()
+
+            post_import_update_resource_counts.apply_async(queue='default')  # may end after the copy read its list
+            self.assertEqual(send_task_mock.call_count, 2)
 
     @patch('core.importers.models.BulkImportInline')
     def test_bulk_import_parts_inline(self, bulk_import_inline_mock):
