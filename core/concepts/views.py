@@ -1036,6 +1036,7 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
     score_threshold_semantic_very_high = 0.9
     serializer_class = ConceptListSerializer
     permission_classes = (IsAuthenticated, CanUseMapper)
+    document_model = ConceptDocument  # the filters' collection facets count only versions the requester can view
     es_fields = Concept.es_fields
     # Semantic kNN. Above ~1000 candidates ES compares far more vectors per clause for no gain in hits
     # (OpenConceptLab/ocl_online#255).

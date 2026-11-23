@@ -112,7 +112,8 @@ class CollectionBaseView(BaseAPIView):
     def get_filter_params(self, default_version_to_head=True):
         query_params = self.request.query_params.dict()
 
-        version = query_params.get('version', None) or self.kwargs.get('version', None)
+        # the URL's version, when it names one, as a search reads it; otherwise the query string's
+        version = self.kwargs.get('version', None) or query_params.get('version', None)
         if not version and default_version_to_head:
             version = HEAD
         if version == LATEST:

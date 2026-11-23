@@ -6,6 +6,7 @@ import zipfile
 
 from mock import patch, Mock
 
+from django.contrib.auth.models import Group
 from django.core.cache import cache
 from django.test import tag, override_settings
 from core.client_configs.models import ClientConfig
@@ -14,7 +15,7 @@ from core.collections.models import Collection, CollectionReference
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory, ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT, ROLE_ADMIN
 from core.common.permissions import HasOwnership
-from core.common.tests import OCLAPITestCase, OCLTestCase
+from core.common.tests import OCLAPITestCase, OCLTestCase, PREVIEW_GROUP_NAME
 from core.common.views import BaseAPIView
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
@@ -2279,6 +2280,27 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
             self.assert_answers(f'/concepts/?collection={self.tag}R*', 200, 200, 200)
             # a prefix longer than any owner URL matches no owner
             self.assert_answers(f'/concepts/?collection_owner_url={self.org.uri}collections/*', 200, 200, 200)
+
+    def test_a_version_the_url_names_wins_over_the_query_strings(self):
+        for resource in ['concepts', 'mappings']:
+            for query in ['', '?version=HEAD', '?version=HEAD&retired=false', f'?version=HEAD&q={self.tag}']:
+                url = f'{self.q_v1.uri}{resource}/{query}'
+                self.assert_answers(url, 401, 403, 200)
+                self.assertEqual(self.request('head', url).status_code, 401, url)
+            self.assertEqual(self.listed(f'{self.q_v1.uri}{resource}/?version=HEAD', self.member, resource), ['inQv1'])
+
+    def test_match_filters_count_only_versions_the_requester_can_view(self):
+        preview = Group.objects.get(name=PREVIEW_GROUP_NAME)
+        for user in [self.outsider, self.member]:
+            user.groups.add(preview)
+        data = {'rows': [{'name': self.tag}], 'target_repo_url': self.source.uri,
+                'filter': {'collection': f'{self.tag}Q'}}
+        for user, expected in [(self.outsider, ['inQhead']), (self.member, ['inQhead', 'inQv1']),
+                               (self.staff, ['inQhead', 'inQv1'])]:
+            response = self.request('post', '/concepts/$match/?limit=10', user, data)
+            self.assertEqual(response.status_code, 200, user)
+            self.assertEqual(
+                self.keys([(row['id'],) for row in response.data[0]['results']], 'concepts'), expected, user)
 
 
 class CanViewAllContentTest(OCLTestCase):
