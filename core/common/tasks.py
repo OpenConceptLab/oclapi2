@@ -15,7 +15,7 @@ from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage
 from django.core.management import call_command
 from django.core.paginator import Paginator
-from django.db import DatabaseError
+from django.db import DatabaseError, connection, transaction
 from django.db.models import Exists, OuterRef
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -179,10 +179,15 @@ def add_references(  # pylint: disable=too-many-arguments,too-many-locals
 ):
     from core.users.models import UserProfile
     from core.collections.models import Collection
+    from core.capabilities.constants import WRITE_ACTION_EDIT
+    from core.capabilities.writes import get_write_refusal, get_write_target
     user = UserProfile.objects.get(id=user_id)
     collection = Collection.objects.filter(id=collection_id).first()
     if not collection:
-        return [], {'error': 'Collection not found'}
+        return [], {'error': 'Collection not found'}, []
+    refusal = get_write_refusal(user, get_write_target(collection), WRITE_ACTION_EDIT)
+    if refusal is not None:  # writable when queued, the collection may be read-only by now: the body, as a 4th item
+        return [], {}, [], refusal
     head = collection.get_head()
     head.add_processing(self.request.id)
 
@@ -196,7 +201,10 @@ def add_references(  # pylint: disable=too-many-arguments,too-many-locals
         logger.info('Errors while adding references....')
         logger.info(errors)
 
-    return [reference.id for reference in added_references], errors
+    unresolved = [
+        [reference.id, reference.unresolved_reason] for reference in added_references
+        if reference.include and reference.unresolved_reason]
+    return [reference.id for reference in added_references], errors, unresolved
 
 
 def __handle_save(instance):
@@ -435,8 +443,11 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
             if not seed_from_head:
                 instance.seed_references()
             if is_source:
-                instance.seed_concepts(index=False)
-                instance.seed_mappings(index=False)
+                # Together, so a doc rebuilt meanwhile never sees the release hold a concept without its mappings: it
+                # would get an entry with no codes for the release, which the append below keeps (MappedCodes)
+                with transaction.atomic():
+                    instance.seed_concepts(index=False)
+                    instance.seed_mappings(index=False)
                 instance.update_children_counts(sync)
                 # Recorded before released is read below, so a release request is read there, indexes the release
                 # itself on seeing this stage (persist_changes), or both. Both only repeats the same writes.
@@ -997,48 +1008,50 @@ def index_source_public_access(self, source_id):
     source.remove_processing(task_id)
 
 
-@app.task(base=QueueOnceCustomTask)
+# A count task releases its QueueOnce lock as it starts, so a count queued while it runs is kept and reads what was
+# committed meanwhile (one queued before it starts is dropped, as that one reads it anyway). Counts of one repo version
+# and field then take turns on an advisory lock, so the last to run is the last to save.
+COUNT_TASK_ONCE = {'unlock_before_run': True}
+
+
+def update_active_count(model, instance_id, field):
+    with transaction.atomic():
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))',
+                [f'{model.__name__}.{field}.{instance_id}']
+            )
+        instance = model.objects.filter(id=instance_id).first()
+        if instance:
+            before = getattr(instance, field)
+            getattr(instance, f'set_{field}')()
+            if before != getattr(instance, field):
+                # an update, not a save: search documents hold no counts, so there's nothing to index
+                model.objects.filter(id=instance_id).update(**{field: getattr(instance, field)})
+
+
+@app.task(base=QueueOnceCustomTask, once=COUNT_TASK_ONCE)
 def update_source_active_concepts_count(source_id):
     from core.sources.models import Source
-    source = Source.objects.filter(id=source_id).first()
-    if source:
-        before_active_concepts = source.active_concepts
-        source.set_active_concepts()
-        if before_active_concepts != source.active_concepts:
-            source.save(update_fields=['active_concepts'])
+    update_active_count(Source, source_id, 'active_concepts')
 
 
-@app.task(base=QueueOnceCustomTask)
+@app.task(base=QueueOnceCustomTask, once=COUNT_TASK_ONCE)
 def update_source_active_mappings_count(source_id):
     from core.sources.models import Source
-    source = Source.objects.filter(id=source_id).first()
-    if source:
-        before_active_mappings = source.active_mappings
-        source.set_active_mappings()
-        if before_active_mappings != source.active_mappings:
-            source.save(update_fields=['active_mappings'])
+    update_active_count(Source, source_id, 'active_mappings')
 
 
-@app.task(base=QueueOnceCustomTask)
+@app.task(base=QueueOnceCustomTask, once=COUNT_TASK_ONCE)
 def update_collection_active_concepts_count(collection_id):
     from core.collections.models import Collection
-    collection = Collection.objects.filter(id=collection_id).first()
-    if collection:
-        before_active_concepts = collection.active_concepts
-        collection.set_active_concepts()
-        if before_active_concepts != collection.active_concepts:
-            collection.save(update_fields=['active_concepts'])
+    update_active_count(Collection, collection_id, 'active_concepts')
 
 
-@app.task(base=QueueOnceCustomTask)
+@app.task(base=QueueOnceCustomTask, once=COUNT_TASK_ONCE)
 def update_collection_active_mappings_count(collection_id):
     from core.collections.models import Collection
-    collection = Collection.objects.filter(id=collection_id).first()
-    if collection:
-        before_active_mappings = collection.active_mappings
-        collection.set_active_mappings()
-        if before_active_mappings != collection.active_mappings:
-            collection.save(update_fields=['active_mappings'])
+    update_active_count(Collection, collection_id, 'active_mappings')
 
 
 @app.task

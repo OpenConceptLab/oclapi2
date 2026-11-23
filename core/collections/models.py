@@ -19,13 +19,12 @@ from core.collections.constants import (
     TRANSFORM_TO_RESOURCE_VERSIONS, COLLECTION_REFERENCE_TYPE, TRANSFORM_TO_EXTENSIONAL,
     RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE, UNRESOLVED_RESOURCE_VERSION_TYPE,
     INTENSIONAL_REFERENCE_RESOURCE_VERSIONS_TOGGLE, EXPANSION_LOCKED_REPO_VERSION_TOGGLE, VERSION_EXPANSION_LOCK,
-    VERSION_EXPANSION_LATEST)
+    VERSION_EXPANSION_LATEST, REFERENCE_FOUND_NOTHING, REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS)
 from core.collections.parsers import CollectionReferenceParser
 from core.collections.translators import CollectionReferenceTranslator
 from core.collections.utils import is_concept, is_mapping
 from core.common.checksums import VersionCompareMixin
 from core.common.constants import (
-    ACCESS_TYPE_VIEW,
     ES_REQUEST_TIMEOUT, ES_REQUEST_TIMEOUT_ASYNC, HEAD, ALL, EXCLUDE_WILDCARD_SEARCH_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM,
     SEARCH_MAP_CODES_PARAM, INCLUDE_SEARCH_META_PARAM, VERBOSE_PARAM, NAMESPACE_INVALID_CHAR_REGEX,
     CONSECUTIVE_HYPHENS_REGEX, SERIALIZATION_RETRY_ATTEMPTS)
@@ -38,7 +37,7 @@ from core.common.utils import drop_version, to_owner_uri, generate_temp_version,
     get_resource_class_from_resource_name, to_snake_case, \
     es_to_pks, id_batches, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
     get_truthy_values, get_falsy_values, get_current_authorized_user, to_camel_case, to_parent_kwargs_from_uri, \
-    is_versioned_uri, canonical_url_to_url_and_version
+    is_versioned_uri, canonical_url_to_url_and_version, split_canonical, to_parent_uri
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -135,9 +134,8 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         if collection:
             queryset = queryset.filter(cls.get_exact_or_criteria('mnemonic', collection))
         if contains_uri:
-            queryset = queryset.filter(
-                references__expression=contains_uri, public_access=ACCESS_TYPE_VIEW
-            )
+            # public versions whose HEAD is public too, as anyone may ask which collections hold an expression
+            queryset = queryset.filter(cls.get_viewable_versions_criteria(None), references__expression=contains_uri)
         if include_references:
             queryset = queryset.prefetch_related('references')
 
@@ -304,7 +302,8 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         self.__dict__.pop('locked_collection_versions', None)
         if user and user.is_authenticated:
             self.updated_by = user
-        self.save()
+        # only who changed it: its other values were saved by the caller, and a concurrent write's stay (its access)
+        self.save(update_fields=['updated_by', 'updated_at'])
         self.update_children_counts()
         return added_references, errors
 
@@ -669,6 +668,8 @@ class CollectionReference(models.Model):
     _concepts = None
     _mappings = None
     _valueset_locks = None
+    # set when an expansion evaluates it as an include: why it added nothing, if so
+    unresolved_reason = None
     original_expression = None
 
     # core
@@ -859,13 +860,16 @@ class CollectionReference(models.Model):
         concept_ids = set()
         mapping_ids = set()
         traversed = []
+        viewable_by_version = {}
 
         for concept in concept_queryset:
             concept_uri = drop_version(concept.uri)
             if concept_uri in traversed:
                 continue
             traversed.append(concept_uri)
-            result = concept.cascade(**cascade_params)
+            repo_version = self._get_viewable_cascade_version(
+                concept, cascade_params['repo_version'], viewable_by_version)
+            result = concept.cascade(**{**cascade_params, 'repo_version': repo_version})
             concept_ids.update(set(result['concepts'].values_list('id', flat=True)))
             mapping_ids.update(set(result['mappings'].values_list('id', flat=True)))
 
@@ -873,6 +877,21 @@ class CollectionReference(models.Model):
         mapping_ids.update(set(mapping_queryset.values_list('id', flat=True)))
 
         return Concept.objects.filter(id__in=concept_ids), Mapping.objects.filter(id__in=mapping_ids)
+
+    def _get_viewable_cascade_version(self, concept, repo_version, viewable_by_version):
+        """The repo version a cascade walks (named by label, or the reference's system or value set version), if the
+        reference's creator can view it. A label resolves as the walk would, among the source versions that hold the
+        concept, and must name exactly one. Otherwise None: the walk adds only the concept, as for an unknown label.
+        """
+        if isinstance(repo_version, str):
+            versions = list(concept.sources.filter(version=decode_string(repo_version))[:2])
+            repo_version = versions[0] if len(versions) == 1 else None
+        if not repo_version:
+            return None
+        key = (repo_version.__class__.__name__, repo_version.id)
+        if key not in viewable_by_version:
+            viewable_by_version[key] = repo_version.can_view_all_content(self.created_by)
+        return repo_version if viewable_by_version[key] else None
 
     def get_mappings(self, system_version=None):
         queryset = self.get_resource_queryset_from_system_and_valueset('mappings', system_version)
@@ -1494,6 +1513,23 @@ class CollectionReference(models.Model):
             valueset_version_cache[cache_key] = version if version.id else None
         return valueset_version_cache[cache_key]
 
+    def get_evaluated_repo_version_urls(self, expansion, user, system_version_cache=None):
+        """URLs of the repository versions its expansion evaluated it in that `user` can view,
+        else of the repositories it names. A version its system names that `user` can't view counts as missing."""
+        expansion_cache = {self.collection_id: expansion}
+        # read as the resolver reads the system: a version after '|', or the fifth segment of a relative URL's path
+        # without its query string (/orgs|users/<owner>/<repo type>/<repo>/<version>/)
+        url, url_version = split_canonical(self.system or '')
+        path = [] if is_canonical_uri(url) else to_parent_uri(url.split('?')[0]).strip('/').split('/')
+        names_version = bool(self.version or url_version) or (len(path) > 4 and path[4] not in ('', HEAD))
+        named_version = self._get_expression_system_version(system_version_cache) if names_version else None
+        system_versions = [] if named_version and not named_version.has_view_access(user) else \
+            self._get_resolved_system_versions(system_version_cache, expansion_cache)
+        versions = [*system_versions, *self._get_resolved_valueset_versions(expansion_cache=expansion_cache)]
+        valuesets = self.valueset if isinstance(self.valueset, list) else []
+        return [version.uri for version in versions if version.has_view_access(user)] or compact(
+            [self.system, *valuesets])
+
     def get_resolved_repo_versions_serialized(  # pylint: disable=too-many-arguments
             self, system_version_cache=None, valueset_version_cache=None, expansion_cache=None, user=None):
         """Serialize repository versions resolved from this reference's system and valuesets that `user` can view."""
@@ -2017,6 +2053,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 if resolve_by_resource_version and ref.is_resource_versioned and \
                         not (_mappings if ref.is_mapping else _concepts).exists():
                     unresolved_repo_versions.append(ref.to_unresolved_resource_version())
+                    ref.unresolved_reason = REFERENCE_VERSION_NOT_HELD
                     return ref.concepts.filter(), ref.mappings.filter()
                 if should_write_back and ref.id and (ref_system_versions or ref.system or is_valueset_only):
                     ref.concepts.set(_concepts)
@@ -2036,11 +2073,17 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
 
         try:
             for reference in include_refs:
+                reference.unresolved_reason = None
                 concepts, mappings = get_ref_results(reference)
                 concepts_updated = self.__include_resources(self.concepts, concepts, True)
                 if index and concepts_updated is not False:
                     index_concepts = [*index_concepts, *concepts_updated.values_list('id', flat=True)]
                 mappings_updated = self.__include_resources(self.mappings, mappings, False)
+                # False: it found nothing; an empty queryset: the expansion's parameters excluded all it found.
+                # exists() runs no query: rel.add in __include_resources already fetched these rows
+                found = [updated for updated in (concepts_updated, mappings_updated) if updated is not False]
+                if not reference.unresolved_reason and not any(updated.exists() for updated in found):
+                    reference.unresolved_reason = REFERENCE_EXCLUDED_BY_PARAMETERS if found else REFERENCE_FOUND_NOTHING
                 if index and mappings_updated is not False:
                     index_mappings = [*index_mappings, *mappings_updated.values_list('id', flat=True)]
 

@@ -17,6 +17,9 @@ from django.utils import timezone
 from ocldev.oclfleximporter import OclFlexImporter
 from pydash import compact, get
 
+from core.capabilities.constants import WRITE_ACTION_EDIT
+from core.capabilities.exceptions import WriteRefused
+from core.capabilities.writes import BatchWriteRefusals, get_own_write_action, get_write_target
 from core.celery import app
 from core.collections.models import Collection
 from core.common import ERRBIT_LOGGER
@@ -123,7 +126,9 @@ class BaseResourceImporter:
     mandatory_fields = set()
     allowed_fields = []
 
-    def __init__(self, data, user, update_if_exists=False, cache=None, isolated=False):  # pylint: disable=too-many-arguments
+    def __init__(  # pylint: disable=too-many-arguments
+            self, data, user, update_if_exists=False, cache=None, isolated=False, write_refusals=None
+    ):
         self.user = user
         self.data = data
         self.update_if_exists = update_if_exists
@@ -131,6 +136,17 @@ class BaseResourceImporter:
         self.index_resources = False
         self.cache = cache if cache is not None else {}
         self.isolated = isolated
+        self.write_refusals = write_refusals  # the write checks a batch shares; made on first use otherwise
+
+    def get_write_refusal(self, repository, action=WRITE_ACTION_EDIT):
+        """
+        For a write to an existing `repository` the user has edit access to: the WriteRefused the line fails with when
+        the capability policy refuses it, carrying the policy's body, or None to go ahead.
+        """
+        if self.write_refusals is None:
+            self.write_refusals = BatchWriteRefusals()
+        refusal = self.write_refusals.get(self.user, get_write_target(repository), action)
+        return None if refusal is None else WriteRefused(refusal)
 
     @classmethod
     def can_handle(cls, obj):
@@ -316,7 +332,10 @@ class SourceImporter(BaseResourceImporter):
     def process(self):
         source = Source(**self.data)
         if source.has_parent_edit_access(self.user):
-            errors = Source.persist_new(source, self.user)
+            try:
+                errors = Source.persist_new(source, self.user)
+            except WriteRefused as ex:  # a new private repository the capability policy refused: the line's result
+                return ex
             return errors or CREATED
         return PERMISSION_DENIED
 
@@ -325,6 +344,10 @@ class SourceImporter(BaseResourceImporter):
             source = self.get_queryset().first()
             try:
                 if source.has_parent_edit_access(self.user):
+                    # deleting the HEAD deletes the repository; deleting another version is an edit
+                    refusal = self.get_write_refusal(source, get_own_write_action(source, 'DELETE', None))
+                    if refusal is not None:
+                        return refusal
                     source.delete()
                     return DELETED
                 return PERMISSION_DENIED
@@ -366,8 +389,9 @@ class SourceVersionImporter(BaseResourceImporter):
             self.data['supported_locales'] = supported_locales.split(',')
 
     def __init__(  # pylint: disable=too-many-arguments
-            self, data, user, update_if_exists=False, cache=None, isolated_version=False, import_task_id=None):
-        super().__init__(data, user, update_if_exists, cache=cache)
+            self, data, user, update_if_exists=False, cache=None, isolated_version=False, import_task_id=None,
+            write_refusals=None):
+        super().__init__(data, user, update_if_exists, cache=cache, write_refusals=write_refusals)
         self.isolated_version = isolated_version
         self.import_task_id = import_task_id
 
@@ -382,6 +406,9 @@ class SourceVersionImporter(BaseResourceImporter):
             source.seeded_from = {'type': SEEDED_FROM_IMPORT, 'task': self.import_task_id}
         source._metadata_fields = list(self.data.keys())  # pylint: disable=protected-access
         if source.has_parent_edit_access(self.user):
+            refusal = self.get_write_refusal(source)
+            if refusal is not None:
+                return refusal
             errors = Source.persist_new_version(source, self.user)
             return errors or CREATED
         return PERMISSION_DENIED
@@ -593,13 +620,19 @@ class IsolatedVersionCommit:
         return Source.objects.filter(**{owner_filter: owner}, mnemonic=source, version=HEAD).first()
 
     def get_rejection(self, importer, needs_head=True):
-        """(True, result) when this version would be rejected. A HEAD the import itself creates isn't there yet."""
+        """
+        (True, result) when this version would be rejected: a WriteRefused when the capability policy refuses an edit
+        of HEAD, before anything changes it. A HEAD the import itself creates isn't there yet.
+        """
         is_clean = importer.clean()
         if not is_clean:
             return True, is_clean
         head = self.get_head()
         if (needs_head and not head) or (head and not head.has_edit_access(self.user)):
             return True, PERMISSION_DENIED
+        refusal = importer.get_write_refusal(head) if head else None
+        if refusal is not None:
+            return True, refusal
         return False, None
 
     def preflight(self, content_lines=()):
@@ -611,6 +644,8 @@ class IsolatedVersionCommit:
             raise ValidationError({'__all__': [SEED_FROM_IMPORT_NEEDS_UPDATE]})
         importer = SourceVersionImporter({**self.version_line}, self.user, self.update_if_exists, isolated_version=True)
         rejected, result = self.get_rejection(importer, needs_head=False)
+        if isinstance(result, WriteRefused):
+            raise result
         if rejected:
             raise ValidationError(result if isinstance(result, dict) else {'__all__': [{
                 False: ISOLATED_VERSION_LINE_INVALID, None: ISOLATED_VERSION_EXISTS,
@@ -669,8 +704,10 @@ class IsolatedVersionCommit:
                 if result != CREATED:
                     raise IsolatedVersionRollback(result)
         except IsolatedVersionRollback as ex:
+            self.dropped = None  # rolled back: HEAD kept everything
             return ex.result
         except ValidationError as ex:
+            self.dropped = None
             return get(ex, 'message_dict') or {'__all__': ex.messages}
         return CREATED
 
@@ -715,7 +752,10 @@ class CollectionImporter(BaseResourceImporter):
     def process(self):
         coll = Collection(**self.data)
         if coll.has_parent_edit_access(self.user):
-            errors = Collection.persist_new(coll, self.user)
+            try:
+                errors = Collection.persist_new(coll, self.user)
+            except WriteRefused as ex:  # a new private repository the capability policy refused: the line's result
+                return ex
             return errors or CREATED
         return PERMISSION_DENIED
 
@@ -724,6 +764,10 @@ class CollectionImporter(BaseResourceImporter):
             collection = self.get_queryset().first()
             try:
                 if collection.has_parent_edit_access(self.user):
+                    # deleting the HEAD deletes the repository; deleting another version is an edit
+                    refusal = self.get_write_refusal(collection, get_own_write_action(collection, 'DELETE', None))
+                    if refusal is not None:
+                        return refusal
                     collection.delete()
                     return DELETED
                 return PERMISSION_DENIED
@@ -761,6 +805,9 @@ class CollectionVersionImporter(BaseResourceImporter):
     def process(self):
         coll = Collection(**self.data)
         if coll.has_parent_edit_access(self.user):
+            refusal = self.get_write_refusal(coll)
+            if refusal is not None:
+                return refusal
             errors = Collection.persist_new_version(obj=coll, user=self.user, sync=True)
             return errors or CREATED
         return PERMISSION_DENIED
@@ -778,8 +825,11 @@ class ConceptImporter(BaseResourceImporter):
         return 'Concept'
 
     def __init__(  # pylint: disable=too-many-arguments
-            self, data, user, update_if_exists, skip_hierarchy_tasks=False, cache=None, isolated=False):
-        super().__init__(data, user, update_if_exists, cache=cache, isolated=isolated)
+            self, data, user, update_if_exists, skip_hierarchy_tasks=False, cache=None, isolated=False,
+            write_refusals=None
+    ):
+        super().__init__(
+            data, user, update_if_exists, cache=cache, isolated=isolated, write_refusals=write_refusals)
         self.skip_hierarchy_tasks = skip_hierarchy_tasks
         self.version = False
         self.instance = None
@@ -828,13 +878,16 @@ class ConceptImporter(BaseResourceImporter):
         self.parse()
         return True
 
-    def process(self):
+    def process(self):  # pylint: disable=too-many-return-statements
         parent = self.data.get('parent')
         errors = {}
         if not parent:
             errors['source'] = 'Not Found'
             return errors
         if parent.has_edit_access(self.user):
+            refusal = self.get_write_refusal(parent)
+            if refusal is not None:
+                return refusal
             if self.version:
                 self.instance = self.get_queryset().first().clone()
                 self.instance._counted = None  # pylint: disable=protected-access
@@ -870,6 +923,9 @@ class ConceptImporter(BaseResourceImporter):
             parent = self.data.get('parent')
             try:
                 if parent.has_edit_access(self.user):
+                    refusal = self.get_write_refusal(parent)
+                    if refusal is not None:
+                        return refusal
                     self.retire_resource(self.get_queryset().first())
                     return self.track_result(DELETED)
                 return PERMISSION_DENIED
@@ -891,8 +947,11 @@ class MappingImporter(BaseResourceImporter):
     def get_resource_type():
         return 'Mapping'
 
-    def __init__(self, data, user, update_if_exists, cache=None, isolated=False):  # pylint: disable=too-many-arguments
-        super().__init__(data, user, update_if_exists, cache=cache, isolated=isolated)
+    def __init__(  # pylint: disable=too-many-arguments
+            self, data, user, update_if_exists, cache=None, isolated=False, write_refusals=None
+    ):
+        super().__init__(
+            data, user, update_if_exists, cache=cache, isolated=isolated, write_refusals=write_refusals)
         self.version = False
         self.instance = None
 
@@ -1018,13 +1077,16 @@ class MappingImporter(BaseResourceImporter):
         self.parse()
         return True
 
-    def process(self):
+    def process(self):  # pylint: disable=too-many-return-statements
         parent = self.data.get('parent')
         errors = {}
         if not parent:
             errors['source'] = 'Not Found'
             return errors
         if parent.has_edit_access(self.user):
+            refusal = self.get_write_refusal(parent)
+            if refusal is not None:
+                return refusal
             if self.version:
                 queryset = self.get_queryset()
                 if queryset.count() > 1:
@@ -1064,6 +1126,9 @@ class MappingImporter(BaseResourceImporter):
             parent = self.data.get('parent')
             try:
                 if parent.has_edit_access(self.user):
+                    refusal = self.get_write_refusal(parent)
+                    if refusal is not None:
+                        return refusal
                     self.retire_resource(self.get_queryset().first())
                     return self.track_result(DELETED)
                 return PERMISSION_DENIED
@@ -1103,6 +1168,9 @@ class ReferenceImporter(BaseResourceImporter):
 
         if collection:
             if collection.has_edit_access(self.user):
+                refusal = self.get_write_refusal(collection)
+                if refusal is not None:
+                    return refusal
                 added_references, errors = collection.add_expressions(
                     self.get('data'), self.user, self.get('__cascade', False),
                     self.get('__transform', False)
@@ -1131,10 +1199,13 @@ class ReferenceImporter(BaseResourceImporter):
             return PERMISSION_DENIED
         return NOT_FOUND
 
-    def delete(self):  # pylint: disable=too-many-locals,too-many-branches
+    def delete(self):  # pylint: disable=too-many-locals,too-many-branches,too-many-return-statements
         collection = self.get_queryset().first()
         if collection:  # pylint: disable=too-many-nested-blocks
             if collection.has_edit_access(self.user):
+                refusal = self.get_write_refusal(collection)
+                if refusal is not None:
+                    return refusal
                 expressions = self.get('references', None) or self.get(
                     'data', {}).get('expressions', [])
                 if expressions == [ALL]:
@@ -1226,8 +1297,9 @@ class ImportIndexer:
 
     def get_mapped_concept_ids(self):
         """
-        The concepts the imported mappings come from, with their versioned objects and latest versions. Older versions
-        are left as they were indexed, as their releases were.
+        The concepts the imported mappings come from, with their versioned objects and latest versions, and the older
+        versions no release holds, which read HEAD's codes too. Older versions a release holds are left as they were
+        indexed, as their releases were.
         """
         ids = set()
         for chunk in chunks(sorted(self.mapped_concept_ids), self.CHUNK_SIZE):
@@ -1238,6 +1310,7 @@ class ImportIndexer:
             ids.update(versioned_ids)
             ids.update(Concept.objects.filter(
                 versioned_object_id__in=versioned_ids, is_latest_version=True).values_list('id', flat=True))
+            ids.update(Concept.get_unreleased_older_ids(versioned_ids))
         return ids
 
 
@@ -1488,6 +1561,7 @@ class BulkImportInline(BaseImporter):
         # cache a "not found" for a concept created earlier in the same run. Don't share this cache
         # across resource types unless that invariant is re-verified.
         self.cache = {}
+        self.write_refusals = BatchWriteRefusals()  # every line's write check: one question per repository
         self.set_task()
         if input_list:
             self.input_list = input_list
@@ -1514,8 +1588,13 @@ class BulkImportInline(BaseImporter):
 
     def preflight_isolated_version(self, version_line):
         if version_line:
-            IsolatedVersionCommit(version_line, self.user, self.update_if_exists).preflight(
-                Source.get_import_content_lines(self.input_list))
+            try:
+                IsolatedVersionCommit(version_line, self.user, self.update_if_exists).preflight(
+                    Source.get_import_content_lines(self.input_list))
+            except WriteRefused as ex:  # nothing imports: the version line is denied with the capability policy's body
+                self.permission_denied.append({**version_line, 'errors': ex.detail})
+                self.processed = 1  # of self.total, the lines submitted
+                self.input_list = []
 
     def set_task(self):
         self.task = Task.objects.filter(id=self.self_task_id).first()
@@ -1528,7 +1607,8 @@ class BulkImportInline(BaseImporter):
 
     def import_source_version(self, item):
         if not self.isolated_version:
-            return SourceVersionImporter(item, self.user, self.update_if_exists).run()
+            return SourceVersionImporter(
+                item, self.user, self.update_if_exists, write_refusals=self.write_refusals).run()
         commit = IsolatedVersionCommit(
             item, self.user, self.update_if_exists,
             hierarchy_map={**Concept.get_import_hierarchy_map(self.input_list, include_parentless=True),
@@ -1549,6 +1629,10 @@ class BulkImportInline(BaseImporter):
             return
         if result == FAILED:
             self.failed.append(item)
+            return
+        if isinstance(result, WriteRefused):  # reported as a permission failure, with the capability policy's body
+            item['errors'] = result.detail
+            self.permission_denied.append(item)
             return
         if result == DELETED:
             self.deleted.append(item)
@@ -1620,7 +1704,8 @@ class BulkImportInline(BaseImporter):
                     )
                     continue
                 if item_type == 'source':
-                    source_importer = SourceImporter(item, self.user, self.update_if_exists)
+                    source_importer = SourceImporter(
+                        item, self.user, self.update_if_exists, write_refusals=self.write_refusals)
                     self.handle_item_import_result(
                         source_importer.delete() if action == 'delete' else source_importer.run(), original_item
                     )
@@ -1629,14 +1714,17 @@ class BulkImportInline(BaseImporter):
                     self.handle_item_import_result(self.import_source_version(item), original_item)
                     continue
                 if item_type == 'collection':
-                    collection_importer = CollectionImporter(item, self.user, self.update_if_exists)
+                    collection_importer = CollectionImporter(
+                        item, self.user, self.update_if_exists, write_refusals=self.write_refusals)
                     self.handle_item_import_result(
                         collection_importer.delete() if action == 'delete' else collection_importer.run(), original_item
                     )
                     continue
                 if item_type == 'collection version':
                     self.handle_item_import_result(
-                        CollectionVersionImporter(item, self.user, self.update_if_exists).run(), original_item
+                        CollectionVersionImporter(
+                            item, self.user, self.update_if_exists, write_refusals=self.write_refusals).run(),
+                        original_item
                     )
                     continue
                 if item_type == 'concept':
@@ -1644,7 +1732,7 @@ class BulkImportInline(BaseImporter):
                         concept_importer = ConceptImporter(
                             item, self.user, self.update_if_exists,
                             skip_hierarchy_tasks=self.skip_hierarchy_tasks and bool(item.get('id')),
-                            cache=self.cache, isolated=self.isolated
+                            cache=self.cache, isolated=self.isolated, write_refusals=self.write_refusals
                         )
                         _result = concept_importer.delete() if action == 'delete' else concept_importer.run()
                         indexer.add(concept_importer.instance)
@@ -1658,7 +1746,9 @@ class BulkImportInline(BaseImporter):
                 if item_type == 'mapping':
                     try:
                         mapping_importer = MappingImporter(
-                            item, self.user, self.update_if_exists, cache=self.cache, isolated=self.isolated)
+                            item, self.user, self.update_if_exists, cache=self.cache, isolated=self.isolated,
+                            write_refusals=self.write_refusals
+                        )
                         _result = mapping_importer.delete() if action == 'delete' else mapping_importer.run()
                         indexer.add(mapping_importer.instance)
                         self.seen_mapping_ids.update(compact([mapping_importer.get_seen_versioned_object_id(_result)]))
@@ -1668,7 +1758,8 @@ class BulkImportInline(BaseImporter):
                     self.handle_item_import_result(_result, original_item)
                     continue
                 if item_type == 'reference':
-                    reference_importer = ReferenceImporter(item, self.user, self.update_if_exists)
+                    reference_importer = ReferenceImporter(
+                        item, self.user, self.update_if_exists, write_refusals=self.write_refusals)
                     self.handle_item_import_result(
                         reference_importer.delete() if action == 'delete' else reference_importer.run(), original_item
                     )
@@ -1762,8 +1853,12 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self.index = should_index_import(index, self.total)
         version_line = Source.get_import_version_line(self.input_list, self.isolated_version)
         if version_line:
-            IsolatedVersionCommit(version_line, self.user, self.update_if_exists).preflight(
-                Source.get_import_content_lines(self.input_list))
+            try:
+                IsolatedVersionCommit(version_line, self.user, self.update_if_exists).preflight(
+                    Source.get_import_content_lines(self.input_list))
+            except WriteRefused as ex:  # nothing imports: the version line is denied with the capability policy's body
+                self.isolated_version_results['permission_denied'] = [{**version_line, 'errors': ex.detail}]
+                self.input_list = []
         self.make_resource_distribution()
         self.make_parts()
         self.collect_concept_hierarchy_map()
@@ -1933,12 +2028,15 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self.dropped = commit.dropped
         # the commit owns the hierarchy, so a rejected version leaves it untouched
         self.hierarchy_reconciliation_done = True
+        errors = result.detail if isinstance(result, WriteRefused) else result if isinstance(result, dict) else None
         self.isolated_version_results.setdefault(self.get_result_key(result), []).append(
-            {**version_line, 'errors': result} if isinstance(result, dict) else version_line)
+            version_line if errors is None else {**version_line, 'errors': errors})
         self.notify_progress()
 
     @staticmethod
     def get_result_key(result):
+        if isinstance(result, WriteRefused):  # as BulkImportInline reports it, with the capability policy's body
+            return 'permission_denied'
         if isinstance(result, dict):
             return 'failed'
         return {None: 'exists', False: 'invalid', CREATED: 'created', PERMISSION_DENIED: 'permission_denied'}.get(
@@ -1948,7 +2046,8 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         return self.total + int(self.has_hierarchy_reconciliation_step())
 
     def get_completed_progress(self):
-        return self.get_overall_tasks_progress() + int(
+        # the seeding version line is processed here, never in a part
+        return self.get_overall_tasks_progress() + sum(map(len, self.isolated_version_results.values())) + int(
             self.has_hierarchy_reconciliation_step() and self.hierarchy_reconciliation_done
         )
 
@@ -2068,6 +2167,8 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         for key, items in self.isolated_version_results.items():
             total_result[key] += items
             total_result['processed'] += len(items)
+        if self.isolated_version_results:  # the lines submitted: the parts hold all but the version line, or none
+            total_result['total'] = max(total_result['total'], self.total)
         total_result['start_time'] = self.start_time_formatted
         total_result['elapsed_seconds'] = self.elapsed_seconds
         total_result['child_resource_time_distribution'] = self.resource_wise_time
