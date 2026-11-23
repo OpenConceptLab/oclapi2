@@ -4649,9 +4649,8 @@ class BulkImportViewTest(OCLAPITestCase):
 
 
 class TasksTest(OCLTestCase):
-    @patch('core.sources.models.Source.update_mappings_count')
-    @patch('core.sources.models.Source.update_concepts_count')
-    def test_post_import_update_resource_counts(self, update_concepts_count_mock, update_mappings_count_mock):
+    @patch('core.common.tasks.update_active_count')
+    def test_post_import_update_resource_counts(self, update_active_count_mock):
         source = OrganizationSourceFactory()
         concept1 = ConceptFactory(_counted=None, parent=source)
         concept2 = ConceptFactory(_counted=True, parent=source)
@@ -4669,94 +4668,91 @@ class TasksTest(OCLTestCase):
         self.assertTrue(concept2._counted)  # pylint: disable=protected-access
         self.assertTrue(mapping2._counted)  # pylint: disable=protected-access
 
-        update_concepts_count_mock.assert_called_once_with(sync=True)
-        update_mappings_count_mock.assert_called_once_with(sync=True)
+        self.assertEqual(
+            update_active_count_mock.call_args_list,
+            [call(Source, source.id, 'active_concepts'), call(Source, source.id, 'active_mappings')])
 
-    @patch('core.sources.models.Source.update_concepts_count')
-    @patch('core.sources.models.Source.update_mappings_count')
-    def test_post_import_update_resource_counts_skips_failing_source(
-            self, update_mappings_count_mock, update_concepts_count_mock):
-        source1 = OrganizationSourceFactory()
-        source2 = OrganizationSourceFactory()
-        concept1 = ConceptFactory(_counted=None, parent=source1)
-        concept2 = ConceptFactory(_counted=None, parent=source2)
-        mapping1 = MappingFactory(_counted=None, parent=source1)
-        mapping2 = MappingFactory(_counted=None, parent=source2)
+    @patch('core.common.tasks.update_active_count')
+    def test_post_import_update_resource_counts_skips_failing_source(self, update_active_count_mock):
+        sources = [OrganizationSourceFactory(), OrganizationSourceFactory()]
+        for source in sources:
+            ConceptFactory(_counted=None, parent=source)
+            MappingFactory(_counted=None, parent=source)
 
-        update_concepts_count_mock.side_effect = [DatabaseError('gone'), None]
-        update_mappings_count_mock.side_effect = [ValueError('any other error'), None]
+        update_active_count_mock.side_effect = [DatabaseError('gone'), None, ValueError('any other error'), None]
 
         post_import_update_resource_counts.run()
 
-        self.assertEqual(update_concepts_count_mock.call_count, 2)
-        self.assertEqual(update_mappings_count_mock.call_count, 2)
-        for resource in (concept1, concept2, mapping1, mapping2):
-            resource.refresh_from_db()
-        # first source (in query order) fails and is skipped, its rows left to count again; the other is counted
-        self.assertEqual(sum(1 for c in (concept1, concept2) if c._counted), 1)  # pylint: disable=protected-access
-        self.assertEqual(sum(1 for m in (mapping1, mapping2) if m._counted), 1)  # pylint: disable=protected-access
+        self.assertEqual(update_active_count_mock.call_count, 4)
+        # the first source of each list fails and is skipped, and keeps a row uncounted, so the next pass counts it
+        # again; the other is counted
+        for model, failed_call in ((Concept, 0), (Mapping, 2)):
+            self.assertEqual(
+                set(model.objects.filter(
+                    parent__in=sources, _counted__isnull=True).values_list('parent_id', flat=True)),
+                {update_active_count_mock.call_args_list[failed_call].args[1]})
 
     @patch('core.common.tasks.logger')
-    @patch('core.sources.models.Source.update_mappings_count')
-    def test_post_import_update_resource_counts_skips_a_source_deleted_after_the_pass_read_it(
-            self, update_mappings_count_mock, logger_mock):
+    def test_post_import_update_resource_counts_skips_a_source_deleted_after_the_pass_read_it(self, logger_mock):
         deleted, kept = OrganizationSourceFactory(), OrganizationSourceFactory()
         MappingFactory(_counted=None, parent=deleted)
         kept_concept = ConceptFactory(_counted=None, parent=kept)
+        set_active_concepts = Source.set_active_concepts
 
-        def count_and_delete(source):  # another task deletes a source the pass has read
+        def delete_and_count(source):  # another task deletes a source the pass has read
             Source.objects.filter(id=deleted.id).delete()
-            source.active_concepts = 1
+            set_active_concepts(source)
 
-        with patch.object(Source, 'set_active_concepts', autospec=True, side_effect=count_and_delete):
+        with patch.object(Source, 'set_active_concepts', autospec=True, side_effect=delete_and_count), \
+                patch.object(Source, 'set_active_mappings') as set_active_mappings_mock:
             post_import_update_resource_counts.run()
 
         kept_concept.refresh_from_db()
+        kept.refresh_from_db()
         self.assertTrue(kept_concept._counted)  # pylint: disable=protected-access
-        update_mappings_count_mock.assert_not_called()
+        self.assertEqual(kept.active_concepts, 1)
+        set_active_mappings_mock.assert_not_called()
         logger_mock.warning.assert_not_called()
 
-    def test_post_import_update_resource_counts_takes_its_locks_in_the_order_other_writers_do(self):
-        # the source's count tasks take the count lock before the source's row, and hard deletes and version creation
-        # lock the row before its children: in that order the count can't deadlock with either, and a count task that
-        # read its total before the import's rows can't save it over this count
+    def test_post_import_update_resource_counts_marks_the_rows_then_counts_under_the_count_tasks_lock(self):
+        # the mark holds its rows' locks only while it runs, so the count can't deadlock with a delete in either lock
+        # order; and it counts as the source's count tasks do, so neither saves a total read before the other's
         concept = ConceptFactory(_counted=None)
 
         with CaptureQueriesContext(connection) as queries:
             post_import_update_resource_counts.run()
 
         statements = [query['sql'] for query in queries.captured_queries]
+        mark = next(i for i, sql in enumerate(statements) if sql.startswith('UPDATE "concepts" SET "_counted"'))
         count_lock = statements.index(
             f"SELECT pg_advisory_xact_lock(hashtextextended('Source.active_concepts.{concept.parent_id}', 0))")
-        row_lock = next(i for i, sql in enumerate(statements) if 'FROM "sources"' in sql and 'FOR NO KEY UPDATE' in sql)
-        mark = next(i for i, sql in enumerate(statements) if sql.startswith('UPDATE "concepts" SET "_counted"'))
-        self.assertLess(count_lock, row_lock)
-        self.assertLess(row_lock, mark)
+        self.assertLess(mark, count_lock)
+        self.assertFalse([sql for sql in statements if 'FOR UPDATE' in sql or 'FOR NO KEY UPDATE' in sql])
 
-    @patch('core.sources.models.Source.update_mappings_count')
-    @patch('core.sources.models.Source.update_concepts_count')
+    @patch('core.common.tasks.update_active_count')
     def test_post_import_update_resource_counts_leaves_rows_added_during_a_pass_to_the_next(
-            self, update_concepts_count_mock, update_mappings_count_mock):
+            self, update_active_count_mock):
         source = OrganizationSourceFactory()
         ConceptFactory(_counted=None, parent=source)
         added = []
-        update_concepts_count_mock.side_effect = lambda sync: added.extend([
+        update_active_count_mock.side_effect = lambda *_: added.extend([
             ConceptFactory(_counted=None, parent=source), MappingFactory(_counted=None, parent=source)])
 
         post_import_update_resource_counts.run()
 
         # rows added once the pass started are counted by the next one, mappings included: each list is read as
         # the pass starts
-        update_mappings_count_mock.assert_not_called()
+        update_active_count_mock.assert_called_once_with(Source, source.id, 'active_concepts')
         for resource in added:
             resource.refresh_from_db()
             self.assertIsNone(resource._counted)  # pylint: disable=protected-access
 
-        update_concepts_count_mock.side_effect = None
+        update_active_count_mock.side_effect = None
         post_import_update_resource_counts.run()
 
-        self.assertEqual(update_concepts_count_mock.call_count, 2)
-        update_mappings_count_mock.assert_called_once_with(sync=True)
+        self.assertEqual(
+            update_active_count_mock.call_args_list[1:],
+            [call(Source, source.id, 'active_concepts'), call(Source, source.id, 'active_mappings')])
         for resource in added:
             resource.refresh_from_db()
             self.assertTrue(resource._counted)  # pylint: disable=protected-access

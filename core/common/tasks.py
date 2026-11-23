@@ -1,6 +1,6 @@
 import json
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import datetime
 from json import JSONDecodeError
 
@@ -1005,17 +1005,13 @@ def index_source_public_access(self, source_id):
 COUNT_TASK_ONCE = {'unlock_before_run': True}
 
 
-def lock_active_count(model, instance_id, field):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            'SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))',
-            [f'{model.__name__}.{field}.{instance_id}']
-        )
-
-
 def update_active_count(model, instance_id, field):
     with transaction.atomic():
-        lock_active_count(model, instance_id, field)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))',
+                [f'{model.__name__}.{field}.{instance_id}']
+            )
         instance = model.objects.filter(id=instance_id).first()
         if instance:
             before = getattr(instance, field)
@@ -1126,7 +1122,7 @@ def try_job_lock(name):
         lock_connection.close()
 
 
-@app.task(base=QueueOnceCustomTask, once=POST_IMPORT_COUNTS_ONCE, ignore_result=True)
+@app.task(base=QueueOnceCustomTask, once=POST_IMPORT_COUNTS_ONCE, ignore_result=True, reject_on_worker_lost=True)
 def post_import_update_resource_counts():
     with try_job_lock(POST_IMPORT_COUNTS_LOCK) as acquired:
         if acquired:
@@ -1155,25 +1151,21 @@ def count_uncounted_resources():
 
 
 def count_source_resources(source, model):
-    # The count takes its turn with the source's count tasks first, so neither saves a total read before the other's,
-    # then locks the source's row, as hard deletes and version creation lock it before its children (no_key, so
-    # children can still be added meanwhile). A source deleted since the pass read it is skipped. Its rows are marked in
-    # the count's transaction, before the count: a row added after the mark is left for the next pass, and an error
-    # rolls the mark back. One source's error doesn't stop the pass.
-    is_concept = model.__name__ == 'Concept'
+    # The source's uncounted rows are marked, then it's counted as its count tasks count it, taking turns with them: the
+    # total saved includes every row marked, and neither saves a total read before the other's. A row added after the
+    # mark is left for the next pass. Neither step holds a row's lock while it waits for another, so neither can
+    # deadlock with a delete, whichever order that locks a source and its rows in. A source deleted since the pass read
+    # it has nothing to count. If the count fails, one of the source's rows is left uncounted again, so the next pass
+    # counts it. One source's error doesn't stop the pass.
+    field = 'active_concepts' if model.__name__ == 'Concept' else 'active_mappings'
     try:
-        with transaction.atomic():
-            lock_active_count(source.__class__, source.id, 'active_concepts' if is_concept else 'active_mappings')
-            if not list(source.__class__.objects.select_for_update(no_key=True).filter(id=source.id).only('id')):
-                return
-            model.objects.filter(parent_id=source.id, _counted__isnull=True).update(_counted=True)
-            if is_concept:
-                source.update_concepts_count(sync=True)
-            else:
-                source.update_mappings_count(sync=True)
+        model.objects.filter(parent_id=source.id, _counted__isnull=True).update(_counted=True)
+        update_active_count(source.__class__, source.id, field)
     except Exception as ex:  # pylint: disable=broad-except
-        logger.warning(
-            'Skipping %s count for source %s: %s', 'concepts' if is_concept else 'mappings', source.id, ex)
+        logger.warning('Skipping %s count for source %s: %s', field, source.id, ex)
+        with suppress(Exception):
+            one_row = model.objects.filter(parent_id=source.id).values('id')[:1]
+            model.objects.filter(id__in=one_row).update(_counted=None)
 
 
 @app.task(ignore_result=True)
