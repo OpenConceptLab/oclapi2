@@ -1209,8 +1209,9 @@ class ImportIndexer:
 
     def get_mapped_concept_ids(self):
         """
-        The concepts the imported mappings come from, with their versioned objects and latest versions. Older versions
-        are left as they were indexed, as their releases were.
+        The concepts the imported mappings come from, with their versioned objects and latest versions, and the older
+        versions no release holds, which read HEAD's codes too. Older versions a release holds are left as they were
+        indexed, as their releases were.
         """
         ids = set()
         for chunk in chunks(sorted(self.mapped_concept_ids), self.CHUNK_SIZE):
@@ -1221,6 +1222,7 @@ class ImportIndexer:
             ids.update(versioned_ids)
             ids.update(Concept.objects.filter(
                 versioned_object_id__in=versioned_ids, is_latest_version=True).values_list('id', flat=True))
+            ids.update(Concept.get_unreleased_older_ids(versioned_ids))
         return ids
 
 

@@ -33,7 +33,7 @@ from core.common.tasks import post_import_update_resource_counts, bulk_import_pa
     index_dropped_source_children
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.common.utils import decode_string, startswith_temp_version, get_bulk_import_celery_once_lock_key
-from core.concepts.documents import ConceptDocument
+from core.concepts.documents import ConceptDocument, MappedCodes
 from core.concepts.models import Concept, HierarchicalConcepts
 from core.concepts.tests.factories import ConceptFactory
 from core.importers.importer import ImporterSubtask, ImportTask, ImportTaskSummary, Importer, ResourceImporter
@@ -2431,10 +2431,12 @@ class BulkImportInlineTest(OCLTestCase):
         }
 
         self.assertEqual(  # just the mapped codes, emptied when there are none
-            actions[unmapped.id]['doc'], {'same_as_map_codes': [], 'other_map_codes': [], 'mapped_codes': []})
+            actions[unmapped.id]['doc'],
+            {'same_as_map_codes': [], 'other_map_codes': [], 'mapped_codes': [], 'release_map_codes': []})
         action = actions[from_concept.versioned_object_id]
         self.assertEqual(action['_op_type'], 'update')
-        self.assertEqual(set(action['doc']), {'same_as_map_codes', 'other_map_codes', 'mapped_codes'})
+        self.assertEqual(
+            set(action['doc']), {'same_as_map_codes', 'other_map_codes', 'mapped_codes', 'release_map_codes'})
         self.assertEqual(sorted(action['doc']['same_as_map_codes']), ['A01', 'To'])
         self.assertEqual(action['doc']['other_map_codes'], ['To'])
         self.assertEqual(
@@ -7163,20 +7165,26 @@ class IsolatedVersionImportTest(OCLTestCase):
         self.assertEqual(Source.objects.get(mnemonic='LOINC', version='HEAD').get_max_mapping_mnemonic(), 3000000000)
 
     def test_older_concept_version_indexes_its_releases_mappings(self):
+        def get_codes(row):
+            fields = MappedCodes([row]).get_fields(row)
+            return fields['same_as_map_codes'], [(
+                list(Source.objects.filter(id__in=entry['source_version_id']).values_list('version', flat=True)),
+                entry['same_as_map_codes']) for entry in fields['release_map_codes']]
+
         self.run_import([self.concept('A'), self.concept('B'), self.version('v1')])
         self.run_import([self.concept('A', names=[{'name': 'A edited', 'locale': 'en', 'locale_preferred': True}]),
                          self.concept('B'), self.mapping('M', 'A', 'B'), self.version('v2')])
         v1_row = Source.objects.get(mnemonic='LOINC', version='v1').concepts.get(mnemonic='A')
         self.assertFalse(v1_row.is_latest_version)
-        self.assertFalse(v1_row.get_indexed_mappings().exists())
+        self.assertEqual(get_codes(v1_row), ([], []))
 
         self.run_import([self.concept('A', names=[{'name': 'A edited', 'locale': 'en', 'locale_preferred': True}]),
                          self.concept('B'), self.version('v3')])
 
-        self.assertFalse(v1_row.get_indexed_mappings().exists())
+        self.assertEqual(get_codes(v1_row), ([], []))
         v2_row = Source.objects.get(mnemonic='LOINC', version='v2').concepts.get(mnemonic='A')
-        self.assertEqual(list(v2_row.get_indexed_mappings().values_list('mnemonic', flat=True)),
-                         [] if v2_row.is_latest_version else ['M'])
+        self.assertEqual(  # HEAD and v3 share v2's row, without the mapping v3 dropped
+            get_codes(v2_row), ([], [(['v2'], ['B'])]) if v2_row.is_latest_version else (['B'], []))
 
     def test_new_ids_skip_those_of_dropped_codes(self):
         self.run_import([self.concept('A'), self.concept('B'), self.mapping('1', 'A', 'B'), self.mapping('2', 'B', 'A'),

@@ -15,7 +15,7 @@ from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage
 from django.core.management import call_command
 from django.core.paginator import Paginator
-from django.db import DatabaseError
+from django.db import DatabaseError, transaction
 from django.db.models import Exists, OuterRef
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -438,8 +438,11 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
             if not seed_from_head:
                 instance.seed_references()
             if is_source:
-                instance.seed_concepts(index=False)
-                instance.seed_mappings(index=False)
+                # Together, so a doc rebuilt meanwhile never sees the release hold a concept without its mappings: it
+                # would get an entry with no codes for the release, which the append below keeps (MappedCodes)
+                with transaction.atomic():
+                    instance.seed_concepts(index=False)
+                    instance.seed_mappings(index=False)
                 instance.update_children_counts(sync)
                 # Recorded before released is read below, so a release request is read there, indexes the release
                 # itself on seeing this stage (persist_changes), or both. Both only repeats the same writes.
