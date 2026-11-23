@@ -15,7 +15,7 @@ from core.common.fields import EncodedDecodedCharField
 from core.common.serializers import AbstractResourceSerializer, SourceChildPageSerializer, \
     SourceVersionFieldMixin, CollectionVersionsMixin, get_collection_in_scope
 from core.common.utils import to_parent_uri_from_kwargs, get_truthy_values, chunks
-from core.concepts.models import Concept, ConceptName
+from core.concepts.models import Concept, ConceptName, HierarchicalConcepts
 
 
 TRUTHY = get_truthy_values()
@@ -669,52 +669,45 @@ class ConceptVersionExportSerializer(ModelSerializer):
     @staticmethod
     def get_version_hierarchy(version, concepts):
         """
-        For a source version's export, from these concepts' prefetched links within their source: the version's row of
-        each linked parent (versioned object id -> uri), and which linked children are the version's rows.
+        A source version's hierarchy among its own rows, for these rows of it, by the rules of
+        Concept.get_version_hierarchy_queryset: each row's own parent links (prefetched) as the version's rows of those
+        concepts, and the version's rows that link to any row of each of these concepts.
+        Returns {'parents': {versioned object id -> uri}, 'children': {versioned object id -> child uris}}.
         """
-        parent_ids, child_ids = set(), set()
-        for concept in concepts:
-            parent_ids.update(
-                linked.versioned_object_id for linked in concept.parent_concepts.all()
-                if linked.parent_id == concept.parent_id)
-            child_ids.update(
-                linked.id for linked in concept.child_concepts.all() if linked.parent_id == concept.parent_id)
-        parent_uris, member_child_ids = {}, set()
+        parent_ids = {linked.versioned_object_id for concept in concepts for linked in concept.parent_concepts.all()}
+        parents, children = {}, {}
         for batch in chunks(sorted(parent_ids), 5000):
-            parent_uris.update(version.concepts.filter(versioned_object_id__in=batch).order_by('id').values_list(
+            parents.update(version.concepts.filter(versioned_object_id__in=batch).order_by('id').values_list(
                 'versioned_object_id', 'uri'))
-        for batch in chunks(sorted(child_ids), 5000):
-            member_child_ids.update(Concept.sources.through.objects.filter(
-                source_id=version.id, concept_id__in=batch).values_list('concept_id', flat=True))
-        return {'parent_uris': parent_uris, 'member_child_ids': member_child_ids}
+        members = Concept.sources.through.objects.filter(source_id=version.id).values('concept_id')
+        for batch in chunks(sorted({concept.versioned_object_id for concept in concepts}), 5000):
+            for parent_id, child_uri in HierarchicalConcepts.objects.filter(
+                    parent__versioned_object_id__in=batch, child_id__in=members
+            ).values_list('parent__versioned_object_id', 'child__uri'):
+                children.setdefault(parent_id, set()).add(child_uri)
+        return {'parents': parents, 'children': children}
 
     def get_shared_hierarchy_urls(self, obj, relation):
         """
         An export is served to anyone who can view its repo version, so it links only concepts of the same source
         and public ones. Reads the export's prefetched relations. A source version's export (version_hierarchy in the
-        context) lists only its rows' own links, as the version API does, since HEAD's links follow later versions:
-        each parent of the source as the version's row of it, and the children that are the version's rows.
+        context) lists only the version's own hierarchy, as the version API does, since HEAD's links follow later
+        versions.
         """
-        concepts = list(getattr(obj, relation).all())
         version_hierarchy = self.context.get('version_hierarchy')
-        if version_hierarchy is None:
-            versioned = getattr(obj, 'versioned_object', None)
-            if versioned:
-                concepts += getattr(versioned, relation).all()
+        if version_hierarchy is not None:
+            if relation == 'child_concepts':
+                return list(version_hierarchy['children'].get(obj.versioned_object_id, []))
             return list({
-                concept.uri for concept in concepts
-                if concept.parent_id == obj.parent_id or concept.public_access != ACCESS_TYPE_NONE})
-        uris = set()
-        for concept in concepts:
-            if concept.parent_id != obj.parent_id:
-                if concept.public_access != ACCESS_TYPE_NONE:
-                    uris.add(concept.uri)
-            elif relation == 'parent_concepts':
-                if concept.versioned_object_id in version_hierarchy['parent_uris']:
-                    uris.add(version_hierarchy['parent_uris'][concept.versioned_object_id])
-            elif concept.id in version_hierarchy['member_child_ids']:
-                uris.add(concept.uri)
-        return list(uris)
+                version_hierarchy['parents'][parent.versioned_object_id] for parent in obj.parent_concepts.all()
+                if parent.versioned_object_id in version_hierarchy['parents']})
+        concepts = list(getattr(obj, relation).all())
+        versioned = getattr(obj, 'versioned_object', None)
+        if versioned:
+            concepts += getattr(versioned, relation).all()
+        return list({
+            concept.uri for concept in concepts
+            if concept.parent_id == obj.parent_id or concept.public_access != ACCESS_TYPE_NONE})
 
     def get_parent_concept_urls(self, obj):
         return self.get_shared_hierarchy_urls(obj, 'parent_concepts')

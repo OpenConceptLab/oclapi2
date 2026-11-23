@@ -2134,15 +2134,22 @@ class ImportHierarchy:
     def resolve_parents(cls, uris):
         """
         uri -> (concept id, source id) of each parent URL: the concept a URL names, or the concept of the exact version
-        it names. A version that doesn't exist resolves to nothing.
+        it names (where several concepts share a URL, the one get_versioned_objects_by_uri resolves it to). A version
+        that doesn't exist resolves to nothing.
         """
         versioned_uris = {uri for uri in uris if drop_version(uri) != uri}
         versionless_uris = set(uris) - versioned_uris
         resolved = Concept.get_versioned_objects_by_uri(versionless_uris) if versionless_uris else {}
+        named_versions = {}
         for batch in chunks(sorted(versioned_uris), cls.CHUNK_SIZE):
             for uri, versioned_object_id, source_id in Concept.objects.filter(uri__in=batch).values_list(
                     'uri', 'versioned_object_id', 'parent_id'):
-                resolved[uri] = (versioned_object_id, source_id)
+                named_versions[uri] = (versioned_object_id, source_id)
+        # a version of a code with two versioned objects resolves to the one its URL resolves to, as an import writes
+        heads = Concept.get_versioned_objects_by_uri(
+            {drop_version(uri) for uri in named_versions}) if named_versions else {}
+        for uri, row in named_versions.items():
+            resolved[uri] = heads.get(drop_version(uri), row)
         return resolved
 
     @classmethod
