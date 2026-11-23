@@ -1081,14 +1081,14 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         are indexed again, and if it was the latest release, the new latest release's members are flagged as such.
         """
         if self.is_head:
-            return super().delete(using=using, keep_parents=keep_parents, force=force, sync=sync)
+            super().delete(using=using, keep_parents=keep_parents, force=force, sync=sync)
+            return
         head = self.head
         was_latest_released = self.is_latest_released
         concept_ids = list(self.concepts.values_list('id', flat=True))
         mapping_ids = list(self.mappings.values_list('id', flat=True))
         super().delete(using=using, keep_parents=keep_parents, force=force, sync=sync)
         transaction.on_commit(lambda: head.queue_reindex(concept_ids, mapping_ids, was_latest_released))
-        return None
 
     def queue_reindex(self, concept_ids, mapping_ids, was_latest_released=False):
         """

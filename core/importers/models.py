@@ -1282,19 +1282,16 @@ class ImportIndexer:
             for chunk in chunks(sorted(self.ids[resource]), self.CHUNK_SIZE):
                 model.objects.filter(id__in=chunk, _index=False).update(_index=True)
         if self.index:
-            self.queue_indexing(self.ids)
+            for resource in ('concept', 'mapping'):
+                for chunk in chunks(sorted(self.ids[resource]), self.CHUNK_SIZE):
+                    batch_index_resources.apply_async(
+                        (resource, {'id__in': chunk}, True, False), queue='indexing', permanent=False)
             for chunk in chunks(sorted(self.get_mapped_concept_ids() - self.ids['concept']), self.CHUNK_SIZE):
                 index_concepts_mapped_codes.apply_async((chunk,), queue='indexing', permanent=False)
 
     @property
     def deferred_superseded_ids(self):
         return {} if self.index else {resource: sorted(ids) for resource, ids in self.superseded_ids.items() if ids}
-
-    def queue_indexing(self, ids):
-        for resource in ('concept', 'mapping'):
-            for chunk in chunks(sorted(ids[resource]), self.CHUNK_SIZE):
-                batch_index_resources.apply_async(
-                    (resource, {'id__in': chunk}, True, False), queue='indexing', permanent=False)
 
     def get_mapped_concept_ids(self):
         """
