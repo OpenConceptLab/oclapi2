@@ -131,6 +131,18 @@ class ReferenceConversionsTest(OCLAPITestCase):
         self.assertEqual(item['repo_versioned']['repo_version'], self.v1.uri)
         self.assertEqual(item['repo_versioned']['chosen_by'], 'recorded')
 
+    def test_repo_versioned_conversion_never_picks_another_owners_private_release(self):
+        private_release = self.release('v3')
+        private_release.public_access = ACCESS_TYPE_NONE
+        private_release.save()
+        self.old.sources.add(private_release)
+        self.head().expansion.explicit_source_versions.clear()
+
+        item = self.preview([self.reference.id])['results'][0]
+
+        self.assertEqual(item['repo_versioned']['repo_version'], self.v1.uri)
+        self.assertEqual(item['repo_versioned']['chosen_by'], 'release')
+
     def test_a_reference_that_is_not_resource_versioned_is_not_supported(self):
         plain = self.add(f'{self.source.uri}concepts/c1/')
 

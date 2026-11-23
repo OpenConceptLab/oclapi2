@@ -97,7 +97,8 @@ class ReferenceConversions:
 
     def pick_repo_version(self, reference, repo_version, references):
         """The version a repo-versioned conversion names: one the expansion records that holds the resource version,
-        else the one adding the reference picks (the lock, then the newest release, then HEAD)"""
+        else the one adding the reference picks (the lock, then the newest release, then HEAD) among those the
+        collection's owner can view, so a conversion never pins it to another owner's private version"""
         if reference.names_repo_version:
             return repo_version, 'named'
         holders = self.get_holders(reference, repo_version, references)
@@ -107,8 +108,18 @@ class ReferenceConversions:
             [holder for holder in holders if holder.id in recorded_ids], evaluated)
         if picked:
             return picked, 'recorded'
-        picked = CollectionReference.pick_repo_version_with_resource_version(holders, evaluated)
+        picked = CollectionReference.pick_repo_version_with_resource_version(
+            [holder for holder in holders if self.is_visible(holder)], evaluated)
         return picked, self.get_chosen_by(picked, evaluated) if picked else None
+
+    def is_visible(self, repo_version):
+        """Whether the collection's owner can view it: a public version or the owner's own"""
+        from core.common.models import BaseModel
+        if repo_version.public_access in BaseModel.PUBLIC_ACCESS_VALUES:
+            return True
+        if self.collection.organization_id:
+            return repo_version.organization_id == self.collection.organization_id
+        return repo_version.user_id == self.collection.user_id
 
     @staticmethod
     def get_chosen_by(version, locked):
