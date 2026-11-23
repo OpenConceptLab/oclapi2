@@ -2160,10 +2160,10 @@ class BulkImportInlineTest(OCLTestCase):
 
     @override_settings(IMPORT_INDEX_MAX_LINES=1)
     @patch('core.importers.models.batch_index_resources')
-    def test_seeding_import_over_the_index_limit_indexes_the_versions_it_superseded(self, batch_index_resources_mock):
+    def test_seeding_part_over_the_index_limit_reports_the_versions_it_superseded(self, batch_index_resources_mock):
         """
-        OpenConceptLab/ocl_online#744: their documents would still say they're HEAD's latest versions, so HEAD's
-        searches would find them next to the versions that replaced them. The version it seeds indexes the rest.
+        OpenConceptLab/ocl_online#744: for the seed's commit to index them once the version is created
+        (IsolatedVersionCommit), as their documents would still say they're HEAD's latest versions.
         """
         source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='SeedSupersededOrg'))
         BulkImportInline(content=None, username='ocladmin', update_if_exists=True, index=True, input_list=[
@@ -2171,21 +2171,19 @@ class BulkImportInlineTest(OCLTestCase):
         first_food = Concept.objects.get(parent=source, mnemonic='Food', is_latest_version=True)
         batch_index_resources_mock.reset_mock()
 
-        BulkImportInline(content=None, username='ocladmin', update_if_exists=True, isolated=True, input_list=[
+        result = BulkImportInline(content=None, username='ocladmin', update_if_exists=True, isolated=True, input_list=[
             self.concept_line(source, 'Food', datatype='Text'), self.concept_line(source, 'Drink'),
             self.concept_line(source, 'Fruit')]).run()
 
         first_food.refresh_from_db()
         self.assertFalse(first_food.is_latest_version)
-        new_food = Concept.objects.get(parent=source, mnemonic='Food', is_latest_version=True)
-        # with the version that replaced it, so that HEAD's searches find Food even if the version isn't created
-        self.assertEqual(self.queued_ids(batch_index_resources_mock, 'concept'), {first_food.id, new_food.id})
+        self.assertEqual(result['seen']['superseded'], {'concept': [first_food.id]})
+        batch_index_resources_mock.apply_async.assert_not_called()  # left to the commit
         self.assertFalse(Concept.objects.filter(parent=source, _index=False).exists())  # the deferral still ends
 
-        batch_index_resources_mock.reset_mock()
-        BulkImportInline(content=None, username='ocladmin', update_if_exists=True, input_list=[  # not seeding
-            self.concept_line(source, 'Food', datatype='Numeric'), self.concept_line(source, 'Fruit')]).run()
-        batch_index_resources_mock.apply_async.assert_not_called()
+        result = BulkImportInline(content=None, username='ocladmin', update_if_exists=True, isolated=True, index=True,
+                                  input_list=[self.concept_line(source, 'Food', datatype='Numeric')]).run()
+        self.assertEqual(result['seen']['superseded'], {})  # the part indexes them itself
 
     @patch('core.importers.models.batch_index_resources')
     def test_concept_created_or_updated_then_deleted_in_one_part_is_not_left_deferred(
@@ -2665,8 +2663,8 @@ class ReseededVersionSearchTest(OCLAPITestCase):
 
         self.assert_each_code_once()
 
-    def test_a_rejected_seed_leaves_heads_search_whole(self):
-        """HEAD keeps what the rejected seed imported, so its searches find that, and nothing else."""
+    def test_a_rejected_seed_leaves_heads_search_as_it_was(self):
+        """The rows it superseded are left to the import's deferral, as are the rows that replaced them."""
         self.seed('first')
         invalid = self.concept('C', 'invalid')
         invalid.pop('concept_class')
@@ -2677,7 +2675,6 @@ class ReseededVersionSearchTest(OCLAPITestCase):
         self.assertFalse(Source.objects.filter(organization=self.source.organization, version='v2').exists())
         self.assertEqual(len(importer.invalid), 1)
         self.assertEqual(int(self.get('concepts/?q=Zephyr&limit=1')['num_found']), 2)
-        self.assertEqual([row['id'] for row in self.get('concepts/?q=second').data], ['A'])
         self.assertEqual(int(self.get('v1/concepts/?q=Zephyr&limit=1')['num_found']), 2)
 
     def test_the_rows_the_deleted_version_held_are_found_no_more(self):
@@ -6867,6 +6864,30 @@ class IsolatedVersionImportTest(OCLTestCase):
         self.assertIn('hierarchy_root', ex.exception.message_dict)
         self.assertFalse(Source.objects.filter(mnemonic='LOINC', version='v2').exists())
         self.assertTrue(Concept.objects.get(mnemonic='ROOT', id=F('versioned_object_id')).is_active)
+
+    @override_settings(IMPORT_INDEX_MAX_LINES=1)
+    def test_seed_over_the_index_limit_indexes_the_versions_it_superseded_once_created(self):
+        """
+        OpenConceptLab/ocl_online#744: their documents would still say they're HEAD's latest versions. A rejected seed
+        leaves them to the import's deferral, as it does the versions that replaced them.
+        """
+        self.run_import([self.concept('A'), self.concept('B'), self.version('v1')])
+        a_in_v1 = Concept.objects.get(mnemonic='A', is_latest_version=True)
+        invalid = self.concept('C')
+        invalid.pop('concept_class')
+        # in the test, as the class's own patch of it would replace a method decorator's
+        with patch('core.importers.models.batch_index_resources') as batch_index_resources_mock:
+            self.run_import([self.concept('A', extras={'x': 1}), self.concept('B'), invalid, self.version('v2')])
+            self.assertFalse(Source.objects.filter(mnemonic='LOINC', version='v2').exists())
+            batch_index_resources_mock.apply_async.assert_not_called()
+
+            a_in_rejected = Concept.objects.get(mnemonic='A', is_latest_version=True)
+            self.run_import([self.concept('A', extras={'x': 2}), self.concept('B'), self.version('v2')])
+
+        self.assertNotEqual(a_in_rejected.id, a_in_v1.id)
+        self.assertEqual(
+            [call_args[0][0] for call_args in batch_index_resources_mock.apply_async.call_args_list],
+            [('concept', {'id__in': [a_in_rejected.id]}, True, False)])
 
     def test_isolated_import_skips_version_when_content_fails(self):
         self.run_import([self.concept('A'), self.concept('B'), self.version('v1')])
