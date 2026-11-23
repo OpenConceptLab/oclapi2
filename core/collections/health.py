@@ -160,23 +160,46 @@ class ExpansionHealth:
                 unheld.append(member_id)
         return unheld
 
+    def get_visible_source_filter(self):
+        """Sources the collection's owner can view: public ones and the owner's own. Health is stored, not computed
+        per viewer, so a class must not tell a viewer about a release they couldn't see"""
+        from core.common.models import BaseModel
+        version = self.collection_version
+        owner = Q(source__organization_id=version.organization_id) if version.organization_id else Q(
+            source__user_id=version.user_id)
+        return Q(source__public_access__in=BaseModel.PUBLIC_ACCESS_VALUES) | owner
+
     def get_released_or_head_member_ids(self, resource_type, member_ids):
-        """Those of member_ids that some active release, or HEAD, of their source holds. Looked up by id in
+        """Those of member_ids that some visible active release, or HEAD, of their source holds. Looked up by id in
         batches: with a subquery of every member the planner scans the whole membership table"""
         resource, klass, _ = self.get_resource_models(resource_type)
         held = set()
         for start in range(0, len(member_ids), self.RELEASED_OR_HEAD_BATCH_SIZE):
             held.update(klass.sources.through.objects.filter(
-                Q(source__released=True, source__is_active=True) | Q(source__version=HEAD),
+                (Q(source__released=True, source__is_active=True) | Q(source__version=HEAD)) &
+                self.get_visible_source_filter(),
                 **{f'{resource}_id__in': member_ids[start:start + self.RELEASED_OR_HEAD_BATCH_SIZE]}
             ).values_list(f'{resource}_id', flat=True).distinct())
         return held
 
+    @cached_property
+    def unexpanded_value_set_reference_ids(self):
+        """Include references whose every resolved version is a collection version with no default expansion:
+        there is nothing to judge their members against"""
+        return {
+            reference_id for reference_id, versions in self.resolved_versions.items()
+            if versions and all(
+                self.version_key(version)[0] == 'collection' and not version.expansion_uri for version in versions)
+        }
+
     def judge(self, member, reference_id, containments, released_or_head_ids):  # pylint: disable=too-many-arguments
-        """The class one reference gives a member, and the keys of its resolved repo versions that hold it"""
+        """The class one reference gives a member (None: nothing to judge it against), and the keys of its
+        resolved repo versions that hold it"""
         member_id, versioned_object_id = member
         if self.include_references[reference_id].is_resource_versioned:
             return RESOURCE_VERSIONED, set()
+        if reference_id in self.unexpanded_value_set_reference_ids:
+            return None, set()
         holders = [
             version for version in self.resolved_versions.get(reference_id, [])
             if self.version_key(version) in containments.get(member_id, set())
@@ -205,6 +228,8 @@ class ExpansionHealth:
             judgements = set()
             for reference_id in reference_ids:
                 member_class, holder_keys = self.judge(member, reference_id, containments, released_or_head_ids)
+                if member_class is None:
+                    continue
                 judgements.add(member_class)
                 self.versions_used_by_reference.setdefault(reference_id, set()).update(holder_keys)
             if not judgements:
@@ -270,6 +295,7 @@ class ExpansionHealth:
         unresolved = self.expansion.unresolved_repo_versions or []
         add('unresolved_references', len(
             [entry for entry in unresolved if entry.get('type') != SYSTEM_VERSION_PARAMETER_TYPE]))
+        add('value_set_without_expansion', len(self.unexpanded_value_set_reference_ids))
         add('system_version_unresolved', len(
             [entry for entry in unresolved if entry.get('type') == SYSTEM_VERSION_PARAMETER_TYPE]))
         for member_class, code in MEMBER_REASONS:

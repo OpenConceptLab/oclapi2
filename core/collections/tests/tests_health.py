@@ -7,10 +7,12 @@ from core.collections.health import (
     UNATTRIBUTED, EMPTY, UNHEALTHY, HEAD_RESOLVED, HEALTHY)
 from core.collections.models import CollectionReference, Expansion
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
+from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
 from core.common.tasks import seed_children_to_new_version
 from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.concepts.tests.factories import ConceptFactory
 from core.mappings.tests.factories import MappingFactory
+from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 
 
@@ -293,6 +295,99 @@ class ExpansionHealthTest(OCLTestCase):
         health = self.health()
         self.assertEqual(health['state'], EMPTY)
         self.assertEqual(health['members']['concepts'][RELEASE], 0)
+
+    def test_a_release_the_collection_owner_cannot_see_does_not_turn_interim_into_mismatch(self):
+        other = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        concept = ConceptFactory(parent=other)
+        old = concept.get_latest_version()
+        new = ConceptFactory(parent=other, mnemonic=concept.mnemonic, versioned_object=concept, version='new')
+        old.sources.remove(other)
+        hidden = OrganizationSourceFactory(
+            mnemonic=other.mnemonic, organization=other.organization, version='v1', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        old.sources.add(hidden)
+        latest = OrganizationSourceFactory(
+            mnemonic=other.mnemonic, organization=other.organization, version='v2', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        new.sources.add(latest)
+        self.expansion.evaluated_source_versions.add(latest)
+        reference = CollectionReference(
+            expression=f'{other.uri}concepts/{concept.mnemonic}/', collection=self.collection, system=other.uri,
+            code=concept.mnemonic)
+        reference.save()
+        reference.concepts.add(old)
+        self.expansion.concepts.add(old)
+
+        self.assertEqual(self.classify(), {old.id: INTERIM})
+
+        Source.objects.filter(id=hidden.id).update(public_access=ACCESS_TYPE_VIEW)
+        self.assertEqual(self.classify(), {old.id: MISMATCH})
+
+    def test_value_set_without_a_default_expansion_is_a_reason_and_judges_nothing(self):
+        concept = ConceptFactory(parent=self.source)
+        version = concept.get_latest_version()
+        other = OrganizationCollectionFactory(organization=self.source.organization)
+        other_release = OrganizationCollectionFactory(
+            mnemonic=other.mnemonic, organization=other.organization, version='v1', released=True)
+        reference = CollectionReference(
+            expression=other_release.uri, collection=self.collection, valueset=[other_release.uri])
+        reference.save()
+        reference.concepts.add(version)
+        self.expansion.concepts.add(version)
+
+        self.assertEqual(self.classify(), {version.id: UNATTRIBUTED})
+        self.assertEqual(self.reason_codes(self.health())['value_set_without_expansion'], 1)
+
+    def test_a_resource_versioned_exclude_reference_counts_as_one(self):
+        concept = ConceptFactory(parent=self.source)
+        version = concept.get_latest_version()
+        self.expansion.evaluated_source_versions.add(self.release('v1', version))
+        self.reference(concept, version)
+        excluded = CollectionReference(
+            expression=version.uri, collection=self.collection, system=self.source.uri, code=concept.mnemonic,
+            resource_version=version.version, include=False)
+        excluded.save()
+
+        self.assertEqual(self.classify(), {version.id: RELEASE})
+        self.assertEqual(self.reason_codes(self.health()), {'resource_versioned_references': 1})
+
+    def test_a_build_records_what_unversioned_references_resolve_to(self):
+        concept = ConceptFactory(parent=self.source)
+        version = concept.get_latest_version()
+        release = self.release('v1', version)
+        collection = OrganizationCollectionFactory(organization=self.source.organization)
+        expansion = Expansion.persist(index=False, collection_version=collection, mnemonic='e1')
+        collection.expansion_uri = expansion.uri
+        collection.save()
+
+        collection.add_expressions({'expressions': [concept.uri]}, collection.created_by)
+
+        self.assertIn(release.id, expansion.evaluated_source_versions.values_list('id', flat=True))
+        classes = ExpansionHealth(expansion).classify('concepts')
+        self.assertEqual({member_class for member_class, _, _ in classes.values()}, {RELEASE})
+
+    def test_a_reference_with_a_system_and_value_sets_is_judged_against_its_system(self):
+        concept = ConceptFactory(parent=self.source)
+        version = concept.get_latest_version()
+        self.expansion.evaluated_source_versions.add(self.release('v1', version))
+        other = OrganizationCollectionFactory(organization=self.source.organization)
+        other_release = OrganizationCollectionFactory(
+            mnemonic=other.mnemonic, organization=other.organization, version='v1', released=True)
+        other_expansion = ExpansionFactory(collection_version=other_release, mnemonic='e1')
+        other_release.expansion_uri = other_expansion.uri
+        other_release.save()
+        self.reference(concept, version, valueset=[other_release.uri])
+
+        self.assertEqual(self.classify(), {version.id: RELEASE})
+
+    def test_a_member_held_only_by_an_inactive_release_is_interim(self):
+        concept, old, new = self.concept_with_replaced_version()
+        inactive = self.release('v1', old)
+        Source.objects.filter(id=inactive.id).update(is_active=False)
+        self.expansion.evaluated_source_versions.add(self.release('v2', new))
+        self.reference(concept, old)
+
+        self.assertEqual(self.classify(), {old.id: INTERIM})
 
     def test_classify_a_page_of_members(self):
         first, second = ConceptFactory(parent=self.source), ConceptFactory(parent=self.source)
