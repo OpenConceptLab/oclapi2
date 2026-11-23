@@ -41,6 +41,7 @@ MEMBER_REASONS = (
 
 class ExpansionHealth:
     """Classifies one expansion's members in a few set-based queries per resource type"""
+    RELEASED_OR_HEAD_BATCH_SIZE = 10000
 
     def __init__(self, expansion):
         self.expansion = expansion
@@ -138,13 +139,38 @@ class ExpansionHealth:
                 containments.setdefault(member_id, set()).add(('collection', collection_version_ids[expansion_id]))
         return containments
 
-    def get_released_or_head_member_ids(self, resource_type, members):
-        """Ids of members that some active release, or HEAD, of their source holds"""
+    @cached_property
+    def resolved_version_keys(self):
+        return {
+            reference_id: {self.version_key(version) for version in versions}
+            for reference_id, versions in self.resolved_versions.items()
+        }
+
+    def get_unheld_member_ids(self, member_rows, attributions, containments):
+        """Members that some reference judges by whether a release or HEAD holds them: none of its versions does"""
+        unheld = []
+        for member_id, versioned_object_id in member_rows:
+            if member_id == versioned_object_id:
+                continue
+            held_keys = containments.get(member_id, set())
+            if any(
+                    not self.include_references[reference_id].is_resource_versioned and
+                    not self.resolved_version_keys.get(reference_id, set()) & held_keys
+                    for reference_id in attributions.get(versioned_object_id, set())):
+                unheld.append(member_id)
+        return unheld
+
+    def get_released_or_head_member_ids(self, resource_type, member_ids):
+        """Those of member_ids that some active release, or HEAD, of their source holds. Looked up by id in
+        batches: with a subquery of every member the planner scans the whole membership table"""
         resource, klass, _ = self.get_resource_models(resource_type)
-        return set(klass.sources.through.objects.filter(
-            Q(source__released=True, source__is_active=True) | Q(source__version=HEAD),
-            **{f'{resource}_id__in': members.values('id')}
-        ).values_list(f'{resource}_id', flat=True).distinct())
+        held = set()
+        for start in range(0, len(member_ids), self.RELEASED_OR_HEAD_BATCH_SIZE):
+            held.update(klass.sources.through.objects.filter(
+                Q(source__released=True, source__is_active=True) | Q(source__version=HEAD),
+                **{f'{resource}_id__in': member_ids[start:start + self.RELEASED_OR_HEAD_BATCH_SIZE]}
+            ).values_list(f'{resource}_id', flat=True).distinct())
+        return held
 
     def judge(self, member, reference_id, containments, released_or_head_ids):  # pylint: disable=too-many-arguments
         """The class one reference gives a member, and the keys of its resolved repo versions that hold it"""
@@ -170,9 +196,11 @@ class ExpansionHealth:
         members = self.get_member_rows(resource_type, member_ids)
         attributions = self.get_attributions(resource_type, members)
         containments = self.get_containments(resource_type, members)
-        released_or_head_ids = self.get_released_or_head_member_ids(resource_type, members)
+        member_rows = list(members.values_list('id', 'versioned_object_id'))
+        released_or_head_ids = self.get_released_or_head_member_ids(
+            resource_type, self.get_unheld_member_ids(member_rows, attributions, containments))
         classes = {}
-        for member in members.values_list('id', 'versioned_object_id'):
+        for member in member_rows:
             reference_ids = sorted(attributions.get(member[1], set()))
             judgements = set()
             for reference_id in reference_ids:

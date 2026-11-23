@@ -1,5 +1,6 @@
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
+from mock import patch
 
 from core.collections.health import (
     ExpansionHealth, RELEASE, UNRELEASED, HEAD_MEMBER, RESOURCE_VERSIONED, INTERIM, MISMATCH, AMBIGUOUS,
@@ -51,6 +52,12 @@ class ExpansionHealthTest(OCLTestCase):
 
     def health(self):
         return ExpansionHealth(self.expansion).compute()
+
+    @staticmethod
+    def release_or_head_queries(context):
+        return [
+            query for query in context.captured_queries
+            if '"concepts_sources"' in query['sql'] and '"released"' in query['sql']]
 
     def reason_codes(self, health):
         return {reason['code']: reason['count'] for reason in health['reasons']}
@@ -293,6 +300,30 @@ class ExpansionHealthTest(OCLTestCase):
 
         classes = ExpansionHealth(self.expansion).classify('concepts', [first.get_latest_version().id])
         self.assertEqual(list(classes), [first.get_latest_version().id])
+
+    def test_release_or_head_check_runs_only_for_members_their_versions_dont_hold(self):
+        concept = ConceptFactory(parent=self.source)
+        version = concept.get_latest_version()
+        self.expansion.evaluated_source_versions.add(self.release('v1', version))
+        self.reference(concept, version)
+
+        with CaptureQueriesContext(connection) as context:
+            self.assertEqual(self.classify(), {version.id: RELEASE})
+        self.assertEqual(self.release_or_head_queries(context), [])
+
+    def test_release_or_head_check_looks_members_up_in_batches(self):
+        first, first_old, first_new = self.concept_with_replaced_version()
+        second, second_old, second_new = self.concept_with_replaced_version()
+        self.release('v1', first_old)
+        self.expansion.evaluated_source_versions.add(self.release('v2', first_new, second_new))
+        self.reference(first, first_old)
+        self.reference(second, second_old)
+
+        with patch.object(ExpansionHealth, 'RELEASED_OR_HEAD_BATCH_SIZE', 1), \
+                CaptureQueriesContext(connection) as context:
+            classes = self.classify()
+        self.assertEqual(classes, {first_old.id: MISMATCH, second_old.id: INTERIM})
+        self.assertEqual(len(self.release_or_head_queries(context)), 2)
 
     def test_queries_do_not_grow_with_references(self):
         def count_queries(references_count):
