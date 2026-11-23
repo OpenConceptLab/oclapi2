@@ -2177,7 +2177,9 @@ class BulkImportInlineTest(OCLTestCase):
 
         first_food.refresh_from_db()
         self.assertFalse(first_food.is_latest_version)
-        self.assertEqual(self.queued_ids(batch_index_resources_mock, 'concept'), {first_food.id})
+        new_food = Concept.objects.get(parent=source, mnemonic='Food', is_latest_version=True)
+        # with the version that replaced it, so that HEAD's searches find Food even if the version isn't created
+        self.assertEqual(self.queued_ids(batch_index_resources_mock, 'concept'), {first_food.id, new_food.id})
         self.assertFalse(Concept.objects.filter(parent=source, _index=False).exists())  # the deferral still ends
 
         batch_index_resources_mock.reset_mock()
@@ -2612,21 +2614,25 @@ class ReseededVersionSearchTest(OCLAPITestCase):
             isolated_version=isolated_version)
         with self.captureOnCommitCallbacks(execute=True), override_settings(SEED_FROM_IMPORT_LARGE_DROP_MIN=10):
             importer.run()
-        self.assertEqual(importer.failed, [])
         self.run_queued_indexing()
+        return importer
 
     def concept(self, code, label):
         return {'type': 'Concept', 'id': code, 'concept_class': 'Misc', 'datatype': 'None', **self.owner,
                 'names': [{'name': f'Zephyr {code} {label}', 'locale': 'en', 'locale_preferred': True}]}
 
-    def seed(self, label):
-        """v1 from an import: A and M1 take the label, B stays the same."""
-        self.import_lines([
+    def seed_lines(self, label, version='v1'):
+        """A and M1 take the label, B stays the same."""
+        return [
             self.concept('A', label), self.concept('B', 'unchanged'),
             {'type': 'Mapping', 'id': 'M1', 'map_type': 'Same As', 'from_concept_url': f'{self.source.uri}concepts/A/',
              'to_concept_url': f'{self.source.uri}concepts/B/', 'extras': {'label': label}, **self.owner},
-            {'type': 'Source Version', 'id': 'v1', 'description': label, 'released': True, **self.owner},
-        ], isolated_version=True)
+            {'type': 'Source Version', 'id': version, 'description': label, 'released': True, **self.owner},
+        ]
+
+    def seed(self, label):
+        """v1 from an import, indexed as it would be."""
+        self.assertEqual(self.import_lines(self.seed_lines(label), isolated_version=True).failed, [])
         version = Source.objects.get(organization=self.source.organization, mnemonic='LOINC', version='v1')
         # as the version's own indexing writes its members' documents
         ConceptDocument().update(version.concepts.all(), refresh=True)
@@ -2648,6 +2654,8 @@ class ReseededVersionSearchTest(OCLAPITestCase):
             self.assertEqual(int(self.get(f'{version}mappings/?q=M1&limit=1')['num_found']), 1, version)
             facets = self.get(f'{version}concepts/?q=Zephyr&facetsOnly=true').data['facets']['fields']
             self.assertEqual(facets['conceptClass'], [('Misc', 2, False)], version)
+            facets = self.get(f'{version}mappings/?q=M1&facetsOnly=true').data['facets']['fields']
+            self.assertEqual(facets['mapType'], [('same as', 1, False)], version)
 
     def test_the_rows_the_import_superseded_are_found_no_more(self):
         self.seed('first')
@@ -2656,6 +2664,21 @@ class ReseededVersionSearchTest(OCLAPITestCase):
             self.seed('second')
 
         self.assert_each_code_once()
+
+    def test_a_rejected_seed_leaves_heads_search_whole(self):
+        """HEAD keeps what the rejected seed imported, so its searches find that, and nothing else."""
+        self.seed('first')
+        invalid = self.concept('C', 'invalid')
+        invalid.pop('concept_class')
+        *content, version_line = self.seed_lines('second', version='v2')
+        with override_settings(IMPORT_INDEX_MAX_LINES=1):
+            importer = self.import_lines([*content, invalid, version_line], isolated_version=True)
+
+        self.assertFalse(Source.objects.filter(organization=self.source.organization, version='v2').exists())
+        self.assertEqual(len(importer.invalid), 1)
+        self.assertEqual(int(self.get('concepts/?q=Zephyr&limit=1')['num_found']), 2)
+        self.assertEqual([row['id'] for row in self.get('concepts/?q=second').data], ['A'])
+        self.assertEqual(int(self.get('v1/concepts/?q=Zephyr&limit=1')['num_found']), 2)
 
     def test_the_rows_the_deleted_version_held_are_found_no_more(self):
         """A's row in the deleted v1 had left HEAD before it, so seeding v1 again doesn't supersede it."""

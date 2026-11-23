@@ -1093,14 +1093,23 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     def index_former_members(self, concept_ids, mapping_ids, was_latest_released=False):
         """
         Indexes again the concepts and mappings of a deleted version of this repository (its HEAD), from what they
-        belong to now, DROPPED_CHILDREN_CHUNK_SIZE a task. was_latest_released: flags the new latest release's members.
+        belong to now: DROPPED_CHILDREN_CHUNK_SIZE a Task, with its arguments saved so it can be rerun, as the version
+        and its links are gone. A chunk that can't be queued is left as a failed Task. was_latest_released: flags the
+        new latest release's members.
         """
         for resource, ids in (('concept', concept_ids), ('mapping', mapping_ids)):
             for chunk in chunks(sorted(ids), DROPPED_CHILDREN_CHUNK_SIZE):
+                args = [resource, {'id__in': chunk}]
                 if get(settings, 'TEST_MODE', False):
-                    batch_index_resources(resource, {'id__in': chunk})
-                else:
-                    batch_index_resources.apply_async((resource, {'id__in': chunk}), queue='indexing', permanent=False)
+                    batch_index_resources(*args)
+                    continue
+                task = Task.new(queue='indexing', user=self.updated_by, name=batch_index_resources.name, args=args)
+                try:
+                    batch_index_resources.apply_async(args, task_id=task.id, queue='indexing', persist_args=True)
+                except Exception as ex:  # pylint: disable=broad-except
+                    task.state = FAILURE
+                    task.finished_at = timezone.now()
+                    task.record_exception(ex)
         latest_released = self.get_latest_released_version() if was_latest_released else None
         if latest_released:
             latest_released.index_children_async(self.updated_by, {'is_in_latest_source_version': True})

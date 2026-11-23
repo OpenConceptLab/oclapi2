@@ -1242,10 +1242,11 @@ class ImportIndexer:
     their batch indexing, without forcing a refresh per batch, and an update of the mapped codes in the documents of
     the concepts the imported mappings come from.
 
-    index_superseded: an import that seeds a version indexes the versions it superseded even when it doesn't index
-    the rest. Their documents would still say they're HEAD's latest versions, and keep the names of versions that
-    held them, so searches of HEAD, and of a later version of the same name, would find them next to the versions
-    that replaced them (OpenConceptLab/ocl_online#744). The new version indexes the rest.
+    index_superseded: an import that seeds a version indexes the versions it superseded, and the ones that replaced
+    them, even when it doesn't index the rest. The superseded versions' documents would still say they're HEAD's
+    latest versions, and keep the names of versions that held them, so searches of HEAD, and of a later version of the
+    same name, would find them next to their replacements (OpenConceptLab/ocl_online#744). Their replacements keep
+    HEAD's searches whole whether or not the version is then created; the new version indexes the rest.
     """
     CHUNK_SIZE = 5000
 
@@ -1253,7 +1254,7 @@ class ImportIndexer:
         self.index = index
         self.index_superseded = index_superseded
         self.ids = {'concept': set(), 'mapping': set()}
-        self.superseded_ids = {'concept': set(), 'mapping': set()}
+        self.superseded_ids = {'concept': set(), 'mapping': set()}  # with the versions that replaced them
         self.mapped_concept_ids = set()
 
     def add(self, instance):
@@ -1262,13 +1263,10 @@ class ImportIndexer:
             return  # nothing saved, or saved with _index=True, which indexes it
         superseded_ids = compact([
             get(instance, 'prev_latest_version_id'), *(get(instance, 'stale_latest_version_ids') or [])])
-        self.superseded_ids[resource].update(superseded_ids)
-        self.ids[resource].update(compact([
-            instance.versioned_object_id,
-            *superseded_ids,
-            get(instance, 'latest_version_id'),
-            instance.id,
-        ]))
+        replacement_ids = compact([get(instance, 'latest_version_id'), instance.id])
+        if superseded_ids:
+            self.superseded_ids[resource].update([*superseded_ids, *replacement_ids])
+        self.ids[resource].update(compact([instance.versioned_object_id, *superseded_ids, *replacement_ids]))
         if resource == 'mapping' and instance.from_concept_id and instance.from_source_id == instance.parent_id:
             self.mapped_concept_ids.add(instance.from_concept_id)
         if resource == 'mapping' and get(instance, 'replaced_from_concept_id'):
