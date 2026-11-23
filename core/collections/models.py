@@ -1498,11 +1498,12 @@ class CollectionReference(models.Model):
 
     def get_evaluated_repo_version_urls(self, expansion, user, system_version_cache=None):
         """URLs of the repository versions its expansion evaluated it in that `user` can view,
-        else of the repositories it names"""
+        else of the repositories it names. A version it names that `user` can't view counts as missing."""
         expansion_cache = {self.collection_id: expansion}
-        versions = [
-            *self._get_resolved_system_versions(system_version_cache, expansion_cache),
-            *self._get_resolved_valueset_versions(expansion_cache=expansion_cache)]
+        named_version = self._get_expression_system_version(system_version_cache) if self.names_repo_version else None
+        system_versions = [] if named_version and not named_version.has_view_access(user) else \
+            self._get_resolved_system_versions(system_version_cache, expansion_cache)
+        versions = [*system_versions, *self._get_resolved_valueset_versions(expansion_cache=expansion_cache)]
         valuesets = self.valueset if isinstance(self.valueset, list) else []
         return [version.uri for version in versions if version.has_view_access(user)] or compact(
             [self.system, *valuesets])

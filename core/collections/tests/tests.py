@@ -4142,6 +4142,26 @@ class ExpansionTest(OCLTestCase):
         self.assertEqual(reference.get_evaluated_repo_version_urls(expansion, UserProfileFactory()), [source.uri])
         self.assertEqual(reference.get_evaluated_repo_version_urls(expansion, None), [source.uri])
 
+    def test_evaluated_repo_version_urls_treat_a_named_version_the_user_cannot_view_as_missing(self):
+        source = OrganizationSourceFactory()
+        recorded = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+        private = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v2', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        expansion.evaluated_source_versions.add(recorded)
+        user = UserProfileFactory()
+
+        def evaluated_urls(system):
+            reference = CollectionReference(
+                expression=f'{system}concepts/c1/', collection=collection, system=system, code='c1')
+            return reference.get_evaluated_repo_version_urls(expansion, user)
+
+        self.assertEqual(evaluated_urls(f'{source.uri}v3/'), [f'{source.uri}v3/'])
+        self.assertEqual(evaluated_urls(private.uri), [private.uri])
+
     def test_rebuild_with_filter_reference_under_release_adds_its_resource_versions(self):
         source, release, _, concept_version = CollectionReferenceTest.released_source_with_concepts()
         collection = OrganizationCollectionFactory()
