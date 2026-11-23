@@ -1421,7 +1421,8 @@ class DeferredImportIndex(models.Model):
         Updates the superseded versions whose replacements are searchable now, and while the window is open, indexes
         the INDEX and MAPPED_CODES rows in order, updating them again every DEFERRED_INDEX_FLAGS_SECONDS and at the end.
         After DEFERRED_INDEX_RUN_SECONDS of indexing it stops and queues the next run behind the indexing tasks queued
-        meanwhile, so they share the worker. Returns how many rows it finished.
+        meanwhile, so they share the worker. Each pass over the latest flags has a budget of its own, so it can't use up
+        the indexing's. Returns how many rows it finished.
 
         One runner at a time: a run holds a lock it renews before each batch, and stops if the lock is no longer its
         own. The lock expires if its runner dies, so a later run picks up where it stopped.
@@ -1431,7 +1432,7 @@ class DeferredImportIndex(models.Model):
         token = uuid.uuid4().hex
         if not django_cache.add(DEFERRED_INDEX_LOCK_KEY, token, timeout=DEFERRED_INDEX_LOCK_SECONDS):
             return 0
-        deadline = time.monotonic() + DEFERRED_INDEX_RUN_SECONDS
+        deadline = None  # the indexing's, set when it starts
 
         def keep_going(indexing=True):
             """Whether to start another batch: the lock is still this run's, and for indexing, time is left."""
@@ -1445,6 +1446,7 @@ class DeferredImportIndex(models.Model):
             done = cls.update_latest_flags(keep_going)
             if cls.is_window_open():
                 flagged_at = time.monotonic()
+                deadline = flagged_at + DEFERRED_INDEX_RUN_SECONDS
                 for row in iter(lambda: cls.get_pending().exclude(stage=cls.Stage.LATEST_FLAGS).first(), None):
                     if row.process(keep_going) != cls.DONE:
                         break  # out of time, the window closed, the lock was lost, or the row failed
@@ -1465,10 +1467,14 @@ class DeferredImportIndex(models.Model):
 
     @classmethod
     def update_latest_flags(cls, keep_going):
-        """Processes the LATEST_FLAGS rows, stopping at a failure or once keep_going says to. How many it finished."""
+        """
+        Processes the LATEST_FLAGS rows, the ones checked longest ago first, for up to DEFERRED_INDEX_RUN_SECONDS.
+        Stops at a failure, or once keep_going says to. Returns how many it finished.
+        """
         done = 0
-        for row in cls.get_pending().filter(stage=cls.Stage.LATEST_FLAGS):
-            if not keep_going(indexing=False):
+        deadline = time.monotonic() + DEFERRED_INDEX_RUN_SECONDS
+        for row in cls.get_pending().filter(stage=cls.Stage.LATEST_FLAGS).order_by('updated_at', 'id'):
+            if time.monotonic() >= deadline or not keep_going(indexing=False):
                 break
             result = row.process(keep_going)
             if result == cls.FAILED:
@@ -1539,7 +1545,7 @@ class DeferredImportIndex(models.Model):
         ready = [_id for _id in self.ids if _id not in waiting]
         if ready:
             self.hand_over(self.Stage.INDEX, model.index_latest_flags(model.objects.filter(id__in=ready)))
-        if waiting and len(waiting) < len(self.ids):
+        if waiting:  # saved even when nothing changed, as updated_at puts it behind the others in the next pass
             self.ids = sorted(waiting)
             self.save(update_fields=['ids', 'updated_at'])
         return not waiting

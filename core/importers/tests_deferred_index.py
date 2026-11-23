@@ -22,7 +22,8 @@ from core.concepts.documents import ConceptDocument, MappedCodes, RELEASE_MAP_CO
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
 from core.importers.constants import DEFERRED_INDEX_LOCK_KEY, DEFERRED_INDEX_MAX_ATTEMPTS, \
-    DEFERRED_INDEX_RETRY_SECONDS, DEFERRED_INDEX_REJECTED_RETRY_SECONDS, DEFERRED_INDEX_BEAT_SECONDS
+    DEFERRED_INDEX_RETRY_SECONDS, DEFERRED_INDEX_REJECTED_RETRY_SECONDS, DEFERRED_INDEX_BEAT_SECONDS, \
+    DEFERRED_INDEX_RUN_SECONDS
 from core.importers.importer import ImporterSubtask
 from core.importers.models import BulkImportInline, DeferredImportIndex, ImportIndexer, CREATED
 from core.mappings.documents import MappingDocument
@@ -608,6 +609,26 @@ class DeferredImportIndexRunTest(OCLTestCase):
             self.assertEqual(self.run_rows(), 3)
         task_mock.apply_async.assert_not_called()  # done in time: beat's next run is enough
         self.assertFalse(DeferredImportIndex.objects.exists())
+
+    def test_a_slow_pass_over_the_latest_flags_leaves_the_indexing_its_own_time(self):
+        concept, (first, second) = self.concept_updates()
+        clock = [0]
+        check = Concept.get_ids_with_unsearchable_replacements
+
+        def slow_check(ids):  # each check of the replacements takes longer than a whole run's budget
+            clock[0] += DEFERRED_INDEX_RUN_SECONDS + 1
+            return check(ids)
+
+        with patch('core.importers.models.time.monotonic', side_effect=lambda: clock[0]), \
+                patch.object(Concept, 'get_ids_with_unsearchable_replacements', side_effect=slow_check), \
+                patch('core.importers.models.run_deferred_import_indexing') as task_mock:
+            self.assertEqual(self.run_rows(), 1)
+
+        # the first part's batch ran after the flags pass; then the run was out of time and queued the next one
+        self.assertEqual(self.indexed, [(INDEX, 'concept', {concept.id})])
+        task_mock.apply_async.assert_called_once()
+        self.assertEqual(
+            deferred(), {(INDEX, 'concept'): {concept.id, second.id}, (LATEST_FLAGS, 'concept'): {first.id}})
 
     def test_run_stops_once_its_lock_is_another_runners(self):
         concept, (first, second) = self.concept_updates()
