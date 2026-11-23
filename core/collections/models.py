@@ -9,6 +9,7 @@ from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models, transaction, OperationalError
 from django.db.models import UniqueConstraint, F, QuerySet, Max
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.functional import cached_property
 from pydash import get, compact, find
@@ -487,7 +488,10 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             expansion = Expansion(
                 mnemonic=mnemonic, collection_version=self, parameters=parameters,
                 built_with=VERSION_EXPANSION_LOCK if lock else VERSION_EXPANSION_LATEST,
-                created_by_id=self.created_by_id, updated_by_id=self.created_by_id)
+                created_by_id=self.created_by_id, updated_by_id=self.created_by_id,
+                # built under HEAD's locks, so it stands on HEAD's deleted ones too
+                deleted_locked_repo_versions=list(get(head_expansion, 'deleted_locked_repo_versions') or [])
+                if lock else [])
             expansion.clean()
             expansion.full_clean()
             expansion.save()
@@ -1627,6 +1631,9 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
     health = models.JSONField(null=True, blank=True)
     health_is_current = models.BooleanField(null=True, blank=True)
     HEALTH_FIELDS = ('health', 'health_is_current')
+    # the locked repo versions deleted since it was built, recorded at delete time: the delete drops the lock itself
+    deleted_locked_repo_versions = ArrayField(models.JSONField(), default=list, null=True, blank=True)
+    SEPARATELY_WRITTEN_FIELDS = (*HEALTH_FIELDS, 'deleted_locked_repo_versions')
 
     @property
     def is_head(self):
@@ -1949,6 +1956,9 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             self.evaluated_collection_versions.clear()
             self.evaluated_source_versions.clear()
             self.unresolved_repo_versions = []
+            # rebuilt without the deleted locks, so it no longer stands on them
+            self.deleted_locked_repo_versions = []
+            Expansion.objects.filter(id=self.id).update(deleted_locked_repo_versions=[])
 
         # attempt_reevaluate is False for delete reference(s)
         should_reevaluate = force_reevaluate or (attempt_reevaluate and not self.is_auto_generated)
@@ -2517,10 +2527,10 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
 
     def save(self, *args, force_insert=False, force_update=False, using=None, update_fields=None):
         if update_fields is None and not force_insert and not self._state.adding:
-            # health is written only by its own updates, so a save from an older copy can't undo them
+            # these are written only by their own updates, so a save from an older copy can't undo them
             update_fields = [
                 field.name for field in self._meta.concrete_fields
-                if not field.primary_key and field.name not in self.HEALTH_FIELDS]
+                if not field.primary_key and field.name not in self.SEPARATELY_WRITTEN_FIELDS]
         super().save(*args, force_insert=force_insert, force_update=force_update, using=using,
                      update_fields=update_fields)
 
@@ -2546,6 +2556,23 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         Expansion.objects.filter(id=self.id).update(health=health)
         self.health = health
         return health
+
+    @classmethod
+    def record_deleted_locks(cls, repo_versions):
+        """On each expansion locked to one of these versions, which one is being deleted. Deleting the rows drops
+        the lock, so a later add would quietly fall back to the latest release; this keeps the sign of it"""
+        deleted_at = timezone.now().isoformat()
+        for version in repo_versions:
+            kind = 'collection' if isinstance(version, Collection) else 'source'
+            through = getattr(cls, f'evaluated_{kind}_versions').through
+            entry = {
+                'url': version.uri, 'repo_url': drop_version(version.uri), 'version': version.version,
+                'type': version.resource_type, 'deleted_at': deleted_at}
+            entries = ArrayField(models.JSONField())
+            locked = through.objects.filter(**{f'{kind}_id': version.id}).values('expansion_id')
+            cls.objects.filter(id__in=locked).update(deleted_locked_repo_versions=models.Func(
+                Coalesce(models.F('deleted_locked_repo_versions'), models.Value([], output_field=entries)),
+                models.Value([entry], output_field=entries), function='array_cat', output_field=entries))
 
     @classmethod
     def mark_health_not_current_for_repository(cls, repo_version):

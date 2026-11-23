@@ -290,6 +290,8 @@ class ExpansionHealth:
             uri for uri, (version_ids, from_unversioned) in repositories.items()
             if len(version_ids) > 1 and from_unversioned)
         add('duplicate_repo_versions', len(duplicates), repositories=duplicates)
+        deleted_locks = self.expansion.deleted_locked_repo_versions or []
+        add('locked_version_deleted', len(deleted_locks), versions=sorted({entry['url'] for entry in deleted_locks}))
         add('resource_versioned_references', len(
             [reference for reference in self.references if reference.is_resource_versioned]))
         unresolved = self.expansion.unresolved_repo_versions or []

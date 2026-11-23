@@ -989,6 +989,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         deleted_urls = [self.url]
         deleted_ids = [self.id]
         canonical_urls = {self.canonical_url}
+        other_versions = []
         if self.is_head:
             other_versions = list(self.versions.exclude(id=self.id))
             for other_version in other_versions:
@@ -1005,6 +1006,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 prev_version.is_latest_version = True
                 prev_version.save()
 
+        # before the rows go: deleting them drops the locks that point at them
+        Expansion.record_deleted_locks([self, *other_versions])
         registry_entry_ids = self.unlink_url_registry_entries(deleted_ids)
         if self.is_head:
             self.versions.exclude(id=self.id).delete()
