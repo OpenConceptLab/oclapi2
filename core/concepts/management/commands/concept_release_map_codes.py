@@ -1,3 +1,4 @@
+import math
 import time
 from collections import defaultdict
 
@@ -41,13 +42,15 @@ class Command(BaseCommand):
             '--after', type=int,
             help='With one --source: start after this concept (the versioned object id a progress line printed).')
         parser.add_argument(
-            '--pause', type=float, default=0, help='Seconds to wait between chunks, to leave the database room.')
+            '--pause', type=float, default=0, help='Seconds to wait after each chunk, to leave the database room.')
 
     def handle(self, *args, **options):
         if options['index'] and options['source']:  # the updates go to the concepts index
             raise CommandError('--source rewrites docs in the concepts index only: leave out --index')
         if options['after'] is not None and len(options['source']) != 1:
             raise CommandError('--after picks up one source: give exactly one --source')
+        if not 0 <= options['pause'] < math.inf:  # not after the first chunk is written
+            raise CommandError('--pause takes a number of seconds, 0 or more')
         index = options['index'] or ConceptDocument._index._name  # pylint: disable=protected-access
         sources = [self.get_source(url) for url in options['source']]
         es = connections.get_connection()
@@ -83,18 +86,16 @@ class Command(BaseCommand):
         now takes HEAD's active codes. Returns how many.
 
         A concept's rows go in one chunk, so its mappings are read once (OpenConceptLab/ocl_online#748). After each
-        chunk it prints the last concept done, which `after` takes to skip those, and waits `pause` seconds.
+        chunk it prints the last concept done, which `after` takes to skip those, then waits `pause` seconds.
         """
         started = time.monotonic()
-        versioned_object_ids = sorted(Concept.objects.filter(
-            parent_id=source.id, id=F('versioned_object_id')).values_list('id', flat=True))
+        versioned_objects = Concept.objects.filter(parent_id=source.id, id=F('versioned_object_id'))
         if after is not None:
-            versioned_object_ids = [id_ for id_ in versioned_object_ids if id_ > after]
+            versioned_objects = versioned_objects.filter(id__gt=after)
+        versioned_object_ids = sorted(versioned_objects.values_list('id', flat=True))
         total, done, docs = len(versioned_object_ids), 0, 0
+        chunk_started = time.monotonic()
         for number, (last, concepts, ids) in enumerate(self.get_chunks(source, versioned_object_ids, after), 1):
-            if number > 1 and pause:
-                time.sleep(pause)
-            chunk_started = time.monotonic()
             if ids:
                 Concept.batch_index_partial_by_ids(
                     Concept.objects.filter(id__in=ids), ConceptDocument, Concept.get_mapped_codes_actions,
@@ -105,6 +106,9 @@ class Command(BaseCommand):
                 f'{time.monotonic() - chunk_started:.1f}s; {done}/{total} concepts, {docs} docs, '
                 f'{time.monotonic() - started:.0f}s so far'
                 + (f'; to resume: --after {last}' if last is not None else ''))
+            if pause:  # before the next chunk's rows are read too
+                time.sleep(pause)
+            chunk_started = time.monotonic()
         return docs
 
     @staticmethod

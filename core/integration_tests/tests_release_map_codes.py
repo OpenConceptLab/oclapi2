@@ -15,6 +15,7 @@ from core.common.constants import ACCESS_TYPE_NONE
 from core.common.search import CustomESSearch
 from core.common.tasks import seed_children_to_new_version
 from core.common.tests import OCLAPITestCase, OCLTestCase
+from core.common.utils import chunks
 from core.concepts.documents import ConceptDocument, MappedCodes, RELEASE_MAP_CODES, MAPPING_VALUES, \
     MAPPED_CODES_PATH, to_mapped_codes
 from core.concepts.management.commands.concept_release_map_codes import Command as BackfillCommand
@@ -198,12 +199,12 @@ class ReleaseMapCodesTest(ReleasesFixture, OCLTestCase):
     @staticmethod
     def backfill(after=None, pause=0):
         """The backfill of LOINC: the ids of each chunk it indexes, and what it printed."""
-        out, chunks = io.StringIO(), []
+        out, batches = io.StringIO(), []
         with patch.object(Concept, 'batch_index_partial_by_ids',
-                          side_effect=lambda queryset, *_, **__: chunks.append(sorted(queryset.values_list(
+                          side_effect=lambda queryset, *_, **__: batches.append(sorted(queryset.values_list(
                               'id', flat=True)))):
             docs = BackfillCommand(stdout=out).backfill(Source.objects.get(uri=LOINC), after, pause)
-        return docs, chunks, out.getvalue().splitlines()
+        return docs, batches, out.getvalue().splitlines()
 
     @staticmethod
     def rows_to_backfill():
@@ -222,36 +223,58 @@ class ReleaseMapCodesTest(ReleasesFixture, OCLTestCase):
         rows = Concept.objects.filter(parent__mnemonic='LOINC')
         heads = {mnemonic: rows.get(mnemonic=mnemonic, id=F('versioned_object_id')).id for mnemonic in 'AB'}
 
-        docs, chunks, lines = self.backfill()
+        docs, batches, lines = self.backfill()
 
         self.assertEqual(docs, len(self.rows_to_backfill()))
-        self.assertEqual(chunks, [  # a chunk can't split a concept's rows
+        self.assertEqual(batches, [  # a chunk can't split a concept's rows
             sorted(self.rows_to_backfill() & set(rows.filter(versioned_object_id=heads[mnemonic]).values_list(
                 'id', flat=True))) for mnemonic in 'AB'])
-        self.assertEqual(len(chunks[0]), 3)
+        self.assertEqual(len(batches[0]), 3)
         self.assertEqual([line.split('; to resume: ')[1] for line in lines],
                          [f'--after {heads["A"]}', f'--after {heads["B"]}'])
         self.assertRegex(lines[1], rf'^{LOINC}: chunk 2: 1 docs of 1 concepts in [\d.]+s; 2/2 concepts, 4 docs, ')
 
-        self.assertEqual(self.backfill(after=heads['A'])[:2], (1, chunks[1:]))
+        self.assertEqual(self.backfill(after=heads['A'])[:2], (1, batches[1:]))
 
+    @patch('core.concepts.management.commands.concept_release_map_codes.BACKFILL_PAGE_SIZE', 1)
     @patch('core.concepts.management.commands.concept_release_map_codes.BACKFILL_CHUNK_SIZE', 1)
-    @patch('core.concepts.management.commands.concept_release_map_codes.time.sleep')
-    def test_the_backfill_pauses_between_chunks(self, sleep):
-        self.backfill(pause=2.5)
+    def test_the_backfill_pauses_after_each_chunk(self):
+        self.run_import([  # C, new in v3: a third concept with a row to rewrite
+            self.concept('A'), self.concept('B'), self.concept('C'), self.mapping('M2', 'B', 'X02'),
+            self.mapping('M3', 'B', 'X03'), self.version('v3')])
+        events = []
 
-        sleep.assert_called_once_with(2.5)
+        def pages(versioned_object_ids, size):
+            for page in chunks(versioned_object_ids, size):
+                events.append('page')
+                yield page
+
+        command = 'core.concepts.management.commands.concept_release_map_codes'
+        with patch(f'{command}.time.sleep', side_effect=events.append), patch(f'{command}.chunks', pages), \
+                patch.object(Concept, 'batch_index_partial_by_ids', side_effect=lambda *_, **__: events.append(
+                    'chunk')):
+            BackfillCommand(stdout=io.StringIO()).backfill(Source.objects.get(uri=LOINC), pause=2.5)
+
+        # a chunk is yielded once the next concept's page is read, and that read waits for the pause
+        self.assertEqual(events, ['page', 'page', 'chunk', 2.5, 'page', 'chunk', 2.5, 'chunk', 2.5])
+
+    @patch('core.concepts.management.commands.concept_release_map_codes.connections')
+    def test_the_backfill_refuses_a_pause_it_cant_wait(self, connections):
+        for pause in (-1, float('nan'), float('inf')):
+            with self.assertRaisesMessage(CommandError, '--pause takes a number of seconds, 0 or more'):
+                call_command('concept_release_map_codes', source=[LOINC], pause=pause, stdout=io.StringIO())
+        connections.get_connection.assert_not_called()  # before the mapping, or any doc, is written
 
     def test_the_backfill_rewrites_a_row_with_no_versioned_object(self):
         old_a = self.make_a_collection_only_row()
         Concept.objects.filter(id=old_a.id).update(versioned_object_id=None)
         self.assertIn(old_a.id, self.rows_to_backfill())
 
-        _, chunks, lines = self.backfill()
+        _, batches, lines = self.backfill()
 
-        self.assertEqual(chunks[0], [old_a.id])
+        self.assertEqual(batches[0], [old_a.id])
         self.assertNotIn('to resume', lines[0])
-        self.assertEqual(sorted(sum(chunks, [])), sorted(self.rows_to_backfill()))
+        self.assertEqual(sorted(sum(batches, [])), sorted(self.rows_to_backfill()))
         self.assertNotIn(old_a.id, sum(self.backfill(after=0)[1], []))
 
     def test_mapped_codes_read_mappings_for_a_few_concepts_a_query(self):
