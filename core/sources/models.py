@@ -13,6 +13,7 @@ from django.db.models.functions import Cast
 from django.utils import timezone
 from pydash import get, compact
 
+from core.collections.constants import HEALTH_RELEVANT_VERSION_FIELDS
 from core.common.checksums import VersionCompareMixin
 from core.common.constants import HEAD, VERSION_UNCOPYABLE_EXTRAS
 from core.common.fields import URIField
@@ -945,6 +946,9 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
         if self.id and 'canonical_url' in dirty_fields:
             self.resolve_url_registry_entries_later()
+        if self.id and not is_new and HEALTH_RELEVANT_VERSION_FIELDS & set(dirty_fields):
+            from core.collections.models import Expansion
+            Expansion.mark_health_not_current_for_repository(self)
 
     def __update_sequences(self, dirty_fields=[]):  # pylint: disable=dangerous-default-value
         def should_update(is_seq, field):

@@ -21,7 +21,7 @@ from core.collections.constants import (
     RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE, UNRESOLVED_RESOURCE_VERSION_TYPE,
     INTENSIONAL_REFERENCE_RESOURCE_VERSIONS_TOGGLE, EXPANSION_LOCKED_REPO_VERSION_TOGGLE, VERSION_EXPANSION_LOCK,
     VERSION_EXPANSION_LATEST, REFERENCE_FOUND_NOTHING, REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS,
-    EXPANSION_HEALTH_TOGGLE, EXPANSION_HEALTH_DEBOUNCE_SECONDS)
+    EXPANSION_HEALTH_TOGGLE, EXPANSION_HEALTH_DEBOUNCE_SECONDS, HEALTH_RELEVANT_VERSION_FIELDS)
 from core.collections.parsers import CollectionReferenceParser
 from core.collections.translators import CollectionReferenceTranslator
 from core.collections.utils import is_concept, is_mapping
@@ -172,6 +172,7 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     def save(
             self, *args, force_insert=False, force_update=False, using=None, update_fields=None
     ):
+        is_new = not self.id
         dirty_fields = self.get_dirty_fields()
 
         super().save(*args, force_insert=force_insert, force_update=force_update, using=using,
@@ -179,6 +180,8 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
         if self.id and 'canonical_url' in dirty_fields:
             self.resolve_url_registry_entries_later()
+        if self.id and not is_new and HEALTH_RELEVANT_VERSION_FIELDS & set(dirty_fields):
+            Expansion.mark_health_not_current_for_repository(self)
 
     def post_create_actions(self):
         if self.should_auto_expand:
@@ -2517,11 +2520,26 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             health = ExpansionHealth(self).compute()
         except Exception:  # pylint: disable=broad-except
             logger.exception('Expansion health failed for %s', self.uri)
-            Expansion.objects.filter(id=self.id).update(health_is_current=False)
+            # None, not False: nothing is queued, so the next change queues a recompute
+            Expansion.objects.filter(id=self.id).update(health_is_current=None)
             return None
         Expansion.objects.filter(id=self.id).update(health=health)
         self.health = health
         return health
+
+    @classmethod
+    def mark_health_not_current_for_repository(cls, repo_version):
+        """Expansions that recorded a version of repo_version's repository: their classes read its versions, so a
+        release, retire or delete leaves them not current. One update, no task: their next change recomputes them"""
+        if not cls.is_health_on():
+            return
+        kind = 'collection' if isinstance(repo_version, Collection) else 'source'
+        version_ids = repo_version.versions.values('id')
+        cls.objects.filter(
+            models.Q(**{f'explicit_{kind}_versions__in': version_ids}) |
+            models.Q(**{f'evaluated_{kind}_versions__in': version_ids}),
+            health_is_current=True
+        ).update(health_is_current=None)
 
     def mark_health_out_of_date(self):
         """Marks the health out of date and queues one recompute, however many changes follow before it runs"""

@@ -982,6 +982,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         ).order_by('-created_at')
 
     def delete(self, using=None, keep_parents=False, force=False, sync=False):  # pylint: disable=arguments-differ
+        from core.collections.models import Expansion
+        # before the rows go, while expansions still record this version
+        Expansion.mark_health_not_current_for_repository(self)
         export_paths = self.get_export_paths_to_delete()
         deleted_urls = [self.url]
         deleted_ids = [self.id]

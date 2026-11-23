@@ -1,6 +1,6 @@
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
-from mock import patch
+from mock import patch, Mock
 
 from core.collections.health import (
     ExpansionHealth, RELEASE, UNRELEASED, HEAD_MEMBER, RESOURCE_VERSIONED, INTERIM, MISMATCH, AMBIGUOUS,
@@ -408,7 +408,60 @@ class ExpansionHealthStorageTest(OCLTestCase):
 
         expansion.refresh_from_db()
         self.assertFalse(expansion.is_processing)
-        self.assertEqual((expansion.health, expansion.health_is_current), (None, False))
+        self.assertEqual((expansion.health, expansion.health_is_current), (None, None))
+
+    def test_a_change_after_a_failure_recomputes(self):
+        with patch.object(ExpansionHealth, 'compute', side_effect=ValueError('boom')):
+            self.add(ConceptFactory())
+        self.assertIsNone(self.stored()[1])
+
+        self.add(ConceptFactory())
+
+        health, is_current = self.stored()
+        self.assertTrue(is_current)
+        self.assertNotEqual(health['state'], EMPTY)
+
+    def recorded_source_version(self, **kwargs):
+        source = OrganizationSourceFactory()
+        version = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', is_latest_version=False,
+            **kwargs)
+        self.expansion.evaluated_source_versions.add(source)
+        other = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+        return version, other
+
+    def test_releasing_a_version_of_a_recorded_repository_leaves_health_not_current(self):
+        version, other = self.recorded_source_version(released=False)
+
+        version.released = True
+        version.save()
+
+        self.assertIsNone(self.stored()[1])
+        self.assertTrue(Expansion.objects.get(id=other.id).health_is_current)
+
+    def test_retiring_a_version_of_a_recorded_repository_leaves_health_not_current(self):
+        version, _ = self.recorded_source_version(released=True)
+
+        version.retired = True
+        version.save()
+
+        self.assertIsNone(self.stored()[1])
+
+    def test_a_save_that_changes_no_health_field_keeps_health_current(self):
+        version, _ = self.recorded_source_version(released=True)
+
+        version.description = 'changed'
+        version.save()
+
+        self.assertTrue(self.stored()[1])
+
+    @patch('core.common.models.delete_s3_objects', Mock())
+    def test_deleting_a_version_of_a_recorded_repository_leaves_health_not_current(self):
+        version, _ = self.recorded_source_version(released=True)
+
+        version.delete()
+
+        self.assertIsNone(self.stored()[1])
 
     def test_a_save_from_an_older_copy_keeps_the_health(self):
         older = Expansion.objects.get(id=self.expansion.id)
