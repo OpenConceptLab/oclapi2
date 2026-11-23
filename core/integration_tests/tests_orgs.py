@@ -1210,10 +1210,17 @@ class OrganizationResourceListRoutesTest(OCLAPITestCase):
             self.assertEqual(response.status_code, 405, url)
             self.assertEqual(response['Allow'], 'GET, HEAD, OPTIONS', url)
             self.assertEqual(self.client.get(url, HTTP_AUTHORIZATION=token).status_code, 200, url)
-        for url in urls[::2]:
+        signed_out_urls = (
+            '/users/batman/orgs/sources/', '/users/batman/orgs/collections/', '/users/batman/orgs/map-projects/')
+        for url in signed_out_urls:
             # the method is refused before sign-in is checked
             self.assertEqual(
                 self.client.post(url, {'id': 'side-door', 'name': 'side door'}, format='json').status_code, 405, url)
+        # rendered as negotiated, not by DRF's fallback to its first renderer
+        response = self.client.post(
+            '/user/orgs/sources/', {'id': 'side-door'}, HTTP_AUTHORIZATION=token,
+            HTTP_ACCEPT='application/fhir+json', format='json')
+        self.assertEqual((response.status_code, response['Content-Type']), (405, 'application/fhir+json'))
 
         self.assertEqual((Source.objects.count(), Collection.objects.count(), MapProject.objects.count()), counts)
 

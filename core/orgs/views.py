@@ -311,6 +311,7 @@ class OrganizationResourceAbstractListView:
     def initial(self, request, *args, **kwargs):
         # 405 before the permission checks, so a refused POST answers the same whatever the requester may do
         if request.method.lower() not in self.http_method_names:
+            self.format_kwarg = self.get_format_suffix(**kwargs)  # so the 405 is rendered as negotiated
             raise MethodNotAllowed(request.method)
         super().initial(request, *args, **kwargs)
 
