@@ -41,7 +41,8 @@ from core.collections.serializers import (
 from core.collections.utils import is_version_specified
 from core.common.constants import (
     HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE,
-    ACCESS_TYPE_NONE, INCLUDE_RETIRED_PARAM, INCLUDE_INVERSE_MAPPINGS_PARAM, ALL, LATEST, DEPRECATED_API_HEADER)
+    ACCESS_TYPE_NONE, INCLUDE_RETIRED_PARAM, INCLUDE_INVERSE_MAPPINGS_PARAM, ALL, LATEST, DEPRECATED_API_HEADER,
+    INCLUDE_HEALTH)
 from core.common.exceptions import Http409, Http405, Http400
 from core.common.mixins import (
     ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin,
@@ -58,7 +59,7 @@ from core.common.swagger_parameters import q_param, compress_header, page_param,
 from core.common.tasks import add_references, export_collection, delete_collection, index_expansion_concepts, \
     index_expansion_mappings, seed_children_to_expansion, collection_version_compare, expansion_compare
 from core.common.throttling import ThrottleUtil
-from core.common.utils import compact_dict_by_values, parse_boolean_query_param, to_int
+from core.common.utils import compact_dict_by_values, parse_boolean_query_param, get_truthy_values, to_int
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
@@ -815,7 +816,7 @@ class CollectionVersionListView(
         queryset = super().get_queryset()
         if self.released_filter is not None:
             queryset = queryset.filter(released=self.released_filter)
-        return queryset.order_by('-created_at')
+        return Collection.annotate_expansion_health(queryset).order_by('-created_at')
 
 
 class CollectionLatestVersionRetrieveUpdateView(CollectionVersionBaseView, RetrieveAPIView, UpdateAPIView):
@@ -1056,13 +1057,35 @@ class CollectionVersionExpansionReEvaluateView(CollectionVersionExpansionBaseVie
 
 
 class CollectionVersionExpansionChildrenView(CollectionVersionExpansionBaseView, ListWithHeadersMixin):
+    health_resource_type = None
+
     def get_queryset(self):
         expansion = super().get_queryset().first()
 
         if not expansion:
             raise Http404()
 
+        self.expansion = expansion  # pylint: disable=attribute-defined-outside-init
         return expansion
+
+    def serialize_list(self, results, paginator=None):
+        data = super().serialize_list(results, paginator)
+        if self.request.query_params.get(INCLUDE_HEALTH) in get_truthy_values() and Expansion.is_health_on():
+            self.add_member_health(results, data['results'] if isinstance(data, dict) else data)
+        return data
+
+    def add_member_health(self, members, items):
+        """Each member of this page gets its class and the references that judged it, computed for this page"""
+        from core.collections.health import ExpansionHealth
+        members = list(members)
+        classes = ExpansionHealth(self.expansion).classify(self.health_resource_type, [member.id for member in members])
+        references_uri = f'{self.expansion.collection_version.uri}references/'
+        for member, item in zip(members, items):
+            member_class, reference_ids, _ = classes.get(member.id, (None, [], False))
+            item['health'] = {
+                'class': member_class,
+                'references': [f'{references_uri}{reference_id}/' for reference_id in reference_ids]
+            }
 
     def get(self, request, *args, **kwargs):
         self.get_queryset()
@@ -1081,6 +1104,8 @@ class CollectionVersionExpansionConceptsView(CollectionVersionExpansionChildrenV
     facet_class = ConceptFacetedSearch
     default_qs_sort_attr = '-id'
 
+    health_resource_type = 'concepts'
+
     def get_serializer_class(self):
         from core.concepts.serializers import ConceptDetailSerializer, ConceptListSerializer
         return ConceptDetailSerializer if self.is_verbose() else ConceptListSerializer
@@ -1096,6 +1121,8 @@ class CollectionVersionExpansionMappingsView(CollectionVersionExpansionChildrenV
     es_fields = Mapping.es_fields
     facet_class = MappingFacetedSearch
     default_qs_sort_attr = '-id'
+
+    health_resource_type = 'mappings'
 
     def get_serializer_class(self):
         from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer

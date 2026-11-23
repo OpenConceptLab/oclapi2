@@ -8,7 +8,7 @@ from core.collections.health import (
 from core.collections.models import CollectionReference, Expansion
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.tasks import seed_children_to_new_version
-from core.common.tests import OCLTestCase
+from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.concepts.tests.factories import ConceptFactory
 from core.mappings.tests.factories import MappingFactory
 from core.sources.tests.factories import OrganizationSourceFactory
@@ -482,3 +482,69 @@ class ExpansionHealthStorageTest(OCLTestCase):
         version.refresh_from_db()
         self.assertTrue(version.expansion.health_is_current)
         self.assertIsNotNone(version.expansion.health['state'])
+
+
+class ExpansionHealthAPITest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.collection = OrganizationCollectionFactory()
+        self.expansion = Expansion.persist(index=False, collection_version=self.collection, mnemonic='autoexpand-HEAD')
+        self.collection.expansion_uri = self.expansion.uri
+        self.collection.save()
+        self.concept = ConceptFactory()
+        self.collection.add_expressions({'expressions': [self.concept.uri]}, self.collection.created_by)
+        self.expansion.refresh_from_db()
+
+    def test_expansion_detail_and_list_show_health_to_a_viewer(self):
+        detail = self.client.get(self.expansion.uri)
+        listing = self.client.get(self.collection.uri + 'HEAD/expansions/')
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.data['health'], self.expansion.health)
+        self.assertTrue(detail.data['health_is_current'])
+        self.assertEqual(listing.data[0]['health']['state'], self.expansion.health['state'])
+
+    def test_versions_list_shows_each_default_expansion_state(self):
+        version = OrganizationCollectionFactory(
+            organization=self.collection.organization, version='v1', mnemonic=self.collection.mnemonic)
+
+        response = self.client.get(self.collection.uri + 'versions/')
+
+        self.assertEqual(response.status_code, 200)
+        health = {item['id']: item['expansion_health'] for item in response.data}
+        self.assertEqual(health['HEAD'], {'state': self.expansion.health['state'], 'is_current': True})
+        self.assertIsNone(health[version.version])
+
+    def test_version_detail_shows_its_default_expansion_state(self):
+        response = self.client.get(self.collection.uri + 'HEAD/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['expansion_health']['state'], self.expansion.health['state'])
+
+    def test_version_lists_nested_elsewhere_carry_no_expansion_health(self):
+        Expansion.objects.filter(id=self.expansion.id).update(health={'state': HEALTHY}, health_is_current=True)
+        version = OrganizationCollectionFactory(
+            organization=self.collection.organization, version='v1', mnemonic=self.collection.mnemonic)
+        self.expansion.evaluated_collection_versions.add(version)
+
+        response = self.client.get(self.expansion.uri)
+
+        self.assertNotIn('expansion_health', response.data['evaluated_collection_versions'][0])
+
+    def test_member_list_adds_each_members_class_only_when_asked(self):
+        url = self.expansion.uri + 'concepts/'
+
+        plain = self.client.get(url)
+        with_health = self.client.get(url + '?includeHealth=true')
+
+        self.assertNotIn('health', plain.data[0])
+        member = with_health.data[0]
+        self.assertIn(member['health']['class'], ('head', 'mismatch', 'release', 'unreleased'))
+        self.assertEqual(len(member['health']['references']), 1)
+        self.assertTrue(member['health']['references'][0].startswith(self.collection.uri + 'references/'))
+
+    def test_member_list_ignores_include_health_with_the_toggle_off(self):
+        with patch.object(Expansion, 'is_health_on', return_value=False):
+            response = self.client.get(self.expansion.uri + 'concepts/?includeHealth=true')
+
+        self.assertNotIn('health', response.data[0])

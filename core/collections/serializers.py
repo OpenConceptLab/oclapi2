@@ -119,14 +119,27 @@ class CollectionVersionListSerializer(ModelSerializer):
     expansion_url = CharField(source='expansion_uri', read_only=True)
     checksums = SerializerMethodField()
     external_exports = SerializerMethodField()
+    expansion_health = SerializerMethodField()
 
     class Meta:
         model = Collection
         fields = (
             'type', 'short_code', 'name', 'url', 'canonical_url', 'owner', 'owner_type', 'owner_url', 'version',
             'created_at', 'id', 'collection_type', 'updated_at', 'released', 'retired', 'version_url',
-            'previous_version_url', 'autoexpand', 'expansion_url', 'checksums', 'external_exports', 'verification'
+            'previous_version_url', 'autoexpand', 'expansion_url', 'checksums', 'external_exports', 'verification',
+            'expansion_health'
         )
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if not hasattr(instance, 'expansion_health_state'):
+            # only the versions list annotates it, so version lists nested elsewhere add no query per row
+            data.pop('expansion_health', None)
+        return data
+
+    @staticmethod
+    def get_expansion_health(obj):
+        return Collection.get_expansion_health(obj)
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
@@ -504,6 +517,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer, Abst
     states = SerializerMethodField()
     tasks = SerializerMethodField()
     external_exports = SerializerMethodField()
+    expansion_health = SerializerMethodField()
 
     class Meta:
         model = Collection
@@ -516,9 +530,14 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer, Abst
             'version', 'concepts_url', 'mappings_url', 'expansions_url', 'is_processing', 'released', 'retired',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright', 'meta',
             'immutable', 'revision_date', 'summary', 'text', 'experimental', 'locked_date',
-            'autoexpand', 'expansion_url', 'checksums', 'states', 'tasks', 'external_exports', 'verification'
+            'autoexpand', 'expansion_url', 'checksums', 'states', 'tasks', 'external_exports', 'verification',
+            'expansion_health'
         ) + AbstractRepoResourcesSerializer.Meta.fields
         read_only_fields = ('verification',)
+
+    @staticmethod
+    def get_expansion_health(obj):
+        return Collection.get_expansion_health(obj)
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
@@ -659,8 +678,9 @@ class ExpansionSerializer(ModelSerializer):
         model = Expansion
         fields = (
             'mnemonic', 'id', 'parameters', 'canonical_url', 'url', 'summary', 'is_processing',
-            'collection_version', 'extras'
+            'collection_version', 'extras', 'health', 'health_is_current'
         )
+        read_only_fields = ('health', 'health_is_current')
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
@@ -704,8 +724,9 @@ class ExpansionDetailSerializer(ModelSerializer):
             'mnemonic', 'id', 'parameters', 'canonical_url', 'url', 'summary', 'created_on', 'created_by',
             'is_processing', 'unresolved_repo_versions', 'collection_version',
             'explicit_collection_versions', 'explicit_source_versions',
-            'evaluated_collection_versions', 'evaluated_source_versions', 'extras'
+            'evaluated_collection_versions', 'evaluated_source_versions', 'extras', 'health', 'health_is_current'
         )
+        read_only_fields = ('health', 'health_is_current')
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
