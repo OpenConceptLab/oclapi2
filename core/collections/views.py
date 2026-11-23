@@ -23,7 +23,9 @@ from core.collections.constants import (
     MAPPING_VERSION_ADDED_TO_COLLECTION, CONCEPT_ADDED_TO_COLLECTION_FMT, MAPPING_ADDED_TO_COLLECTION_FMT,
     DELETE_FAILURE, DELETE_SUCCESS, NO_MATCH, VERSION_ALREADY_EXISTS,
     SOURCE_MAPPINGS,
-    UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT, TRANSFORM_TO_RESOURCE_VERSIONS, TRANSFORM_TO_EXTENSIONAL)
+    UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT, TRANSFORM_TO_RESOURCE_VERSIONS, TRANSFORM_TO_EXTENSIONAL,
+    REFERENCE_RESOLVED_TO_NOTHING_FMT, REFERENCE_VERSION_NOT_HELD_FMT, REFERENCE_VERSION_NOT_HELD,
+    REFERENCE_NAMED_VERSION_NOT_HELD_FMT, REFERENCE_EXCLUDED_BY_PARAMETERS_FMT, REFERENCE_EXCLUDED_BY_PARAMETERS)
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection, CollectionReference, Expansion, ExpansionParameters
 from core.collections.search import CollectionFacetedSearch
@@ -521,7 +523,9 @@ class CollectionReferencesView(
         result = self.perform_task(add_references, task_args, queue='default')
         if isinstance(result, Response):
             return result
-        added_references_ids, errors = result
+        added_references_ids, errors = result[:2]
+        # an older worker's result has no third item
+        unresolved_reasons = dict(result[2]) if len(result) > 2 else {}
         if get(errors, 'error') == 'Collection not found':  # async task, collection may be deleted
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -545,9 +549,10 @@ class CollectionReferencesView(
                 added_original_expressions.add(expression)
 
         results = []
+        unresolved_items = self.get_unresolved_items(collection, added_references, unresolved_reasons)
 
         for expression in added_original_expressions:
-            response_item = self.create_response_item(added_expressions, errors, expression)
+            response_item = self.create_response_item(added_expressions, errors, expression, unresolved_items)
             if response_item:
                 results.append(response_item)
 
@@ -559,23 +564,52 @@ class CollectionReferencesView(
     def should_cascade_mappings(self):
         return self.request.query_params.get('cascade', '').lower() == SOURCE_MAPPINGS
 
-    def create_response_item(self, added_expressions, errors, expression):
+    @staticmethod
+    def get_unresolved_items(collection, references, unresolved_reasons):
+        """{expression: response item} of the added include references its expansion found nothing for"""
+        unresolved_refs = [reference for reference in references if reference.id in unresolved_reasons]
+        expansion = collection.expansion if unresolved_refs else None
+        if not expansion:
+            return {}
+        system_version_cache = {}
+        items = {}
+        for reference in unresolved_refs:
+            reason = unresolved_reasons[reference.id]
+            item = {'added': True, 'resolved': False, 'expression': reference.expression}
+            if reason == REFERENCE_VERSION_NOT_HELD:
+                named_version = reference.resolve_expression_system_version if reference.names_repo_version else None
+                item['repo_versions'] = [named_version.uri if named_version else reference.system]
+                message_format = REFERENCE_NAMED_VERSION_NOT_HELD_FMT if named_version else \
+                    REFERENCE_VERSION_NOT_HELD_FMT
+                item['message'] = message_format.format(
+                    collection.name, item['repo_versions'][0], reference.resource_version)
+            else:
+                item['repo_versions'] = reference.get_evaluated_repo_version_urls(expansion, system_version_cache)
+                message_format = REFERENCE_EXCLUDED_BY_PARAMETERS_FMT if reason == REFERENCE_EXCLUDED_BY_PARAMETERS \
+                    else REFERENCE_RESOLVED_TO_NOTHING_FMT
+                item['message'] = message_format.format(
+                    collection.name, ', '.join(item['repo_versions']) or 'any repository version')
+            items[reference.expression] = item
+        return items
+
+    def create_response_item(self, added_expressions, errors, expression, unresolved_items):
         adding_expression_failed = len(errors) > 0 and expression in errors
         if adding_expression_failed:
             return self.create_error_message(errors, expression)
-        return self.create_success_message(added_expressions, expression)
+        return self.create_success_message(added_expressions, expression, unresolved_items)
 
-    def create_success_message(self, added_expressions, expression):
-        message = self.select_update_message(expression)
-
+    def create_success_message(self, added_expressions, expression, unresolved_items):
         references = list(filter(lambda expr: expr.startswith(expression), added_expressions))
         if len(references) < 1:
             return None
 
+        if references[0] in unresolved_items:
+            return unresolved_items[references[0]]
+
         return {
             'added': True,
             'expression': references[0],
-            'message': message
+            'message': self.select_update_message(expression)
         }
 
     @staticmethod
