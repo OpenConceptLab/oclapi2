@@ -13,6 +13,7 @@ from core.collections.models import Collection, Expansion
 class Command(BaseCommand):
     help = ('Computes expansion health for expansions that have none, or whose health is not current or was computed '
             'with older rules. A dry run unless --apply is given: it computes and reports, and stores nothing. '
+            'Expansions being built are skipped and reported, since their build stores health when it ends. '
             'Run it after rebuild_expansion_version_lists, whose lists health reads.')
 
     def add_arguments(self, parser):
@@ -51,9 +52,9 @@ class Command(BaseCommand):
     def get_expansion_ids(self):
         if not self.options['all']:
             return [self.get_expansion(uri).id for uri in self.options['uris']]
+        # those being built are listed too, so a skipped one shows in the report
         expansions = Expansion.objects.filter(
-            is_active=True, collection_version__is_active=True, is_processing=False,
-            id__gt=self.options['start_after_id'])
+            is_active=True, collection_version__is_active=True, id__gt=self.options['start_after_id'])
         if not self.options['force']:
             # none yet, not current, or computed with older rules
             expansions = expansions.filter(
@@ -74,6 +75,11 @@ class Command(BaseCommand):
     def backfill(self, expansion_id):
         expansion = Expansion.objects.filter(id=expansion_id).select_related('collection_version').first()
         if not expansion:
+            return
+        skipped = self.get_skip_reason(expansion)
+        if skipped:
+            self.totals[f'skipped_{skipped.replace(" ", "_")}'] += 1
+            self.write({'expansion': expansion.uri, 'id': expansion.id, 'skipped': skipped})
             return
         before = {'state': (expansion.health or {}).get('state'), 'is_current': expansion.health_is_current,
                   'rules_version': (expansion.health or {}).get('rules_version')}
@@ -102,8 +108,20 @@ class Command(BaseCommand):
             self.reasons[reason['code']] += 1
         self.write({**report, 'health': health})
 
+    def get_skip_reason(self, expansion):
+        if expansion.is_processing:
+            return 'being built'
+        is_up_to_date = expansion.health_is_current is True and \
+            (expansion.health or {}).get('rules_version') == RULES_VERSION
+        # listed at the start, so a build since may have stored it
+        if self.options['all'] and not self.options['force'] and is_up_to_date:
+            return 'now current'
+        return None
+
     def write(self, report):
-        if 'error' in report:
+        if 'skipped' in report:
+            self.stdout.write(f'SKIPPED {report["expansion"]}: {report["skipped"]}')
+        elif 'error' in report:
             self.stdout.write(f'FAILED {report["expansion"]}: {report["error"]}')
         else:
             health = report['health']

@@ -9,6 +9,7 @@ from mock import patch
 from core.collections.health import EMPTY, RULES_VERSION, ExpansionHealth
 from core.collections.models import Expansion
 from core.collections.tests.factories import OrganizationCollectionFactory
+from core.common.management.commands.backfill_expansion_health import Command
 from core.common.tests import OCLTestCase
 
 
@@ -80,10 +81,32 @@ class ExpansionHealthBackfillTest(OCLTestCase):
 
         self.assertIn(f'{current.uri}:', self.run_command(all=True, force=True))
 
-    def test_all_skips_expansions_being_built(self):
+    def test_all_skips_and_reports_expansions_being_built(self):
         Expansion.objects.filter(id=self.expansion.id).update(is_processing=True)
 
-        self.assertNotIn(f'{self.expansion.uri}:', self.run_command(all=True))
+        out = self.run_command(all=True, apply=True)
+
+        self.assertIn(f'SKIPPED {self.expansion.uri}: being built', out)
+        self.assertIn('"skipped_being_built": 1', out)
+        self.assertEqual(self.stored(self.expansion), (None, None))
+
+    def test_a_uri_being_built_is_skipped_too(self):
+        Expansion.objects.filter(id=self.expansion.id).update(is_processing=True)
+
+        out = self.run_command(self.expansion.uri, apply=True)
+
+        self.assertIn(f'SKIPPED {self.expansion.uri}: being built', out)
+        self.assertEqual(self.stored(self.expansion), (None, None))
+
+    def test_all_skips_an_expansion_a_build_made_current_since_the_run_listed_it(self):
+        current = self.another_expansion()
+        with patch.object(Command, 'get_expansion_ids', return_value=[current.id]), \
+                patch.object(ExpansionHealth, 'compute') as compute:
+            out = self.run_command(all=True)
+
+        compute.assert_not_called()
+        self.assertIn(f'SKIPPED {current.uri}: now current', out)
+        self.assertIn('"skipped_now_current": 1', out)
 
     def test_all_resumes_after_an_id_and_stops_at_the_limit(self):
         second = self.another_expansion()
