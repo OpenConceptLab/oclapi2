@@ -116,6 +116,18 @@ class ExpansionVersionListsTest(OCLTestCase):
         self.assertEqual(lists.notes[0]['reason'], 'no one version holds all its members')
         self.assertEqual(lists.notes[0]['partial_holders'], [self.v2.uri, self.v1.uri])
 
+    def test_reference_no_one_version_holds_records_only_versions_that_add_members(self):
+        other = self.members_split_across_v1_and_v2()
+        third = self.release('v3')
+        self.member.sources.add(third)
+        self.reference([self.member, other])
+        self.expansion.explicit_source_versions.set([self.v1, self.v2, third])
+
+        lists = self.rebuild()
+
+        self.assertEqual(self.ids(lists, 'evaluated_source_versions'), {third.id, self.v2.id})
+        self.assertEqual(lists.notes[0]['partial_holders'], [third.uri, self.v2.uri])
+
     def test_reference_no_recorded_version_holds_keeps_what_is_recorded(self):
         other = self.members_split_across_v1_and_v2()
         self.reference([self.member, other])
@@ -152,6 +164,20 @@ class ExpansionVersionListsTest(OCLTestCase):
         self.assertEqual(report['in_both'], [])
         self.assertEqual(lists.notes[-1]['kept'], [])
         self.assertEqual(lists.notes[-1]['reason'], 'it has no members; other references record its repo')
+
+    def test_reference_without_members_keeps_its_lock_when_another_reference_names_a_version(self):
+        self.reference([])
+        self.reference([self.member], version='v2')
+        self.expansion.explicit_source_versions.set([self.v2])
+        self.expansion.evaluated_source_versions.set([self.v1])
+
+        lists = self.rebuild()
+        report = lists.to_report()
+
+        self.assertEqual(self.ids(lists, 'evaluated_source_versions'), {self.v1.id})
+        self.assertEqual(self.ids(lists, 'explicit_source_versions'), {self.v2.id})
+        self.assertEqual(report['loses_lock'], [])
+        self.assertFalse(report['changed'])
 
     def test_mapping_members_are_judged_like_concepts(self):
         mapping = MappingFactory(parent=self.source).get_latest_version()
@@ -299,6 +325,18 @@ class ExpansionVersionListsTest(OCLTestCase):
             expression=value_set.uri, collection=self.collection, valueset=[value_set.uri], reference_type='concepts')
         reference.concepts.set(members)
         return reference
+
+    def test_versionless_value_set_held_by_a_recorded_version_looks_up_no_releases(self):
+        value_set, release = self.value_set_release()
+        self.value_set_reference(value_set, [self.member])
+        self.value_set_reference(value_set, [self.member])
+        self.expansion.explicit_collection_versions.set([release])
+
+        with patch.object(ExpansionVersionLists, 'releases_then_head') as releases_then_head:
+            lists = self.rebuild()
+
+        releases_then_head.assert_not_called()
+        self.assertEqual(self.ids(lists, 'evaluated_collection_versions'), {release.id})
 
     def test_versionless_value_set_with_nothing_recorded_takes_the_release_holding_its_members(self):
         value_set, release = self.value_set_release()

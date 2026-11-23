@@ -19,10 +19,11 @@ RULE = (
     'the version holding its resource version: one the expansion already records, else the one adding it picks. '
     'A version-less reference records as evaluated the version its members came from: when members sit in several '
     'versions of the repo, a version the expansion already records that holds all of them (newest first), else the '
-    'newest live release holding all of them, else HEAD. When no one version holds them all, it records each '
-    'recorded version holding any of them. A reference with no members, or none held by a recorded version, keeps '
-    'what the expansion records for its repo, unless other references record that repo. A version both kinds of '
-    'reference use is in both lists. Members are never changed.')
+    'newest live release holding all of them, else HEAD. When no one version holds them all, it records the '
+    'recorded versions that between them hold the most, newest first, each adding members the newer ones lack. A '
+    'reference with no members, or none held by a recorded version, keeps what the expansion records for its repo, '
+    'unless the list it reads already holds that repo. A version both kinds of reference use is in both lists. '
+    'Members are never changed.')
 
 
 class ExpansionVersionLists:
@@ -37,6 +38,8 @@ class ExpansionVersionLists:
         self.fallbacks = []
         self._resolved = {}
         self._heads = {}
+        self._releases = {}
+        self._expansion_ids = {}
         self.built_from = None
 
     @staticmethod
@@ -56,9 +59,31 @@ class ExpansionVersionLists:
         return self._heads[version.id]
 
     def releases_then_head(self, repo_version):
-        versions = list(repo_version.active_versions.filter(released=True, retired=False).exclude(version=HEAD))
-        head = self.get_head(repo_version)
-        return [*self.newest_first(versions), *([head] if head else [])]
+        key = (type(repo_version).__name__, drop_version(repo_version.uri))
+        if key not in self._releases:
+            versions = list(repo_version.active_versions.filter(released=True, retired=False).exclude(version=HEAD))
+            head = self.get_head(repo_version)
+            self._releases[key] = [*self.newest_first(versions), *([head] if head else [])]
+        return self._releases[key]
+
+    def get_expansion_id(self, collection_version):
+        if collection_version.id not in self._expansion_ids:
+            self._expansion_ids[collection_version.id] = collection_version.expansions.filter(
+                uri=collection_version.expansion_uri).values_list('id', flat=True).first() \
+                if collection_version.expansion_uri else None
+        return self._expansion_ids[collection_version.id]
+
+    @staticmethod
+    def get_covering_versions(versions, held):
+        """Newest first, each version holding a member none before it holds"""
+        covered = set()
+        covering = []
+        for version in versions:
+            members = held.get(version.id, set()) - covered
+            if members:
+                covering.append(version)
+                covered |= members
+        return covering
 
     def resolve(self, klass, expression, namespace, version=None):
         key = (klass.__name__, expression, namespace, version)
@@ -79,16 +104,14 @@ class ExpansionVersionLists:
         self.fallbacks.append((reference, relations, repo_uri, reason))
 
     def keep_fallbacks(self):
-        recorded_repos = {
-            (relation.split('_')[1], drop_version(version.uri))
+        # skipped only when the list the reference reads already holds its repo
+        recorded = {
+            (relation, drop_version(version.uri))
             for relation, versions in self.after.items() for version in versions.values()}
-        kept_repos = set()
         for reference, relations, repo_uri, reason in self.fallbacks:
-            key = (relations[0].split('_')[1], repo_uri)
-            if key in recorded_repos and key not in kept_repos:
+            if (relations[0], repo_uri) in recorded:
                 self.note(reference, kept=[], reason=f'{reason}; other references record its repo')
                 continue
-            kept_repos.add(key)
             kept = []
             for relation in relations:
                 for version in self.before[relation]:
@@ -222,21 +245,30 @@ class ExpansionVersionLists:
             else:
                 pending.append(reference)
         recorded = self.recorded_versions_of((EVALUATED_SOURCES, EXPLICIT_SOURCES), repo_uri)
-        held_by_recorded = self.count_members(
-            [reference.id for reference in pending], include, parent_id, [version.id for version in recorded]
-        ) if pending and recorded else Counter()
-        for candidates, chosen_by in ((recorded, 'recorded'), (self.releases_then_head(repo_version), 'release')):
+        for chosen_by in ('recorded', 'release'):
             if not pending:
                 break
+            candidates = recorded if chosen_by == 'recorded' else self.releases_then_head(repo_version)
             pending = self.pick_holders(pending, include, parent_id, totals, candidates, chosen_by)
         for reference in pending:
             self.record_partial_holders(
-                reference, [version for version in recorded if held_by_recorded[(reference.id, version.id)]],
+                reference, self.get_covering_versions(
+                    recorded, self.get_held_members(reference, include, parent_id, recorded)),
                 (EVALUATED_SOURCES, EXPLICIT_SOURCES), repo_uri)
 
+    def get_held_members(self, reference, include, parent_id, versions):
+        """Per version, the reference's members it holds"""
+        held = {}
+        for through, field in ((ReferencedConcept, 'concept'), (ReferencedMapping, 'mapping')):
+            rows = self.member_rows(through, field, [reference.id], include).filter(**{
+                f'{field}__parent_id': parent_id, f'{field}__sources__id__in': [version.id for version in versions]})
+            for member_id, version_id in rows.values_list(f'{field}_id', f'{field}__sources__id'):
+                held.setdefault(version_id, set()).add((field, member_id))
+        return held
+
     def record_partial_holders(self, reference, partial, relations, repo_uri):
-        """Members from several versions: the recorded ones holding some of them go in the list it reads, else it
-        keeps what is recorded"""
+        """Members from several versions: recorded ones covering them go in the list it reads, else it keeps what
+        is recorded"""
         for version in partial:
             self.record(relations[0], version)
         if partial:
@@ -289,7 +321,8 @@ class ExpansionVersionLists:
                 self.record(EVALUATED_COLLECTIONS, version)
                 self.note(reference, recorded=version.uri, chosen_by='resolved', reason='it has no members')
             return
-        for candidates, chosen_by in ((recorded, 'recorded'), (self.releases_then_head(version), 'release')):
+        for chosen_by in ('recorded', 'release'):
+            candidates = recorded if chosen_by == 'recorded' else self.releases_then_head(version)
             holder = next((
                 candidate for candidate in candidates if self.valueset_holds(candidate, reference, total)), None)
             if holder:
@@ -298,22 +331,24 @@ class ExpansionVersionLists:
                     self.note(reference, recorded=holder.uri, chosen_by='HEAD' if holder.is_head else chosen_by)
                 return
         self.record_partial_holders(
-            reference, [holder for holder in recorded if self.count_held_by_valueset(holder, reference)], relations,
-            repo_uri)
+            reference, self.get_covering_versions(recorded, {
+                holder.id: self.get_held_by_valueset(holder, reference) for holder in recorded}), relations, repo_uri)
 
     def valueset_holds(self, valueset_version, reference, total):
-        return self.count_held_by_valueset(valueset_version, reference) == total
+        return len(self.get_held_by_valueset(valueset_version, reference)) == total
 
-    def count_held_by_valueset(self, valueset_version, reference):
-        expansion = valueset_version.expansion
-        if not expansion:
-            return 0
-        held = 0
+    def get_held_by_valueset(self, valueset_version, reference):
+        """The reference's members the value set version's default expansion holds"""
+        expansion_id = self.get_expansion_id(valueset_version)
+        if not expansion_id:
+            return set()
+        held = set()
         for through, field in ((ReferencedConcept, 'concept'), (ReferencedMapping, 'mapping')):
             member_through = getattr(Expansion, f'{field}s').through
-            held += self.member_rows(through, field, [reference.id], reference.include).filter(Exists(
-                member_through.objects.filter(expansion_id=expansion.id, **{f'{field}_id': OuterRef(f'{field}_id')})
-            )).values(f'{field}_id').distinct().count()
+            held |= {(field, member_id) for member_id in self.member_rows(
+                through, field, [reference.id], reference.include).filter(Exists(member_through.objects.filter(
+                    expansion_id=expansion_id, **{f'{field}_id': OuterRef(f'{field}_id')}))
+            ).values_list(f'{field}_id', flat=True)}
         return held
 
     def get_uris(self, lists):
