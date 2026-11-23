@@ -14,8 +14,8 @@ from pydash import get
 
 from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
+from core.common.checksums import VersionCompareMixin
 from core.common.constants import HEAD
-from core.common.models import ConceptContainerModel
 from core.common.tasks import resolve_url_registry_entries
 from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.fhir.resolve import FhirResolution
@@ -456,7 +456,7 @@ class URLRegistryLinkTest(OCLAPITestCase):
 
     def fail_once(self):
         """A delete that fails part-way: after the entries are unlinked and, for a HEAD, its versions deleted"""
-        return patch.object(ConceptContainerModel, 'delete_version_checksum_maps', side_effect=RuntimeError('fail'))
+        return patch.object(VersionCompareMixin, 'delete_version_checksum_maps', side_effect=RuntimeError('fail'))
 
     @patch('core.common.models.delete_s3_objects')  # export files: no broker in tests
     def test_a_failed_repository_delete_keeps_its_entries_and_a_retry_finishes_it(self, _):

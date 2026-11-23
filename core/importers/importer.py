@@ -19,6 +19,7 @@ from kombu import uuid
 from packaging.version import Version
 from pydantic import BaseModel, computed_field, PrivateAttr
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from pydash import get
 from rest_framework.exceptions import ValidationError
@@ -29,12 +30,14 @@ from core.capabilities.exceptions import WriteRefused
 from core.capabilities.writes import BatchWriteRefusals, get_write_refusal, get_write_target
 from core.common.serializers import IdentifierSerializer
 from core.common.tasks import bulk_import_subtask, bulk_import_subtask_empty, bulk_import_queue
+from core.concepts.models import Concept
+from core.sources.constants import ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION
 from core.common.tasks import import_finisher
 from core.code_systems.converter import CodeSystemConverter
 from core.common.utils import get_export_service
 from core.importers.models import SourceImporter, SourceVersionImporter, ConceptImporter, OrganizationImporter, \
     CollectionImporter, CollectionVersionImporter, MappingImporter, ReferenceImporter, ImportIndexer, CREATED, \
-    UPDATED, FAILED, DELETED, NOT_FOUND, PERMISSION_DENIED, UNCHANGED, should_index_import
+    UPDATED, FAILED, DELETED, NOT_FOUND, PERMISSION_DENIED, UNCHANGED, should_index_import, IsolatedVersionCommit
 from core.orgs.models import Organization
 from core.sources.models import Source
 from core.users.models import UserProfile
@@ -80,6 +83,7 @@ class ImportTaskSummary(BaseModel):
     unchanged: int = 0
     failures: list = []
     dependencies: list = []
+    dropped: dict | None = None
 
 
 class ImportTask(BaseModel):
@@ -159,6 +163,9 @@ class ImportTask(BaseModel):
                     results = [child.result]
 
                 for result in results:
+                    if isinstance(result, dict):
+                        summary.dropped = result.get('dropped', summary.dropped)
+                        continue
                     summary.processed += 1
                     if result == CREATED:
                         summary.created += 1
@@ -217,11 +224,14 @@ class Importer:
     owner: str
     import_type: str = 'default'
     index: bool | None = None  # None: whether the import is small enough (should_index_import)
+    isolated_version: bool = False
     MIN_BATCH_SIZE: int = 50
     IMPORT_CACHE: str = "import_cache/"
 
     # pylint: disable=too-many-arguments
-    def __init__(self, task_id, path, username, owner_type, owner, import_type='default', index=None):
+    def __init__(  # pylint: disable=too-many-arguments
+            self, task_id, path, username, owner_type, owner, import_type='default', index=None,
+            isolated_version=False):
         super().__init__()
         self.task_id = task_id
         self.path = path
@@ -230,6 +240,44 @@ class Importer:
         self.owner = owner
         self.import_type = import_type
         self.index = index
+        self.isolated_version = isolated_version
+        self.version_lines = []
+        self.content_targets = set()
+        self.content_lines = []  # what preflight needs of each Concept and Mapping line in a seeding import
+
+    def validate_versioning(self, resources, resource_types):
+        if not self.isolated_version:
+            return resource_types
+        try:
+            if sum(get(resources, 'Source Version', {}).values()) != 1:
+                raise ValidationError(ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION)
+            Source.validate_import_targets(self.version_lines[0], self.content_targets)
+            IsolatedVersionCommit(
+                self.version_lines[0], UserProfile.objects.filter(username=self.username).first(), True).preflight(
+                    self.content_lines)
+        except DjangoValidationError as ex:
+            raise ValidationError(ex.message_dict if hasattr(ex, 'error_dict') else ex.messages) from ex
+        return self.get_isolated_version_resource_types(resource_types)
+
+    def get_refused_result(self, refusal, resources, time_started, dependencies):
+        """
+        Nothing imports: the version line, the one line processed, fails with the capability policy's body, as a
+        refused line does in a subtask.
+        """
+        import_task = ImportTask(time_started=time_started, dependencies=dependencies)
+        import_task.initial_summary.total = sum(sum(files.values()) for files in resources.values())
+        import_task.initial_summary.processed = import_task.initial_summary.failed = 1
+        import_task.initial_summary.failures = [
+            f"Failed to import resource with id {get(self.version_lines, '0.id')} from {self.path} to "
+            f"{self.owner_type}/{self.owner} by {self.username} due to: {json.dumps(refusal.detail, default=str)}"]
+        import_task.time_finished = timezone.now()
+        return import_task.model_dump()
+
+    @staticmethod
+    def get_isolated_version_resource_types(resource_types):
+        resource_types = [_type for _type in resource_types if _type != 'Source Version']
+        resource_types.insert(resource_types.index('Mapping') + 1, 'Source Version')
+        return resource_types
 
     def is_npm_import(self) -> bool:
         return self.import_type == 'npm'
@@ -274,6 +322,10 @@ class Importer:
         dependencies = []
 
         self.prepare_resources(self.path, resource_types, dependencies, [], resources)
+        try:
+            resource_types = self.validate_versioning(resources, resource_types)
+        except WriteRefused as ex:
+            return self.get_refused_result(ex, resources, time_started, dependencies)
         self.index = should_index_import(self.index, sum(sum(files.values()) for files in resources.values()))
         tasks = self.prepare_tasks(resource_types, dependencies, resources)
         if tasks:
@@ -446,15 +498,17 @@ class Importer:
         group_queue = []
         for task in tasks:
             group_tasks = []
+            previous_subtask_ids = list(subtask_ids)
             for group_task in task:
                 # TODO: create 2 queues for new bulk import subtasks: bulk_import_subtask and bulk_import_subtask_root
                 subtask_id = uuid()
                 subtask_ids.append(subtask_id)
-                group_tasks.append(bulk_import_subtask.si(group_task['path'], group_task['username'],
-                                                          group_task['owner_type'], group_task['owner'],
-                                                          group_task['resource_type'], group_task['files'],
-                                                          self.index)
-                                   .set(task_id=subtask_id))
+                args = (group_task['path'], group_task['username'], group_task['owner_type'], group_task['owner'],
+                        group_task['resource_type'], group_task['files'], self.index)
+                if self.isolated_version:
+                    is_version = group_task['resource_type'] == 'Source Version'
+                    args = (*args, True, is_version, *((previous_subtask_ids, self.task_id) if is_version else ()))
+                group_tasks.append(bulk_import_subtask.si(*args).set(task_id=subtask_id))
             if len(group_tasks) == 1:  # Prevent celery from converting group to a single task
                 group_tasks.append(bulk_import_subtask_empty.si())
 
@@ -483,7 +537,9 @@ class Importer:
 
         try:
             parser = ijson.parse(json_file, multiple_values=True, allow_comments=True)
+            builder = None  # the current resource, built whole only for a seeding import
             for prefix, event, value in parser:
+                builder = self.collect_seeding_line(builder, prefix, event, value)
                 # Expect {"resourceType": ""}{"resourceType": ""} or {"type": ""}{"type": ""}
                 if event == 'string' and (prefix in {'resourceType', 'type'}):
                     # Categorize files based on resourceType
@@ -501,6 +557,25 @@ class Importer:
         except JSONError as json_error:
             raise JSONError(f'Failed to process {path}/{file_path}') from json_error
 
+    def collect_seeding_line(self, builder, prefix, event, value):
+        """Builds each resource of a seeding import whole, for preflight to read as the importers will."""
+        if not self.isolated_version:
+            return None
+        if not prefix and event == 'start_map':
+            builder = ijson.ObjectBuilder()
+        if builder is None:
+            return None
+        builder.event(event, value)
+        if prefix or event != 'end_map':
+            return builder
+        line = builder.value
+        if line.get('type') == 'Source Version':
+            self.version_lines.append(line)
+        elif line.get('type') in ('Concept', 'Mapping'):
+            self.content_targets.add(Source.get_import_target(line))
+            self.content_lines.append({key: line.get(key) for key in IsolatedVersionCommit.CONTENT_LINE_KEYS})
+        return None
+
 
 class ImportRequest:
     path: str
@@ -517,9 +592,11 @@ class ResourceImporter:
     converters = [CodeSystemConverter]
     result_type = [CREATED, UPDATED, FAILED, DELETED, NOT_FOUND, PERMISSION_DENIED, UNCHANGED]
 
-    def __init__(self, indexer=None, write_refusals=None):
+    def __init__(self, indexer=None, isolated=False, write_refusals=None):
         self.indexer = indexer  # collects the concepts and mappings imported with _index=False
+        self.isolated = isolated
         self.write_refusals = write_refusals  # the write checks the rows of one file share (BatchWriteRefusals)
+        self.importer = None
 
     @staticmethod
     def get_resource_types():
@@ -547,7 +624,11 @@ class ResourceImporter:
             for resource_importer in self.resource_importers:
                 if resource_importer.can_handle(resource):
                     user_profile = UserProfile.objects.get(username=username)
-                    importer = resource_importer(resource, user_profile, True, write_refusals=self.write_refusals)
+                    is_content = resource_importer in (ConceptImporter, MappingImporter)
+                    importer = resource_importer(
+                        resource, user_profile, True, write_refusals=self.write_refusals,
+                        **({'isolated': self.isolated} if is_content else {}))
+                    self.importer = importer
                     result = importer.run()
                     if self.indexer:
                         self.indexer.add(get(importer, 'instance'))
@@ -678,7 +759,9 @@ class ImporterSubtask:
     indexer: ImportIndexer
 
     # pylint: disable=too-many-arguments
-    def __init__(self, path, username, owner_type, owner, resource_type, files, index=True):
+    def __init__(
+            self, path, username, owner_type, owner, resource_type, files, index=True, isolated=False,
+            isolated_version=False, previous_subtask_ids=None, import_task_id=None):
         super().__init__()
         self.path = path
         self.username = username
@@ -687,8 +770,16 @@ class ImporterSubtask:
         self.resource_type = resource_type
         self.files = files
         self.indexer = ImportIndexer(index)
+        self.isolated = isolated
+        self.isolated_version = isolated_version
+        self.previous_subtask_ids = previous_subtask_ids or []
+        self.import_task_id = import_task_id
+        self.dropped = None
+        self.seen = {'concepts': set(), 'mappings': set()}
+        self.assigned_hierarchy = {}
+        self.hierarchy_map = {}
 
-    def run(self):
+    def run(self):  # pylint: disable=too-many-branches
         results = []
 
         try:
@@ -703,6 +794,8 @@ class ImporterSubtask:
                     ImporterUtils.fetch_to_file(remote_file, temp)
 
                 is_zipped, is_tarred = ImporterUtils.is_zipped_or_tarred(temp)
+                if self.isolated_version:
+                    self.collect_hierarchy_map(temp, is_zipped, is_tarred)
 
                 if is_zipped:
                     self.import_zip(temp, results)
@@ -727,7 +820,49 @@ class ImporterSubtask:
                 results.extend([str(ex)] * (results_count - len(results)))
 
         self.indexer.finish()
+        if self.isolated and not self.isolated_version:
+            results.append({'seen': {
+                **{key: sorted(value) for key, value in self.seen.items()}, 'hierarchy': self.assigned_hierarchy}})
         return results
+
+    def collect_hierarchy_map(self, temp, is_zipped, is_tarred):
+        def collect(json_file):
+            for item in ijson.items(json_file, '', multiple_values=True, allow_comments=True, use_float=True):
+                if isinstance(item, dict) and item.get('type') == 'Concept':
+                    self.hierarchy_map.update(Concept.get_import_hierarchy_map([item], include_parentless=True))
+
+        temp.seek(0)
+        if is_zipped:
+            with ZipFile(temp) as package:
+                for info in package.infolist():
+                    if info.filename.endswith('.json') and info.file_size:
+                        with package.open(info) as json_file:
+                            collect(json_file)
+        elif is_tarred:
+            with tarfile.open(fileobj=temp, mode='r') as package:
+                for member in package.getmembers():
+                    if member.name.endswith('.json') and member.size:
+                        with package.extractfile(member) as json_file:
+                            collect(json_file)
+        else:
+            collect(temp)
+        temp.seek(0)
+
+    def commit_isolated_version(self, version_line):
+        commit = IsolatedVersionCommit(
+            version_line, UserProfile.objects.get(username=self.username), True, hierarchy_map=self.hierarchy_map,
+            import_task_id=self.import_task_id)
+        for results in self.iter_previous_results():
+            commit.add_subtask_results(results)
+        result = commit.run()
+        self.dropped = commit.dropped
+        return result
+
+    def iter_previous_results(self):
+        """Each earlier subtask's results in turn, so only one is held at a time."""
+        for task_id in self.previous_subtask_ids:
+            result = AsyncResult(task_id).result
+            yield result if isinstance(result, list) else [result]
 
     def import_zip(self, temp, results):
         with ZipFile(temp) as package:
@@ -783,6 +918,13 @@ class ImporterSubtask:
             except Exception as ex:
                 self.add_exception_to_results(file, start_index, end_index, count, ex, results)
 
+    def add_seen(self, importer, result):
+        versioned_object_id = importer.get_seen_versioned_object_id(result) if importer else None
+        if versioned_object_id:
+            self.seen['concepts' if isinstance(importer, ConceptImporter) else 'mappings'].add(versioned_object_id)
+        if isinstance(importer, ConceptImporter):
+            self.assigned_hierarchy.update(importer.get_assigned_hierarchy(result))
+
     @staticmethod
     def add_exception_to_results(file, start_index, end_index, count, ex, results):
         error = f"Failed to process {file.get('filepath', '')}({start_index}:{end_index}) " \
@@ -799,8 +941,8 @@ class ImporterSubtask:
             count = None
 
         results = []
-        resource_importer = ResourceImporter(self.indexer, BatchWriteRefusals())
-        for resource in ijson.items(parse, '', multiple_values=True, allow_comments=True):
+        write_refusals = BatchWriteRefusals()
+        for resource in ijson.items(parse, '', multiple_values=True, allow_comments=True, use_float=True):
             if resource.get('__action', None) == 'DELETE':
                 continue
 
@@ -815,9 +957,18 @@ class ImporterSubtask:
                             resource['owner_type'] = self.owner_type
                         if 'owner' not in resource:
                             resource['owner'] = self.owner
-                    result = resource_importer.import_resource(resource, self.username, self.owner_type, self.owner)
+                    if self.isolated_version and self.resource_type == 'Source Version':
+                        resource_importer = None
+                        result = self.commit_isolated_version(resource)
+                    else:
+                        resource_importer = ResourceImporter(self.indexer, self.isolated, write_refusals)
+                        result = resource_importer.import_resource(
+                            resource, self.username, self.owner_type, self.owner)
                     if isinstance(result, int):
                         results.append(result)
+                        self.add_seen(get(resource_importer, 'importer'), result)
+                        if self.dropped is not None:
+                            results.append({'dropped': self.dropped})
                     elif isinstance(result, WriteRefused):  # a failure, so the summary lists the policy's body
                         results.append(f'{error} due to: {json.dumps(result.detail, default=str)}')
                     else:
@@ -836,7 +987,7 @@ class ImporterSubtask:
         json_file.seek(0)  # position at the beginning of file
         if start_index != 0:
             index = 0
-            parse_events = ijson.parse(json_file, multiple_values=True, allow_comments=True)
+            parse_events = ijson.parse(json_file, multiple_values=True, allow_comments=True, use_float=True)
             for prefix, event, value in parse_events:
                 if event == 'string' and prefix in ('resourceType', 'type') and value == self.resource_type:
                     index += 1

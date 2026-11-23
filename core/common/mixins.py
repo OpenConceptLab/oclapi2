@@ -1,4 +1,5 @@
 import logging
+from copy import deepcopy
 from math import ceil
 from urllib import parse
 from urllib.parse import urlencode
@@ -670,6 +671,8 @@ class SourceChildMixin(ChecksumModel):
     _counted = models.BooleanField(default=True, null=True, blank=True)
     _index = models.BooleanField(default=True)
 
+    ISOLATED_VERSION_DEFAULTS = {'extras': {}, 'retired': False}
+
     # relations the list serializers read on every row, prefetched once per page by load_list_fields
     LIST_PREFETCHES = ()
     # relations named like the serializer field that reads them; prefetched by load_list_fields when it's serialized
@@ -1141,6 +1144,27 @@ class SourceChildMixin(ChecksumModel):
             if add_parent:
                 self.sources.add(parent)
 
+    def set_version_fields(self, data, fields, isolated=False):
+        for field in fields:
+            if isolated:
+                value = data.get(field)
+                setattr(self, field, deepcopy(self.ISOLATED_VERSION_DEFAULTS.get(field)) if value is None else value)
+            else:
+                setattr(self, field, data.get(field, getattr(self, field)))
+
+    def restore_to_head(self):
+        versioned_object = self.versioned_object
+        parent = versioned_object.parent
+        if not versioned_object.is_active:
+            versioned_object.is_active = True
+            # updated_at moves, so HEAD's cached comparisons and exports see it back
+            versioned_object.save(update_fields=['is_active', 'updated_at'])
+        versioned_object.sources.add(parent)
+        latest_version = versioned_object.get_latest_version()
+        if latest_version:
+            latest_version.sources.add(parent)
+        return latest_version
+
     def unmark_latest_version(self, index=True, parent=None):
         parent = parent or self.parent
         self.__update_latest_version(index, False, parent, True, False)
@@ -1395,3 +1419,27 @@ class ConceptContainerProcessingMixin:
         version.clear_processing()
 
         return Response(status=status.HTTP_200_OK)
+
+
+class RepoVersionListMixin:
+    """
+    GET and HEAD on a source's or collection's versions list. List this mixin before ListWithHeadersMixin in the class
+    bases, so its HEAD runs first.
+    """
+    def check_repos_permissions(self):
+        """
+        The list answers only to those who can view every repository among its versions, as the owner and repository
+        segments of the URL can each name several, separated by commas. A repository is checked through its HEAD, or
+        version by version when it has no HEAD.
+        """
+        queryset = self.get_queryset()
+        repo_fields = ('organization_id', 'user_id', 'mnemonic')
+        for version in queryset.order_by(*repo_fields).distinct(*repo_fields):
+            head = version.head
+            repo_versions = queryset.filter(**{field: getattr(version, field) for field in repo_fields})
+            for obj in [head] if head else repo_versions:
+                self.check_object_permissions(self.request, obj)
+
+    def head(self, request, **kwargs):
+        self.check_repos_permissions()
+        return super().head(request, **kwargs)

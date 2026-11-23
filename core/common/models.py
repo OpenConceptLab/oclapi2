@@ -1045,16 +1045,6 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 Q(id__in=entry_ids) | Q(url__in=canonical_urls, namespace=self.parent_url), is_active=True):
             entry.lookup_entry()
 
-    @staticmethod
-    def delete_version_changelogs(urls):
-        from core.repos.models import VersionChangelog
-        VersionChangelog.objects.filter(Q(version1_url__in=urls) | Q(version2_url__in=urls)).delete()
-
-    @staticmethod
-    def delete_version_checksum_maps(urls):
-        from core.repos.models import VersionChecksumMap
-        VersionChecksumMap.objects.filter(version_url__in=urls).delete()
-
     def get_export_key_prefixes(self):
         prefix = self.get_version_export_path(suffix=None)
         prefixes = [(prefix, get_export_key_pattern(prefix))]
@@ -1297,6 +1287,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                     cursor.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
             # Serialize version creation with destructive child operations on the HEAD repository.
             head = cls.objects.select_for_update().get(id=head.id)
+            obj.apply_version_metadata_to_head(head)
             obj.update_version_data(head)
             obj.store_blank_access_as_none()  # a HEAD stored blank before blanks were stored as None
             obj.save(**kwargs)
@@ -1348,6 +1339,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         """A blank access is private (public_can_view): it's stored as None, the value the lists read as private"""
         if self.public_access == '':
             self.public_access = ACCESS_TYPE_NONE
+
+    def apply_version_metadata_to_head(self, head):
+        pass
 
     @classmethod
     def persist_changes(cls, obj, updated_by, original_schema, **kwargs):  # pylint: disable=too-many-locals,too-many-branches

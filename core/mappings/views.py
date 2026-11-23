@@ -16,7 +16,7 @@ from core.common.swagger_parameters import (
     include_facets_header, updated_since_param, include_retired_param,
     compress_header, include_source_versions_param, include_collection_versions_param, search_from_latest_repo_header)
 from core.common.utils import to_int
-from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
+from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, SourceVersionListHeadMixin, \
     SourceChildExtraRetrieveUpdateDestroyView
 from core.concepts.permissions import CanEditParentDictionary, CanViewParentDictionary
 from core.mappings.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_MAPPING
@@ -43,7 +43,7 @@ class MappingBaseView(SourceChildCommonBaseView):
         return Mapping.get_base_queryset(self.params)
 
 
-class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
+class MappingListView(SourceVersionListHeadMixin, MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
     is_page_size_capped = True
     serializer_class = MappingListSerializer
 
@@ -136,8 +136,7 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
     )
     def get(self, request, *args, **kwargs):
         self.set_parent_resource(False)
-        if self.parent_resource:
-            self.check_object_permissions(request, self.parent_resource)
+        self.check_parent_permissions(request)
         return self.list(request, *args, **kwargs)
 
     def set_parent_resource(self, __pop=True):
@@ -146,11 +145,7 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
         collection = self.kwargs.pop('collection', None) if __pop else self.kwargs.get('collection', None)
         container_version = self.kwargs.pop('version', HEAD) if __pop else self.kwargs.get('version', HEAD)
         parent_resource = None
-        if 'org' in self.kwargs:
-            filters = {'organization__mnemonic': self.kwargs['org']}
-        else:
-            username = self.request.user.username if self.user_is_self else self.kwargs.get('user')
-            filters = {'user__username': username}
+        filters = self.get_parent_owner_filters()
         if source:
             parent_resource = Source.get_version(source, container_version or HEAD, filters)
         if collection:

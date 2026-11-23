@@ -1,30 +1,34 @@
 import uuid
 from collections import OrderedDict
 
+from celery.states import FAILURE
 from celery_once import AlreadyQueued
 from dirtyfields import DirtyFieldsMixin
 from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from django.db.models import UniqueConstraint, F, Max, Count
+from django.db.models import UniqueConstraint, F, Max, Count, Q
 from django.db.models.functions import Cast
+from django.utils import timezone
 from pydash import get, compact
 
 from core.common.checksums import VersionCompareMixin
-from core.common.constants import HEAD
+from core.common.constants import HEAD, VERSION_UNCOPYABLE_EXTRAS
 from core.common.fields import URIField
 from core.common.models import ConceptContainerModel
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings, \
-    sync_source_concept_vectors, index_source_public_access
-from core.common.utils import split_canonical, to_camel_case
+    sync_source_concept_vectors, index_source_public_access, index_dropped_source_children
+from core.common.utils import split_canonical, to_camel_case, chunks
 from core.common.validators import validate_non_negative
-from core.concepts.models import ConceptName, Concept
+from core.concepts.models import ConceptName, Concept, HierarchicalConcepts
 from core.services.storages.postgres import PostgresQL
 from core.sources.constants import SOURCE_TYPE, SOURCE_VERSION_TYPE, HIERARCHY_ROOT_MUST_BELONG_TO_SAME_SOURCE, \
     HIERARCHY_MEANINGS, AUTO_ID_CHOICES, AUTO_ID_SEQUENTIAL, AUTO_ID_UUID, LOCALE_EXTERNAL_AUTO_ID_CHOICES, \
-    CONTENT_TYPE_SUPPLEMENT, SUPPLEMENTS_REQUIRED, SUPPLEMENTS_FORMAT, SEED_MEMBERS_WRITTEN, SEED_RELEASE_INDEXED, \
-    SEED_STAGE
+    SEEDED_FROM_REPO_VERSION, SEEDED_FROM_IMPORT, ISOLATED_METADATA_FIELDS, ISOLATED_REQUIRED_METADATA_FIELDS, \
+    HIERARCHY_ROOT_CANNOT_BE_DROPPED, ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION, DROPPED_CHILDREN_CHUNK_SIZE, \
+    ISOLATED_VERSION_TARGET_MISMATCH, CONTENT_TYPE_SUPPLEMENT, SUPPLEMENTS_REQUIRED, SUPPLEMENTS_FORMAT, \
+    SEED_MEMBERS_WRITTEN, SEED_RELEASE_INDEXED, SEED_STAGE
 from core.tasks.models import Task
 
 
@@ -115,6 +119,8 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     compositional = models.BooleanField(null=True, blank=True, default=None)
     version_needed = models.BooleanField(null=True, blank=True, default=None)
     hierarchy_root = models.ForeignKey('concepts.Concept', null=True, blank=True, on_delete=models.SET_NULL)
+    # what a version was seeded from, recorded once at creation; on HEAD, what an import last re-seeded it from
+    seeded_from = models.JSONField(null=True, blank=True)
     # auto-id
     autoid_concept_mnemonic = models.CharField(null=True, blank=True, choices=AUTO_ID_CHOICES, max_length=10)
     autoid_concept_external_id = models.CharField(null=True, blank=True, choices=AUTO_ID_CHOICES, max_length=10)
@@ -239,6 +245,136 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         self.case_sensitive = head.case_sensitive
         self.compositional = head.compositional
         self.version_needed = head.version_needed
+
+    @property
+    def is_seeded_from_import(self):
+        return get(self, 'seeded_from.type') == SEEDED_FROM_IMPORT
+
+    def get_version_url(self, version):
+        return f'{self.uri}{version}/'
+
+    def apply_version_metadata_to_head(self, head):
+        if not self.is_seeded_from_import:
+            self.seeded_from = {'type': SEEDED_FROM_REPO_VERSION, 'url': head.get_version_url(HEAD)}
+            return
+        head.seeded_from = {'type': SEEDED_FROM_REPO_VERSION, 'url': head.get_version_url(self.version)}
+        # HEAD keeps its own match algorithms, as after POST .../versions/: the line sets them on the version only
+        fields = [field for field in get(self, '_metadata_fields') or [] if field in ISOLATED_METADATA_FIELDS and
+                  field != 'match_algorithms']
+        for field in fields:
+            setattr(head, field, getattr(self, field))
+        for field in ISOLATED_REQUIRED_METADATA_FIELDS:
+            if field in (get(self, '_metadata_fields') or []) and getattr(self, field):
+                setattr(head, field, getattr(self, field))
+        if 'extras' in (get(self, '_metadata_fields') or []):
+            head.extras = {
+                **{key: value for key, value in (head.extras or {}).items() if key in VERSION_UNCOPYABLE_EXTRAS},
+                **(self.extras or {})
+            }
+        head.save()
+
+    def queue_index_dropped_children(self, concept_ids, mapping_ids):
+        """
+        Queues the repair of dropped codes in chunks, each a retried Task with its arguments saved so it can be rerun.
+        The first chunk also recounts HEAD. A chunk that can't be queued is left as a failed Task.
+        """
+        if get(settings, 'TEST_MODE'):
+            self.index_dropped_children(concept_ids, mapping_ids)
+            return []
+        concept_chunks = list(chunks(concept_ids, DROPPED_CHILDREN_CHUNK_SIZE))
+        mapping_chunks = list(chunks(mapping_ids, DROPPED_CHILDREN_CHUNK_SIZE))
+        tasks = []
+        for index in range(max(len(concept_chunks), len(mapping_chunks), 1)):
+            args = [
+                self.id, concept_chunks[index] if index < len(concept_chunks) else [],
+                mapping_chunks[index] if index < len(mapping_chunks) else [], index == 0
+            ]
+            task = Task.new(queue='indexing', user=self.updated_by, name=index_dropped_source_children.name,
+                            args=args)
+            try:
+                index_dropped_source_children.apply_async(args, task_id=task.id, queue='indexing', persist_args=True)
+            except Exception as ex:  # pylint: disable=broad-except
+                task.state = FAILURE
+                task.finished_at = timezone.now()
+                task.record_exception(ex)
+            tasks.append(task)
+        return tasks
+
+    def index_dropped_children(self, concept_ids, mapping_ids, recount=True):
+        from core.concepts.documents import ConceptDocument
+        from core.mappings.documents import MappingDocument
+        from core.mappings.models import Mapping
+        for model, document, ids in ((Concept, ConceptDocument, concept_ids), (Mapping, MappingDocument, mapping_ids)):
+            for chunk in chunks(ids, DROPPED_CHILDREN_CHUNK_SIZE):
+                self.batch_index(model.objects.filter(id__in=chunk), document)
+        for chunk in chunks(mapping_ids, DROPPED_CHILDREN_CHUNK_SIZE):
+            # the rows that serve HEAD no longer map to the dropped; older releases' rows keep their codes
+            from_concept_ids = Mapping.objects.filter(id__in=chunk).values('from_concept__versioned_object_id')
+            Concept.index_mapped_codes(Concept.objects.filter(
+                Q(id__in=from_concept_ids) | Q(versioned_object_id__in=from_concept_ids, is_latest_version=True)))
+        if recount:
+            self.update_children_counts(sync=True)
+
+    def drop_unseen_children(self, seen_concept_ids, seen_mapping_ids):
+        from core.mappings.models import Mapping
+        to_index = {Concept: [], Mapping: []}
+        with transaction.atomic():
+            Source.objects.select_for_update().get(id=self.id)
+            concept_ids = set(self.concepts_set.filter(
+                id=F('versioned_object_id'), is_active=True).values_list('id', flat=True)) - set(seen_concept_ids)
+            mapping_ids = set(self.mappings_set.filter(
+                id=F('versioned_object_id'), is_active=True).values_list('id', flat=True)) - set(seen_mapping_ids)
+            if self.hierarchy_root_id and Concept.objects.filter(
+                    id=self.hierarchy_root_id, versioned_object_id__in=concept_ids).exists():
+                raise ValidationError({'hierarchy_root': [HIERARCHY_ROOT_CANNOT_BE_DROPPED]})
+            for model, ids in ((Concept, concept_ids), (Mapping, mapping_ids)):
+                for chunk in chunks(sorted(ids), 5000):
+                    latest_ids = list(model.objects.filter(
+                        versioned_object_id__in=chunk, is_latest_version=True).values_list('id', flat=True))
+                    # a new updated_at, so HEAD's exports and comparisons see the change
+                    model.objects.filter(id__in=chunk).update(is_active=False, updated_at=timezone.now())
+                    model.sources.through.objects.filter(
+                        source_id=self.id, **{f'{model.__name__.lower()}_id__in': [*chunk, *latest_ids]}).delete()
+                    if model is Concept:
+                        HierarchicalConcepts.objects.filter(child_id__in=chunk).delete()
+                    to_index[model] += [*chunk, *latest_ids]
+
+        if to_index[Concept] or to_index[Mapping]:
+            # registered robustly so a failure to queue can't stop the version's seeding
+            transaction.on_commit(
+                lambda: self.queue_index_dropped_children(to_index[Concept], to_index[Mapping]), robust=True)
+        return {'concepts': len(concept_ids), 'mappings': len(mapping_ids)}
+
+    @staticmethod
+    def get_import_version_line(input_list, seed_from_import):
+        """Checks the whole import before anything runs. A seed_from_import import gets its one version line back."""
+        if not seed_from_import:
+            return None
+        types = [(line.get('type', '') or '').lower() for line in input_list]
+        version_indexes = [index for index, _type in enumerate(types) if _type == 'source version']
+        content_indexes = [index for index, _type in enumerate(types) if _type in ('concept', 'mapping')]
+        if len(version_indexes) != 1 or (content_indexes and content_indexes[-1] > version_indexes[0]):
+            raise ValidationError(ISOLATED_VERSION_NEEDS_ONE_SOURCE_VERSION)
+        version_line = input_list[version_indexes[0]]
+        Source.validate_import_targets(
+            version_line, {Source.get_import_target(input_list[index]) for index in content_indexes})
+        return version_line
+
+    @staticmethod
+    def get_import_content_lines(input_list):
+        return [line for line in input_list if (line.get('type', '') or '').lower() in ('concept', 'mapping')]
+
+    @staticmethod
+    def get_import_target(line):
+        """The source an import line names: (owner kind, owner, source mnemonic), read as the importers read it."""
+        owner_type = (line.get('owner_type', '') or '').lower()
+        return 'user' if owner_type == 'user' else 'org', line.get('owner'), line.get('source')
+
+    @staticmethod
+    def validate_import_targets(version_line, targets):
+        """A seeding import's content must all be in the version's source, or the commit would empty that HEAD."""
+        if any(target != Source.get_import_target(version_line) for target in targets):
+            raise ValidationError(ISOLATED_VERSION_TARGET_MISMATCH)
 
     def get_concept_name_locales(self):
         return ConceptName.objects.filter(concept__in=self.get_active_concepts())
@@ -746,10 +882,15 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         release: one superseded while it was seeding leaves that to the release that superseded it.
         """
         versions = []
-        for version in self.released_versions.exclude(id=self.id).order_by('-created_at').iterator():
+        # Not .iterator(): a server-side cursor doesn't survive PgBouncer's transaction pooling
+        for version in self.released_versions.exclude(id=self.id).order_by('-created_at'):
             versions.append(version)
             seed_task = version.get_seed_new_version_task()
-            if not seed_task or get(seed_task.summary, SEED_STAGE) == SEED_RELEASE_INDEXED:
+            if not seed_task:
+                break
+            stage = get(seed_task.summary, SEED_STAGE)
+            # A seed that succeeded with no stage predates seed stages, and indexed its own release
+            if stage == SEED_RELEASE_INDEXED or (not stage and seed_task.is_success):
                 break
         return versions
 
@@ -885,18 +1026,23 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         return get(self.get_mappings_queryset().aggregate(max_val=Max(attribute)), 'max_val', None)
 
     def get_max_concept_mnemonic(self):
-        return self.get_max_mnemonic_for_resource(self.get_concepts_queryset())
+        # over every concept HEAD has had, so a dropped one's id isn't given out again
+        queryset = self.concepts_set.filter(
+            id=F('versioned_object_id')) if self.is_head else self.get_concepts_queryset()
+        return self.get_max_mnemonic_for_resource(queryset)
 
     def get_max_mapping_mnemonic(self):
-        return self.get_max_mnemonic_for_resource(self.get_mappings_queryset())
+        queryset = self.mappings_set.filter(
+            id=F('versioned_object_id')) if self.is_head else self.get_mappings_queryset()
+        return self.get_max_mnemonic_for_resource(queryset)
 
     @staticmethod
     def get_max_mnemonic_for_resource(queryset):
         return get(
             queryset.filter(
-                mnemonic__regex=r'^\d+$'
+                mnemonic__regex=r'^\d{1,18}$'  # fits a bigint, so one oversized id can't fail the whole query
             ).annotate(
-                mnemonic_int=Cast('mnemonic', models.IntegerField())
+                mnemonic_int=Cast('mnemonic', models.BigIntegerField())
             ).aggregate(
                 max_val=Max('mnemonic_int')), 'max_val', None
         )
@@ -1206,8 +1352,8 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         return Source.objects.filter(id__in=self.get_mappings_queryset().values_list('to_source_id', flat=True))
 
     def get_concepts_queryset(self):
-        if self.is_head:
-            return self.concepts_set.filter(id=F('versioned_object_id'))
+        if self.is_head:  # what an import seeding a version dropped isn't HEAD's
+            return self.concepts_set.filter(id=F('versioned_object_id'), is_active=True)
 
         return Concept.objects.filter(
             id__in=Concept.sources.through.objects.filter(source_id=self.id).values_list('concept_id', flat=True)
@@ -1215,7 +1361,7 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
     def get_mappings_queryset(self):
         if self.is_head:
-            return self.mappings_set.filter(id=F('versioned_object_id'))
+            return self.mappings_set.filter(id=F('versioned_object_id'), is_active=True)
 
         from core.mappings.models import Mapping
         return Mapping.objects.filter(

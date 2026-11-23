@@ -7,7 +7,7 @@ from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models, transaction, OperationalError
-from django.db.models import UniqueConstraint, F, QuerySet, Max, OuterRef, Subquery, Exists
+from django.db.models import UniqueConstraint, F, QuerySet, Max
 from django.utils import timezone
 from django.utils.functional import cached_property
 from pydash import get, compact, find
@@ -19,7 +19,7 @@ from core.collections.constants import (
     TRANSFORM_TO_RESOURCE_VERSIONS, COLLECTION_REFERENCE_TYPE, TRANSFORM_TO_EXTENSIONAL,
     RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE, UNRESOLVED_RESOURCE_VERSION_TYPE,
     INTENSIONAL_REFERENCE_RESOURCE_VERSIONS_TOGGLE, EXPANSION_LOCKED_REPO_VERSION_TOGGLE, VERSION_EXPANSION_LOCK,
-    VERSION_EXPANSION_LATEST)
+    VERSION_EXPANSION_LATEST, REFERENCE_FOUND_NOTHING, REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS)
 from core.collections.parsers import CollectionReferenceParser
 from core.collections.translators import CollectionReferenceTranslator
 from core.collections.utils import is_concept, is_mapping
@@ -670,6 +670,8 @@ class CollectionReference(models.Model):
     _concepts = None
     _mappings = None
     _valueset_locks = None
+    # set when an expansion evaluates it as an include: why it added nothing, if so
+    unresolved_reason = None
     original_expression = None
 
     # core
@@ -1495,6 +1497,15 @@ class CollectionReference(models.Model):
             valueset_version_cache[cache_key] = version if version.id else None
         return valueset_version_cache[cache_key]
 
+    def get_evaluated_repo_version_urls(self, expansion, system_version_cache=None):
+        """URLs of the repository versions its expansion evaluated it in, else of the repositories it names"""
+        expansion_cache = {self.collection_id: expansion}
+        versions = [
+            *self._get_resolved_system_versions(system_version_cache, expansion_cache),
+            *self._get_resolved_valueset_versions(expansion_cache=expansion_cache)]
+        valuesets = self.valueset if isinstance(self.valueset, list) else []
+        return [version.uri for version in versions] or compact([self.system, *valuesets])
+
     def get_resolved_repo_versions_serialized(  # pylint: disable=too-many-arguments
             self, system_version_cache=None, valueset_version_cache=None, expansion_cache=None, user=None):
         """Serialize repository versions resolved from this reference's system and valuesets that `user` can view."""
@@ -2018,6 +2029,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 if resolve_by_resource_version and ref.is_resource_versioned and \
                         not (_mappings if ref.is_mapping else _concepts).exists():
                     unresolved_repo_versions.append(ref.to_unresolved_resource_version())
+                    ref.unresolved_reason = REFERENCE_VERSION_NOT_HELD
                     return ref.concepts.filter(), ref.mappings.filter()
                 if should_write_back and ref.id and (ref_system_versions or ref.system or is_valueset_only):
                     ref.concepts.set(_concepts)
@@ -2037,11 +2049,17 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
 
         try:
             for reference in include_refs:
+                reference.unresolved_reason = None
                 concepts, mappings = get_ref_results(reference)
                 concepts_updated = self.__include_resources(self.concepts, concepts, True)
                 if index and concepts_updated is not False:
                     index_concepts = [*index_concepts, *concepts_updated.values_list('id', flat=True)]
                 mappings_updated = self.__include_resources(self.mappings, mappings, False)
+                # False: it found nothing; an empty queryset: the expansion's parameters excluded all it found.
+                # exists() runs no query: rel.add in __include_resources already fetched these rows
+                found = [updated for updated in (concepts_updated, mappings_updated) if updated is not False]
+                if not reference.unresolved_reason and not any(updated.exists() for updated in found):
+                    reference.unresolved_reason = REFERENCE_EXCLUDED_BY_PARAMETERS if found else REFERENCE_FOUND_NOTHING
                 if index and mappings_updated is not False:
                     index_mappings = [*index_mappings, *mappings_updated.values_list('id', flat=True)]
 
@@ -2161,19 +2179,44 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             return value
         return locked
 
+    REPLACE_HEAD_ROWS_BATCH_SIZE = 10000
+
     @staticmethod
-    def replace_head_rows(rows, owner, field, klass):
+    def get_latest_version_ids(klass, versioned_object_ids):
+        """{versioned object id: its latest resource version's id}, read through the partial index on latest rows"""
+        return dict(klass.objects.filter(
+            versioned_object_id__in=versioned_object_ids, is_active=True, is_latest_version=True
+        ).exclude(id=F('versioned_object_id')).order_by('versioned_object_id', '-created_at', '-id').distinct(
+            'versioned_object_id').values_list('versioned_object_id', 'id'))
+
+    @classmethod
+    def replace_head_rows(cls, rows, owner, field, klass):
         """Points rows at each HEAD resource's latest resource version, dropping rows that already hold it"""
-        latest = klass.objects.filter(
-            versioned_object_id=OuterRef(f'{field}_id'), is_latest_version=True
-        ).exclude(id=F('versioned_object_id')).values('id')[:1]
-        head_rows = rows.filter(**{f'{field}_id': F(f'{field}__versioned_object_id')}).annotate(
-            latest_id=Subquery(latest)).filter(latest_id__isnull=False)
-        holds_latest = rows.filter(**{f'{owner}_id': OuterRef(f'{owner}_id'), f'{field}_id': OuterRef('latest_id')})
-        duplicate_ids = list(head_rows.filter(Exists(holds_latest)).values_list('id', flat=True))
-        if duplicate_ids:
-            rows.model.objects.filter(id__in=duplicate_ids)._raw_delete(rows.db)  # pylint: disable=protected-access
-        rows.model.objects.filter(id__in=head_rows.values('id')).update(**{f'{field}_id': Subquery(latest)})
+        last_id = 0
+        while True:
+            batch = list(rows.filter(**{f'{field}_id': F(f'{field}__versioned_object_id')}, id__gt=last_id).order_by(
+                'id').values_list('id', f'{owner}_id', f'{field}_id')[:cls.REPLACE_HEAD_ROWS_BATCH_SIZE])
+            if not batch:
+                break
+            last_id = batch[-1][0]
+            latest = cls.get_latest_version_ids(klass, {head_id for _, _, head_id in batch})
+            # duplicates matched here, not with a correlated EXISTS, which runs once per pair of an owner's rows
+            held = set(rows.filter(**{f'{field}_id__in': set(latest.values())}).values_list(
+                f'{owner}_id', f'{field}_id'))
+            duplicate_ids, updates = [], []
+            for row_id, owner_id, head_id in batch:
+                if head_id not in latest:
+                    continue
+                if (owner_id, latest[head_id]) in held:
+                    duplicate_ids.append(row_id)
+                else:
+                    updates.append(rows.model(id=row_id, **{f'{field}_id': latest[head_id]}))
+                    held.add((owner_id, latest[head_id]))
+            if duplicate_ids:
+                rows.model.objects.filter(id__in=duplicate_ids)._raw_delete(rows.db)  # pylint: disable=protected-access
+            rows.model.objects.bulk_update(updates, [field], batch_size=1000)
+            if len(batch) < cls.REPLACE_HEAD_ROWS_BATCH_SIZE:
+                break
 
     def seed_children(self, index=True, force_reevaluate=False):
         version = self.collection_version

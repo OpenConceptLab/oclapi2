@@ -1,5 +1,8 @@
 import json
+import os
+import tempfile
 from types import SimpleNamespace
+from zipfile import ZipFile
 from unittest.mock import Mock, patch
 
 from django.test import override_settings
@@ -21,15 +24,18 @@ from core.common.tasks import add_references
 from core.common.tests import OCLAPITestCase
 from core.concept_maps.serializers import ConceptMapDetailSerializer
 from core.concept_maps.views import ConceptMapRetrieveUpdateView
+from core.concepts.models import Concept
+from core.concepts.permissions import CanAdministerParentDictionary
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
-from core.importers.importer import ImportRequest, ResourceImporter
-from core.importers.models import BulkImportInline
+from core.importers.importer import Importer, ImportRequest, ResourceImporter
+from core.importers.models import BulkImportInline, BulkImportParallelRunner, IsolatedVersionCommit
 from core.map_projects.tests.factories import AutomatchRunFactory, MapProjectFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.serializers import SourceDetailSerializer, SourceVersionDetailSerializer
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.sources.views import SourceRetrieveUpdateDestroyView
+from core.tasks.models import Task
 from core.users.tests.factories import UserProfileFactory
 from core.value_sets.views import ValueSetRetrieveUpdateView
 
@@ -457,8 +463,19 @@ class RepositoryWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
         ReadOnlyPolicy.read_only = [self.collection]
         self.assertEqual(
             add_references(self.user.id, data, self.collection.id),  # pylint: disable=no-value-for-parameter
-            ([], {'write_refused': ReadOnlyPolicy.body}))
+            ([], {}, [], ReadOnlyPolicy.body))
         self.assertFalse(self.collection.references.exists())
+
+    def test_an_expression_named_like_a_refusal_is_reported_as_an_expression(self):
+        ReadOnlyPolicy.read_only = []
+        errors = {'write_refused': {'errors': ['Not found']}}
+
+        with patch('core.collections.views.add_references', Mock(
+                __name__='add_references', return_value=([], errors, []))):
+            response = self.request('put', self.collection.uri + 'references/', {'data': {'expressions': ['x']}})
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual([item['expression'] for item in response.json()], ['write_refused'])
 
     def test_external_export_uploads_and_removals_are_edits_of_the_version(self):
         version = OrganizationSourceFactory(organization=self.org, mnemonic=self.source.mnemonic, version='v1')
@@ -670,6 +687,77 @@ class ImportWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
         self.source.refresh_from_db()
         self.assertNotEqual(self.source.full_name, 'Renamed')
 
+    def version_line(self, source):
+        return {
+            'type': 'Source Version', 'id': 'v2', 'source': source.mnemonic, 'owner': self.org.mnemonic,
+            'owner_type': 'Organization', 'description': 'v2', 'released': True
+        }
+
+    def test_a_seeded_version_of_a_read_only_source_is_refused_before_any_line_imports(self):
+        version_line = self.version_line(self.source)
+        content = '\n'.join(json.dumps(line) for line in [self.concept_line(self.source, 'refused'), version_line])
+
+        with self.assertRaises(WriteRefused) as context:
+            IsolatedVersionCommit(version_line, self.user, True).preflight()
+        self.assertEqual(context.exception.detail, ReadOnlyPolicy.body)
+
+        inline = BulkImportInline(content, self.user.username, True, isolated_version=True)
+        inline.run()
+        task = Task.new(user=self.user, name='bulk_import_parallel_inline')
+        parallel = BulkImportParallelRunner(
+            content, self.user.username, True, self_task_id=task.id, isolated_version=True)
+        with patch('core.importers.models.post_import_update_resource_counts.apply_async', Mock()):
+            parallel.run()
+
+        denied = [{**version_line, 'errors': ReadOnlyPolicy.body}]
+        self.assertEqual((inline.json_result['permission_denied'], inline.created), (denied, []))
+        self.assertEqual(parallel.json_result['permission_denied'], denied)
+        for result in (inline.json_result, parallel.json_result):  # the version line is the one line processed
+            self.assertEqual((result['total'], result['processed']), (2, 1))
+        task.refresh_from_db()
+        self.assertEqual(task.summary, {'processed': 1, 'total': 2})  # the progress the task saves says the same
+        self.assertEqual(ReadOnlyPolicy.calls, [(self.user, self.source, WRITE_ACTION_EDIT)] * 3)
+        self.assertFalse(self.source.concepts_set.filter(mnemonic='refused').exists())
+
+    def test_a_seeded_version_archive_of_a_read_only_source_reports_the_refusal(self):
+        version_line = self.version_line(self.source)
+        path = os.path.join(tempfile.mkdtemp(), 'import.zip')
+        with ZipFile(path, 'w') as package:
+            package.writestr('concepts.json', json.dumps(self.concept_line(self.source, 'refused')))
+            package.writestr('version.json', json.dumps(version_line))
+
+        result = Importer(
+            'task-id', path, self.user.username, 'Organization', self.org.mnemonic, isolated_version=True).run()
+
+        self.assertEqual((result['summary']['failed'], result['import_task'], result['subtask_ids']), (1, (), []))
+        self.assertEqual((result['summary']['total'], result['summary']['processed']), (2, 1))
+        self.assertTrue(result['summary']['failures'][0].endswith(f'due to: {json.dumps(ReadOnlyPolicy.body)}'))
+        self.assertFalse(self.source.concepts_set.filter(mnemonic='refused').exists())
+
+    def test_a_seeded_version_commit_is_refused_before_it_changes_head(self):
+        commit = IsolatedVersionCommit(self.version_line(self.source), self.user, True)
+
+        with patch.object(Source, 'drop_unseen_children') as drop_mock:
+            result = commit.run()
+
+        self.assertIsInstance(result, WriteRefused)
+        self.assertEqual(result.detail, ReadOnlyPolicy.body)
+        drop_mock.assert_not_called()
+        self.assertIsNone(commit.dropped)
+
+    def test_a_parallel_import_denies_a_refused_version_with_the_body(self):
+        ReadOnlyPolicy.read_only = []
+        version_line = self.version_line(self.source)
+        runner = BulkImportParallelRunner(json.dumps(version_line), self.user.username, True, isolated_version=True)
+        ReadOnlyPolicy.read_only = [self.source]  # read-only by the time the version commits
+
+        runner.commit_isolated_version(version_line)
+
+        self.assertEqual(
+            runner.isolated_version_results, {'permission_denied': [{**version_line, 'errors': ReadOnlyPolicy.body}]})
+        self.assertIsNone(runner.dropped)
+        self.assertFalse(Source.objects.filter(mnemonic=self.source.mnemonic, version='v2').exists())
+
 
 @override_settings(CAPABILITY_POLICY=READ_ONLY_POLICY)
 class HierarchyWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
@@ -711,3 +799,35 @@ class HierarchyWriteCheckpointTest(WriteCheckpointTestMixin, OCLAPITestCase):
         self.assertEqual(
             [new_version in child.get_latest_version().parent_concepts.all() for child in children], [True, True])
         self.assertEqual(ReadOnlyPolicy.calls, [(self.user, parent_source, WRITE_ACTION_EDIT)])
+
+    def test_an_import_s_hierarchy_leaves_children_in_read_only_repositories_as_they_are(self):
+        read_only_source = OrganizationSourceFactory(organization=self.org)
+        parent = new_concept(self.source)
+        children = [new_concept(source) for source in (self.source, read_only_source)]
+        ReadOnlyPolicy.read_only = [read_only_source]
+
+        Concept.reconcile_import_hierarchy({child.uri: [parent.uri] for child in children}, self.user)
+
+        parent_version = parent.get_latest_version()
+        self.assertEqual(
+            [child.parent_concepts.filter(id=parent_version.id).exists() for child in children], [True, False])
+        self.assertEqual({call[1] for call in ReadOnlyPolicy.calls}, {self.source, read_only_source})
+
+    def test_an_import_s_hierarchy_asks_only_about_its_children_s_sources(self):
+        parent_source = OrganizationSourceFactory(organization=self.org)
+        parent = new_concept(parent_source)
+        child = new_concept(self.source)
+
+        Concept.reconcile_import_hierarchy({child.uri: [parent.uri]}, self.user)
+
+        self.assertTrue(child.parent_concepts.filter(id=parent.get_latest_version().id).exists())
+        self.assertEqual(ReadOnlyPolicy.calls, [(self.user, self.source, WRITE_ACTION_EDIT)])
+
+    def test_a_write_to_a_concept_is_an_edit_whatever_the_view(self):
+        """A view that writes its own object still asks about what a concept's repository holds as an edit."""
+        request = SimpleNamespace(method='DELETE', user=self.user, data=None)
+
+        self.assertTrue(CanAdministerParentDictionary().has_object_permission(
+            request, SimpleNamespace(writes_own_object=True), self.concept))
+
+        self.assertEqual(ReadOnlyPolicy.calls, [(self.user, self.source, WRITE_ACTION_EDIT)])

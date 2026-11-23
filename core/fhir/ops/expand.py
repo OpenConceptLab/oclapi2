@@ -9,8 +9,9 @@ version the request names. core.fhir.adapters.r4 writes the answer as an R4 Valu
   the same for both.
 - The expansion: the version's default stored expansion, read and never computed or saved, so a POST reads exactly as
   a GET does. A version without one, or whose expansion is still being computed, can't be expanded (422); so can't one
-  whose references named a code system or value set OCL didn't hold when it was computed (422 not-found, as FHIR
-  answers a value set that draws on an unknown code system), because its stored expansion is incomplete.
+  whose references named a code system, value set, or pinned version of a concept or mapping OCL didn't hold when it
+  was computed (422 not-found, as FHIR answers a value set that draws on an unknown code system, naming what wasn't
+  found), because its stored expansion is incomplete.
 - Members: the expansion's concepts (not deleted) whose code system the caller is shown (core.fhir.resolve's
   viewable_rows), as ValueSet $validate-code counts them. A member of a code system the caller isn't shown leaves no
   trace: not in contains, total or used-codesystem, and no other statement runs.
@@ -45,7 +46,9 @@ from django.db.models import BooleanField, Case, Exists, ExpressionWrapper, F, F
 from django.db.models.functions import Coalesce, JSONObject
 from django.db.models.lookups import Regex
 
+from core.collections.constants import UNRESOLVED_RESOURCE_VERSION_TYPE
 from core.collections.models import Expansion
+from core.collections.utils import is_mapping
 from core.common.constants import HEAD
 from core.common.serializers import IdentifierSerializer
 from core.concepts.models import Concept, ConceptName
@@ -87,8 +90,18 @@ ONLY_FALSE = {  # boolean R4 $expand inputs supported when false
                               'which of its codes are post-coordinated.',
 }
 SATISFIED = ('excludeNested', 'excludeNotForUI')  # booleans every stored expansion meets
-# a reference an expansion couldn't resolve, by its type: (message id, message) without and with a version named
+# a reference an expansion couldn't resolve, by its type: (message id, message) without and with a version named. A
+# pinned concept or mapping (reference.resource_version) gets OCL's own ids: HL7's have none for a version of a
+# concept, or for a mapping
 UNRESOLVED = {
+    'concept': (
+        ('OCL_UNKNOWN_CONCEPT_EXP', "The concept '{url}' could not be found, so the value set cannot be expanded"),
+        ('OCL_UNKNOWN_CONCEPT_VERSION_EXP',
+         "The concept '{url}' version '{version}' could not be found, so the value set cannot be expanded")),
+    'mapping': (
+        ('OCL_UNKNOWN_MAPPING_EXP', "The mapping '{url}' could not be found, so the value set cannot be expanded"),
+        ('OCL_UNKNOWN_MAPPING_VERSION_EXP',
+         "The mapping '{url}' version '{version}' could not be found, so the value set cannot be expanded")),
     'reference.valueset': (
         ('VS_EXP_IMPORT_UNK', "Unable to find included value set '{url}'"),
         ('VS_EXP_IMPORT_UNK_PINNED', "Unable to find included value set '{url}' version '{version}'")),
@@ -223,14 +236,23 @@ def stored_expansion(value_set):
     if expansion.is_processing:
         raise outcomes.ProcessingError(f'The expansion of the value set {name} is being computed: try again shortly.')
     if expansion.unresolved_repo_versions:
-        raise unresolved(expansion.unresolved_repo_versions[0])
+        raise unresolved(expansion.unresolved_repo_versions[0], value_set)
     return expansion
 
 
-def unresolved(reference):
-    """The 422 not-found for the first reference an expansion couldn't resolve: a value set, else a code system."""
+def unresolved(reference, value_set):
+    """
+    The 422 not-found for the first reference an expansion of the value set version couldn't resolve: a value set; a
+    pinned concept or mapping, as the version's references that pinned it are (their type, else their expression, as
+    the expansion evaluated them) when they agree, else as the expression reads; else a code system.
+    """
     url, version = reference.get('url') or '', reference.get('version') or None
-    message_id, message = UNRESOLVED.get(reference.get('type'), UNRESOLVED['system'])[bool(version)]
+    kind = reference.get('type')
+    if kind == UNRESOLVED_RESOURCE_VERSION_TYPE:
+        kinds = {pinned.is_mapping for pinned in value_set.references.filter(
+            expression=url, resource_version=version).only('reference_type', 'expression')}
+        kind = 'mapping' if (kinds.pop() if len(kinds) == 1 else is_mapping(url)) else 'concept'
+    message_id, message = UNRESOLVED.get(kind, UNRESOLVED['system'])[bool(version)]
     return outcomes.NotFoundError(message.format(url=url, version=version), tx_issue_type='not-found',
                                   message_id=message_id, status_code=422)
 

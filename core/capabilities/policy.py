@@ -107,7 +107,8 @@ class CapabilityPolicy(ABC):
         hierarchy amend route); deleting an owner (an organization, by its route or an import line, or a user, by
         staff), which deletes its repositories without asking about each; and linking a parent's new version to the
         children it already has. Writes a worker makes on its own (a bulk import's lines, a parent's new version in
-        another repository during a hierarchy update) are asked in the worker. Other queued writes are asked when
+        another repository during a hierarchy update) are asked in the worker; an import that seeds a version asks
+        about its source's HEAD before any line imports. Other queued writes are asked when
         they're requested, and a reference add asks again when it runs.
 
         Returns None to allow the write, or the refusal body to send. By default, every write is allowed.

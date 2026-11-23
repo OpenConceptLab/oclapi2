@@ -309,7 +309,7 @@ class ConceptDocument(Document):
 
     @staticmethod
     def get_mapped_codes(instance):
-        mappings = instance.get_unidirectional_mappings()
+        mappings = instance.get_indexed_mappings()
         same_as_mapped_codes = []
         other_mapped_codes = []
         verbose_info = []
