@@ -38,7 +38,7 @@ from core.common.utils import drop_version, to_owner_uri, generate_temp_version,
     get_resource_class_from_resource_name, to_snake_case, \
     es_to_pks, id_batches, split_list_by_condition, decode_string, is_canonical_uri, encode_string, \
     get_truthy_values, get_falsy_values, get_current_authorized_user, to_camel_case, to_parent_kwargs_from_uri, \
-    is_versioned_uri, canonical_url_to_url_and_version, split_canonical
+    is_versioned_uri, canonical_url_to_url_and_version, split_canonical, to_parent_uri
 from core.concepts.constants import LOCALES_FULLY_SPECIFIED
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -1503,8 +1503,8 @@ class CollectionReference(models.Model):
         # read as the resolver reads the system: a version after '|', or the fifth segment of a relative URL's path
         # without its query string (/orgs|users/<owner>/<repo type>/<repo>/<version>/)
         url, url_version = split_canonical(self.system or '')
-        path_version = None if is_canonical_uri(url) else to_parent_kwargs_from_uri(url.split('?')[0]).get('version')
-        names_version = bool(self.version or url_version) or path_version not in (None, HEAD)
+        path = [] if is_canonical_uri(url) else to_parent_uri(url.split('?')[0]).strip('/').split('/')
+        names_version = bool(self.version or url_version) or (len(path) > 4 and path[4] not in ('', HEAD))
         named_version = self._get_expression_system_version(system_version_cache) if names_version else None
         system_versions = [] if named_version and not named_version.has_view_access(user) else \
             self._get_resolved_system_versions(system_version_cache, expansion_cache)

@@ -4164,6 +4164,7 @@ class ExpansionTest(OCLTestCase):
                 self.assertEqual(evaluated_urls(system + suffix), [system + suffix])
             # versionless, it names the release the expansion recorded, whatever newer release it can't view exists
             self.assertEqual(evaluated_urls(source.uri + suffix), [recorded.uri])
+        self.assertEqual(evaluated_urls('/orgs/acme//catalog/'), ['/orgs/acme//catalog/'])
 
     def test_rebuild_with_filter_reference_under_release_adds_its_resource_versions(self):
         source, release, _, concept_version = CollectionReferenceTest.released_source_with_concepts()
