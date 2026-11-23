@@ -4123,7 +4123,48 @@ class ExpansionTest(OCLTestCase):
             expression='/orgs/nobody/sources/nothing/concepts/c1/', collection=collection,
             system='/orgs/nobody/sources/nothing/', code='c1')
 
-        self.assertEqual(reference.get_evaluated_repo_version_urls(expansion), ['/orgs/nobody/sources/nothing/'])
+        self.assertEqual(
+            reference.get_evaluated_repo_version_urls(expansion, None), ['/orgs/nobody/sources/nothing/'])
+
+    def test_evaluated_repo_version_urls_name_only_versions_the_user_can_view(self):
+        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        release = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        member = UserProfileFactory()
+        source.organization.members.add(member)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        reference = CollectionReference(
+            expression=f'{source.uri}concepts/c1/', collection=collection, system=source.uri, code='c1')
+
+        self.assertEqual(reference.get_evaluated_repo_version_urls(expansion, member), [release.uri])
+        self.assertEqual(reference.get_evaluated_repo_version_urls(expansion, UserProfileFactory()), [source.uri])
+
+    def test_evaluated_repo_version_urls_treat_a_named_version_the_user_cannot_view_as_missing(self):
+        # an org named like a repository type, so only the segment's position tells a version
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='sources'))
+        recorded = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+        private = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v2', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        expansion.evaluated_source_versions.add(recorded)
+        user = UserProfileFactory()
+
+        def evaluated_urls(system):
+            reference = CollectionReference(
+                expression=f"{system.rstrip('/')}/concepts/c1/", collection=collection, system=system, code='c1')
+            return reference.get_evaluated_repo_version_urls(expansion, user)
+
+        for suffix in ('', '?q=a/b/'):  # the resolver drops the query string
+            for system in (f'{source.uri}v3', f'{source.uri}v3/', private.uri.rstrip('/'), private.uri):
+                self.assertEqual(evaluated_urls(system + suffix), [system + suffix])
+            # versionless, it names the release the expansion recorded, whatever newer release it can't view exists
+            self.assertEqual(evaluated_urls(source.uri + suffix), [recorded.uri])
+        self.assertEqual(evaluated_urls('/orgs/acme//catalog/'), ['/orgs/acme//catalog/'])
 
     def test_rebuild_with_filter_reference_under_release_adds_its_resource_versions(self):
         source, release, _, concept_version = CollectionReferenceTest.released_source_with_concepts()

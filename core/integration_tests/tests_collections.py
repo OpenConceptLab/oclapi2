@@ -1242,6 +1242,94 @@ class CollectionReferencesViewTest(OCLAPITestCase):
             }]
         )
 
+    @staticmethod
+    def _private_source_with_empty_release():
+        """A source only its org can view, whose latest release holds none of its concepts"""
+        source = OrganizationSourceFactory(organization=OrganizationFactory(), public_access=ACCESS_TYPE_NONE)
+        concept = ConceptFactory(parent=source, mnemonic='c1')
+        release = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        return source, concept, release
+
+    def _put_expressions(self, expressions):
+        return self.client.put(
+            self.collection.uri + 'references/',
+            {'data': {'expressions': expressions}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+    def _resolved_to_nothing_item(self, expression, repo_version):
+        return {
+            'added': True,
+            'resolved': False,
+            'expression': expression,
+            'repo_versions': [repo_version],
+            'message': f'The reference is saved in collection {self.collection.name}, but it resolved to '
+                       f'no concepts or mappings in {repo_version}'
+        }
+
+    def test_put_200_reference_to_a_repository_the_requester_cannot_view_answers_like_a_missing_one(self):
+        source, concept, _ = self._private_source_with_empty_release()
+        missing_expression = '/orgs/nobody/sources/nothing/concepts/c1/'
+
+        response = self._put_expressions([concept.uri, missing_expression])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertCountEqual(
+            list(response.data),
+            [
+                self._resolved_to_nothing_item(concept.uri, source.uri),
+                self._resolved_to_nothing_item(missing_expression, '/orgs/nobody/sources/nothing/')
+            ]
+        )
+
+    def test_put_200_reference_to_a_private_repository_names_the_version_to_its_members(self):
+        source, concept, release = self._private_source_with_empty_release()
+        source.organization.members.add(self.user)
+
+        response = self._put_expressions([concept.uri])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.data), [self._resolved_to_nothing_item(concept.uri, release.uri)])
+
+    def test_put_200_reference_to_a_private_repository_names_the_version_to_staff(self):
+        _, concept, release = self._private_source_with_empty_release()
+        self.user.is_staff = True
+        self.user.save()
+
+        response = self._put_expressions([concept.uri])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.data), [self._resolved_to_nothing_item(concept.uri, release.uri)])
+
+    def test_put_200_pinned_reference_naming_a_version_the_requester_cannot_view_answers_like_a_missing_one(self):
+        source, old, v2 = self._source_with_concept_version_no_release_holds()
+        Source.objects.filter(mnemonic=source.mnemonic, organization=source.organization).update(
+            public_access=ACCESS_TYPE_NONE)
+        expression = f'{v2.uri}concepts/c1/{old.version}/'
+        missing_source_uri = '/orgs/nobody/sources/nothing/'
+        missing_expression = f'{missing_source_uri}v2/concepts/c1/{old.version}/'
+
+        with patch.object(CollectionReference, 'is_resource_version_repo_resolution_on', return_value=True):
+            response = self._put_expressions([expression, missing_expression])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertCountEqual(
+            list(response.data),
+            [
+                {
+                    'added': True,
+                    'resolved': False,
+                    'expression': _expression,
+                    'repo_versions': [source_uri],
+                    'message': f'The reference is saved in collection {self.collection.name}, but no version of '
+                               f'{source_uri} holds resource version {old.version}'
+                } for _expression, source_uri in ((expression, source.uri), (missing_expression, missing_source_uri))
+            ]
+        )
+
     def test_put_expression_with_cascade_to_concepts(self):
         source1 = OrganizationSourceFactory()
         source2 = OrganizationSourceFactory()
