@@ -471,8 +471,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def get_viewable_collection_urls(self, field, value, prefix):
         """
         The URLs of the collection versions a collection facet value matches that the requester can view. None for
-        staff, who can view every version, and for a prefix that matches no version hidden from them, which then
-        stays a prefix. A prefix that matches more than max_viewable_collection_urls they can view answers 400.
+        staff, who can view every version. A prefix that matches more than max_viewable_collection_urls they can
+        view answers 400 when it matches any they can't, and otherwise stays a prefix (None).
         """
         from core.collections.models import Collection
         viewable = Collection.get_viewable_versions_criteria(self.request.user)
@@ -483,16 +483,18 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         cache, key = self._viewable_collection_urls, (field, value, prefix)
         if key not in cache:
             versions = Collection.objects.filter(self.get_collection_facet_versions_criteria(field, value, prefix))
-            urls = None
+            urls = versions.filter(viewable).values_list('uri', flat=True)
             if not prefix:
-                urls = list(versions.filter(viewable).values_list('uri', flat=True))
-            elif versions.exclude(viewable).exists():
+                urls = list(urls)
+            else:
                 limit = self.max_viewable_collection_urls
-                urls = list(versions.filter(viewable).values_list('uri', flat=True)[:limit + 1])
+                urls = list(urls[:limit + 1])
                 if len(urls) > limit:
-                    raise Http400(detail=f'{field}: more than {limit} collection versions match {value}. '
-                                         'Please narrow the filter.')
-                if field == 'collection_owner_url':
+                    if versions.exclude(viewable).exists():
+                        raise Http400(detail=f'{field}: more than {limit} collection versions match {value}. '
+                                             'Please narrow the filter.')
+                    urls = None  # they can view every version it matches
+                elif field == 'collection_owner_url':
                     urls = [url for url in urls if to_owner_uri(url).startswith(value)]
             cache[key] = urls
         return cache[key]

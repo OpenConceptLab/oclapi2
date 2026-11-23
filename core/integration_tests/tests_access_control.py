@@ -2251,7 +2251,7 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
         """The index keeps a deleted version's members until they're indexed again."""
         p_v1_uri = self.p_v1.uri
         Collection.objects.filter(id__in=[self.p_v1.id, self.p_head.id]).delete()
-        for query in [f'collection_url={p_v1_uri}', f'collection={self.tag}P']:
+        for query in [f'collection_url={p_v1_uri}', f'collection={self.tag}P', f'collection={self.tag}P*']:
             for resource, user in itertools.product(['concepts', 'mappings'], [None, self.outsider, self.member]):
                 self.assertEqual(self.listed(f'/{resource}/?{query}', user, resource), [], (query, user))
 
