@@ -246,8 +246,10 @@ class ExpansionHealth:
             [entry for entry in unresolved if entry.get('type') == SYSTEM_VERSION_PARAMETER_TYPE]))
         for member_class, code in MEMBER_REASONS:
             count = sum(member_counts[resource_type][member_class] for resource_type in RESOURCE_TYPES)
-            if member_class == MISMATCH:
-                add(code, count, head_concept=head_counts['concepts'], head_mapping=head_counts['mappings'])
+            if member_class in (MISMATCH, AMBIGUOUS):
+                # HEAD concepts and mappings are never valid members, so the reasons that can hold them name them
+                add(code, count, head_concept=head_counts['concepts'][member_class],
+                    head_mapping=head_counts['mappings'][member_class])
             else:
                 add(code, count)
         multiple_named = sorted(
@@ -261,11 +263,11 @@ class ExpansionHealth:
         for resource_type in RESOURCE_TYPES:
             classes = self.classify(resource_type)
             counts = {member_class: 0 for member_class in MEMBER_CLASSES}
-            head_counts[resource_type] = 0
+            head_counts[resource_type] = {member_class: 0 for member_class in MEMBER_CLASSES}
             for member_class, _, is_head_object in classes.values():
                 counts[member_class] += 1
-                if member_class == MISMATCH and is_head_object:
-                    head_counts[resource_type] += 1
+                if is_head_object:
+                    head_counts[resource_type][member_class] += 1
             member_counts[resource_type] = counts
             total += len(classes)
         reasons, multiple_named = self.get_reasons(member_counts, head_counts)

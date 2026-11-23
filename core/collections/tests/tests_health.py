@@ -118,6 +118,19 @@ class ExpansionHealthTest(OCLTestCase):
         mismatch = next(reason for reason in self.health()['reasons'] if reason['code'] == 'version_mismatches')
         self.assertEqual(mismatch['head_concept'], 1)
 
+    def test_head_concept_judged_differently_is_ambiguous_and_still_counted_apart(self):
+        head_concept = ConceptFactory(parent=self.source)
+        self.reference(head_concept, head_concept)
+        pinned = CollectionReference(
+            expression=head_concept.uri, collection=self.collection, system=self.source.uri,
+            code=head_concept.mnemonic, resource_version=head_concept.version)
+        pinned.save()
+        pinned.concepts.add(head_concept)
+
+        self.assertEqual(self.classify(), {head_concept.id: AMBIGUOUS})
+        ambiguous = next(reason for reason in self.health()['reasons'] if reason['code'] == 'ambiguous_members')
+        self.assertEqual(ambiguous, {'code': 'ambiguous_members', 'count': 1, 'head_concept': 1, 'head_mapping': 0})
+
     def test_member_two_references_judge_differently_is_ambiguous(self):
         concept = ConceptFactory(parent=self.source)
         version = concept.get_latest_version()
