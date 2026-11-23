@@ -216,9 +216,9 @@ class ReleaseMapCodesTest(ReleasesFixture, OCLTestCase):
             id=F('versioned_object_id')).values_list('id', flat=True)
         return set(release_rows) | set(older_rows)
 
-    @patch('core.concepts.management.commands.concept_release_map_codes.BACKFILL_CHUNK_SIZE', 3)
+    @patch('core.concepts.management.commands.concept_release_map_codes.BACKFILL_CHUNK_SIZE', 2)
     def test_the_backfill_goes_concept_by_concept(self):
-        # A: its v1/v2 row, v3 row (no release holds it) and v4 row, a full chunk; B, on the same page: one row
+        # A: its v1/v2 row, v3 row (no release holds it) and v4 row, more than a chunk holds; B, on the same page: one
         self.make_a_collection_only_row()
         rows = Concept.objects.filter(parent__mnemonic='LOINC')
         heads = {mnemonic: rows.get(mnemonic=mnemonic, id=F('versioned_object_id')).id for mnemonic in 'AB'}
