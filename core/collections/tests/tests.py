@@ -2575,6 +2575,7 @@ class TasksTest(OCLTestCase):
         self.assertEqual(list(copy.concepts.all()), [latest])
         self.assertEqual(list(collection_v1.references.first().concepts.all()), [latest])
 
+    @patch('core.collections.models.Expansion.is_health_on', Mock(return_value=False))
     @patch('core.collections.models.batch_index_resources')
     @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
     @patch('core.common.tasks.export_collection')
@@ -2760,6 +2761,7 @@ class TasksTest(OCLTestCase):
                 self.assertEqual(list(manual.concepts.all()), expected)
                 self.assertIsNone(references[0]._valueset_locks)  # pylint: disable=protected-access
 
+    @patch('core.collections.models.Expansion.is_health_on', Mock(return_value=False))
     @override_settings(TEST_MODE=False)
     @patch('core.collections.models.batch_index_resources')
     @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
@@ -2798,6 +2800,7 @@ class TasksTest(OCLTestCase):
         reference.concepts.add(concept)
         return collection, expansion, reference
 
+    @patch('core.collections.models.Expansion.is_health_on', Mock(return_value=False))
     @override_settings(TEST_MODE=False)
     @patch('core.collections.models.batch_index_resources')
     @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
@@ -2819,6 +2822,7 @@ class TasksTest(OCLTestCase):
         self.assertFalse(
             Task.objects.filter(name__iendswith='readd_references_to_expansion_on_references_removal').exists())
 
+    @patch('core.collections.models.Expansion.is_health_on', Mock(return_value=False))
     @override_settings(TEST_MODE=False)
     @patch('core.collections.models.batch_index_resources')
     @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
