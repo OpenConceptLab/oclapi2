@@ -4716,17 +4716,22 @@ class TasksTest(OCLTestCase):
         update_mappings_count_mock.assert_not_called()
         logger_mock.warning.assert_not_called()
 
-    def test_post_import_update_resource_counts_locks_the_source_before_its_rows(self):
-        # the order hard deletes and version creation lock them in, so neither can deadlock with the count
-        ConceptFactory(_counted=None)
+    def test_post_import_update_resource_counts_takes_its_locks_in_the_order_other_writers_do(self):
+        # the source's count tasks take the count lock before the source's row, and hard deletes and version creation
+        # lock the row before its children: in that order the count can't deadlock with either, and a count task that
+        # read its total before the import's rows can't save it over this count
+        concept = ConceptFactory(_counted=None)
 
         with CaptureQueriesContext(connection) as queries:
             post_import_update_resource_counts.run()
 
         statements = [query['sql'] for query in queries.captured_queries]
-        lock = next(i for i, sql in enumerate(statements) if 'FROM "sources"' in sql and 'FOR NO KEY UPDATE' in sql)
+        count_lock = statements.index(
+            f"SELECT pg_advisory_xact_lock(hashtextextended('Source.active_concepts.{concept.parent_id}', 0))")
+        row_lock = next(i for i, sql in enumerate(statements) if 'FROM "sources"' in sql and 'FOR NO KEY UPDATE' in sql)
         mark = next(i for i, sql in enumerate(statements) if sql.startswith('UPDATE "concepts" SET "_counted"'))
-        self.assertLess(lock, mark)
+        self.assertLess(count_lock, row_lock)
+        self.assertLess(row_lock, mark)
 
     @patch('core.sources.models.Source.update_mappings_count')
     @patch('core.sources.models.Source.update_concepts_count')

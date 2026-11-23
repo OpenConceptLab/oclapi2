@@ -1005,13 +1005,17 @@ def index_source_public_access(self, source_id):
 COUNT_TASK_ONCE = {'unlock_before_run': True}
 
 
+def lock_active_count(model, instance_id, field):
+    with connection.cursor() as cursor:
+        cursor.execute(
+            'SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))',
+            [f'{model.__name__}.{field}.{instance_id}']
+        )
+
+
 def update_active_count(model, instance_id, field):
     with transaction.atomic():
-        with connection.cursor() as cursor:
-            cursor.execute(
-                'SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))',
-                [f'{model.__name__}.{field}.{instance_id}']
-            )
+        lock_active_count(model, instance_id, field)
         instance = model.objects.filter(id=instance_id).first()
         if instance:
             before = getattr(instance, field)
@@ -1151,13 +1155,15 @@ def count_uncounted_resources():
 
 
 def count_source_resources(source, model):
-    # The source's row is locked first, as hard deletes and version creation lock it before its children; no_key, so
-    # children can still be added meanwhile. A source deleted since the pass read it is skipped. Its rows are marked in
+    # The count takes its turn with the source's count tasks first, so neither saves a total read before the other's,
+    # then locks the source's row, as hard deletes and version creation lock it before its children (no_key, so
+    # children can still be added meanwhile). A source deleted since the pass read it is skipped. Its rows are marked in
     # the count's transaction, before the count: a row added after the mark is left for the next pass, and an error
     # rolls the mark back. One source's error doesn't stop the pass.
     is_concept = model.__name__ == 'Concept'
     try:
         with transaction.atomic():
+            lock_active_count(source.__class__, source.id, 'active_concepts' if is_concept else 'active_mappings')
             if not list(source.__class__.objects.select_for_update(no_key=True).filter(id=source.id).only('id')):
                 return
             model.objects.filter(parent_id=source.id, _counted__isnull=True).update(_counted=True)
