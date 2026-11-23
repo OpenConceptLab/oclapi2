@@ -1419,3 +1419,27 @@ class ConceptContainerProcessingMixin:
         version.clear_processing()
 
         return Response(status=status.HTTP_200_OK)
+
+
+class RepoVersionListMixin:
+    """
+    GET and HEAD on a source's or collection's versions list. List this mixin before ListWithHeadersMixin in the class
+    bases, so its HEAD runs first.
+    """
+    def check_repos_permissions(self):
+        """
+        The list answers only to those who can view every repository among its versions, as the owner and repository
+        segments of the URL can each name several, separated by commas. A repository is checked through its HEAD, or
+        version by version when it has no HEAD.
+        """
+        queryset = self.get_queryset()
+        repo_fields = ('organization_id', 'user_id', 'mnemonic')
+        for version in queryset.order_by(*repo_fields).distinct(*repo_fields):
+            head = version.head
+            repo_versions = queryset.filter(**{field: getattr(version, field) for field in repo_fields})
+            for obj in [head] if head else repo_versions:
+                self.check_object_permissions(self.request, obj)
+
+    def head(self, request, **kwargs):
+        self.check_repos_permissions()
+        return super().head(request, **kwargs)
