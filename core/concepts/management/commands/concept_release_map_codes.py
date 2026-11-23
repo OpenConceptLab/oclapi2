@@ -86,8 +86,7 @@ class Command(BaseCommand):
         now takes HEAD's active codes. Returns how many.
 
         A concept's rows go in one chunk, so its mappings are read once (OpenConceptLab/ocl_online#748). After each
-        chunk it prints the last concept done, which `after` takes to skip those, then, if it wrote any doc, waits
-        `pause` seconds.
+        chunk it prints the last concept done, which `after` takes to skip those, then waits `pause` seconds.
         """
         started = time.monotonic()
         versioned_objects = Concept.objects.filter(parent_id=source.id, id=F('versioned_object_id'))
@@ -107,7 +106,7 @@ class Command(BaseCommand):
                 f'{time.monotonic() - chunk_started:.1f}s; {done}/{total} concepts, {docs} docs, '
                 f'{time.monotonic() - started:.0f}s so far'
                 + (f'; to resume: --after {last}' if last is not None else ''))
-            if pause and ids:  # before the next chunk's rows are read too
+            if pause:  # before the next chunk's rows are read too
                 time.sleep(pause)
             chunk_started = time.monotonic()
         return docs

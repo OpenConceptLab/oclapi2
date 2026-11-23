@@ -216,10 +216,10 @@ class ReleaseMapCodesTest(ReleasesFixture, OCLTestCase):
             id=F('versioned_object_id')).values_list('id', flat=True)
         return set(release_rows) | set(older_rows)
 
-    @patch('core.concepts.management.commands.concept_release_map_codes.BACKFILL_PAGE_SIZE', 1)
-    @patch('core.concepts.management.commands.concept_release_map_codes.BACKFILL_CHUNK_SIZE', 1)
+    @patch('core.concepts.management.commands.concept_release_map_codes.BACKFILL_CHUNK_SIZE', 3)
     def test_the_backfill_goes_concept_by_concept(self):
-        self.make_a_collection_only_row()  # A: its v1/v2 row, v3 row (no release holds it) and v4 row; B: one row
+        # A: its v1/v2 row, v3 row (no release holds it) and v4 row, a full chunk; B, on the same page: one row
+        self.make_a_collection_only_row()
         rows = Concept.objects.filter(parent__mnemonic='LOINC')
         heads = {mnemonic: rows.get(mnemonic=mnemonic, id=F('versioned_object_id')).id for mnemonic in 'AB'}
 
@@ -237,11 +237,12 @@ class ReleaseMapCodesTest(ReleasesFixture, OCLTestCase):
         self.assertEqual(self.backfill(after=heads['A'])[:2], (1, batches[1:]))
 
     @patch('core.concepts.management.commands.concept_release_map_codes.BACKFILL_PAGE_SIZE', 2)
-    def test_the_backfill_pauses_after_each_chunk_it_writes(self):
+    def test_the_backfill_pauses_after_each_chunk(self):
         self.run_import([  # C and D, new in v3: concepts with a row to rewrite
             self.concept('A'), self.concept('B'), self.concept('C'), self.concept('D'), self.mapping('M2', 'B', 'X02'),
             self.mapping('M3', 'B', 'X03'), self.version('v3')])
-        self.run_import([self.concept('E'), self.concept('F')], isolated_version=False)  # no rows to rewrite: HEAD's
+        self.run_import(  # E to H, in HEAD only: no rows to rewrite
+            [self.concept(mnemonic) for mnemonic in 'EFGH'], isolated_version=False)
         events, out = [], io.StringIO()
 
         def pages(versioned_object_ids, size):
@@ -255,9 +256,9 @@ class ReleaseMapCodesTest(ReleasesFixture, OCLTestCase):
                     'chunk')):
             BackfillCommand(stdout=out).backfill(Source.objects.get(uri=LOINC), pause=2.5)
 
-        # a chunk ends with its page, and the next page is read after the pause; one with no rows still checkpoints
-        self.assertEqual(events, ['page', 'chunk', 2.5, 'page', 'chunk', 2.5, 'page'])
-        self.assertRegex(out.getvalue().splitlines()[-1], ': chunk 3: 0 docs of 2 concepts .*; 6/6 concepts, 4 docs')
+        # a chunk ends with its page, and the next page is read after the pause, pages with nothing to rewrite too
+        self.assertEqual(events, ['page', 'chunk', 2.5, 'page', 'chunk', 2.5, 'page', 2.5, 'page', 2.5])
+        self.assertRegex(out.getvalue().splitlines()[-1], ': chunk 4: 0 docs of 2 concepts .*; 8/8 concepts, 4 docs')
 
     @patch('core.concepts.management.commands.concept_release_map_codes.connections')
     def test_the_backfill_refuses_a_pause_it_cant_wait(self, connections):
