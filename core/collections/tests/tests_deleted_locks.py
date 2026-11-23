@@ -3,6 +3,7 @@ from mock import patch
 from core.collections.health import UNHEALTHY
 from core.collections.models import Expansion
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
+from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tasks import seed_children_to_new_version
 from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory
@@ -45,6 +46,7 @@ class DeletedLockTest(OCLTestCase):
         self.assertEqual(recorded[0]['url'], self.v1.uri)
         self.assertEqual(recorded[0]['repo_url'], self.source.uri)
         self.assertEqual((recorded[0]['version'], recorded[0]['type']), ('v1', 'Source'))
+        self.assertEqual((recorded[0]['owner_url'], recorded[0]['public']), (self.source.parent_url, True))
         self.assertEqual(self.recorded(listed_only), [])
         self.assertEqual(list(self.expansion.concepts.values_list('id', flat=True)), members)
         self.assertEqual(list(self.expansion.evaluated_source_versions.all()), [])
@@ -97,6 +99,42 @@ class DeletedLockTest(OCLTestCase):
         self.assertEqual(health['state'], UNHEALTHY)
         reason = next(reason for reason in health['reasons'] if reason['code'] == 'locked_version_deleted')
         self.assertEqual(reason, {'code': 'locked_version_deleted', 'count': 1, 'versions': [self.v1.uri]})
+
+    def deleted_lock_reason(self):
+        health = Expansion.objects.get(id=self.expansion.id).update_health()
+        return next(reason for reason in health['reasons'] if reason['code'] == 'locked_version_deleted')
+
+    def test_health_counts_but_does_not_name_another_owners_private_version(self):
+        private = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        private_release = OrganizationSourceFactory(
+            mnemonic=private.mnemonic, organization=private.organization, version='v1', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        self.expansion.evaluated_source_versions.add(self.v1, private_release)
+
+        private_release.delete()
+        self.v1.delete()
+
+        self.assertEqual(
+            self.deleted_lock_reason(), {'code': 'locked_version_deleted', 'count': 2, 'versions': [self.v1.uri]})
+
+    def test_health_names_the_collection_owners_own_private_version(self):
+        own = OrganizationSourceFactory(organization=self.collection.organization, public_access=ACCESS_TYPE_NONE)
+        own_release = OrganizationSourceFactory(
+            mnemonic=own.mnemonic, organization=own.organization, version='v1', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        self.expansion.evaluated_source_versions.add(own_release)
+
+        own_release.delete()
+
+        self.assertEqual(self.deleted_lock_reason()['versions'], [own_release.uri])
+
+    def test_health_counts_a_version_recorded_twice_once(self):
+        self.expansion.evaluated_source_versions.add(self.v1)
+        Expansion.record_deleted_locks([self.v1])
+        Expansion.record_deleted_locks([self.v1])
+
+        self.assertEqual(
+            self.deleted_lock_reason(), {'code': 'locked_version_deleted', 'count': 1, 'versions': [self.v1.uri]})
 
     def test_a_rebuild_from_scratch_clears_the_record(self):
         self.expansion.evaluated_source_versions.add(self.v1)

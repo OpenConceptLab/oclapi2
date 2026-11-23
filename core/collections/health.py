@@ -276,6 +276,15 @@ class ExpansionHealth:
             if version.version == HEAD
         })
 
+    def get_deleted_locks(self):
+        """How many locked versions were deleted, each once, and the URLs of those the collection's owner could see.
+        Health is stored, not computed per viewer, so another owner's private version is counted, not named"""
+        entries = {entry['url']: entry for entry in self.expansion.deleted_locked_repo_versions or []}
+        owner_url = self.collection_version.parent_url
+        named = sorted(
+            url for url, entry in entries.items() if entry.get('public') or entry.get('owner_url') == owner_url)
+        return len(entries), named
+
     def get_reasons(self, member_counts, head_counts):
         reasons = []
 
@@ -290,8 +299,8 @@ class ExpansionHealth:
             uri for uri, (version_ids, from_unversioned) in repositories.items()
             if len(version_ids) > 1 and from_unversioned)
         add('duplicate_repo_versions', len(duplicates), repositories=duplicates)
-        deleted_locks = self.expansion.deleted_locked_repo_versions or []
-        add('locked_version_deleted', len(deleted_locks), versions=sorted({entry['url'] for entry in deleted_locks}))
+        deleted_count, deleted_named = self.get_deleted_locks()
+        add('locked_version_deleted', deleted_count, versions=deleted_named)
         add('resource_versioned_references', len(
             [reference for reference in self.references if reference.is_resource_versioned]))
         unresolved = self.expansion.unresolved_repo_versions or []

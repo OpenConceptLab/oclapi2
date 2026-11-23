@@ -2561,13 +2561,16 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
     def record_deleted_locks(cls, repo_versions):
         """On each expansion locked to one of these versions, which one is being deleted. Deleting the rows drops
         the lock, so a later add would quietly fall back to the latest release; this keeps the sign of it"""
+        from core.common.models import BaseModel
         deleted_at = timezone.now().isoformat()
         for version in repo_versions:
             kind = 'collection' if isinstance(version, Collection) else 'source'
             through = getattr(cls, f'evaluated_{kind}_versions').through
             entry = {
                 'url': version.uri, 'repo_url': drop_version(version.uri), 'version': version.version,
-                'type': version.resource_type, 'deleted_at': deleted_at}
+                'type': version.resource_type, 'deleted_at': deleted_at, 'owner_url': version.parent_url,
+                # health names it only where it was visible, as the version is gone by the time anyone asks
+                'public': version.public_access in BaseModel.PUBLIC_ACCESS_VALUES}
             entries = ArrayField(models.JSONField())
             locked = through.objects.filter(**{f'{kind}_id': version.id}).values('expansion_id')
             cls.objects.filter(id__in=locked).update(deleted_locked_repo_versions=models.Func(
