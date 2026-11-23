@@ -1287,7 +1287,7 @@ class SourceChildCommonBaseView(BaseAPIView):
     permission_classes = (CanViewParentDictionary, )
     is_searchable = True
     default_filters = {}
-    hidden_query_versions = ()  # see set_hidden_query_versions
+    viewable_query_versions = None  # see set_viewable_query_versions
     url_versions = ()  # the source versions check_source_version_access read
 
     def initial(self, request, *args, **kwargs):
@@ -1356,7 +1356,7 @@ class SourceChildCommonBaseView(BaseAPIView):
         still follow.
         """
         from core.sources.models import Source
-        mnemonics = compact(self.kwargs['source'].split(','))
+        mnemonics = list(dict.fromkeys(compact(self.kwargs['source'].split(','))))  # each once
         if not mnemonics:
             raise Http404()
         self.url_versions = []
@@ -1384,7 +1384,7 @@ class SourceChildCommonBaseView(BaseAPIView):
         exist under the owner it names, then 401 or 403 unless the requester can view both. A source that doesn't
         exist there has nothing to read (a search reads the name as a facet), so it's skipped. `latest` is the
         newest released version, as the reads resolve it. With no owner (none in the URL, or an empty `org`), see
-        set_hidden_query_versions. On a collection's route, the URL's version is the collection's, left to its
+        set_viewable_query_versions. On a collection's route, the URL's version is the collection's, left to its
         own checks. HEAD's own content carries its access, so reads of it are checked where they're made.
         """
         from core.sources.models import Source
@@ -1397,9 +1397,9 @@ class SourceChildCommonBaseView(BaseAPIView):
         if (version, params.get(url_repo), owner_filters) == (
                 self.kwargs.get('version'), self.kwargs.get(url_repo), self.get_parent_owner_filters()):
             return  # the URL's own version, checked already
-        mnemonics = compact(params['source'].split(','))
+        mnemonics = list(dict.fromkeys(compact(params['source'].split(','))))  # each once
         if not owner_filters:
-            self.set_hidden_query_versions(request, mnemonics, version)
+            self.set_viewable_query_versions(request, mnemonics, version)
             return
         for mnemonic in mnemonics:
             head = Source.get_version(mnemonic, HEAD, owner_filters)
@@ -1413,28 +1413,32 @@ class SourceChildCommonBaseView(BaseAPIView):
             for viewed in compact([head, repo_version]):
                 self.check_view_access(request, viewed)
 
-    def set_hidden_query_versions(self, request, mnemonics, version):
+    def set_viewable_query_versions(self, request, mnemonics, version):
         """
         With no owner named, the reads answer from the version the query string names under every owner's source of
-        that name. Those the requester can't view are left out of the reads (not refused, which would show that they
-        exist), and a source answers 404 unless one owner's is left. `latest` resolves to no release without an
-        owner, so those reads find nothing.
+        that name. They keep to the ones the requester can view, leaving out the others (not refusing them, which
+        would show that they exist), and a source answers 404 unless one owner's is left. A renamed source's versions
+        keep their old name, so they're left out too. `latest` resolves to no release without an owner, so those
+        reads find nothing.
         """
         if version == LATEST:
             return
         from core.sources.models import Source
-        hidden = []
+        viewable_versions = []
         for mnemonic in mnemonics:
-            viewable = []
-            for repo_version in Source.objects.filter(mnemonic=mnemonic, version=version):
-                (viewable if repo_version.has_view_access(request.user) else hidden).append(repo_version)
+            viewable = [repo_version for repo_version in Source.objects.filter(mnemonic=mnemonic, version=version)
+                        if repo_version.has_view_access(request.user)]
             if not viewable:
                 raise Http404()
-        self.hidden_query_versions = hidden
+            viewable_versions += viewable
+        self.viewable_query_versions = viewable_versions
 
-    def leave_out_hidden_query_versions(self, queryset):
-        """The reads' concepts or mappings, without the members of the versions set_hidden_query_versions hides."""
-        return queryset.exclude(sources__in=self.hidden_query_versions) if self.hidden_query_versions else queryset
+    def keep_to_viewable_query_versions(self, queryset):
+        """The reads' concepts or mappings, kept to the members of the versions set_viewable_query_versions found."""
+        if self.viewable_query_versions is None:
+            return queryset
+        return queryset.filter(
+            id__in=queryset.model.objects.filter(sources__in=self.viewable_query_versions).values('id'))
 
     def check_query_collection_version_access(self, request):
         """

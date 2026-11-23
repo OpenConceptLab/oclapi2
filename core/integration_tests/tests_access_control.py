@@ -1854,6 +1854,17 @@ class SourceVersionReadAccessTest(SourceVersionReadAccessMixin, OCLAPITestCase):
         # without an owner, `latest` resolves to no release, so there's nothing to read
         self.assert_answers(f'{other.uri}{concept}?org=&source={self.source.mnemonic}&version=latest', 404, 404, 404)
 
+        # a renamed source's versions keep their old name, so another source given the new name can't reach them
+        Source.objects.filter(id=self.source.id).update(mnemonic=f'{self.name}r')
+        own = UserSourceFactory(user=self.outsider, mnemonic=f'{self.name}r', public_access=ACCESS_TYPE_VIEW)
+        UserSourceFactory(
+            user=self.outsider, mnemonic=own.mnemonic, version='v1', released=True, public_access=ACCESS_TYPE_VIEW)
+        for url in [f'{own.uri}v1/{concept}?user=', f'{own.uri}v1/{mapping}?user=']:
+            for user in [None, self.outsider]:
+                self.assertEqual(self.request('get', url, user).status_code, 404, (url, user))
+        response = self.client.head(f'{own.uri[:-1]},/v1/concepts/?user=')  # a list, read without a parent
+        self.assertEqual((response.status_code, response.headers['num_found']), (200, '0'))
+
     def test_latest_in_the_query_string_is_the_newest_release_the_reads_use(self):
         OrganizationSourceFactory(
             organization=self.org, mnemonic=self.source.mnemonic, version='latest', public_access=ACCESS_TYPE_NONE)
